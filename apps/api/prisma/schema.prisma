@@ -1,0 +1,184 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  firstName String
+  lastName  String
+  role      String   @default("AGENT")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  assignedLeads Lead[]
+  notes         Note[]
+  tasks         Task[]
+  activities    Activity[]
+
+  @@map("users")
+}
+
+model Lead {
+  id                String   @id @default(cuid())
+  source            String
+  status            String   @default("NEW")
+  
+  propertyAddress   String
+  propertyCity      String
+  propertyState     String
+  propertyZip       String
+  propertyType      String?
+  bedrooms          Int?
+  bathrooms         Float?
+  sqft              Int?
+  
+  sellerFirstName   String
+  sellerLastName    String
+  sellerPhone       String
+  sellerEmail       String?
+  
+  timeline          Int?
+  askingPrice       Float?
+  conditionLevel    String?
+  distressSignals   Json?
+  ownershipStatus   String?
+  
+  arv               Float?
+  arvConfidence     Float?
+  lastCompsDate     DateTime?
+  
+  challengeScore    Int      @default(0)
+  authorityScore    Int      @default(0)
+  moneyScore        Int      @default(0)
+  priorityScore     Int      @default(0)
+  totalScore        Int      @default(0)
+  scoreBand         String   @default("DEAD_COLD")
+  abcdFit           String?
+  scoringRationale  String?
+  lastScoredAt      DateTime?
+  
+  assignedToUserId  String?
+  assignedTo        User?    @relation(fields: [assignedToUserId], references: [id])
+  tags              Json?
+  
+  doNotContact      Boolean  @default(false)
+  unsubscribedAt    DateTime?
+  
+  sourceMetadata    Json?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  messages          Message[]
+  comps             Comp[]
+  tasks             Task[]
+  notes             Note[]
+  activities        Activity[]
+  contract          Contract?
+
+  @@map("leads")
+}
+
+model Message {
+  id          String    @id @default(cuid())
+  leadId      String
+  lead        Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  direction   String
+  status      String    @default("PENDING")
+  body        String
+  from        String
+  to          String
+  twilioSid   String?   @unique
+  sentAt      DateTime?
+  deliveredAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@map("messages")
+}
+
+model Comp {
+  id            String   @id @default(cuid())
+  leadId        String
+  lead          Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  address       String
+  distance      Float
+  soldPrice     Float
+  soldDate      DateTime
+  daysOnMarket  Int?
+  bedrooms      Int?
+  bathrooms     Float?
+  sqft          Int?
+  sourceUrl     String?
+  createdAt     DateTime @default(now())
+
+  @@map("comps")
+}
+
+model Task {
+  id          String    @id @default(cuid())
+  leadId      String
+  lead        Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  userId      String?
+  user        User?     @relation(fields: [userId], references: [id])
+  title       String
+  description String?
+  dueDate     DateTime?
+  completed   Boolean   @default(false)
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@map("tasks")
+}
+
+model Note {
+  id        String   @id @default(cuid())
+  leadId    String
+  lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  content   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("notes")
+}
+
+model Activity {
+  id          String   @id @default(cuid())
+  leadId      String
+  lead        Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id])
+  type        String
+  description String
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  @@map("activities")
+}
+
+model Contract {
+  id                String    @id @default(cuid())
+  leadId            String    @unique
+  lead              Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  contractDate      DateTime
+  buyerName         String?
+  assignmentFee     Float?
+  titleCompany      String?
+  expectedCloseDate DateTime?
+  actualCloseDate   DateTime?
+  dispositionNotes  String?
+  outcome           String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@map("contracts")
+}
