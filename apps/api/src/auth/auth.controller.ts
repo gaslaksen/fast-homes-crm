@@ -55,7 +55,7 @@ export class AuthController {
   @Post('invite')
   async invite(
     @Headers('authorization') authHeader: string,
-    @Body() body: { email: string; firstName: string; lastName: string; role?: string; tempPassword: string },
+    @Body() body: { email: string; firstName: string; lastName: string; role: string; tempPassword: string },
   ) {
     const decoded = this.getUser(authHeader);
     if (decoded.role !== 'ADMIN') throw new ForbiddenException('Admin only');
