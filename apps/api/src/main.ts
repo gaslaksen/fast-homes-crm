@@ -19,9 +19,15 @@ async function bootstrap() {
   });
   console.log('📂 Static file serving enabled: /uploads/');
 
+  // Health check endpoint for Railway
+  const httpAdapter = app.getHttpAdapter();
+  httpAdapter.get('/health', (_req: any, res: any) => res.json({ status: 'ok' }));
+
   // Enable CORS
   app.enableCors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    origin: process.env.FRONTEND_URL
+      ? process.env.FRONTEND_URL.split(',').map((s: string) => s.trim())
+      : ['http://localhost:3000'],
     credentials: true,
   });
 
