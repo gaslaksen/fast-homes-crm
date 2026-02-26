@@ -7,15 +7,32 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model User {
+model Organization {
   id        String   @id @default(cuid())
-  email     String   @unique
-  password  String
-  firstName String
-  lastName  String
-  role      String   @default("AGENT")
+  name      String
+  slug      String   @unique
+  plan      String   @default("FREE")   // FREE | PRO | ENTERPRISE
+  maxUsers  Int      @default(10)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  users User[]
+  leads Lead[]
+
+  @@map("organizations")
+}
+
+model User {
+  id             String   @id @default(cuid())
+  email          String   @unique
+  password       String
+  firstName      String
+  lastName       String
+  role           String   @default("AGENT")  // ADMIN | AGENT | VIEWER
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   assignedLeads Lead[]
   notes         Note[]
@@ -27,6 +44,8 @@ model User {
 
 model Lead {
   id                String   @id @default(cuid())
+  organizationId    String?
+  organization      Organization? @relation(fields: [organizationId], references: [id])
   source            String
   status            String   @default("NEW")
   
@@ -38,7 +57,11 @@ model Lead {
   bedrooms          Int?
   bathrooms         Float?
   sqft              Int?
-  
+  yearBuilt         Int?
+  lotSize           Float?
+  latitude          Float?
+  longitude         Float?
+
   sellerFirstName   String
   sellerLastName    String
   sellerPhone       String
@@ -70,17 +93,45 @@ model Lead {
   
   doNotContact      Boolean  @default(false)
   unsubscribedAt    DateTime?
-  
+  autoRespond       Boolean  @default(true)
+  autoResponseCount Int      @default(0)
+  autoResponseDate  DateTime?
+
+  campPriorityComplete  Boolean @default(false)
+  campMoneyComplete     Boolean @default(false)
+  campChallengeComplete Boolean @default(false)
+  campAuthorityComplete Boolean @default(false)
+
   sourceMetadata    Json?
+  primaryPhoto      String?
+  photos            Json     @default("[]")
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
+  // Pipeline tracking
+  stageChangedAt    DateTime  @default(now())
+  daysInStage       Int       @default(0)
+  lastTouchedAt     DateTime  @default(now())
+  touchCount        Int       @default(0)
+  aiRecommendation  String?
+
+  // AI Analysis fields
+  aiAnalysis        String?   // JSON string of full analysis
+  aiDealRating      Int?      // 1-10 rating
+  aiDealWorthiness  String?   // YES/NO/NEED_MORE_DATA
+  aiProfitPotential String?   // HIGH/MEDIUM/LOW/UNKNOWN
+  aiConfidence      Int?      // 0-100
+  aiLastUpdated     DateTime?
+  aiSummary         String?   // Brief summary for overview
+
   messages          Message[]
   comps             Comp[]
+  compAnalyses      CompAnalysis[]
   tasks             Task[]
   notes             Note[]
   activities        Activity[]
   contract          Contract?
+  dripSequence      DripSequence?
 
   @@map("leads")
 }
@@ -104,21 +155,81 @@ model Message {
 }
 
 model Comp {
-  id            String   @id @default(cuid())
-  leadId        String
-  lead          Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
-  address       String
-  distance      Float
-  soldPrice     Float
-  soldDate      DateTime
-  daysOnMarket  Int?
-  bedrooms      Int?
-  bathrooms     Float?
-  sqft          Int?
-  sourceUrl     String?
-  createdAt     DateTime @default(now())
+  id              String        @id @default(cuid())
+  leadId          String
+  lead            Lead          @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  analysisId      String?
+  analysis        CompAnalysis? @relation(fields: [analysisId], references: [id], onDelete: SetNull)
+  address         String
+  distance        Float
+  soldPrice       Float
+  soldDate        DateTime
+  daysOnMarket    Int?
+  bedrooms        Int?
+  bathrooms       Float?
+  sqft            Int?
+  lotSize         Float?
+  yearBuilt       Int?
+  hasPool         Boolean       @default(false)
+  hasGarage       Boolean       @default(false)
+  isRenovated     Boolean       @default(false)
+  propertyType    String?
+  hoaFees         Float?
+  schoolDistrict  String?
+  photoUrl        String?
+  sourceUrl       String?
+  source          String        @default("manual")
+  correlation     Float?
+  latitude        Float?
+  longitude       Float?
+  features        Json?
+  notes           String?
+  similarityScore Int?
+  selected        Boolean       @default(true)
+  adjustmentAmount Float?
+  adjustedPrice   Float?
+  adjustmentNotes  String?
+  createdAt       DateTime      @default(now())
 
   @@map("comps")
+}
+
+model CompAnalysis {
+  id                String   @id @default(cuid())
+  leadId            String
+  lead              Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  mode              String   @default("ARV")
+  maxDistance        Float    @default(3)
+  timeFrameMonths   Int      @default(12)
+  propertyStatus    Json     @default("[\"Sold\"]")
+  propertyType      String   @default("Auto")
+  confidenceScore   Int      @default(0)
+  aiSummary         String?  @db.Text
+  aiAssessment      String?  @db.Text  // Detailed wholesaler assessment (comp pool, market, deal viability)
+  photoAnalysis     String?  @db.Text  // Room-by-room assessment from photo upload
+  photoRepairLow    Int?               // Photo-based repair estimate low
+  photoRepairHigh   Int?               // Photo-based repair estimate high
+  arvEstimate       Float?
+  arvLow            Float?
+  arvHigh           Float?
+  arvMethod         String   @default("average")
+  avgAdjustment     Float?
+  pricePerSqft      Float?
+  adjustmentsEnabled Boolean @default(true)
+  adjustmentConfig  Json?
+  repairCosts       Float?
+  repairFinishLevel String?
+  repairNotes       String?  @db.Text
+  repairItems       Json?
+  dealType          String   @default("wholesale")
+  assignmentFee     Float    @default(15000)
+  maoPercent        Float    @default(70)
+  savedToLead       Boolean  @default(false)
+  comps             Comp[]
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@map("comp_analyses")
 }
 
 model Task {
@@ -163,6 +274,60 @@ model Activity {
   createdAt   DateTime @default(now())
 
   @@map("activities")
+}
+
+model DripSequence {
+  id              String   @id @default(cuid())
+  leadId          String   @unique
+  lead            Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  status          String   @default("PENDING") // PENDING | ACTIVE | COMPLETED | CANCELLED
+  currentStep     Int      @default(0)
+
+  hasTimeline     Boolean  @default(false)
+  hasCondition    Boolean  @default(false)
+  hasOwnership    Boolean  @default(false)
+  hasAskingPrice  Boolean  @default(false)
+
+  initialDelayMs  Int      @default(60000)
+  retryDelayMs    Int      @default(86400000)
+  maxRetries      Int      @default(2)
+  currentRetries  Int      @default(0)
+
+  lastMessageAt   DateTime?
+  lastReplyAt     DateTime?
+  pausedReason    String?
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("drip_sequences")
+}
+
+model DripSettings {
+  id                  String   @id @default("default")
+  initialDelayMs      Int      @default(60000)
+  nextQuestionDelayMs Int      @default(30000)
+  retryDelayMs        Int      @default(86400000)
+  maxRetries          Int      @default(2)
+  demoMode            Boolean  @default(false)
+  updatedAt           DateTime @updatedAt
+
+  @@map("drip_settings")
+}
+
+model AiPrompt {
+  id              String   @id @default(cuid())
+  name            String
+  scenario        String   @unique
+  contextRules    Json
+  systemPrompt    String   @db.Text
+  exampleMessages Json?
+  priority        Int      @default(0)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("ai_prompts")
 }
 
 model Contract {

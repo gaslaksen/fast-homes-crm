@@ -1,7 +1,10 @@
-import { Controller, Post, Body, Req, Res } from '@nestjs/common';
+import { Controller, Post, Body, Req, Res, HttpCode } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { LeadsService } from '../leads/leads.service';
 import { MessagesService } from '../messages/messages.service';
+import { DripService } from '../drip/drip.service';
+import { SlackLeadService } from './slack-lead.service';
+import { InvestorFuseService } from './investorfuse.service';
 import { formatPhoneNumber, LeadSource } from '@fast-homes/shared';
 
 @Controller('webhooks')
@@ -9,6 +12,9 @@ export class WebhooksController {
   constructor(
     private leadsService: LeadsService,
     private messagesService: MessagesService,
+    private dripService: DripService,
+    private slackLeadService: SlackLeadService,
+    private investorFuseService: InvestorFuseService,
   ) {}
 
   /**
@@ -42,6 +48,13 @@ export class WebhooksController {
       };
 
       const lead = await this.leadsService.createLead(leadData);
+
+      // Start auto-text drip sequence
+      try {
+        await this.dripService.startSequence(lead.id);
+      } catch (err) {
+        console.error('⚠️  Failed to start drip sequence:', err.message);
+      }
 
       console.log(`✅ PropertyLeads lead created: ${lead.id}`);
 
@@ -81,6 +94,13 @@ export class WebhooksController {
       };
 
       const lead = await this.leadsService.createLead(leadData);
+
+      // Start auto-text drip sequence
+      try {
+        await this.dripService.startSequence(lead.id);
+      } catch (err) {
+        console.error('⚠️  Failed to start drip sequence:', err.message);
+      }
 
       console.log(`✅ Google Ads lead created: ${lead.id}`);
 
@@ -124,6 +144,54 @@ export class WebhooksController {
       res.set('Content-Type', 'text/xml');
       res.send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
     }
+  }
+
+  /**
+   * InvestorFuse "opportunity created" webhook
+   * Paste this URL into InvestorFuse Settings → Integrations → Webhook
+   * Format: https://your-tunnel.loca.lt/webhooks/investorfuse
+   *
+   * On receipt: parses address, fetches RentCast comps + Claude analysis,
+   * posts full breakdown to Slack.
+   */
+  @Post('investorfuse')
+  @HttpCode(200)
+  async handleInvestorFuse(@Body() body: any) {
+    console.log('📥 InvestorFuse webhook received');
+    return this.investorFuseService.handleOpportunityCreated(body);
+  }
+
+  /**
+   * Slack lead notification webhook
+   * Called by Zapier when a new lead posts in the #esl-1-llc channel.
+   * Parses the address, fetches RentCast comps + Claude analysis,
+   * and posts the full breakdown back to Slack.
+   */
+  @Post('slack-lead')
+  @HttpCode(200)
+  async handleSlackLead(@Body() body: any) {
+    console.log('📥 Slack lead webhook received:', JSON.stringify(body).substring(0, 200));
+
+    // Zapier sends the Slack message text + the channel's webhook URL to respond to
+    const text: string = body.text || body.message || body.content || '';
+    const responseUrl: string = body.response_url || body.responseUrl || body.slackWebhookUrl || '';
+
+    if (!text) {
+      return { success: false, error: 'No message text received' };
+    }
+
+    if (!responseUrl) {
+      console.warn('⚠️  No Slack response URL provided — analysis will run but cannot post back');
+    }
+
+    // Run analysis in background so we return 200 to Zapier immediately
+    setImmediate(() => {
+      this.slackLeadService.analyzeAndPost({ text, responseUrl }).catch((err) => {
+        console.error('❌ Slack lead analysis failed:', err);
+      });
+    });
+
+    return { success: true, message: 'Analysis started — results posting to Slack shortly' };
   }
 
   /**

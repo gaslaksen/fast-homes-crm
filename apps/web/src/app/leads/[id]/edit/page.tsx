@@ -209,13 +209,14 @@ export default function EditLeadPage() {
             <h2 className="text-lg font-bold mb-4">Property Information</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-1">Address *</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Street Address *</label>
                 <input
                   type="text"
                   name="propertyAddress"
                   value={formData.propertyAddress}
                   onChange={handleChange}
                   className="input"
+                  placeholder="123 Main St"
                   required
                 />
               </div>

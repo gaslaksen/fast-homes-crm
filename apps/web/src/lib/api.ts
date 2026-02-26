@@ -39,6 +39,15 @@ export const authAPI = {
   register: (data: { email: string; password: string; firstName: string; lastName: string }) =>
     api.post('/auth/register', data),
   getMe: () => api.get('/auth/me'),
+  getTeam: () => api.get('/auth/team'),
+  invite: (data: { email: string; firstName: string; lastName: string; role?: string; tempPassword: string }) =>
+    api.post('/auth/invite', data),
+  changePassword: (data: { currentPassword: string; newPassword: string }) =>
+    api.patch('/auth/password', data),
+  resetPassword: (userId: string, newPassword: string) =>
+    api.patch(`/auth/team/${userId}/password`, { newPassword }),
+  removeUser: (userId: string) =>
+    api.delete(`/auth/team/${userId}`),
 };
 
 // Leads API
@@ -51,6 +60,16 @@ export const leadsAPI = {
   addNote: (id: string, content: string, userId: string) =>
     api.post(`/leads/${id}/notes`, { content, userId }),
   upsertContract: (id: string, data: any) => api.post(`/leads/${id}/contract`, data),
+  toggleAutoRespond: (id: string, autoRespond: boolean) =>
+    api.patch(`/leads/${id}/auto-respond`, { autoRespond }),
+  refreshPropertyDetails: (id: string) =>
+    api.post(`/leads/${id}/property-details/refresh`),
+  bulkDelete: (ids: string[]) => api.post('/leads/bulk-delete', { ids }),
+  bulkUpdateStatus: (ids: string[], status: string) =>
+    api.post('/leads/bulk-status', { ids, status }),
+  exportCsv: (filters: any) =>
+    api.post('/leads/export-csv', filters, { responseType: 'blob' }),
+  stats: () => api.get('/leads/stats'),
 };
 
 // Messages API
@@ -62,12 +81,56 @@ export const messagesAPI = {
     api.post(`/leads/${leadId}/messages/send`, { message, userId }),
   rescore: (leadId: string, userId?: string) =>
     api.post(`/leads/${leadId}/messages/rescore`, { userId }),
+  simulateReply: (leadId: string, message: string) =>
+    api.post(`/leads/${leadId}/messages/simulate-reply`, { message }),
 };
 
 // Comps API
 export const compsAPI = {
-  fetch: (leadId: string) => api.post(`/leads/${leadId}/comps`),
+  fetch: (leadId: string, forceRefresh?: boolean) =>
+    api.post(`/leads/${leadId}/comps${forceRefresh ? '?forceRefresh=true' : ''}`),
   list: (leadId: string) => api.get(`/leads/${leadId}/comps`),
+  toggleComp: (leadId: string, compId: string) =>
+    api.post(`/leads/${leadId}/comps/${compId}/toggle`),
+  autoSelect: (leadId: string, minSimilarity: number, maxDistance: number) =>
+    api.post(`/leads/${leadId}/comps/auto-select`, { minSimilarity, maxDistance }),
+};
+
+// Comp Analysis API
+export const compAnalysisAPI = {
+  create: (leadId: string, params?: any) =>
+    api.post(`/leads/${leadId}/comp-analysis`, params || {}),
+  list: (leadId: string) => api.get(`/leads/${leadId}/comp-analysis`),
+  get: (leadId: string, analysisId: string) =>
+    api.get(`/leads/${leadId}/comp-analysis/${analysisId}`),
+  update: (leadId: string, analysisId: string, data: any) =>
+    api.patch(`/leads/${leadId}/comp-analysis/${analysisId}`, data),
+  addComp: (leadId: string, analysisId: string, data: any) =>
+    api.post(`/leads/${leadId}/comp-analysis/${analysisId}/comps`, data),
+  updateComp: (leadId: string, analysisId: string, compId: string, data: any) =>
+    api.patch(`/leads/${leadId}/comp-analysis/${analysisId}/comps/${compId}`, data),
+  deleteComp: (leadId: string, analysisId: string, compId: string) =>
+    api.delete(`/leads/${leadId}/comp-analysis/${analysisId}/comps/${compId}`),
+  toggleComp: (leadId: string, analysisId: string, compId: string) =>
+    api.post(`/leads/${leadId}/comp-analysis/${analysisId}/comps/${compId}/toggle`),
+  calculateAdjustments: (leadId: string, analysisId: string, config?: any) =>
+    api.post(`/leads/${leadId}/comp-analysis/${analysisId}/calculate-adjustments`, { config }),
+  calculateArv: (leadId: string, analysisId: string, method?: string) =>
+    api.post(`/leads/${leadId}/comp-analysis/${analysisId}/calculate-arv`, { method }),
+  aiSummary: (leadId: string, analysisId: string) =>
+    api.post(`/leads/${leadId}/comp-analysis/${analysisId}/ai-summary`),
+  estimateRepairs: (leadId: string, analysisId: string, data: any) =>
+    api.post(`/leads/${leadId}/comp-analysis/${analysisId}/estimate-repairs`, data),
+  calculateDeal: (leadId: string, analysisId: string, data: any) =>
+    api.post(`/leads/${leadId}/comp-analysis/${analysisId}/calculate-deal`, data),
+  saveToLead: (leadId: string, analysisId: string) =>
+    api.post(`/leads/${leadId}/comp-analysis/${analysisId}/save-to-lead`),
+  generateAssessment: (leadId: string, analysisId: string) =>
+    api.post(`/leads/${leadId}/comp-analysis/${analysisId}/assessment`),
+  analyzePhotos: (leadId: string, analysisId: string, formData: FormData) =>
+    api.post(`/leads/${leadId}/comp-analysis/${analysisId}/analyze-photos`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }),
 };
 
 // Dashboard API
@@ -76,10 +139,72 @@ export const dashboardAPI = {
   activity: (limit?: number) => api.get('/dashboard/activity', { params: { limit } }),
   tasks: (userId?: string) => api.get('/dashboard/tasks', { params: { userId } }),
   hotLeads: (limit?: number) => api.get('/dashboard/hot-leads', { params: { limit } }),
+  staleLeads: (limit?: number) => api.get('/dashboard/stale-leads', { params: { limit } }),
+};
+
+// Settings API
+export const settingsAPI = {
+  getDrip: () => api.get('/settings/drip'),
+  updateDrip: (data: {
+    initialDelayMs?: number;
+    nextQuestionDelayMs?: number;
+    retryDelayMs?: number;
+    maxRetries?: number;
+    demoMode?: boolean;
+  }) => api.patch('/settings/drip', data),
+  sendDemoLead: () => api.post('/settings/drip/demo-lead'),
+};
+
+// Prompts API
+export const promptsAPI = {
+  list: () => api.get('/settings/prompts'),
+  get: (id: string) => api.get(`/settings/prompts/${id}`),
+  create: (data: any) => api.post('/settings/prompts', data),
+  update: (id: string, data: any) => api.patch(`/settings/prompts/${id}`, data),
+  delete: (id: string) => api.delete(`/settings/prompts/${id}`),
+  test: (id: string) => api.post(`/settings/prompts/${id}/test`),
 };
 
 // Tasks API
 export const tasksAPI = {
   complete: (id: string, userId?: string) =>
     api.post(`/tasks/${id}/complete`, { userId }),
+};
+
+// Pipeline API
+export const pipelineAPI = {
+  get: () => api.get('/pipeline'),
+  updateStage: (id: string, stage: string) =>
+    api.patch(`/pipeline/leads/${id}/stage`, { stage }),
+  getInsights: () => api.post('/pipeline/insights'),
+  getLeadAnalysis: (id: string) => api.get(`/pipeline/leads/${id}/analysis`),
+  refreshLeadAnalysis: (id: string) => api.post(`/pipeline/leads/${id}/analysis/refresh`),
+};
+
+// Photos API
+export const photosAPI = {
+  fetchAll: (leadId: string) =>
+    api.post(`/leads/${leadId}/photos/fetch-all`),
+  fetchStreetView: (leadId: string) =>
+    api.post(`/leads/${leadId}/photos/streetview`),
+  upload: (leadId: string, file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.post(`/leads/${leadId}/photos/upload`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+  uploadMultiple: (leadId: string, files: File[]) => {
+    const formData = new FormData();
+    files.forEach((file) => formData.append('photos', file));
+    return api.post(`/leads/${leadId}/photos/upload-multiple`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+  addFromUrl: (leadId: string, url: string, caption?: string) =>
+    api.post(`/leads/${leadId}/photos/url`, { url, caption }),
+  delete: (leadId: string, photoId: string) =>
+    api.delete(`/leads/${leadId}/photos/${photoId}`),
+  setPrimary: (leadId: string, photoId: string) =>
+    api.patch(`/leads/${leadId}/photos/primary`, { photoId }),
 };

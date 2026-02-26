@@ -63,7 +63,7 @@ export default function NewLeadPage() {
           <div className="flex justify-between items-center py-4">
             <h1 className="text-2xl font-bold text-gray-900">Create New Lead</h1>
             <Link href="/leads" className="text-primary-600 hover:text-primary-700">
-              ← Back to Leads
+              &larr; Back to Leads
             </Link>
           </div>
         </div>
@@ -77,7 +77,7 @@ export default function NewLeadPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="md:col-span-2">
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Address *
+                  Street Address *
                 </label>
                 <input
                   type="text"
@@ -85,9 +85,11 @@ export default function NewLeadPage() {
                   value={formData.propertyAddress}
                   onChange={handleChange}
                   className="input"
+                  placeholder="123 Main St"
                   required
                 />
               </div>
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   City *
@@ -97,7 +99,7 @@ export default function NewLeadPage() {
                   name="propertyCity"
                   value={formData.propertyCity}
                   onChange={handleChange}
-                  className="input"
+                  className="input bg-gray-50"
                   required
                 />
               </div>
@@ -110,7 +112,7 @@ export default function NewLeadPage() {
                   name="propertyState"
                   value={formData.propertyState}
                   onChange={handleChange}
-                  className="input"
+                  className="input bg-gray-50"
                   maxLength={2}
                   placeholder="NC"
                   required
@@ -125,7 +127,7 @@ export default function NewLeadPage() {
                   name="propertyZip"
                   value={formData.propertyZip}
                   onChange={handleChange}
-                  className="input"
+                  className="input bg-gray-50"
                   placeholder="28202"
                   required
                 />

@@ -1,14 +1,33 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject, forwardRef, Logger, Optional } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ScoringService } from '../scoring/scoring.service';
+import { MessagesService } from '../messages/messages.service';
+import { PhotosService } from '../photos/photos.service';
+import { RentCastService } from '../comps/rentcast.service';
+import { CompsService } from '../comps/comps.service';
+import { PipelineService } from '../pipeline/pipeline.service';
 import { LeadStatus, LeadSource } from '@fast-homes/shared';
 import { Prisma } from '@prisma/client';
 
+const INITIAL_OUTREACH_DELAY_MS = 60_000; // 1 minute
+const DEMO_OUTREACH_DELAY_MS = 3_000;     // 3 seconds in demo mode
+
+/** Fields that trigger AI analysis refresh when changed */
+const AI_REFRESH_FIELDS = ['arv', 'askingPrice', 'timeline', 'conditionLevel', 'ownershipStatus'];
+
 @Injectable()
 export class LeadsService {
+  private readonly logger = new Logger(LeadsService.name);
+
   constructor(
     private prisma: PrismaService,
     private scoringService: ScoringService,
+    @Inject(forwardRef(() => MessagesService))
+    private messagesService: MessagesService,
+    @Optional() private photosService: PhotosService,
+    private rentCastService: RentCastService,
+    private compsService: CompsService,
+    private pipelineService: PipelineService,
   ) {}
 
   /**
@@ -28,6 +47,8 @@ export class LeadsService {
     bedrooms?: number;
     bathrooms?: number;
     sqft?: number;
+    yearBuilt?: number;
+    lotSize?: number;
     timeline?: number;
     askingPrice?: number;
     conditionLevel?: string;
@@ -35,6 +56,7 @@ export class LeadsService {
     ownershipStatus?: string;
     assignedToUserId?: string;
     sourceMetadata?: any;
+    organizationId?: string;
   }) {
     // Initial scoring
     const scoringResult = await this.scoringService.scoreLead({
@@ -57,6 +79,15 @@ export class LeadsService {
         abcdFit: scoringResult.abcdFit,
         scoringRationale: scoringResult.rationale,
         lastScoredAt: new Date(),
+        // Pre-populate CAMP flags
+        campPriorityComplete: data.timeline != null,
+        campMoneyComplete: data.askingPrice != null,
+        campChallengeComplete: data.conditionLevel != null,
+        campAuthorityComplete: data.ownershipStatus != null,
+        // Pipeline tracking
+        lastTouchedAt: new Date(),
+        touchCount: 0,
+        daysInStage: 0,
       },
     });
 
@@ -70,7 +101,208 @@ export class LeadsService {
       },
     });
 
+    // Schedule automatic initial outreach
+    if (lead.autoRespond && !lead.doNotContact) {
+      this.scheduleInitialOutreach(lead.id);
+    }
+
+    // Non-blocking photo fetch from all sources (Street View + SerpAPI)
+    if (this.photosService) {
+      console.log(`📍 Lead created: ${lead.id} - ${data.propertyAddress}. Fetching photos...`);
+      this.photosService.fetchAllPhotos(lead.id).catch((err) => {
+        console.log(`⚠️ Photo fetch failed for ${lead.id}: ${err.message}`);
+      });
+    } else {
+      console.log(`📍 Lead created: ${lead.id} - ${data.propertyAddress}. No PhotosService available.`);
+    }
+
+    // Auto-populate property details from RentCast (non-blocking)
+    this.autoPopulatePropertyDetails(lead.id, data).catch((err) => {
+      this.logger.error(`Property details auto-population failed for ${lead.id}: ${err.message}`);
+    });
+
     return lead;
+  }
+
+  /**
+   * Schedule the initial outreach message after a short delay.
+   */
+  private async scheduleInitialOutreach(leadId: string) {
+    // Check demo mode for delay
+    let delay = INITIAL_OUTREACH_DELAY_MS;
+    try {
+      const settings = await this.prisma.dripSettings.findUnique({ where: { id: 'default' } });
+      if (settings?.demoMode) {
+        delay = DEMO_OUTREACH_DELAY_MS;
+      }
+    } catch {
+      // Use default delay
+    }
+
+    this.logger.log(`Scheduling initial outreach for lead ${leadId} in ${delay}ms`);
+
+    setTimeout(async () => {
+      try {
+        await this.messagesService.sendInitialOutreach(leadId);
+      } catch (error) {
+        this.logger.error(`Initial outreach failed for lead ${leadId}: ${error.message}`);
+      }
+    }, delay);
+  }
+
+  /**
+   * Auto-populate property details from RentCast, then fetch comps.
+   */
+  private async autoPopulatePropertyDetails(
+    leadId: string,
+    data: { propertyAddress: string; propertyCity: string; propertyState: string; propertyZip: string },
+  ) {
+    // Skip if no address
+    if (!data.propertyAddress || !data.propertyCity) return;
+
+    const address = `${data.propertyAddress}, ${data.propertyCity}, ${data.propertyState} ${data.propertyZip}`;
+    this.logger.log(`Looking up property details for lead ${leadId}: ${address}`);
+
+    const property = await this.rentCastService.getPropertyDetails(address);
+
+    if (property) {
+      // Only update fields that aren't already set on the lead
+      const lead = await this.prisma.lead.findUnique({
+        where: { id: leadId },
+        select: { bedrooms: true, bathrooms: true, sqft: true, propertyType: true, yearBuilt: true, lotSize: true },
+      });
+
+      const updates: Record<string, any> = {};
+      if (!lead?.bedrooms && property.bedrooms) updates.bedrooms = property.bedrooms;
+      if (!lead?.bathrooms && property.bathrooms) updates.bathrooms = property.bathrooms;
+      if (!lead?.sqft && property.squareFootage) updates.sqft = property.squareFootage;
+      if (!lead?.propertyType && property.propertyType) updates.propertyType = property.propertyType;
+      if (!lead?.yearBuilt && property.yearBuilt) updates.yearBuilt = property.yearBuilt;
+      if (!lead?.lotSize && property.lotSize) updates.lotSize = property.lotSize;
+
+      if (Object.keys(updates).length > 0) {
+        await this.prisma.lead.update({
+          where: { id: leadId },
+          data: updates,
+        });
+
+        this.logger.log(`Property details auto-populated for lead ${leadId}: ${JSON.stringify(updates)}`);
+
+        await this.prisma.activity.create({
+          data: {
+            leadId,
+            type: 'FIELD_UPDATED',
+            description: `Property details auto-populated from public records (${Object.keys(updates).join(', ')})`,
+            metadata: { source: 'rentcast', fields: Object.keys(updates) },
+          },
+        });
+      }
+    } else {
+      this.logger.warn(`Property details not found for lead ${leadId}`);
+      await this.prisma.activity.create({
+        data: {
+          leadId,
+          type: 'FIELD_UPDATED',
+          description: 'Property details not found in public records — manual entry may be needed',
+        },
+      });
+    }
+
+    // Fetch comps now that we may have property details
+    await this.fetchCompsForLead(leadId);
+  }
+
+  /**
+   * Fetch comps for a lead using the CompsService fallback chain.
+   */
+  async fetchCompsForLead(leadId: string): Promise<void> {
+    const lead = await this.prisma.lead.findUnique({
+      where: { id: leadId },
+      select: {
+        propertyAddress: true,
+        propertyCity: true,
+        propertyState: true,
+        propertyZip: true,
+        bedrooms: true,
+        sqft: true,
+      },
+    });
+    if (!lead) return;
+
+    if (!lead.bedrooms && !lead.sqft) {
+      this.logger.warn(`Missing property details for lead ${leadId}, skipping comps fetch`);
+      return;
+    }
+
+    this.logger.log(`Fetching comps for lead ${leadId}`);
+
+    try {
+      const result = await this.compsService.fetchComps(leadId, {
+        street: lead.propertyAddress,
+        city: lead.propertyCity,
+        state: lead.propertyState,
+        zip: lead.propertyZip,
+      });
+
+      this.logger.log(
+        `Comps fetched for lead ${leadId}: ${result.compsCount} comps, ARV: $${result.arv.toLocaleString()} (${result.source})`,
+      );
+    } catch (error) {
+      this.logger.error(`Comps fetch failed for lead ${leadId}: ${error.message}`);
+    }
+  }
+
+  /**
+   * Refresh property details from RentCast for an existing lead.
+   */
+  async refreshPropertyDetails(leadId: string) {
+    const lead = await this.prisma.lead.findUnique({
+      where: { id: leadId },
+      select: {
+        propertyAddress: true,
+        propertyCity: true,
+        propertyState: true,
+        propertyZip: true,
+      },
+    });
+    if (!lead) throw new Error('Lead not found');
+
+    const address = `${lead.propertyAddress}, ${lead.propertyCity}, ${lead.propertyState} ${lead.propertyZip}`;
+    const property = await this.rentCastService.getPropertyDetails(address);
+
+    if (!property) {
+      return { success: false, message: 'Property details not found' };
+    }
+
+    const updates: Record<string, any> = {};
+    if (property.bedrooms) updates.bedrooms = property.bedrooms;
+    if (property.bathrooms) updates.bathrooms = property.bathrooms;
+    if (property.squareFootage) updates.sqft = property.squareFootage;
+    if (property.propertyType) updates.propertyType = property.propertyType;
+    if (property.yearBuilt) updates.yearBuilt = property.yearBuilt;
+    if (property.lotSize) updates.lotSize = property.lotSize;
+
+    if (Object.keys(updates).length > 0) {
+      await this.prisma.lead.update({
+        where: { id: leadId },
+        data: updates,
+      });
+
+      await this.prisma.activity.create({
+        data: {
+          leadId,
+          type: 'FIELD_UPDATED',
+          description: `Property details refreshed from public records (${Object.keys(updates).join(', ')})`,
+          metadata: { source: 'rentcast', fields: Object.keys(updates) },
+        },
+      });
+    }
+
+    return {
+      success: true,
+      details: updates,
+      message: `Property details updated: ${Object.keys(updates).join(', ')}`,
+    };
   }
 
   /**
@@ -121,6 +353,7 @@ export class LeadsService {
     createdBefore?: string;
     page?: number;
     limit?: number;
+    organizationId?: string;
   }) {
     const page = filters.page || 1;
     const limit = filters.limit || 50;
@@ -139,6 +372,8 @@ export class LeadsService {
       if (filters.maxScore) scoreFilter.lte = filters.maxScore;
       where.totalScore = scoreFilter;
     }
+
+    if (filters.organizationId) where.organizationId = filters.organizationId;
 
     if (filters.search) {
       where.OR = [
@@ -201,6 +436,7 @@ export class LeadsService {
     arv?: number;
     assignedToUserId?: string;
     tags?: string[];
+    autoRespond?: boolean;
     [key: string]: any;
   }) {
     const lead = await this.prisma.lead.findUnique({ where: { id } });
@@ -254,6 +490,9 @@ export class LeadsService {
         },
       });
 
+      // Refresh CAMP flags
+      await this.scoringService.refreshCampFlags(id);
+
       if (lead.totalScore !== scoringResult.totalScore) {
         await this.prisma.activity.create({
           data: {
@@ -269,6 +508,15 @@ export class LeadsService {
           },
         });
       }
+    }
+
+    // Auto-refresh AI analysis if key deal data changed
+    const shouldRefreshAi = AI_REFRESH_FIELDS.some((field) => data[field] !== undefined);
+    if (shouldRefreshAi) {
+      this.logger.log(`Key data changed for lead ${id}, refreshing AI analysis in background`);
+      this.pipelineService.generateLeadAnalysis(id).catch((err) =>
+        this.logger.error(`Background AI analysis refresh failed for ${id}: ${err.message}`),
+      );
     }
 
     return this.getLead(id);
@@ -350,6 +598,105 @@ export class LeadsService {
     });
 
     return note;
+  }
+
+  /**
+   * Bulk delete leads by IDs
+   */
+  async bulkDelete(ids: string[]): Promise<{ deleted: number }> {
+    const result = await this.prisma.lead.deleteMany({
+      where: { id: { in: ids } },
+    });
+    return { deleted: result.count };
+  }
+
+  /**
+   * Bulk update lead status
+   */
+  async bulkUpdateStatus(ids: string[], status: LeadStatus): Promise<{ updated: number }> {
+    const result = await this.prisma.lead.updateMany({
+      where: { id: { in: ids } },
+      data: { status },
+    });
+    return { updated: result.count };
+  }
+
+  /**
+   * Export leads as CSV string
+   */
+  async exportCsv(filters: {
+    source?: LeadSource;
+    status?: LeadStatus;
+    scoreBand?: string;
+    search?: string;
+    createdAfter?: string;
+    createdBefore?: string;
+  }): Promise<string> {
+    const where: Prisma.LeadWhereInput = {};
+    if (filters.source) where.source = filters.source;
+    if (filters.status) where.status = filters.status;
+    if (filters.scoreBand) where.scoreBand = filters.scoreBand as any;
+    if (filters.search) {
+      where.OR = [
+        { propertyAddress: { contains: filters.search, mode: 'insensitive' } },
+        { sellerFirstName: { contains: filters.search, mode: 'insensitive' } },
+        { sellerLastName: { contains: filters.search, mode: 'insensitive' } },
+        { sellerPhone: { contains: filters.search, mode: 'insensitive' } },
+      ];
+    }
+    if (filters.createdAfter || filters.createdBefore) {
+      const dateFilter: Prisma.DateTimeFilter<'Lead'> = {};
+      if (filters.createdAfter) dateFilter.gte = new Date(filters.createdAfter);
+      if (filters.createdBefore) dateFilter.lte = new Date(filters.createdBefore);
+      where.createdAt = dateFilter;
+    }
+
+    const leads = await this.prisma.lead.findMany({ where, orderBy: { createdAt: 'desc' } });
+
+    const headers = ['Name', 'Phone', 'Email', 'Address', 'City', 'State', 'Zip', 'Status', 'Score', 'Band', 'Source', 'Created', 'Timeline', 'Asking Price'];
+    const csvEscape = (val: string | null | undefined) => {
+      if (val == null) return '';
+      const str = String(val);
+      return str.includes(',') || str.includes('"') || str.includes('\n')
+        ? `"${str.replace(/"/g, '""')}"` : str;
+    };
+
+    const rows = leads.map((l) => [
+      csvEscape(`${l.sellerFirstName} ${l.sellerLastName}`),
+      csvEscape(l.sellerPhone),
+      csvEscape(l.sellerEmail),
+      csvEscape(l.propertyAddress),
+      csvEscape(l.propertyCity),
+      csvEscape(l.propertyState),
+      csvEscape(l.propertyZip),
+      csvEscape(l.status),
+      l.totalScore ?? '',
+      csvEscape(l.scoreBand),
+      csvEscape(l.source),
+      l.createdAt ? new Date(l.createdAt).toISOString().split('T')[0] : '',
+      l.timeline ?? '',
+      l.askingPrice ?? '',
+    ].join(','));
+
+    return [headers.join(','), ...rows].join('\n');
+  }
+
+  /**
+   * Get lead counts grouped by status and source
+   */
+  async getLeadStats() {
+    const [byStatus, bySource, byBand, total] = await Promise.all([
+      this.prisma.lead.groupBy({ by: ['status'], _count: true }),
+      this.prisma.lead.groupBy({ by: ['source'], _count: true }),
+      this.prisma.lead.groupBy({ by: ['scoreBand'], _count: true }),
+      this.prisma.lead.count(),
+    ]);
+    return {
+      total,
+      byStatus: Object.fromEntries(byStatus.map((r) => [r.status, r._count])),
+      bySource: Object.fromEntries(bySource.map((r) => [r.source, r._count])),
+      byBand: Object.fromEntries(byBand.map((r) => [r.scoreBand, r._count])),
+    };
   }
 
   /**
