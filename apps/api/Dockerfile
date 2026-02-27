@@ -1,4 +1,8 @@
-FROM node:20-alpine AS base
+FROM node:20-slim AS base
+
+# Install OpenSSL required by Prisma
+RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
+
 RUN npm install -g pnpm
 
 WORKDIR /app
