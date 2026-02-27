@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { leadsAPI } from '@/lib/api';
@@ -122,7 +122,7 @@ function SortHeader({ label, sortKey, current, dir, onClick }: {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export default function LeadsPage() {
+function LeadsPageInner() {
   const searchParams = useSearchParams();
   const [allLeads, setAllLeads] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -566,5 +566,13 @@ export default function LeadsPage() {
 
       </main>
     </div>
+  );
+}
+
+export default function LeadsPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-gray-50 flex items-center justify-center text-gray-400">Loading...</div>}>
+      <LeadsPageInner />
+    </Suspense>
   );
 }
