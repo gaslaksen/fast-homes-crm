@@ -92,6 +92,8 @@ export class InvestorFuseService {
       // Meta
       source,
       sourceMetadata: body,
+      // Stamp with default org so webhook leads appear in the frontend
+      organizationId: process.env.DEFAULT_ORGANIZATION_ID,
     };
   }
 
