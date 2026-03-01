@@ -2,11 +2,12 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import axios from 'axios';
-import sharp from 'sharp';
-import * as fs from 'fs';
-import * as path from 'path';
 import { randomUUID } from 'crypto';
 
+/**
+ * Fetches Google Street View photos and stores the direct Google URL —
+ * no local file download, no disk dependency, survives redeployments.
+ */
 @Injectable()
 export class StreetViewService {
   private readonly logger = new Logger(StreetViewService.name);
@@ -36,7 +37,7 @@ export class StreetViewService {
     const address = `${lead.propertyAddress}, ${lead.propertyCity}, ${lead.propertyState} ${lead.propertyZip}`;
     console.log(`🌍 Fetching Street View for: ${address}`);
 
-    // Check metadata first (free call)
+    // Check metadata first (free — confirms coverage before using a paid call)
     const metadataUrl = `https://maps.googleapis.com/maps/api/streetview/metadata?location=${encodeURIComponent(address)}&key=${this.apiKey}`;
     console.log(`📡 Checking metadata...`);
 
@@ -53,51 +54,23 @@ export class StreetViewService {
       return null;
     }
 
-    // Fetch the image
-    const imageUrl = `https://maps.googleapis.com/maps/api/streetview?size=640x480&location=${encodeURIComponent(address)}&key=${this.apiKey}`;
-    console.log(`📸 Fetching image...`);
-
-    const imageRes = await axios.get(imageUrl, {
-      responseType: 'arraybuffer',
-    });
-
-    const buffer = Buffer.from(imageRes.data);
-    console.log(`📸 Image downloaded: ${buffer.length} bytes`);
-
-    const uploadsDir = path.join(process.cwd(), 'uploads', 'properties');
-    fs.mkdirSync(uploadsDir, { recursive: true });
-
-    const timestamp = Date.now();
-    const mainFilename = `${leadId}-${timestamp}-main.jpg`;
-    const thumbFilename = `${leadId}-${timestamp}-thumb.jpg`;
-    const mainPath = path.join(uploadsDir, mainFilename);
-    const thumbPath = path.join(uploadsDir, thumbFilename);
-
-    // Process main image (800px wide)
-    await sharp(buffer)
-      .resize(800, null, { withoutEnlargement: true })
-      .jpeg({ quality: 80 })
-      .toFile(mainPath);
-    console.log(`💾 Main image saved: ${mainPath}`);
-
-    // Process thumbnail (200px wide)
-    await sharp(buffer)
-      .resize(200, null, { withoutEnlargement: true })
-      .jpeg({ quality: 70 })
-      .toFile(thumbPath);
-    console.log(`💾 Thumbnail saved: ${thumbPath}`);
+    // Store the direct Google URL — no download, no disk, survives redeployments
+    const encodedAddress = encodeURIComponent(address);
+    const photoUrl = `https://maps.googleapis.com/maps/api/streetview?size=800x600&location=${encodedAddress}&key=${this.apiKey}`;
+    const thumbUrl = `https://maps.googleapis.com/maps/api/streetview?size=200x150&location=${encodedAddress}&key=${this.apiKey}`;
 
     const photo = {
       id: randomUUID(),
-      url: `/uploads/properties/${mainFilename}`,
-      thumbnailUrl: `/uploads/properties/${thumbFilename}`,
+      url: photoUrl,
+      thumbnailUrl: thumbUrl,
       source: 'streetview',
       uploadedAt: new Date().toISOString(),
     };
 
-    // Update lead photos
+    // Update lead photos — dedupe any existing streetview entry
     const currentPhotos = (lead.photos as any[]) || [];
-    const updatedPhotos = [...currentPhotos, photo];
+    const withoutOldSv = currentPhotos.filter((p: any) => p.source !== 'streetview');
+    const updatedPhotos = [...withoutOldSv, photo];
 
     await this.prisma.lead.update({
       where: { id: leadId },
@@ -117,12 +90,12 @@ export class StreetViewService {
       },
     });
 
-    console.log(`✅ Street View photo saved for lead ${leadId}: ${photo.url}`);
+    console.log(`✅ Street View URL saved for lead ${leadId}`);
     return photo;
   }
 
   /**
-   * Get a Street View URL for direct display (no download needed)
+   * Get a Street View URL for direct display
    */
   getStreetViewUrl(address: string): string | null {
     if (!this.apiKey) return null;
