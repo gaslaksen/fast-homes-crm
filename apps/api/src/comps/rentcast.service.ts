@@ -40,6 +40,14 @@ interface RentCastProperty {
     fireplace?: boolean;
   };
   taxAssessments?: Record<string, { value?: number; land?: number; improvements?: number }>;
+  ownerOccupied?: boolean;
+  ownerName?: string;
+  ownerNames?: string[];
+  legalDescription?: string;
+  county?: string;
+  apn?: string;
+  subdivision?: string;
+  zoning?: string;
 }
 
 interface RentCastComparable extends RentCastProperty {
@@ -331,15 +339,27 @@ export class RentCastService {
 
     const fullAddress = `${address.street}, ${address.city}, ${address.state} ${address.zip}`;
 
-    // ── Call RentCast AVM endpoint ──
-    const avmResult = await this.getValueWithComps(fullAddress, {
-      propertyType: this.mapPropertyType(lead?.propertyType),
-      bedrooms: lead?.bedrooms || undefined,
-      bathrooms: lead?.bathrooms || undefined,
-      squareFootage: lead?.sqft || undefined,
-      maxRadius: options?.maxRadius || 1,
-      compCount: options?.compCount || 15,
-    });
+    // ── Call RentCast AVM endpoint (with radius fallback for rural areas) ──
+    const radiusProgression = options?.maxRadius ? [options.maxRadius] : [1, 5, 15, 25];
+    let avmResult: RentCastAVMResponse | null = null;
+    let usedRadius = radiusProgression[0];
+
+    for (const radius of radiusProgression) {
+      this.logger.log(`Trying RentCast AVM with radius=${radius}mi for: ${fullAddress}`);
+      avmResult = await this.getValueWithComps(fullAddress, {
+        propertyType: this.mapPropertyType(lead?.propertyType),
+        bedrooms: lead?.bedrooms || undefined,
+        bathrooms: lead?.bathrooms || undefined,
+        squareFootage: lead?.sqft || undefined,
+        maxRadius: radius,
+        compCount: options?.compCount || 15,
+      });
+      if (avmResult?.price) {
+        usedRadius = radius;
+        if (radius > 1) this.logger.log(`RentCast found comps at radius=${radius}mi (rural/sparse area)`);
+        break;
+      }
+    }
 
     if (!avmResult || !avmResult.price) {
       throw new Error('RentCast API returned no valuation data');

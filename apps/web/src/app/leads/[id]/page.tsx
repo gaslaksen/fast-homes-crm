@@ -63,6 +63,9 @@ export default function LeadDetailPage() {
     try {
       const response = await leadsAPI.get(leadId);
       setLead(response.data);
+      if (response.data?.aiAnalysis) {
+        try { setAiAnalysis(JSON.parse(response.data.aiAnalysis)); } catch {}
+      }
     } catch (error) {
       console.error('Failed to load lead:', error);
     } finally {
@@ -203,44 +206,54 @@ export default function LeadDetailPage() {
                 size="md"
               />
               <div>
-                <div className="flex items-center gap-1.5 mb-2 text-xs text-gray-400">
+                <div className="flex items-center gap-1.5 mb-1 text-xs text-gray-400">
                   <Link href="/leads" className="hover:text-gray-700 transition-colors">Leads</Link>
                   <span>/</span>
                   <span className="text-gray-600 font-medium">{lead.propertyAddress}</span>
                 </div>
-                <h1 className="text-2xl font-bold">{lead.propertyAddress}</h1>
-                <p className="text-gray-600">{lead.propertyCity}, {lead.propertyState}</p>
+                <h1 className="text-xl font-bold text-gray-900">{lead.propertyAddress}</h1>
+                <p className="text-gray-600 text-sm">{lead.propertyCity}, {lead.propertyState} {lead.propertyZip}</p>
               </div>
             </div>
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-5">
+              {/* Lead score donut */}
+              <DonutStat
+                value={lead.totalScore}
+                max={12}
+                label={lead.scoreBand.replace('_', ' ')}
+                color={lead.scoreBand === 'HOT' ? '#ef4444' : lead.scoreBand === 'WARM' ? '#f97316' : '#6b7280'}
+                size={60}
+              />
+              {/* AI analysis score donut */}
+              {aiAnalysis?.dealRating != null ? (
+                <DonutStat
+                  value={aiAnalysis.dealRating}
+                  max={10}
+                  label="AI Score"
+                  color={aiAnalysis.dealRating >= 7 ? '#10b981' : aiAnalysis.dealRating >= 4 ? '#f59e0b' : '#ef4444'}
+                  size={60}
+                />
+              ) : null}
               <Link href={`/leads/${leadId}/edit`} className="btn btn-primary">
                 Edit Lead
               </Link>
-              <div className="text-right">
-                <div className="text-3xl font-bold text-primary-600 mb-1">
-                  {lead.totalScore}/12
-                </div>
-                <span className={`badge badge-${lead.scoreBand.toLowerCase().replace('_', '-')}`}>
-                  {lead.scoreBand.replace('_', ' ')}
-                </span>
-              </div>
             </div>
           </div>
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Tabs */}
-        <div className="border-b border-gray-200 mb-6">
-          <nav className="flex space-x-8">
+      {/* Tab Nav */}
+      <div className="bg-white border-b border-gray-200">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <nav className="flex space-x-6 text-sm">
             {['overview', 'messages', 'comps', 'analysis', 'activity'].map((tab) => (
               <button
                 key={tab}
                 onClick={() => handleTabClick(tab)}
-                className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                className={`py-3 px-1 border-b-2 font-medium whitespace-nowrap ${
                   activeTab === tab
                     ? 'border-primary-500 text-primary-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                    : 'border-transparent text-gray-400 hover:text-gray-600'
                 }`}
               >
                 {tab.charAt(0).toUpperCase() + tab.slice(1)}
@@ -248,6 +261,9 @@ export default function LeadDetailPage() {
             ))}
           </nav>
         </div>
+      </div>
+
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
 
         {/* Overview Tab */}
         {activeTab === 'overview' && (
@@ -386,7 +402,8 @@ export default function LeadDetailPage() {
                     </span>
                   )}
                 </div>
-                <dl className="grid grid-cols-2 gap-4">
+                {/* Property specs */}
+                <dl className="grid grid-cols-2 gap-4 mb-5">
                   <div>
                     <dt className="text-sm font-medium text-gray-500">Type</dt>
                     <dd className="mt-1 text-sm text-gray-900">{lead.propertyType || 'Unknown'}</dd>
@@ -409,7 +426,13 @@ export default function LeadDetailPage() {
                   </div>
                   <div>
                     <dt className="text-sm font-medium text-gray-500">Lot Size</dt>
-                    <dd className="mt-1 text-sm text-gray-900">{lead.lotSize ? `${lead.lotSize.toLocaleString()} sqft` : 'Unknown'}</dd>
+                    <dd className="mt-1 text-sm text-gray-900">
+                      {lead.lotSize
+                        ? lead.lotSize < 10
+                          ? `${lead.lotSize.toFixed(2)} acres`
+                          : `${(lead.lotSize / 43560).toFixed(2)} acres`
+                        : 'Unknown'}
+                    </dd>
                   </div>
                   {lead.conditionLevel && (
                     <div>
@@ -417,7 +440,104 @@ export default function LeadDetailPage() {
                       <dd className="mt-1 text-sm text-gray-900">{lead.conditionLevel}</dd>
                     </div>
                   )}
+                  {lead.hoaFee && (
+                    <div>
+                      <dt className="text-sm font-medium text-gray-500">HOA Fee</dt>
+                      <dd className="mt-1 text-sm text-gray-900">${lead.hoaFee.toLocaleString()}/mo</dd>
+                    </div>
+                  )}
+                  {lead.ownerOccupied != null && (
+                    <div>
+                      <dt className="text-sm font-medium text-gray-500">Owner Occupied</dt>
+                      <dd className="mt-1 text-sm text-gray-900">{lead.ownerOccupied ? 'Yes' : 'No'}</dd>
+                    </div>
+                  )}
                 </dl>
+
+                {/* Sale & Assessment History */}
+                {(lead.lastSaleDate || lead.lastSalePrice || lead.taxAssessedValue) && (
+                  <div className="border-t border-gray-100 pt-4 mb-4">
+                    <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-1.5">
+                      🏷️ Sale & Assessment History
+                    </h3>
+                    <dl className="grid grid-cols-2 gap-4">
+                      {lead.lastSaleDate && (
+                        <div>
+                          <dt className="text-sm font-medium text-gray-500">Last Sale Date</dt>
+                          <dd className="mt-1 text-sm font-semibold text-gray-900">
+                            {new Date(lead.lastSaleDate).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}
+                          </dd>
+                        </div>
+                      )}
+                      {lead.lastSalePrice && (
+                        <div>
+                          <dt className="text-sm font-medium text-gray-500">Last Sale Price</dt>
+                          <dd className="mt-1 text-sm font-bold text-blue-700">
+                            ${lead.lastSalePrice.toLocaleString()}
+                          </dd>
+                          {lead.arv && (
+                            <dd className="text-xs text-gray-400 mt-0.5">
+                              {((lead.lastSalePrice / lead.arv) * 100).toFixed(0)}% of ARV
+                            </dd>
+                          )}
+                        </div>
+                      )}
+                      {lead.taxAssessedValue && (
+                        <div>
+                          <dt className="text-sm font-medium text-gray-500">Tax Assessed Value</dt>
+                          <dd className="mt-1 text-sm font-semibold text-gray-900">
+                            ${lead.taxAssessedValue.toLocaleString()}
+                          </dd>
+                          {lead.arv && (
+                            <dd className="text-xs text-gray-400 mt-0.5">
+                              {((lead.taxAssessedValue / lead.arv) * 100).toFixed(0)}% of ARV
+                            </dd>
+                          )}
+                        </div>
+                      )}
+                      {lead.lastSalePrice && lead.askingPrice && (
+                        <div>
+                          <dt className="text-sm font-medium text-gray-500">vs. Asking Price</dt>
+                          <dd className={`mt-1 text-sm font-bold ${lead.askingPrice >= lead.lastSalePrice ? 'text-green-600' : 'text-red-600'}`}>
+                            {lead.askingPrice >= lead.lastSalePrice ? '+' : ''}${(lead.askingPrice - lead.lastSalePrice).toLocaleString()}
+                          </dd>
+                          <dd className="text-xs text-gray-400 mt-0.5">
+                            {lead.askingPrice >= lead.lastSalePrice ? 'above' : 'below'} last sale
+                          </dd>
+                        </div>
+                      )}
+                    </dl>
+
+                    {/* Seller equity callout */}
+                    {lead.lastSalePrice && lead.arv && (
+                      <div className={`mt-3 rounded-lg px-3 py-2 text-xs flex items-center gap-2 ${
+                        lead.lastSalePrice < lead.arv * 0.6
+                          ? 'bg-green-50 text-green-800 border border-green-200'
+                          : lead.lastSalePrice < lead.arv * 0.8
+                          ? 'bg-yellow-50 text-yellow-800 border border-yellow-200'
+                          : 'bg-red-50 text-red-800 border border-red-200'
+                      }`}>
+                        <span className="text-base">
+                          {lead.lastSalePrice < lead.arv * 0.6 ? '💚' : lead.lastSalePrice < lead.arv * 0.8 ? '⚠️' : '🔴'}
+                        </span>
+                        <span>
+                          {lead.lastSalePrice < lead.arv * 0.6
+                            ? `Strong equity position — paid $${lead.lastSalePrice.toLocaleString()}, ARV $${lead.arv.toLocaleString()}`
+                            : lead.lastSalePrice < lead.arv * 0.8
+                            ? `Moderate equity — paid $${lead.lastSalePrice.toLocaleString()}, limited spread`
+                            : `Thin equity — paid $${lead.lastSalePrice.toLocaleString()}, close to ARV`}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Mortgage note */}
+                <div className="border-t border-gray-100 pt-4 mb-1">
+                  <p className="text-xs text-gray-400 italic">
+                    💡 Mortgage & lien data not available from public records API — verify via county recorder or title search.
+                  </p>
+                </div>
                 <button
                   onClick={async () => {
                     try {
@@ -1102,6 +1222,36 @@ function AnalysisTab({
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+// ─── DonutStat ────────────────────────────────────────────────────────────────
+function DonutStat({
+  value, max, label, color, size = 56,
+}: { value: number; max: number; label: string; color: string; size?: number }) {
+  const r = (size - 8) / 2;
+  const circ = 2 * Math.PI * r;
+  const dash = Math.min(value / max, 1) * circ;
+  const cx = size / 2;
+  const textStyle = {
+    transform: `rotate(90deg)`,
+    transformOrigin: `${cx}px ${cx}px`,
+    fontSize: size < 52 ? 11 : 13,
+    fontWeight: 700,
+    fill: color,
+  } as React.CSSProperties;
+  return (
+    <div className="flex flex-col items-center" style={{ width: size }}>
+      <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
+        <circle cx={cx} cy={cx} r={r} fill="none" stroke="#e5e7eb" strokeWidth={6} />
+        <circle cx={cx} cy={cx} r={r} fill="none" stroke={color} strokeWidth={6}
+          strokeDasharray={`${dash} ${circ}`} strokeLinecap="round" />
+        <text x={cx} y={cx} textAnchor="middle" dominantBaseline="central" style={textStyle}>
+          {value}
+        </text>
+      </svg>
+      <div className="text-xs text-gray-500 text-center leading-tight mt-0.5">{label}</div>
     </div>
   );
 }

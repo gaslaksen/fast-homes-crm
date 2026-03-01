@@ -59,6 +59,11 @@ model Lead {
   sqft              Int?
   yearBuilt         Int?
   lotSize           Float?
+  lastSaleDate      DateTime?
+  lastSalePrice     Float?
+  taxAssessedValue  Float?
+  ownerOccupied     Boolean?
+  hoaFee            Float?
   latitude          Float?
   longitude         Float?
 

@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
-import { leadsAPI, compsAPI, compAnalysisAPI } from '@/lib/api';
+import { leadsAPI, compsAPI, compAnalysisAPI, photosAPI } from '@/lib/api';
 import AppNav from '@/components/AppNav';
 import PropertyPhoto from '@/components/PropertyPhoto';
 
@@ -28,6 +28,14 @@ interface Lead {
   lastCompsDate?: string;
   primaryPhoto?: string;
   scoreBand?: string;
+  totalScore?: number;
+  yearBuilt?: number;
+  lotSize?: number;
+  lastSaleDate?: string;
+  lastSalePrice?: number;
+  taxAssessedValue?: number;
+  ownerOccupied?: boolean;
+  hoaFee?: number;
   latitude?: number;
   longitude?: number;
 }
@@ -104,6 +112,7 @@ export default function CompsAnalysisPage() {
   const leadId = params.id as string;
 
   const [lead, setLead] = useState<Lead | null>(null);
+  const [aiAnalysis, setAiAnalysis] = useState<any>(null);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeSection, setActiveSection] = useState<string>('comps');
@@ -133,11 +142,14 @@ export default function CompsAnalysisPage() {
 
   // Processing states
   const [calculating, setCalculating] = useState(false);
+  const [aiAdjusting, setAiAdjusting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [generatingAi, setGeneratingAi] = useState(false);
   const [generatingAssessment, setGeneratingAssessment] = useState(false);
   const [analyzingPhotos, setAnalyzingPhotos] = useState(false);
   const [selectedPhotos, setSelectedPhotos] = useState<File[]>([]);
+  const [photoThumbnails, setPhotoThumbnails] = useState<{file: File; url: string; status: 'ready'|'uploading'|'done'}[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -147,6 +159,7 @@ export default function CompsAnalysisPage() {
     try {
       const leadRes = await leadsAPI.get(leadId);
       setLead(leadRes.data);
+      if (leadRes.data?.aiAnalysis) { try { setAiAnalysis(JSON.parse(leadRes.data.aiAnalysis)); } catch {} }
 
       // Check for existing analyses
       const analyses = await compAnalysisAPI.list(leadId);
@@ -281,7 +294,7 @@ export default function CompsAnalysisPage() {
     setCalculating(true);
     try {
       await compAnalysisAPI.calculateAdjustments(leadId, analysis.id);
-      const arvRes = await compAnalysisAPI.calculateArv(leadId, analysis.id, 'average');
+      const arvRes = await compAnalysisAPI.calculateArv(leadId, analysis.id, 'weighted');
       setDealArv(arvRes.data.arv || 0);
       await refreshAnalysis();
       setActiveSection('results');
@@ -307,6 +320,22 @@ export default function CompsAnalysisPage() {
     }
   };
 
+  // ─── AI Adjustment Engine ───────────────────────────────────────────────────
+  const handleAiAdjustComps = async () => {
+    if (!analysis) return;
+    setAiAdjusting(true);
+    try {
+      await compAnalysisAPI.aiAdjustComps(leadId, analysis.id);
+      await refreshAnalysis();
+      setActiveSection('results');
+    } catch (error) {
+      console.error('AI adjustment failed:', error);
+      alert('AI adjustment failed — please try again');
+    } finally {
+      setAiAdjusting(false);
+    }
+  };
+
   // ─── AI Assessment ────────────────────────────────────────────────────────
   const handleGenerateAssessment = async () => {
     if (!analysis) return;
@@ -323,23 +352,53 @@ export default function CompsAnalysisPage() {
   };
 
   // ─── Photo Analysis ───────────────────────────────────────────────────────
+  const addPhotos = (files: File[]) => {
+    const newFiles = files.slice(0, Math.max(0, 15 - selectedPhotos.length));
+    const newThumbs = newFiles.map(f => ({
+      file: f,
+      url: URL.createObjectURL(f),
+      status: 'ready' as const,
+    }));
+    setSelectedPhotos(prev => [...prev, ...newFiles]);
+    setPhotoThumbnails(prev => [...prev, ...newThumbs]);
+  };
+
+  const removePhoto = (idx: number) => {
+    setSelectedPhotos(prev => prev.filter((_, i) => i !== idx));
+    setPhotoThumbnails(prev => {
+      URL.revokeObjectURL(prev[idx]?.url);
+      return prev.filter((_, i) => i !== idx);
+    });
+  };
+
   const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []).slice(0, 15);
-    setSelectedPhotos(files);
+    addPhotos(Array.from(e.target.files || []));
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    addPhotos(Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/')));
   };
 
   const handleAnalyzePhotos = async () => {
     if (!analysis || selectedPhotos.length === 0) return;
     setAnalyzingPhotos(true);
+    // Show uploading status on thumbnails
+    setPhotoThumbnails(prev => prev.map(t => ({ ...t, status: 'uploading' as const })));
     try {
       const formData = new FormData();
       selectedPhotos.forEach((photo) => formData.append('photos', photo));
+      // Persist photos to lead in parallel with analysis
+      photosAPI.uploadMultiple(leadId, selectedPhotos).catch(() => {});
       const res = await compAnalysisAPI.analyzePhotos(leadId, analysis.id, formData);
       if (res.data.repairLow) setRepairCosts(Math.round((res.data.repairLow + res.data.repairHigh) / 2));
+      setPhotoThumbnails(prev => prev.map(t => ({ ...t, status: 'done' as const })));
       await refreshAnalysis();
     } catch (error) {
       console.error('Photo analysis failed:', error);
       alert('Photo analysis failed — please try again');
+      setPhotoThumbnails(prev => prev.map(t => ({ ...t, status: 'ready' as const })));
     } finally {
       setAnalyzingPhotos(false);
     }
@@ -471,43 +530,31 @@ export default function CompsAnalysisPage() {
                   <span className="text-gray-600 font-medium">Comp Analysis</span>
                 </div>
                 <h1 className="text-xl font-bold text-gray-900">{lead.propertyAddress}</h1>
-                <p className="text-gray-600 text-sm">
-                  {lead.propertyAddress}, {lead.propertyCity}, {lead.propertyState} {lead.propertyZip}
-                </p>
+                <p className="text-gray-600 text-sm">{lead.propertyCity}, {lead.propertyState} {lead.propertyZip}</p>
               </div>
             </div>
-            <div className="flex items-center gap-4">
-              {analysis?.confidenceScore ? (
-                <div className="text-center">
-                  <div className={`text-3xl font-bold ${
-                    analysis.confidenceScore >= 80 ? 'text-green-600' :
-                    analysis.confidenceScore >= 60 ? 'text-yellow-600' : 'text-red-500'
-                  }`}>
-                    {analysis.confidenceScore}
-                  </div>
-                  <div className="text-xs text-gray-500">Confidence</div>
-                </div>
+            <div className="flex items-center gap-5">
+              {/* Lead score donut */}
+              <DonutStat
+                value={lead.totalScore ?? 0}
+                max={12}
+                label={(lead.scoreBand ?? 'COLD').replace('_', ' ')}
+                color={lead.scoreBand === 'HOT' ? '#ef4444' : lead.scoreBand === 'WARM' ? '#f97316' : '#6b7280'}
+                size={60}
+              />
+              {/* AI score donut */}
+              {aiAnalysis?.dealRating != null ? (
+                <DonutStat
+                  value={aiAnalysis.dealRating}
+                  max={10}
+                  label="AI Score"
+                  color={aiAnalysis.dealRating >= 7 ? '#10b981' : aiAnalysis.dealRating >= 4 ? '#f59e0b' : '#ef4444'}
+                  size={60}
+                />
               ) : null}
-              {(analysis?.arvEstimate || lead.arv) ? (
-                <div className="text-center">
-                  <div className="text-2xl font-bold text-green-600">
-                    ${(analysis?.arvEstimate || lead.arv || 0).toLocaleString()}
-                  </div>
-                  <div className="text-xs text-gray-500">ARV</div>
-                </div>
-              ) : null}
-              <button
-                onClick={() => handleFindComps(false)}
-                disabled={fetchingComps}
-                className="btn btn-primary"
-              >
-                {fetchingComps ? (
-                  <span className="flex items-center gap-2">
-                    <span className="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full"></span>
-                    Fetching...
-                  </span>
-                ) : allComps.length > 0 ? 'Refresh Comps' : 'Find Comps'}
-              </button>
+              <Link href={`/leads/${leadId}/edit`} className="btn btn-primary">
+                Edit Lead
+              </Link>
             </div>
           </div>
         </div>
@@ -625,9 +672,14 @@ export default function CompsAnalysisPage() {
                   <button
                     onClick={() => handleFindComps(true)}
                     disabled={fetchingComps}
-                    className="btn btn-secondary btn-sm"
+                    className="btn btn-primary btn-sm"
                   >
-                    {fetchingComps ? 'Fetching...' : 'Force Refresh'}
+                    {fetchingComps ? (
+                      <span className="flex items-center gap-2">
+                        <span className="animate-spin inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full" />
+                        Fetching...
+                      </span>
+                    ) : 'Refresh Comps'}
                   </button>
                   <button
                     onClick={() => setShowAddComp(!showAddComp)}
@@ -817,10 +869,24 @@ export default function CompsAnalysisPage() {
                 <div className="mt-6 flex items-center gap-3">
                   <button
                     onClick={handleCalculate}
-                    disabled={calculating || selectedComps.length === 0}
-                    className="btn btn-primary"
+                    disabled={calculating || aiAdjusting || selectedComps.length === 0}
+                    className="btn btn-secondary"
                   >
-                    {calculating ? 'Calculating...' : `Calculate ARV (${selectedComps.length} comps)`}
+                    {calculating ? 'Calculating...' : `Rule-Based ARV (${selectedComps.length} comps)`}
+                  </button>
+                  <button
+                    onClick={handleAiAdjustComps}
+                    disabled={aiAdjusting || calculating || selectedComps.length === 0}
+                    className="btn btn-primary flex items-center gap-2"
+                  >
+                    {aiAdjusting ? (
+                      <>
+                        <span className="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
+                        AI Adjusting Comps...
+                      </>
+                    ) : (
+                      <>✨ AI Adjust &amp; Calculate ARV</>
+                    )}
                   </button>
                   <button
                     onClick={handleAiSummary}
@@ -885,22 +951,108 @@ export default function CompsAnalysisPage() {
                   ) : (analysis as any)?.aiAssessment ? 'Regenerate' : 'Generate Assessment'}
                 </button>
               </div>
-              {(analysis as any)?.aiAssessment ? (
-                <div className="prose prose-sm max-w-none text-gray-800 bg-indigo-50 rounded-lg p-4 text-sm leading-relaxed whitespace-pre-wrap">
-                  {(analysis as any).aiAssessment.split('\n').map((line: string, i: number) => {
-                    if (line.startsWith('**') && line.endsWith('**')) {
-                      return <p key={i} className="font-bold text-indigo-900 mt-3 mb-1">{line.replace(/\*\*/g, '')}</p>;
+              {(() => {
+                const raw = (analysis as any)?.aiAssessment;
+                if (!raw) {
+                  return (
+                    <p className="text-sm text-gray-500 italic">
+                      {allComps.length === 0
+                        ? 'Fetch comps first, then generate a detailed wholesaler assessment.'
+                        : 'Click Generate Assessment for a detailed analysis of ARV confidence, market conditions, red flags, and deal viability.'}
+                    </p>
+                  );
+                }
+                // Try to parse as structured JSON (from aiAdjustComps)
+                let parsed: any = null;
+                try {
+                  const stripped = raw.replace(/^```[\w]*\s*/m, '').replace(/\s*```$/m, '').trim();
+                  const m = stripped.match(/\{[\s\S]*/);
+                  if (m) {
+                    // Repair truncated JSON
+                    let j = m[0];
+                    let opens = 0, arrOpens = 0, inStr = false, esc = false;
+                    for (const ch of j) {
+                      if (esc) { esc = false; continue; }
+                      if (ch === '\\') { esc = true; continue; }
+                      if (ch === '"' && !inStr) { inStr = true; continue; }
+                      if (ch === '"' && inStr) { inStr = false; continue; }
+                      if (!inStr) {
+                        if (ch === '{') opens++;
+                        else if (ch === '}') opens--;
+                        else if (ch === '[') arrOpens++;
+                        else if (ch === ']') arrOpens--;
+                      }
                     }
-                    return <p key={i} className={line === '' ? 'mb-2' : 'mb-0.5'}>{line}</p>;
-                  })}
-                </div>
-              ) : (
-                <p className="text-sm text-gray-500 italic">
-                  {allComps.length === 0
-                    ? 'Fetch comps first, then generate a detailed wholesaler assessment.'
-                    : 'Click Generate Assessment for a detailed analysis of ARV confidence, market conditions, red flags, and deal viability.'}
-                </p>
-              )}
+                    if (inStr) j += '"';
+                    j += ']'.repeat(Math.max(0, arrOpens)) + '}'.repeat(Math.max(0, opens));
+                    parsed = JSON.parse(j);
+                  }
+                } catch {}
+
+                if (parsed) {
+                  // Structured visual render
+                  return (
+                    <div className="space-y-4">
+                      {/* Wholesaler note */}
+                      {parsed.wholesalerNote && (
+                        <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4">
+                          <div className="text-xs font-semibold text-indigo-700 uppercase tracking-wide mb-1">💡 Wholesaler Take</div>
+                          <p className="text-sm text-indigo-900 leading-relaxed">{parsed.wholesalerNote}</p>
+                        </div>
+                      )}
+                      {/* Method */}
+                      {parsed.method && (
+                        <div className="bg-gray-50 border border-gray-200 rounded-xl p-3">
+                          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">📐 Valuation Method</div>
+                          <p className="text-sm text-gray-700">{parsed.method}</p>
+                        </div>
+                      )}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {/* Key Factors */}
+                        {parsed.keyFactors?.length > 0 && (
+                          <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+                            <div className="text-xs font-semibold text-blue-700 uppercase tracking-wide mb-2">🔑 Key Factors</div>
+                            <ul className="space-y-1.5">
+                              {parsed.keyFactors.map((f: string, i: number) => (
+                                <li key={i} className="text-sm text-blue-900 flex gap-2">
+                                  <span className="text-blue-400 shrink-0 mt-0.5">•</span>
+                                  <span>{f}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                        {/* Risks */}
+                        {parsed.risks?.length > 0 && (
+                          <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+                            <div className="text-xs font-semibold text-red-700 uppercase tracking-wide mb-2">⚠️ Risks</div>
+                            <ul className="space-y-1.5">
+                              {parsed.risks.map((r: string, i: number) => (
+                                <li key={i} className="text-sm text-red-900 flex gap-2">
+                                  <span className="text-red-400 shrink-0 mt-0.5">•</span>
+                                  <span>{r}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                }
+
+                // Fallback: prose text render
+                return (
+                  <div className="prose prose-sm max-w-none text-gray-800 bg-indigo-50 rounded-lg p-4 text-sm leading-relaxed">
+                    {raw.split('\n').map((line: string, i: number) => {
+                      if (line.startsWith('**') && line.endsWith('**')) {
+                        return <p key={i} className="font-bold text-indigo-900 mt-3 mb-1">{line.replace(/\*\*/g, '')}</p>;
+                      }
+                      return <p key={i} className={line === '' ? 'mb-2' : 'mb-0.5'}>{line}</p>;
+                    })}
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Quick Stats if no full analysis calculated yet */}
@@ -923,46 +1075,69 @@ export default function CompsAnalysisPage() {
             {/* ARV Report */}
             {analysis && (
               <div className="card">
-                <h2 className="text-lg font-bold mb-4">Comp Report</h2>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-                  <div className="bg-green-50 rounded-lg p-4 text-center border border-green-200">
-                    <div className="text-xs text-green-700 font-medium mb-1">Estimated ARV Range</div>
-                    <div className="text-sm font-bold text-green-800">
-                      ${(analysis.arvLow || 0).toLocaleString()} - ${(analysis.arvHigh || 0).toLocaleString()}
+                <div className="flex items-center justify-between mb-5">
+                  <h2 className="text-lg font-bold">ARV Report</h2>
+                  {analysis.arvMethod && (
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 capitalize">
+                      {analysis.arvMethod === 'weighted' ? '✨ AI-weighted' : analysis.arvMethod} method
+                    </span>
+                  )}
+                </div>
+
+                {/* Primary ARV display with confidence interval */}
+                <div className="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-2xl p-6 mb-5">
+                  <div className="flex items-end justify-between flex-wrap gap-4">
+                    <div>
+                      <div className="text-xs font-semibold text-green-700 uppercase tracking-wide mb-1">Estimated ARV</div>
+                      <div className="text-5xl font-bold text-green-700">${(analysis.arvEstimate || 0).toLocaleString()}</div>
+                      {(analysis.arvLow && analysis.arvHigh) ? (
+                        <div className="mt-2">
+                          <div className="text-sm text-green-600 font-medium mb-1">
+                            Range: ${(analysis.arvLow).toLocaleString()} – ${(analysis.arvHigh).toLocaleString()}
+                            <span className="text-green-500 ml-2">
+                              (±${Math.round(((analysis.arvHigh - analysis.arvLow) / (analysis.arvEstimate || 1)) * 50).toLocaleString()}%)
+                            </span>
+                          </div>
+                          {/* Confidence interval bar */}
+                          <div className="relative h-3 bg-green-200 rounded-full w-64 mt-1">
+                            {(() => {
+                              const range = analysis.arvHigh - analysis.arvLow;
+                              const span = range * 1.4;
+                              const base = (analysis.arvEstimate || 0) - span / 2;
+                              const lowPct = Math.max(0, ((analysis.arvLow - base) / span) * 100);
+                              const highPct = Math.min(100, ((analysis.arvHigh - base) / span) * 100);
+                              const midPct = (((analysis.arvEstimate ?? 0) - base) / span) * 100;
+                              return (
+                                <>
+                                  <div className="absolute h-3 bg-green-400 rounded-full" style={{ left: `${lowPct}%`, width: `${highPct - lowPct}%` }} />
+                                  <div className="absolute h-5 w-1 bg-green-800 rounded-full top-[-4px]" style={{ left: `${midPct}%` }} />
+                                </>
+                              );
+                            })()}
+                          </div>
+                          <div className="flex justify-between text-xs text-green-500 mt-1 w-64">
+                            <span>Low</span><span>Point estimate</span><span>High</span>
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
-                  </div>
-                  <div className="bg-green-50 rounded-lg p-4 text-center border border-green-200">
-                    <div className="text-xs text-green-700 font-medium mb-1">ARV (Adjusted)</div>
-                    <div className="text-2xl font-bold text-green-800">
-                      ${(analysis.arvEstimate || 0).toLocaleString()}
-                    </div>
-                    {analysis.avgAdjustment ? (
-                      <div className={`text-xs font-medium ${analysis.avgAdjustment >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                        {analysis.avgAdjustment >= 0 ? '+' : ''}${analysis.avgAdjustment.toLocaleString()} avg adj
+                    <div className="flex items-center gap-6">
+                      <DonutStat
+                        value={analysis.confidenceScore || 0}
+                        max={100}
+                        label="Confidence"
+                        color={(analysis.confidenceScore || 0) >= 80 ? '#10b981' : (analysis.confidenceScore || 0) >= 60 ? '#f59e0b' : '#ef4444'}
+                        size={80}
+                      />
+                      <div className="text-right">
+                        <div className="text-xs text-gray-500 mb-1">$/sqft</div>
+                        <div className="text-2xl font-bold text-gray-700">${analysis.pricePerSqft || avgPricePerSqft || 0}</div>
+                        {analysis.avgAdjustment ? (
+                          <div className={`text-xs font-medium ${(analysis.avgAdjustment || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                            {(analysis.avgAdjustment || 0) >= 0 ? '+' : ''}${(analysis.avgAdjustment || 0).toLocaleString()} avg adj
+                          </div>
+                        ) : null}
                       </div>
-                    ) : null}
-                  </div>
-                  <div className="bg-gray-50 rounded-lg p-4 text-center border border-gray-200">
-                    <div className="text-xs text-gray-600 font-medium mb-1">Price Per Sq Ft</div>
-                    <div className="text-2xl font-bold text-gray-800">
-                      ${analysis.pricePerSqft || avgPricePerSqft || 0}
-                    </div>
-                    <div className="text-xs text-gray-500">/sq ft</div>
-                  </div>
-                  <div className={`rounded-lg p-4 text-center border ${
-                    (analysis.confidenceScore || 0) >= 80 ? 'bg-green-50 border-green-200' :
-                    (analysis.confidenceScore || 0) >= 60 ? 'bg-yellow-50 border-yellow-200' :
-                    'bg-red-50 border-red-200'
-                  }`}>
-                    <div className="text-xs font-medium mb-1" style={{
-                      color: (analysis.confidenceScore || 0) >= 80 ? '#15803d' :
-                             (analysis.confidenceScore || 0) >= 60 ? '#a16207' : '#dc2626'
-                    }}>Confidence Score</div>
-                    <div className="text-3xl font-bold" style={{
-                      color: (analysis.confidenceScore || 0) >= 80 ? '#15803d' :
-                             (analysis.confidenceScore || 0) >= 60 ? '#a16207' : '#dc2626'
-                    }}>
-                      {analysis.confidenceScore || 0}
                     </div>
                   </div>
                 </div>
@@ -1287,7 +1462,7 @@ export default function CompsAnalysisPage() {
         {activeSection === 'repairs' && (
           <div className="space-y-6">
 
-            {/* Photo Analysis */}
+            {/* ── Photo Upload & AI Analysis ── */}
             <div className="card border border-purple-200">
               <div className="flex items-center gap-2 mb-4">
                 <span className="text-xl">📸</span>
@@ -1297,95 +1472,304 @@ export default function CompsAnalysisPage() {
                 )}
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Upload Property Photos (up to 15)
-                    </label>
-                    <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-purple-300 rounded-lg cursor-pointer bg-purple-50 hover:bg-purple-100 transition-colors">
-                      <div className="flex flex-col items-center justify-center pt-3 pb-3">
-                        <span className="text-2xl mb-1">📁</span>
-                        <p className="text-sm text-purple-700 font-medium">Click to select photos</p>
-                        <p className="text-xs text-gray-500 mt-1">
-                          {selectedPhotos.length > 0
-                            ? `${selectedPhotos.length} photo${selectedPhotos.length > 1 ? 's' : ''} selected`
-                            : 'JPG, PNG up to 15 files'}
-                        </p>
-                      </div>
-                      <input
-                        type="file"
-                        className="hidden"
-                        multiple
-                        accept="image/*"
-                        onChange={handlePhotoChange}
+              {/* Drop Zone */}
+              <div
+                onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+                onDragLeave={() => setIsDragging(false)}
+                onDrop={handleDrop}
+                className={`relative border-2 border-dashed rounded-xl p-6 text-center transition-all cursor-pointer mb-4 ${
+                  isDragging ? 'border-purple-500 bg-purple-100' : 'border-purple-300 bg-purple-50 hover:bg-purple-100'
+                }`}
+                onClick={() => document.getElementById('photo-upload-input')?.click()}
+              >
+                <input
+                  id="photo-upload-input"
+                  type="file"
+                  className="hidden"
+                  multiple
+                  accept="image/*"
+                  onChange={handlePhotoChange}
+                />
+                {isDragging ? (
+                  <div className="text-purple-600 font-medium">Drop photos here!</div>
+                ) : (
+                  <>
+                    <div className="text-3xl mb-2">📷</div>
+                    <p className="text-sm font-medium text-purple-700">Drag & drop photos here, or click to select</p>
+                    <p className="text-xs text-gray-400 mt-1">
+                      {selectedPhotos.length > 0
+                        ? `${selectedPhotos.length}/15 photos added`
+                        : 'Up to 15 photos — JPG, PNG, HEIC'}
+                    </p>
+                  </>
+                )}
+              </div>
+
+              {/* Thumbnails */}
+              {photoThumbnails.length > 0 && (
+                <div className="flex flex-wrap gap-2 mb-4">
+                  {photoThumbnails.map((t, i) => (
+                    <div key={i} className="relative group">
+                      <img
+                        src={t.url}
+                        alt={`Photo ${i + 1}`}
+                        className={`w-16 h-16 object-cover rounded-lg border-2 transition-all ${
+                          t.status === 'done' ? 'border-green-400 opacity-90' :
+                          t.status === 'uploading' ? 'border-purple-400 opacity-60' :
+                          'border-gray-300'
+                        }`}
                       />
-                    </label>
-                  </div>
-
-                  {selectedPhotos.length > 0 && (
-                    <div className="flex flex-wrap gap-2">
-                      {selectedPhotos.map((f, i) => (
-                        <span key={i} className="text-xs px-2 py-1 bg-gray-100 rounded-full text-gray-600 truncate max-w-[120px]">
-                          {f.name}
-                        </span>
-                      ))}
+                      {t.status === 'uploading' && (
+                        <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-black/30">
+                          <span className="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
+                        </div>
+                      )}
+                      {t.status === 'done' && (
+                        <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-green-500/20">
+                          <span className="text-green-600 text-lg">✓</span>
+                        </div>
+                      )}
+                      {t.status === 'ready' && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); removePhoto(i); }}
+                          className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full text-white text-xs items-center justify-center hidden group-hover:flex"
+                        >×</button>
+                      )}
                     </div>
-                  )}
-
-                  <button
-                    onClick={handleAnalyzePhotos}
-                    disabled={analyzingPhotos || selectedPhotos.length === 0 || !analysis}
-                    className="btn btn-primary w-full"
-                  >
-                    {analyzingPhotos ? (
-                      <span className="flex items-center justify-center gap-2">
-                        <span className="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
-                        Analyzing photos with AI...
-                      </span>
-                    ) : `Analyze ${selectedPhotos.length > 0 ? selectedPhotos.length + ' ' : ''}Photos with AI`}
-                  </button>
-
-                  {(analysis as any)?.photoRepairLow && (analysis as any)?.photoRepairHigh && (
-                    <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
-                      <div className="text-xs text-purple-700 font-medium mb-1">Photo-Based Repair Estimate</div>
-                      <div className="text-2xl font-bold text-purple-900">
-                        ${(analysis as any).photoRepairLow.toLocaleString()} – ${(analysis as any).photoRepairHigh.toLocaleString()}
-                      </div>
-                      <button
-                        onClick={() => setRepairCosts(Math.round(((analysis as any).photoRepairLow + (analysis as any).photoRepairHigh) / 2))}
-                        className="text-xs text-purple-600 hover:underline mt-1"
-                      >
-                        Apply midpoint (${Math.round(((analysis as any).photoRepairLow + (analysis as any).photoRepairHigh) / 2).toLocaleString()}) to deal calculator
-                      </button>
-                    </div>
-                  )}
+                  ))}
                 </div>
+              )}
 
-                <div>
-                  {(analysis as any)?.photoAnalysis ? (
-                    <div className="bg-purple-50 rounded-lg p-4 border border-purple-100 h-full overflow-y-auto max-h-96">
-                      <div className="text-xs font-semibold text-purple-800 mb-2">Room-by-Room Assessment</div>
-                      <div className="text-sm text-gray-800 leading-relaxed whitespace-pre-wrap">
-                        {(analysis as any).photoAnalysis.split('\n').map((line: string, i: number) => {
-                          if (line.startsWith('**') && line.endsWith('**')) {
-                            return <p key={i} className="font-bold text-purple-900 mt-3 mb-1">{line.replace(/\*\*/g, '')}</p>;
-                          }
-                          return <p key={i} className={line === '' ? 'mb-2' : 'mb-0.5'}>{line}</p>;
-                        })}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="flex items-center justify-center h-full min-h-32 bg-gray-50 rounded-lg border-2 border-dashed border-gray-200">
+              <button
+                onClick={handleAnalyzePhotos}
+                disabled={analyzingPhotos || selectedPhotos.length === 0 || !analysis}
+                className="btn btn-primary w-full mb-6"
+              >
+                {analyzingPhotos ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <span className="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
+                    Analyzing {selectedPhotos.length} photo{selectedPhotos.length !== 1 ? 's' : ''} with AI...
+                  </span>
+                ) : (
+                  `Analyze ${selectedPhotos.length > 0 ? selectedPhotos.length + ' Photo' + (selectedPhotos.length !== 1 ? 's' : '') : 'Photos'} with AI`
+                )}
+              </button>
+
+              {/* ── AI Analysis Results (visual) ── */}
+              {(() => {
+                let parsed: any = null;
+                try {
+                  const raw = (analysis as any)?.photoAnalysis;
+                  if (raw) {
+                    // Strip markdown code fences if present
+                    const stripped = raw.replace(/^```[\w]*\s*/m, '').replace(/\s*```$/m, '').trim();
+                    const jsonMatch = stripped.match(/\{[\s\S]*/);
+                    if (jsonMatch) {
+                      let jsonStr = jsonMatch[0];
+                      // Repair truncated JSON: track string state to properly close
+                      let opens = 0, arrOpens = 0, inStr = false, esc = false;
+                      for (const ch of jsonStr) {
+                        if (esc) { esc = false; continue; }
+                        if (ch === '\\') { esc = true; continue; }
+                        if (ch === '"' && !inStr) { inStr = true; continue; }
+                        if (ch === '"' && inStr) { inStr = false; continue; }
+                        if (!inStr) {
+                          if (ch === '{') opens++;
+                          else if (ch === '}') opens--;
+                          else if (ch === '[') arrOpens++;
+                          else if (ch === ']') arrOpens--;
+                        }
+                      }
+                      if (inStr) jsonStr += '"'; // close open string
+                      jsonStr += ']'.repeat(Math.max(0, arrOpens)) + '}'.repeat(Math.max(0, opens));
+                      parsed = JSON.parse(jsonStr);
+                    }
+                  }
+                } catch {}
+
+                if (!parsed && !(analysis as any)?.photoAnalysis) {
+                  return (
+                    <div className="flex items-center justify-center min-h-24 bg-gray-50 rounded-xl border-2 border-dashed border-gray-200">
                       <p className="text-sm text-gray-400 text-center px-4">
-                        Upload seller photos and click Analyze to get a room-by-room condition report and repair estimate
+                        Upload photos and click Analyze to get a visual condition report and repair estimate
                       </p>
                     </div>
-                  )}
-                </div>
-              </div>
+                  );
+                }
+
+                if (!parsed) {
+                  // Legacy text fallback
+                  return (
+                    <div className="bg-purple-50 rounded-lg p-4 border border-purple-100 max-h-72 overflow-y-auto text-sm text-gray-700 whitespace-pre-wrap">
+                      {(analysis as any).photoAnalysis}
+                    </div>
+                  );
+                }
+
+                const conditionColor = (c: string) =>
+                  c === 'Good' ? 'bg-green-100 text-green-700' :
+                  c === 'Fair' ? 'bg-yellow-100 text-yellow-800' :
+                  c === 'Poor' ? 'bg-orange-100 text-orange-700' :
+                  c === 'Gut'  ? 'bg-red-100 text-red-700' :
+                  'bg-gray-100 text-gray-600';
+
+                const urgencyIcon = (u: string) =>
+                  u === 'critical' ? '🚨' : u === 'high' ? '⚠️' : u === 'medium' ? '🔶' : '✅';
+
+                const systemIcon = (s: string) =>
+                  ({ roof: '🏠', hvac: '❄️', electrical: '⚡', plumbing: '🚰', foundation: '🪨' })[s] || '🔧';
+
+                return (
+                  <div className="space-y-5">
+                    {/* Overall summary bar */}
+                    <div className="flex items-center gap-4 bg-gray-50 rounded-xl p-4 border border-gray-200">
+                      <div className="flex-1">
+                        <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Overall Condition</div>
+                        <span className={`inline-block text-sm font-bold px-3 py-1 rounded-full ${conditionColor(parsed.overallCondition || 'Fair')}`}>
+                          {parsed.overallCondition || 'Fair'}
+                        </span>
+                      </div>
+                      {(parsed.repairLow || parsed.repairHigh) ? (
+                        <div className="text-right">
+                          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Photo Repair Estimate</div>
+                          <div className="text-xl font-bold text-purple-700">
+                            ${(parsed.repairLow || 0).toLocaleString()} – ${(parsed.repairHigh || 0).toLocaleString()}
+                          </div>
+                          <button
+                            onClick={() => { setRepairCosts(Math.round(((parsed.repairLow || 0) + (parsed.repairHigh || 0)) / 2)); }}
+                            className="text-xs text-purple-600 hover:underline mt-0.5 block"
+                          >
+                            Apply midpoint (${Math.round(((parsed.repairLow||0) + (parsed.repairHigh||0)) / 2).toLocaleString()}) →
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
+
+                    {/* Wholesaler notes */}
+                    {parsed.wholesalerNotes && (
+                      <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-800">
+                        <div className="font-semibold text-blue-900 mb-1">💡 Wholesaler Take</div>
+                        {parsed.wholesalerNotes}
+                      </div>
+                    )}
+
+                    {/* Red flags */}
+                    {parsed.redFlags?.length > 0 && (
+                      <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+                        <div className="font-semibold text-red-800 mb-2">🚨 Red Flags</div>
+                        <ul className="space-y-1">
+                          {parsed.redFlags.map((flag: string, i: number) => (
+                            <li key={i} className="text-sm text-red-700 flex gap-2">
+                              <span>•</span><span>{flag}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {/* Rooms grid */}
+                    {parsed.rooms?.length > 0 && (
+                      <div>
+                        <div className="text-sm font-bold text-gray-700 mb-3">Room-by-Room</div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          {parsed.rooms.map((room: any, i: number) => (
+                            <div key={i} className={`rounded-xl border p-3 ${
+                              room.condition === 'Gut' ? 'border-red-200 bg-red-50' :
+                              room.condition === 'Poor' ? 'border-orange-200 bg-orange-50' :
+                              room.condition === 'Fair' ? 'border-yellow-200 bg-yellow-50' :
+                              'border-green-200 bg-green-50'
+                            }`}>
+                              <div className="flex items-center justify-between mb-2">
+                                <span className="font-semibold text-sm text-gray-800">{urgencyIcon(room.urgency)} {room.name}</span>
+                                <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${conditionColor(room.condition)}`}>
+                                  {room.condition}
+                                </span>
+                              </div>
+                              {room.issues?.length > 0 && (
+                                <ul className="text-xs text-gray-600 space-y-0.5">
+                                  {room.issues.map((issue: string, j: number) => (
+                                    <li key={j} className="flex gap-1.5"><span className="text-orange-400 mt-0.5">•</span>{issue}</li>
+                                  ))}
+                                </ul>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Systems */}
+                    {parsed.systems && (
+                      <div>
+                        <div className="text-sm font-bold text-gray-700 mb-3">Systems</div>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
+                          {Object.entries(parsed.systems).map(([key, sys]: [string, any]) => (
+                            <div key={key} className={`rounded-xl border p-3 text-center ${
+                              sys.condition === 'Poor' ? 'border-orange-200 bg-orange-50' :
+                              sys.condition === 'Good' ? 'border-green-200 bg-green-50' :
+                              'border-gray-200 bg-gray-50'
+                            }`}>
+                              <div className="text-2xl mb-1">{systemIcon(key)}</div>
+                              <div className="text-xs font-semibold text-gray-700 capitalize">{key}</div>
+                              <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${conditionColor(sys.condition || 'Unknown')}`}>
+                                {sys.condition || 'Unknown'}
+                              </span>
+                              {sys.notes && <div className="text-xs text-gray-500 mt-1 text-left leading-tight">{sys.notes}</div>}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Repair Items */}
+                    {parsed.repairItems?.length > 0 && (
+                      <div>
+                        <div className="text-sm font-bold text-gray-700 mb-3">Repair Breakdown</div>
+                        <div className="rounded-xl border border-gray-200 overflow-hidden">
+                          <table className="w-full text-sm">
+                            <thead className="bg-gray-50 text-xs text-gray-500 uppercase">
+                              <tr>
+                                <th className="text-left px-4 py-2">Item</th>
+                                <th className="text-center px-3 py-2">Priority</th>
+                                <th className="text-right px-4 py-2">Range</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {parsed.repairItems.map((item: any, i: number) => (
+                                <tr key={i} className="border-t border-gray-100 hover:bg-gray-50">
+                                  <td className="px-4 py-2 text-gray-800">{item.item}</td>
+                                  <td className="px-3 py-2 text-center">
+                                    <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
+                                      item.priority === 'critical' ? 'bg-red-100 text-red-700' :
+                                      item.priority === 'high' ? 'bg-orange-100 text-orange-700' :
+                                      item.priority === 'medium' ? 'bg-yellow-100 text-yellow-700' :
+                                      'bg-gray-100 text-gray-500'
+                                    }`}>{item.priority}</span>
+                                  </td>
+                                  <td className="px-4 py-2 text-right text-gray-700">
+                                    ${(item.estimateLow||0).toLocaleString()} – ${(item.estimateHigh||0).toLocaleString()}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                            <tfoot className="bg-gray-50 font-bold">
+                              <tr className="border-t border-gray-200">
+                                <td className="px-4 py-2 text-gray-800" colSpan={2}>Total Estimate</td>
+                                <td className="px-4 py-2 text-right text-purple-700">
+                                  ${(parsed.repairLow||0).toLocaleString()} – ${(parsed.repairHigh||0).toLocaleString()}
+                                </td>
+                              </tr>
+                            </tfoot>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
 
+            {/* ── Repair Cost Estimator ── */}
             <div className="card">
               <h2 className="text-lg font-bold mb-4">Repair Cost Estimator</h2>
 
@@ -1405,9 +1789,7 @@ export default function CompsAnalysisPage() {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Quick Repair Options
-                    </label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Quick Repair Options</label>
                     <div className="flex flex-wrap gap-2">
                       {REPAIR_ITEMS.map((item) => (
                         <button
@@ -1426,9 +1808,7 @@ export default function CompsAnalysisPage() {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Describe Repairs Needed
-                    </label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Describe Repairs Needed</label>
                     <textarea
                       value={repairDescription}
                       onChange={(e) => setRepairDescription(e.target.value)}
@@ -1447,51 +1827,57 @@ export default function CompsAnalysisPage() {
                   </button>
                 </div>
 
-                <div>
-                  <div className="bg-gray-50 rounded-lg p-6 border border-gray-200 text-center">
-                    <div className="text-sm text-gray-600 mb-2">Estimated Repair Costs</div>
-                    <div className="text-4xl font-bold text-gray-900">
+                <div className="space-y-4">
+                  {/* Cost card */}
+                  <div className={`rounded-xl border-2 p-6 text-center transition-all ${
+                    repairCosts > 0 ? 'border-orange-300 bg-orange-50' : 'border-gray-200 bg-gray-50'
+                  }`}>
+                    <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Estimated Repair Costs</div>
+                    <div className={`text-4xl font-bold mb-1 ${repairCosts > 0 ? 'text-orange-700' : 'text-gray-400'}`}>
                       ${repairCosts.toLocaleString()}
                     </div>
-                    <div className="text-sm text-gray-500 mt-2">
+                    <div className="text-sm text-gray-500">
                       {repairLevel.charAt(0).toUpperCase() + repairLevel.slice(1)} grade
-                      {lead?.sqft && repairCosts > 0 ? ` | $${Math.round(repairCosts / lead.sqft)}/sqft` : ''}
+                      {lead?.sqft && repairCosts > 0 ? ` · $${Math.round(repairCosts / lead.sqft)}/sqft` : ''}
                     </div>
-                    {selectedRepairs.length > 0 && (
-                      <div className="mt-3 text-xs text-gray-500">
-                        Items: {selectedRepairs.join(', ')}
+                    {repairCosts > 0 && (
+                      <div className="mt-3 text-xs text-orange-700 bg-orange-100 rounded-lg px-3 py-2">
+                        ✓ Applied to deal calculator · ARV needed to break even: ${dealArv > 0 ? Math.round((repairCosts + assignmentFee) / (maoPercent / 100)).toLocaleString() : '—'}
                       </div>
                     )}
                   </div>
 
                   {analysis?.repairNotes && (
-                    <div className="mt-4 bg-blue-50 rounded-lg p-4 border border-blue-200">
+                    <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
                       <div className="text-xs font-medium text-blue-800 mb-1">AI Breakdown</div>
                       <div className="text-sm text-blue-700">{analysis.repairNotes}</div>
                     </div>
                   )}
 
-                  <div className="mt-4 flex gap-2">
-                    {[
-                      { label: 'Light ($20/sqft)', rate: 20 },
-                      { label: 'Moderate ($30/sqft)', rate: 30 },
-                      { label: 'Heavy ($45/sqft)', rate: 45 },
-                    ].map((opt) => (
-                      <button
-                        key={opt.rate}
-                        onClick={() => setRepairCosts((lead?.sqft || 1500) * opt.rate)}
-                        className="text-xs px-3 py-1.5 rounded border border-gray-300 hover:bg-gray-100 bg-white"
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
+                  <div>
+                    <div className="text-xs text-gray-500 mb-2 font-medium">Quick estimate by condition:</div>
+                    <div className="grid grid-cols-3 gap-2">
+                      {[
+                        { label: 'Light', sublabel: '$20/sqft', rate: 20, color: 'border-green-300 hover:bg-green-50' },
+                        { label: 'Moderate', sublabel: '$30/sqft', rate: 30, color: 'border-yellow-300 hover:bg-yellow-50' },
+                        { label: 'Heavy', sublabel: '$45/sqft', rate: 45, color: 'border-red-300 hover:bg-red-50' },
+                      ].map((opt) => (
+                        <button
+                          key={opt.rate}
+                          onClick={() => setRepairCosts((lead?.sqft || 1500) * opt.rate)}
+                          className={`text-xs px-2 py-2 rounded-lg border text-center transition-colors bg-white ${opt.color}`}
+                        >
+                          <div className="font-semibold text-gray-700">{opt.label}</div>
+                          <div className="text-gray-400">{opt.sublabel}</div>
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
           </div>
         )}
-
       </main>
 
       {/* RentCast attribution */}
@@ -1600,10 +1986,26 @@ function CompCard({
           </span>
         </div>
         {comp.adjustedPrice && comp.adjustedPrice !== comp.soldPrice && (
-          <div className={`text-xs font-medium mt-1 ${
-            (comp.adjustmentAmount || 0) >= 0 ? 'text-green-600' : 'text-red-600'
-          }`}>
-            Adj: ${comp.adjustedPrice.toLocaleString()} ({(comp.adjustmentAmount || 0) >= 0 ? '+' : ''}{comp.adjustmentAmount?.toLocaleString()})
+          <div className="mt-2 rounded-lg border border-dashed border-gray-200 bg-gray-50 p-2">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-xs text-gray-500">Adjusted Price</span>
+              <span className={`text-sm font-bold ${(comp.adjustmentAmount || 0) >= 0 ? 'text-green-700' : 'text-red-600'}`}>
+                ${comp.adjustedPrice.toLocaleString()}
+                <span className="text-xs ml-1 font-normal">
+                  ({(comp.adjustmentAmount || 0) >= 0 ? '+' : ''}{(comp.adjustmentAmount || 0).toLocaleString()})
+                </span>
+              </span>
+            </div>
+            {comp.adjustmentNotes && (
+              <div className="space-y-0.5">
+                {comp.adjustmentNotes.split('\n').filter((l: string) => l.trim()).map((line: string, i: number) => (
+                  <div key={i} className={`text-xs flex gap-1 ${line.startsWith('AI:') ? 'text-purple-600 font-medium' : 'text-gray-500'}`}>
+                    <span className="shrink-0">{line.startsWith('AI:') ? '✨' : '•'}</span>
+                    <span>{line}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -1668,6 +2070,36 @@ function CompCard({
           Remove
         </button>
       </div>
+    </div>
+  );
+}
+
+// ─── DonutStat ────────────────────────────────────────────────────────────────
+function DonutStat({
+  value, max, label, color, size = 56,
+}: { value: number; max: number; label: string; color: string; size?: number }) {
+  const r = (size - 8) / 2;
+  const circ = 2 * Math.PI * r;
+  const dash = Math.min(value / max, 1) * circ;
+  const cx = size / 2;
+  const textStyle = {
+    transform: `rotate(90deg)`,
+    transformOrigin: `${cx}px ${cx}px`,
+    fontSize: size < 52 ? 11 : 13,
+    fontWeight: 700,
+    fill: color,
+  } as React.CSSProperties;
+  return (
+    <div className="flex flex-col items-center" style={{ width: size }}>
+      <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
+        <circle cx={cx} cy={cx} r={r} fill="none" stroke="#e5e7eb" strokeWidth={6} />
+        <circle cx={cx} cy={cx} r={r} fill="none" stroke={color} strokeWidth={6}
+          strokeDasharray={`${dash} ${circ}`} strokeLinecap="round" />
+        <text x={cx} y={cx} textAnchor="middle" dominantBaseline="central" style={textStyle}>
+          {value}
+        </text>
+      </svg>
+      <div className="text-xs text-gray-500 text-center leading-tight mt-0.5">{label}</div>
     </div>
   );
 }

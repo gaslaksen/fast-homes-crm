@@ -117,6 +117,8 @@ export const compAnalysisAPI = {
     api.post(`/leads/${leadId}/comp-analysis/${analysisId}/calculate-adjustments`, { config }),
   calculateArv: (leadId: string, analysisId: string, method?: string) =>
     api.post(`/leads/${leadId}/comp-analysis/${analysisId}/calculate-arv`, { method }),
+  aiAdjustComps: (leadId: string, analysisId: string) =>
+    api.post(`/leads/${leadId}/comp-analysis/${analysisId}/ai-adjust-comps`),
   aiSummary: (leadId: string, analysisId: string) =>
     api.post(`/leads/${leadId}/comp-analysis/${analysisId}/ai-summary`),
   estimateRepairs: (leadId: string, analysisId: string, data: any) =>

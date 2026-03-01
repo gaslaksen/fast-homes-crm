@@ -15,6 +15,20 @@ const DEMO_OUTREACH_DELAY_MS = 3_000;     // 3 seconds in demo mode
 /** Fields that trigger AI analysis refresh when changed */
 const AI_REFRESH_FIELDS = ['arv', 'askingPrice', 'timeline', 'conditionLevel', 'ownershipStatus'];
 
+// Convert lot size: if value > 10 it's almost certainly sqft, convert to acres
+function normalizeLotSize(raw: number | undefined): number | undefined {
+  if (!raw) return undefined;
+  return raw > 100 ? parseFloat((raw / 43560).toFixed(4)) : raw;
+}
+
+// Get most recent tax assessed value from RentCast taxAssessments map
+function latestTaxAssessment(taxAssessments?: Record<string, any>): number | undefined {
+  if (!taxAssessments) return undefined;
+  const years = Object.keys(taxAssessments).sort().reverse();
+  return years.length ? taxAssessments[years[0]]?.value : undefined;
+}
+
+
 @Injectable()
 export class LeadsService {
   private readonly logger = new Logger(LeadsService.name);
@@ -178,7 +192,13 @@ export class LeadsService {
       if (!lead?.sqft && property.squareFootage) updates.sqft = property.squareFootage;
       if (!lead?.propertyType && property.propertyType) updates.propertyType = property.propertyType;
       if (!lead?.yearBuilt && property.yearBuilt) updates.yearBuilt = property.yearBuilt;
-      if (!lead?.lotSize && property.lotSize) updates.lotSize = property.lotSize;
+      if (property.lotSize) updates.lotSize = normalizeLotSize(property.lotSize);
+      if (property.lastSaleDate) updates.lastSaleDate = new Date(property.lastSaleDate);
+      if (property.lastSalePrice) updates.lastSalePrice = property.lastSalePrice;
+      const taxVal = latestTaxAssessment((property as any).taxAssessments);
+      if (taxVal) updates.taxAssessedValue = taxVal;
+      if ((property as any).ownerOccupied != null) updates.ownerOccupied = (property as any).ownerOccupied;
+      if (property.hoa?.fee) updates.hoaFee = property.hoa.fee;
 
       if (Object.keys(updates).length > 0) {
         await this.prisma.lead.update({
@@ -280,7 +300,13 @@ export class LeadsService {
     if (property.squareFootage) updates.sqft = property.squareFootage;
     if (property.propertyType) updates.propertyType = property.propertyType;
     if (property.yearBuilt) updates.yearBuilt = property.yearBuilt;
-    if (property.lotSize) updates.lotSize = property.lotSize;
+    if (property.lotSize) updates.lotSize = normalizeLotSize(property.lotSize);
+    if (property.lastSaleDate) updates.lastSaleDate = new Date(property.lastSaleDate);
+    if (property.lastSalePrice) updates.lastSalePrice = property.lastSalePrice;
+    const taxVal = latestTaxAssessment((property as any).taxAssessments);
+    if (taxVal) updates.taxAssessedValue = taxVal;
+    if ((property as any).ownerOccupied != null) updates.ownerOccupied = (property as any).ownerOccupied;
+    if (property.hoa?.fee) updates.hoaFee = property.hoa.fee;
 
     if (Object.keys(updates).length > 0) {
       await this.prisma.lead.update({

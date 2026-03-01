@@ -12,6 +12,7 @@ interface AdjustmentConfig {
   pool: number;
   garage: number;
   renovated: number;
+  annualAppreciationRate: number; // e.g. 0.04 = 4% per year for time adjustment
 }
 
 const DEFAULT_ADJUSTMENTS: AdjustmentConfig = {
@@ -23,6 +24,16 @@ const DEFAULT_ADJUSTMENTS: AdjustmentConfig = {
   pool: 15000,
   garage: 10000,
   renovated: 20000,
+  annualAppreciationRate: 0.04,
+};
+
+// Condition tiers mapped to $ adjustment relative to "Fair" baseline
+const CONDITION_ADJUSTMENTS: Record<string, number> = {
+  'Good':     15000,
+  'Updated':  10000,
+  'Fair':         0,
+  'Poor':    -15000,
+  'Gut':     -35000,
 };
 
 @Injectable()
@@ -276,7 +287,13 @@ export class CompAnalysisService {
       where: { id: analysisId },
       include: {
         comps: { where: { selected: true } },
-        lead: { select: { bedrooms: true, bathrooms: true, sqft: true } },
+        lead: {
+          select: {
+            bedrooms: true, bathrooms: true, sqft: true, yearBuilt: true,
+            lotSize: true, conditionLevel: true, propertyType: true,
+            propertyAddress: true, propertyCity: true, propertyState: true,
+          },
+        },
       },
     });
     if (!analysisRaw) throw new Error('Analysis not found');
@@ -284,102 +301,148 @@ export class CompAnalysisService {
     const analysis = analysisRaw as typeof analysisRaw & { lead: any; comps: any[] };
     const lead = analysis.lead;
     const adj = { ...DEFAULT_ADJUSTMENTS, ...config };
+    const now = Date.now();
+
+    // Determine subject condition from photo analysis or conditionLevel field
+    let subjectCondition = 'Fair';
+    if ((analysis as any).photoAnalysis) {
+      try {
+        const pa = JSON.parse((analysis as any).photoAnalysis
+          .replace(/^```[\w]*\s*/m, '').replace(/\s*```$/m, '').trim());
+        if (pa?.overallCondition) subjectCondition = pa.overallCondition;
+      } catch {}
+    } else if (lead.conditionLevel) {
+      const lvl = lead.conditionLevel.toLowerCase();
+      if (lvl.includes('gut') || lvl.includes('tear')) subjectCondition = 'Gut';
+      else if (lvl.includes('poor') || lvl.includes('bad')) subjectCondition = 'Poor';
+      else if (lvl.includes('good') || lvl.includes('excel') || lvl.includes('great')) subjectCondition = 'Good';
+      else if (lvl.includes('updat') || lvl.includes('remodel')) subjectCondition = 'Updated';
+    }
+
+    const subjectConditionAdj = CONDITION_ADJUSTMENTS[subjectCondition] ?? 0;
+    this.logger.log(`Adjustment engine: subject condition=${subjectCondition} (adj=${subjectConditionAdj})`);
 
     const updatedComps = [];
     for (const comp of analysis.comps) {
-      let adjustment = 0;
       const notes: string[] = [];
+      let adjustment = 0;
 
-      // Size adjustment
+      // ── 1. Size adjustment ($/sqft × diff) ──
       if (lead.sqft && comp.sqft) {
         const sqftDiff = lead.sqft - comp.sqft;
         if (sqftDiff !== 0) {
           const sqftAdj = sqftDiff * adj.pricePerSqft;
           adjustment += sqftAdj;
-          notes.push(`Size: ${sqftDiff > 0 ? '+' : ''}$${sqftAdj.toLocaleString()} (${Math.abs(sqftDiff)} sqft ${sqftDiff > 0 ? 'smaller comp' : 'larger comp'})`);
+          notes.push(`Size: ${sqftAdj >= 0 ? '+' : ''}$${Math.round(sqftAdj).toLocaleString()} (${sqftDiff > 0 ? 'comp smaller' : 'comp larger'} by ${Math.abs(sqftDiff)} sqft)`);
         }
       }
 
-      // Bedroom adjustment
-      if (lead.bedrooms && comp.bedrooms) {
+      // ── 2. Bedroom adjustment ──
+      if (lead.bedrooms != null && comp.bedrooms != null) {
         const bedDiff = lead.bedrooms - comp.bedrooms;
         if (bedDiff !== 0) {
           const bedAdj = bedDiff * adj.perBedroom;
           adjustment += bedAdj;
-          notes.push(`Beds: ${bedAdj > 0 ? '+' : ''}$${bedAdj.toLocaleString()} (${Math.abs(bedDiff)} bed diff)`);
+          notes.push(`Beds: ${bedAdj >= 0 ? '+' : ''}$${Math.round(bedAdj).toLocaleString()} (${bedDiff > 0 ? 'comp has fewer' : 'comp has more'} beds)`);
         }
       }
 
-      // Bathroom adjustment
-      if (lead.bathrooms && comp.bathrooms) {
+      // ── 3. Bathroom adjustment ──
+      if (lead.bathrooms != null && comp.bathrooms != null) {
         const bathDiff = lead.bathrooms - comp.bathrooms;
         if (bathDiff !== 0) {
           const bathAdj = bathDiff * adj.perBathroom;
           adjustment += bathAdj;
-          notes.push(`Baths: ${bathAdj > 0 ? '+' : ''}$${bathAdj.toLocaleString()} (${Math.abs(bathDiff)} bath diff)`);
+          notes.push(`Baths: ${bathAdj >= 0 ? '+' : ''}$${Math.round(bathAdj).toLocaleString()} (${bathDiff > 0 ? 'comp has fewer' : 'comp has more'} baths)`);
         }
       }
 
-      // Lot size adjustment
-      if (comp.lotSize) {
-        const lotDiff = 0; // Subject lot size not always available
-        // Skip if no subject lot data
+      // ── 4. Year built adjustment ──
+      if (lead.yearBuilt && comp.yearBuilt) {
+        const ageDiff = lead.yearBuilt - comp.yearBuilt; // positive = subject newer
+        if (Math.abs(ageDiff) >= 5) {
+          const periods = ageDiff / 5;
+          const ageAdj = periods * adj.yearBuiltPer5Years;
+          adjustment += ageAdj;
+          notes.push(`Age: ${ageAdj >= 0 ? '+' : ''}$${Math.round(ageAdj).toLocaleString()} (subject ${ageDiff > 0 ? 'newer' : 'older'} by ${Math.abs(ageDiff)} yrs)`);
+        }
       }
 
-      // Year built adjustment — skip if no subject year data (Lead model doesn't track year built)
+      // ── 5. Lot size adjustment ──
+      if (lead.lotSize && comp.lotSize) {
+        const lotDiff = lead.lotSize - comp.lotSize;
+        if (Math.abs(lotDiff) > 0.1) {
+          const lotAdj = lotDiff * adj.perAcreLot;
+          adjustment += lotAdj;
+          notes.push(`Lot: ${lotAdj >= 0 ? '+' : ''}$${Math.round(lotAdj).toLocaleString()} (${Math.abs(lotDiff).toFixed(2)} acre diff)`);
+        }
+      }
 
-      // Pool adjustment (if comp has pool but subject doesn't, subtract)
+      // ── 6. Pool adjustment ──
       if (comp.hasPool) {
         adjustment -= adj.pool;
-        notes.push(`Pool: -$${adj.pool.toLocaleString()} (comp has pool)`);
+        notes.push(`Pool: -$${adj.pool.toLocaleString()} (comp has pool, subject does not)`);
       }
 
-      // Garage adjustment
+      // ── 7. Garage adjustment ──
       if (comp.hasGarage) {
-        // Assume subject doesn't have garage info — skip unless comp has it
+        adjustment -= adj.garage;
+        notes.push(`Garage: -$${adj.garage.toLocaleString()} (comp has garage, subject does not)`);
       }
 
-      // Renovation adjustment
+      // ── 8. Renovation adjustment ──
       if (comp.isRenovated) {
         adjustment -= adj.renovated;
-        notes.push(`Renovated: -$${adj.renovated.toLocaleString()} (comp was renovated)`);
+        notes.push(`Renovated comp: -$${adj.renovated.toLocaleString()} (comp was renovated)`);
       }
 
-      const adjustedPrice = comp.soldPrice + adjustment;
+      // ── 9. Condition adjustment (photo analysis vs comp assumed Fair) ──
+      if (subjectCondition !== 'Fair') {
+        adjustment += subjectConditionAdj;
+        notes.push(`Condition (${subjectCondition}): ${subjectConditionAdj >= 0 ? '+' : ''}$${subjectConditionAdj.toLocaleString()} vs comp baseline`);
+      }
+
+      // ── 10. Time adjustment — normalize older comps to today's value ──
+      const monthsAgo = (now - new Date(comp.soldDate).getTime()) / (30 * 24 * 60 * 60 * 1000);
+      if (monthsAgo > 1) {
+        const yearsAgo = monthsAgo / 12;
+        const timeAdj = Math.round(comp.soldPrice * adj.annualAppreciationRate * yearsAgo);
+        adjustment += timeAdj;
+        notes.push(`Time: +$${timeAdj.toLocaleString()} (${monthsAgo.toFixed(0)} mo ago @ ${(adj.annualAppreciationRate * 100).toFixed(1)}%/yr appreciation)`);
+      }
+
+      const adjustedPrice = Math.round(comp.soldPrice + adjustment);
 
       const updated = await this.prisma.comp.update({
         where: { id: comp.id },
         data: {
           adjustmentAmount: Math.round(adjustment),
-          adjustedPrice: Math.round(adjustedPrice),
+          adjustedPrice: adjustedPrice,
           adjustmentNotes: notes.join('\n'),
         },
       });
-      updatedComps.push(updated);
+      updatedComps.push({ ...updated, adjustmentBreakdown: notes });
     }
 
-    // Calculate average adjustment
     const totalAdj = updatedComps.reduce((sum, c) => sum + (c.adjustmentAmount || 0), 0);
     const avgAdj = updatedComps.length > 0 ? Math.round(totalAdj / updatedComps.length) : 0;
 
     await this.prisma.compAnalysis.update({
       where: { id: analysisId },
-      data: {
-        avgAdjustment: avgAdj,
-        adjustmentConfig: adj as any,
-        adjustmentsEnabled: true,
-      },
+      data: { avgAdjustment: avgAdj, adjustmentConfig: adj as any, adjustmentsEnabled: true },
     });
 
-    return { comps: updatedComps, avgAdjustment: avgAdj };
+    this.logger.log(`Adjustments applied to ${updatedComps.length} comps. Avg adjustment: $${avgAdj.toLocaleString()}. Subject condition: ${subjectCondition}`);
+    return { comps: updatedComps, avgAdjustment: avgAdj, subjectCondition };
   }
 
-  async calculateArv(analysisId: string, method: string = 'average') {
+
+  async calculateArv(analysisId: string, method: string = 'weighted') {
     const analysis = await this.prisma.compAnalysis.findUnique({
       where: { id: analysisId },
       include: {
         comps: { where: { selected: true } },
-        lead: { select: { sqft: true } },
+        lead: { select: { sqft: true, bedrooms: true, bathrooms: true, yearBuilt: true } },
       },
     });
     if (!analysis) throw new Error('Analysis not found');
@@ -388,93 +451,272 @@ export class CompAnalysisService {
     if (comps.length === 0) return null;
 
     const useAdjusted = analysis.adjustmentsEnabled;
-    const prices = comps.map((c) => useAdjusted && c.adjustedPrice ? c.adjustedPrice : c.soldPrice);
+    const prices = comps.map((c) => (useAdjusted && c.adjustedPrice ? c.adjustedPrice : c.soldPrice) as number);
+    const lead = analysis.lead as any;
+    const now = Date.now();
 
     let arv: number;
+
     if (method === 'median') {
       const sorted = [...prices].sort((a, b) => a - b);
       const mid = Math.floor(sorted.length / 2);
       arv = sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
-    } else if (method === 'weighted') {
-      // Weight by inverse distance
-      const totalWeight = comps.reduce((sum, c) => sum + (1 / Math.max(c.distance, 0.1)), 0);
-      arv = comps.reduce((sum, c, i) => {
-        const weight = (1 / Math.max(c.distance, 0.1)) / totalWeight;
-        return sum + prices[i] * weight;
-      }, 0);
+
+    } else if (method === 'weighted' || method === 'average') {
+      // Multi-factor weight: recency × proximity × size similarity
+      const weights = comps.map((c, i) => {
+        // Recency weight: comps sold in last 3 months = 1.0, decay over 24 months
+        const monthsAgo = (now - new Date(c.soldDate).getTime()) / (30 * 24 * 60 * 60 * 1000);
+        const recencyW = Math.max(0.2, 1 - (monthsAgo / 24));
+
+        // Proximity weight: inverse distance, capped at 0.1 miles
+        const proximityW = 1 / Math.max(c.distance, 0.1);
+
+        // Size similarity weight: how close sqft is to subject
+        let sizeW = 1.0;
+        if (lead?.sqft && c.sqft) {
+          const pctDiff = Math.abs(c.sqft - lead.sqft) / lead.sqft;
+          sizeW = Math.max(0.3, 1 - pctDiff * 2); // 10% diff = 0.8 weight, 30% diff = 0.4
+        }
+
+        return recencyW * proximityW * sizeW;
+      });
+
+      const totalWeight = weights.reduce((s, w) => s + w, 0);
+      arv = prices.reduce((sum, p, i) => sum + p * (weights[i] / totalWeight), 0);
+
     } else {
       arv = prices.reduce((sum, p) => sum + p, 0) / prices.length;
     }
 
     arv = Math.round(arv);
-    const arvLow = Math.round(Math.min(...prices));
-    const arvHigh = Math.round(Math.max(...prices));
 
-    // Price per sqft
-    const totalSqft = comps.reduce((sum, c) => sum + (c.sqft || 0), 0);
-    const avgSqft = comps.length > 0 ? Math.round(totalSqft / comps.length) : 0;
-    const pricePerSqft = avgSqft > 0 ? Math.round(arv / avgSqft) : 0;
+    // ARV range: use adjusted price spread, excluding outliers (beyond 1.5 IQR)
+    const sorted = [...prices].sort((a, b) => a - b);
+    const q1 = sorted[Math.floor(sorted.length * 0.25)];
+    const q3 = sorted[Math.floor(sorted.length * 0.75)];
+    const iqr = q3 - q1;
+    const filtered = prices.filter(p => p >= q1 - 1.5 * iqr && p <= q3 + 1.5 * iqr);
+    const arvLow = Math.round(Math.min(...filtered));
+    const arvHigh = Math.round(Math.max(...filtered));
 
-    // Confidence score
-    const confidence = this.calculateConfidence(comps, analysis.lead as any);
+    // Price per sqft (use subject sqft if available, otherwise avg comp sqft)
+    const subjectSqft = lead?.sqft;
+    const avgCompSqft = comps.reduce((s, c) => s + (c.sqft || 0), 0) / comps.filter(c => c.sqft).length || 0;
+    const refSqft = subjectSqft || Math.round(avgCompSqft);
+    const pricePerSqft = refSqft > 0 ? Math.round(arv / refSqft) : 0;
+
+    const confidence = this.calculateConfidence(comps, lead, arvLow, arvHigh, arv);
 
     await this.prisma.compAnalysis.update({
       where: { id: analysisId },
-      data: {
-        arvEstimate: arv,
-        arvLow,
-        arvHigh,
-        arvMethod: method,
-        pricePerSqft,
-        confidenceScore: confidence,
-      },
+      data: { arvEstimate: arv, arvLow, arvHigh, arvMethod: method, pricePerSqft, confidenceScore: confidence },
     });
 
+    this.logger.log(`ARV calculated: $${arv.toLocaleString()} (${method}) range $${arvLow.toLocaleString()}–$${arvHigh.toLocaleString()} confidence=${confidence}`);
     return { arv, arvLow, arvHigh, pricePerSqft, confidence, method };
   }
 
-  private calculateConfidence(comps: any[], lead: any): number {
+  private calculateConfidence(comps: any[], lead: any, arvLow?: number, arvHigh?: number, arv?: number): number {
     let score = 0;
 
-    // Number of comps (max 25 points)
-    score += Math.min(comps.length * 5, 25);
+    // ── 1. Comp count (max 20 pts) ──
+    score += Math.min(comps.length * 4, 20);
 
-    // Average distance (max 25 points)
+    // ── 2. Proximity (max 20 pts) ──
     const avgDist = comps.reduce((s, c) => s + c.distance, 0) / comps.length;
-    if (avgDist <= 0.5) score += 25;
-    else if (avgDist <= 1) score += 20;
-    else if (avgDist <= 2) score += 15;
-    else if (avgDist <= 3) score += 10;
-    else score += 5;
+    score += avgDist <= 0.5 ? 20 : avgDist <= 1 ? 16 : avgDist <= 2 ? 12 : avgDist <= 3 ? 8 : 4;
 
-    // Sale recency (max 25 points)
+    // ── 3. Recency (max 20 pts) ──
     const now = Date.now();
-    const avgMonthsAgo = comps.reduce((s, c) => {
-      return s + (now - new Date(c.soldDate).getTime()) / (30 * 24 * 60 * 60 * 1000);
-    }, 0) / comps.length;
-    if (avgMonthsAgo <= 3) score += 25;
-    else if (avgMonthsAgo <= 6) score += 20;
-    else if (avgMonthsAgo <= 9) score += 15;
-    else if (avgMonthsAgo <= 12) score += 10;
-    else score += 5;
+    const avgMonthsAgo = comps.reduce((s, c) =>
+      s + (now - new Date(c.soldDate).getTime()) / (30 * 24 * 60 * 60 * 1000), 0) / comps.length;
+    score += avgMonthsAgo <= 3 ? 20 : avgMonthsAgo <= 6 ? 16 : avgMonthsAgo <= 9 ? 12 : avgMonthsAgo <= 12 ? 8 : 4;
 
-    // Size similarity (max 25 points)
+    // ── 4. Size similarity (max 15 pts) ──
     if (lead?.sqft) {
       const avgSqft = comps.reduce((s, c) => s + (c.sqft || lead.sqft), 0) / comps.length;
       const pctDiff = Math.abs(avgSqft - lead.sqft) / lead.sqft;
-      if (pctDiff <= 0.05) score += 25;
-      else if (pctDiff <= 0.1) score += 20;
-      else if (pctDiff <= 0.2) score += 15;
-      else if (pctDiff <= 0.3) score += 10;
-      else score += 5;
+      score += pctDiff <= 0.05 ? 15 : pctDiff <= 0.1 ? 12 : pctDiff <= 0.2 ? 8 : pctDiff <= 0.3 ? 4 : 2;
     } else {
-      score += 15; // neutral
+      score += 8;
     }
 
-    return Math.min(score, 100);
+    // ── 5. ARV spread tightness (max 15 pts) — tight spread = high confidence ──
+    if (arvLow != null && arvHigh != null && arv != null && arv > 0) {
+      const spreadPct = (arvHigh - arvLow) / arv;
+      score += spreadPct <= 0.05 ? 15 : spreadPct <= 0.1 ? 12 : spreadPct <= 0.2 ? 8 : spreadPct <= 0.3 ? 4 : 1;
+    } else {
+      score += 5;
+    }
+
+    // ── 6. Data completeness — how many comps have sqft/beds/baths (max 10 pts) ──
+    const withData = comps.filter(c => c.sqft && c.bedrooms && c.bathrooms).length;
+    score += Math.round((withData / Math.max(comps.length, 1)) * 10);
+
+    return Math.min(Math.round(score), 100);
   }
 
-  async generateAiSummary(analysisId: string) {
+
+  /**
+   * AI-powered adjustment validation — Claude reviews all comp adjustments
+   * and returns refined estimates with reasoning, plus a confidence interval.
+   */
+  async aiAdjustComps(analysisId: string) {
+    const analysis = await this.prisma.compAnalysis.findUnique({
+      where: { id: analysisId },
+      include: {
+        comps: { where: { selected: true } },
+        lead: {
+          select: {
+            propertyAddress: true, propertyCity: true, propertyState: true,
+            bedrooms: true, bathrooms: true, sqft: true, yearBuilt: true,
+            lotSize: true, conditionLevel: true, propertyType: true, askingPrice: true,
+          },
+        },
+      },
+    });
+    if (!analysis) throw new Error('Analysis not found');
+    if (!this.anthropic) throw new Error('Anthropic not configured');
+
+    const lead = analysis.lead as any;
+    const comps = analysis.comps as any[];
+    if (comps.length === 0) throw new Error('No comps selected');
+
+    // Build subject property summary
+    const subjectDesc = [
+      `Address: ${lead.propertyAddress}, ${lead.propertyCity}, ${lead.propertyState}`,
+      lead.propertyType ? `Type: ${lead.propertyType}` : null,
+      lead.sqft ? `Size: ${lead.sqft.toLocaleString()} sqft` : null,
+      lead.bedrooms ? `Beds: ${lead.bedrooms}` : null,
+      lead.bathrooms ? `Baths: ${lead.bathrooms}` : null,
+      lead.yearBuilt ? `Year Built: ${lead.yearBuilt}` : null,
+      lead.lotSize ? `Lot: ${lead.lotSize.toFixed(2)} acres` : null,
+      lead.conditionLevel ? `Condition: ${lead.conditionLevel}` : null,
+      lead.askingPrice ? `Asking Price: $${lead.askingPrice.toLocaleString()}` : null,
+    ].filter(Boolean).join('\n');
+
+    // Photo condition if available
+    let photoCondition = '';
+    if ((analysis as any).photoAnalysis) {
+      try {
+        const pa = JSON.parse((analysis as any).photoAnalysis.replace(/^```[\w]*\s*/m, '').replace(/\s*```$/m, '').trim());
+        if (pa?.overallCondition) photoCondition = `\nPhoto Analysis Condition: ${pa.overallCondition}`;
+        if (pa?.wholesalerNotes) photoCondition += `\nPhoto Notes: ${pa.wholesalerNotes}`;
+      } catch {}
+    }
+
+    // Build comp summaries
+    const compSummaries = comps.map((c, i) => {
+      const monthsAgo = Math.round((Date.now() - new Date(c.soldDate).getTime()) / (30 * 24 * 60 * 60 * 1000));
+      return [
+        `COMP ${i + 1}: ${c.address}`,
+        `  Sold: $${c.soldPrice.toLocaleString()} (${monthsAgo} months ago, ${c.distance.toFixed(2)} mi away)`,
+        c.sqft ? `  Size: ${c.sqft.toLocaleString()} sqft` : null,
+        (c.bedrooms || c.bathrooms) ? `  ${c.bedrooms}bd/${c.bathrooms}ba` : null,
+        c.yearBuilt ? `  Built: ${c.yearBuilt}` : null,
+        c.isRenovated ? '  Status: Renovated' : null,
+        c.hasPool ? '  Has Pool' : null,
+        c.hasGarage ? '  Has Garage' : null,
+        c.adjustmentAmount != null ? `  Rule-based adjustment: ${c.adjustmentAmount >= 0 ? '+' : ''}$${c.adjustmentAmount.toLocaleString()} → Adjusted: $${(c.adjustedPrice || c.soldPrice).toLocaleString()}` : null,
+        c.adjustmentNotes ? `  Breakdown: ${c.adjustmentNotes.replace(/\n/g, ' | ')}` : null,
+      ].filter(Boolean).join('\n');
+    }).join('\n\n');
+
+    const prompt = `You are a professional real estate appraiser and wholesaling expert. Review these comparable sales and the rule-based adjustments already applied, then provide refined AI adjustments.
+
+SUBJECT PROPERTY:
+${subjectDesc}${photoCondition}
+
+COMPARABLE SALES WITH RULE-BASED ADJUSTMENTS:
+${compSummaries}
+
+Your task:
+1. Review each comp's adjustment — does it make sense given the data?
+2. Provide your own adjusted value for each comp (can confirm or override the rule-based one)
+3. Flag any comps that are poor matches and should be weighted down or removed
+4. Give an overall ARV conclusion with a confidence interval
+
+Respond ONLY with valid JSON:
+{
+  "comps": [
+    {
+      "compIndex": 0,
+      "soldPrice": number,
+      "aiAdjustedPrice": number,
+      "adjustmentDelta": number,
+      "reasoning": "brief explanation",
+      "quality": "excellent" | "good" | "fair" | "poor",
+      "weight": 0.0-1.0
+    }
+  ],
+  "arvRecommendation": {
+    "point": number,
+    "low": number,
+    "high": number,
+    "confidence": number,
+    "method": "brief description of approach used",
+    "keyFactors": ["factor1", "factor2"],
+    "risks": ["risk1", "risk2"],
+    "wholesalerNote": "2-3 sentence deal context"
+  }
+}`;
+
+    const response = await this.anthropic.messages.create({
+      model: 'claude-opus-4-5',
+      max_tokens: 4096,
+      messages: [{ role: 'user', content: prompt }],
+    });
+
+    const text = (response.content[0] as any)?.text || '';
+    let parsed: any = null;
+    try {
+      const stripped = text.replace(/^```[\w]*\s*/m, '').replace(/\s*```$/m, '').trim();
+      const m = stripped.match(/\{[\s\S]*\}/);
+      if (m) parsed = JSON.parse(m[0]);
+    } catch (e) {
+      this.logger.error('Failed to parse AI adjustment response', e);
+      throw new Error('AI adjustment response could not be parsed');
+    }
+
+    // Apply AI-adjusted prices back to each comp
+    const updatedComps = [];
+    for (const aiComp of parsed.comps) {
+      const comp = comps[aiComp.compIndex];
+      if (!comp) continue;
+      const updated = await this.prisma.comp.update({
+        where: { id: comp.id },
+        data: {
+          adjustedPrice: Math.round(aiComp.aiAdjustedPrice),
+          adjustmentAmount: Math.round(aiComp.aiAdjustedPrice - comp.soldPrice),
+          adjustmentNotes: (comp.adjustmentNotes || '') + '\nAI: ' + aiComp.reasoning,
+          similarityScore: Math.round((aiComp.weight || 0.5) * 100),
+        },
+      });
+      updatedComps.push({ ...updated, quality: aiComp.quality, weight: aiComp.weight });
+    }
+
+    // Save AI ARV recommendation to analysis
+    const rec = parsed.arvRecommendation;
+    await this.prisma.compAnalysis.update({
+      where: { id: analysisId },
+      data: {
+        arvEstimate: Math.round(rec.point),
+        arvLow: Math.round(rec.low),
+        arvHigh: Math.round(rec.high),
+        confidenceScore: Math.round(rec.confidence),
+        adjustmentsEnabled: true,
+        aiAssessment: (analysis as any).aiAssessment
+          ? (analysis as any).aiAssessment
+          : JSON.stringify({ keyFactors: rec.keyFactors, risks: rec.risks, wholesalerNote: rec.wholesalerNote, method: rec.method }),
+      },
+    });
+
+    this.logger.log(`AI adjustment complete: ARV=$${rec.point.toLocaleString()} range $${rec.low.toLocaleString()}–$${rec.high.toLocaleString()} confidence=${rec.confidence}`);
+    return { comps: updatedComps, arvRecommendation: rec };
+  }
+
+    async generateAiSummary(analysisId: string) {
     const analysis = await this.getAnalysis(analysisId);
     if (!analysis) throw new Error('Analysis not found');
     if (!this.anthropic) {
@@ -782,21 +1024,42 @@ Property: ${lead.propertyAddress}, ${lead.propertyCity}, ${lead.propertyState}
 Size: ${lead.sqft ? lead.sqft.toLocaleString() + ' sqft' : 'Unknown'}, built ${(lead as any).yearBuilt || 'unknown'}
 ARV Estimate: ${analysis.arvEstimate ? '$' + analysis.arvEstimate.toLocaleString() : 'Unknown'}
 
-Analyze these ${photos.length} property photo(s). Provide:
+Analyze these ${photos.length} property photo(s) and respond ONLY with valid JSON (no markdown, no explanation outside the JSON).
 
-1. **Room-by-Room Condition Assessment** — for each visible area: condition rating (Good/Fair/Poor/Gut), specific issues observed, repairs needed
-2. **Systems Assessment** — HVAC, plumbing, electrical, roof (note if roof appears new/old)
-3. **Repair Estimate Summary** — itemized list with cost ranges
-4. **Total Repair Estimate** — provide a LOW and HIGH number in this exact format at the end:
-   REPAIR_LOW: $XX,XXX
-   REPAIR_HIGH: $XX,XXX
+Return this exact structure:
+{
+  "rooms": [
+    {
+      "name": "string (room or area name)",
+      "condition": "Good" | "Fair" | "Poor" | "Gut",
+      "issues": ["string"],
+      "repairs": ["string"],
+      "urgency": "low" | "medium" | "high" | "critical"
+    }
+  ],
+  "systems": {
+    "roof": { "condition": "Good" | "Fair" | "Poor" | "Unknown", "notes": "string", "estimatedAge": "string" },
+    "hvac": { "condition": "Good" | "Fair" | "Poor" | "Unknown", "notes": "string" },
+    "electrical": { "condition": "Good" | "Fair" | "Poor" | "Unknown", "notes": "string" },
+    "plumbing": { "condition": "Good" | "Fair" | "Poor" | "Unknown", "notes": "string" },
+    "foundation": { "condition": "Good" | "Fair" | "Poor" | "Unknown", "notes": "string" }
+  },
+  "redFlags": ["string — only serious concerns like mold, structural, asbestos risk, code violations"],
+  "repairItems": [
+    { "item": "string", "estimateLow": number, "estimateHigh": number, "priority": "low" | "medium" | "high" | "critical" }
+  ],
+  "repairLow": number,
+  "repairHigh": number,
+  "overallCondition": "Good" | "Fair" | "Poor" | "Gut",
+  "wholesalerNotes": "string — 2-3 sentence deal summary for a wholesaler"
+}
 
-Use rural Texas pricing. Be specific about what you see — don't generalize. Flag any serious concerns (mold, structural, foundation, asbestos risk).`;
+Use Midwest/rural Ohio pricing. Be specific about what you see — don't generalize. Flag any serious concerns in redFlags.`;
 
     try {
       const response = await this.anthropic.messages.create({
         model: 'claude-opus-4-5',
-        max_tokens: 1500,
+        max_tokens: 4000,
         messages: [{
           role: 'user',
           content: [...imageBlocks, { type: 'text', text: textPrompt }],
@@ -805,17 +1068,35 @@ Use rural Texas pricing. Be specific about what you see — don't generalize. Fl
 
       const fullText = (response.content[0] as any)?.text || '';
 
-      // Parse repair cost range from response
-      const lowMatch = fullText.match(/REPAIR_LOW:\s*\$?([\d,]+)/i);
-      const highMatch = fullText.match(/REPAIR_HIGH:\s*\$?([\d,]+)/i);
-      const repairLow = lowMatch ? parseInt(lowMatch[1].replace(/,/g, '')) : 0;
-      const repairHigh = highMatch ? parseInt(highMatch[1].replace(/,/g, '')) : 0;
+      // Parse structured JSON response
+      let parsed: any = null;
+      let repairLow = 0;
+      let repairHigh = 0;
+      let assessment = fullText;
 
-      // Clean the display text (remove the machine-readable tags)
-      const assessment = fullText
-        .replace(/REPAIR_LOW:\s*\$?[\d,]+/i, '')
-        .replace(/REPAIR_HIGH:\s*\$?[\d,]+/i, '')
-        .trim();
+      try {
+        // Strip markdown code fences if present (```json ... ```)
+        const stripped = fullText.replace(/^```[\w]*\s*/m, '').replace(/\s*```$/m, '').trim();
+        // Extract JSON from response (handle any surrounding whitespace)
+        const jsonMatch = stripped.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          parsed = JSON.parse(jsonMatch[0]);
+          repairLow = parsed.repairLow || 0;
+          repairHigh = parsed.repairHigh || 0;
+          assessment = JSON.stringify(parsed); // Store full structured data
+        }
+      } catch (parseErr) {
+        // Fallback: try old-style REPAIR_LOW/HIGH parsing
+        this.logger.warn('Could not parse structured JSON from photo analysis, falling back to text');
+        const lowMatch = fullText.match(/REPAIR_LOW:\s*\$?([\d,]+)/i);
+        const highMatch = fullText.match(/REPAIR_HIGH:\s*\$?([\d,]+)/i);
+        repairLow = lowMatch ? parseInt(lowMatch[1].replace(/,/g, '')) : 0;
+        repairHigh = highMatch ? parseInt(highMatch[1].replace(/,/g, '')) : 0;
+        assessment = fullText
+          .replace(/REPAIR_LOW:\s*\$?[\d,]+/i, '')
+          .replace(/REPAIR_HIGH:\s*\$?[\d,]+/i, '')
+          .trim();
+      }
 
       await this.prisma.compAnalysis.update({
         where: { id: analysisId },

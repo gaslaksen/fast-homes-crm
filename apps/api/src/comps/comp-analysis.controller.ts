@@ -75,6 +75,11 @@ export class CompAnalysisController {
     return this.compAnalysisService.calculateAdjustments(analysisId, body.config);
   }
 
+  @Post(':analysisId/ai-adjust-comps')
+  async aiAdjustComps(@Param('analysisId') analysisId: string) {
+    return this.compAnalysisService.aiAdjustComps(analysisId);
+  }
+
   @Post(':analysisId/calculate-arv')
   async calculateArv(
     @Param('analysisId') analysisId: string,
