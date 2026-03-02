@@ -220,7 +220,7 @@ export default function LeadDetailPage() {
               <DonutStat
                 value={lead.totalScore}
                 max={12}
-                label={lead.scoreBand.replace('_', ' ')}
+                label={({ STRIKE_ZONE: 'Strike Zone', HOT: 'Hot', WORKABLE: 'Workable', DEAD_COLD: 'Cold' } as Record<string,string>)[lead.scoreBand] ?? lead.scoreBand.replace('_', ' ')}
                 color={lead.scoreBand === 'HOT' ? '#ef4444' : lead.scoreBand === 'WARM' ? '#f97316' : '#6b7280'}
                 size={60}
               />

@@ -116,7 +116,7 @@ export default function LeadManagementPage() {
     STRIKE_ZONE: 'Strike Zone',
     HOT: 'Hot',
     WORKABLE: 'Workable',
-    DEAD_COLD: 'Dead/Cold',
+    DEAD_COLD: 'Cold',
   };
 
   if (loading) {

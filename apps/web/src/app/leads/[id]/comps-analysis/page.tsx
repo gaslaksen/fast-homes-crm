@@ -538,7 +538,7 @@ export default function CompsAnalysisPage() {
               <DonutStat
                 value={lead.totalScore ?? 0}
                 max={12}
-                label={(lead.scoreBand ?? 'COLD').replace('_', ' ')}
+                label={({ STRIKE_ZONE: 'Strike Zone', HOT: 'Hot', WORKABLE: 'Workable', DEAD_COLD: 'Cold' } as Record<string,string>)[lead.scoreBand ?? 'DEAD_COLD'] ?? (lead.scoreBand ?? 'Cold').replace('_', ' ')}
                 color={lead.scoreBand === 'HOT' ? '#ef4444' : lead.scoreBand === 'WARM' ? '#f97316' : '#6b7280'}
                 size={60}
               />

@@ -26,7 +26,7 @@ const BAND_STYLES: Record<string, { pill: string; dot: string }> = {
   COLD:        { pill: 'bg-gray-100 text-gray-500 border-gray-200',       dot: 'bg-gray-300' },
 };
 const BAND_LABELS: Record<string, string> = {
-  STRIKE_ZONE: 'Strike Zone', HOT: 'Hot', WORKABLE: 'Workable', DEAD_COLD: 'Dead Cold',
+  STRIKE_ZONE: 'Strike Zone', HOT: 'Hot', WORKABLE: 'Workable', DEAD_COLD: 'Cold',
   WARM: 'Warm', COOL: 'Cool', COLD: 'Cold', // legacy
 };
 const STATUS_LABELS: Record<string, string> = {
