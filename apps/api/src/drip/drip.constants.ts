@@ -2,18 +2,18 @@ export const DRIP_QUEUE_NAME = 'drip-sequence';
 
 export const CAMP_STEPS = [
   {
-    key: 'hasAskingPrice',
-    field: 'askingPrice',
-    label: 'Money (Asking Price)',
-    purpose:
-      'Ask what price range they have in mind for the property. No pressure, just getting a ballpark.',
-  },
-  {
     key: 'hasTimeline',
     field: 'timeline',
     label: 'Priority (Timeline)',
     purpose:
       'Ask when they need to sell — are they in a rush, or just exploring options? Be conversational.',
+  },
+  {
+    key: 'hasAskingPrice',
+    field: 'askingPrice',
+    label: 'Money (Asking Price)',
+    purpose:
+      'Ask what price range they have in mind for the property. No pressure, just getting a ballpark.',
   },
   {
     key: 'hasCondition',
@@ -37,10 +37,10 @@ export const DEFAULT_RETRY_DELAY_MS = 86_400_000; // 24 hours
 export const DEFAULT_MAX_RETRIES = 2;
 
 export const FALLBACK_MESSAGES: Record<string, string> = {
-  hasAskingPrice:
-    'Hi {name}, this is Fast Homes for Cash reaching out about {address}. Do you have a ballpark price in mind for the property? Reply STOP to opt out.',
   hasTimeline:
-    'Thanks for the info! Quick question — do you have a timeline in mind for selling? Are you in a rush or just exploring?',
+    'Hi {name}, this is Fast Homes for Cash reaching out about {address}. Quick question — do you have a timeline in mind for selling? Reply STOP to opt out.',
+  hasAskingPrice:
+    'Thanks for the info! Do you have a ballpark price in mind for the property?',
   hasCondition:
     'Got it! How would you describe the condition of the property? Any major repairs needed?',
   hasOwnership:

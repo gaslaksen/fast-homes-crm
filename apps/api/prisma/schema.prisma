@@ -77,7 +77,8 @@ model Lead {
   conditionLevel    String?
   distressSignals   Json?
   ownershipStatus   String?
-  
+  sellerMotivation  String?
+
   arv               Float?
   arvConfidence     Float?
   lastCompsDate     DateTime?

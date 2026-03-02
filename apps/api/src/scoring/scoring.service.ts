@@ -205,18 +205,26 @@ export class ScoringService {
       parts.push(`property condition: ${data.input.conditionLevel}`);
     }
 
+    // Motivation
+    if ((data.input as any).sellerMotivation) {
+      parts.push(`seller motivation: ${(data.input as any).sellerMotivation}`);
+    }
+
     return parts.length > 0 ? parts.join(', ') : 'Limited information available';
   }
 
   /**
-   * Extract structured data from message text using AI
+   * Extract structured data from message text using AI.
+   * Only uses the last 10 messages to keep context focused and costs low.
    */
   async extractFromMessages(messages: string[]): Promise<AIExtractionResult> {
     if (!this.openai || messages.length === 0) {
       return {};
     }
 
-    const conversationText = messages.join('\n\n');
+    // Cap to last 10 messages
+    const recentMessages = messages.slice(-10);
+    const conversationText = recentMessages.join('\n\n');
 
     const prompt = `You are analyzing text messages from a seller about their property. Extract key information:
 
@@ -230,7 +238,8 @@ Extract and return ONLY a JSON object with these fields (use null if not found):
   "condition_level": <"excellent"|"good"|"fair"|"poor"|"distressed" or null>,
   "distress_signals": <array of strings or []> (e.g., ["vacant", "foreclosure", "code_violations", "major_repairs"]),
   "ownership_status": <"sole_owner"|"co_owner"|"heir"|"not_owner" or null>,
-  "confidence": <number 0-100> (your confidence in these extractions)
+  "seller_motivation": <string or null> (why they want to sell — e.g. "divorce", "relocation", "financial_distress", "inherited", "tired_landlord", "behind_on_mortgage", "downsizing", "death_in_family", "other"),
+  "confidence": <number 0-100> (your overall confidence in these extractions based on how clearly the seller expressed them)
 }
 
 Return ONLY valid JSON, no other text.`;
@@ -261,6 +270,37 @@ Return ONLY valid JSON, no other text.`;
     } catch (error) {
       console.error('AI extraction failed:', error);
       return {};
+    }
+  }
+
+  /**
+   * Detect the emotional sentiment of a seller's message.
+   * Used to pick the right response tone automatically.
+   */
+  async detectSentiment(message: string): Promise<'positive' | 'neutral' | 'negative' | 'hesitant'> {
+    if (!this.openai || !message) return 'neutral';
+
+    try {
+      const response = await this.openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: 'Classify the sentiment of this seller text message. Reply with exactly one word: positive, neutral, negative, or hesitant.',
+          },
+          { role: 'user', content: message },
+        ],
+        temperature: 0,
+        max_tokens: 10,
+      });
+
+      const raw = response.choices[0]?.message?.content?.trim().toLowerCase() ?? 'neutral';
+      if (['positive', 'neutral', 'negative', 'hesitant'].includes(raw)) {
+        return raw as 'positive' | 'neutral' | 'negative' | 'hesitant';
+      }
+      return 'neutral';
+    } catch {
+      return 'neutral';
     }
   }
 
@@ -426,7 +466,15 @@ Return ONLY valid JSON, no other text.`;
       return this.getDefaultMessageDrafts(context);
     }
 
-    const history = context.conversationHistory?.join('\n') || 'No previous messages';
+    // Cap conversation history to last 10 messages to control context size
+    const fullHistory = context.conversationHistory ?? [];
+    const trimmedHistory = fullHistory.length > 10 ? fullHistory.slice(-10) : fullHistory;
+    const historyPrefix = fullHistory.length > 10
+      ? `[Earlier conversation: ${fullHistory.length - 10} messages not shown]\n`
+      : '';
+    const history = fullHistory.length > 0
+      ? historyPrefix + trimmedHistory.join('\n')
+      : 'No previous messages';
     const purpose = context.purpose || 'follow up and move the conversation forward';
 
     // Determine which system prompt to use

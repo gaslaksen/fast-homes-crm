@@ -158,6 +158,7 @@ export interface AIExtractionResult {
   condition_level?: string;
   distress_signals?: string[];
   ownership_status?: string;
+  seller_motivation?: string;
   confidence?: number;
 }
 

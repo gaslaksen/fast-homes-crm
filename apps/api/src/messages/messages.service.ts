@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { ScoringService } from '../scoring/scoring.service';
 import { DripService } from '../drip/drip.service';
-import Twilio from 'twilio';
+import { SmsProvider, createSmsProvider } from './sms.provider';
 import { formatPhoneNumber, isOptOutMessage } from '@fast-homes/shared';
 
 const MAX_AUTO_RESPONSES_PER_DAY = 5;
@@ -13,7 +13,7 @@ const DEMO_AUTO_RESPONSE_DELAY_MS = 2_000;    // 2 seconds in demo mode
 @Injectable()
 export class MessagesService {
   private readonly logger = new Logger(MessagesService.name);
-  private twilio: Twilio.Twilio | null = null;
+  private smsProvider: SmsProvider;
   private twilioNumber: string;
 
   constructor(
@@ -23,16 +23,8 @@ export class MessagesService {
     @Inject(forwardRef(() => DripService))
     private dripService: DripService,
   ) {
-    const accountSid = this.config.get<string>('TWILIO_ACCOUNT_SID');
-    const authToken = this.config.get<string>('TWILIO_AUTH_TOKEN');
-    this.twilioNumber = this.config.get<string>('TWILIO_PHONE_NUMBER') || '';
-
-    if (accountSid && authToken) {
-      this.twilio = Twilio(accountSid, authToken);
-      console.log('✅ Twilio initialized');
-    } else {
-      console.warn('⚠️  Twilio not configured - messages will be simulated');
-    }
+    this.twilioNumber = this.config.get<string>('SMRTPHONE_PHONE_NUMBER') || this.config.get<string>('TWILIO_PHONE_NUMBER') || '';
+    this.smsProvider = createSmsProvider(this.config);
   }
 
   /**
@@ -116,37 +108,18 @@ export class MessagesService {
     });
 
     try {
-      if (this.twilio) {
-        // Send via Twilio
-        const twilioMessage = await this.twilio.messages.create({
-          body,
-          from,
-          to,
-        });
+      const sent = await this.smsProvider.sendSms(to, from, body);
 
-        // Update message with Twilio SID and status
-        await this.prisma.message.update({
-          where: { id: message.id },
-          data: {
-            twilioSid: twilioMessage.sid,
-            status: 'SENT',
-            sentAt: new Date(),
-          },
-        });
+      await this.prisma.message.update({
+        where: { id: message.id },
+        data: {
+          twilioSid: sent.sid,
+          status: 'SENT',
+          sentAt: new Date(),
+        },
+      });
 
-        this.logger.log(`Message sent: ${twilioMessage.sid}`);
-      } else {
-        // Simulate sending (for development without Twilio)
-        await this.prisma.message.update({
-          where: { id: message.id },
-          data: {
-            status: 'SENT',
-            sentAt: new Date(),
-          },
-        });
-
-        this.logger.log(`Message simulated: ${body.substring(0, 50)}...`);
-      }
+      this.logger.log(`Message sent via ${this.smsProvider.constructor.name}: ${sent.sid}`);
 
       // Log activity
       await this.prisma.activity.create({
@@ -326,8 +299,33 @@ export class MessagesService {
         lead.messages,
       );
 
-      // Use the friendly tone for auto-responses
-      const messageBody = drafts.friendly;
+      // Sentiment-based tone selection
+      let selectedTone: 'direct' | 'friendly' | 'professional' = 'friendly';
+      if (lastInboundMessage) {
+        const sentiment = await this.scoringService.detectSentiment(lastInboundMessage);
+        if (sentiment === 'positive' || sentiment === 'neutral') selectedTone = 'friendly';
+        else if (sentiment === 'hesitant') selectedTone = 'professional';
+        else if (sentiment === 'negative') selectedTone = 'professional';
+        this.logger.log(`🎭 Sentiment: ${sentiment} → tone: ${selectedTone}`);
+      }
+      const messageBody = drafts[selectedTone];
+
+      // If all CAMP is complete, create a follow-up task for the agent
+      if (!nextField) {
+        try {
+          await this.prisma.task.create({
+            data: {
+              leadId,
+              title: 'Review CAMP info and make offer',
+              description: 'AI has gathered all CAMP information from the seller. Review the details and follow up with an offer.',
+              dueDate: new Date(Date.now() + 24 * 60 * 60 * 1000),
+            },
+          });
+          this.logger.log(`📋 Follow-up task created for lead ${leadId} — CAMP complete`);
+        } catch (err) {
+          this.logger.warn(`Could not create follow-up task for lead ${leadId}: ${err.message}`);
+        }
+      }
 
       await this.sendMessage(leadId, messageBody);
       await this.incrementAutoResponseCount(leadId);
@@ -335,7 +333,7 @@ export class MessagesService {
       // Refresh CAMP flags
       await this.scoringService.refreshCampFlags(leadId);
 
-      this.logger.log(`Auto-response sent for lead ${leadId} (next CAMP: ${nextField?.label || 'complete'})`);
+      this.logger.log(`Auto-response sent for lead ${leadId} (next CAMP: ${nextField?.label || 'complete'}, tone: ${selectedTone})`);
       return messageBody;
     } catch (error) {
       this.logger.error(`Auto-response failed for lead ${leadId}: ${error.message}`);
@@ -435,13 +433,15 @@ export class MessagesService {
 
       this.logger.log(`Lead ${lead.id} opted out`);
 
-      // Send confirmation if Twilio is configured
-      if (this.twilio) {
-        await this.twilio.messages.create({
-          body: 'You have been unsubscribed from Fast Homes for Cash. You will not receive further messages.',
-          from: data.To,
-          to: data.From,
-        });
+      // Send opt-out confirmation
+      try {
+        await this.smsProvider.sendSms(
+          data.From,
+          data.To,
+          'You have been unsubscribed from Fast Homes for Cash. You will not receive further messages.',
+        );
+      } catch (err) {
+        this.logger.warn(`Could not send opt-out confirmation: ${err.message}`);
       }
 
       return { success: true, optOut: true };
@@ -500,25 +500,31 @@ export class MessagesService {
     let updateData: any = {};
     try {
       const extracted = await this.scoringService.extractFromMessages(allMessages);
+      const confidence = extracted.confidence ?? 100;
 
-      // Update lead with extracted info
-      if (extracted.timeline_days) updateData.timeline = extracted.timeline_days;
-      if (extracted.asking_price) updateData.askingPrice = extracted.asking_price;
-      if (extracted.condition_level) updateData.conditionLevel = extracted.condition_level;
-      if (extracted.distress_signals) updateData.distressSignals = extracted.distress_signals;
-      if (extracted.ownership_status) updateData.ownershipStatus = extracted.ownership_status;
+      if (confidence < 50) {
+        this.logger.warn(`⚠️  Low confidence extraction (${confidence}) for lead ${lead.id} — skipping field updates`);
+      } else {
+        // Update lead with extracted info
+        if (extracted.timeline_days) updateData.timeline = extracted.timeline_days;
+        if (extracted.asking_price) updateData.askingPrice = extracted.asking_price;
+        if (extracted.condition_level) updateData.conditionLevel = extracted.condition_level;
+        if (extracted.distress_signals) updateData.distressSignals = extracted.distress_signals;
+        if (extracted.ownership_status) updateData.ownershipStatus = extracted.ownership_status;
+        if (extracted.seller_motivation) updateData.sellerMotivation = extracted.seller_motivation;
 
-      if (Object.keys(updateData).length > 0) {
-        await this.prisma.lead.update({
-          where: { id: lead.id },
-          data: updateData,
-        });
+        if (Object.keys(updateData).length > 0) {
+          await this.prisma.lead.update({
+            where: { id: lead.id },
+            data: updateData,
+          });
 
-        this.logger.log(`💾 Updated lead ${lead.id} with extracted data: ${JSON.stringify(updateData)}`);
+          this.logger.log(`💾 Updated lead ${lead.id} with extracted data (confidence: ${confidence}): ${JSON.stringify(updateData)}`);
 
-        // Refresh CAMP flags and rescore
-        await this.scoringService.refreshCampFlags(lead.id);
-        await this.rescoreLead(lead.id);
+          // Refresh CAMP flags and rescore
+          await this.scoringService.refreshCampFlags(lead.id);
+          await this.rescoreLead(lead.id);
+        }
       }
     } catch (error) {
       console.error('Failed to extract from messages:', error);
