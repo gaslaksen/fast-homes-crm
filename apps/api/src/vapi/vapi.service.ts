@@ -162,7 +162,7 @@ You will be asked to summarize key findings. Be ready to report:
         name: 'Alex - Fast Homes Acquisitions',
         model: {
           provider: 'openai',
-          model: 'gpt-4o',
+          model: 'gpt-4o-mini',
           temperature: 0.7,
           messages: [
             {
@@ -170,13 +170,15 @@ You will be asked to summarize key findings. Be ready to report:
               content: this.buildSystemPrompt(lead),
             },
           ],
+          // Reduce response latency
+          maxTokens: 150,
         },
         voice: {
-          provider: '11labs',
-          voiceId: 'paula',
-          stability: 0.5,
-          similarityBoost: 0.75,
+          // Deepgram TTS is significantly lower latency than ElevenLabs
+          provider: 'deepgram',
+          voiceId: 'asteria',
         },
+
         firstMessage: this.buildFirstMessage(lead),
         firstMessageMode: 'assistant-speaks-first',
         endCallMessage: "Thanks so much for your time today. Have a wonderful day!",
