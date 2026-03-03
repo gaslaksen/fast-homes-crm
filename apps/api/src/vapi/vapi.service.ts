@@ -178,9 +178,8 @@ You will be asked to summarize key findings. Be ready to report:
           maxTokens: 150,
         },
         voice: {
-          // Deepgram TTS is significantly lower latency than ElevenLabs
-          provider: 'deepgram',
-          voiceId: 'asteria',
+          provider: '11labs',
+          voiceId: '6YQMyaUWlj0VX652cY1C',
         },
 
         firstMessage: this.buildFirstMessage(lead),
