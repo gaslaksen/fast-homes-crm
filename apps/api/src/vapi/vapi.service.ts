@@ -160,6 +160,10 @@ You will be asked to summarize key findings. Be ready to report:
       },
       assistant: {
         name: 'Alex - Fast Homes Acquisitions',
+        server: {
+          url: this.config.get<string>('VAPI_WEBHOOK_URL') ||
+            'https://fast-homesapi-production.up.railway.app/calls/vapi-webhook',
+        },
         model: {
           provider: 'openai',
           model: 'gpt-4o-mini',
