@@ -712,18 +712,39 @@ export default function LeadDetailPage() {
                 {lead.callLogs?.length > 0 ? (
                   <div className="mt-4 border-t border-gray-100 pt-4">
                     <h4 className="text-sm font-semibold text-gray-700 mb-2">Call History</h4>
-                    <div className="space-y-2">
+                    <div className="space-y-3">
                       {lead.callLogs.map((log: any) => (
-                        <div key={log.id} className="flex justify-between items-center p-2 bg-gray-50 rounded text-sm">
-                          <div>
-                            <span className="font-medium">{log.status || 'Completed'}</span>
-                            {log.duration != null && (
-                              <span className="text-gray-500 ml-2">{Math.round(log.duration / 60)}m {log.duration % 60}s</span>
-                            )}
+                        <div key={log.id} className="bg-gray-50 rounded-lg p-3 text-sm">
+                          <div className="flex justify-between items-center">
+                            <div className="flex items-center gap-2">
+                              <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                                log.status === 'completed' ? 'bg-green-100 text-green-800' :
+                                log.status === 'in-progress' ? 'bg-blue-100 text-blue-800' :
+                                log.status === 'ended' ? 'bg-gray-100 text-gray-700' :
+                                'bg-yellow-100 text-yellow-800'
+                              }`}>
+                                {log.status || 'queued'}
+                              </span>
+                              {log.duration != null && (
+                                <span className="text-gray-500 text-xs">
+                                  {Math.floor(log.duration / 60)}m {log.duration % 60}s
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-xs text-gray-400">
+                              {format(new Date(log.createdAt), 'MMM d, h:mm a')}
+                            </span>
                           </div>
-                          <span className="text-xs text-gray-500">
-                            {format(new Date(log.createdAt), 'MMM d, h:mm a')}
-                          </span>
+                          {log.transcript && (
+                            <details className="mt-2">
+                              <summary className="text-xs text-primary-600 cursor-pointer hover:text-primary-800 font-medium">
+                                View transcript &amp; summary
+                              </summary>
+                              <div className="mt-2 p-2 bg-white border border-gray-200 rounded text-xs text-gray-700 whitespace-pre-wrap max-h-64 overflow-y-auto">
+                                {log.transcript}
+                              </div>
+                            </details>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -1025,27 +1046,54 @@ export default function LeadDetailPage() {
 
         {/* Activity Tab */}
         {activeTab === 'activity' && (
-          <div className="card">
-            <h2 className="text-xl font-bold mb-4">Activity Log</h2>
-            <div className="space-y-3">
-              {lead.activities?.map((activity: any) => (
-                <div key={activity.id} className="p-3 bg-gray-50 rounded">
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <div className="text-sm font-medium">{activity.description}</div>
-                      {activity.user && (
-                        <div className="text-xs text-gray-500">
-                          by {activity.user.firstName} {activity.user.lastName}
-                        </div>
-                      )}
+          <div className="space-y-6">
+
+            {/* Notes (includes AI call summaries) */}
+            {lead.notes?.length > 0 && (
+              <div className="card">
+                <h2 className="text-xl font-bold mb-4">Notes</h2>
+                <div className="space-y-3">
+                  {lead.notes.map((note: any) => (
+                    <div key={note.id} className="p-3 bg-blue-50 border border-blue-100 rounded-lg">
+                      <div className="flex justify-between items-start mb-1">
+                        <span className="text-xs font-medium text-blue-700">
+                          {note.user ? `${note.user.firstName} ${note.user.lastName}` : '🤖 AI'}
+                        </span>
+                        <span className="text-xs text-gray-400">
+                          {format(new Date(note.createdAt), 'MMM d, h:mm a')}
+                        </span>
+                      </div>
+                      <div className="text-sm text-gray-800 whitespace-pre-wrap">{note.content}</div>
                     </div>
-                    <div className="text-xs text-gray-500">
-                      {format(new Date(activity.createdAt), 'MMM d, h:mm a')}
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Activity Log */}
+            <div className="card">
+              <h2 className="text-xl font-bold mb-4">Activity Log</h2>
+              <div className="space-y-3">
+                {lead.activities?.map((activity: any) => (
+                  <div key={activity.id} className="p-3 bg-gray-50 rounded">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <div className="text-sm font-medium">{activity.description}</div>
+                        {activity.user && (
+                          <div className="text-xs text-gray-500">
+                            by {activity.user.firstName} {activity.user.lastName}
+                          </div>
+                        )}
+                      </div>
+                      <div className="text-xs text-gray-500">
+                        {format(new Date(activity.createdAt), 'MMM d, h:mm a')}
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
+
           </div>
         )}
       </main>

@@ -192,15 +192,20 @@ export class CallsService {
       }
     }
 
-    // Append call summary to lead notes
-    if (summary) {
-      const callNote = `\n\n[AI Call Summary - ${new Date().toLocaleDateString()}]\n${summary}`;
-      updates.notes = ((lead.notes ?? '') + callNote).trim();
-    }
-
     if (Object.keys(updates).length > 0) {
       await this.prisma.lead.update({ where: { id: leadId }, data: updates });
       this.logger.log(`Lead ${leadId} updated from AI call analysis: ${Object.keys(updates).join(', ')}`);
+    }
+
+    // Append call summary as a Note record
+    if (summary) {
+      await this.prisma.note.create({
+        data: {
+          leadId,
+          content: `📞 AI Call Summary (${new Date().toLocaleDateString()})\n\n${summary}`,
+        },
+      });
+      this.logger.log(`Note created for lead ${leadId} from AI call summary`);
     }
   }
 }

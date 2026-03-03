@@ -359,6 +359,10 @@ export class LeadsService {
           include: { user: true },
         },
         contract: true,
+        callLogs: {
+          orderBy: { createdAt: 'desc' },
+          take: 20,
+        },
       },
     });
   }
