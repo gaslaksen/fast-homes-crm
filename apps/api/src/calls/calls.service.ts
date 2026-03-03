@@ -19,9 +19,25 @@ export class CallsService {
     }
 
     const customerPhone = formatPhoneNumber(lead.sellerPhone);
-    const customerName = `${lead.sellerFirstName} ${lead.sellerLastName}`.trim();
 
-    const call = await this.vapiService.createOutboundCall(customerPhone, customerName);
+    // Pass full lead context so the AI can have an informed conversation
+    const call = await this.vapiService.createOutboundCall(customerPhone, {
+      sellerFirstName: lead.sellerFirstName ?? undefined,
+      sellerLastName: lead.sellerLastName ?? undefined,
+      propertyAddress: lead.propertyAddress ?? undefined,
+      propertyCity: lead.propertyCity ?? undefined,
+      propertyState: lead.propertyState ?? undefined,
+      propertyZip: lead.propertyZip ?? undefined,
+      propertyType: lead.propertyType ?? undefined,
+      bedrooms: lead.bedrooms ?? undefined,
+      bathrooms: lead.bathrooms ?? undefined,
+      sqft: lead.sqft ?? undefined,
+      askingPrice: lead.askingPrice ?? undefined,
+      timeline: lead.timeline ?? undefined,
+      conditionLevel: lead.conditionLevel ?? undefined,
+      motivationScore: lead.motivationScore ?? undefined,
+      notes: lead.notes ?? undefined,
+    });
 
     const callLog = await this.prisma.callLog.create({
       data: {
@@ -32,7 +48,6 @@ export class CallsService {
       },
     });
 
-    // Log activity
     await this.prisma.activity.create({
       data: {
         leadId,
@@ -72,18 +87,21 @@ export class CallsService {
       case 'call-started':
         updateData.status = 'in-progress';
         break;
+
       case 'call-ended':
         updateData.status = 'ended';
         if (event?.call?.duration) {
           updateData.duration = Math.round(event.call.duration);
         }
         break;
+
       case 'transcript':
         if (event?.transcript) {
           updateData.transcript = event.transcript;
         }
         break;
-      case 'end-of-call-report':
+
+      case 'end-of-call-report': {
         updateData.status = 'completed';
         if (event?.call?.duration) {
           updateData.duration = Math.round(event.call.duration);
@@ -91,7 +109,29 @@ export class CallsService {
         if (event?.transcript) {
           updateData.transcript = event.transcript;
         }
+
+        // Save AI-generated summary and structured analysis
+        const summary = event?.analysis?.summary;
+        const structuredData = event?.analysis?.structuredData;
+        const successEval = event?.analysis?.successEvaluation;
+
+        if (summary || structuredData) {
+          updateData.transcript = [
+            updateData.transcript || '',
+            summary ? `\n\n--- AI SUMMARY ---\n${summary}` : '',
+            successEval !== undefined ? `\n\nCall successful: ${successEval}` : '',
+          ]
+            .join('')
+            .trim();
+        }
+
+        // If the AI extracted useful CAMP data, update the lead
+        if (structuredData && callLog.leadId) {
+          await this.syncStructuredDataToLead(callLog.leadId, structuredData, summary);
+        }
         break;
+      }
+
       default:
         this.logger.debug(`Unhandled webhook event type: ${eventType}`);
     }
@@ -103,18 +143,64 @@ export class CallsService {
       });
     }
 
-    // Log activity for call completion
     if (eventType === 'end-of-call-report' && callLog.leadId) {
+      const duration = updateData.duration;
       await this.prisma.activity.create({
         data: {
           leadId: callLog.leadId,
           type: 'AI_CALL_COMPLETED',
-          description: `AI call completed (${updateData.duration ? `${updateData.duration}s` : 'unknown duration'})`,
+          description: `AI call completed${duration ? ` (${duration}s)` : ''}`,
           metadata: { vapiCallId },
         },
       });
     }
 
     return { received: true };
+  }
+
+  /**
+   * Syncs structured data extracted by Vapi's analysis back onto the lead record.
+   * Only overwrites fields that are currently blank, so manual edits are preserved.
+   */
+  private async syncStructuredDataToLead(
+    leadId: string,
+    data: Record<string, any>,
+    summary?: string,
+  ) {
+    const lead = await this.prisma.lead.findUnique({ where: { id: leadId } });
+    if (!lead) return;
+
+    const updates: Record<string, any> = {};
+
+    if (data.askingPriceMentioned && !lead.askingPrice) {
+      updates.askingPrice = data.askingPriceMentioned;
+    }
+    if (data.timelineDays && !lead.timeline) {
+      updates.timeline = data.timelineDays;
+    }
+    if (data.conditionDescription && !lead.conditionLevel) {
+      // Map free text to enum if possible, otherwise leave it for manual review
+      const lower = data.conditionDescription.toLowerCase();
+      if (lower.includes('excel') || lower.includes('great') || lower.includes('perfect')) {
+        updates.conditionLevel = 'EXCELLENT';
+      } else if (lower.includes('good') || lower.includes('nice')) {
+        updates.conditionLevel = 'GOOD';
+      } else if (lower.includes('fair') || lower.includes('average') || lower.includes('okay')) {
+        updates.conditionLevel = 'FAIR';
+      } else if (lower.includes('poor') || lower.includes('bad') || lower.includes('rough') || lower.includes('needs work') || lower.includes('fixer')) {
+        updates.conditionLevel = 'POOR';
+      }
+    }
+
+    // Append call summary to lead notes
+    if (summary) {
+      const callNote = `\n\n[AI Call Summary - ${new Date().toLocaleDateString()}]\n${summary}`;
+      updates.notes = ((lead.notes ?? '') + callNote).trim();
+    }
+
+    if (Object.keys(updates).length > 0) {
+      await this.prisma.lead.update({ where: { id: leadId }, data: updates });
+      this.logger.log(`Lead ${leadId} updated from AI call analysis: ${Object.keys(updates).join(', ')}`);
+    }
   }
 }
