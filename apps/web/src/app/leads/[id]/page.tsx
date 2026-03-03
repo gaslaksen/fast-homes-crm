@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { leadsAPI, messagesAPI, compsAPI, settingsAPI, photosAPI, pipelineAPI } from '@/lib/api';
+import { leadsAPI, messagesAPI, compsAPI, settingsAPI, photosAPI, pipelineAPI, callsAPI } from '@/lib/api';
 import PropertyPhoto from '@/components/PropertyPhoto';
 import PhotoGallery from '@/components/PhotoGallery';
 import AppNav from '@/components/AppNav';
@@ -53,6 +53,7 @@ export default function LeadDetailPage() {
   const [compsResult, setCompsResult] = useState<any>(null);
   const [aiAnalysis, setAiAnalysis] = useState<any>(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [initiatingCall, setInitiatingCall] = useState(false);
 
   useEffect(() => {
     loadLead();
@@ -166,6 +167,20 @@ export default function LeadDetailPage() {
     }
   };
 
+  const handleAiCall = async () => {
+    setInitiatingCall(true);
+    try {
+      await callsAPI.initiateAiCall(leadId);
+      alert('AI call initiated!');
+      loadLead();
+    } catch (error) {
+      console.error('Failed to initiate AI call:', error);
+      alert('Failed to initiate AI call');
+    } finally {
+      setInitiatingCall(false);
+    }
+  };
+
   const handleToggleAutoRespond = async () => {
     setTogglingAutoRespond(true);
     try {
@@ -234,6 +249,18 @@ export default function LeadDetailPage() {
                   size={60}
                 />
               ) : null}
+              <button
+                onClick={handleAiCall}
+                disabled={initiatingCall || lead.doNotContact}
+                className="btn btn-sm flex items-center gap-1.5"
+                style={{ backgroundColor: '#16a34a', color: 'white', opacity: initiatingCall || lead.doNotContact ? 0.5 : 1 }}
+                title={lead.doNotContact ? 'Lead is on Do Not Contact list' : 'Start AI phone call'}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                  <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" />
+                </svg>
+                {initiatingCall ? 'Calling...' : 'AI Call'}
+              </button>
               <Link href={`/leads/${leadId}/edit`} className="btn btn-primary">
                 Edit Lead
               </Link>

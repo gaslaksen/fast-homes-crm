@@ -12,6 +12,8 @@ import { DripModule } from './drip/drip.module';
 import { SettingsModule } from './settings/settings.module';
 import { PhotosModule } from './photos/photos.module';
 import { PipelineModule } from './pipeline/pipeline.module';
+import { VapiModule } from './vapi/vapi.module';
+import { CallsModule } from './calls/calls.module';
 
 @Module({
   imports: [
@@ -30,6 +32,8 @@ import { PipelineModule } from './pipeline/pipeline.module';
     SettingsModule,
     PhotosModule,
     PipelineModule,
+    VapiModule,
+    CallsModule,
   ],
 })
 export class AppModule {}

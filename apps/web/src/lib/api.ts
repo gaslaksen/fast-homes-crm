@@ -183,6 +183,12 @@ export const pipelineAPI = {
   refreshLeadAnalysis: (id: string) => api.post(`/pipeline/leads/${id}/analysis/refresh`),
 };
 
+// Calls API
+export const callsAPI = {
+  initiateAiCall: (leadId: string) =>
+    api.post('/calls/ai-initiate', { leadId }),
+};
+
 // Photos API
 export const photosAPI = {
   fetchAll: (leadId: string) =>

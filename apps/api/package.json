@@ -19,6 +19,7 @@
     "@nestjs/core": "^10.3.0",
     "@nestjs/platform-express": "^10.4.22",
     "@prisma/client": "^5.8.0",
+    "@vapi-ai/server-sdk": "^0.11.0",
     "axios": "^1.6.5",
     "bcrypt": "^5.1.1",
     "bullmq": "^5.1.0",
