@@ -249,18 +249,6 @@ export default function LeadDetailPage() {
                   size={60}
                 />
               ) : null}
-              <button
-                onClick={handleAiCall}
-                disabled={initiatingCall || lead.doNotContact}
-                className="btn btn-sm flex items-center gap-1.5"
-                style={{ backgroundColor: '#16a34a', color: 'white', opacity: initiatingCall || lead.doNotContact ? 0.5 : 1 }}
-                title={lead.doNotContact ? 'Lead is on Do Not Contact list' : 'Start AI phone call'}
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                  <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" />
-                </svg>
-                {initiatingCall ? 'Calling...' : 'AI Call'}
-              </button>
               <Link href={`/leads/${leadId}/edit`} className="btn btn-primary">
                 Edit Lead
               </Link>
@@ -273,17 +261,23 @@ export default function LeadDetailPage() {
       <div className="bg-white border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <nav className="flex space-x-6 text-sm">
-            {['overview', 'messages', 'comps', 'analysis', 'activity'].map((tab) => (
+            {[
+              { key: 'overview', label: 'Overview' },
+              { key: 'communications', label: 'Communications' },
+              { key: 'comps', label: 'Comps' },
+              { key: 'analysis', label: 'Analysis' },
+              { key: 'activity', label: 'Activity' },
+            ].map((tab) => (
               <button
-                key={tab}
-                onClick={() => handleTabClick(tab)}
+                key={tab.key}
+                onClick={() => handleTabClick(tab.key)}
                 className={`py-3 px-1 border-b-2 font-medium whitespace-nowrap ${
-                  activeTab === tab
+                  activeTab === tab.key
                     ? 'border-primary-500 text-primary-600'
                     : 'border-transparent text-gray-400 hover:text-gray-600'
                 }`}
               >
-                {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                {tab.label}
               </button>
             ))}
           </nav>
@@ -677,13 +671,75 @@ export default function LeadDetailPage() {
           </div>
         )}
 
-        {/* Messages Tab */}
-        {activeTab === 'messages' && (
+        {/* Communications Tab */}
+        {activeTab === 'communications' && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-2">
+            <div className="lg:col-span-2 space-y-6">
+              {/* AI Voice Call Section */}
+              <div className="card">
+                <div className="flex items-center gap-2 mb-4">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-green-600" viewBox="0 0 20 20" fill="currentColor">
+                    <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" />
+                  </svg>
+                  <h2 className="text-xl font-bold">AI Voice Call</h2>
+                </div>
+
+                {lead.sellerPhone && (
+                  <p className="text-sm text-gray-600 mb-3">
+                    Phone: <span className="font-medium text-gray-900">{lead.sellerPhone}</span>
+                  </p>
+                )}
+
+                {lead.doNotContact && (
+                  <div className="mb-3 px-3 py-2 rounded bg-red-50 border border-red-200 text-sm text-red-700">
+                    This lead is on the Do Not Contact list. Calling is disabled.
+                  </div>
+                )}
+
+                <button
+                  onClick={handleAiCall}
+                  disabled={initiatingCall || lead.doNotContact}
+                  className="btn flex items-center gap-2"
+                  style={{ backgroundColor: '#16a34a', color: 'white', opacity: initiatingCall || lead.doNotContact ? 0.5 : 1 }}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                    <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" />
+                  </svg>
+                  {initiatingCall ? 'Initiating Call...' : 'Start AI Call'}
+                </button>
+
+                {/* Call Log History */}
+                {lead.callLogs?.length > 0 ? (
+                  <div className="mt-4 border-t border-gray-100 pt-4">
+                    <h4 className="text-sm font-semibold text-gray-700 mb-2">Call History</h4>
+                    <div className="space-y-2">
+                      {lead.callLogs.map((log: any) => (
+                        <div key={log.id} className="flex justify-between items-center p-2 bg-gray-50 rounded text-sm">
+                          <div>
+                            <span className="font-medium">{log.status || 'Completed'}</span>
+                            {log.duration != null && (
+                              <span className="text-gray-500 ml-2">{Math.round(log.duration / 60)}m {log.duration % 60}s</span>
+                            )}
+                          </div>
+                          <span className="text-xs text-gray-500">
+                            {format(new Date(log.createdAt), 'MMM d, h:mm a')}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="mt-3 text-xs text-gray-400">No calls yet</p>
+                )}
+              </div>
+
+              {/* Divider */}
+              <div className="border-t border-gray-200" />
+
+              {/* Text Messages Section */}
               <div className="card">
                 <div className="flex justify-between items-center mb-4">
-                  <h2 className="text-xl font-bold">Messages</h2>
+                  <h2 className="text-xl font-bold">Text Messages</h2>
                   <button onClick={handleDraftMessage} className="btn btn-primary btn-sm">
                     Draft Message
                   </button>
