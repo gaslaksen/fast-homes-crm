@@ -191,34 +191,60 @@ You will be asked to summarize key findings. Be ready to report:
         backgroundSound: 'office',
         maxDurationSeconds: 600, // 10 min hard cap
         analysisPlan: {
-          summaryPrompt: `Summarize this real estate acquisition call. Include:
+          summaryPlan: {
+            enabled: true,
+            messages: [
+              {
+                role: 'system',
+                content: `You are an expert real estate acquisitions call analyst. Summarize this call in bullet points covering:
 1. Did we reach the intended seller? (yes / no / voicemail)
-2. Property condition (as described)
+2. Property condition (as described by seller)
 3. Asking price mentioned (if any)
 4. Motivation / reason for selling
 5. Timeline to sell
 6. Decision-maker confirmed?
 7. Level of interest: hot / warm / cold / not interested
 8. Agreed next steps (if any)
-Keep it concise — bullet points preferred.`,
-          structuredDataPrompt: `Extract the following data from the call transcript as JSON:`,
-          structuredDataSchema: {
-            type: 'object',
-            properties: {
-              reachedSeller: { type: 'boolean' },
-              leftVoicemail: { type: 'boolean' },
-              conditionDescription: { type: 'string' },
-              askingPriceMentioned: { type: 'number', description: 'Dollar amount if mentioned' },
-              motivationSummary: { type: 'string' },
-              timelineDays: { type: 'number', description: 'Estimated days to close if mentioned' },
-              isDecisionMaker: { type: 'boolean' },
-              interestLevel: { type: 'string', enum: ['hot', 'warm', 'cold', 'not_interested'] },
-              nextSteps: { type: 'string' },
-              callbackRequestedAt: { type: 'string', description: 'Preferred callback time if mentioned' },
+Be concise and factual.`,
+              },
+              {
+                role: 'user',
+                content: 'Here is the transcript:\n\n{{transcript}}\n\nEnded reason: {{endedReason}}',
+              },
+            ],
+          },
+          structuredDataPlan: {
+            enabled: true,
+            schema: {
+              type: 'object',
+              properties: {
+                reachedSeller: { type: 'boolean' },
+                leftVoicemail: { type: 'boolean' },
+                conditionDescription: { type: 'string' },
+                askingPriceMentioned: { type: 'number' },
+                motivationSummary: { type: 'string' },
+                timelineDays: { type: 'number' },
+                isDecisionMaker: { type: 'boolean' },
+                interestLevel: { type: 'string', enum: ['hot', 'warm', 'cold', 'not_interested'] },
+                nextSteps: { type: 'string' },
+                callbackRequestedAt: { type: 'string' },
+              },
             },
           },
-          successEvaluationPrompt: `Was this call successful? A successful call means we either: (1) reached the seller and gathered at least motivation + timeline data, or (2) left a voicemail. Answer with true or false and a brief reason.`,
-          successEvaluationRubric: 'PassFail',
+          successEvaluationPlan: {
+            enabled: true,
+            rubric: 'PassFail',
+            messages: [
+              {
+                role: 'system',
+                content: 'A successful call means we either (1) reached the seller and gathered at least motivation + timeline, or (2) left a voicemail. Answer with true or false only.',
+              },
+              {
+                role: 'user',
+                content: 'Transcript:\n\n{{transcript}}\n\nEnded reason: {{endedReason}}',
+              },
+            ],
+          },
         },
       },
     });
