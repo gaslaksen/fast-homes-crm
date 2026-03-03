@@ -566,9 +566,9 @@ export default function CompsAnalysisPage() {
           <nav className="flex space-x-6 text-sm">
             {[
               { label: 'Overview', href: `/leads/${leadId}` },
-              { label: 'Messages', href: `/leads/${leadId}` },
               { label: 'Comps', href: `/leads/${leadId}/comps-analysis`, active: true },
               { label: 'Analysis', href: `/leads/${leadId}` },
+              { label: 'Messages', href: `/leads/${leadId}` },
               { label: 'Activity', href: `/leads/${leadId}` },
             ].map((item) => (
               <Link

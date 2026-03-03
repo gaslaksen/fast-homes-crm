@@ -263,9 +263,9 @@ export default function LeadDetailPage() {
           <nav className="flex space-x-6 text-sm">
             {[
               { key: 'overview', label: 'Overview' },
-              { key: 'communications', label: 'Communications' },
               { key: 'comps', label: 'Comps' },
               { key: 'analysis', label: 'Analysis' },
+              { key: 'communications', label: 'Messages' },
               { key: 'activity', label: 'Activity' },
             ].map((tab) => (
               <button

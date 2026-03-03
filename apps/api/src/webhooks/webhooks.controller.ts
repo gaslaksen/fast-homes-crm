@@ -6,6 +6,7 @@ import { DripService } from '../drip/drip.service';
 import { SlackLeadService } from './slack-lead.service';
 import { InvestorFuseService } from './investorfuse.service';
 import { formatPhoneNumber, LeadSource } from '@fast-homes/shared';
+import { normalizeLeadAddress } from './address-parser';
 
 @Controller('webhooks')
 export class WebhooksController {
@@ -27,13 +28,15 @@ export class WebhooksController {
 
     try {
       // Map PropertyLeads fields to our schema
-      // Adjust mapping based on actual PropertyLeads payload structure
+      // normalizeLeadAddress handles full address strings like "123 Main St, Austin, TX 78701"
+      const addr = normalizeLeadAddress(body);
+      console.log('📍 Parsed address:', addr);
       const leadData = {
         source: LeadSource.PROPERTY_LEADS,
-        propertyAddress: body.property_address || body.address,
-        propertyCity: body.city,
-        propertyState: body.state,
-        propertyZip: body.zip || body.zipcode,
+        propertyAddress: addr.propertyAddress,
+        propertyCity: addr.propertyCity,
+        propertyState: addr.propertyState,
+        propertyZip: addr.propertyZip,
         sellerFirstName: body.first_name || body.firstName,
         sellerLastName: body.last_name || body.lastName,
         sellerPhone: formatPhoneNumber(body.phone || body.phoneNumber),
@@ -80,12 +83,14 @@ export class WebhooksController {
     console.log('📥 Google Ads webhook received:', body);
 
     try {
+      const addr = normalizeLeadAddress(body);
+      console.log('📍 Parsed address:', addr);
       const leadData = {
         source: LeadSource.GOOGLE_ADS,
-        propertyAddress: body.propertyAddress || body.address,
-        propertyCity: body.propertyCity || body.city,
-        propertyState: body.propertyState || body.state,
-        propertyZip: body.propertyZip || body.zip,
+        propertyAddress: addr.propertyAddress,
+        propertyCity: addr.propertyCity,
+        propertyState: addr.propertyState,
+        propertyZip: addr.propertyZip,
         sellerFirstName: body.sellerFirstName || body.firstName || body.name?.split(' ')[0] || 'Unknown',
         sellerLastName: body.sellerLastName || body.lastName || body.name?.split(' ').slice(1).join(' ') || '',
         sellerPhone: formatPhoneNumber(body.sellerPhone || body.phone),
