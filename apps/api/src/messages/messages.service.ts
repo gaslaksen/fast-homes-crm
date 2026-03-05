@@ -305,14 +305,29 @@ export class MessagesService {
     }
 
     let purpose: string;
+    const campComplete = !nextField;
+
     if (nextField) {
       purpose = justExtractedSummary
         ? `${justExtractedSummary} Then ask about their ${nextField.label} — ${nextField.question}.`
         : `Continue the conversation naturally. Ask about their ${nextField.label} — ${nextField.question}.`;
     } else {
-      purpose = justExtractedSummary
-        ? `${justExtractedSummary} All CAMP information has been gathered. Summarize what you know, thank the seller, and set expectations for next steps.`
-        : 'All CAMP information gathered. Summarize, thank the seller, and set expectations for next steps.';
+      // CAMP is complete — close the conversation warmly, no more questions
+      const knownSummary = [
+        lead.timeline != null ? `timeline of ${lead.timeline === 365 ? 'no specific urgency' : `~${lead.timeline} days`}` : null,
+        lead.askingPrice != null ? `asking price around $${Number(lead.askingPrice).toLocaleString()}` : null,
+        lead.conditionLevel != null ? `property in ${lead.conditionLevel} condition` : null,
+        lead.ownershipStatus != null ? `ownership: ${lead.ownershipStatus.replace('_', ' ')}` : null,
+      ].filter(Boolean).join(', ');
+
+      purpose = `CAMP COMPLETE — DO NOT ASK ANY MORE QUESTIONS. This is your closing message.
+What you know: ${knownSummary || 'gathered all key details'}.
+Your message must:
+1. Thank ${lead.sellerFirstName} sincerely for their time and for sharing
+2. Briefly confirm what you learned (price, timeline, condition) in a natural way
+3. Tell them someone from the Fast Homes team will review and reach out soon to discuss next steps
+4. Keep it warm and brief — under 160 characters if possible
+5. Do NOT ask anything. Do NOT request more info. End the conversation professionally.`;
     }
 
     const knownData = {
@@ -349,8 +364,8 @@ export class MessagesService {
       }
       const messageBody = drafts[selectedTone];
 
-      // If all CAMP is complete, create a follow-up task for the agent
-      if (!nextField) {
+      // If all CAMP is complete, create follow-up task and shut off auto-respond
+      if (campComplete) {
         try {
           await this.prisma.task.create({
             data: {
@@ -364,6 +379,16 @@ export class MessagesService {
         } catch (err) {
           this.logger.warn(`Could not create follow-up task for lead ${leadId}: ${err.message}`);
         }
+
+        // Turn off auto-respond so no more AI messages fire after the closing
+        await this.prisma.lead.update({
+          where: { id: leadId },
+          data: { autoRespond: false, status: 'CAMP_COMPLETE' },
+        }).catch(() => {
+          // status might not accept CAMP_COMPLETE — just turn off auto-respond
+          this.prisma.lead.update({ where: { id: leadId }, data: { autoRespond: false } });
+        });
+        this.logger.log(`🔕 Auto-respond disabled for lead ${leadId} — CAMP complete, closing message sent`);
       }
 
       await this.sendMessage(leadId, messageBody);
@@ -706,70 +731,39 @@ export class MessagesService {
       },
     });
 
-    // Extract CAMP data using keyword matching (works without AI)
-    const lower = body.toLowerCase();
+    // Extract CAMP data using Claude AI — same path as real inbound messages
     const updateData: any = {};
+    try {
+      const allMessages = await this.prisma.message.findMany({
+        where: { leadId },
+        orderBy: { createdAt: 'asc' },
+        select: { body: true },
+      });
+      const messageTexts = [...allMessages.map(m => m.body), body];
+      const extracted = await this.scoringService.extractFromMessages(messageTexts);
+      const confidence = extracted.confidence ?? 100;
 
-    // Timeline — look for day/week/month mentions
-    const dayMatch = lower.match(/(\d+)\s*days?/);
-    const weekMatch = lower.match(/(\d+)\s*weeks?/);
-    const monthMatch = lower.match(/(\d+)\s*months?/);
-    if (dayMatch) {
-      updateData.timeline = parseInt(dayMatch[1]);
-    } else if (weekMatch) {
-      updateData.timeline = parseInt(weekMatch[1]) * 7;
-    } else if (monthMatch) {
-      updateData.timeline = parseInt(monthMatch[1]) * 30;
-    } else if (lower.includes('asap') || lower.includes('right away') || lower.includes('immediately')) {
-      updateData.timeline = 7;
+      if (confidence >= 50) {
+        if (extracted.timeline_days != null) updateData.timeline = extracted.timeline_days;
+        if (extracted.asking_price) updateData.askingPrice = extracted.asking_price;
+        if (extracted.condition_level) updateData.conditionLevel = extracted.condition_level;
+        if (extracted.ownership_status) updateData.ownershipStatus = extracted.ownership_status;
+        if (extracted.seller_motivation) updateData.sellerMotivation = extracted.seller_motivation;
+        if (extracted.distress_signals?.length) updateData.distressSignals = extracted.distress_signals;
+        if (extracted.asking_price_high) updateData._askingPriceHigh = extracted.asking_price_high;
+        if (extracted.asking_price_raw) updateData._askingPriceRaw = extracted.asking_price_raw;
+      }
+    } catch (err) {
+      this.logger.error(`simulateReply extraction failed: ${err.message}`);
     }
 
-    // Condition
-    if (lower.includes('needs a lot of work') || lower.includes('major repair') || lower.includes('tear down') || lower.includes('distressed')) {
-      updateData.conditionLevel = 'poor';
-    } else if (lower.includes('needs replacing') || lower.includes('outdated') || lower.includes('needs work') || lower.includes('some repair')) {
-      updateData.conditionLevel = 'fair';
-    } else if (lower.includes('move-in ready') || lower.includes('great shape') || lower.includes('excellent')) {
-      updateData.conditionLevel = 'excellent';
-    } else if (lower.includes('good condition') || lower.includes('decent')) {
-      updateData.conditionLevel = 'good';
-    }
-
-    // Ownership
-    if (lower.includes('sole owner') || lower.includes('only owner') || lower.includes('i am the sole') || lower.includes('just me')) {
-      updateData.ownershipStatus = 'sole_owner';
-    } else if (lower.includes('co-own') || lower.includes('spouse') || lower.includes('partner') || lower.includes('together')) {
-      updateData.ownershipStatus = 'co_owner';
-    } else if (lower.includes('inherited') || lower.includes('heir')) {
-      updateData.ownershipStatus = 'heir';
-    }
-
-    // Asking price
-    const priceMatch = lower.match(/\$\s*([\d,]+(?:\.\d+)?)/);
-    const priceWordMatch = lower.match(/([\d,]+(?:\.\d+)?)\s*(?:thousand|k\b)/i);
-    if (priceMatch) {
-      updateData.askingPrice = parseFloat(priceMatch[1].replace(/,/g, ''));
-    } else if (priceWordMatch) {
-      updateData.askingPrice = parseFloat(priceWordMatch[1].replace(/,/g, '')) * 1000;
-    }
-
-    // Distress signals
-    const signals: string[] = [];
-    if (lower.includes('vacant') || lower.includes('empty')) signals.push('vacant');
-    if (lower.includes('foreclos')) signals.push('foreclosure');
-    if (lower.includes('code violation')) signals.push('code_violations');
-    if (lower.includes('roof') || lower.includes('foundation') || lower.includes('structural')) signals.push('major_repairs');
-    if (lower.includes('relocat') || lower.includes('moving')) signals.push('relocation');
-    if (signals.length > 0) updateData.distressSignals = signals;
-
-    if (Object.keys(updateData).length > 0) {
+    if (Object.keys(updateData).filter(k => !k.startsWith('_')).length > 0) {
       await this.prisma.lead.update({
         where: { id: leadId },
-        data: updateData,
+        data: Object.fromEntries(Object.entries(updateData).filter(([k]) => !k.startsWith('_'))),
       });
-      this.logger.log(`Demo: Updated lead ${leadId} with extracted data: ${JSON.stringify(updateData)}`);
+      this.logger.log(`💾 simulateReply: updated lead ${leadId}: ${JSON.stringify(updateData)}`);
 
-      // Refresh CAMP flags and rescore
       await this.scoringService.refreshCampFlags(leadId);
       await this.rescoreLead(leadId);
     }
