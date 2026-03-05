@@ -239,7 +239,19 @@ export class MessagesService {
     // Build a description of what was just extracted for acknowledgment
     const justExtractedDescriptions: string[] = [];
     if (justExtracted) {
-      if (justExtracted.askingPrice != null) justExtractedDescriptions.push(`their asking price is $${Number(justExtracted.askingPrice).toLocaleString()}`);
+      if (justExtracted.askingPrice != null) {
+        // If seller gave a range, acknowledge both ends naturally
+        if (justExtracted._askingPriceHigh) {
+          const lo = Number(justExtracted.askingPrice).toLocaleString();
+          const hi = Number(justExtracted._askingPriceHigh).toLocaleString();
+          justExtractedDescriptions.push(`their asking price range is $${lo}–$${hi}`);
+        } else {
+          justExtractedDescriptions.push(`their asking price is $${Number(justExtracted.askingPrice).toLocaleString()}`);
+        }
+      } else if (justExtracted._askingPriceRaw) {
+        // AI saw a price-like answer but couldn't pin down a number — still acknowledge it
+        justExtractedDescriptions.push(`they mentioned a price of "${justExtracted._askingPriceRaw}" (treat this as their ballpark)`);
+      }
       if (justExtracted.timeline != null) justExtractedDescriptions.push(`their timeline is ${justExtracted.timeline} days`);
       if (justExtracted.conditionLevel != null) justExtractedDescriptions.push(`the property condition is ${justExtracted.conditionLevel}`);
       if (justExtracted.ownershipStatus != null) justExtractedDescriptions.push(`their ownership status is ${justExtracted.ownershipStatus}`);
@@ -512,6 +524,11 @@ export class MessagesService {
         if (extracted.distress_signals) updateData.distressSignals = extracted.distress_signals;
         if (extracted.ownership_status) updateData.ownershipStatus = extracted.ownership_status;
         if (extracted.seller_motivation) updateData.sellerMotivation = extracted.seller_motivation;
+
+        // Pass raw price text through so the AI response can acknowledge it naturally
+        // even when the parsed number is uncertain (e.g. "70 to 80" → "around $70k–$80k")
+        if (extracted.asking_price_raw) updateData._askingPriceRaw = extracted.asking_price_raw;
+        if (extracted.asking_price_high) updateData._askingPriceHigh = extracted.asking_price_high;
 
         if (Object.keys(updateData).length > 0) {
           await this.prisma.lead.update({

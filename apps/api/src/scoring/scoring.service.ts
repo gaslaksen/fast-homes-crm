@@ -226,20 +226,49 @@ export class ScoringService {
     const recentMessages = messages.slice(-10);
     const conversationText = recentMessages.join('\n\n');
 
-    const prompt = `You are analyzing text messages from a seller about their property. Extract key information:
+    const prompt = `You are analyzing SMS text messages from a property seller in a real estate context. Extract key information, being smart about informal language.
 
 Conversation:
 ${conversationText}
 
-Extract and return ONLY a JSON object with these fields (use null if not found):
+IMPORTANT RULES FOR EXTRACTION:
+
+**Asking Price** — sellers text casually. Apply these rules in order:
+1. Explicit full number: "$75,000" → 75000. "$1.2M" → 1200000.
+2. "k" shorthand: "75k", "75K" → 75000. "1.2M" → 1200000.
+3. Bare numbers in real estate context: if someone says "70", "80", "150", "250" with no unit,
+   assume THOUSANDS for residential property (the context here is always residential real estate).
+   So "70" → 70000, "around 80" → 80000.
+4. Ranges like "70 to 80", "between 70 and 80", "maybe 70 or 80" → use the MIDPOINT as asking_price
+   (e.g. 75000) AND set asking_price_high to the upper bound.
+5. "Maybe 70" / "around 70" / "like 70" — still extract 70000, confidence just lower.
+6. Only return null if there is genuinely NO price information at all.
+
+**Timeline** — similarly casual:
+- "30 days", "a month" → 30
+- "couple months" → 60
+- "ASAP", "right away", "yesterday" → 7
+- "few weeks" → 21
+- "6 months" → 180
+- "not in a rush", "whenever" → 180
+
+**Condition** — read between the lines:
+- "needs work", "fixer", "rough shape", "some issues" → "poor"
+- "pretty good", "mostly updated" → "good"
+- "move-in ready", "renovated", "updated" → "excellent"
+- "okay", "average", "some repairs" → "fair"
+
+Extract and return ONLY a JSON object:
 {
-  "timeline_days": <number or null> (how soon they want to sell, in days),
-  "asking_price": <number or null> (their asking/target price),
+  "timeline_days": <number or null>,
+  "asking_price": <number or null> (always in full dollars, e.g. 75000 not 75),
+  "asking_price_high": <number or null> (upper end if seller gave a range, else null),
+  "asking_price_raw": <string or null> (exactly what seller said, e.g. "70 to 80"),
   "condition_level": <"excellent"|"good"|"fair"|"poor"|"distressed" or null>,
-  "distress_signals": <array of strings or []> (e.g., ["vacant", "foreclosure", "code_violations", "major_repairs"]),
+  "distress_signals": <array of strings or []>,
   "ownership_status": <"sole_owner"|"co_owner"|"heir"|"not_owner" or null>,
-  "seller_motivation": <string or null> (why they want to sell — e.g. "divorce", "relocation", "financial_distress", "inherited", "tired_landlord", "behind_on_mortgage", "downsizing", "death_in_family", "other"),
-  "confidence": <number 0-100> (your overall confidence in these extractions based on how clearly the seller expressed them)
+  "seller_motivation": <string or null>,
+  "confidence": <number 0-100>
 }
 
 Return ONLY valid JSON, no other text.`;
@@ -639,10 +668,21 @@ Return ONLY a JSON object:
     // Build acknowledgment if something was just extracted
     let ack = '';
     if (extracted) {
-      if (extracted.askingPrice != null) ack = `Got it, $${Number(extracted.askingPrice).toLocaleString()}. `;
-      else if (extracted.timeline != null) ack = `${extracted.timeline} days — thanks for letting me know. `;
-      else if (extracted.conditionLevel != null) ack = `Thanks for the details on the condition. `;
-      else if (extracted.ownershipStatus != null) ack = `Good to know about the ownership. `;
+      if (extracted.askingPrice != null && extracted._askingPriceHigh != null) {
+        const lo = Number(extracted.askingPrice).toLocaleString();
+        const hi = Number(extracted._askingPriceHigh).toLocaleString();
+        ack = `Got it, somewhere in the $${lo}–$${hi} range. `;
+      } else if (extracted.askingPrice != null) {
+        ack = `Got it, around $${Number(extracted.askingPrice).toLocaleString()}. `;
+      } else if (extracted._askingPriceRaw) {
+        ack = `Got it, noted the ${extracted._askingPriceRaw}. `;
+      } else if (extracted.timeline != null) {
+        ack = `${extracted.timeline} days — thanks for letting me know. `;
+      } else if (extracted.conditionLevel != null) {
+        ack = `Thanks for the details on the condition. `;
+      } else if (extracted.ownershipStatus != null) {
+        ack = `Good to know about the ownership. `;
+      }
     }
 
     // Determine next missing CAMP field: Priority → Money → Challenge → Authority

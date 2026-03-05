@@ -155,6 +155,8 @@ export interface ScoringResult {
 export interface AIExtractionResult {
   timeline_days?: number;
   asking_price?: number;
+  asking_price_high?: number;    // upper bound when seller gives a range (e.g. "70 to 80")
+  asking_price_raw?: string;     // exactly what seller said, for natural acknowledgment
   condition_level?: string;
   distress_signals?: string[];
   ownership_status?: string;
