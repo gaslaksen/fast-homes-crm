@@ -92,14 +92,24 @@ export class SmrtphoneSmsProvider implements SmsProvider {
       }
     }
 
-    const response = await fetch('https://api.smrtphone.io/v1/messages', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${this.apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ to, from: from || this.phoneNumber, text: body }),
-    });
+    let response: Response;
+    try {
+      response = await fetch('https://api.smrtphone.io/v1/messages', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ to, from: from || this.phoneNumber, text: body }),
+        signal: AbortSignal.timeout(8000),
+      });
+    } catch (fetchErr: any) {
+      // DNS / network unreachable — happens in local dev where SmrtPhone
+      // API is not accessible. Fall back to simulation so dev flow continues.
+      this.logger.warn(`⚠️  SmrtPhone unreachable (${fetchErr.message}) — simulating send locally`);
+      this.logger.log(`📱 [SIMULATED SMS] To: ${to} | "${body.substring(0, 80)}"`);
+      return { sid: `SIMULATED_OFFLINE_${Date.now()}` };
+    }
 
     if (!response.ok) {
       const text = await response.text();

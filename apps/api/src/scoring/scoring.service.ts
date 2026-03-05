@@ -279,9 +279,8 @@ Return ONLY valid JSON, no other text.`;
 
     try {
       const response = await this.anthropic.messages.create({
-        model: 'claude-3-5-haiku-20241022',
+        model: 'claude-haiku-4-5',
         max_tokens: 600,
-        temperature: 0.1,
         system: 'You extract structured data from real estate seller conversations. Always respond with valid JSON only. No markdown, no explanation — just the JSON object.',
         messages: [{ role: 'user', content: prompt }],
       });
@@ -308,7 +307,7 @@ Return ONLY valid JSON, no other text.`;
 
     try {
       const response = await this.anthropic.messages.create({
-        model: 'claude-3-5-haiku-20241022',
+        model: 'claude-haiku-4-5',
         max_tokens: 10,
         system: 'Classify the sentiment of this seller text message. Reply with exactly one word: positive, neutral, negative, or hesitant.',
         messages: [{ role: 'user', content: message }],
@@ -605,7 +604,7 @@ Return ONLY a JSON object:
       anthropicMessages.push({ role: 'user', content: prompt });
 
       const response = await this.anthropic.messages.create({
-        model: 'claude-3-5-haiku-20241022',
+        model: 'claude-haiku-4-5',
         max_tokens: 500,
         system: systemMessage,
         messages: anthropicMessages,
