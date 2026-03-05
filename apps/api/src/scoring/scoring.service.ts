@@ -1,21 +1,25 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import OpenAI from 'openai';
+import Anthropic from '@anthropic-ai/sdk';
 import { ScoringInput, ScoringResult, AIExtractionResult } from '@fast-homes/shared';
 import { calculateScoreBand, calculateABCDFit } from '@fast-homes/shared';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class ScoringService {
-  private openai: OpenAI;
+  private readonly logger = new Logger(ScoringService.name);
+  private anthropic: Anthropic;
 
   constructor(
     private config: ConfigService,
     private prisma: PrismaService,
   ) {
-    const apiKey = this.config.get<string>('OPENAI_API_KEY');
+    const apiKey = this.config.get<string>('ANTHROPIC_API_KEY');
     if (apiKey) {
-      this.openai = new OpenAI({ apiKey });
+      this.anthropic = new Anthropic({ apiKey });
+      this.logger.log('🤖 ScoringService using Anthropic Claude');
+    } else {
+      this.logger.warn('⚠️  ANTHROPIC_API_KEY not set — AI features disabled, using fallback templates');
     }
   }
 
@@ -218,7 +222,7 @@ export class ScoringService {
    * Only uses the last 10 messages to keep context focused and costs low.
    */
   async extractFromMessages(messages: string[]): Promise<AIExtractionResult> {
-    if (!this.openai || messages.length === 0) {
+    if (!this.anthropic || messages.length === 0) {
       return {};
     }
 
@@ -274,30 +278,23 @@ Extract and return ONLY a JSON object:
 Return ONLY valid JSON, no other text.`;
 
     try {
-      const response = await this.openai.chat.completions.create({
-        model: 'gpt-4o-mini',
-        messages: [
-          {
-            role: 'system',
-            content: 'You extract structured data from conversations. Always respond with valid JSON only.',
-          },
-          {
-            role: 'user',
-            content: prompt,
-          },
-        ],
+      const response = await this.anthropic.messages.create({
+        model: 'claude-3-5-haiku-20241022',
+        max_tokens: 600,
         temperature: 0.1,
-        max_tokens: 500,
+        system: 'You extract structured data from real estate seller conversations. Always respond with valid JSON only. No markdown, no explanation — just the JSON object.',
+        messages: [{ role: 'user', content: prompt }],
       });
 
-      const content = response.choices[0]?.message?.content?.trim();
+      const content = (response.content[0] as any)?.text?.trim();
       if (!content) return {};
 
-      // Parse JSON response
-      const extracted = JSON.parse(content);
+      // Strip markdown code fences if model adds them
+      const cleaned = content.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
+      const extracted = JSON.parse(cleaned);
       return extracted;
     } catch (error) {
-      console.error('AI extraction failed:', error);
+      this.logger.error('AI extraction failed:', error.message);
       return {};
     }
   }
@@ -307,23 +304,17 @@ Return ONLY valid JSON, no other text.`;
    * Used to pick the right response tone automatically.
    */
   async detectSentiment(message: string): Promise<'positive' | 'neutral' | 'negative' | 'hesitant'> {
-    if (!this.openai || !message) return 'neutral';
+    if (!this.anthropic || !message) return 'neutral';
 
     try {
-      const response = await this.openai.chat.completions.create({
-        model: 'gpt-4o-mini',
-        messages: [
-          {
-            role: 'system',
-            content: 'Classify the sentiment of this seller text message. Reply with exactly one word: positive, neutral, negative, or hesitant.',
-          },
-          { role: 'user', content: message },
-        ],
-        temperature: 0,
+      const response = await this.anthropic.messages.create({
+        model: 'claude-3-5-haiku-20241022',
         max_tokens: 10,
+        system: 'Classify the sentiment of this seller text message. Reply with exactly one word: positive, neutral, negative, or hesitant.',
+        messages: [{ role: 'user', content: message }],
       });
 
-      const raw = response.choices[0]?.message?.content?.trim().toLowerCase() ?? 'neutral';
+      const raw = (response.content[0] as any)?.text?.trim().toLowerCase() ?? 'neutral';
       if (['positive', 'neutral', 'negative', 'hesitant'].includes(raw)) {
         return raw as 'positive' | 'neutral' | 'negative' | 'hesitant';
       }
@@ -490,7 +481,7 @@ Return ONLY valid JSON, no other text.`;
     lead?: { status: string; askingPrice?: number | null; timeline?: number | null; conditionLevel?: string | null; ownershipStatus?: string | null },
     messages?: { direction: string; body: string }[],
   ): Promise<{ direct: string; friendly: string; professional: string }> {
-    if (!this.openai) {
+    if (!this.anthropic) {
       // Fallback templates if no AI
       return this.getDefaultMessageDrafts(context);
     }
@@ -601,34 +592,34 @@ Return ONLY a JSON object:
 }`;
 
     try {
-      const openaiMessages: any[] = [
-        { role: 'system', content: systemMessage },
-      ];
+      // Anthropic uses system param separately; user/assistant messages only in messages array
+      // Few-shot examples are passed as alternating user/assistant turns
+      const anthropicMessages: Anthropic.MessageParam[] = [];
 
-      // Add few-shot examples if available
       for (const example of fewShotMessages) {
-        openaiMessages.push({
-          role: example.role,
-          content: example.content,
-        });
+        // Map 'system' role examples to 'user' so Anthropic accepts them
+        const role = example.role === 'assistant' ? 'assistant' : 'user';
+        anthropicMessages.push({ role, content: example.content });
       }
 
-      openaiMessages.push({ role: 'user', content: prompt });
+      anthropicMessages.push({ role: 'user', content: prompt });
 
-      const response = await this.openai.chat.completions.create({
-        model: 'gpt-4o-mini',
-        messages: openaiMessages,
-        temperature: 0.7,
-        max_tokens: 400,
+      const response = await this.anthropic.messages.create({
+        model: 'claude-3-5-haiku-20241022',
+        max_tokens: 500,
+        system: systemMessage,
+        messages: anthropicMessages,
       });
 
-      const content = response.choices[0]?.message?.content?.trim();
+      const content = (response.content[0] as any)?.text?.trim();
       if (!content) return this.getDefaultMessageDrafts(context);
 
-      const drafts = JSON.parse(content);
+      // Strip markdown code fences if model adds them
+      const cleaned = content.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
+      const drafts = JSON.parse(cleaned);
       return drafts;
     } catch (error) {
-      console.error('AI draft generation failed:', error);
+      this.logger.error('AI draft generation failed:', error.message);
       return this.getDefaultMessageDrafts(context);
     }
   }
