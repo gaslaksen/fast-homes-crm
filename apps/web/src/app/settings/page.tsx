@@ -19,6 +19,11 @@ export default function SettingsPage() {
   const [demoMode, setDemoMode] = useState(false);
   const [togglingDemo, setTogglingDemo] = useState(false);
   const [sendingDemo, setSendingDemo] = useState(false);
+  const [aiSmsEnabled, setAiSmsEnabled] = useState(false);
+  const [aiCallEnabled, setAiCallEnabled] = useState(false);
+  const [callDelaySec, setCallDelaySec] = useState(120);
+  const [togglingAiSms, setTogglingAiSms] = useState(false);
+  const [togglingAiCall, setTogglingAiCall] = useState(false);
 
   useEffect(() => {
     const load = async () => {
@@ -30,6 +35,9 @@ export default function SettingsPage() {
         setRetryDelayHours(s.retryDelayMs / 3600000);
         setMaxRetries(s.maxRetries);
         setDemoMode(s.demoMode ?? false);
+        setAiSmsEnabled(s.aiSmsEnabled ?? false);
+        setAiCallEnabled(s.aiCallEnabled ?? false);
+        setCallDelaySec((s.callDelayMs ?? 120000) / 1000);
       } catch (error) {
         console.error('Failed to load drip settings:', error);
       } finally {
@@ -49,6 +57,7 @@ export default function SettingsPage() {
         retryDelayMs: Math.round(retryDelayHours * 3600000),
         maxRetries,
         demoMode,
+        callDelayMs: Math.round(callDelaySec * 1000),
       });
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
@@ -190,6 +199,114 @@ export default function SettingsPage() {
                 Settings saved successfully
               </span>
             )}
+          </div>
+        </div>
+
+        {/* AI Outreach Card */}
+        <div className="card max-w-2xl mt-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-1">AI Outreach</h3>
+          <p className="text-sm text-gray-600 mb-5">
+            Control whether AI automatically contacts new leads. Turn both off to receive leads without any outreach firing.
+            <span className="block mt-1 text-amber-600 font-medium">
+              ⚠️ Keep both OFF until you&apos;re ready — only test numbers will receive messages while TEST_MODE is active.
+            </span>
+          </p>
+
+          {/* AI SMS Toggle */}
+          <div className="flex items-start justify-between py-4 border-b border-gray-100">
+            <div className="flex-1 mr-6">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-gray-900">AI Text Messages (SMS)</span>
+                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${aiSmsEnabled ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                  {aiSmsEnabled ? 'ON' : 'OFF'}
+                </span>
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                When a new lead arrives, AI sends the first text and handles the CAMP qualification conversation via SmrtPhone.
+              </p>
+            </div>
+            <button
+              type="button"
+              disabled={togglingAiSms}
+              onClick={async () => {
+                setTogglingAiSms(true);
+                const newValue = !aiSmsEnabled;
+                try {
+                  const res = await settingsAPI.updateDrip({ aiSmsEnabled: newValue });
+                  setAiSmsEnabled(res.data.aiSmsEnabled);
+                } catch (err: any) {
+                  alert('Failed to update: ' + (err.response?.data?.message || err.message));
+                } finally {
+                  setTogglingAiSms(false);
+                }
+              }}
+              className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${
+                aiSmsEnabled ? 'bg-green-500' : 'bg-gray-300'
+              } ${togglingAiSms ? 'opacity-50' : ''}`}
+            >
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${aiSmsEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+            </button>
+          </div>
+
+          {/* AI Call Toggle */}
+          <div className="flex items-start justify-between py-4 border-b border-gray-100">
+            <div className="flex-1 mr-6">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-gray-900">AI Phone Calls (Vapi)</span>
+                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${aiCallEnabled ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                  {aiCallEnabled ? 'ON' : 'OFF'}
+                </span>
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                After the call delay below, &ldquo;Alex&rdquo; calls the seller to gather CAMP details. Call results sync back to the lead record automatically.
+              </p>
+            </div>
+            <button
+              type="button"
+              disabled={togglingAiCall}
+              onClick={async () => {
+                setTogglingAiCall(true);
+                const newValue = !aiCallEnabled;
+                try {
+                  const res = await settingsAPI.updateDrip({ aiCallEnabled: newValue });
+                  setAiCallEnabled(res.data.aiCallEnabled);
+                } catch (err: any) {
+                  alert('Failed to update: ' + (err.response?.data?.message || err.message));
+                } finally {
+                  setTogglingAiCall(false);
+                }
+              }}
+              className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${
+                aiCallEnabled ? 'bg-green-500' : 'bg-gray-300'
+              } ${togglingAiCall ? 'opacity-50' : ''}`}
+            >
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${aiCallEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+            </button>
+          </div>
+
+          {/* Call Delay */}
+          <div className="pt-4">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Call Delay (seconds)
+            </label>
+            <p className="text-xs text-gray-500 mb-2">
+              How long after a new lead arrives before the AI call fires. Default is 120s (2 minutes) — gives the seller time to see your text first.
+            </p>
+            <div className="flex items-center gap-3">
+              <input
+                type="number"
+                min={0}
+                value={callDelaySec}
+                onChange={(e) => setCallDelaySec(Number(e.target.value))}
+                className="input w-32"
+              />
+              <span className="text-sm text-gray-500">seconds ({Math.round(callDelaySec / 60 * 10) / 10} min)</span>
+            </div>
+            <div className="mt-3">
+              <button onClick={handleSave} disabled={saving} className="btn btn-secondary text-sm">
+                {saving ? 'Saving...' : 'Save Call Delay'}
+              </button>
+            </div>
           </div>
         </div>
 

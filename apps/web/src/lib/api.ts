@@ -153,6 +153,9 @@ export const settingsAPI = {
     retryDelayMs?: number;
     maxRetries?: number;
     demoMode?: boolean;
+    aiSmsEnabled?: boolean;
+    aiCallEnabled?: boolean;
+    callDelayMs?: number;
   }) => api.patch('/settings/drip', data),
   sendDemoLead: () => api.post('/settings/drip/demo-lead'),
 };

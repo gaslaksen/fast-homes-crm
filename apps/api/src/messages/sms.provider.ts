@@ -1,5 +1,44 @@
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+
+// ---------------------------------------------------------------------------
+// Safety Guard — blocks SMS sends when TEST_MODE is enabled
+// ---------------------------------------------------------------------------
+const safetyLogger = new Logger('SmsSafetyGuard');
+
+export function checkSmsAllowed(
+  to: string,
+  config: ConfigService,
+): { allowed: boolean; reason?: string } {
+  const testMode = config.get<string>('SMRTPHONE_TEST_MODE', 'false').toLowerCase() === 'true';
+
+  if (!testMode) {
+    return { allowed: true };
+  }
+
+  const rawList = config.get<string>('SMRTPHONE_ALLOWED_NUMBERS', '');
+  const allowedNumbers = rawList
+    .split(',')
+    .map((n) => n.trim().replace(/\D/g, ''))
+    .filter(Boolean);
+
+  const normalizedTo = to.replace(/\D/g, '');
+
+  // Match last 10 digits to handle +1 prefix differences
+  const isAllowed = allowedNumbers.some(
+    (n) => normalizedTo.endsWith(n.slice(-10)) || n.endsWith(normalizedTo.slice(-10)),
+  );
+
+  if (!isAllowed) {
+    safetyLogger.warn(
+      `🚫 TEST_MODE: Blocked SMS to ${to} — not in allowed list. Add to SMRTPHONE_ALLOWED_NUMBERS or set SMRTPHONE_TEST_MODE=false`,
+    );
+    return { allowed: false, reason: `TEST_MODE active — ${to} not in SMRTPHONE_ALLOWED_NUMBERS` };
+  }
+
+  safetyLogger.log(`✅ TEST_MODE: Allowed SMS to ${to}`);
+  return { allowed: true };
+}
 import Twilio from 'twilio';
 
 export interface SmsProvider {
@@ -37,6 +76,7 @@ export class SmrtphoneSmsProvider implements SmsProvider {
   constructor(
     private readonly apiKey: string,
     private readonly phoneNumber: string,
+    private readonly config?: ConfigService,
   ) {}
 
   isConfigured() {
@@ -44,6 +84,14 @@ export class SmrtphoneSmsProvider implements SmsProvider {
   }
 
   async sendSms(to: string, from: string, body: string): Promise<{ sid: string }> {
+    // Safety guard — respect TEST_MODE allowlist before any outbound send
+    if (this.config) {
+      const check = checkSmsAllowed(to, this.config);
+      if (!check.allowed) {
+        return { sid: `BLOCKED_TEST_MODE_${Date.now()}` };
+      }
+    }
+
     const response = await fetch('https://api.smrtphone.io/v1/messages', {
       method: 'POST',
       headers: {
@@ -90,7 +138,11 @@ export function createSmsProvider(config: ConfigService): SmsProvider {
 
   if (smrtphoneKey) {
     logger.log('📞 Using Smrtphone SMS provider');
-    return new SmrtphoneSmsProvider(smrtphoneKey, smrtphoneNumber);
+    const testMode = config.get<string>('SMRTPHONE_TEST_MODE', 'false');
+    if (testMode.toLowerCase() === 'true') {
+      logger.warn('🔒 SMRTPHONE_TEST_MODE=true — SMS sends restricted to SMRTPHONE_ALLOWED_NUMBERS');
+    }
+    return new SmrtphoneSmsProvider(smrtphoneKey, smrtphoneNumber, config);
   }
 
   const twilioSid = config.get<string>('TWILIO_ACCOUNT_SID');

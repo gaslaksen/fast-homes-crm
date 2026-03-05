@@ -25,4 +25,17 @@ export class UpdateDripDto {
   @IsOptional()
   @IsBoolean()
   demoMode?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  aiSmsEnabled?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  aiCallEnabled?: boolean;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  callDelayMs?: number;
 }

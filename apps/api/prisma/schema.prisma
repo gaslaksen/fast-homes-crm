@@ -317,6 +317,12 @@ model DripSettings {
   retryDelayMs        Int      @default(86400000)
   maxRetries          Int      @default(2)
   demoMode            Boolean  @default(false)
+
+  // AI Outreach Toggles
+  aiSmsEnabled        Boolean  @default(false)   // master switch for AI SMS drip
+  aiCallEnabled       Boolean  @default(false)   // master switch for AI outbound calls
+  callDelayMs         Int      @default(120000)  // delay before auto-call fires (default 2 min)
+
   updatedAt           DateTime @updatedAt
 
   @@map("drip_settings")

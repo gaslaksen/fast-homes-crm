@@ -6,10 +6,11 @@ import { LeadsModule } from '../leads/leads.module';
 import { MessagesModule } from '../messages/messages.module';
 import { DripModule } from '../drip/drip.module';
 import { CompsModule } from '../comps/comps.module';
+import { CallsModule } from '../calls/calls.module';
 
 @Module({
-  imports: [LeadsModule, MessagesModule, DripModule, CompsModule],
+  imports: [LeadsModule, MessagesModule, DripModule, CompsModule, CallsModule],
   controllers: [WebhooksController],
-  providers: [SlackLeadService, InvestorFuseService],  // SlackLeadService kept for /webhooks/slack-lead endpoint
+  providers: [SlackLeadService, InvestorFuseService],
 })
 export class WebhooksModule {}

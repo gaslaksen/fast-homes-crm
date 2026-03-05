@@ -3,6 +3,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { VapiService } from '../vapi/vapi.service';
 import { formatPhoneNumber } from '@fast-homes/shared';
 
+const DEFAULT_CALL_DELAY_MS = 120_000; // 2 minutes
+
 @Injectable()
 export class CallsService {
   private readonly logger = new Logger(CallsService.name);
@@ -11,6 +13,44 @@ export class CallsService {
     private prisma: PrismaService,
     private vapiService: VapiService,
   ) {}
+
+  /**
+   * Schedule an AI outbound call after a configurable delay.
+   * Checks aiCallEnabled at execution time so a mid-flight toggle is respected.
+   * Safe to call on every lead creation — it no-ops if the toggle is off.
+   */
+  async scheduleOutboundCall(leadId: string, delayMs = DEFAULT_CALL_DELAY_MS) {
+    this.logger.log(`📅 AI call scheduled for lead ${leadId} in ${delayMs / 1000}s`);
+
+    setTimeout(async () => {
+      try {
+        // Re-check toggle at fire time (may have changed since scheduling)
+        const settings = await this.prisma.dripSettings.findUnique({
+          where: { id: 'default' },
+        });
+
+        if (!settings?.aiCallEnabled) {
+          this.logger.log(`⏸️  AI calls disabled — skipping scheduled call for lead ${leadId}`);
+          return;
+        }
+
+        // Verify lead still exists and hasn't opted out
+        const lead = await this.prisma.lead.findUnique({ where: { id: leadId } });
+        if (!lead) {
+          this.logger.warn(`Lead ${leadId} not found at call time — skipping`);
+          return;
+        }
+        if (lead.doNotContact) {
+          this.logger.log(`🚫 Lead ${leadId} is DNC — skipping scheduled call`);
+          return;
+        }
+
+        await this.initiateAiCall(leadId);
+      } catch (err) {
+        this.logger.error(`Scheduled call failed for lead ${leadId}: ${err.message}`);
+      }
+    }, delayMs);
+  }
 
   async initiateAiCall(leadId: string) {
     const lead = await this.prisma.lead.findUnique({ where: { id: leadId } });
