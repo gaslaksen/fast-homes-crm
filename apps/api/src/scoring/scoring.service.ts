@@ -254,13 +254,26 @@ IMPORTANT RULES FOR EXTRACTION:
 - "ASAP", "right away", "yesterday" → 7
 - "few weeks" → 21
 - "6 months" → 180
-- "not in a rush", "whenever" → 180
+- "not in a rush", "whenever" → 365
+- IMPORTANT: "no timeline", "no timeline yet", "not sure", "haven't decided", "no specific timeline",
+  "flexible", "don't know yet" → use 365 (treat as "whenever"). Do NOT leave null just because
+  they don't have a specific date — they still answered the question.
 
-**Condition** — read between the lines:
+**Condition** — read between the lines. Be aggressive about inferring condition:
 - "needs work", "fixer", "rough shape", "some issues" → "poor"
-- "pretty good", "mostly updated" → "good"
-- "move-in ready", "renovated", "updated" → "excellent"
-- "okay", "average", "some repairs" → "fair"
+- "needs a new roof", "roof needs work", "needs roof" → "poor" (major structural)
+- "needs some repairs", "few things to fix" → "fair"
+- "it's ok", "okay", "decent", "average" → "fair"
+- "pretty good", "mostly updated", "good shape" → "good"
+- "move-in ready", "renovated", "updated", "great condition" → "excellent"
+- If they mention ANY major repair (roof, foundation, HVAC, plumbing) → at most "fair", usually "poor"
+- IMPORTANT: If they say BOTH something okay AND a major repair (e.g. "it's ok, needs a new roof"),
+  the repair wins — use "poor" or "fair", not their overall self-assessment.
+
+**fields_addressed** — list the CAMP topics the seller mentioned in their replies, even if vaguely.
+This is separate from extraction — if the seller said ANYTHING about timeline (even "no timeline"),
+include "timeline" in this list. If they mentioned condition at all, include "condition". Etc.
+Topics: "timeline", "asking_price", "condition", "ownership"
 
 Extract and return ONLY a JSON object:
 {
@@ -272,6 +285,7 @@ Extract and return ONLY a JSON object:
   "distress_signals": <array of strings or []>,
   "ownership_status": <"sole_owner"|"co_owner"|"heir"|"not_owner" or null>,
   "seller_motivation": <string or null>,
+  "fields_addressed": <array of strings> (CAMP topics the seller addressed, even vaguely — from: "timeline", "asking_price", "condition", "ownership"),
   "confidence": <number 0-100>
 }
 

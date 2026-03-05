@@ -161,6 +161,7 @@ export interface AIExtractionResult {
   distress_signals?: string[];
   ownership_status?: string;
   seller_motivation?: string;
+  fields_addressed?: string[];   // CAMP topics seller mentioned, even vaguely ("timeline", "asking_price", "condition", "ownership")
   confidence?: number;
 }
 

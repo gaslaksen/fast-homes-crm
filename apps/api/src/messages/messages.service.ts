@@ -262,16 +262,43 @@ export class MessagesService {
       : '';
 
     // Determine NEXT single CAMP field to ask about (Priority → Money → Challenge → Authority)
-    const campFieldLabels: { field: string; label: string; question: string }[] = [
-      { field: 'timeline', label: 'TIMELINE', question: 'how soon they want to sell' },
-      { field: 'askingPrice', label: 'ASKING PRICE', question: 'what price they are hoping to get' },
-      { field: 'conditionLevel', label: 'PROPERTY CONDITION', question: 'the condition of the property' },
-      { field: 'ownershipStatus', label: 'OWNERSHIP', question: 'who owns the property and who can make decisions' },
+    const campFieldLabels: { field: string; label: string; question: string; keywords: string[] }[] = [
+      { field: 'timeline', label: 'TIMELINE', question: 'how soon they want to sell',
+        keywords: ['timeline', 'how soon', 'when are you', 'when do you', 'timeframe', 'time frame', 'sell by', 'hoping to sell', 'looking to sell'] },
+      { field: 'askingPrice', label: 'ASKING PRICE', question: 'what price they are hoping to get',
+        keywords: ['price', 'asking', 'hoping to get', 'ballpark', 'how much', 'what are you looking'] },
+      { field: 'conditionLevel', label: 'PROPERTY CONDITION', question: 'the condition of the property',
+        keywords: ['condition', 'shape', 'repairs', 'roof', 'foundation', 'hvac', 'updates', 'renovated', 'fixer'] },
+      { field: 'ownershipStatus', label: 'OWNERSHIP', question: 'who owns the property and who can make decisions',
+        keywords: ['owner', 'ownership', 'decision', 'others involved', 'sole owner', 'co-own', 'title'] },
     ];
+
+    // Helper: has a CAMP topic been asked in outbound messages AND has the seller
+    // replied at least once since then? If so, treat as "addressed" even if
+    // extraction couldn't parse a clean value.
+    const hasBeenAddressedInConversation = (keywords: string[]): boolean => {
+      const msgs = lead.messages;
+      // Find the LAST outbound message that asked about this topic
+      let lastAskedIdx = -1;
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i].direction === 'OUTBOUND') {
+          const body = msgs[i].body.toLowerCase();
+          if (keywords.some(k => body.includes(k))) {
+            lastAskedIdx = i;
+            break;
+          }
+        }
+      }
+      if (lastAskedIdx === -1) return false;
+      // Check if seller replied after that ask
+      return msgs.slice(lastAskedIdx + 1).some(m => m.direction === 'INBOUND');
+    };
 
     let nextField: typeof campFieldLabels[0] | null = null;
     for (const cf of campFieldLabels) {
-      if ((lead as any)[cf.field] == null) {
+      const hasValue = (lead as any)[cf.field] != null;
+      const addressed = hasValue || hasBeenAddressedInConversation(cf.keywords);
+      if (!addressed) {
         nextField = cf;
         break;
       }
@@ -518,7 +545,8 @@ export class MessagesService {
         this.logger.warn(`⚠️  Low confidence extraction (${confidence}) for lead ${lead.id} — skipping field updates`);
       } else {
         // Update lead with extracted info
-        if (extracted.timeline_days) updateData.timeline = extracted.timeline_days;
+        // Use 365 as sentinel for "no specific timeline" so the field isn't null forever
+        if (extracted.timeline_days != null) updateData.timeline = extracted.timeline_days;
         if (extracted.asking_price) updateData.askingPrice = extracted.asking_price;
         if (extracted.condition_level) updateData.conditionLevel = extracted.condition_level;
         if (extracted.distress_signals) updateData.distressSignals = extracted.distress_signals;
