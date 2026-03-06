@@ -428,7 +428,7 @@ Rules:
 - If this is a second follow-up, even lighter touch`,
       exampleMessages: [
         { role: 'user', content: 'Following up with Sarah about 456 Maple Ave. She mentioned wanting to sell within 2 weeks due to foreclosure. Last message was 3 days ago.' },
-        { role: 'assistant', content: '{"direct":"Hi Sarah, checking in on 456 Maple Ave. I know timing is important with your situation — still interested in exploring a quick cash offer?","friendly":"Hey Sarah! Just thinking about you and the Maple Ave property. How are things going? Still looking to move forward?","professional":"Hello Sarah, I wanted to follow up regarding 456 Maple Ave. Given your timeline, I would love to help if you are still considering a sale."}' },
+        { role: 'assistant', content: '{"direct":"Hi Sarah, checking in on 456 Maple Ave. I know timing matters with your situation. Still interested in exploring a cash offer?","friendly":"Hey Sarah! Just thinking about you and the Maple Ave property. How are things going? Still looking to move forward?","professional":"Hello Sarah, I wanted to follow up regarding 456 Maple Ave. Given your situation, I would love to help if you are still considering a sale."}' },
       ],
     },
     {
@@ -446,7 +446,7 @@ The seller is qualified and we need to explain how our process works and what ha
 RBP Key Points:
 1. We make a fair cash offer based on property condition and market comps
 2. No realtor commissions, no closing costs for the seller
-3. We can close in as little as 7-14 days (or on their timeline)
+3. Flexible closing timeline — the team will discuss what works for both sides
 4. No repairs needed — we buy as-is
 5. Simple contract, no hidden fees
 6. We handle all paperwork and title work
@@ -459,13 +459,14 @@ Voice & Tone:
 
 Rules:
 - Keep under 160 characters per message
-- Don't make promises about specific dollar amounts
+- Do NOT promise or imply a specific closing timeline (e.g. never say "7 days", "close in a week", etc.) — timelines are discussed by the team
 - Emphasize their flexibility (they choose the closing date)
 - Ask if they have questions about the process
-- Reference their specific property and situation`,
+- Reference their specific property and situation
+- NEVER use em dashes (—) in your message`,
       exampleMessages: [
         { role: 'user', content: 'Explain RBP to Michael for 789 Pine Drive. He asked for $200k, property is in good condition.' },
-        { role: 'assistant', content: '{"direct":"Michael, here is how it works: we will review 789 Pine Dr, make a fair cash offer, and can close in as little as 7 days. No fees, no repairs. Want to discuss numbers?","friendly":"Great news Michael! For Pine Dr, we can put together a cash offer fast — no commissions, no repairs, and you pick the closing date. Sound good?","professional":"Michael, I would like to walk you through our Rapid Buy Program for 789 Pine Dr. We offer a straightforward cash purchase with no seller fees. May I explain the next steps?"}' },
+        { role: 'assistant', content: '{"direct":"Michael, here is how it works: we review 789 Pine Dr, make a fair cash offer, no fees, no repairs. Want to discuss next steps?","friendly":"Great news Michael! For Pine Dr, we can put together a cash offer fast. No commissions, no repairs, and you pick the closing date. Sound good?","professional":"Michael, I would like to walk you through our Rapid Buy Program for 789 Pine Dr. We offer a straightforward cash purchase with no seller fees. May I explain the next steps?"}' },
       ],
     },
     {
@@ -500,8 +501,8 @@ Rules:
 - Do not give a specific offer number yet
 - Be empathetic if they seem uncertain about price`,
       exampleMessages: [
-        { role: 'user', content: 'Seller wants to sell within 30 days. We still need their asking price.' },
-        { role: 'assistant', content: '{"direct":"Thanks for sharing the timeline. Do you have a price in mind for the property?","friendly":"Got it, 30 days works great! Out of curiosity, do you have a ballpark number you are hoping to get?","professional":"Thank you for that information. May I ask if you have a target price in mind for the property?"}' },
+        { role: 'user', content: 'Seller wants to sell urgently. We still need their asking price.' },
+        { role: 'assistant', content: '{"direct":"Thanks for sharing that. Do you have a price in mind for the property?","friendly":"Got it, thanks for letting me know. Do you have a ballpark number you are hoping to get?","professional":"Thank you for that information. May I ask if you have a target price in mind for the property?"}' },
       ],
     },
     {

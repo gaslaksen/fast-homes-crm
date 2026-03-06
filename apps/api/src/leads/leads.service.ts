@@ -394,7 +394,11 @@ export class LeadsService {
     if (filters.source) where.source = filters.source;
     if (filters.status) where.status = filters.status;
     if (filters.scoreBand) where.scoreBand = filters.scoreBand as any;
-    if (filters.assignedToUserId) where.assignedToUserId = filters.assignedToUserId;
+    if (filters.assignedToUserId === 'none') {
+      where.assignedToUserId = null;
+    } else if (filters.assignedToUserId) {
+      where.assignedToUserId = filters.assignedToUserId;
+    }
     if (filters.zip) where.propertyZip = filters.zip;
     if (filters.minScore || filters.maxScore) {
       const scoreFilter: Prisma.IntFilter<'Lead'> = {};
@@ -727,6 +731,75 @@ export class LeadsService {
       bySource: Object.fromEntries(bySource.map((r) => [r.source, r._count])),
       byBand: Object.fromEntries(byBand.map((r) => [r.scoreBand, r._count])),
     };
+  }
+
+  /**
+   * Assign a lead to a user for a specific workflow stage
+   */
+  async assignLead(leadId: string, userId: string, stage: string) {
+    const lead = await this.prisma.lead.findUnique({ where: { id: leadId } });
+    if (!lead) throw new Error('Lead not found');
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, firstName: true, lastName: true },
+    });
+    if (!user) throw new Error('User not found');
+
+    const updated = await this.prisma.lead.update({
+      where: { id: leadId },
+      data: {
+        assignedToUserId: userId,
+        assignedStage: stage,
+        assignedAt: new Date(),
+      },
+    });
+
+    await this.prisma.activity.create({
+      data: {
+        leadId,
+        userId,
+        type: 'LEAD_ASSIGNED',
+        description: `Lead assigned to ${user.firstName} ${user.lastName} for ${stage}`,
+        metadata: { userId, stage },
+      },
+    });
+
+    return this.getLead(leadId);
+  }
+
+  /**
+   * Remove assignment from a lead
+   */
+  async unassignLead(leadId: string) {
+    const lead = await this.prisma.lead.findUnique({
+      where: { id: leadId },
+      include: { assignedTo: { select: { firstName: true, lastName: true } } },
+    });
+    if (!lead) throw new Error('Lead not found');
+
+    await this.prisma.lead.update({
+      where: { id: leadId },
+      data: {
+        assignedToUserId: null,
+        assignedStage: null,
+        assignedAt: null,
+      },
+    });
+
+    const prevName = lead.assignedTo
+      ? `${lead.assignedTo.firstName} ${lead.assignedTo.lastName}`
+      : 'unknown';
+
+    await this.prisma.activity.create({
+      data: {
+        leadId,
+        type: 'LEAD_UNASSIGNED',
+        description: `Lead unassigned from ${prevName}`,
+      },
+    });
+
+    return this.getLead(leadId);
   }
 
   /**

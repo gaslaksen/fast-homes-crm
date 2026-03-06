@@ -54,6 +54,9 @@ export class PipelineService {
         touchCount: true,
         daysInStage: true,
         aiRecommendation: true,
+        assignedToUserId: true,
+        assignedTo: { select: { id: true, firstName: true, lastName: true } },
+        assignedStage: true,
         createdAt: true,
       },
     });

@@ -252,13 +252,23 @@ export class MessagesService {
         // AI saw a price-like answer but couldn't pin down a number — still acknowledge it
         justExtractedDescriptions.push(`they mentioned a price of "${justExtracted._askingPriceRaw}" (treat this as their ballpark)`);
       }
-      if (justExtracted.timeline != null) justExtractedDescriptions.push(`their timeline is ${justExtracted.timeline} days`);
+      if (justExtracted.timeline != null) {
+        // Describe urgency in plain language — do NOT give the AI a specific day number.
+        // A short extracted timeline (e.g. 7 days) is an AI estimate from casual language;
+        // actual closing timelines are discussed by the team, typically 30-60 days minimum.
+        const days = justExtracted.timeline;
+        const urgencyLabel = days <= 14 ? 'they want to move urgently / as soon as possible'
+          : days <= 30 ? 'they want to move quickly, within about a month'
+          : days <= 90 ? 'they have a moderate timeline of a couple months'
+          : 'they are flexible on timing';
+        justExtractedDescriptions.push(urgencyLabel);
+      }
       if (justExtracted.conditionLevel != null) justExtractedDescriptions.push(`the property condition is ${justExtracted.conditionLevel}`);
       if (justExtracted.ownershipStatus != null) justExtractedDescriptions.push(`their ownership status is ${justExtracted.ownershipStatus}`);
       if (justExtracted.distressSignals != null) justExtractedDescriptions.push(`distress signals: ${justExtracted.distressSignals.join(', ')}`);
     }
     const justExtractedSummary = justExtractedDescriptions.length > 0
-      ? `The seller just told you ${justExtractedDescriptions.join(' and ')}. Acknowledge this.`
+      ? `The seller just told you ${justExtractedDescriptions.join(' and ')}. Simply confirm you received their answer (e.g. "Got it", "Thanks for sharing that") — do NOT agree to, commit to, or validate their price or timeline. You are gathering information only, not making any offer or promise.`
       : '';
 
     // Determine NEXT single CAMP field to ask about (Priority → Money → Challenge → Authority)
@@ -324,10 +334,10 @@ export class MessagesService {
 What you know: ${knownSummary || 'gathered all key details'}.
 Your message must:
 1. Thank ${lead.sellerFirstName} sincerely for their time and for sharing
-2. Briefly confirm what you learned (price, timeline, condition) in a natural way
-3. Tell them someone from the Fast Homes team will review and reach out soon to discuss next steps
-4. Keep it warm and brief — under 160 characters if possible
-5. Do NOT ask anything. Do NOT request more info. End the conversation professionally.`;
+2. Tell them someone from the Fast Homes team will review the information and reach out soon to discuss next steps
+3. Keep it warm and brief — under 160 characters if possible
+4. Do NOT ask anything. Do NOT request more info. End the conversation professionally.
+5. Do NOT repeat back their price or timeline in a way that implies agreement or commitment (e.g. do NOT say "We'll do $250k" or "We can close in 7 days") — the team will handle those discussions separately.`;
     }
 
     const knownData = {

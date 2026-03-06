@@ -3,7 +3,7 @@
 import { useEffect, useState, useMemo, Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { leadsAPI } from '@/lib/api';
+import { leadsAPI, authAPI } from '@/lib/api';
 import PropertyPhoto from '@/components/PropertyPhoto';
 import AppNav from '@/components/AppNav';
 import { formatDistanceToNow } from 'date-fns';
@@ -135,6 +135,8 @@ function LeadsPageInner() {
   const [arvFilter, setArvFilter] = useState('');         // 'has' | 'none'
   const [dealFilter, setDealFilter] = useState('');       // 'pencils' | 'no'
   const [stateFilter, setStateFilter] = useState('');
+  const [assigneeFilter, setAssigneeFilter] = useState('');
+  const [teamMembers, setTeamMembers] = useState<any[]>([]);
   const [sortKey, setSortKey] = useState<SortKey>('score');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [viewMode, setViewMode] = useState<ViewMode>('table');
@@ -156,6 +158,7 @@ function LeadsPageInner() {
     leadsAPI.list({}).then(r => {
       setAllLeads(r.data.leads || []);
     }).catch(console.error).finally(() => setLoading(false));
+    authAPI.getTeam().then(r => setTeamMembers(r.data || [])).catch(() => {});
   }, []);
 
   const handleSort = (key: SortKey) => {
@@ -171,6 +174,8 @@ function LeadsPageInner() {
       if (statusFilter && l.status !== statusFilter) return false;
       if (sourceFilter && l.source !== sourceFilter) return false;
       if (stateFilter && (l.propertyState || '').toUpperCase() !== stateFilter.toUpperCase()) return false;
+      if (assigneeFilter === 'unassigned' && l.assignedToUserId) return false;
+      if (assigneeFilter && assigneeFilter !== 'unassigned' && l.assignedToUserId !== assigneeFilter) return false;
       if (q && ![l.propertyAddress, l.propertyCity, l.propertyState, l.sellerFirstName, l.sellerLastName, l.sellerPhone]
         .filter(Boolean).join(' ').toLowerCase().includes(q)) return false;
       // Date added filter
@@ -214,7 +219,7 @@ function LeadsPageInner() {
       if (av > bv) return sortDir === 'desc' ? -1 : 1;
       return 0;
     });
-  }, [allLeads, search, bandFilter, statusFilter, sourceFilter, dateFilter, staleFilter, arvFilter, dealFilter, stateFilter, sortKey, sortDir]);
+  }, [allLeads, search, bandFilter, statusFilter, sourceFilter, dateFilter, staleFilter, arvFilter, dealFilter, stateFilter, assigneeFilter, sortKey, sortDir]);
 
   const toggleSelect = (id: string) => {
     setSelectedIds(prev => {
@@ -249,8 +254,9 @@ function LeadsPageInner() {
   const clearFilters = () => {
     setSearch(''); setBandFilter(''); setStatusFilter(''); setSourceFilter('');
     setDateFilter(''); setStaleFilter(''); setArvFilter(''); setDealFilter(''); setStateFilter('');
+    setAssigneeFilter('');
   };
-  const hasFilters = !!(search || bandFilter || statusFilter || sourceFilter || dateFilter || staleFilter || arvFilter || dealFilter || stateFilter);
+  const hasFilters = !!(search || bandFilter || statusFilter || sourceFilter || dateFilter || staleFilter || arvFilter || dealFilter || stateFilter || assigneeFilter);
 
   // Unique states from loaded leads
   const availableStates = useMemo(() => {
@@ -380,6 +386,13 @@ function LeadsPageInner() {
                   <option value="pencils">Pencils ✓</option>
                   <option value="no">Doesn't pencil</option>
                 </FilterSelect>
+                <FilterSelect label="Assigned to" value={assigneeFilter} onChange={setAssigneeFilter}>
+                  <option value="">All leads</option>
+                  <option value="unassigned">Unassigned</option>
+                  {teamMembers.map((u: any) => (
+                    <option key={u.id} value={u.id}>{u.firstName} {u.lastName}</option>
+                  ))}
+                </FilterSelect>
                 {availableStates.length > 1 && (
                   <FilterSelect label="State" value={stateFilter} onChange={setStateFilter}>
                     <option value="">All states</option>
@@ -472,6 +485,11 @@ function LeadsPageInner() {
                     </Link>
                     <Link href={`/leads/${lead.id}`} className="flex items-center gap-1.5">
                       <StatusBadge status={lead.status} />
+                      {lead.assignedTo && (
+                        <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-primary-100 text-primary-700 text-[10px] font-bold flex-shrink-0" title={`${lead.assignedTo.firstName} ${lead.assignedTo.lastName}`}>
+                          {lead.assignedTo.firstName?.[0]}{lead.assignedTo.lastName?.[0]}
+                        </span>
+                      )}
                     </Link>
                     <Link href={`/leads/${lead.id}`} className="flex justify-center">
                       <ScorePill band={lead.scoreBand} score={lead.totalScore} />
@@ -534,7 +552,14 @@ function LeadsPageInner() {
                     </div>
 
                     <div className="flex items-center justify-between text-xs">
-                      <span className="text-gray-500">{lead.sellerFirstName} {lead.sellerLastName}</span>
+                      <span className="text-gray-500 flex items-center gap-1.5">
+                        {lead.sellerFirstName} {lead.sellerLastName}
+                        {lead.assignedTo && (
+                          <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-primary-100 text-primary-700 text-[9px] font-bold" title={`Assigned: ${lead.assignedTo.firstName} ${lead.assignedTo.lastName}`}>
+                            {lead.assignedTo.firstName?.[0]}{lead.assignedTo.lastName?.[0]}
+                          </span>
+                        )}
+                      </span>
                       <StatusBadge status={lead.status} />
                     </div>
 

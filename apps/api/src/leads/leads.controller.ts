@@ -158,6 +158,19 @@ export class LeadsController {
     }
   }
 
+  @Patch(':id/assign')
+  async assignLead(
+    @Param('id') id: string,
+    @Body() body: { userId: string; stage: string },
+  ) {
+    return this.leadsService.assignLead(id, body.userId, body.stage);
+  }
+
+  @Patch(':id/unassign')
+  async unassignLead(@Param('id') id: string) {
+    return this.leadsService.unassignLead(id);
+  }
+
   @Post(':id/contract')
   async upsertContract(@Param('id') leadId: string, @Body() body: any) {
     return this.leadsService.upsertContract(leadId, body);

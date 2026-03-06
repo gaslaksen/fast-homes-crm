@@ -559,7 +559,15 @@ Always respond with valid JSON only.`;
         return `- ${label}: Unknown`;
       };
       knownDataLines.push(formatField('Asking Price', knownData.askingPrice != null ? `$${Number(knownData.askingPrice).toLocaleString()}` : null, 'askingPrice'));
-      knownDataLines.push(formatField('Timeline', knownData.timeline != null ? `${knownData.timeline} days` : null, 'timeline'));
+      // Show timeline as urgency label — never as a raw day count — so the AI
+      // doesn't echo back a specific number (e.g. "7 days") as if it's a promise.
+      // Actual closing timelines (typically 30-60 days minimum) are handled by the team.
+      const timelineLabel = knownData.timeline == null ? null
+        : knownData.timeline <= 14 ? 'urgent / ASAP'
+        : knownData.timeline <= 30 ? 'wants to move quickly (~1 month)'
+        : knownData.timeline <= 90 ? 'moderate (~2-3 months)'
+        : 'flexible / no rush';
+      knownDataLines.push(formatField('Timeline', timelineLabel, 'timeline'));
       knownDataLines.push(formatField('Property Condition', knownData.conditionLevel, 'conditionLevel'));
       knownDataLines.push(formatField('Ownership', knownData.ownershipStatus, 'ownershipStatus'));
     }
@@ -574,7 +582,7 @@ Always respond with valid JSON only.`;
 
     // Build acknowledgment instruction
     const acknowledgmentBlock = context.lastInboundMessage
-      ? `\nCRITICAL: Your response MUST first acknowledge what the seller just said, then naturally transition to asking about the next topic. Do NOT re-introduce yourself. Do NOT ask about information already provided above.\n`
+      ? `\nCRITICAL: Your response MUST first acknowledge what the seller just said (confirm you received their answer — neutral phrases like "Got it" or "Thanks for sharing"), then naturally transition to asking about the next topic. Do NOT re-introduce yourself. Do NOT ask about information already provided above. Do NOT agree to, validate, or commit to any price, timeline, or terms — never say things like "$250k works", "that price sounds good", "7 days works for us", or anything that implies you are accepting their terms. NEVER use em dashes (—) in your message.\n`
       : '';
 
     const prompt = `Seller: ${context.sellerName}
@@ -596,6 +604,10 @@ Rules:
 - Be respectful and compliant
 ${isFirstMessage ? '- Include "Reply STOP to opt out" at the end\n' : ''}- Sound human, not spammy
 - Do NOT ask about information already known (listed above)
+- Do NOT agree to, validate, or commit to any price, timeline, or terms the seller mentioned (e.g. never say "$250k works", "that price works for us", "7 days works", or anything implying agreement)
+- You are ONLY gathering information — all offers and decisions are made by the team, not in this message
+- When acknowledging what the seller said, simply confirm receipt (e.g. "Got it, thanks" / "Thanks for letting me know") — neutral, no judgment on whether the terms work
+- NEVER use em dashes (—) in any message; use a comma, period, or rephrase instead
 
 Return ONLY a JSON object:
 {

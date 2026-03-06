@@ -95,6 +95,8 @@ model Lead {
   
   assignedToUserId  String?
   assignedTo        User?    @relation(fields: [assignedToUserId], references: [id])
+  assignedStage     String?
+  assignedAt        DateTime?
   tags              Json?
   
   doNotContact      Boolean  @default(false)

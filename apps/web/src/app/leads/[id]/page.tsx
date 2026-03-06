@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { leadsAPI, messagesAPI, compsAPI, settingsAPI, photosAPI, pipelineAPI, callsAPI } from '@/lib/api';
+import { leadsAPI, messagesAPI, compsAPI, settingsAPI, photosAPI, pipelineAPI, callsAPI, authAPI } from '@/lib/api';
 import PropertyPhoto from '@/components/PropertyPhoto';
 import PhotoGallery from '@/components/PhotoGallery';
 import AppNav from '@/components/AppNav';
@@ -54,16 +54,23 @@ export default function LeadDetailPage() {
   const [aiAnalysis, setAiAnalysis] = useState<any>(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [initiatingCall, setInitiatingCall] = useState(false);
+  const [teamMembers, setTeamMembers] = useState<any[]>([]);
+  const [assignUserId, setAssignUserId] = useState('');
+  const [assignStage, setAssignStage] = useState('');
+  const [assignSaving, setAssignSaving] = useState(false);
 
   useEffect(() => {
     loadLead();
     settingsAPI.getDrip().then((res) => setDemoMode(res.data.demoMode ?? false)).catch(() => {});
+    authAPI.getTeam().then((res) => setTeamMembers(res.data || [])).catch(() => {});
   }, [leadId]);
 
   const loadLead = async () => {
     try {
       const response = await leadsAPI.get(leadId);
       setLead(response.data);
+      setAssignUserId(response.data?.assignedToUserId || '');
+      setAssignStage(response.data?.assignedStage || '');
       if (response.data?.aiAnalysis) {
         try { setAiAnalysis(JSON.parse(response.data.aiAnalysis)); } catch {}
       }
@@ -178,6 +185,35 @@ export default function LeadDetailPage() {
       alert('Failed to initiate AI call');
     } finally {
       setInitiatingCall(false);
+    }
+  };
+
+  const handleAssign = async () => {
+    if (!assignUserId || !assignStage) return;
+    setAssignSaving(true);
+    try {
+      await leadsAPI.assign(leadId, assignUserId, assignStage);
+      loadLead();
+    } catch (error) {
+      console.error('Failed to assign lead:', error);
+      alert('Failed to assign lead');
+    } finally {
+      setAssignSaving(false);
+    }
+  };
+
+  const handleUnassign = async () => {
+    setAssignSaving(true);
+    try {
+      await leadsAPI.unassign(leadId);
+      setAssignUserId('');
+      setAssignStage('');
+      loadLead();
+    } catch (error) {
+      console.error('Failed to unassign lead:', error);
+      alert('Failed to unassign lead');
+    } finally {
+      setAssignSaving(false);
     }
   };
 
@@ -659,6 +695,69 @@ export default function LeadDetailPage() {
                     Force Refresh
                   </button>
                 )}
+              </div>
+
+              {/* Assignment */}
+              <div className="card">
+                <h3 className="text-lg font-bold mb-3">Assignment</h3>
+                {lead.assignedTo ? (
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="w-9 h-9 rounded-full bg-primary-100 text-primary-700 flex items-center justify-center text-sm font-bold flex-shrink-0">
+                      {lead.assignedTo.firstName?.[0]}{lead.assignedTo.lastName?.[0]}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium text-gray-900 truncate">
+                        {lead.assignedTo.firstName} {lead.assignedTo.lastName}
+                      </div>
+                      {lead.assignedStage && (
+                        <div className="text-xs text-gray-500 capitalize">{lead.assignedStage}</div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-400 mb-3">Unassigned</p>
+                )}
+                <div className="space-y-2">
+                  <select
+                    value={assignUserId}
+                    onChange={(e) => setAssignUserId(e.target.value)}
+                    className="w-full text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  >
+                    <option value="">Select team member...</option>
+                    {teamMembers.map((u: any) => (
+                      <option key={u.id} value={u.id}>{u.firstName} {u.lastName}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={assignStage}
+                    onChange={(e) => setAssignStage(e.target.value)}
+                    className="w-full text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  >
+                    <option value="">Select stage...</option>
+                    <option value="intake">Intake</option>
+                    <option value="disposition">Disposition</option>
+                    <option value="closing">Closing</option>
+                    <option value="follow-up">Follow-up</option>
+                  </select>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleAssign}
+                      disabled={assignSaving || !assignUserId || !assignStage}
+                      className="btn btn-primary btn-sm flex-1"
+                    >
+                      {assignSaving ? 'Saving...' : 'Assign'}
+                    </button>
+                    {lead.assignedTo && (
+                      <button
+                        onClick={handleUnassign}
+                        disabled={assignSaving}
+                        className="btn btn-secondary btn-sm"
+                      >
+                        Unassign
+                      </button>
+                    )}
+                  </div>
+                </div>
               </div>
 
               {/* AI Summary Box */}

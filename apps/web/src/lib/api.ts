@@ -64,6 +64,10 @@ export const leadsAPI = {
     api.patch(`/leads/${id}/auto-respond`, { autoRespond }),
   refreshPropertyDetails: (id: string) =>
     api.post(`/leads/${id}/property-details/refresh`),
+  assign: (id: string, userId: string, stage: string) =>
+    api.patch(`/leads/${id}/assign`, { userId, stage }),
+  unassign: (id: string) =>
+    api.patch(`/leads/${id}/unassign`),
   bulkDelete: (ids: string[]) => api.post('/leads/bulk-delete', { ids }),
   bulkUpdateStatus: (ids: string[], status: string) =>
     api.post('/leads/bulk-status', { ids, status }),

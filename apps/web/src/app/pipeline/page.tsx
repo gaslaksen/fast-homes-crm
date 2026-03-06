@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { pipelineAPI } from '@/lib/api';
+import { pipelineAPI, authAPI } from '@/lib/api';
 import PropertyPhoto from '@/components/PropertyPhoto';
 import AppNav from '@/components/AppNav';
 
@@ -35,9 +35,12 @@ export default function PipelinePage() {
   const [aiInsights, setAiInsights] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [insightsLoading, setInsightsLoading] = useState(false);
+  const [teamMembers, setTeamMembers] = useState<any[]>([]);
+  const [assigneeFilter, setAssigneeFilter] = useState('');
 
   useEffect(() => {
     fetchPipeline();
+    authAPI.getTeam().then(r => setTeamMembers(r.data || [])).catch(() => {});
   }, []);
 
   const fetchPipeline = async () => {
@@ -88,7 +91,19 @@ export default function PipelinePage() {
     }
   };
 
-  const totalLeads = Object.values(leads).flat().length;
+  // Filter leads by assignee
+  const filteredLeads: Record<string, any[]> = {};
+  for (const [stage, stageLeads] of Object.entries(leads)) {
+    if (assigneeFilter === 'unassigned') {
+      filteredLeads[stage] = (stageLeads || []).filter((l: any) => !l.assignedToUserId);
+    } else if (assigneeFilter) {
+      filteredLeads[stage] = (stageLeads || []).filter((l: any) => l.assignedToUserId === assigneeFilter);
+    } else {
+      filteredLeads[stage] = stageLeads || [];
+    }
+  }
+
+  const totalLeads = Object.values(filteredLeads).flat().length;
 
   if (loading) {
     return (
@@ -110,13 +125,26 @@ export default function PipelinePage() {
               Drag cards to move leads through your pipeline.
             </p>
           </div>
-          <button
-            onClick={fetchAiInsights}
-            disabled={insightsLoading}
-            className="btn btn-primary"
-          >
-            {insightsLoading ? 'Analyzing...' : aiInsights ? 'Refresh AI Insights' : 'Get AI Insights'}
-          </button>
+          <div className="flex items-center gap-3">
+            <select
+              value={assigneeFilter}
+              onChange={(e) => setAssigneeFilter(e.target.value)}
+              className={`text-sm border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary-500 ${assigneeFilter ? 'border-primary-400 bg-primary-50 text-primary-700 font-medium' : 'border-gray-200'}`}
+            >
+              <option value="">All team members</option>
+              <option value="unassigned">Unassigned</option>
+              {teamMembers.map((u: any) => (
+                <option key={u.id} value={u.id}>{u.firstName} {u.lastName}</option>
+              ))}
+            </select>
+            <button
+              onClick={fetchAiInsights}
+              disabled={insightsLoading}
+              className="btn btn-primary"
+            >
+              {insightsLoading ? 'Analyzing...' : aiInsights ? 'Refresh AI Insights' : 'Get AI Insights'}
+            </button>
+          </div>
         </div>
 
         {/* AI Insights Banner */}
@@ -174,7 +202,7 @@ export default function PipelinePage() {
                   <div className="flex justify-between items-center">
                     <h3 className="font-bold text-sm">{stage.name}</h3>
                     <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-white/60">
-                      {leads[stage.id]?.length || 0}
+                      {filteredLeads[stage.id]?.length || 0}
                     </span>
                   </div>
                 </div>
@@ -191,7 +219,7 @@ export default function PipelinePage() {
                           : 'border-2 border-transparent'
                       }`}
                     >
-                      {(leads[stage.id] || []).map((lead: any, index: number) => (
+                      {(filteredLeads[stage.id] || []).map((lead: any, index: number) => (
                         <Draggable key={lead.id} draggableId={lead.id} index={index}>
                           {(provided, snapshot) => (
                             <div
@@ -230,12 +258,22 @@ export default function PipelinePage() {
                                   </span>
                                 </div>
 
-                                {/* Seller Name */}
-                                {lead.sellerFirstName && (
-                                  <p className="text-xs text-gray-600 mb-2">
-                                    {lead.sellerFirstName} {lead.sellerLastName}
-                                  </p>
-                                )}
+                                {/* Seller Name + Assignee */}
+                                <div className="flex items-center justify-between mb-2">
+                                  {lead.sellerFirstName && (
+                                    <p className="text-xs text-gray-600">
+                                      {lead.sellerFirstName} {lead.sellerLastName}
+                                    </p>
+                                  )}
+                                  {lead.assignedTo && (
+                                    <span
+                                      className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-primary-100 text-primary-700 text-[10px] font-bold flex-shrink-0"
+                                      title={`Assigned: ${lead.assignedTo.firstName} ${lead.assignedTo.lastName}`}
+                                    >
+                                      {lead.assignedTo.firstName?.[0]}{lead.assignedTo.lastName?.[0]}
+                                    </span>
+                                  )}
+                                </div>
 
                                 {/* Stats Row */}
                                 <div className="flex items-center gap-3 text-xs text-gray-500 mb-2">
