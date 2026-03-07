@@ -121,6 +121,12 @@ export default function CompsAnalysisPage() {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [hoveredCompId, setHoveredCompId] = useState<string | null>(null);
 
+  // Stable comp-id → display number map (must be here, before early returns, to satisfy Rules of Hooks)
+  const compIndexMap = useMemo(
+    () => new Map((analysis?.comps || []).map((c, i) => [c.id, i + 1])),
+    [analysis?.comps],
+  );
+
   // Add comp form
   const [showAddComp, setShowAddComp] = useState(false);
   const [compForm, setCompForm] = useState({
@@ -481,12 +487,6 @@ export default function CompsAnalysisPage() {
 
   const allComps = analysis?.comps || [];
   const selectedComps = allComps.filter((c) => c.selected);
-
-  // Stable number map (API order = distance asc) — same numbers on map AND cards
-  const compIndexMap = useMemo(
-    () => new Map(allComps.map((c, i) => [c.id, i + 1])),
-    [allComps],
-  );
 
   // Sort comps
   const sortedComps = [...allComps].sort((a, b) => {
