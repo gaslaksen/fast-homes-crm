@@ -51,6 +51,13 @@ export class CompAnalysisService {
     }
   }
 
+  /** Returns true if the sale date is within `months` months of today */
+  private isRecentSale(soldDate: Date | string, months: number): boolean {
+    const cutoff = new Date();
+    cutoff.setMonth(cutoff.getMonth() - months);
+    return new Date(soldDate) >= cutoff;
+  }
+
   async createAnalysis(leadId: string, params: {
     mode?: string;
     maxDistance?: number;
@@ -125,12 +132,18 @@ export class CompAnalysisService {
           notes: comp.notes,
           photoUrl: comp.photoUrl,
           sourceUrl: comp.sourceUrl,
-          selected: true,
+          // Auto-select: within 1 mile AND sold within the last 12 months
+          selected: comp.distance <= 1.0 && this.isRecentSale(comp.soldDate, 12),
         },
       });
     }
 
-    this.logger.log(`Imported ${existingComps.length} existing comps into analysis ${analysisId}`);
+    const autoSelected = existingComps.filter(
+      (c) => c.distance <= 1.0 && this.isRecentSale(c.soldDate, 12),
+    ).length;
+    this.logger.log(
+      `Imported ${existingComps.length} existing comps into analysis ${analysisId} — ${autoSelected} auto-selected (≤1 mi, sold ≤12 months)`,
+    );
     return existingComps.length;
   }
 

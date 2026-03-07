@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
@@ -119,6 +119,7 @@ export default function CompsAnalysisPage() {
   const [fetchingComps, setFetchingComps] = useState(false);
   const [sortField, setSortField] = useState<string>('distance');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const [hoveredCompId, setHoveredCompId] = useState<string | null>(null);
 
   // Add comp form
   const [showAddComp, setShowAddComp] = useState(false);
@@ -481,6 +482,12 @@ export default function CompsAnalysisPage() {
   const allComps = analysis?.comps || [];
   const selectedComps = allComps.filter((c) => c.selected);
 
+  // Stable number map (API order = distance asc) — same numbers on map AND cards
+  const compIndexMap = useMemo(
+    () => new Map(allComps.map((c, i) => [c.id, i + 1])),
+    [allComps],
+  );
+
   // Sort comps
   const sortedComps = [...allComps].sort((a, b) => {
     let aVal: any, bVal: any;
@@ -630,6 +637,9 @@ export default function CompsAnalysisPage() {
                 <CompsMap
                   lead={lead!}
                   comps={allComps}
+                  compIndexMap={compIndexMap}
+                  hoveredCompId={hoveredCompId}
+                  onHoverComp={setHoveredCompId}
                   onToggleComp={async (compId) => {
                     if (!analysis) return;
                     await compAnalysisAPI.toggleComp(leadId, analysis.id, compId);
@@ -857,6 +867,10 @@ export default function CompsAnalysisPage() {
                       key={comp.id}
                       comp={comp}
                       lead={lead}
+                      compIndex={compIndexMap.get(comp.id)}
+                      isHovered={hoveredCompId === comp.id}
+                      onHoverEnter={() => setHoveredCompId(comp.id)}
+                      onHoverLeave={() => setHoveredCompId(null)}
                       onToggle={() => handleToggleComp(comp.id)}
                       onDelete={() => handleDeleteComp(comp.id)}
                     />
@@ -1924,11 +1938,19 @@ function SourceBadge({ source }: { source?: string }) {
 function CompCard({
   comp,
   lead,
+  compIndex,
+  isHovered,
+  onHoverEnter,
+  onHoverLeave,
   onToggle,
   onDelete,
 }: {
   comp: Comp;
   lead: Lead;
+  compIndex?: number;
+  isHovered?: boolean;
+  onHoverEnter?: () => void;
+  onHoverLeave?: () => void;
   onToggle: () => void;
   onDelete: () => void;
 }) {
@@ -1941,12 +1963,25 @@ function CompCard({
   const pricePerSqft = comp.sqft ? Math.round(comp.soldPrice / comp.sqft) : null;
 
   return (
-    <div className={`rounded-lg border-2 p-4 transition-all ${
-      comp.selected ? 'border-primary-400 bg-white shadow-sm' : 'border-gray-200 bg-gray-50 opacity-60'
-    }`}>
-      {/* Top row: badges and checkbox */}
+    <div
+      className={`rounded-lg border-2 p-4 transition-all cursor-pointer ${
+        isHovered
+          ? 'border-yellow-400 bg-yellow-50 shadow-md ring-2 ring-yellow-300'
+          : comp.selected
+          ? 'border-primary-400 bg-white shadow-sm'
+          : 'border-gray-200 bg-gray-50 opacity-60'
+      }`}
+      onMouseEnter={onHoverEnter}
+      onMouseLeave={onHoverLeave}
+    >
+      {/* Top row: number badge, badges, checkbox */}
       <div className="flex justify-between items-start mb-2">
         <div className="flex items-center gap-1.5 flex-wrap">
+          {compIndex != null && (
+            <span className="w-6 h-6 bg-gray-700 text-white rounded-full flex items-center justify-center text-xs font-bold shrink-0">
+              {compIndex}
+            </span>
+          )}
           <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium">
             {comp.distance.toFixed(1)} mi
           </span>
