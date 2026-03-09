@@ -1021,8 +1021,8 @@ Be specific with numbers. For deal viability, calculate MAO at 70% rule with $15
 
     const lead = analysis.lead;
 
-    // Build image content blocks (max 15, Anthropic supports up to 20)
-    const imageBlocks: Anthropic.ImageBlockParam[] = photos.slice(0, 15).map((photo) => ({
+    // Build image content blocks (max 30, Anthropic supports up to 100 with claude-3-5-sonnet)
+    const imageBlocks: Anthropic.ImageBlockParam[] = photos.slice(0, 30).map((photo) => ({
       type: 'image' as const,
       source: {
         type: 'base64' as const,

@@ -360,7 +360,7 @@ export default function CompsAnalysisPage() {
 
   // ─── Photo Analysis ───────────────────────────────────────────────────────
   const addPhotos = (files: File[]) => {
-    const newFiles = files.slice(0, Math.max(0, 15 - selectedPhotos.length));
+    const newFiles = files.slice(0, Math.max(0, 30 - selectedPhotos.length));
     const newThumbs = newFiles.map(f => ({
       file: f,
       url: URL.createObjectURL(f),
@@ -1512,8 +1512,8 @@ export default function CompsAnalysisPage() {
                     <p className="text-sm font-medium text-purple-700">Drag & drop photos here, or click to select</p>
                     <p className="text-xs text-gray-400 mt-1">
                       {selectedPhotos.length > 0
-                        ? `${selectedPhotos.length}/15 photos added`
-                        : 'Up to 15 photos — JPG, PNG, HEIC'}
+                        ? `${selectedPhotos.length}/30 photos added`
+                        : 'Up to 30 photos — JPG, PNG, HEIC'}
                     </p>
                   </>
                 )}
