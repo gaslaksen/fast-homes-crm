@@ -138,6 +138,19 @@ export class LeadsController {
     return this.leadsService.addNote(leadId, body.content, body.userId);
   }
 
+  @Post(':id/send-outreach')
+  async sendInitialOutreach(@Param('id') id: string) {
+    try {
+      const result = await this.leadsService.triggerInitialOutreach(id);
+      return { success: true, result };
+    } catch (error) {
+      throw new HttpException(
+        error.message || 'Failed to send outreach',
+        error.status || HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
   @Patch(':id/auto-respond')
   async toggleAutoRespond(
     @Param('id') id: string,

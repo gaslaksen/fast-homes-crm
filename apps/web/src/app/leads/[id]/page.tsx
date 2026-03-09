@@ -1010,9 +1010,26 @@ export default function LeadDetailPage() {
               <div className="card">
                 <div className="flex justify-between items-center mb-4">
                   <h2 className="text-xl font-bold">Text Messages</h2>
+                  <div className="flex items-center gap-2">
+                    {lead.messages?.length === 0 && !lead.doNotContact && (
+                      <button
+                        onClick={async () => {
+                          try {
+                            await leadsAPI.sendOutreach(lead.id);
+                            loadLead();
+                          } catch (e: any) {
+                            alert('Failed to send: ' + (e.response?.data?.message || e.message));
+                          }
+                        }}
+                        className="btn btn-sm text-xs border border-green-300 text-green-700 hover:bg-green-50"
+                      >
+                        📤 Send Initial Text
+                      </button>
+                    )}
                   <button onClick={handleDraftMessage} className="btn btn-primary btn-sm">
                     Draft Message
                   </button>
+                  </div>
                 </div>
                 <div className="space-y-3">
                   {lead.messages?.map((msg: any) => (

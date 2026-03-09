@@ -92,32 +92,55 @@ export class SmrtphoneSmsProvider implements SmsProvider {
       }
     }
 
+    const fromNumber = from || this.phoneNumber;
+
+    // SmrtPhone API: https://phone.smrt.studio/sms/send
+    // Auth: X-Auth-smrtPhone header
+    // Body: application/x-www-form-urlencoded  (from, to, message)
+    const params = new URLSearchParams({
+      from: fromNumber,
+      to,
+      message: body,
+    });
+
     let response: Response;
     try {
-      response = await fetch('https://api.smrtphone.io/v1/messages', {
+      response = await fetch('https://phone.smrt.studio/sms/send', {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${this.apiKey}`,
-          'Content-Type': 'application/json',
+          'X-Auth-smrtPhone': this.apiKey,
+          'Content-Type': 'application/x-www-form-urlencoded',
         },
-        body: JSON.stringify({ to, from: from || this.phoneNumber, text: body }),
-        signal: AbortSignal.timeout(8000),
+        body: params.toString(),
+        signal: AbortSignal.timeout(10000),
       });
     } catch (fetchErr: any) {
-      // DNS / network unreachable — happens in local dev where SmrtPhone
-      // API is not accessible. Fall back to simulation so dev flow continues.
       this.logger.warn(`⚠️  SmrtPhone unreachable (${fetchErr.message}) — simulating send locally`);
       this.logger.log(`📱 [SIMULATED SMS] To: ${to} | "${body.substring(0, 80)}"`);
       return { sid: `SIMULATED_OFFLINE_${Date.now()}` };
     }
 
+    const responseText = await response.text();
+
     if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`Smrtphone API error ${response.status}: ${text}`);
+      throw new Error(`SmrtPhone API error ${response.status}: ${responseText}`);
     }
 
-    const data: any = await response.json();
-    return { sid: data.messageId || data.id || 'smrtphone-sent' };
+    this.logger.log(`✅ SmrtPhone SMS sent to ${to} — response: ${responseText.substring(0, 100)}`);
+
+    // SmrtPhone returns plain text or a message ID — extract if present
+    let sid = 'smrtphone-sent';
+    try {
+      const data = JSON.parse(responseText);
+      sid = data.messageId || data.id || data.smsId || sid;
+    } catch {
+      // Plain text response — use it as the SID if it looks like an ID
+      if (responseText && responseText.length < 100 && !responseText.includes(' ')) {
+        sid = responseText.trim();
+      }
+    }
+
+    return { sid };
   }
 }
 

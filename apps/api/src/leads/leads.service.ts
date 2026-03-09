@@ -140,9 +140,10 @@ export class LeadsService {
 
   /**
    * Schedule the initial outreach message after a short delay.
+   * Uses setImmediate in demo mode (next tick) and a short setTimeout otherwise.
+   * Kept intentionally short — Railway restarts kill long timers.
    */
   private async scheduleInitialOutreach(leadId: string) {
-    // Check demo mode for delay
     let delay = INITIAL_OUTREACH_DELAY_MS;
     try {
       const settings = await this.prisma.dripSettings.findUnique({ where: { id: 'default' } });
@@ -155,13 +156,20 @@ export class LeadsService {
 
     this.logger.log(`Scheduling initial outreach for lead ${leadId} in ${delay}ms`);
 
-    setTimeout(async () => {
+    const fire = async () => {
       try {
         await this.messagesService.sendInitialOutreach(leadId);
       } catch (error) {
         this.logger.error(`Initial outreach failed for lead ${leadId}: ${error.message}`);
       }
-    }, delay);
+    };
+
+    if (delay <= 5000) {
+      // Demo mode or very short delay — fire on next event loop tick
+      setImmediate(fire);
+    } else {
+      setTimeout(fire, delay);
+    }
   }
 
   /**
@@ -554,6 +562,16 @@ export class LeadsService {
     }
 
     return this.getLead(id);
+  }
+
+  /**
+   * Manually trigger initial outreach for a lead (useful for testing / retroactive sends)
+   */
+  async triggerInitialOutreach(leadId: string): Promise<string | null> {
+    const lead = await this.prisma.lead.findUnique({ where: { id: leadId } });
+    if (!lead) throw new Error('Lead not found');
+    if (lead.doNotContact) throw new Error('Lead is marked Do Not Contact');
+    return this.messagesService.sendInitialOutreach(leadId);
   }
 
   /**
