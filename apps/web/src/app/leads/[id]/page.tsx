@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { leadsAPI, messagesAPI, compsAPI, settingsAPI, photosAPI, pipelineAPI, callsAPI, authAPI } from '@/lib/api';
+import { leadsAPI, messagesAPI, compsAPI, settingsAPI, photosAPI, pipelineAPI, callsAPI, authAPI, tasksAPI } from '@/lib/api';
 import PropertyPhoto from '@/components/PropertyPhoto';
 import PhotoGallery from '@/components/PhotoGallery';
 import AppNav from '@/components/AppNav';
@@ -58,11 +58,18 @@ export default function LeadDetailPage() {
   const [assignUserId, setAssignUserId] = useState('');
   const [assignStage, setAssignStage] = useState('');
   const [assignSaving, setAssignSaving] = useState(false);
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [noteText, setNoteText] = useState('');
+  const [addingNote, setAddingNote] = useState(false);
+  const [showDeadForm, setShowDeadForm] = useState(false);
+  const [deadReason, setDeadReason] = useState('');
+  const [markingDead, setMarkingDead] = useState(false);
 
   useEffect(() => {
     loadLead();
     settingsAPI.getDrip().then((res) => setDemoMode(res.data.demoMode ?? false)).catch(() => {});
     authAPI.getTeam().then((res) => setTeamMembers(res.data || [])).catch(() => {});
+    authAPI.getMe().then((res) => setCurrentUser(res.data)).catch(() => {});
   }, [leadId]);
 
   const loadLead = async () => {
@@ -230,6 +237,40 @@ export default function LeadDetailPage() {
     }
   };
 
+  const handleAddNote = async () => {
+    if (!noteText.trim() || !currentUser) return;
+    setAddingNote(true);
+    try {
+      await leadsAPI.addNote(leadId, noteText, currentUser.id);
+      setNoteText('');
+      loadLead();
+    } catch (error) {
+      console.error('Failed to add note:', error);
+      alert('Failed to add note');
+    } finally {
+      setAddingNote(false);
+    }
+  };
+
+  const handleMarkDead = async () => {
+    if (!deadReason.trim()) return;
+    setMarkingDead(true);
+    try {
+      if (currentUser) {
+        await leadsAPI.addNote(leadId, `[Dead] ${deadReason}`, currentUser.id);
+      }
+      await leadsAPI.update(leadId, { status: 'DEAD' });
+      setShowDeadForm(false);
+      setDeadReason('');
+      loadLead();
+    } catch (error) {
+      console.error('Failed to mark lead as dead:', error);
+      alert('Failed to mark lead as dead');
+    } finally {
+      setMarkingDead(false);
+    }
+  };
+
   if (loading) {
     return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
   }
@@ -262,7 +303,14 @@ export default function LeadDetailPage() {
                   <span>/</span>
                   <span className="text-gray-600 font-medium">{lead.propertyAddress}</span>
                 </div>
-                <h1 className="text-xl font-bold text-gray-900">{lead.propertyAddress}</h1>
+                <div className="flex items-center gap-2">
+                  <h1 className="text-xl font-bold text-gray-900">{lead.propertyAddress}</h1>
+                  {lead.status === 'DEAD' && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-100 text-red-700 text-xs font-semibold">
+                      💀 Dead
+                    </span>
+                  )}
+                </div>
                 <p className="text-gray-600 text-sm">{lead.propertyCity}, {lead.propertyState} {lead.propertyZip}</p>
               </div>
             </div>
@@ -302,6 +350,7 @@ export default function LeadDetailPage() {
               { key: 'comps', label: 'Comps' },
               { key: 'analysis', label: 'Analysis' },
               { key: 'communications', label: 'Messages' },
+              { key: 'notes', label: `Notes${lead.notes?.length ? ` (${lead.notes.length})` : ''}` },
               { key: 'activity', label: 'Activity' },
             ].map((tab) => (
               <button
@@ -766,6 +815,57 @@ export default function LeadDetailPage() {
                 onRefresh={loadLead}
                 onViewAnalysis={() => setActiveTab('analysis')}
               />
+
+              {/* Quick Actions */}
+              <div className="card">
+                <h3 className="text-lg font-bold mb-3">Quick Actions</h3>
+                {lead.status === 'DEAD' ? (
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-100 text-gray-500 text-sm">
+                    <span>💀</span>
+                    <span className="font-medium">Lead is Dead</span>
+                  </div>
+                ) : !showDeadForm ? (
+                  <button
+                    onClick={() => setShowDeadForm(true)}
+                    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg border-2 border-red-200 text-red-700 hover:bg-red-50 text-sm font-medium transition-colors"
+                  >
+                    <span>💀</span>
+                    <span>Mark as Dead</span>
+                  </button>
+                ) : (
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Reason for disqualifying <span className="text-red-500">*</span>
+                      </label>
+                      <textarea
+                        value={deadReason}
+                        onChange={(e) => setDeadReason(e.target.value)}
+                        placeholder="e.g. Seller doesn't own the lot, asking price too high, no motivation..."
+                        className="input w-full"
+                        rows={3}
+                        autoFocus
+                      />
+                      <p className="text-xs text-gray-400 mt-1">This will be saved as a note before marking dead.</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={handleMarkDead}
+                        disabled={markingDead || !deadReason.trim()}
+                        className="flex-1 px-3 py-1.5 rounded-lg bg-red-600 text-white text-sm font-medium hover:bg-red-700 disabled:opacity-50 transition-colors"
+                      >
+                        {markingDead ? 'Saving...' : '💀 Confirm Dead'}
+                      </button>
+                      <button
+                        onClick={() => { setShowDeadForm(false); setDeadReason(''); }}
+                        className="px-3 py-1.5 rounded-lg border border-gray-200 text-sm text-gray-600 hover:bg-gray-50 transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -1130,6 +1230,63 @@ export default function LeadDetailPage() {
           </div>
         )}
 
+        {/* Notes Tab */}
+        {activeTab === 'notes' && (
+          <div className="max-w-3xl space-y-6">
+            {/* Add Note Form */}
+            <div className="card">
+              <h2 className="text-xl font-bold mb-4">Add Note</h2>
+              <textarea
+                value={noteText}
+                onChange={(e) => setNoteText(e.target.value)}
+                placeholder="Add a conversation note, follow-up detail, or anything relevant about this lead..."
+                className="input w-full mb-3"
+                rows={4}
+              />
+              <button
+                onClick={handleAddNote}
+                disabled={addingNote || !noteText.trim() || !currentUser}
+                className="btn btn-primary"
+              >
+                {addingNote ? 'Saving...' : 'Save Note'}
+              </button>
+              {!currentUser && (
+                <p className="text-xs text-gray-400 mt-2">Loading user info...</p>
+              )}
+            </div>
+
+            {/* Notes List */}
+            {lead.notes?.length > 0 ? (
+              <div className="card">
+                <h2 className="text-xl font-bold mb-4">Notes ({lead.notes.length})</h2>
+                <div className="space-y-4">
+                  {lead.notes.map((note: any) => (
+                    <div key={note.id} className={`p-4 rounded-lg border ${note.content?.startsWith('[Dead]') ? 'border-red-200 bg-red-50' : 'border-blue-100 bg-blue-50'}`}>
+                      <div className="flex justify-between items-start mb-2">
+                        <span className={`text-xs font-semibold ${note.content?.startsWith('[Dead]') ? 'text-red-700' : 'text-blue-700'}`}>
+                          {note.content?.startsWith('[Dead]') ? '💀 ' : '📝 '}
+                          {note.user ? `${note.user.firstName} ${note.user.lastName}` : '🤖 AI'}
+                        </span>
+                        <span className="text-xs text-gray-400">
+                          {format(new Date(note.createdAt), 'MMM d, yyyy h:mm a')}
+                        </span>
+                      </div>
+                      <div className="text-sm text-gray-800 whitespace-pre-wrap">
+                        {note.content?.startsWith('[Dead] ') ? note.content.slice(7) : note.content}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="card text-center py-12 text-gray-400">
+                <div className="text-4xl mb-3">📝</div>
+                <p className="text-sm">No notes yet. Add your first note above.</p>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Analysis Tab */}
         {activeTab === 'analysis' && (
           <AnalysisTab
@@ -1147,27 +1304,50 @@ export default function LeadDetailPage() {
         {activeTab === 'activity' && (
           <div className="space-y-6">
 
-            {/* Notes (includes AI call summaries) */}
-            {lead.notes?.length > 0 && (
-              <div className="card">
-                <h2 className="text-xl font-bold mb-4">Notes</h2>
+            {/* Notes */}
+            <div className="card">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl font-bold">Notes{lead.notes?.length > 0 ? ` (${lead.notes.length})` : ''}</h2>
+                <button
+                  onClick={() => setActiveTab('notes')}
+                  className="text-sm text-primary-600 hover:underline"
+                >
+                  Add / View all →
+                </button>
+              </div>
+              {lead.notes?.length > 0 ? (
                 <div className="space-y-3">
-                  {lead.notes.map((note: any) => (
-                    <div key={note.id} className="p-3 bg-blue-50 border border-blue-100 rounded-lg">
+                  {lead.notes.slice(0, 3).map((note: any) => (
+                    <div key={note.id} className={`p-3 rounded-lg border ${note.content?.startsWith('[Dead]') ? 'border-red-200 bg-red-50' : 'border-blue-100 bg-blue-50'}`}>
                       <div className="flex justify-between items-start mb-1">
-                        <span className="text-xs font-medium text-blue-700">
+                        <span className={`text-xs font-medium ${note.content?.startsWith('[Dead]') ? 'text-red-700' : 'text-blue-700'}`}>
+                          {note.content?.startsWith('[Dead]') ? '💀 ' : '📝 '}
                           {note.user ? `${note.user.firstName} ${note.user.lastName}` : '🤖 AI'}
                         </span>
                         <span className="text-xs text-gray-400">
                           {format(new Date(note.createdAt), 'MMM d, h:mm a')}
                         </span>
                       </div>
-                      <div className="text-sm text-gray-800 whitespace-pre-wrap">{note.content}</div>
+                      <div className="text-sm text-gray-800 whitespace-pre-wrap">
+                        {note.content?.startsWith('[Dead] ') ? note.content.slice(7) : note.content}
+                      </div>
                     </div>
                   ))}
+                  {lead.notes.length > 3 && (
+                    <button onClick={() => setActiveTab('notes')} className="text-sm text-primary-600 hover:underline">
+                      + {lead.notes.length - 3} more note{lead.notes.length - 3 !== 1 ? 's' : ''}
+                    </button>
+                  )}
                 </div>
-              </div>
-            )}
+              ) : (
+                <p className="text-sm text-gray-400">
+                  No notes yet.{' '}
+                  <button onClick={() => setActiveTab('notes')} className="text-primary-600 hover:underline">
+                    Add one →
+                  </button>
+                </p>
+              )}
+            </div>
 
             {/* Activity Log */}
             <div className="card">
