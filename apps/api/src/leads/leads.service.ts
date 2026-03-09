@@ -570,6 +570,25 @@ export class LeadsService {
   }
 
   /**
+   * Normalize all stored phone numbers to E.164 (+1XXXXXXXXXX) format.
+   * Safe to run multiple times — skips numbers already in E.164.
+   */
+  async normalizeAllPhones(): Promise<{ updated: number; skipped: number }> {
+    const leads = await this.prisma.lead.findMany({ select: { id: true, sellerPhone: true } });
+    let updated = 0;
+    let skipped = 0;
+    for (const lead of leads) {
+      if (!lead.sellerPhone) { skipped++; continue; }
+      const normalized = formatPhoneNumber(lead.sellerPhone);
+      if (normalized === lead.sellerPhone) { skipped++; continue; }
+      await this.prisma.lead.update({ where: { id: lead.id }, data: { sellerPhone: normalized } });
+      updated++;
+    }
+    this.logger.log(`normalizeAllPhones: updated=${updated}, skipped=${skipped}`);
+    return { updated, skipped };
+  }
+
+  /**
    * Manually trigger initial outreach for a lead (useful for testing / retroactive sends)
    */
   async triggerInitialOutreach(leadId: string): Promise<string | null> {

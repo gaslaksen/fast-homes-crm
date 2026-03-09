@@ -151,6 +151,13 @@ export class LeadsController {
     }
   }
 
+  /** One-time: normalize all stored phone numbers to E.164 format */
+  @Post('admin/normalize-phones')
+  async normalizePhones() {
+    const result = await this.leadsService.normalizeAllPhones();
+    return { success: true, ...result };
+  }
+
   @Patch(':id/auto-respond')
   async toggleAutoRespond(
     @Param('id') id: string,
