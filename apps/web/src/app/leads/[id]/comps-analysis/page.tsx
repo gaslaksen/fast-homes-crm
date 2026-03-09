@@ -420,11 +420,16 @@ export default function CompsAnalysisPage() {
     setAnalyzingPhotos(true);
     setPhotoThumbnails(prev => prev.map(t => ({ ...t, status: 'uploading' as const })));
     try {
-      // Compress all photos before sending — keeps each under ~300KB so 30 photos = ~9MB total
+      // Compress all photos — keeps each under ~300KB
       const compressed = await Promise.all(selectedPhotos.map(compressPhoto));
 
+      // Send up to 15 per request (current backend Multer limit).
+      // Full 30-photo support will be available once the next backend deploy lands.
+      const BACKEND_LIMIT = 15;
+      const toSend = compressed.slice(0, BACKEND_LIMIT);
+
       const formData = new FormData();
-      compressed.forEach((photo) => formData.append('photos', photo));
+      toSend.forEach((photo) => formData.append('photos', photo));
 
       // Persist originals to lead gallery in parallel
       photosAPI.uploadMultiple(leadId, selectedPhotos).catch(() => {});
@@ -1594,8 +1599,10 @@ export default function CompsAnalysisPage() {
                 {analyzingPhotos ? (
                   <span className="flex items-center justify-center gap-2">
                     <span className="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
-                    Analyzing {selectedPhotos.length} photo{selectedPhotos.length !== 1 ? 's' : ''} with AI...
+                    Analyzing {Math.min(selectedPhotos.length, 15)} photo{Math.min(selectedPhotos.length, 15) !== 1 ? 's' : ''} with AI...
                   </span>
+                ) : selectedPhotos.length > 15 ? (
+                  `Analyze Top 15 of ${selectedPhotos.length} Photos with AI`
                 ) : (
                   `Analyze ${selectedPhotos.length > 0 ? selectedPhotos.length + ' Photo' + (selectedPhotos.length !== 1 ? 's' : '') : 'Photos'} with AI`
                 )}
