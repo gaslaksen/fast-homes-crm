@@ -423,9 +423,8 @@ export default function CompsAnalysisPage() {
       // Compress all photos — keeps each under ~300KB
       const compressed = await Promise.all(selectedPhotos.map(compressPhoto));
 
-      // Send up to 15 per request (current backend Multer limit).
-      // Full 30-photo support will be available once the next backend deploy lands.
-      const BACKEND_LIMIT = 15;
+      // Backend Multer limit is now 30.
+      const BACKEND_LIMIT = 30;
       const toSend = compressed.slice(0, BACKEND_LIMIT);
 
       const formData = new FormData();
@@ -1599,10 +1598,10 @@ export default function CompsAnalysisPage() {
                 {analyzingPhotos ? (
                   <span className="flex items-center justify-center gap-2">
                     <span className="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
-                    Analyzing {Math.min(selectedPhotos.length, 15)} photo{Math.min(selectedPhotos.length, 15) !== 1 ? 's' : ''} with AI...
+                    Analyzing {Math.min(selectedPhotos.length, 30)} photo{Math.min(selectedPhotos.length, 30) !== 1 ? 's' : ''} with AI...
                   </span>
-                ) : selectedPhotos.length > 15 ? (
-                  `Analyze Top 15 of ${selectedPhotos.length} Photos with AI`
+                ) : selectedPhotos.length > 30 ? (
+                  `Analyze Top 30 of ${selectedPhotos.length} Photos with AI`
                 ) : (
                   `Analyze ${selectedPhotos.length > 0 ? selectedPhotos.length + ' Photo' + (selectedPhotos.length !== 1 ? 's' : '') : 'Photos'} with AI`
                 )}
