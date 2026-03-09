@@ -388,23 +388,55 @@ export default function CompsAnalysisPage() {
     addPhotos(Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/')));
   };
 
+  /** Compress a photo to max 1200px wide and 85% JPEG quality before sending to the API.
+   *  Raw phone photos are 2–5MB each; this brings them to ~150–300KB, well within Anthropic limits. */
+  const compressPhoto = (file: File): Promise<File> =>
+    new Promise((resolve) => {
+      const img = new window.Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        const MAX_DIM = 1200;
+        const scale = Math.min(1, MAX_DIM / Math.max(img.width, img.height));
+        const w = Math.round(img.width * scale);
+        const h = Math.round(img.height * scale);
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d')!;
+        ctx.drawImage(img, 0, 0, w, h);
+        canvas.toBlob(
+          (blob) => resolve(blob ? new File([blob], file.name, { type: 'image/jpeg' }) : file),
+          'image/jpeg',
+          0.85,
+        );
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
+      img.src = url;
+    });
+
   const handleAnalyzePhotos = async () => {
     if (!analysis || selectedPhotos.length === 0) return;
     setAnalyzingPhotos(true);
-    // Show uploading status on thumbnails
     setPhotoThumbnails(prev => prev.map(t => ({ ...t, status: 'uploading' as const })));
     try {
+      // Compress all photos before sending — keeps each under ~300KB so 30 photos = ~9MB total
+      const compressed = await Promise.all(selectedPhotos.map(compressPhoto));
+
       const formData = new FormData();
-      selectedPhotos.forEach((photo) => formData.append('photos', photo));
-      // Persist photos to lead in parallel with analysis
+      compressed.forEach((photo) => formData.append('photos', photo));
+
+      // Persist originals to lead gallery in parallel
       photosAPI.uploadMultiple(leadId, selectedPhotos).catch(() => {});
+
       const res = await compAnalysisAPI.analyzePhotos(leadId, analysis.id, formData);
       if (res.data.repairLow) setRepairCosts(Math.round((res.data.repairLow + res.data.repairHigh) / 2));
       setPhotoThumbnails(prev => prev.map(t => ({ ...t, status: 'done' as const })));
       await refreshAnalysis();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Photo analysis failed:', error);
-      alert('Photo analysis failed — please try again');
+      const msg = error?.response?.data?.message || error?.message || 'Unknown error';
+      alert(`Photo analysis failed: ${msg}\n\nTry reducing to 10–15 photos if the issue persists.`);
       setPhotoThumbnails(prev => prev.map(t => ({ ...t, status: 'ready' as const })));
     } finally {
       setAnalyzingPhotos(false);

@@ -133,7 +133,7 @@ export class CompAnalysisController {
   }
 
   @Post(':analysisId/analyze-photos')
-  @UseInterceptors(FilesInterceptor('photos', 15, { storage: memoryStorage() }))
+  @UseInterceptors(FilesInterceptor('photos', 30, { storage: memoryStorage() }))
   async analyzePhotos(
     @Param('analysisId') analysisId: string,
     @UploadedFiles() photos: Express.Multer.File[],
