@@ -480,9 +480,16 @@ Your message must:
 
     this.logger.log(`📥 Inbound message from ${from}: "${body.substring(0, 80)}"`);
 
-    // Find lead by phone number
+    // Find lead by phone number — try E.164 first, then 10-digit fallback
+    const stripped = from.replace(/\D/g, '').replace(/^1/, ''); // → 10 digits
     const lead = await this.prisma.lead.findFirst({
-      where: { sellerPhone: from },
+      where: {
+        OR: [
+          { sellerPhone: from },           // +17046812994
+          { sellerPhone: stripped },        // 7046812994
+          { sellerPhone: `1${stripped}` },  // 17046812994
+        ],
+      },
       include: {
         messages: {
           orderBy: { createdAt: 'desc' },

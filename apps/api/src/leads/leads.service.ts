@@ -6,7 +6,7 @@ import { PhotosService } from '../photos/photos.service';
 import { RentCastService } from '../comps/rentcast.service';
 import { CompsService } from '../comps/comps.service';
 import { PipelineService } from '../pipeline/pipeline.service';
-import { LeadStatus, LeadSource } from '@fast-homes/shared';
+import { LeadStatus, LeadSource, formatPhoneNumber } from '@fast-homes/shared';
 import { Prisma } from '@prisma/client';
 
 const INITIAL_OUTREACH_DELAY_MS = 60_000; // 1 minute
@@ -80,6 +80,11 @@ export class LeadsService {
       distressSignals: data.distressSignals,
       ownershipStatus: data.ownershipStatus,
     });
+
+    // Always store phone in E.164 format so inbound webhook lookups match
+    if (data.sellerPhone) {
+      data.sellerPhone = formatPhoneNumber(data.sellerPhone);
+    }
 
     const lead = await this.prisma.lead.create({
       data: {
