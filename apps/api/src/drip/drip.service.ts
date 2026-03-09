@@ -40,10 +40,15 @@ export class DripService implements OnModuleInit, OnModuleDestroy {
   }
 
   onModuleInit() {
-    this.queue = new Queue(DRIP_QUEUE_NAME, {
-      connection: this.getRedisConnection(),
-    });
-    this.logger.log('Drip queue initialized');
+    try {
+      this.queue = new Queue(DRIP_QUEUE_NAME, {
+        connection: this.getRedisConnection(),
+      });
+      this.logger.log('Drip queue initialized (BullMQ/Redis)');
+    } catch (err) {
+      this.logger.warn(`⚠️  Redis unavailable — drip queue disabled, falling back to demo/setTimeout mode: ${err.message}`);
+      this.queue = null;
+    }
   }
 
   async onModuleDestroy() {
@@ -91,12 +96,28 @@ export class DripService implements OnModuleInit, OnModuleDestroy {
       }, delay);
       this.demoTimers.set(jobId, timer);
       this.logger.log(`Demo timer set: ${jobName} in ${delay}ms (${jobId})`);
-    } else {
+    } else if (this.queue) {
       await this.queue.add(jobName, data, {
         delay,
         jobId,
         removeOnComplete: true,
       });
+    } else {
+      // Redis unavailable — fall back to setTimeout
+      const timer = setTimeout(async () => {
+        this.demoTimers.delete(jobId);
+        try {
+          if (jobName === 'send-drip') {
+            await this.sendNextMessage(data.leadId, data.sequenceId);
+          } else if (jobName === 'drip-timeout') {
+            await this.handleTimeout(data.leadId, data.sequenceId);
+          }
+        } catch (err) {
+          this.logger.error(`Fallback timer error (${jobName}): ${err.message}`);
+        }
+      }, delay);
+      this.demoTimers.set(jobId, timer);
+      this.logger.warn(`Redis unavailable — fallback setTimeout for ${jobName} (${delay}ms)`);
     }
   }
 
@@ -104,7 +125,7 @@ export class DripService implements OnModuleInit, OnModuleDestroy {
    * Cancel a scheduled job.
    */
   private async cancelJob(jobId: string, isDemo: boolean) {
-    if (isDemo) {
+    if (isDemo || !this.queue) {
       const timer = this.demoTimers.get(jobId);
       if (timer) {
         clearTimeout(timer);

@@ -15,40 +15,50 @@ export class DripProcessor implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
+    const redisHost = this.config.get<string>('REDIS_HOST', '');
+    if (!redisHost) {
+      this.logger.warn('⚠️  REDIS_HOST not set — drip worker disabled (BullMQ requires Redis). Drip sequences will use fallback setTimeout.');
+      return;
+    }
+
     const connection = {
-      host: this.config.get<string>('REDIS_HOST', 'localhost'),
+      host: redisHost,
       port: this.config.get<number>('REDIS_PORT', 6379),
       maxRetriesPerRequest: null,
     };
 
-    this.worker = new Worker(
-      DRIP_QUEUE_NAME,
-      async (job: Job) => {
-        const { leadId, sequenceId } = job.data;
+    try {
+      this.worker = new Worker(
+        DRIP_QUEUE_NAME,
+        async (job: Job) => {
+          const { leadId, sequenceId } = job.data;
 
-        switch (job.name) {
-          case 'send-drip':
-            this.logger.log(`Processing send-drip for lead ${leadId}`);
-            await this.dripService.sendNextMessage(leadId, sequenceId);
-            break;
+          switch (job.name) {
+            case 'send-drip':
+              this.logger.log(`Processing send-drip for lead ${leadId}`);
+              await this.dripService.sendNextMessage(leadId, sequenceId);
+              break;
 
-          case 'drip-timeout':
-            this.logger.log(`Processing drip-timeout for lead ${leadId}`);
-            await this.dripService.handleTimeout(leadId, sequenceId);
-            break;
+            case 'drip-timeout':
+              this.logger.log(`Processing drip-timeout for lead ${leadId}`);
+              await this.dripService.handleTimeout(leadId, sequenceId);
+              break;
 
-          default:
-            this.logger.warn(`Unknown job name: ${job.name}`);
-        }
-      },
-      { connection, concurrency: 5 },
-    );
+            default:
+              this.logger.warn(`Unknown job name: ${job.name}`);
+          }
+        },
+        { connection, concurrency: 5 },
+      );
 
-    this.worker.on('failed', (job, err) => {
-      this.logger.error(`Drip job ${job?.id} failed: ${err.message}`);
-    });
+      this.worker.on('failed', (job, err) => {
+        this.logger.error(`Drip job ${job?.id} failed: ${err.message}`);
+      });
 
-    this.logger.log('Drip worker started');
+      this.logger.log('Drip worker started');
+    } catch (err) {
+      this.logger.warn(`⚠️  Drip worker failed to start: ${err.message}`);
+    }
   }
 
   async onModuleDestroy() {
