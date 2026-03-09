@@ -432,10 +432,12 @@ Your message must:
     });
     if (!lead) return null;
 
-    // Don't send if any messages already exist (outbound OR inbound).
-    // If the seller already replied, the conversation has started — don't intro.
-    if (lead.messages.length > 0) {
-      this.logger.log(`Lead ${leadId}: messages already exist (${lead.messages.length}), skipping initial outreach`);
+    // Don't send if any real messages exist (ignore SIMULATED sids from old broken attempts)
+    const realMessages = lead.messages.filter(
+      (m) => !m.twilioSid?.startsWith('SIMULATED') && !m.twilioSid?.startsWith('BLOCKED'),
+    );
+    if (realMessages.length > 0) {
+      this.logger.log(`Lead ${leadId}: real messages already exist (${realMessages.length}), skipping initial outreach`);
       return null;
     }
 

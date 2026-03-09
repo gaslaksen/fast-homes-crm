@@ -40,13 +40,19 @@ export class DripService implements OnModuleInit, OnModuleDestroy {
   }
 
   onModuleInit() {
+    const redisHost = this.config.get<string>('REDIS_HOST', '');
+    if (!redisHost) {
+      this.logger.warn('⚠️  REDIS_HOST not configured — drip queue disabled. Drip sequences will use fallback setTimeout mode.');
+      this.queue = null;
+      return;
+    }
     try {
       this.queue = new Queue(DRIP_QUEUE_NAME, {
         connection: this.getRedisConnection(),
       });
       this.logger.log('Drip queue initialized (BullMQ/Redis)');
     } catch (err) {
-      this.logger.warn(`⚠️  Redis unavailable — drip queue disabled, falling back to demo/setTimeout mode: ${err.message}`);
+      this.logger.warn(`⚠️  Redis unavailable — drip queue disabled: ${err.message}`);
       this.queue = null;
     }
   }
