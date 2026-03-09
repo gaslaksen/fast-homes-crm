@@ -64,6 +64,7 @@ export default function LeadDetailPage() {
   const [showDeadForm, setShowDeadForm] = useState(false);
   const [deadReason, setDeadReason] = useState('');
   const [markingDead, setMarkingDead] = useState(false);
+  const [settingTier, setSettingTier] = useState(false);
 
   useEffect(() => {
     loadLead();
@@ -271,6 +272,18 @@ export default function LeadDetailPage() {
     }
   };
 
+  const handleSetTier = async (tier: number | null) => {
+    setSettingTier(true);
+    try {
+      await leadsAPI.update(leadId, { tier });
+      loadLead();
+    } catch (error) {
+      console.error('Failed to set tier:', error);
+    } finally {
+      setSettingTier(false);
+    }
+  };
+
   if (loading) {
     return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
   }
@@ -303,8 +316,11 @@ export default function LeadDetailPage() {
                   <span>/</span>
                   <span className="text-gray-600 font-medium">{lead.propertyAddress}</span>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <h1 className="text-xl font-bold text-gray-900">{lead.propertyAddress}</h1>
+                  {lead.tier === 1 && <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-100 text-green-800 border border-green-300 text-xs font-bold">T1 · Contract Now</span>}
+                  {lead.tier === 2 && <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-800 border border-yellow-300 text-xs font-bold">T2 · Opportunity</span>}
+                  {lead.tier === 3 && <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 border border-gray-300 text-xs font-bold">T3 · Dead</span>}
                   {lead.status === 'DEAD' && (
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-100 text-red-700 text-xs font-semibold">
                       💀 Dead
@@ -815,6 +831,40 @@ export default function LeadDetailPage() {
                 onRefresh={loadLead}
                 onViewAnalysis={() => setActiveTab('analysis')}
               />
+
+              {/* Deal Tier */}
+              <div className="card">
+                <h3 className="text-lg font-bold mb-3">Deal Tier</h3>
+                <p className="text-xs text-gray-400 mb-3">How likely are we to get this under contract?</p>
+                <div className="space-y-2">
+                  {[
+                    { tier: 1, label: 'Tier 1', sub: 'Send a contract now', color: 'border-green-300 bg-green-50 text-green-800', activeColor: 'border-green-500 bg-green-500 text-white' },
+                    { tier: 2, label: 'Tier 2', sub: 'Opportunity, keep pursuing', color: 'border-yellow-300 bg-yellow-50 text-yellow-800', activeColor: 'border-yellow-500 bg-yellow-500 text-white' },
+                    { tier: 3, label: 'Tier 3', sub: 'Low chance, dead/no go', color: 'border-gray-300 bg-gray-50 text-gray-600', activeColor: 'border-gray-500 bg-gray-500 text-white' },
+                  ].map(({ tier, label, sub, color, activeColor }) => {
+                    const isActive = lead.tier === tier;
+                    return (
+                      <button
+                        key={tier}
+                        onClick={() => handleSetTier(isActive ? null : tier)}
+                        disabled={settingTier}
+                        className={`w-full flex items-center justify-between px-3 py-2 rounded-lg border-2 text-left transition-all disabled:opacity-50 ${isActive ? activeColor : `${color} hover:opacity-80`}`}
+                      >
+                        <div>
+                          <div className="text-sm font-semibold">{label}</div>
+                          <div className={`text-xs ${isActive ? 'opacity-80' : 'opacity-60'}`}>{sub}</div>
+                        </div>
+                        {isActive && <span className="text-sm">✓</span>}
+                      </button>
+                    );
+                  })}
+                  {lead.tier && (
+                    <button onClick={() => handleSetTier(null)} className="text-xs text-gray-400 hover:text-gray-600 w-full text-center">
+                      Clear tier
+                    </button>
+                  )}
+                </div>
+              </div>
 
               {/* Quick Actions */}
               <div className="card">

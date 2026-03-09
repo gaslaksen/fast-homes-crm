@@ -110,6 +110,9 @@ model Lead {
   campChallengeComplete Boolean @default(false)
   campAuthorityComplete Boolean @default(false)
 
+  // Deal tier: 1 = contract now, 2 = opportunity, 3 = dead/no go
+  tier                  Int?
+
   sourceMetadata    Json?
   primaryPhoto      String?
   photos            Json     @default("[]")

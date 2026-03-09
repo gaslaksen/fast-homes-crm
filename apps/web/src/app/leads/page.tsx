@@ -16,6 +16,25 @@ type ViewMode = 'table' | 'cards';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+const INACTIVE_STATUSES = ['DEAD', 'CLOSED_WON', 'CLOSED_LOST'];
+
+const TIER_CONFIG: Record<number, { label: string; short: string; pill: string; dot: string }> = {
+  1: { label: 'Tier 1 · Contract Now', short: 'T1', pill: 'bg-green-100 text-green-800 border-green-300',   dot: 'bg-green-500' },
+  2: { label: 'Tier 2 · Opportunity',  short: 'T2', pill: 'bg-yellow-100 text-yellow-800 border-yellow-300', dot: 'bg-yellow-400' },
+  3: { label: 'Tier 3 · Dead',         short: 'T3', pill: 'bg-gray-100 text-gray-500 border-gray-300',       dot: 'bg-gray-400' },
+};
+
+function TierBadge({ tier }: { tier?: number | null }) {
+  if (!tier) return null;
+  const cfg = TIER_CONFIG[tier];
+  if (!cfg) return null;
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold border ${cfg.pill}`}>
+      {cfg.short}
+    </span>
+  );
+}
+
 const BAND_STYLES: Record<string, { pill: string; dot: string }> = {
   STRIKE_ZONE: { pill: 'bg-red-100 text-red-700 border-red-200',         dot: 'bg-red-500' },
   HOT:         { pill: 'bg-orange-100 text-orange-700 border-orange-200', dot: 'bg-orange-500' },
@@ -136,6 +155,8 @@ function LeadsPageInner() {
   const [dealFilter, setDealFilter] = useState('');       // 'pencils' | 'no'
   const [stateFilter, setStateFilter] = useState('');
   const [assigneeFilter, setAssigneeFilter] = useState('');
+  const [tierFilter, setTierFilter] = useState('');       // '1' | '2' | '3'
+  const [showInactive, setShowInactive] = useState(false);
   const [teamMembers, setTeamMembers] = useState<any[]>([]);
   const [sortKey, setSortKey] = useState<SortKey>('score');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
@@ -170,12 +191,15 @@ function LeadsPageInner() {
     const now = Date.now();
     const q = search.toLowerCase();
     return allLeads.filter(l => {
+      // Default: hide dead/closed unless a specific status is chosen or showInactive is on
+      if (!showInactive && !statusFilter && INACTIVE_STATUSES.includes(l.status)) return false;
       if (bandFilter && l.scoreBand !== bandFilter) return false;
       if (statusFilter && l.status !== statusFilter) return false;
       if (sourceFilter && l.source !== sourceFilter) return false;
       if (stateFilter && (l.propertyState || '').toUpperCase() !== stateFilter.toUpperCase()) return false;
       if (assigneeFilter === 'unassigned' && l.assignedToUserId) return false;
       if (assigneeFilter && assigneeFilter !== 'unassigned' && l.assignedToUserId !== assigneeFilter) return false;
+      if (tierFilter && String(l.tier) !== tierFilter) return false;
       if (q && ![l.propertyAddress, l.propertyCity, l.propertyState, l.sellerFirstName, l.sellerLastName, l.sellerPhone]
         .filter(Boolean).join(' ').toLowerCase().includes(q)) return false;
       // Date added filter
@@ -219,7 +243,7 @@ function LeadsPageInner() {
       if (av > bv) return sortDir === 'desc' ? -1 : 1;
       return 0;
     });
-  }, [allLeads, search, bandFilter, statusFilter, sourceFilter, dateFilter, staleFilter, arvFilter, dealFilter, stateFilter, assigneeFilter, sortKey, sortDir]);
+  }, [allLeads, search, bandFilter, statusFilter, sourceFilter, dateFilter, staleFilter, arvFilter, dealFilter, stateFilter, assigneeFilter, tierFilter, showInactive, sortKey, sortDir]);
 
   const toggleSelect = (id: string) => {
     setSelectedIds(prev => {
@@ -254,9 +278,15 @@ function LeadsPageInner() {
   const clearFilters = () => {
     setSearch(''); setBandFilter(''); setStatusFilter(''); setSourceFilter('');
     setDateFilter(''); setStaleFilter(''); setArvFilter(''); setDealFilter(''); setStateFilter('');
-    setAssigneeFilter('');
+    setAssigneeFilter(''); setTierFilter(''); setShowInactive(false);
   };
-  const hasFilters = !!(search || bandFilter || statusFilter || sourceFilter || dateFilter || staleFilter || arvFilter || dealFilter || stateFilter || assigneeFilter);
+  const hasFilters = !!(search || bandFilter || statusFilter || sourceFilter || dateFilter || staleFilter || arvFilter || dealFilter || stateFilter || assigneeFilter || tierFilter || showInactive);
+
+  // Count of hidden inactive leads
+  const hiddenInactiveCount = useMemo(() => {
+    if (showInactive || statusFilter) return 0;
+    return allLeads.filter(l => INACTIVE_STATUSES.includes(l.status)).length;
+  }, [allLeads, showInactive, statusFilter]);
 
   // Unique states from loaded leads
   const availableStates = useMemo(() => {
@@ -287,7 +317,12 @@ function LeadsPageInner() {
           <div>
             <h1 className="text-xl font-bold text-gray-900">Leads</h1>
             <p className="text-sm text-gray-400 mt-0.5">
-              {filtered.length} of {allLeads.length} leads
+              {filtered.length} active leads
+              {hiddenInactiveCount > 0 && (
+                <button onClick={() => setShowInactive(true)} className="ml-2 text-gray-400 hover:text-gray-600 underline underline-offset-2 decoration-dashed">
+                  +{hiddenInactiveCount} dead/closed hidden
+                </button>
+              )}
               {hasFilters && <button onClick={clearFilters} className="ml-2 text-blue-500 hover:underline">Clear filters</button>}
             </p>
           </div>
@@ -336,9 +371,9 @@ function LeadsPageInner() {
             </button>
           </div>
 
-          {/* Score Band Quick Filters */}
+          {/* Score Band + Tier Quick Filters */}
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs text-gray-400 font-medium">Priority:</span>
+            <span className="text-xs text-gray-400 font-medium">Score:</span>
             <FilterChip label="All" active={!bandFilter} onClick={() => setBandFilter('')} />
             {['STRIKE_ZONE', 'HOT', 'WORKABLE', 'DEAD_COLD'].map(band => (
               <FilterChip
@@ -348,6 +383,27 @@ function LeadsPageInner() {
                 onClick={() => setBandFilter(bandFilter === band ? '' : band)}
               />
             ))}
+            <span className="text-gray-200">|</span>
+            <span className="text-xs text-gray-400 font-medium">Tier:</span>
+            {[1, 2, 3].map(t => (
+              <FilterChip
+                key={t}
+                label={TIER_CONFIG[t].label}
+                active={tierFilter === String(t)}
+                onClick={() => setTierFilter(tierFilter === String(t) ? '' : String(t))}
+              />
+            ))}
+            <span className="text-gray-200">|</span>
+            <button
+              onClick={() => setShowInactive(v => !v)}
+              className={`px-3 py-1 rounded-full text-xs font-medium border transition-all ${
+                showInactive
+                  ? 'bg-gray-600 text-white border-gray-600'
+                  : 'bg-white text-gray-400 border-gray-200 hover:border-gray-400'
+              }`}
+            >
+              {showInactive ? '👁 Showing dead/closed' : 'Show dead/closed'}
+            </button>
           </div>
 
           {/* Advanced Filters */}
@@ -392,6 +448,12 @@ function LeadsPageInner() {
                   {teamMembers.map((u: any) => (
                     <option key={u.id} value={u.id}>{u.firstName} {u.lastName}</option>
                   ))}
+                </FilterSelect>
+                <FilterSelect label="Tier" value={tierFilter} onChange={setTierFilter}>
+                  <option value="">All tiers</option>
+                  <option value="1">Tier 1 · Contract Now</option>
+                  <option value="2">Tier 2 · Opportunity</option>
+                  <option value="3">Tier 3 · Dead</option>
                 </FilterSelect>
                 {availableStates.length > 1 && (
                   <FilterSelect label="State" value={stateFilter} onChange={setStateFilter}>
@@ -440,7 +502,7 @@ function LeadsPageInner() {
           /* ─── TABLE VIEW ─── */
           <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
             {/* Table Header */}
-            <div className="grid grid-cols-[auto_48px_2fr_1fr_80px_80px_80px_72px_80px] gap-3 px-4 py-2.5 border-b border-gray-100 bg-gray-50/80">
+            <div className="grid grid-cols-[auto_48px_2fr_1fr_56px_80px_80px_80px_72px_80px] gap-3 px-4 py-2.5 border-b border-gray-100 bg-gray-50/80">
               <input
                 type="checkbox"
                 checked={selectedIds.size === filtered.length && filtered.length > 0}
@@ -450,6 +512,7 @@ function LeadsPageInner() {
               <div />
               <SortHeader label="Property / Seller" sortKey="address" current={sortKey} dir={sortDir} onClick={handleSort} />
               <SortHeader label="Stage" sortKey="score" current={sortKey} dir={sortDir} onClick={handleSort} />
+              <div className="text-xs font-semibold uppercase tracking-wide text-gray-400">Tier</div>
               <SortHeader label="Score" sortKey="score" current={sortKey} dir={sortDir} onClick={handleSort} />
               <SortHeader label="ARV" sortKey="arv" current={sortKey} dir={sortDir} onClick={handleSort} />
               <SortHeader label="Asking" sortKey="asking" current={sortKey} dir={sortDir} onClick={handleSort} />
@@ -467,7 +530,7 @@ function LeadsPageInner() {
                 const stale = hoursAgo !== null && hoursAgo > 72 && !['CLOSED_WON','CLOSED_LOST','DEAD'].includes(lead.status);
 
                 return (
-                  <div key={lead.id} className={`grid grid-cols-[auto_48px_2fr_1fr_80px_80px_80px_72px_80px] gap-3 items-center px-4 py-2.5 hover:bg-gray-50 transition-colors group ${selectedIds.has(lead.id) ? 'bg-blue-50/40' : ''}`}>
+                  <div key={lead.id} className={`grid grid-cols-[auto_48px_2fr_1fr_56px_80px_80px_80px_72px_80px] gap-3 items-center px-4 py-2.5 hover:bg-gray-50 transition-colors group ${selectedIds.has(lead.id) ? 'bg-blue-50/40' : ''}`}>
                     <input
                       type="checkbox"
                       checked={selectedIds.has(lead.id)}
@@ -490,6 +553,9 @@ function LeadsPageInner() {
                           {lead.assignedTo.firstName?.[0]}{lead.assignedTo.lastName?.[0]}
                         </span>
                       )}
+                    </Link>
+                    <Link href={`/leads/${lead.id}`} className="flex justify-start">
+                      <TierBadge tier={lead.tier} />
                     </Link>
                     <Link href={`/leads/${lead.id}`} className="flex justify-center">
                       <ScorePill band={lead.scoreBand} score={lead.totalScore} />
@@ -560,7 +626,10 @@ function LeadsPageInner() {
                           </span>
                         )}
                       </span>
-                      <StatusBadge status={lead.status} />
+                      <div className="flex items-center gap-1.5">
+                        <TierBadge tier={lead.tier} />
+                        <StatusBadge status={lead.status} />
+                      </div>
                     </div>
 
                     {(lead.arv || lead.askingPrice) && (
