@@ -5,6 +5,14 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { leadsAPI } from '@/lib/api';
 
+/** Normalize any US phone input to E.164 (+1XXXXXXXXXX). Returns null if invalid. */
+function normalizePhone(raw: string): string | null {
+  const digits = raw.replace(/\D/g, '');
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
+  return null;
+}
+
 export default function NewLeadPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -33,8 +41,16 @@ export default function NewLeadPage() {
     setLoading(true);
 
     try {
+      const normalizedPhone = normalizePhone(formData.sellerPhone);
+      if (!normalizedPhone) {
+        alert('Please enter a valid 10-digit US phone number.');
+        setLoading(false);
+        return;
+      }
+
       const payload = {
         ...formData,
+        sellerPhone: normalizedPhone,
         bedrooms: formData.bedrooms ? parseInt(formData.bedrooms) : undefined,
         bathrooms: formData.bathrooms ? parseFloat(formData.bathrooms) : undefined,
         sqft: formData.sqft ? parseInt(formData.sqft) : undefined,
@@ -235,9 +251,16 @@ export default function NewLeadPage() {
                   value={formData.sellerPhone}
                   onChange={handleChange}
                   className="input"
-                  placeholder="+17045551234"
+                  placeholder="(704) 555-1234"
                   required
                 />
+                {formData.sellerPhone && (
+                  <p className={`text-xs mt-1 ${normalizePhone(formData.sellerPhone) ? 'text-green-600' : 'text-red-500'}`}>
+                    {normalizePhone(formData.sellerPhone)
+                      ? `Will be saved as ${normalizePhone(formData.sellerPhone)}`
+                      : 'Enter a valid 10-digit US number'}
+                  </p>
+                )}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -299,7 +322,7 @@ export default function NewLeadPage() {
                   onChange={handleChange}
                   className="input"
                 >
-                  <option value="">— Unknown (AI will ask) —</option>
+                  <option value=""></option>
                   <option value="excellent">Excellent</option>
                   <option value="good">Good</option>
                   <option value="fair">Fair</option>
@@ -317,7 +340,7 @@ export default function NewLeadPage() {
                   onChange={handleChange}
                   className="input"
                 >
-                  <option value="">— Unknown (AI will ask) —</option>
+                  <option value=""></option>
                   <option value="sole_owner">Sole Owner</option>
                   <option value="co_owner">Co-Owner</option>
                   <option value="heir">Heir</option>
