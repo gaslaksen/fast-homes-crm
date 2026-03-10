@@ -32,7 +32,6 @@ interface Lead {
 interface CompsMapProps {
   lead: Lead;
   comps: Comp[];
-  /** Stable comp-id → display number map (pass from parent so numbers match the list) */
   compIndexMap?: Map<string, number>;
   hoveredCompId?: string | null;
   onHoverComp?: (id: string | null) => void;
@@ -47,13 +46,19 @@ export default function CompsMap({
   onHoverComp,
   onToggleComp,
 }: CompsMapProps) {
-  const mapRef = useRef<HTMLDivElement>(null);
+  const mapRef        = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<any>(null);
-  // Keep callback ref so event listeners always call the latest version
-  const onHoverRef = useRef(onHoverComp);
-  useEffect(() => { onHoverRef.current = onHoverComp; }, [onHoverComp]);
 
-  // ── Build / rebuild map when comps data changes ──────────────────────────
+  // Stable refs so event listeners always call the latest callback
+  // without being listed as useEffect deps (prevents map rebuilds)
+  const onHoverRef  = useRef(onHoverComp);
+  const onToggleRef = useRef(onToggleComp);
+  useEffect(() => { onHoverRef.current  = onHoverComp;  }, [onHoverComp]);
+  useEffect(() => { onToggleRef.current = onToggleComp; }, [onToggleComp]);
+
+  // ── Build / rebuild map only when actual data changes ────────────────────
+  // onToggleComp and onHoverComp are intentionally excluded from deps
+  // (accessed via refs above) so hover/callback changes don't rebuild the map.
   useEffect(() => {
     if (!mapRef.current || typeof window === 'undefined') return;
 
@@ -61,8 +66,8 @@ export default function CompsMap({
       delete (L.Icon.Default.prototype as any)._getIconUrl;
       L.Icon.Default.mergeOptions({
         iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-        iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-        shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+        iconUrl:       'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+        shadowUrl:     'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
       });
 
       if (mapInstanceRef.current) {
@@ -71,12 +76,11 @@ export default function CompsMap({
       }
 
       const compsWithCoords = comps.filter((c) => c.latitude && c.longitude);
-      const hasSubjectCoords = !!(lead.latitude && lead.longitude);
+      const hasSubject      = !!(lead.latitude && lead.longitude);
+      if (!hasSubject && compsWithCoords.length === 0) return;
 
-      if (!hasSubjectCoords && compsWithCoords.length === 0) return;
-
-      const centerLat = hasSubjectCoords ? lead.latitude! : compsWithCoords[0].latitude!;
-      const centerLng = hasSubjectCoords ? lead.longitude! : compsWithCoords[0].longitude!;
+      const centerLat = hasSubject ? lead.latitude!  : compsWithCoords[0].latitude!;
+      const centerLng = hasSubject ? lead.longitude! : compsWithCoords[0].longitude!;
 
       const map = L.map(mapRef.current!, { zoomControl: true }).setView([centerLat, centerLng], 14);
       mapInstanceRef.current = map;
@@ -88,8 +92,8 @@ export default function CompsMap({
 
       const bounds: [number, number][] = [];
 
-      // Subject property marker (red "S")
-      if (hasSubjectCoords) {
+      // Subject property marker
+      if (hasSubject) {
         const subjectIcon = L.divIcon({
           className: '',
           html: `<div style="
@@ -114,12 +118,15 @@ export default function CompsMap({
         bounds.push([lead.latitude!, lead.longitude!]);
       }
 
-      // Comp markers — numbered to match the card list
+      // Comp markers
       compsWithCoords.forEach((comp) => {
-        const isSelected = comp.selected;
+        const isSelected  = comp.selected;
+        const color       = isSelected ? '#2563eb' : '#9ca3af';
+        const displayNum  = compIndexMap?.get(comp.id) ?? '?';
         const correlation = comp.correlation ? Math.round(comp.correlation * 100) : null;
-        const color = isSelected ? '#2563eb' : '#9ca3af';
-        const displayNum = compIndexMap?.get(comp.id) ?? '?';
+        const monthsAgo   = Math.round(
+          (Date.now() - new Date(comp.soldDate).getTime()) / (30 * 24 * 60 * 60 * 1000),
+        );
 
         const compIcon = L.divIcon({
           className: '',
@@ -132,21 +139,18 @@ export default function CompsMap({
               font-weight:bold;font-size:11px;
               box-shadow:0 2px 4px rgba(0,0,0,0.3);
               cursor:pointer;
-              transition:transform 0.12s ease, box-shadow 0.12s ease;
+              transition:transform 0.12s ease,box-shadow 0.12s ease;
             ">${displayNum}</div>`,
           iconSize: [28, 28],
           iconAnchor: [14, 14],
         });
-
-        const monthsAgo = Math.round(
-          (Date.now() - new Date(comp.soldDate).getTime()) / (30 * 24 * 60 * 60 * 1000),
-        );
 
         const marker = L.marker([comp.latitude!, comp.longitude!], {
           icon: compIcon,
           zIndexOffset: isSelected ? 500 : 100,
         }).addTo(map);
 
+        // Popup on CLICK only — not on hover, so the map doesn't pan/jump
         marker.bindPopup(`
           <div style="min-width:200px">
             <strong>#${displayNum} · ${comp.address}</strong><br/>
@@ -155,25 +159,24 @@ export default function CompsMap({
             <span style="color:#555">${comp.distance.toFixed(2)} mi · sold ${monthsAgo}mo ago</span><br/>
             ${correlation ? `<strong style="color:${correlation >= 90 ? '#16a34a' : correlation >= 80 ? '#ca8a04' : '#dc2626'}">${correlation}% match</strong>` : ''}
             ${isSelected ? ' · <span style="color:#2563eb">✓ Selected</span>' : ''}
-            ${onToggleComp ? `<br/><button onclick="window.toggleComp('${comp.id}')" style="margin-top:6px;padding:3px 10px;background:${isSelected ? '#e5e7eb' : '#2563eb'};color:${isSelected ? '#374151' : 'white'};border:none;border-radius:4px;cursor:pointer;font-size:12px">${isSelected ? 'Deselect' : 'Select'}</button>` : ''}
+            <br/><button
+              onclick="window.__compsToggle('${comp.id}')"
+              style="margin-top:6px;padding:3px 10px;background:${isSelected ? '#e5e7eb' : '#2563eb'};color:${isSelected ? '#374151' : 'white'};border:none;border-radius:4px;cursor:pointer;font-size:12px"
+            >${isSelected ? 'Deselect' : 'Select'}</button>
           </div>
-        `);
+        `, { autoPan: false }); // autoPan:false prevents map jumping when popup opens
 
-        // Hover events — call latest callback via ref (no map rebuild needed)
-        marker.on('mouseover', () => {
-          onHoverRef.current?.(comp.id);
-          marker.openPopup();
-        });
-        marker.on('mouseout', () => {
-          onHoverRef.current?.(null);
-        });
+        // Hover: just highlight marker via DOM — no popup, no map pan
+        marker.on('mouseover', () => { onHoverRef.current?.(comp.id); });
+        marker.on('mouseout',  () => { onHoverRef.current?.(null); });
 
         bounds.push([comp.latitude!, comp.longitude!]);
       });
 
-      if (onToggleComp) {
-        (window as any).toggleComp = onToggleComp;
-      }
+      // Global toggle handler — reads from ref so it always calls the latest version
+      (window as any).__compsToggle = (id: string) => {
+        onToggleRef.current?.(id);
+      };
 
       if (bounds.length > 1) {
         map.fitBounds(bounds, { padding: [40, 40] });
@@ -186,26 +189,29 @@ export default function CompsMap({
         mapInstanceRef.current = null;
       }
     };
-  }, [lead, comps, onToggleComp, compIndexMap]);
+  // NOTE: onToggleComp and onHoverComp intentionally omitted — using refs above
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lead, comps, compIndexMap]);
 
-  // ── Hover highlight — DOM manipulation, no map rebuild ───────────────────
+  // ── Hover highlight — pure DOM mutation, zero map rebuild ─────────────────
   useEffect(() => {
     document.querySelectorAll<HTMLElement>('[data-comp-marker]').forEach((el) => {
-      el.style.transform = 'scale(1)';
-      el.style.boxShadow = '0 2px 4px rgba(0,0,0,0.3)';
+      el.style.transform  = 'scale(1)';
+      el.style.boxShadow  = '0 2px 4px rgba(0,0,0,0.3)';
+      el.style.zIndex     = '';
     });
     if (hoveredCompId) {
       const el = document.querySelector<HTMLElement>(`[data-comp-marker="${hoveredCompId}"]`);
       if (el) {
         el.style.transform = 'scale(1.45)';
         el.style.boxShadow = '0 4px 14px rgba(0,0,0,0.55)';
+        el.style.zIndex    = '999';
       }
     }
   }, [hoveredCompId]);
 
   return (
     <>
-      {/* Leaflet CSS */}
       <link
         rel="stylesheet"
         href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
@@ -220,13 +226,13 @@ export default function CompsMap({
         </div>
         <div className="flex items-center gap-2">
           <div className="w-4 h-4 bg-blue-600 rounded-full border-2 border-white shadow" />
-          <span className="text-gray-600">Selected Comps</span>
+          <span className="text-gray-600">Selected</span>
         </div>
         <div className="flex items-center gap-2">
           <div className="w-4 h-4 bg-gray-400 rounded-full border-2 border-white shadow" />
-          <span className="text-gray-600">Unselected Comps</span>
+          <span className="text-gray-600">Unselected</span>
         </div>
-        <span className="text-xs text-gray-400 italic">Numbers match the comp cards below · hover to highlight</span>
+        <span className="text-xs text-gray-400 italic">Hover to highlight · click marker to select/deselect</span>
       </div>
     </>
   );
