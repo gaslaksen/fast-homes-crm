@@ -7,7 +7,7 @@ import { CallsService } from '../calls/calls.service';
 import { SlackLeadService } from './slack-lead.service';
 import { InvestorFuseService } from './investorfuse.service';
 import { formatPhoneNumber, LeadSource } from '@fast-homes/shared';
-import { normalizeLeadAddress } from './address-parser';
+import { normalizeLeadAddressAsync } from './address-parser';
 
 @Controller('webhooks')
 export class WebhooksController {
@@ -30,8 +30,8 @@ export class WebhooksController {
 
     try {
       // Map PropertyLeads fields to our schema
-      // normalizeLeadAddress handles full address strings like "123 Main St, Austin, TX 78701"
-      const addr = normalizeLeadAddress(body);
+      // normalizeLeadAddressAsync handles full address strings and looks up city/state from zip
+      const addr = await normalizeLeadAddressAsync(body);
       console.log('📍 Parsed address:', addr);
       const leadData = {
         source: LeadSource.PROPERTY_LEADS,
@@ -78,7 +78,7 @@ export class WebhooksController {
     console.log('📥 Google Ads webhook received:', body);
 
     try {
-      const addr = normalizeLeadAddress(body);
+      const addr = await normalizeLeadAddressAsync(body);
       console.log('📍 Parsed address:', addr);
       const leadData = {
         source: LeadSource.GOOGLE_ADS,

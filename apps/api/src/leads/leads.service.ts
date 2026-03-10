@@ -8,6 +8,7 @@ import { CompsService } from '../comps/comps.service';
 import { PipelineService } from '../pipeline/pipeline.service';
 import { LeadStatus, LeadSource, formatPhoneNumber } from '@fast-homes/shared';
 import { Prisma } from '@prisma/client';
+import { enrichAddressFromZip } from '../webhooks/address-parser';
 
 const INITIAL_OUTREACH_DELAY_MS = 60_000; // 1 minute
 const DEMO_OUTREACH_DELAY_MS = 3_000;     // 3 seconds in demo mode
@@ -72,6 +73,18 @@ export class LeadsService {
     sourceMetadata?: any;
     organizationId?: string;
   }) {
+    // Enrich address — fill in missing city/state from zip lookup if needed
+    const enriched = await enrichAddressFromZip({
+      propertyAddress: data.propertyAddress || '',
+      propertyCity: data.propertyCity || '',
+      propertyState: data.propertyState || '',
+      propertyZip: data.propertyZip || '',
+    });
+    data.propertyAddress = enriched.propertyAddress;
+    data.propertyCity = enriched.propertyCity;
+    data.propertyState = enriched.propertyState;
+    data.propertyZip = enriched.propertyZip;
+
     // Initial scoring
     const scoringResult = await this.scoringService.scoreLead({
       timeline: data.timeline,
@@ -567,6 +580,66 @@ export class LeadsService {
     }
 
     return this.getLead(id);
+  }
+
+  /**
+   * Backfill city/state on leads where those fields are blank but a zip is present.
+   * Uses the free zippopotam.us API. Safe to run multiple times.
+   */
+  async backfillMissingCityState(): Promise<{ updated: number; skipped: number; failed: number }> {
+    const leads = await this.prisma.lead.findMany({
+      select: { id: true, propertyCity: true, propertyState: true, propertyZip: true },
+      where: {
+        propertyZip: { not: '' },
+        OR: [
+          { propertyCity: '' },
+          { propertyCity: null },
+          { propertyState: '' },
+          { propertyState: null },
+        ],
+      },
+    });
+
+    this.logger.log(`backfillMissingCityState: ${leads.length} leads to process`);
+
+    let updated = 0, skipped = 0, failed = 0;
+
+    for (const lead of leads) {
+      if (!lead.propertyZip) { skipped++; continue; }
+      try {
+        const enriched = await enrichAddressFromZip({
+          propertyAddress: '',
+          propertyCity: lead.propertyCity || '',
+          propertyState: lead.propertyState || '',
+          propertyZip: lead.propertyZip,
+        });
+
+        if (!enriched.propertyCity && !enriched.propertyState) { skipped++; continue; }
+
+        const patch: Record<string, string> = {};
+        if (!lead.propertyCity && enriched.propertyCity) patch.propertyCity = enriched.propertyCity;
+        if (!lead.propertyState && enriched.propertyState) patch.propertyState = enriched.propertyState;
+
+        if (Object.keys(patch).length === 0) { skipped++; continue; }
+
+        await this.prisma.lead.update({ where: { id: lead.id }, data: patch });
+        await this.prisma.activity.create({
+          data: {
+            leadId: lead.id,
+            type: 'FIELD_UPDATED',
+            description: `Address enriched from zip ${lead.propertyZip}: ${Object.entries(patch).map(([k, v]) => `${k}=${v}`).join(', ')}`,
+            metadata: { source: 'zip-lookup', ...patch },
+          },
+        });
+        updated++;
+      } catch (err) {
+        this.logger.error(`backfillMissingCityState: failed for lead ${lead.id}: ${err.message}`);
+        failed++;
+      }
+    }
+
+    this.logger.log(`backfillMissingCityState complete: updated=${updated}, skipped=${skipped}, failed=${failed}`);
+    return { updated, skipped, failed };
   }
 
   /**

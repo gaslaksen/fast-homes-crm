@@ -63,6 +63,11 @@ export class LeadsController {
     });
   }
 
+  @Post('backfill-addresses')
+  async backfillAddresses() {
+    return this.leadsService.backfillMissingCityState();
+  }
+
   @Post('bulk-delete')
   async bulkDelete(@Body() body: { ids: string[] }) {
     return this.leadsService.bulkDelete(body.ids);

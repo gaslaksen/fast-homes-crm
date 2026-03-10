@@ -9,7 +9,15 @@
  *   - "1515 Sycamore Street"              (street only)
  *
  * Priority: explicit payload fields > parsed from full address string > zip lookup
+ *
+ * Zip lookup: uses zippopotam.us (free, no API key required).
+ * When city/state are missing but a 5-digit zip is present, city and state
+ * are automatically resolved before the lead is stored.
  */
+
+import { Logger } from '@nestjs/common';
+
+const zipLogger = new Logger('AddressParser');
 
 const US_STATES: Record<string, string> = {
   AL: 'AL', AK: 'AK', AZ: 'AZ', AR: 'AR', CA: 'CA', CO: 'CO', CT: 'CT',
@@ -28,6 +36,70 @@ export interface ParsedAddress {
   state: string;
   zip: string;
 }
+
+export interface NormalizedAddress {
+  propertyAddress: string;
+  propertyCity: string;
+  propertyState: string;
+  propertyZip: string;
+}
+
+// ---------------------------------------------------------------------------
+// Zip Code Lookup — zippopotam.us (free, no key)
+// ---------------------------------------------------------------------------
+
+/** Simple in-process cache: zip → {city, state} to avoid repeat API calls */
+const zipCache = new Map<string, { city: string; state: string }>();
+
+/**
+ * Resolves city and state from a US zip code using the free zippopotam.us API.
+ * Returns null if the zip is invalid or the request fails.
+ *
+ * Example: "28104" → { city: "Matthews", state: "NC" }
+ */
+export async function lookupCityStateFromZip(
+  zip: string,
+): Promise<{ city: string; state: string } | null> {
+  const clean = zip?.replace(/\D/g, '').slice(0, 5);
+  if (!clean || clean.length !== 5) return null;
+
+  if (zipCache.has(clean)) return zipCache.get(clean)!;
+
+  try {
+    const res = await fetch(`https://api.zippopotam.us/us/${clean}`, {
+      signal: AbortSignal.timeout(5000),
+    });
+
+    if (!res.ok) {
+      zipLogger.warn(`Zip lookup failed for ${clean}: HTTP ${res.status}`);
+      return null;
+    }
+
+    const data = await res.json();
+    const place = data?.places?.[0];
+    if (!place) return null;
+
+    const result = {
+      city: toTitleCase(place['place name'] || ''),
+      state: (place['state abbreviation'] || '').toUpperCase(),
+    };
+
+    zipCache.set(clean, result);
+    zipLogger.log(`Zip ${clean} → ${result.city}, ${result.state}`);
+    return result;
+  } catch (err: any) {
+    zipLogger.warn(`Zip lookup error for ${clean}: ${err.message}`);
+    return null;
+  }
+}
+
+function toTitleCase(str: string): string {
+  return str.replace(/\w\S*/g, (w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+}
+
+// ---------------------------------------------------------------------------
+// Address String Parser
+// ---------------------------------------------------------------------------
 
 /**
  * Parses a full address string into components.
@@ -114,18 +186,19 @@ export function parseAddressString(raw: string): Partial<ParsedAddress> {
   return { street: cleaned, city: '', state: '', zip: '' };
 }
 
+// ---------------------------------------------------------------------------
+// Sync normalizer (used by webhook handlers before async enrichment)
+// ---------------------------------------------------------------------------
+
 /**
- * Normalizes address fields from a raw webhook payload.
- *
+ * Normalizes address fields from a raw webhook payload (synchronous).
  * Merges explicit payload fields with anything parsed from a full address string.
  * Explicit fields always win over parsed values.
+ *
+ * NOTE: Does NOT perform zip lookup — call normalizeLeadAddressAsync for the
+ * full enrichment pipeline including city/state resolution from zip.
  */
-export function normalizeLeadAddress(payload: Record<string, any>): {
-  propertyAddress: string;
-  propertyCity: string;
-  propertyState: string;
-  propertyZip: string;
-} {
+export function normalizeLeadAddress(payload: Record<string, any>): NormalizedAddress {
   // Grab raw field values from payload (try multiple naming conventions)
   const rawStreet: string =
     payload.property_address ||
@@ -151,12 +224,59 @@ export function normalizeLeadAddress(payload: Record<string, any>): {
   const state = (rawState || parsed.state || '').toUpperCase();
   const zip = rawZip || parsed.zip || '';
 
-  // If the parsed street already extracted city/state/zip from rawStreet,
-  // use the clean street-only value
   return {
     propertyAddress: street,
     propertyCity: city,
     propertyState: state,
     propertyZip: zip,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Async normalizer — full pipeline with zip lookup
+// ---------------------------------------------------------------------------
+
+/**
+ * Full async address normalization pipeline:
+ *   1. Parse any full-address string and merge with explicit payload fields
+ *   2. If city or state are still missing but zip is present, look them up
+ *
+ * Use this everywhere a lead is created or updated.
+ */
+export async function normalizeLeadAddressAsync(
+  payload: Record<string, any>,
+): Promise<NormalizedAddress> {
+  const addr = normalizeLeadAddress(payload);
+
+  // Nothing to look up if city and state are already populated
+  if (addr.propertyCity && addr.propertyState) return addr;
+
+  // Try zip lookup to fill gaps
+  if (addr.propertyZip) {
+    const looked = await lookupCityStateFromZip(addr.propertyZip);
+    if (looked) {
+      if (!addr.propertyCity) addr.propertyCity = looked.city;
+      if (!addr.propertyState) addr.propertyState = looked.state;
+    }
+  }
+
+  return addr;
+}
+
+/**
+ * Fill in missing city/state on an already-parsed address object.
+ * Use this inside createLead / updateLead when individual fields arrive
+ * instead of a raw payload dict.
+ */
+export async function enrichAddressFromZip(addr: NormalizedAddress): Promise<NormalizedAddress> {
+  if (addr.propertyCity && addr.propertyState) return addr;
+  if (!addr.propertyZip) return addr;
+
+  const looked = await lookupCityStateFromZip(addr.propertyZip);
+  if (looked) {
+    if (!addr.propertyCity) addr.propertyCity = looked.city;
+    if (!addr.propertyState) addr.propertyState = looked.state;
+  }
+
+  return addr;
 }
