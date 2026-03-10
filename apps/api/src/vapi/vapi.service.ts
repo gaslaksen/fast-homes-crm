@@ -239,8 +239,8 @@ Be concise and factual.`,
                 motivationSummary: { type: 'string', description: 'Why the seller wants to sell (e.g. divorce, relocation, financial hardship, downsizing)' },
                 timelineDays: { type: 'number', description: 'How many days until the seller wants to close. Use 7 for "ASAP / as fast as possible / immediately", 14 for "two weeks", 30 for "about a month", 60 for "a couple months", 90 for "a few months", 180 for "not urgent / flexible". Always provide a number — never leave null.' },
                 // Authority
-                isDecisionMaker: { type: 'boolean', description: 'True if the seller is the sole decision-maker. False if a spouse, partner, co-owner, or estate is also involved.' },
-                otherDecisionMakers: { type: 'string', description: 'Who else is involved in the decision (e.g. spouse, co-owner, heir, attorney)' },
+                isDecisionMaker: { type: 'boolean', description: 'True ONLY if the seller explicitly confirmed they are the SOLE owner and no one else is on the title or needs to agree. False if they mention a spouse, partner, co-owner, heir, or anyone else involved — even if they say they are willing to move forward or their partner is agreeable. When in doubt, use false.' },
+                otherDecisionMakers: { type: 'string', description: 'Who else is involved in ownership or the decision (e.g. spouse, co-owner, heir, attorney). Fill this in whenever isDecisionMaker is false.' },
                 // Outcome
                 interestLevel: { type: 'string', enum: ['hot', 'warm', 'cold', 'not_interested'], description: 'hot=very motivated, wants to move fast; warm=interested but not urgent; cold=exploring options; not_interested=declined' },
                 nextSteps: { type: 'string', description: 'Any specific next steps agreed upon during the call' },
