@@ -367,16 +367,19 @@ model Contract {
 }
 
 model CallLog {
-  id          String   @id @default(cuid())
-  leadId      String?
-  lead        Lead?    @relation(fields: [leadId], references: [id], onDelete: SetNull)
-  vapiCallId  String?  @unique
-  status      String   @default("queued")
-  type        String   @default("ai_outbound")
-  transcript  String?  @db.Text
-  duration    Int?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id           String   @id @default(cuid())
+  leadId       String?
+  lead         Lead?    @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  vapiCallId   String?  @unique
+  status       String   @default("queued")
+  type         String   @default("ai_outbound")
+  transcript   String?  @db.Text
+  summary      String?  @db.Text
+  recordingUrl String?
+  endedReason  String?
+  duration     Int?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   @@map("call_logs")
 }

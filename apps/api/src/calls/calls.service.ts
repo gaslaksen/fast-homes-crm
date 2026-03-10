@@ -100,70 +100,87 @@ export class CallsService {
   }
 
   async handleWebhookEvent(event: any) {
-    const vapiCallId = event?.call?.id;
-    const eventType = event?.message?.type || event?.type;
+    // Vapi wraps all event data under event.message
+    const msg = event?.message ?? event;
+    const eventType: string = msg?.type ?? '';
 
-    this.logger.log(`Vapi webhook: ${eventType} for call ${vapiCallId}`);
+    // Call ID lives at message.call.id
+    const vapiCallId: string | undefined = msg?.call?.id;
+
+    this.logger.log(`Vapi webhook [${eventType}] call=${vapiCallId ?? 'unknown'}`);
 
     if (!vapiCallId) {
-      this.logger.warn('Webhook event missing call ID');
+      // Non-call events (e.g. server-message pings) — safe to ignore
       return { received: true };
     }
 
-    const callLog = await this.prisma.callLog.findUnique({
-      where: { vapiCallId },
-    });
+    const callLog = await this.prisma.callLog.findUnique({ where: { vapiCallId } });
 
     if (!callLog) {
-      this.logger.warn(`No CallLog found for vapiCallId ${vapiCallId}`);
+      this.logger.warn(`No CallLog for vapiCallId=${vapiCallId} — may be an untracked call`);
       return { received: true };
     }
 
-    const updateData: any = {};
+    const updateData: Record<string, any> = {};
 
     switch (eventType) {
+      // ── Call went live ───────────────────────────────────────────────────
       case 'call-started':
-        updateData.status = 'in-progress';
+      case 'status-update':
+        if (msg?.call?.status) updateData.status = msg.call.status;
         break;
 
-      case 'call-ended':
-        updateData.status = 'ended';
-        if (event?.call?.duration) {
-          updateData.duration = Math.round(event.call.duration);
-        }
-        break;
-
+      // ── Real-time transcript chunk (skip — end-of-call has the full one) ─
       case 'transcript':
-        if (event?.transcript) {
-          updateData.transcript = event.transcript;
-        }
+      case 'conversation-update':
+      case 'speech-update':
         break;
 
+      // ── Final report — everything we care about ──────────────────────────
       case 'end-of-call-report': {
         updateData.status = 'completed';
-        if (event?.call?.duration) {
-          updateData.duration = Math.round(event.call.duration);
-        }
-        if (event?.transcript) {
-          updateData.transcript = event.transcript;
+        updateData.endedReason = msg?.endedReason ?? msg?.call?.endedReason ?? null;
+
+        // Duration (seconds)
+        const dur = msg?.call?.duration ?? msg?.durationSeconds;
+        if (dur != null) updateData.duration = Math.round(dur);
+
+        // Full transcript — check both common locations Vapi uses
+        const transcript =
+          msg?.transcript ??
+          msg?.artifact?.transcript ??
+          msg?.call?.artifact?.transcript ??
+          null;
+        if (transcript) updateData.transcript = transcript;
+
+        // Recording URL
+        const recordingUrl =
+          msg?.recordingUrl ??
+          msg?.artifact?.recordingUrl ??
+          msg?.call?.artifact?.recordingUrl ??
+          msg?.stereoRecordingUrl ??
+          msg?.call?.artifact?.stereoRecordingUrl ??
+          null;
+        if (recordingUrl) updateData.recordingUrl = recordingUrl;
+
+        // AI analysis — summary + structured data
+        const analysis = msg?.analysis ?? msg?.call?.analysis ?? {};
+        const summary: string | undefined = analysis?.summary;
+        const structuredData: Record<string, any> | undefined = analysis?.structuredData;
+        const successEval: string | undefined = analysis?.successEvaluation;
+
+        if (summary) {
+          const suffix = successEval != null ? `\n\nCall successful: ${successEval}` : '';
+          updateData.summary = summary + suffix;
         }
 
-        // Save AI-generated summary and structured analysis
-        const summary = event?.analysis?.summary;
-        const structuredData = event?.analysis?.structuredData;
-        const successEval = event?.analysis?.successEvaluation;
+        this.logger.log(
+          `end-of-call-report — duration=${updateData.duration}s | ` +
+          `transcript=${transcript ? 'yes' : 'no'} | summary=${summary ? 'yes' : 'no'} | ` +
+          `structuredData=${structuredData ? JSON.stringify(structuredData) : 'none'}`,
+        );
 
-        if (summary || structuredData) {
-          updateData.transcript = [
-            updateData.transcript || '',
-            summary ? `\n\n--- AI SUMMARY ---\n${summary}` : '',
-            successEval !== undefined ? `\n\nCall successful: ${successEval}` : '',
-          ]
-            .join('')
-            .trim();
-        }
-
-        // If the AI extracted useful CAMP data, update the lead
+        // Push extracted CAMP data back to the lead
         if (structuredData && callLog.leadId) {
           await this.syncStructuredDataToLead(callLog.leadId, structuredData, summary);
         }
@@ -171,24 +188,21 @@ export class CallsService {
       }
 
       default:
-        this.logger.debug(`Unhandled webhook event type: ${eventType}`);
+        this.logger.debug(`Unhandled Vapi event: ${eventType}`);
     }
 
     if (Object.keys(updateData).length > 0) {
-      await this.prisma.callLog.update({
-        where: { id: callLog.id },
-        data: updateData,
-      });
+      await this.prisma.callLog.update({ where: { id: callLog.id }, data: updateData });
     }
 
     if (eventType === 'end-of-call-report' && callLog.leadId) {
-      const duration = updateData.duration;
+      const dur = updateData.duration;
       await this.prisma.activity.create({
         data: {
           leadId: callLog.leadId,
           type: 'AI_CALL_COMPLETED',
-          description: `AI call completed${duration ? ` (${duration}s)` : ''}`,
-          metadata: { vapiCallId },
+          description: `AI call completed${dur ? ` (${dur}s)` : ''}${updateData.endedReason ? ` — ${updateData.endedReason}` : ''}`,
+          metadata: { vapiCallId, recordingUrl: updateData.recordingUrl ?? null },
         },
       });
     }
@@ -210,29 +224,64 @@ export class CallsService {
 
     const updates: Record<string, any> = {};
 
+    // Asking price — only backfill if blank
     if (data.askingPriceMentioned && !lead.askingPrice) {
       updates.askingPrice = data.askingPriceMentioned;
     }
+
+    // Timeline in days — only backfill if blank
     if (data.timelineDays && !lead.timeline) {
       updates.timeline = data.timelineDays;
     }
+
+    // Condition — map free-text description to enum values (lowercase to match DB)
     if (data.conditionDescription && !lead.conditionLevel) {
-      // Map free text to enum if possible, otherwise leave it for manual review
       const lower = data.conditionDescription.toLowerCase();
-      if (lower.includes('excel') || lower.includes('great') || lower.includes('perfect')) {
-        updates.conditionLevel = 'EXCELLENT';
-      } else if (lower.includes('good') || lower.includes('nice')) {
-        updates.conditionLevel = 'GOOD';
-      } else if (lower.includes('fair') || lower.includes('average') || lower.includes('okay')) {
-        updates.conditionLevel = 'FAIR';
-      } else if (lower.includes('poor') || lower.includes('bad') || lower.includes('rough') || lower.includes('needs work') || lower.includes('fixer')) {
-        updates.conditionLevel = 'POOR';
+      if (lower.includes('excel') || lower.includes('great') || lower.includes('perfect') || lower.includes('pristine')) {
+        updates.conditionLevel = 'excellent';
+      } else if (lower.includes('good') || lower.includes('nice') || lower.includes('well-maintain')) {
+        updates.conditionLevel = 'good';
+      } else if (lower.includes('fair') || lower.includes('average') || lower.includes('okay') || lower.includes('ok')) {
+        updates.conditionLevel = 'fair';
+      } else if (lower.includes('poor') || lower.includes('bad') || lower.includes('rough') || lower.includes('needs work') || lower.includes('fixer') || lower.includes('dated')) {
+        updates.conditionLevel = 'poor';
+      } else if (lower.includes('distress') || lower.includes('abandon') || lower.includes('uninhabit') || lower.includes('condemned')) {
+        updates.conditionLevel = 'distressed';
       }
+    }
+
+    // Seller motivation from AI summary
+    if (data.motivationSummary && !lead.sellerMotivation) {
+      updates.sellerMotivation = data.motivationSummary;
+    }
+
+    // Ownership status
+    if (data.isDecisionMaker === true && !lead.ownershipStatus) {
+      updates.ownershipStatus = 'sole_owner';
+    }
+
+    // Update lead status based on interest level from call
+    if (data.interestLevel && lead.status === 'ATTEMPTING_CONTACT') {
+      if (data.reachedSeller) {
+        updates.status = 'CONTACT_MADE';
+      }
+    }
+    if (data.interestLevel === 'not_interested') {
+      updates.status = 'LOST';
     }
 
     if (Object.keys(updates).length > 0) {
       await this.prisma.lead.update({ where: { id: leadId }, data: updates });
-      this.logger.log(`Lead ${leadId} updated from AI call analysis: ${Object.keys(updates).join(', ')}`);
+      this.logger.log(`Lead ${leadId} updated from AI call: ${Object.keys(updates).join(', ')}`);
+
+      await this.prisma.activity.create({
+        data: {
+          leadId,
+          type: 'FIELD_UPDATED',
+          description: `AI call updated lead fields: ${Object.keys(updates).join(', ')}`,
+          metadata: { source: 'vapi-call', interestLevel: data.interestLevel, ...updates },
+        },
+      });
     }
   }
 }
