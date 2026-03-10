@@ -136,10 +136,10 @@ You will be asked to summarize key findings. Be ready to report:
   private buildFirstMessage(lead: LeadContext): string {
     const firstName = lead.sellerFirstName || 'there';
     const address = lead.propertyAddress
-      ? ` about the property on ${lead.propertyAddress}`
+      ? ` about the property at ${lead.propertyAddress}`
       : '';
 
-    return `Hi, is this ${firstName}? ... Hi ${firstName}! This is Alex calling from Fast Homes. I'm reaching out${address} — I just wanted to have a quick chat to see if there's any interest in a cash offer. Do you have just a couple minutes?`;
+    return `Hi ${firstName}! This is Alex calling from Fast Homes. I'm reaching out${address} — I just wanted to ask a few quick questions to learn a bit more about the property. Do you have just a couple minutes?`;
   }
 
   async createOutboundCall(customerPhone: string, lead: LeadContext) {
@@ -223,16 +223,27 @@ Be concise and factual.`,
             schema: {
               type: 'object',
               properties: {
-                reachedSeller: { type: 'boolean' },
-                leftVoicemail: { type: 'boolean' },
-                conditionDescription: { type: 'string' },
-                askingPriceMentioned: { type: 'number' },
-                motivationSummary: { type: 'string' },
-                timelineDays: { type: 'number' },
-                isDecisionMaker: { type: 'boolean' },
-                interestLevel: { type: 'string', enum: ['hot', 'warm', 'cold', 'not_interested'] },
-                nextSteps: { type: 'string' },
-                callbackRequestedAt: { type: 'string' },
+                reachedSeller: { type: 'boolean', description: 'True if we actually spoke with the intended seller' },
+                leftVoicemail: { type: 'boolean', description: 'True if we left a voicemail' },
+                // Challenge — property condition
+                conditionLevel: {
+                  type: 'string',
+                  enum: ['excellent', 'good', 'fair', 'poor', 'distressed'],
+                  description: 'Overall property condition based on what the seller described. excellent=like new/fully updated, good=well maintained minor issues, fair=functional but needs some work, poor=significant repairs needed, distressed=major issues/uninhabitable',
+                },
+                conditionNotes: { type: 'string', description: 'Specific condition details mentioned by the seller (e.g. new roof, HVAC, water heater leak)' },
+                // Money
+                askingPriceMentioned: { type: 'number', description: 'Dollar amount the seller mentioned as their asking or target price' },
+                priceFlexible: { type: 'boolean', description: 'Whether the seller indicated flexibility on price' },
+                // Priority / motivation
+                motivationSummary: { type: 'string', description: 'Why the seller wants to sell (e.g. divorce, relocation, financial hardship, downsizing)' },
+                timelineDays: { type: 'number', description: 'How many days until the seller wants to close. Use 30 for "about a month", 14 for "two weeks", etc.' },
+                // Authority
+                isDecisionMaker: { type: 'boolean', description: 'True if the seller is the sole decision-maker. False if a spouse, partner, co-owner, or estate is also involved.' },
+                otherDecisionMakers: { type: 'string', description: 'Who else is involved in the decision (e.g. spouse, co-owner, heir, attorney)' },
+                // Outcome
+                interestLevel: { type: 'string', enum: ['hot', 'warm', 'cold', 'not_interested'], description: 'hot=very motivated, wants to move fast; warm=interested but not urgent; cold=exploring options; not_interested=declined' },
+                nextSteps: { type: 'string', description: 'Any specific next steps agreed upon during the call' },
               },
             },
           },

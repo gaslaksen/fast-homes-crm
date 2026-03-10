@@ -224,47 +224,45 @@ export class CallsService {
 
     const updates: Record<string, any> = {};
 
-    // Asking price — only backfill if blank
+    // ── Money: asking price ──────────────────────────────────────────────
     if (data.askingPriceMentioned && !lead.askingPrice) {
       updates.askingPrice = data.askingPriceMentioned;
     }
 
-    // Timeline in days — only backfill if blank
+    // ── Priority: timeline + motivation ─────────────────────────────────
     if (data.timelineDays && !lead.timeline) {
       updates.timeline = data.timelineDays;
     }
-
-    // Condition — map free-text description to enum values (lowercase to match DB)
-    if (data.conditionDescription && !lead.conditionLevel) {
-      const lower = data.conditionDescription.toLowerCase();
-      if (lower.includes('excel') || lower.includes('great') || lower.includes('perfect') || lower.includes('pristine')) {
-        updates.conditionLevel = 'excellent';
-      } else if (lower.includes('good') || lower.includes('nice') || lower.includes('well-maintain')) {
-        updates.conditionLevel = 'good';
-      } else if (lower.includes('fair') || lower.includes('average') || lower.includes('okay') || lower.includes('ok')) {
-        updates.conditionLevel = 'fair';
-      } else if (lower.includes('poor') || lower.includes('bad') || lower.includes('rough') || lower.includes('needs work') || lower.includes('fixer') || lower.includes('dated')) {
-        updates.conditionLevel = 'poor';
-      } else if (lower.includes('distress') || lower.includes('abandon') || lower.includes('uninhabit') || lower.includes('condemned')) {
-        updates.conditionLevel = 'distressed';
-      }
-    }
-
-    // Seller motivation from AI summary
     if (data.motivationSummary && !lead.sellerMotivation) {
       updates.sellerMotivation = data.motivationSummary;
     }
 
-    // Ownership status
-    if (data.isDecisionMaker === true && !lead.ownershipStatus) {
-      updates.ownershipStatus = 'sole_owner';
+    // ── Challenge: condition — now a direct enum from the AI ─────────────
+    const validConditions = ['excellent', 'good', 'fair', 'poor', 'distressed'];
+    if (data.conditionLevel && validConditions.includes(data.conditionLevel) && !lead.conditionLevel) {
+      updates.conditionLevel = data.conditionLevel;
+    }
+    // Append condition notes to distressSignals if present
+    if (data.conditionNotes) {
+      const existing = (lead.distressSignals as string[]) ?? [];
+      const notes = data.conditionNotes.split(/[,;]+/).map((s: string) => s.trim()).filter(Boolean);
+      const merged = [...new Set([...existing, ...notes])];
+      if (merged.length > existing.length) updates.distressSignals = merged;
     }
 
-    // Update lead status based on interest level from call
-    if (data.interestLevel && lead.status === 'ATTEMPTING_CONTACT') {
-      if (data.reachedSeller) {
-        updates.status = 'CONTACT_MADE';
+    // ── Authority: ownership / decision-maker ────────────────────────────
+    if (!lead.ownershipStatus) {
+      if (data.isDecisionMaker === true) {
+        updates.ownershipStatus = 'sole_owner';
+      } else if (data.isDecisionMaker === false) {
+        // Co-decision-maker situation (spouse, partner, co-owner, estate, etc.)
+        updates.ownershipStatus = 'co_owner';
       }
+    }
+
+    // ── Lead status: advance pipeline based on call outcome ──────────────
+    if (data.reachedSeller && lead.status === 'ATTEMPTING_CONTACT') {
+      updates.status = 'CONTACT_MADE';
     }
     if (data.interestLevel === 'not_interested') {
       updates.status = 'LOST';
