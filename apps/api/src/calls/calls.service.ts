@@ -1,6 +1,7 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { VapiService } from '../vapi/vapi.service';
+import { ScoringService } from '../scoring/scoring.service';
 import { formatPhoneNumber } from '@fast-homes/shared';
 
 const DEFAULT_CALL_DELAY_MS = 120_000; // 2 minutes
@@ -12,6 +13,7 @@ export class CallsService {
   constructor(
     private prisma: PrismaService,
     private vapiService: VapiService,
+    private scoringService: ScoringService,
   ) {}
 
   /**
@@ -280,6 +282,10 @@ export class CallsService {
           metadata: { source: 'vapi-call', interestLevel: data.interestLevel, ...updates },
         },
       });
+
+      // Refresh CAMP completion flags so the UI reflects the new data immediately
+      await this.scoringService.refreshCampFlags(leadId);
+      this.logger.log(`CAMP flags refreshed for lead ${leadId}`);
     }
   }
 }

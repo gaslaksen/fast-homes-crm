@@ -237,7 +237,7 @@ Be concise and factual.`,
                 priceFlexible: { type: 'boolean', description: 'Whether the seller indicated flexibility on price' },
                 // Priority / motivation
                 motivationSummary: { type: 'string', description: 'Why the seller wants to sell (e.g. divorce, relocation, financial hardship, downsizing)' },
-                timelineDays: { type: 'number', description: 'How many days until the seller wants to close. Use 30 for "about a month", 14 for "two weeks", etc.' },
+                timelineDays: { type: 'number', description: 'How many days until the seller wants to close. Use 7 for "ASAP / as fast as possible / immediately", 14 for "two weeks", 30 for "about a month", 60 for "a couple months", 90 for "a few months", 180 for "not urgent / flexible". Always provide a number — never leave null.' },
                 // Authority
                 isDecisionMaker: { type: 'boolean', description: 'True if the seller is the sole decision-maker. False if a spouse, partner, co-owner, or estate is also involved.' },
                 otherDecisionMakers: { type: 'string', description: 'Who else is involved in the decision (e.g. spouse, co-owner, heir, attorney)' },
