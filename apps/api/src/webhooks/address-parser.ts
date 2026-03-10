@@ -265,10 +265,14 @@ export async function normalizeLeadAddressAsync(
 
 /**
  * Fill in missing city/state on an already-parsed address object.
+ * Also strips any embedded city/state/country from the street field.
  * Use this inside createLead / updateLead when individual fields arrive
  * instead of a raw payload dict.
  */
 export async function enrichAddressFromZip(addr: NormalizedAddress): Promise<NormalizedAddress> {
+  // Clean the street field — strip any embedded city, state, zip, or country
+  addr.propertyAddress = cleanStreetAddress(addr.propertyAddress);
+
   if (addr.propertyCity && addr.propertyState) return addr;
   if (!addr.propertyZip) return addr;
 
@@ -279,4 +283,34 @@ export async function enrichAddressFromZip(addr: NormalizedAddress): Promise<Nor
   }
 
   return addr;
+}
+
+/**
+ * Strips city, state, zip, and country noise from a street address field.
+ *
+ * Examples:
+ *   "123 Main St, Austin, TX 78701, USA" → "123 Main St"
+ *   "123 Main St, Austin, TX"            → "123 Main St"
+ *   "123 Main St 78701"                  → "123 Main St"
+ *   "123 Main St"                        → "123 Main St"  (unchanged)
+ */
+export function cleanStreetAddress(raw: string): string {
+  if (!raw) return raw;
+
+  const parsed = parseAddressString(raw);
+
+  // Only replace if parsing found a cleaner street component
+  if (parsed.street && parsed.street !== raw && parsed.street.length < raw.length) {
+    return parsed.street;
+  }
+
+  // Fallback: strip trailing ", City, ST 12345" / ", USA" patterns even if
+  // the full parse didn't match (e.g. lower-case state abbreviations)
+  return raw
+    .replace(/,?\s*(USA|US|United States)\s*$/i, '')
+    .replace(/,\s*[A-Za-z\s]+,\s*[A-Z]{2}\s+\d{5}(-\d{4})?\s*$/i, '')  // ", City, ST 12345"
+    .replace(/,\s*[A-Z]{2}\s+\d{5}(-\d{4})?\s*$/i, '')                  // ", ST 12345"
+    .replace(/,\s*[A-Z]{2}\s*$/i, '')                                     // ", ST"
+    .replace(/\s+\d{5}(-\d{4})?\s*$/, '')                                 // trailing zip
+    .trim();
 }

@@ -602,13 +602,18 @@ Your message must:
         if (extracted.asking_price_raw) updateData._askingPriceRaw = extracted.asking_price_raw;
         if (extracted.asking_price_high) updateData._askingPriceHigh = extracted.asking_price_high;
 
-        if (Object.keys(updateData).length > 0) {
+        // Filter out virtual _underscore fields before writing to Prisma (they're not schema columns)
+        const prismaUpdateData = Object.fromEntries(
+          Object.entries(updateData).filter(([k]) => !k.startsWith('_')),
+        );
+
+        if (Object.keys(prismaUpdateData).length > 0) {
           await this.prisma.lead.update({
             where: { id: lead.id },
-            data: updateData,
+            data: prismaUpdateData,
           });
 
-          this.logger.log(`💾 Updated lead ${lead.id} with extracted data (confidence: ${confidence}): ${JSON.stringify(updateData)}`);
+          this.logger.log(`💾 Updated lead ${lead.id} with extracted data (confidence: ${confidence}): ${JSON.stringify(prismaUpdateData)}`);
 
           // Refresh CAMP flags and rescore
           await this.scoringService.refreshCampFlags(lead.id);

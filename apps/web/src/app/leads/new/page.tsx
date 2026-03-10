@@ -24,8 +24,8 @@ export default function NewLeadPage() {
     sellerEmail: '',
     timeline: '',
     askingPrice: '',
-    conditionLevel: 'good',
-    ownershipStatus: 'sole_owner',
+    conditionLevel: '',
+    ownershipStatus: '',
   });
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -40,6 +40,9 @@ export default function NewLeadPage() {
         sqft: formData.sqft ? parseInt(formData.sqft) : undefined,
         timeline: formData.timeline ? parseInt(formData.timeline) : undefined,
         askingPrice: formData.askingPrice ? parseFloat(formData.askingPrice) : undefined,
+        // Don't send blank CAMP fields — let the AI drip fill them in
+        conditionLevel: formData.conditionLevel || undefined,
+        ownershipStatus: formData.ownershipStatus || undefined,
       };
 
       const response = await leadsAPI.create(payload);
@@ -296,6 +299,7 @@ export default function NewLeadPage() {
                   onChange={handleChange}
                   className="input"
                 >
+                  <option value="">— Unknown (AI will ask) —</option>
                   <option value="excellent">Excellent</option>
                   <option value="good">Good</option>
                   <option value="fair">Fair</option>
@@ -313,6 +317,7 @@ export default function NewLeadPage() {
                   onChange={handleChange}
                   className="input"
                 >
+                  <option value="">— Unknown (AI will ask) —</option>
                   <option value="sole_owner">Sole Owner</option>
                   <option value="co_owner">Co-Owner</option>
                   <option value="heir">Heir</option>
