@@ -179,7 +179,7 @@ You will be asked to summarize key findings. Be ready to report:
         },
         voice: {
           provider: '11labs',
-          voiceId: '6YQMyaUWlj0VX652cY1C',
+          voiceId: 'Bwff1jnzl1s94AEcntUq',
         },
 
         firstMessage: this.buildFirstMessage(lead),
@@ -193,7 +193,7 @@ You will be asked to summarize key findings. Be ready to report:
           'remove me from your list',
           'do not call again',
         ],
-        backgroundSound: 'office',
+        backgroundSound: 'off',
         maxDurationSeconds: 600, // 10 min hard cap
         analysisPlan: {
           summaryPlan: {
