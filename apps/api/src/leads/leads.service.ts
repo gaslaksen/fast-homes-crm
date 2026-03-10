@@ -385,6 +385,9 @@ export class LeadsService {
           include: { user: true },
         },
         contract: true,
+        offers: {
+          orderBy: { createdAt: 'desc' },
+        },
         callLogs: {
           orderBy: { createdAt: 'desc' },
           take: 20,
@@ -917,28 +920,148 @@ export class LeadsService {
   /**
    * Create or update contract
    */
-  async upsertContract(leadId: string, data: {
-    contractDate: Date;
-    buyerName?: string;
-    assignmentFee?: number;
-    titleCompany?: string;
-    expectedCloseDate?: Date;
-    actualCloseDate?: Date;
-    dispositionNotes?: string;
-    outcome?: 'WON' | 'LOST';
-  }) {
+  async upsertContract(leadId: string, data: any) {
+    // Parse date strings to Date objects
+    const clean: any = { ...data };
+    if (clean.contractDate) clean.contractDate = new Date(clean.contractDate);
+    if (clean.expectedCloseDate) clean.expectedCloseDate = new Date(clean.expectedCloseDate);
+    if (clean.actualCloseDate) clean.actualCloseDate = new Date(clean.actualCloseDate);
+
     const contract = await this.prisma.contract.upsert({
       where: { leadId },
-      create: { leadId, ...data },
-      update: data,
+      create: { leadId, ...clean },
+      update: clean,
     });
 
-    // Update lead status if contract is created
-    const lead = await this.prisma.lead.findUnique({ where: { id: leadId } });
-    if (lead && lead.status !== 'UNDER_CONTRACT' && lead.status !== 'CLOSING') {
-      await this.updateLead(leadId, { status: 'UNDER_CONTRACT' as LeadStatus });
+    // Advance lead status when contract is signed
+    if (clean.contractStatus === 'signed') {
+      const lead = await this.prisma.lead.findUnique({ where: { id: leadId } });
+      if (lead && !['UNDER_CONTRACT', 'CLOSING', 'CLOSED'].includes(lead.status)) {
+        await this.updateLead(leadId, { status: 'UNDER_CONTRACT' as LeadStatus });
+      }
     }
 
     return contract;
+  }
+
+  // ── Dispo Summary ──────────────────────────────────────────────────────────
+
+  async getDispoSummary(leadId: string) {
+    const lead = await this.prisma.lead.findUnique({
+      where: { id: leadId },
+      include: {
+        contract: true,
+        offers: { orderBy: { createdAt: 'desc' } },
+        compAnalyses: { orderBy: { createdAt: 'desc' } },
+      },
+    });
+    if (!lead) throw new Error('Lead not found');
+
+    // Use the comp analysis that was saved to the lead first, then most recent
+    const analysis =
+      lead.compAnalyses.find((c) => c.savedToLead) ?? lead.compAnalyses[0] ?? null;
+
+    const arv = lead.arv ?? analysis?.arvEstimate ?? null;
+    const repairCost = analysis?.repairCosts ?? null;
+    const mao = arv != null && repairCost != null ? arv * 0.7 - repairCost : null;
+
+    const offerAmount = lead.contract?.offerAmount ?? null;
+    const assignmentFee = lead.contract?.assignmentFee ?? analysis?.assignmentFee ?? null;
+    const buyerPrice =
+      offerAmount != null && assignmentFee != null ? offerAmount + assignmentFee : null;
+    const buyerSpread = arv != null && buyerPrice != null ? arv - buyerPrice : null;
+    const projectedProfit = assignmentFee ?? null;
+
+    return {
+      arv,
+      repairCost,
+      mao,
+      askingPrice: lead.askingPrice ?? null,
+      offerAmount,
+      assignmentFee,
+      buyerPrice,
+      buyerSpread,
+      projectedProfit,
+      contract: lead.contract ?? null,
+      offers: lead.offers,
+      latestCompAnalysis: analysis
+        ? {
+            repairCosts: analysis.repairCosts,
+            assignmentFee: analysis.assignmentFee,
+            arvEstimate: analysis.arvEstimate,
+            dealType: analysis.dealType,
+            repairNotes: analysis.repairNotes,
+          }
+        : null,
+    };
+  }
+
+  // ── Offers ─────────────────────────────────────────────────────────────────
+
+  async listOffers(leadId: string) {
+    return this.prisma.offer.findMany({
+      where: { leadId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async createOffer(leadId: string, data: any) {
+    const offer = await this.prisma.offer.create({
+      data: {
+        leadId,
+        offerAmount: data.offerAmount,
+        offerDate: data.offerDate ? new Date(data.offerDate) : new Date(),
+        status: data.status ?? 'pending',
+        notes: data.notes ?? null,
+      },
+    });
+
+    await this.prisma.activity.create({
+      data: {
+        leadId,
+        type: 'OFFER_MADE',
+        description: `Offer made: $${offer.offerAmount.toLocaleString()}`,
+        metadata: { offerId: offer.id, amount: offer.offerAmount },
+      },
+    });
+
+    // Advance lead status to OFFER_MADE if not already further along
+    const lead = await this.prisma.lead.findUnique({ where: { id: leadId } });
+    const advanceStatuses = ['NEW', 'ATTEMPTING_CONTACT', 'CONTACT_MADE'];
+    if (lead && advanceStatuses.includes(lead.status)) {
+      await this.updateLead(leadId, { status: 'OFFER_MADE' as any });
+    }
+
+    return offer;
+  }
+
+  async updateOffer(leadId: string, offerId: string, data: any) {
+    const offer = await this.prisma.offer.update({
+      where: { id: offerId, leadId },
+      data: {
+        ...(data.status !== undefined && { status: data.status }),
+        ...(data.counterAmount !== undefined && { counterAmount: data.counterAmount }),
+        ...(data.notes !== undefined && { notes: data.notes }),
+        ...(data.offerAmount !== undefined && { offerAmount: data.offerAmount }),
+      },
+    });
+
+    if (data.status === 'accepted') {
+      await this.prisma.activity.create({
+        data: {
+          leadId,
+          type: 'OFFER_ACCEPTED',
+          description: `Offer accepted: $${offer.offerAmount.toLocaleString()}`,
+          metadata: { offerId: offer.id },
+        },
+      });
+    }
+
+    return offer;
+  }
+
+  async deleteOffer(leadId: string, offerId: string) {
+    await this.prisma.offer.delete({ where: { id: offerId, leadId } });
+    return { deleted: true };
   }
 }

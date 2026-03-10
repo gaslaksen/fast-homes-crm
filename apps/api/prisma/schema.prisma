@@ -142,6 +142,7 @@ model Lead {
   notes             Note[]
   activities        Activity[]
   contract          Contract?
+  offers            Offer[]
   dripSequence      DripSequence?
   callLogs          CallLog[]
 
@@ -349,21 +350,42 @@ model AiPrompt {
 }
 
 model Contract {
-  id                String    @id @default(cuid())
-  leadId            String    @unique
-  lead              Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
-  contractDate      DateTime
-  buyerName         String?
-  assignmentFee     Float?
-  titleCompany      String?
-  expectedCloseDate DateTime?
-  actualCloseDate   DateTime?
-  dispositionNotes  String?
-  outcome           String?
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  id                   String    @id @default(cuid())
+  leadId               String    @unique
+  lead                 Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  contractStatus       String    @default("draft")    // draft/signed/inspection/past-inspection/at-title/closed/cancelled
+  exitStrategy         String    @default("wholesale") // wholesale/novation/subject-to/creative/retail
+  offerAmount          Float?    // purchase price offered to seller
+  earnestMoney         Float?
+  inspectionPeriodDays Int?
+  sellerFinancing      Boolean   @default(false)
+  contractDate         DateTime?
+  buyerName            String?
+  assignmentFee        Float?
+  titleCompany         String?
+  expectedCloseDate    DateTime?
+  actualCloseDate      DateTime?
+  dispositionNotes     String?   @db.Text
+  outcome              String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
 
   @@map("contracts")
+}
+
+model Offer {
+  id            String   @id @default(cuid())
+  leadId        String
+  lead          Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  offerAmount   Float
+  offerDate     DateTime @default(now())
+  status        String   @default("pending") // pending/accepted/rejected/countered/withdrawn
+  counterAmount Float?
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@map("offers")
 }
 
 model CallLog {

@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { leadsAPI, messagesAPI, compsAPI, settingsAPI, photosAPI, pipelineAPI, callsAPI, authAPI, tasksAPI } from '@/lib/api';
 import PropertyPhoto from '@/components/PropertyPhoto';
+import DispoTab from '@/components/DispoTab';
 import PhotoGallery from '@/components/PhotoGallery';
 import AppNav from '@/components/AppNav';
 import AiSummaryBox from '@/components/AiSummaryBox';
@@ -363,6 +364,7 @@ export default function LeadDetailPage() {
           <nav className="flex space-x-6 text-sm">
             {[
               { key: 'overview', label: 'Overview' },
+              { key: 'dispo', label: 'Dispo' },
               { key: 'comps', label: 'Comps' },
               { key: 'analysis', label: 'Analysis' },
               { key: 'communications', label: 'Messages' },
@@ -918,6 +920,11 @@ export default function LeadDetailPage() {
               </div>
             </div>
           </div>
+        )}
+
+        {/* Dispo Tab */}
+        {activeTab === 'dispo' && (
+          <DispoTab leadId={leadId} leadAddress={lead.propertyAddress} />
         )}
 
         {/* Communications Tab */}

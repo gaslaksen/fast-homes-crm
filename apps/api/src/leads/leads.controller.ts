@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Body, Param, Query, Headers, Res, HttpException, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Put, Delete, Body, Param, Query, Headers, Res, HttpException, HttpStatus } from '@nestjs/common';
 import { Response } from 'express';
 import { LeadsService } from './leads.service';
 import { RentCastService } from '../comps/rentcast.service';
@@ -197,8 +197,43 @@ export class LeadsController {
   }
 
   @Post(':id/contract')
+  @Put(':id/contract')
   async upsertContract(@Param('id') leadId: string, @Body() body: any) {
     return this.leadsService.upsertContract(leadId, body);
+  }
+
+  // ── Dispo summary ─────────────────────────────────────────────────────────
+  @Get(':id/dispo')
+  async getDispoSummary(@Param('id') leadId: string) {
+    return this.leadsService.getDispoSummary(leadId);
+  }
+
+  // ── Offers ────────────────────────────────────────────────────────────────
+  @Get(':id/offers')
+  async listOffers(@Param('id') leadId: string) {
+    return this.leadsService.listOffers(leadId);
+  }
+
+  @Post(':id/offers')
+  async createOffer(@Param('id') leadId: string, @Body() body: any) {
+    return this.leadsService.createOffer(leadId, body);
+  }
+
+  @Patch(':id/offers/:offerId')
+  async updateOffer(
+    @Param('id') leadId: string,
+    @Param('offerId') offerId: string,
+    @Body() body: any,
+  ) {
+    return this.leadsService.updateOffer(leadId, offerId, body);
+  }
+
+  @Delete(':id/offers/:offerId')
+  async deleteOffer(
+    @Param('id') leadId: string,
+    @Param('offerId') offerId: string,
+  ) {
+    return this.leadsService.deleteOffer(leadId, offerId);
   }
 }
 

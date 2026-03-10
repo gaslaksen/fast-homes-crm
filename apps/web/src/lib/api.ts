@@ -224,3 +224,11 @@ export const photosAPI = {
   setPrimary: (leadId: string, photoId: string) =>
     api.patch(`/leads/${leadId}/photos/primary`, { photoId }),
 };
+
+export const dispoAPI = {
+  getSummary: (leadId: string) => api.get(`/leads/${leadId}/dispo`),
+  upsertContract: (leadId: string, data: any) => api.put(`/leads/${leadId}/contract`, data),
+  createOffer: (leadId: string, data: any) => api.post(`/leads/${leadId}/offers`, data),
+  updateOffer: (leadId: string, offerId: string, data: any) => api.patch(`/leads/${leadId}/offers/${offerId}`, data),
+  deleteOffer: (leadId: string, offerId: string) => api.delete(`/leads/${leadId}/offers/${offerId}`),
+};
