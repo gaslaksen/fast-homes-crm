@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState, useMemo, Suspense } from 'react';
+import { useEffect, useState, useMemo, Suspense, useCallback } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { leadsAPI, authAPI } from '@/lib/api';
+import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
+import { leadsAPI, authAPI, pipelineAPI } from '@/lib/api';
 import PropertyPhoto from '@/components/PropertyPhoto';
 import AppNav from '@/components/AppNav';
 
@@ -16,6 +17,23 @@ type ViewMode = 'table' | 'cards';
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const INACTIVE_STATUSES = ['DEAD', 'CLOSED_WON', 'CLOSED_LOST'];
+
+const PIPELINE_STAGES = [
+  { id: 'NEW',                name: 'New Leads',          color: 'bg-blue-100   border-blue-300   text-blue-800' },
+  { id: 'ATTEMPTING_CONTACT', name: 'Attempting Contact', color: 'bg-yellow-100 border-yellow-300 text-yellow-800' },
+  { id: 'CONTACT_MADE',       name: 'Contact Made',       color: 'bg-green-100  border-green-300  text-green-800' },
+  { id: 'QUALIFYING',         name: 'Qualifying',         color: 'bg-purple-100 border-purple-300 text-purple-800' },
+  { id: 'OFFER_SENT',         name: 'Offer Made',         color: 'bg-orange-100 border-orange-300 text-orange-800' },
+  { id: 'UNDER_CONTRACT',     name: 'Under Contract',     color: 'bg-teal-100   border-teal-300   text-teal-800' },
+  { id: 'NURTURE',            name: 'Nurture',            color: 'bg-gray-100   border-gray-300   text-gray-600' },
+];
+
+function pipelineTimeAgo(date: string) {
+  const hours = Math.round((Date.now() - new Date(date).getTime()) / 3_600_000);
+  if (hours < 1)  return 'Just now';
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
+}
 
 
 const TIER_CONFIG: Record<number, { label: string; short: string; emoji: string; desc: string; pill: string; dot: string; chipActive: string }> = {
@@ -373,6 +391,34 @@ function LeadsPageInner() {
 
   const hasFilters = !!(search || bandFilter || statusFilter || sourceFilter || dateFilter ||
     staleFilter || arvFilter || dealFilter || stateFilter || assigneeFilter || tierFilter || showInactive);
+
+  // ─── Pipeline (Grid view) drag-and-drop ─────────────────────────────────────
+  const onDragEnd = useCallback(async (result: DropResult) => {
+    if (!result.destination) return;
+    const { draggableId: leadId, source, destination } = result;
+    if (source.droppableId === destination.droppableId) return;
+    setAllLeads(prev => prev.map(l =>
+      l.id === leadId ? { ...l, status: destination.droppableId } : l,
+    ));
+    try {
+      await pipelineAPI.updateStage(leadId, destination.droppableId);
+    } catch {
+      setAllLeads(prev => prev.map(l =>
+        l.id === leadId ? { ...l, status: source.droppableId } : l,
+      ));
+    }
+  }, []);
+
+  const pipelineByStage = useMemo(() => {
+    const map: Record<string, any[]> = {};
+    for (const s of PIPELINE_STAGES) map[s.id] = [];
+    for (const lead of filtered) {
+      if (!INACTIVE_STATUSES.includes(lead.status) && map[lead.status] !== undefined) {
+        map[lead.status].push(lead);
+      }
+    }
+    return map;
+  }, [filtered]);
 
   // ─── Render ─────────────────────────────────────────────────────────────────
 
@@ -737,85 +783,131 @@ function LeadsPageInner() {
 
         ) : (
 
-          /* ─── CARDS VIEW ─── */
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {filtered.map(lead => {
-              const s        = spread(lead);
-              const hoursAgo = lead.lastTouchedAt
-                ? Math.round((Date.now() - new Date(lead.lastTouchedAt).getTime()) / 3600000)
-                : null;
-              const stale = hoursAgo !== null && hoursAgo > 72 && !INACTIVE_STATUSES.includes(lead.status);
-              const bs    = BAND_STYLES[lead.scoreBand] || BAND_STYLES.COLD;
-              const tier  = lead._tier as 1 | 2 | 3;
+          /* ─── GRID / PIPELINE VIEW ─── */
+          <div className="-mx-6 px-2">
+            <DragDropContext onDragEnd={onDragEnd}>
+              <div className="flex gap-3 overflow-x-auto pb-4" style={{ minHeight: 520 }}>
+                {PIPELINE_STAGES.map(stage => {
+                  const stageLeads = pipelineByStage[stage.id] || [];
+                  return (
+                    <div key={stage.id} className="flex-shrink-0 flex flex-col" style={{ width: 260 }}>
 
-              return (
-                <Link
-                  key={lead.id}
-                  href={`/leads/${lead.id}`}
-                  className={`bg-white rounded-xl border border-gray-200 overflow-hidden hover:shadow-md hover:border-blue-200 transition-all group ${
-                    lead.status === 'DEAD' ? 'opacity-60' : ''
-                  }`}
-                >
-                  <div className={`h-1.5 w-full ${TIER_CONFIG[tier].dot}`} />
-                  <div className="p-4 space-y-3">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <PropertyPhoto src={lead.primaryPhoto} scoreBand={lead.scoreBand} address={lead.propertyAddress} size="sm" />
-                        <div className="min-w-0">
-                          <div className="font-semibold text-sm text-gray-900 truncate group-hover:text-blue-700">
-                            {lead.propertyAddress}
-                          </div>
-                          <div className="text-xs text-gray-400 truncate">
-                            {lead.propertyCity}, {lead.propertyState}
-                          </div>
-                        </div>
+                      {/* Column header */}
+                      <div className={`${stage.color} border rounded-lg px-3 py-2 mb-2 flex items-center justify-between flex-shrink-0`}>
+                        <span className="font-bold text-xs uppercase tracking-wide">{stage.name}</span>
+                        <span className="text-xs font-semibold px-1.5 py-0.5 rounded-full bg-white/60">
+                          {stageLeads.length}
+                        </span>
                       </div>
-                      <div className="flex flex-col items-end gap-1">
-                        <TierBadge tier={tier} />
-                        <ScorePill band={lead.scoreBand} score={lead.totalScore} />
-                      </div>
-                    </div>
 
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="text-gray-500 flex items-center gap-1.5">
-                        {lead.sellerFirstName} {lead.sellerLastName}
-                        {lead.assignedTo && (
-                          <span
-                            className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-primary-100 text-primary-700 text-[9px] font-bold"
-                            title={`Assigned: ${lead.assignedTo.firstName} ${lead.assignedTo.lastName}`}
+                      {/* Droppable column */}
+                      <Droppable droppableId={stage.id}>
+                        {(provided, snapshot) => (
+                          <div
+                            ref={provided.innerRef}
+                            {...provided.droppableProps}
+                            className={`flex-1 space-y-2 p-1 rounded-lg min-h-[100px] transition-colors ${
+                              snapshot.isDraggingOver
+                                ? 'bg-blue-50 border-2 border-blue-300 border-dashed'
+                                : 'border-2 border-transparent'
+                            }`}
                           >
-                            {lead.assignedTo.firstName?.[0]}{lead.assignedTo.lastName?.[0]}
-                          </span>
+                            {stageLeads.map((lead, index) => {
+                              const tier = lead._tier as 1 | 2 | 3;
+                              const hoursAgo = lead.lastTouchedAt
+                                ? Math.round((Date.now() - new Date(lead.lastTouchedAt).getTime()) / 3_600_000)
+                                : null;
+                              const stale = hoursAgo !== null && hoursAgo > 72;
+                              const s = spread(lead);
+                              return (
+                                <Draggable key={lead.id} draggableId={lead.id} index={index}>
+                                  {(provided, snapshot) => (
+                                    <div
+                                      ref={provided.innerRef}
+                                      {...provided.draggableProps}
+                                      {...provided.dragHandleProps}
+                                    >
+                                      <Link
+                                        href={`/leads/${lead.id}`}
+                                        className={`block bg-white rounded-lg border border-gray-200 overflow-hidden hover:shadow-md hover:border-blue-200 transition-all ${
+                                          snapshot.isDragging ? 'shadow-xl ring-2 ring-blue-400 rotate-1' : ''
+                                        }`}
+                                        onClick={e => { if (snapshot.isDragging) e.preventDefault(); }}
+                                      >
+                                        {/* Tier stripe */}
+                                        <div className={`h-1 w-full ${TIER_CONFIG[tier].dot}`} />
+
+                                        <div className="p-2.5 space-y-2">
+                                          {/* Address + photo */}
+                                          <div className="flex items-start gap-2">
+                                            <PropertyPhoto
+                                              src={lead.primaryPhoto}
+                                              scoreBand={lead.scoreBand}
+                                              address={lead.propertyAddress}
+                                              size="sm"
+                                            />
+                                            <div className="flex-1 min-w-0">
+                                              <p className="font-semibold text-xs text-gray-900 truncate leading-snug">
+                                                {lead.propertyAddress}
+                                              </p>
+                                              <p className="text-[11px] text-gray-400 truncate">
+                                                {lead.propertyCity}, {lead.propertyState}
+                                              </p>
+                                            </div>
+                                            <ScorePill band={lead.scoreBand} score={lead.totalScore} />
+                                          </div>
+
+                                          {/* Seller + assignee */}
+                                          <div className="flex items-center justify-between">
+                                            <span className="text-[11px] text-gray-500 truncate">
+                                              {lead.sellerFirstName} {lead.sellerLastName}
+                                            </span>
+                                            {lead.assignedTo && (
+                                              <span
+                                                className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-primary-100 text-primary-700 text-[9px] font-bold flex-shrink-0"
+                                                title={`${lead.assignedTo.firstName} ${lead.assignedTo.lastName}`}
+                                              >
+                                                {lead.assignedTo.firstName?.[0]}{lead.assignedTo.lastName?.[0]}
+                                              </span>
+                                            )}
+                                          </div>
+
+                                          {/* Stats */}
+                                          <div className="flex items-center justify-between text-[11px] border-t border-gray-100 pt-1.5">
+                                            <div className="flex items-center gap-1.5 text-gray-400">
+                                              {lead.arv && (
+                                                <span className="text-green-600 font-semibold">${(lead.arv / 1000).toFixed(0)}k</span>
+                                              )}
+                                              {s !== null && (
+                                                <span className={`font-bold ${s >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                                                  {s >= 0 ? '+' : ''}${(s / 1000).toFixed(0)}k
+                                                </span>
+                                              )}
+                                            </div>
+                                            <span className={`${stale ? 'text-amber-500 font-semibold' : 'text-gray-300'}`}>
+                                              {hoursAgo !== null ? pipelineTimeAgo(lead.lastTouchedAt) : '—'}
+                                              {stale ? ' ⚠' : ''}
+                                            </span>
+                                          </div>
+                                        </div>
+                                      </Link>
+                                    </div>
+                                  )}
+                                </Draggable>
+                              );
+                            })}
+                            {provided.placeholder}
+                            {stageLeads.length === 0 && !snapshot.isDraggingOver && (
+                              <p className="text-[11px] text-gray-300 text-center pt-6 select-none">Empty</p>
+                            )}
+                          </div>
                         )}
-                      </span>
-                      <StatusBadge status={lead.status} />
+                      </Droppable>
                     </div>
-
-                    {(lead.arv || lead.askingPrice) && (
-                      <div className="flex items-center justify-between pt-2 border-t border-gray-100">
-                        <div className="text-xs text-gray-500">
-                          {lead.arv && <span>ARV <strong className="text-gray-700">${(lead.arv / 1000).toFixed(0)}k</strong></span>}
-                          {lead.askingPrice && (
-                            <span className="ml-2">Ask <strong className="text-gray-700">${(lead.askingPrice / 1000).toFixed(0)}k</strong></span>
-                          )}
-                        </div>
-                        {s !== null && (
-                          <span className={`text-xs font-bold ${s >= 0 ? 'text-green-600' : 'text-red-500'}`}>
-                            {s >= 0 ? '+' : ''}${(s / 1000).toFixed(0)}k
-                          </span>
-                        )}
-                      </div>
-                    )}
-
-                    {stale && (
-                      <div className="text-xs text-amber-600 font-medium">
-                        ⚠ No contact {Math.round(hoursAgo! / 24)}d
-                      </div>
-                    )}
-                  </div>
-                </Link>
-              );
-            })}
+                  );
+                })}
+              </div>
+            </DragDropContext>
           </div>
 
         )}
