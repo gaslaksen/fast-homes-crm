@@ -97,8 +97,9 @@ export default function LeadManagementPage() {
   const statusLabels: Record<string, string> = {
     NEW: 'New',
     ATTEMPTING_CONTACT: 'Attempting Contact',
-    QUALIFIED: 'Qualified',
-    OFFER_SENT: 'Offer Sent',
+    CONTACT_MADE: 'Contact Made',
+    QUALIFYING: 'Qualifying',
+    OFFER_SENT: 'Offer Made',
     UNDER_CONTRACT: 'Under Contract',
     CLOSING: 'Closing',
     CLOSED_WON: 'Closed Won',

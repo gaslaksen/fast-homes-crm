@@ -173,9 +173,7 @@ export default function EditLeadPage() {
                   <option value="ATTEMPTING_CONTACT">Attempting Contact</option>
                   <option value="CONTACT_MADE">Contact Made</option>
                   <option value="QUALIFYING">Qualifying</option>
-                  <option value="QUALIFIED">Qualified</option>
-                  <option value="OFFER_SENT">Offer Sent</option>
-                  <option value="NEGOTIATING">Negotiating</option>
+                  <option value="OFFER_SENT">Offer Made</option>
                   <option value="UNDER_CONTRACT">Under Contract</option>
                   <option value="CLOSING">Closing</option>
                   <option value="CLOSED_WON">Closed Won</option>

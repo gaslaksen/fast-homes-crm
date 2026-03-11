@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState, useMemo, Suspense } from 'react';
+import { useEffect, useState, useMemo, Suspense, useCallback } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { leadsAPI, authAPI } from '@/lib/api';
+import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
+import { leadsAPI, authAPI, pipelineAPI } from '@/lib/api';
 import PropertyPhoto from '@/components/PropertyPhoto';
 import AppNav from '@/components/AppNav';
 
@@ -11,11 +12,28 @@ import AppNav from '@/components/AppNav';
 
 type SortKey = 'score' | 'arv' | 'asking' | 'created' | 'touched' | 'address' | 'tier';
 type SortDir = 'asc' | 'desc';
-type ViewMode = 'table' | 'cards';
+type ViewMode = 'table' | 'cards' | 'pipeline';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const INACTIVE_STATUSES = ['DEAD', 'CLOSED_WON', 'CLOSED_LOST'];
+
+const PIPELINE_STAGES = [
+  { id: 'NEW',               name: 'New Leads',          color: 'bg-blue-100   border-blue-300   text-blue-800' },
+  { id: 'ATTEMPTING_CONTACT',name: 'Attempting Contact', color: 'bg-yellow-100 border-yellow-300 text-yellow-800' },
+  { id: 'CONTACT_MADE',      name: 'Contact Made',       color: 'bg-green-100  border-green-300  text-green-800' },
+  { id: 'QUALIFYING',        name: 'Qualifying',         color: 'bg-purple-100 border-purple-300 text-purple-800' },
+  { id: 'OFFER_SENT',        name: 'Offer Made',         color: 'bg-orange-100 border-orange-300 text-orange-800' },
+  { id: 'UNDER_CONTRACT',    name: 'Under Contract',     color: 'bg-teal-100   border-teal-300   text-teal-800' },
+  { id: 'NURTURE',           name: 'Nurture',            color: 'bg-gray-100   border-gray-300   text-gray-600' },
+];
+
+function pipelineTimeAgo(date: string) {
+  const hours = Math.round((Date.now() - new Date(date).getTime()) / 3_600_000);
+  if (hours < 1)  return 'Just now';
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
+}
 
 const TIER_CONFIG: Record<number, { label: string; short: string; emoji: string; desc: string; pill: string; dot: string; chipActive: string }> = {
   1: {
@@ -60,7 +78,7 @@ const STATUS_LABELS: Record<string, string> = {
   QUALIFYING: 'Qualifying',
   IN_QUALIFICATION: 'Qualifying',
   QUALIFIED: 'Qualified',
-  OFFER_SENT: 'Offer Sent',
+  OFFER_SENT: 'Offer Made',
   NEGOTIATING: 'Negotiating',
   IN_NEGOTIATION: 'Negotiating',
   UNDER_CONTRACT: 'Under Contract',
@@ -208,6 +226,7 @@ function LeadsPageInner() {
   const [sortKey,       setSortKey]       = useState<SortKey>('tier');
   const [sortDir,       setSortDir]       = useState<SortDir>('asc');
   const [viewMode,      setViewMode]      = useState<ViewMode>('table');
+  const [pipelineDragging, setPipelineDragging] = useState(false);
   const [selectedIds,   setSelectedIds]   = useState<Set<string>>(new Set());
   const [bulkStatus,    setBulkStatus]    = useState('');
   const [showFilters,   setShowFilters]   = useState(false);
@@ -372,6 +391,38 @@ function LeadsPageInner() {
   const hasFilters = !!(search || bandFilter || statusFilter || sourceFilter || dateFilter ||
     staleFilter || arvFilter || dealFilter || stateFilter || assigneeFilter || tierFilter || showInactive);
 
+  // ─── Pipeline drag-and-drop ──────────────────────────────────────────────────
+  const onDragEnd = useCallback(async (result: DropResult) => {
+    if (!result.destination) return;
+    const { draggableId: leadId, source, destination } = result;
+    if (source.droppableId === destination.droppableId) return;
+
+    // Optimistic update: mutate status in allLeads
+    setAllLeads(prev => prev.map(l =>
+      l.id === leadId ? { ...l, status: destination.droppableId } : l
+    ));
+    try {
+      await pipelineAPI.updateStage(leadId, destination.droppableId);
+    } catch {
+      // Revert on failure
+      setAllLeads(prev => prev.map(l =>
+        l.id === leadId ? { ...l, status: source.droppableId } : l
+      ));
+    }
+  }, []);
+
+  // Group filtered leads by stage for pipeline view (exclude inactive unless showInactive)
+  const pipelineByStage = useMemo(() => {
+    const active = filtered.filter(l => viewMode !== 'pipeline' || showInactive || !INACTIVE_STATUSES.includes(l.status));
+    const map: Record<string, any[]> = {};
+    for (const stage of PIPELINE_STAGES) map[stage.id] = [];
+    for (const lead of active) {
+      const stageId = PIPELINE_STAGES.find(s => s.id === lead.status) ? lead.status : null;
+      if (stageId) map[stageId].push(lead);
+    }
+    return map;
+  }, [filtered, viewMode, showInactive]);
+
   // ─── Render ─────────────────────────────────────────────────────────────────
 
   return (
@@ -427,13 +478,19 @@ function LeadsPageInner() {
                 onClick={() => setViewMode('table')}
                 className={`px-3 py-1.5 text-xs font-medium transition-colors ${viewMode === 'table' ? 'bg-gray-100 text-gray-800' : 'text-gray-400 hover:text-gray-600'}`}
               >
-                ☰ Table
+                ☰ List
               </button>
               <button
                 onClick={() => setViewMode('cards')}
-                className={`px-3 py-1.5 text-xs font-medium transition-colors ${viewMode === 'cards' ? 'bg-gray-100 text-gray-800' : 'text-gray-400 hover:text-gray-600'}`}
+                className={`px-3 py-1.5 text-xs font-medium border-x border-gray-200 transition-colors ${viewMode === 'cards' ? 'bg-gray-100 text-gray-800' : 'text-gray-400 hover:text-gray-600'}`}
               >
-                ⊞ Cards
+                ⊞ Grid
+              </button>
+              <button
+                onClick={() => setViewMode('pipeline')}
+                className={`px-3 py-1.5 text-xs font-medium transition-colors ${viewMode === 'pipeline' ? 'bg-gray-100 text-gray-800' : 'text-gray-400 hover:text-gray-600'}`}
+              >
+                ⧉ Pipeline
               </button>
             </div>
 
@@ -731,7 +788,7 @@ function LeadsPageInner() {
             </div>
           </div>
 
-        ) : (
+        ) : viewMode === 'cards' ? (
 
           /* ─── CARDS VIEW ─── */
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
@@ -812,6 +869,127 @@ function LeadsPageInner() {
                 </Link>
               );
             })}
+          </div>
+
+        ) : (
+
+          /* ─── PIPELINE VIEW ─── */
+          <div className="-mx-6 px-6">
+            <DragDropContext onDragEnd={onDragEnd}>
+              <div className="flex gap-3 overflow-x-auto pb-4" style={{ minHeight: 480 }}>
+                {PIPELINE_STAGES.map((stage) => {
+                  const stageLeads = pipelineByStage[stage.id] || [];
+                  return (
+                    <div key={stage.id} className="flex-shrink-0 flex flex-col" style={{ width: 272 }}>
+                      {/* Column header */}
+                      <div className={`${stage.color} border rounded-lg px-3 py-2 mb-2 flex items-center justify-between`}>
+                        <span className="font-bold text-xs uppercase tracking-wide">{stage.name}</span>
+                        <span className="text-xs font-semibold px-1.5 py-0.5 rounded-full bg-white/60">
+                          {stageLeads.length}
+                        </span>
+                      </div>
+
+                      {/* Droppable column */}
+                      <Droppable droppableId={stage.id}>
+                        {(provided, snapshot) => (
+                          <div
+                            ref={provided.innerRef}
+                            {...provided.droppableProps}
+                            className={`flex-1 space-y-2 p-1.5 rounded-lg min-h-[120px] transition-colors ${
+                              snapshot.isDraggingOver
+                                ? 'bg-blue-50 border-2 border-blue-300 border-dashed'
+                                : 'border-2 border-transparent'
+                            }`}
+                          >
+                            {stageLeads.map((lead, index) => {
+                              const tier = lead._tier as 1 | 2 | 3;
+                              const hoursAgo = lead.lastTouchedAt
+                                ? Math.round((Date.now() - new Date(lead.lastTouchedAt).getTime()) / 3_600_000)
+                                : null;
+                              const stale = hoursAgo !== null && hoursAgo > 72;
+                              return (
+                                <Draggable key={lead.id} draggableId={lead.id} index={index}>
+                                  {(provided, snapshot) => (
+                                    <div
+                                      ref={provided.innerRef}
+                                      {...provided.draggableProps}
+                                      {...provided.dragHandleProps}
+                                    >
+                                      <Link
+                                        href={`/leads/${lead.id}`}
+                                        className={`block bg-white rounded-lg border border-gray-200 p-3 hover:shadow-md hover:border-blue-200 transition-all ${
+                                          snapshot.isDragging ? 'shadow-xl ring-2 ring-blue-400 rotate-1' : ''
+                                        }`}
+                                        onClick={e => { if (snapshot.isDragging) e.preventDefault(); }}
+                                      >
+                                        {/* Tier stripe */}
+                                        <div className={`-mx-3 -mt-3 mb-2 h-1 rounded-t-lg ${TIER_CONFIG[tier].dot}`} />
+
+                                        {/* Address + photo */}
+                                        <div className="flex items-start gap-2 mb-2">
+                                          <PropertyPhoto
+                                            src={lead.primaryPhoto}
+                                            scoreBand={lead.scoreBand}
+                                            address={lead.propertyAddress}
+                                            size="sm"
+                                          />
+                                          <div className="flex-1 min-w-0">
+                                            <p className="font-semibold text-xs text-gray-900 truncate leading-snug">
+                                              {lead.propertyAddress}
+                                            </p>
+                                            <p className="text-[11px] text-gray-400 truncate">
+                                              {lead.propertyCity}, {lead.propertyState}
+                                            </p>
+                                          </div>
+                                          <ScorePill band={lead.scoreBand} score={lead.totalScore} />
+                                        </div>
+
+                                        {/* Seller + assignee */}
+                                        <div className="flex items-center justify-between mb-1.5">
+                                          <span className="text-[11px] text-gray-500 truncate">
+                                            {lead.sellerFirstName} {lead.sellerLastName}
+                                          </span>
+                                          {lead.assignedTo && (
+                                            <span
+                                              className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-primary-100 text-primary-700 text-[9px] font-bold flex-shrink-0"
+                                              title={`${lead.assignedTo.firstName} ${lead.assignedTo.lastName}`}
+                                            >
+                                              {lead.assignedTo.firstName?.[0]}{lead.assignedTo.lastName?.[0]}
+                                            </span>
+                                          )}
+                                        </div>
+
+                                        {/* Stats row */}
+                                        <div className="flex items-center gap-2 text-[11px] text-gray-400">
+                                          {lead.arv && (
+                                            <span className="text-green-600 font-semibold">${(lead.arv / 1000).toFixed(0)}k</span>
+                                          )}
+                                          <span className="ml-auto">
+                                            {lead.lastTouchedAt ? pipelineTimeAgo(lead.lastTouchedAt) : '—'}
+                                          </span>
+                                          {stale && <span className="text-amber-500">⚠</span>}
+                                        </div>
+                                      </Link>
+                                    </div>
+                                  )}
+                                </Draggable>
+                              );
+                            })}
+                            {provided.placeholder}
+
+                            {stageLeads.length === 0 && !snapshot.isDraggingOver && (
+                              <div className="text-[11px] text-gray-300 text-center pt-4 select-none">
+                                No leads
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </Droppable>
+                    </div>
+                  );
+                })}
+              </div>
+            </DragDropContext>
           </div>
         )}
 
