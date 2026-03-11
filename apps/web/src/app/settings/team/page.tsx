@@ -25,6 +25,12 @@ export default function TeamPage() {
   const [orgNameDraft, setOrgNameDraft] = useState('');
   const [savingOrgName, setSavingOrgName] = useState(false);
   const [orgNameError, setOrgNameError] = useState('');
+
+  // Member editing
+  const [editingMemberId, setEditingMemberId] = useState<string | null>(null);
+  const [memberForm, setMemberForm] = useState<any>({});
+  const [savingMember, setSavingMember] = useState(false);
+  const [memberError, setMemberError] = useState('');
   const [showInvite, setShowInvite] = useState(false);
   const [inviteForm, setInviteForm] = useState({ email: '', firstName: '', lastName: '', role: 'AGENT', tempPassword: '' });
   const [inviteError, setInviteError] = useState('');
@@ -114,6 +120,34 @@ export default function TeamPage() {
 
   const isAdmin = currentUser?.role === 'ADMIN';
 
+  const startEditMember = (m: any) => {
+    setMemberForm({ firstName: m.firstName, lastName: m.lastName || '', phone: m.phone || '', title: m.title || '', role: m.role });
+    setMemberError('');
+    setEditingMemberId(m.id);
+  };
+
+  const handleSaveMember = async (userId: string) => {
+    setSavingMember(true);
+    setMemberError('');
+    try {
+      const updated = await authAPI.updateTeamMember(userId, memberForm);
+      setMembers(prev => prev.map(m => m.id === userId ? { ...m, ...updated.data } : m));
+      // Update localStorage if editing self
+      if (userId === currentUser?.id) {
+        try {
+          const stored = JSON.parse(localStorage.getItem('user') || '{}');
+          Object.assign(stored, { firstName: updated.data.firstName, lastName: updated.data.lastName });
+          localStorage.setItem('user', JSON.stringify(stored));
+        } catch {}
+      }
+      setEditingMemberId(null);
+    } catch (err: any) {
+      setMemberError(err.response?.data?.message || 'Failed to save');
+    } finally {
+      setSavingMember(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       <AppNav />
@@ -178,35 +212,132 @@ export default function TeamPage() {
           {loading ? (
             <div className="px-5 py-8 text-center text-sm text-gray-400 animate-pulse">Loading...</div>
           ) : (
-            <div className="divide-y divide-gray-50">
-              {members.map(m => (
-                <div key={m.id} className="flex items-center justify-between px-5 py-3">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium text-sm text-gray-900">
-                        {m.firstName} {m.lastName}
-                        {m.id === currentUser?.id && <span className="text-xs text-blue-500 ml-1">(you)</span>}
-                      </span>
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                        m.role === 'ADMIN' ? 'bg-purple-100 text-purple-700' :
-                        m.role === 'VIEWER' ? 'bg-gray-100 text-gray-500' :
-                        'bg-blue-100 text-blue-700'
-                      }`}>
-                        {ROLE_LABELS[m.role] || m.role}
-                      </span>
+            <div className="divide-y divide-gray-100">
+              {members.map(m => {
+                const canEdit = isAdmin || m.id === currentUser?.id;
+                const isEditing = editingMemberId === m.id;
+                return (
+                  <div key={m.id}>
+                    {/* ── Member row ── */}
+                    <div className="flex items-center justify-between px-5 py-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-medium text-sm text-gray-900">
+                            {m.firstName} {m.lastName}
+                            {m.id === currentUser?.id && <span className="text-xs text-blue-500 ml-1">(you)</span>}
+                          </span>
+                          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                            m.role === 'ADMIN' ? 'bg-purple-100 text-purple-700' :
+                            m.role === 'VIEWER' ? 'bg-gray-100 text-gray-500' :
+                            'bg-blue-100 text-blue-700'
+                          }`}>
+                            {ROLE_LABELS[m.role] || m.role}
+                          </span>
+                          {m.title && (
+                            <span className="text-xs text-gray-400 italic">{m.title}</span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-3 text-xs text-gray-400 mt-0.5 flex-wrap">
+                          <span>{m.email}</span>
+                          {m.phone && <span>📞 {m.phone}</span>}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3 flex-shrink-0 ml-4">
+                        {isAdmin && m.id !== currentUser?.id && (
+                          <button
+                            onClick={() => handleResetPassword(m.id, `${m.firstName} ${m.lastName}`)}
+                            className="text-xs text-gray-400 hover:text-blue-600 transition-colors"
+                          >
+                            Reset password
+                          </button>
+                        )}
+                        {canEdit && (
+                          <button
+                            onClick={() => isEditing ? setEditingMemberId(null) : startEditMember(m)}
+                            className="text-xs text-blue-500 hover:text-blue-700 font-medium transition-colors"
+                          >
+                            {isEditing ? 'Cancel' : 'Edit'}
+                          </button>
+                        )}
+                      </div>
                     </div>
-                    <div className="text-xs text-gray-400 mt-0.5">{m.email}</div>
+
+                    {/* ── Inline edit form ── */}
+                    {isEditing && (
+                      <div className="bg-gray-50 border-t border-gray-100 px-5 py-4 space-y-4">
+                        {memberError && (
+                          <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{memberError}</div>
+                        )}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">First Name</label>
+                            <input
+                              className="input w-full"
+                              value={memberForm.firstName}
+                              onChange={e => setMemberForm((f: any) => ({ ...f, firstName: e.target.value }))}
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">Last Name</label>
+                            <input
+                              className="input w-full"
+                              value={memberForm.lastName}
+                              onChange={e => setMemberForm((f: any) => ({ ...f, lastName: e.target.value }))}
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">Phone</label>
+                            <input
+                              className="input w-full"
+                              value={memberForm.phone}
+                              onChange={e => setMemberForm((f: any) => ({ ...f, phone: e.target.value }))}
+                              placeholder="e.g. 704-555-1234"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">Title</label>
+                            <input
+                              className="input w-full"
+                              value={memberForm.title}
+                              onChange={e => setMemberForm((f: any) => ({ ...f, title: e.target.value }))}
+                              placeholder="e.g. Acquisitions Manager"
+                            />
+                          </div>
+                          {isAdmin && (
+                            <div>
+                              <label className="block text-xs font-medium text-gray-600 mb-1">Role</label>
+                              <select
+                                className="input w-full"
+                                value={memberForm.role}
+                                onChange={e => setMemberForm((f: any) => ({ ...f, role: e.target.value }))}
+                              >
+                                <option value="ADMIN">Admin — full access</option>
+                                <option value="AGENT">Agent — view/edit leads</option>
+                                <option value="VIEWER">Viewer — read only</option>
+                              </select>
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex gap-2 pt-1">
+                          <button
+                            onClick={() => handleSaveMember(m.id)}
+                            disabled={savingMember}
+                            className="btn btn-primary btn-sm"
+                          >
+                            {savingMember ? 'Saving…' : 'Save changes'}
+                          </button>
+                          <button
+                            onClick={() => setEditingMemberId(null)}
+                            className="btn btn-secondary btn-sm"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                  {isAdmin && m.id !== currentUser?.id && (
-                    <button
-                      onClick={() => handleResetPassword(m.id, `${m.firstName} ${m.lastName}`)}
-                      className="text-xs text-gray-400 hover:text-blue-600 transition-colors"
-                    >
-                      Reset password
-                    </button>
-                  )}
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

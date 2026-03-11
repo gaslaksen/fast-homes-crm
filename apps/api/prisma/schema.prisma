@@ -29,6 +29,8 @@ model User {
   firstName      String
   lastName       String
   role           String   @default("AGENT")  // ADMIN | AGENT | VIEWER
+  phone          String?
+  title          String?
   organizationId String?
   organization   Organization? @relation(fields: [organizationId], references: [id])
   createdAt      DateTime @default(now())

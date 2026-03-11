@@ -141,10 +141,38 @@ export class AuthService {
       where: { organizationId },
       select: {
         id: true, email: true, firstName: true, lastName: true,
-        role: true, createdAt: true,
+        role: true, phone: true, title: true, createdAt: true,
       },
       orderBy: { createdAt: 'asc' },
     });
+  }
+
+  // ── Admin: update a team member's details ────────────────────────────────
+  async updateTeamMember(
+    actorId: string,
+    actorRole: string,
+    organizationId: string,
+    targetUserId: string,
+    data: { firstName?: string; lastName?: string; phone?: string; title?: string; role?: string },
+  ) {
+    // Verify target belongs to same org
+    const target = await this.prisma.user.findUnique({ where: { id: targetUserId } });
+    if (!target || target.organizationId !== organizationId) throw new Error('User not found');
+    // Only admins can change roles; non-admins can only edit their own profile
+    if (actorRole !== 'ADMIN' && actorId !== targetUserId) throw new Error('Forbidden');
+    // Only admins can change roles
+    const updateData: any = {};
+    if (data.firstName !== undefined) updateData.firstName = data.firstName;
+    if (data.lastName  !== undefined) updateData.lastName  = data.lastName;
+    if (data.phone     !== undefined) updateData.phone     = data.phone || null;
+    if (data.title     !== undefined) updateData.title     = data.title || null;
+    if (data.role      !== undefined && actorRole === 'ADMIN') updateData.role = data.role;
+    const updated = await this.prisma.user.update({
+      where: { id: targetUserId },
+      data: updateData,
+      select: { id: true, email: true, firstName: true, lastName: true, role: true, phone: true, title: true },
+    });
+    return updated;
   }
 
   // ── Change own password ──────────────────────────────────────────────────

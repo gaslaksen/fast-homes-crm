@@ -48,6 +48,8 @@ export const authAPI = {
     api.patch(`/auth/team/${userId}/password`, { newPassword }),
   removeUser: (userId: string) =>
     api.delete(`/auth/team/${userId}`),
+  updateTeamMember: (userId: string, data: { firstName?: string; lastName?: string; phone?: string; title?: string; role?: string }) =>
+    api.patch(`/auth/team/${userId}`, data),
   updateOrganization: (name: string) =>
     api.patch('/auth/organization', { name }),
 };

@@ -83,6 +83,19 @@ export class AuthController {
     return this.authService.resetPassword(userId, body.newPassword);
   }
 
+  @Patch('team/:userId')
+  async updateTeamMember(
+    @Headers('authorization') authHeader: string,
+    @Param('userId') userId: string,
+    @Body() body: { firstName?: string; lastName?: string; phone?: string; title?: string; role?: string },
+  ) {
+    const decoded = this.getUser(authHeader);
+    if (!decoded.organizationId) throw new ForbiddenException('Not part of an organization');
+    return this.authService.updateTeamMember(
+      decoded.userId, decoded.role, decoded.organizationId, userId, body,
+    );
+  }
+
   @Patch('organization')
   async updateOrganization(
     @Headers('authorization') authHeader: string,
