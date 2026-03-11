@@ -358,6 +358,24 @@ export default function LeadDetailPage() {
                   size={60}
                 />
               ) : null}
+              {/* Zillow quick-link */}
+              <a
+                href={`https://www.zillow.com/homes/${encodeURIComponent(
+                  [lead.propertyAddress, lead.propertyCity, lead.propertyState, lead.propertyZip]
+                    .filter(Boolean).join(', ')
+                )}_rb/`}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="View on Zillow"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 bg-white hover:border-[#006AFF] hover:bg-blue-50 transition-colors text-xs font-semibold text-[#006AFF]"
+              >
+                {/* Zillow "Z" wordmark */}
+                <svg width="14" height="14" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M16 0C7.163 0 0 7.163 0 16s7.163 16 16 16 16-7.163 16-16S24.837 0 16 0z" fill="#006AFF"/>
+                  <path d="M22.4 21.6H9.6v-1.92l8.064-8.064H9.6V9.6h12.8v1.92l-8.064 8.064H22.4v2.016z" fill="white"/>
+                </svg>
+                Zillow
+              </a>
               <Link href={`/leads/${leadId}/edit`} className="btn btn-primary">
                 Edit Lead
               </Link>
