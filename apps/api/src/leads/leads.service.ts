@@ -962,7 +962,8 @@ export class LeadsService {
       lead.compAnalyses.find((c) => c.savedToLead) ?? lead.compAnalyses[0] ?? null;
 
     const arv = lead.arv ?? analysis?.arvEstimate ?? null;
-    const repairCost = analysis?.repairCosts ?? null;
+    // lead.repairCosts exists in schema — cast needed locally due to stale pnpm-hoisted Prisma client
+    const repairCost = (lead as any).repairCosts ?? analysis?.repairCosts ?? null;
     const mao = arv != null && repairCost != null ? arv * 0.7 - repairCost : null;
 
     const offerAmount = lead.contract?.offerAmount ?? null;

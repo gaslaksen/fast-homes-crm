@@ -92,6 +92,11 @@ export default function DispoTab({
   const [showOfferForm, setShowOfferForm] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  // Deal Numbers edit mode
+  const [editingNumbers, setEditingNumbers] = useState(false);
+  const [numbersForm, setNumbersForm] = useState({ arv: '', repairCosts: '', askingPrice: '' });
+  const [savingNumbers, setSavingNumbers] = useState(false);
+
   // Contract form state
   const blankContract = {
     contractStatus: 'draft',
@@ -210,6 +215,44 @@ export default function DispoTab({
     }
   };
 
+  const startEditingNumbers = () => {
+    const s = summary!;
+    setNumbersForm({
+      arv: s.arv != null ? String(s.arv) : '',
+      repairCosts: s.repairCost != null ? String(s.repairCost) : '',
+      askingPrice: s.askingPrice != null ? String(s.askingPrice) : '',
+    });
+    setEditingNumbers(true);
+  };
+
+  const handleSaveDealNumbers = async () => {
+    setSavingNumbers(true);
+    try {
+      const payload: { arv?: number | null; repairCosts?: number | null; askingPrice?: number | null } = {};
+      payload.arv = numbersForm.arv !== '' ? parseFloat(numbersForm.arv) : null;
+      payload.repairCosts = numbersForm.repairCosts !== '' ? parseFloat(numbersForm.repairCosts) : null;
+      payload.askingPrice = numbersForm.askingPrice !== '' ? parseFloat(numbersForm.askingPrice) : null;
+      await dispoAPI.updateDealNumbers(leadId, payload);
+      setEditingNumbers(false);
+      await load();
+    } catch (e) {
+      console.error('Failed to save deal numbers', e);
+      alert('Failed to save deal numbers');
+    } finally {
+      setSavingNumbers(false);
+    }
+  };
+
+  // Live-compute derived values while editing
+  const liveArv = numbersForm.arv !== '' ? parseFloat(numbersForm.arv) : null;
+  const liveRepairs = numbersForm.repairCosts !== '' ? parseFloat(numbersForm.repairCosts) : null;
+  const liveAsking = numbersForm.askingPrice !== '' ? parseFloat(numbersForm.askingPrice) : null;
+  const liveMao = liveArv != null && liveRepairs != null ? liveArv * 0.7 - liveRepairs : null;
+  const liveOfferAmount = summary?.offerAmount ?? null;
+  const liveAssignmentFee = summary?.assignmentFee ?? null;
+  const liveBuyerPrice = liveOfferAmount != null && liveAssignmentFee != null ? liveOfferAmount + liveAssignmentFee : null;
+  const liveBuyerSpread = liveArv != null && liveBuyerPrice != null ? liveArv - liveBuyerPrice : null;
+
   if (loading) {
     return <div className="card text-center py-12 text-gray-400">Loading dispo data...</div>;
   }
@@ -223,55 +266,165 @@ export default function DispoTab({
       <div className="card">
         <div className="flex items-center justify-between mb-5">
           <h2 className="text-xl font-bold">Deal Numbers</h2>
-          {s.contract && (
-            <span className={`text-xs font-semibold px-2 py-1 rounded-full ${
-              s.contract.contractStatus === 'closed' ? 'bg-green-100 text-green-800' :
-              s.contract.contractStatus === 'cancelled' ? 'bg-red-100 text-red-700' :
-              s.contract.contractStatus === 'signed' ? 'bg-blue-100 text-blue-800' :
-              'bg-yellow-100 text-yellow-800'
-            }`}>
-              {CONTRACT_STATUS_LABELS[s.contract.contractStatus] ?? s.contract.contractStatus}
-            </span>
-          )}
+          <div className="flex items-center gap-2">
+            {s.contract && (
+              <span className={`text-xs font-semibold px-2 py-1 rounded-full ${
+                s.contract.contractStatus === 'closed' ? 'bg-green-100 text-green-800' :
+                s.contract.contractStatus === 'cancelled' ? 'bg-red-100 text-red-700' :
+                s.contract.contractStatus === 'signed' ? 'bg-blue-100 text-blue-800' :
+                'bg-yellow-100 text-yellow-800'
+              }`}>
+                {CONTRACT_STATUS_LABELS[s.contract.contractStatus] ?? s.contract.contractStatus}
+              </span>
+            )}
+            {!editingNumbers && (
+              <button
+                onClick={startEditingNumbers}
+                className="text-xs px-2 py-1 rounded-lg border border-gray-200 text-gray-500 hover:text-gray-700 hover:border-gray-300 transition-colors flex items-center gap-1"
+              >
+                ✏️ Edit
+              </button>
+            )}
+          </div>
         </div>
 
-        {!s.arv && (
-          <div className="mb-5 px-4 py-3 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-800">
-            ⚠️ No ARV on file.{' '}
-            <Link href={`/leads/${leadId}/comps-analysis`} className="font-semibold underline">
-              Run comps analysis
-            </Link>{' '}
-            to populate deal numbers.
+        {/* Edit mode banner */}
+        {editingNumbers && (
+          <div className="mb-4 px-4 py-3 rounded-lg bg-blue-50 border border-blue-200 text-sm text-blue-800 flex items-center justify-between gap-3">
+            <span>Editing deal numbers — changes save to this lead and override comps analysis values.</span>
+            <div className="flex gap-2 flex-shrink-0">
+              <button
+                onClick={handleSaveDealNumbers}
+                disabled={savingNumbers}
+                className="text-xs px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 font-medium disabled:opacity-50"
+              >
+                {savingNumbers ? 'Saving…' : 'Save'}
+              </button>
+              <button
+                onClick={() => setEditingNumbers(false)}
+                disabled={savingNumbers}
+                className="text-xs px-3 py-1.5 rounded-lg border border-blue-300 text-blue-700 hover:bg-blue-100"
+              >
+                Cancel
+              </button>
+            </div>
           </div>
         )}
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-0 rounded-xl border border-gray-200 overflow-hidden text-sm">
-          <DealRow label="ARV (After Repair Value)" value={fmt(s.arv)} muted={!s.arv} />
-          <DealRow label="Repair Estimate" value={fmt(s.repairCost)} muted={!s.repairCost}
-            sub={s.latestCompAnalysis?.repairNotes ?? undefined} />
-          <DealRow
-            label="MAO (70% Rule)"
-            value={fmt(s.mao)}
-            highlight={
-              s.mao != null && s.offerAmount != null
-                ? s.offerAmount <= s.mao ? 'green' : 'red'
-                : undefined
-            }
-            sub={s.mao != null ? `ARV × 70% − repairs` : undefined}
-          />
-          <DealRow label="Seller Asking Price" value={fmt(s.askingPrice)} muted={!s.askingPrice} divider />
-          <DealRow label="Offer to Seller" value={fmt(s.offerAmount)} bold muted={!s.offerAmount} />
-          <DealRow label="Assignment Fee" value={fmt(s.assignmentFee)} bold muted={!s.assignmentFee} />
-          <DealRow label="Buyer's All-In Price" value={fmt(s.buyerPrice)} divider />
-          <DealRow label="Buyer's Spread" value={fmt(s.buyerSpread)}
-            highlight={s.buyerSpread != null ? (s.buyerSpread > 0 ? 'green' : 'red') : undefined} />
-          <DealRow
-            label="Your Profit"
-            value={fmt(s.projectedProfit)}
-            bold
-            highlight={s.projectedProfit != null ? (s.projectedProfit > 0 ? 'green' : 'red') : undefined}
-          />
-        </div>
+        {!s.arv && !editingNumbers && (
+          <div className="mb-5 px-4 py-3 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-800">
+            ⚠️ No ARV on file. Enter it above or{' '}
+            <Link href={`/leads/${leadId}/comps-analysis`} className="font-semibold underline">
+              run comps analysis
+            </Link>{' '}
+            to auto-populate.
+          </div>
+        )}
+
+        {editingNumbers ? (
+          /* ── Editable rows ──────────────────────────────────────────────── */
+          <div className="space-y-4">
+            {/* Input fields for the three source values */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">ARV — After Repair Value ($)</label>
+                <input
+                  type="number"
+                  value={numbersForm.arv}
+                  onChange={(e) => setNumbersForm((f) => ({ ...f, arv: e.target.value }))}
+                  className="input w-full"
+                  placeholder="e.g. 250000"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Repair Estimate ($)</label>
+                <input
+                  type="number"
+                  value={numbersForm.repairCosts}
+                  onChange={(e) => setNumbersForm((f) => ({ ...f, repairCosts: e.target.value }))}
+                  className="input w-full"
+                  placeholder="e.g. 35000"
+                />
+                {s.latestCompAnalysis?.repairNotes && (
+                  <p className="text-xs text-gray-400 mt-1 truncate">{s.latestCompAnalysis.repairNotes}</p>
+                )}
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Seller Asking Price ($)</label>
+                <input
+                  type="number"
+                  value={numbersForm.askingPrice}
+                  onChange={(e) => setNumbersForm((f) => ({ ...f, askingPrice: e.target.value }))}
+                  className="input w-full"
+                  placeholder="e.g. 180000"
+                />
+              </div>
+            </div>
+
+            {/* Live-computed preview */}
+            <div className="rounded-xl border border-gray-200 overflow-hidden text-sm">
+              <div className="px-4 py-2 bg-gray-50 border-b border-gray-100 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                Live Preview
+              </div>
+              <DealRow
+                label="MAO (70% Rule)"
+                value={fmt(liveMao)}
+                muted={liveMao == null}
+                highlight={
+                  liveMao != null && liveOfferAmount != null
+                    ? liveOfferAmount <= liveMao ? 'green' : 'red'
+                    : undefined
+                }
+                sub="ARV × 70% − repairs"
+              />
+              <DealRow label="Offer to Seller" value={fmt(liveOfferAmount)} bold muted={!liveOfferAmount}
+                sub="Set in Contract Details below" />
+              <DealRow label="Assignment Fee" value={fmt(liveAssignmentFee)} bold muted={!liveAssignmentFee}
+                sub="Set in Contract Details below" />
+              <DealRow label="Buyer's All-In Price" value={fmt(liveBuyerPrice)} muted={liveBuyerPrice == null} divider />
+              <DealRow label="Buyer's Spread" value={fmt(liveBuyerSpread)}
+                highlight={liveBuyerSpread != null ? (liveBuyerSpread > 0 ? 'green' : 'red') : undefined} />
+              <DealRow
+                label="Your Profit"
+                value={fmt(liveAssignmentFee)}
+                bold
+                highlight={liveAssignmentFee != null ? (liveAssignmentFee > 0 ? 'green' : 'red') : undefined}
+              />
+            </div>
+            <p className="text-xs text-gray-400">
+              💡 <Link href={`/leads/${leadId}/comps-analysis`} className="underline hover:text-gray-600">Comps Analysis</Link> can auto-fill ARV and repairs from comparable sales.
+            </p>
+          </div>
+        ) : (
+          /* ── Read-only rows ─────────────────────────────────────────────── */
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-0 rounded-xl border border-gray-200 overflow-hidden text-sm">
+            <DealRow label="ARV (After Repair Value)" value={fmt(s.arv)} muted={!s.arv} />
+            <DealRow label="Repair Estimate" value={fmt(s.repairCost)} muted={!s.repairCost}
+              sub={s.latestCompAnalysis?.repairNotes ?? undefined} />
+            <DealRow
+              label="MAO (70% Rule)"
+              value={fmt(s.mao)}
+              highlight={
+                s.mao != null && s.offerAmount != null
+                  ? s.offerAmount <= s.mao ? 'green' : 'red'
+                  : undefined
+              }
+              sub={s.mao != null ? `ARV × 70% − repairs` : undefined}
+            />
+            <DealRow label="Seller Asking Price" value={fmt(s.askingPrice)} muted={!s.askingPrice} divider />
+            <DealRow label="Offer to Seller" value={fmt(s.offerAmount)} bold muted={!s.offerAmount} />
+            <DealRow label="Assignment Fee" value={fmt(s.assignmentFee)} bold muted={!s.assignmentFee} />
+            <DealRow label="Buyer's All-In Price" value={fmt(s.buyerPrice)} divider />
+            <DealRow label="Buyer's Spread" value={fmt(s.buyerSpread)}
+              highlight={s.buyerSpread != null ? (s.buyerSpread > 0 ? 'green' : 'red') : undefined} />
+            <DealRow
+              label="Your Profit"
+              value={fmt(s.projectedProfit)}
+              bold
+              highlight={s.projectedProfit != null ? (s.projectedProfit > 0 ? 'green' : 'red') : undefined}
+            />
+          </div>
+        )}
       </div>
 
       {/* ── Offer Tracker ─────────────────────────────────────────────────── */}

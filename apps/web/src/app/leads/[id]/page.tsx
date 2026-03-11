@@ -366,7 +366,7 @@ export default function LeadDetailPage() {
               { key: 'overview', label: 'Overview' },
               { key: 'dispo', label: 'Dispo' },
               { key: 'comps', label: 'Comps' },
-              { key: 'analysis', label: 'Analysis' },
+              { key: 'analysis', label: 'AI Insights' },
               { key: 'communications', label: 'Messages' },
               { key: 'notes', label: `Notes${lead.notes?.length ? ` (${lead.notes.length})` : ''}` },
               { key: 'activity', label: 'Activity' },
