@@ -310,7 +310,7 @@ export default function LeadDetailPage() {
       <AppNav />
       {/* Lead Header */}
       <header className="bg-white border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+        <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex justify-between items-center">
             <div className="flex items-center gap-4">
               <PropertyPhoto
@@ -368,8 +368,8 @@ export default function LeadDetailPage() {
 
       {/* Tab Nav */}
       <div className="bg-white border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <nav className="flex space-x-6 text-sm">
+        <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8">
+          <nav className="flex space-x-4 text-sm overflow-x-auto scrollbar-none">
             {[
               { key: 'overview', label: 'Overview' },
               { key: 'dispo', label: 'Dispo' },
@@ -395,7 +395,7 @@ export default function LeadDetailPage() {
         </div>
       </div>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
 
         {/* Overview Tab */}
         {activeTab === 'overview' && (

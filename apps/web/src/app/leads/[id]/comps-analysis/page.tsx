@@ -555,7 +555,7 @@ export default function CompsAnalysisPage() {
       <AppNav />
       {/* Lead Sub-header */}
       <header className="bg-white border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+        <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex justify-between items-center">
             <div className="flex items-center gap-4">
               <PropertyPhoto
@@ -605,8 +605,8 @@ export default function CompsAnalysisPage() {
 
       {/* Parent lead nav */}
       <div className="bg-white border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <nav className="flex space-x-6 text-sm">
+        <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8">
+          <nav className="flex space-x-4 text-sm overflow-x-auto scrollbar-none">
             {[
               { label: 'Overview',    href: `/leads/${leadId}` },
               { label: 'Dispo',       href: `/leads/${leadId}?tab=dispo` },
@@ -634,8 +634,8 @@ export default function CompsAnalysisPage() {
 
       {/* Comp Analysis Sub-Nav */}
       <div className="bg-white border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <nav className="flex space-x-8">
+        <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8">
+          <nav className="flex space-x-6 overflow-x-auto scrollbar-none">
             {[
               { key: 'comps', label: `Comps (${allComps.length})` },
               { key: 'results', label: 'Results & ARV' },
@@ -658,7 +658,7 @@ export default function CompsAnalysisPage() {
         </div>
       </div>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <main className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
 
         {/* ═══════════════ COMPS SECTION ═══════════════ */}
         {activeSection === 'comps' && (

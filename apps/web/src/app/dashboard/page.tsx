@@ -139,7 +139,7 @@ export default function DashboardPage() {
     <div className="min-h-screen bg-gray-50">
       <AppNav />
 
-      <main className="max-w-7xl mx-auto px-6 py-8 space-y-8">
+      <main className="max-w-screen-2xl mx-auto px-6 py-8 space-y-8">
 
         {/* Greeting + date */}
         <div className="flex items-baseline justify-between">
