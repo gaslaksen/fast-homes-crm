@@ -248,9 +248,12 @@ export class DripService implements OnModuleInit, OnModuleDestroy {
       where: { id: leadId },
       include: {
         messages: { orderBy: { createdAt: 'desc' }, take: 10 },
+        organization: true,
       },
     });
     if (!lead) return;
+
+    const dripBusinessName = (lead as any).organization?.name || 'Fast Homes for Cash';
 
     if (!['NEW', 'ATTEMPTING_CONTACT'].includes(lead.status)) {
       await this.cancelSequence(sequenceId, `Lead status changed to ${lead.status}`);
@@ -306,10 +309,11 @@ export class DripService implements OnModuleInit, OnModuleDestroy {
           {
             sellerName: lead.sellerFirstName,
             propertyAddress: lead.propertyAddress,
+            businessName: dripBusinessName,
             conversationHistory: lead.messages.map(
               (m) => `${m.direction}: ${m.body}`,
             ),
-            purpose: `${nextStep.purpose}${isFirstMessage ? ' This is the FIRST message to this seller — introduce yourself as Fast Homes for Cash and include "Reply STOP to opt out" at the end.' : ' Do NOT introduce yourself — you are already in a conversation with this seller.'}`,
+            purpose: `${nextStep.purpose}${isFirstMessage ? ` This is the FIRST message to this seller — introduce yourself as ${dripBusinessName} and include "Reply STOP to opt out" at the end.` : ' Do NOT introduce yourself — you are already in a conversation with this seller.'}`,
           },
           undefined,
           lead,
@@ -321,7 +325,8 @@ export class DripService implements OnModuleInit, OnModuleDestroy {
         this.logger.warn(`AI generation failed, using fallback: ${err.message}`);
         messageBody = FALLBACK_MESSAGES[nextStep.key]
           .replace('{name}', lead.sellerFirstName)
-          .replace('{address}', lead.propertyAddress);
+          .replace('{address}', lead.propertyAddress)
+          .replace('{businessName}', dripBusinessName);
       }
     }
 

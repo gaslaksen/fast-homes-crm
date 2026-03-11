@@ -38,7 +38,7 @@ export const DEFAULT_MAX_RETRIES = 2;
 
 export const FALLBACK_MESSAGES: Record<string, string> = {
   hasTimeline:
-    'Hi {name}, this is Fast Homes for Cash reaching out about {address}. Quick question — do you have a timeline in mind for selling? Reply STOP to opt out.',
+    'Hi {name}, this is {businessName} reaching out about {address}. Quick question — do you have a timeline in mind for selling? Reply STOP to opt out.',
   hasAskingPrice:
     'Thanks for the info! Do you have a ballpark price in mind for the property?',
   hasCondition:

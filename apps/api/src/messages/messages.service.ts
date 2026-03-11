@@ -229,10 +229,12 @@ export class MessagesService {
       where: { id: leadId },
       include: {
         messages: { orderBy: { createdAt: 'asc' }, take: 20 },
+        organization: true,
       },
     });
     if (!lead) return null;
 
+    const autoBusinessName = (lead as any).organization?.name || 'Fast Homes for Cash';
     const conversationHistory = lead.messages.map(
       (m) => `${m.direction}: ${m.body}`,
     );
@@ -341,7 +343,7 @@ export class MessagesService {
 What you know: ${knownSummary || 'gathered all key details'}.
 Your message must:
 1. Thank ${lead.sellerFirstName} sincerely for their time and for sharing
-2. Tell them someone from the Fast Homes team will review the information and reach out soon to discuss next steps
+2. Tell them someone from the team will review the information and reach out soon to discuss next steps
 3. Keep it warm and brief — under 160 characters if possible
 4. Do NOT ask anything. Do NOT request more info. End the conversation professionally.
 5. Do NOT repeat back their price or timeline in a way that implies agreement or commitment (e.g. do NOT say "We'll do $250k" or "We can close in 7 days") — the team will handle those discussions separately.`;
@@ -359,6 +361,7 @@ Your message must:
         {
           sellerName: lead.sellerFirstName,
           propertyAddress: lead.propertyAddress,
+          businessName: autoBusinessName,
           conversationHistory,
           purpose,
           knownData,
@@ -435,9 +438,12 @@ Your message must:
       where: { id: leadId },
       include: {
         messages: { orderBy: { createdAt: 'asc' }, take: 5 },
+        organization: true,
       },
     });
     if (!lead) return null;
+
+    const businessName = (lead as any).organization?.name || 'Fast Homes for Cash';
 
     // Don't send if any real messages exist (ignore SIMULATED sids from old broken attempts)
     const realMessages = lead.messages.filter(
@@ -453,8 +459,9 @@ Your message must:
         {
           sellerName: lead.sellerFirstName,
           propertyAddress: lead.propertyAddress,
+          businessName,
           conversationHistory: [],
-          purpose: 'First outreach to a new seller lead. Introduce yourself as Fast Homes for Cash and include "Reply STOP to opt out" at the end.',
+          purpose: `First outreach to a new seller lead. Introduce yourself as ${businessName} and include "Reply STOP to opt out" at the end.`,
         },
         undefined,
         lead,
@@ -502,6 +509,7 @@ Your message must:
           orderBy: { createdAt: 'desc' },
           take: 20,
         },
+        organization: true,
       },
     });
 
@@ -528,7 +536,7 @@ Your message must:
         await this.smsProvider.sendSms(
           data.From,
           data.To,
-          'You have been unsubscribed from Fast Homes for Cash. You will not receive further messages.',
+          `You have been unsubscribed from ${(lead as any).organization?.name || 'Fast Homes for Cash'}. You will not receive further messages.`,
         );
       } catch (err) {
         this.logger.warn(`Could not send opt-out confirmation: ${err.message}`);

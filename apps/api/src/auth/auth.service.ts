@@ -164,4 +164,13 @@ export class AuthService {
     await this.prisma.user.update({ where: { id: userId }, data: { password: hashed } });
     return { success: true };
   }
+
+  // ── Update organization name (business branding) ─────────────────────────
+  async updateOrganization(organizationId: string, name: string) {
+    const org = await this.prisma.organization.update({
+      where: { id: organizationId },
+      data: { name },
+    });
+    return { id: org.id, name: org.name, plan: org.plan };
+  }
 }

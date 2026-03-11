@@ -83,6 +83,18 @@ export class AuthController {
     return this.authService.resetPassword(userId, body.newPassword);
   }
 
+  @Patch('organization')
+  async updateOrganization(
+    @Headers('authorization') authHeader: string,
+    @Body() body: { name: string },
+  ) {
+    const decoded = this.getUser(authHeader);
+    if (decoded.role !== 'ADMIN') throw new ForbiddenException('Admin only');
+    if (!decoded.organizationId) throw new ForbiddenException('Not part of an organization');
+    if (!body.name?.trim()) throw new ForbiddenException('Name cannot be empty');
+    return this.authService.updateOrganization(decoded.organizationId, body.name.trim());
+  }
+
   @Delete('team/:userId')
   async removeUser(
     @Headers('authorization') authHeader: string,

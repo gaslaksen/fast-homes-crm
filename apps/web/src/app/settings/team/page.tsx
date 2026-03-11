@@ -18,6 +18,13 @@ export default function TeamPage() {
   const [members, setMembers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState<any>({});
+
+  // Business name editing
+  const [orgName, setOrgName] = useState('');
+  const [editingOrgName, setEditingOrgName] = useState(false);
+  const [orgNameDraft, setOrgNameDraft] = useState('');
+  const [savingOrgName, setSavingOrgName] = useState(false);
+  const [orgNameError, setOrgNameError] = useState('');
   const [showInvite, setShowInvite] = useState(false);
   const [inviteForm, setInviteForm] = useState({ email: '', firstName: '', lastName: '', role: 'AGENT', tempPassword: '' });
   const [inviteError, setInviteError] = useState('');
@@ -31,12 +38,38 @@ export default function TeamPage() {
   const [pwSuccess, setPwSuccess] = useState('');
 
   useEffect(() => {
-    setCurrentUser(getUser());
+    const user = getUser();
+    setCurrentUser(user);
+    const name = user?.organization?.name || '';
+    setOrgName(name);
+    setOrgNameDraft(name);
     authAPI.getTeam()
       .then(r => setMembers(r.data))
       .catch(console.error)
       .finally(() => setLoading(false));
   }, []);
+
+  const handleSaveOrgName = async () => {
+    if (!orgNameDraft.trim()) return;
+    setSavingOrgName(true);
+    setOrgNameError('');
+    try {
+      const res = await authAPI.updateOrganization(orgNameDraft.trim());
+      const newName = res.data.name;
+      setOrgName(newName);
+      setEditingOrgName(false);
+      // Persist to localStorage so nav/other pages pick it up without re-login
+      try {
+        const stored = JSON.parse(localStorage.getItem('user') || '{}');
+        if (stored.organization) stored.organization.name = newName;
+        localStorage.setItem('user', JSON.stringify(stored));
+      } catch {}
+    } catch (err: any) {
+      setOrgNameError(err.response?.data?.message || 'Failed to save');
+    } finally {
+      setSavingOrgName(false);
+    }
+  };
 
   const handleInvite = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -88,7 +121,44 @@ export default function TeamPage() {
 
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Team</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Quick Cash Home Buyers</p>
+
+          {/* Business name — editable by admins */}
+          {editingOrgName ? (
+            <div className="flex items-center gap-2 mt-1">
+              <input
+                autoFocus
+                className="input text-sm py-1"
+                value={orgNameDraft}
+                onChange={e => setOrgNameDraft(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') handleSaveOrgName(); if (e.key === 'Escape') setEditingOrgName(false); }}
+                placeholder="Your business name"
+              />
+              <button
+                onClick={handleSaveOrgName}
+                disabled={savingOrgName || !orgNameDraft.trim()}
+                className="btn btn-primary btn-sm"
+              >
+                {savingOrgName ? 'Saving…' : 'Save'}
+              </button>
+              <button onClick={() => { setEditingOrgName(false); setOrgNameDraft(orgName); }} className="btn btn-secondary btn-sm">
+                Cancel
+              </button>
+              {orgNameError && <span className="text-xs text-red-500">{orgNameError}</span>}
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 mt-0.5">
+              <p className="text-sm text-gray-500">{orgName || '—'}</p>
+              {isAdmin && (
+                <button
+                  onClick={() => { setOrgNameDraft(orgName); setEditingOrgName(true); }}
+                  className="text-xs text-blue-500 hover:text-blue-700"
+                  title="Edit business name"
+                >
+                  ✏️ Edit
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Team Members */}

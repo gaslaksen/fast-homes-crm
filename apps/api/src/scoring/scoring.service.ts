@@ -476,6 +476,7 @@ Return ONLY valid JSON, no other text.`;
     context: {
       sellerName: string;
       propertyAddress: string;
+      businessName?: string;
       conversationHistory?: string[];
       purpose?: string;
       knownData?: {
@@ -534,7 +535,7 @@ Return ONLY valid JSON, no other text.`;
         fewShotMessages = selected.exampleMessages || [];
       } else {
         // Fallback: safe follow-up prompt that will NEVER introduce itself
-        systemMessage = `You are a real estate acquisitions specialist for "Fast Homes for Cash" continuing a conversation with a seller.
+        systemMessage = `You are a real estate acquisitions specialist for "${context.businessName || 'Fast Homes for Cash'}" continuing a conversation with a seller.
 Continue the natural flow of conversation. Show you listened to what they've already said.
 Be empathetic. Ask ONE question at a time. Keep under 160 characters. Sound human.
 NEVER introduce yourself or the company — you are already in a conversation.
@@ -657,6 +658,7 @@ Return ONLY a JSON object:
   private getDefaultMessageDrafts(context: {
     sellerName: string;
     propertyAddress: string;
+    businessName?: string;
     conversationHistory?: string[];
     knownData?: {
       askingPrice?: number | null;
@@ -673,11 +675,12 @@ Return ONLY a JSON object:
     const extracted = context.justExtracted;
 
     // If there's no conversation yet, send intro
+    const bizName = context.businessName || 'Fast Homes for Cash';
     if (!hasConversation) {
       return {
-        direct: `Hi ${name}, this is Fast Homes for Cash. I noticed your property at ${context.propertyAddress} — are you considering selling? Reply STOP to opt out.`,
-        friendly: `Hey ${name}! I'm with Fast Homes for Cash and saw your place at ${context.propertyAddress}. Would love to learn more if you have a sec. Reply STOP to opt out.`,
-        professional: `Hello ${name}, this is Fast Homes for Cash reaching out about ${context.propertyAddress}. Would you have a moment to discuss your property? Reply STOP to opt out.`,
+        direct: `Hi ${name}, this is ${bizName}. I noticed your property at ${context.propertyAddress} — are you considering selling? Reply STOP to opt out.`,
+        friendly: `Hey ${name}! I'm with ${bizName} and saw your place at ${context.propertyAddress}. Would love to learn more if you have a sec. Reply STOP to opt out.`,
+        professional: `Hello ${name}, this is ${bizName} reaching out about ${context.propertyAddress}. Would you have a moment to discuss your property? Reply STOP to opt out.`,
       };
     }
 
