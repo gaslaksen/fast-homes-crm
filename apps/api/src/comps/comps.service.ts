@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { RentCastService } from './rentcast.service';
+import { AttomService, AttomEnrichmentResult } from './attom.service';
 import axios from 'axios';
 
 interface ChatARVResponse {
@@ -28,10 +29,12 @@ export class CompsService {
     private prisma: PrismaService,
     private config: ConfigService,
     private rentCastService: RentCastService,
+    private attomService: AttomService,
   ) {}
 
   /**
    * Fetch comps and ARV for a property.
+   * Runs ATTOM enrichment in parallel with RentCast comps for maximum data.
    * Priority: 1) RentCast, 2) ChatARV, 3) Placeholder
    */
   async fetchComps(
@@ -45,20 +48,43 @@ export class CompsService {
     confidence: number;
     compsCount: number;
     source: string;
+    attom?: AttomEnrichmentResult | null;
   }> {
+    // Run ATTOM enrichment in parallel (non-blocking — it's bonus data)
+    const attomPromise = this.attomService.isConfigured
+      ? this.attomService.enrichLead(leadId, address, { forceRefresh: options?.forceRefresh })
+          .catch(err => { this.logger.warn(`ATTOM enrichment failed (non-fatal): ${err.message}`); return null; })
+      : Promise.resolve(null);
+
+    let compsResult: {
+      arv: number; arvLow?: number; arvHigh?: number; confidence: number; compsCount: number; source: string;
+    };
+
     // 1) Try RentCast
     if (this.rentCastService.isConfigured) {
       try {
         this.logger.log(`Fetching comps via RentCast for lead ${leadId}`);
-        const result = await this.rentCastService.fetchAndSaveComps(leadId, address, {
+        compsResult = await this.rentCastService.fetchAndSaveComps(leadId, address, {
           forceRefresh: options?.forceRefresh,
         });
-        return result;
       } catch (error) {
         this.logger.error(`RentCast fetch failed, trying fallbacks: ${error.message}`);
+        compsResult = await this.fetchCompsWithFallback(leadId, address);
       }
+    } else {
+      compsResult = await this.fetchCompsWithFallback(leadId, address);
     }
 
+    // Await ATTOM (it's been running in parallel the whole time)
+    const attom = await attomPromise;
+
+    return { ...compsResult, attom };
+  }
+
+  private async fetchCompsWithFallback(
+    leadId: string,
+    address: { street: string; city: string; state: string; zip: string },
+  ) {
     // 2) Try ChatARV
     const chatARVKey = this.config.get<string>('CHATARV_API_KEY');
     if (chatARVKey) {

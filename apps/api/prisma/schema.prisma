@@ -84,6 +84,29 @@ model Lead {
   arv               Float?
   arvConfidence     Float?
   lastCompsDate     DateTime?
+
+  // ── ATTOM enrichment ─────────────────────────────────────────────────────
+  attomId              String?   // ATTOM property ID for lookups
+  attomEnrichedAt      DateTime? // when ATTOM data was last fetched
+  attomAvm             Float?    // ATTOM AVM estimate
+  attomAvmLow          Float?
+  attomAvmHigh         Float?
+  attomAvmConfidence   Float?    // ATTOM confidence score (0-100)
+  avmPoorLow           Float?    // Condition-adjusted: distressed/AS-IS range low
+  avmPoorHigh          Float?    // Condition-adjusted: distressed/AS-IS range high
+  avmGoodLow           Float?    // Good condition range low
+  avmGoodHigh          Float?    // Good condition range high
+  avmExcellentLow      Float?    // After-repair/renovated ARV range low
+  avmExcellentHigh     Float?    // After-repair/renovated ARV range high ← TRUE ARV
+  marketAssessedValue  Float?    // ATTOM market assessed value
+  annualTaxAmount      Float?    // Actual annual property tax
+  propertyCondition    String?   // ATTOM: GOOD / FAIR / POOR
+  propertyQuality      String?   // ATTOM: EXCELLENT / GOOD / AVERAGE / FAIR / POOR
+  wallType             String?   // ATTOM: BRICK / FRAME / STUCCO etc.
+  stories              Int?      // Number of stories/levels
+  basementSqft         Int?      // Basement square footage
+  effectiveYearBuilt   Int?      // Renovation/effective year (from ATTOM)
+  subdivision          String?   // Subdivision/neighborhood name
   
   challengeScore    Int      @default(0)
   authorityScore    Int      @default(0)

@@ -158,6 +158,10 @@ export default function CompsAnalysisPage() {
   const [photoThumbnails, setPhotoThumbnails] = useState<{file: File; url: string; status: 'ready'|'uploading'|'done'}[]>([]);
   const [isDragging, setIsDragging] = useState(false);
 
+  // ATTOM enrichment
+  const [attomData, setAttomData] = useState<any>(null);
+  const [attomLoading, setAttomLoading] = useState(false);
+
   useEffect(() => {
     loadData();
   }, [leadId]);
@@ -167,6 +171,9 @@ export default function CompsAnalysisPage() {
       const leadRes = await leadsAPI.get(leadId);
       setLead(leadRes.data);
       if (leadRes.data?.aiAnalysis) { try { setAiAnalysis(JSON.parse(leadRes.data.aiAnalysis)); } catch {} }
+
+      // Load ATTOM data (non-blocking)
+      compsAPI.getAttomData(leadId).then(r => setAttomData(r.data)).catch(() => {});
 
       // Check for existing analyses
       const analyses = await compAnalysisAPI.list(leadId);
@@ -641,6 +648,7 @@ export default function CompsAnalysisPage() {
               { key: 'results', label: 'Results & ARV' },
               { key: 'deal', label: 'Deal Analysis' },
               { key: 'repairs', label: 'Repairs' },
+              { key: 'property-intel', label: '🏠 Property Intel' },
             ].map((tab) => (
               <button
                 key={tab.key}
@@ -1932,12 +1940,246 @@ export default function CompsAnalysisPage() {
             </div>
           </div>
         )}
+
+        {/* ═══════════════ PROPERTY INTEL (ATTOM) ═══════════════ */}
+        {activeSection === 'property-intel' && (
+          <div className="space-y-6">
+
+            {/* Header */}
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-bold text-gray-900">🏠 Property Intelligence</h2>
+                <p className="text-sm text-gray-500 mt-0.5">
+                  Deep property data & valuation ranges from ATTOM — the industry standard for real estate data.
+                </p>
+              </div>
+              <button
+                onClick={async () => {
+                  setAttomLoading(true);
+                  try {
+                    const r = await compsAPI.attomEnrich(leadId, true);
+                    setAttomData(r.data);
+                    // Reload lead to pick up newly filled fields
+                    const lr = await leadsAPI.get(leadId);
+                    setLead(lr.data);
+                  } catch {}
+                  setAttomLoading(false);
+                }}
+                disabled={attomLoading}
+                className="btn btn-secondary btn-sm"
+              >
+                {attomLoading ? '⏳ Fetching…' : '🔄 Refresh ATTOM Data'}
+              </button>
+            </div>
+
+            {!attomData?.attomId ? (
+              <div className="card border-dashed border-2 border-gray-200 text-center py-12">
+                <div className="text-4xl mb-3">🏘️</div>
+                <div className="text-gray-600 font-medium">No ATTOM data loaded yet</div>
+                <p className="text-sm text-gray-400 mt-1 mb-4">
+                  Fetch to enrich this property with deep data: AVM, tax records, building details, condition-adjusted value ranges.
+                </p>
+                <button
+                  onClick={async () => {
+                    setAttomLoading(true);
+                    try {
+                      const r = await compsAPI.attomEnrich(leadId);
+                      setAttomData(r.data);
+                      const lr = await leadsAPI.get(leadId);
+                      setLead(lr.data);
+                    } catch {}
+                    setAttomLoading(false);
+                  }}
+                  disabled={attomLoading}
+                  className="btn btn-primary"
+                >
+                  {attomLoading ? '⏳ Fetching ATTOM data…' : '📡 Fetch Property Intelligence'}
+                </button>
+              </div>
+            ) : (
+              <>
+                {/* ── Condition-Adjusted AVM (investor's crown jewel) ── */}
+                <div className="card border border-indigo-200 bg-gradient-to-br from-indigo-50 to-white">
+                  <div className="flex items-center gap-2 mb-4">
+                    <span className="text-2xl">💎</span>
+                    <div>
+                      <h3 className="font-bold text-gray-900">Condition-Adjusted Valuation</h3>
+                      <p className="text-xs text-gray-500">ATTOM AVM ranges based on property condition — critical for investor ARV</p>
+                    </div>
+                    {attomData.attomAvmConfidence && (
+                      <span className="ml-auto text-xs px-2 py-1 bg-indigo-100 text-indigo-700 rounded-full font-medium">
+                        {attomData.attomAvmConfidence}% confidence
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    {/* Distressed / AS-IS */}
+                    <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-center">
+                      <div className="text-xs font-semibold text-red-600 uppercase tracking-wide mb-1">😰 Distressed / AS-IS</div>
+                      <div className="text-2xl font-bold text-red-700">
+                        {attomData.avmPoorHigh ? `$${Math.round(attomData.avmPoorHigh).toLocaleString()}` : '—'}
+                      </div>
+                      {attomData.avmPoorLow && attomData.avmPoorHigh && (
+                        <div className="text-xs text-red-500 mt-1">
+                          ${Math.round(attomData.avmPoorLow).toLocaleString()} – ${Math.round(attomData.avmPoorHigh).toLocaleString()}
+                        </div>
+                      )}
+                      <div className="text-xs text-gray-500 mt-2">Poor condition, needs major work</div>
+                    </div>
+
+                    {/* Good condition */}
+                    <div className="rounded-xl border border-yellow-200 bg-yellow-50 p-4 text-center">
+                      <div className="text-xs font-semibold text-yellow-700 uppercase tracking-wide mb-1">👍 Good Condition</div>
+                      <div className="text-2xl font-bold text-yellow-700">
+                        {attomData.avmGoodHigh ? `$${Math.round(attomData.avmGoodHigh).toLocaleString()}` : '—'}
+                      </div>
+                      {attomData.avmGoodLow && attomData.avmGoodHigh && (
+                        <div className="text-xs text-yellow-600 mt-1">
+                          ${Math.round(attomData.avmGoodLow).toLocaleString()} – ${Math.round(attomData.avmGoodHigh).toLocaleString()}
+                        </div>
+                      )}
+                      <div className="text-xs text-gray-500 mt-2">Average condition, minor repairs needed</div>
+                    </div>
+
+                    {/* After-Repair / Excellent = TRUE ARV */}
+                    <div className="rounded-xl border border-green-300 bg-green-50 p-4 text-center ring-2 ring-green-400">
+                      <div className="text-xs font-semibold text-green-700 uppercase tracking-wide mb-1">✨ After Repair (ARV)</div>
+                      <div className="text-3xl font-bold text-green-700">
+                        {attomData.avmExcellentHigh ? `$${Math.round(attomData.avmExcellentHigh).toLocaleString()}` : '—'}
+                      </div>
+                      {attomData.avmExcellentLow && attomData.avmExcellentHigh && (
+                        <div className="text-xs text-green-600 mt-1">
+                          ${Math.round(attomData.avmExcellentLow).toLocaleString()} – ${Math.round(attomData.avmExcellentHigh).toLocaleString()}
+                        </div>
+                      )}
+                      <div className="text-xs text-gray-500 mt-2">Fully renovated / excellent condition</div>
+                    </div>
+                  </div>
+
+                  {/* ATTOM AVM baseline */}
+                  {attomData.attomAvm && (
+                    <div className="mt-4 flex items-center gap-4 text-sm text-gray-600 bg-white rounded-lg px-4 py-3 border border-gray-200">
+                      <span className="font-medium">ATTOM AVM Baseline:</span>
+                      <span className="font-bold text-gray-900">${Math.round(attomData.attomAvm).toLocaleString()}</span>
+                      {attomData.attomAvmLow && attomData.attomAvmHigh && (
+                        <span className="text-gray-400 text-xs">
+                          (range: ${Math.round(attomData.attomAvmLow).toLocaleString()} – ${Math.round(attomData.attomAvmHigh).toLocaleString()})
+                        </span>
+                      )}
+                      {attomData.attomAvmConfidence && (
+                        <span className="ml-auto text-xs text-gray-400">Updated {attomData.attomEnrichedAt ? new Date(attomData.attomEnrichedAt).toLocaleDateString() : '—'}</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* ── Property Details ── */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+                  {/* Building Details */}
+                  <div className="card">
+                    <h3 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                      <span>🏗️</span> Building Details
+                    </h3>
+                    <div className="grid grid-cols-2 gap-3">
+                      {[
+                        { label: 'Beds', value: attomData.bedrooms ? `${attomData.bedrooms} bed` : '—' },
+                        { label: 'Baths', value: attomData.bathrooms ? `${attomData.bathrooms} bath` : '—' },
+                        { label: 'Sq Ft (Living)', value: attomData.sqft ? `${attomData.sqft.toLocaleString()} sqft` : '—' },
+                        { label: 'Lot Size', value: attomData.lotSize ? `${attomData.lotSize.toFixed(3)} acres` : '—' },
+                        { label: 'Year Built', value: attomData.yearBuilt ? String(attomData.yearBuilt) : '—' },
+                        { label: 'Effective Year', value: attomData.effectiveYearBuilt ? String(attomData.effectiveYearBuilt) : '—' },
+                        { label: 'Stories', value: attomData.stories ? String(attomData.stories) : '—' },
+                        { label: 'Basement', value: attomData.basementSqft ? `${attomData.basementSqft.toLocaleString()} sqft` : '—' },
+                        { label: 'Wall Type', value: attomData.wallType || '—' },
+                        { label: 'Condition', value: attomData.propertyCondition || '—' },
+                        { label: 'Quality', value: attomData.propertyQuality || '—' },
+                        { label: 'Subdivision', value: attomData.subdivision || '—' },
+                      ].map(({ label, value }) => (
+                        <div key={label} className="bg-gray-50 rounded-lg p-3">
+                          <div className="text-xs text-gray-500 mb-0.5">{label}</div>
+                          <div className="text-sm font-semibold text-gray-900">{value}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Tax & Assessment */}
+                  <div className="space-y-4">
+                    <div className="card">
+                      <h3 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                        <span>🏦</span> Tax & Assessment
+                      </h3>
+                      <div className="space-y-3">
+                        {[
+                          { label: 'Annual Tax', value: attomData.annualTaxAmount ? `$${Math.round(attomData.annualTaxAmount).toLocaleString()}/yr` : '—', highlight: true },
+                          { label: 'Assessed Value', value: attomData.taxAssessedValue ? `$${Math.round(attomData.taxAssessedValue).toLocaleString()}` : '—' },
+                          { label: 'Market Assessed', value: attomData.marketAssessedValue ? `$${Math.round(attomData.marketAssessedValue).toLocaleString()}` : '—' },
+                          { label: 'Last Sale Price', value: attomData.lastSalePrice ? `$${Math.round(attomData.lastSalePrice).toLocaleString()}` : '—' },
+                          { label: 'Last Sale Date', value: attomData.lastSaleDate ? new Date(attomData.lastSaleDate).toLocaleDateString() : '—' },
+                        ].map(({ label, value, highlight }) => (
+                          <div key={label} className={`flex justify-between items-center py-2 border-b border-gray-100 last:border-0 ${highlight ? 'text-gray-900 font-semibold' : ''}`}>
+                            <span className="text-sm text-gray-600">{label}</span>
+                            <span className={`text-sm ${highlight ? 'text-gray-900 font-bold' : 'text-gray-900'}`}>{value}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Quick investor math using ATTOM data */}
+                    {attomData.avmExcellentHigh && attomData.avmPoorHigh && (
+                      <div className="card border border-purple-200 bg-purple-50">
+                        <h3 className="font-semibold text-purple-900 mb-3 flex items-center gap-2">
+                          <span>🎯</span> ATTOM Investor Snapshot
+                        </h3>
+                        <div className="space-y-2 text-sm">
+                          <div className="flex justify-between">
+                            <span className="text-purple-700">ARV (after repair)</span>
+                            <span className="font-bold text-green-700">${Math.round(attomData.avmExcellentHigh).toLocaleString()}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-purple-700">AS-IS value</span>
+                            <span className="font-semibold text-red-600">${Math.round(attomData.avmPoorHigh).toLocaleString()}</span>
+                          </div>
+                          <div className="flex justify-between border-t border-purple-200 pt-2 mt-2">
+                            <span className="text-purple-700 font-medium">Upside potential</span>
+                            <span className="font-bold text-purple-800">
+                              ${Math.round(attomData.avmExcellentHigh - attomData.avmPoorHigh).toLocaleString()}
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-purple-700">70% MAO (of ARV)</span>
+                            <span className="font-semibold text-blue-700">
+                              ${Math.round(attomData.avmExcellentHigh * 0.7).toLocaleString()}
+                            </span>
+                          </div>
+                          {attomData.annualTaxAmount && (
+                            <div className="flex justify-between text-xs text-purple-600 mt-1">
+                              <span>Monthly tax hold cost</span>
+                              <span>${Math.round(attomData.annualTaxAmount / 12).toLocaleString()}/mo</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <p className="text-xs text-gray-400 text-center">
+                  Property intelligence powered by ATTOM Data Solutions · Last updated: {attomData.attomEnrichedAt ? new Date(attomData.attomEnrichedAt).toLocaleString() : '—'}
+                </p>
+              </>
+            )}
+          </div>
+        )}
+
       </main>
 
-      {/* RentCast attribution */}
+      {/* Attribution */}
       {compsWithSource > 0 && (
         <div className="text-center text-xs text-gray-400 pb-4">
-          Comparable data powered by RentCast
+          Comparable data powered by RentCast · Property intelligence powered by ATTOM
         </div>
       )}
     </div>
