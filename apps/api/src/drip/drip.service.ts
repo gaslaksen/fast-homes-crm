@@ -156,10 +156,10 @@ export class DripService implements OnModuleInit, OnModuleDestroy {
     if (!lead) throw new Error(`Lead ${leadId} not found`);
     if (lead.doNotContact) return null;
 
-    // Respect the global AI SMS toggle (unless demo mode is on — demo always runs)
+    // Respect the global AI SMS toggle — this is a hard gate, demo mode does NOT bypass it
     const settings = await this.getDripSettings();
-    if (!settings.aiSmsEnabled && !settings.demoMode) {
-      this.logger.log(`⏸️  AI SMS disabled — skipping drip for lead ${leadId}`);
+    if (!settings.aiSmsEnabled) {
+      this.logger.log(`⏸️  AI SMS disabled (aiSmsEnabled=false) — skipping drip for lead ${leadId}`);
       return null;
     }
 

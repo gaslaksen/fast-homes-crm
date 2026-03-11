@@ -169,6 +169,13 @@ export class MessagesService {
    * Check if auto-response is allowed for this lead (safety controls).
    */
   private async canAutoRespond(leadId: string): Promise<boolean> {
+    // ── Global master switch — always checked first ──────────────────────────
+    const settings = await this.prisma.dripSettings.findUnique({ where: { id: 'default' } });
+    if (!settings?.aiSmsEnabled) {
+      this.logger.log(`⏸️  AI SMS master switch OFF — blocking auto-respond for lead ${leadId}`);
+      return false;
+    }
+
     const lead = await this.prisma.lead.findUnique({ where: { id: leadId } });
     if (!lead) return false;
     if (!lead.autoRespond) return false;
