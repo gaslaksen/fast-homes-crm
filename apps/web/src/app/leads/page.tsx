@@ -784,9 +784,9 @@ function LeadsPageInner() {
         ) : (
 
           /* ─── GRID / PIPELINE VIEW ─── */
-          <div className="-mx-6 px-2">
+          <div className="overflow-x-auto pb-2">
             <DragDropContext onDragEnd={onDragEnd}>
-              <div className="flex gap-3 overflow-x-auto pb-4" style={{ minHeight: 520 }}>
+              <div className="flex gap-3 pb-4" style={{ minHeight: 520, minWidth: 'max-content' }}>
                 {PIPELINE_STAGES.map(stage => {
                   const stageLeads = pipelineByStage[stage.id] || [];
                   return (
