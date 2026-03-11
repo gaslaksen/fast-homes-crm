@@ -608,11 +608,13 @@ export default function CompsAnalysisPage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <nav className="flex space-x-6 text-sm">
             {[
-              { label: 'Overview', href: `/leads/${leadId}` },
-              { label: 'Comps', href: `/leads/${leadId}/comps-analysis`, active: true },
-              { label: 'Analysis', href: `/leads/${leadId}` },
-              { label: 'Messages', href: `/leads/${leadId}` },
-              { label: 'Activity', href: `/leads/${leadId}` },
+              { label: 'Overview',    href: `/leads/${leadId}` },
+              { label: 'Dispo',       href: `/leads/${leadId}?tab=dispo` },
+              { label: 'Comps',       href: `/leads/${leadId}/comps-analysis`, active: true },
+              { label: 'AI Insights', href: `/leads/${leadId}?tab=analysis` },
+              { label: 'Messages',    href: `/leads/${leadId}?tab=communications` },
+              { label: 'Notes',       href: `/leads/${leadId}?tab=notes` },
+              { label: 'Activity',    href: `/leads/${leadId}?tab=activity` },
             ].map((item) => (
               <Link
                 key={item.label}

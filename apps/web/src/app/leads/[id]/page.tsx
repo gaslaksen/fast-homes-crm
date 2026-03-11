@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { leadsAPI, messagesAPI, compsAPI, settingsAPI, photosAPI, pipelineAPI, callsAPI, authAPI, tasksAPI } from '@/lib/api';
 import PropertyPhoto from '@/components/PropertyPhoto';
@@ -31,10 +31,16 @@ function campProgress(lead: any): number {
 export default function LeadDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const leadId = params.id as string;
 
   const [lead, setLead] = useState<any>(null);
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useState(() => {
+    const tab = searchParams.get('tab');
+    return tab && ['overview', 'dispo', 'analysis', 'communications', 'notes', 'activity'].includes(tab)
+      ? tab
+      : 'overview';
+  });
 
   const handleTabClick = (tab: string) => {
     if (tab === 'comps') {
@@ -42,6 +48,8 @@ export default function LeadDetailPage() {
       return;
     }
     setActiveTab(tab);
+    // Keep URL in sync so browser back/forward and comps-nav links work
+    router.replace(`/leads/${leadId}?tab=${tab}`, { scroll: false });
   };
   const [messageDrafts, setMessageDrafts] = useState<any>(null);
   const [selectedDraft, setSelectedDraft] = useState('');
