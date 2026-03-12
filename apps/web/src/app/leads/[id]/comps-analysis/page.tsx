@@ -648,7 +648,6 @@ export default function CompsAnalysisPage() {
               { key: 'results', label: 'Results & ARV' },
               { key: 'deal', label: 'Deal Analysis' },
               { key: 'repairs', label: 'Repairs' },
-              { key: 'property-intel', label: '🏠 Property Intel' },
             ].map((tab) => (
               <button
                 key={tab.key}
@@ -697,15 +696,75 @@ export default function CompsAnalysisPage() {
 
             {/* Subject Property Summary */}
             <div className="card">
-              <h2 className="text-lg font-bold mb-3">Subject Property</h2>
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-lg font-bold">Subject Property</h2>
+                <div className="flex items-center gap-2">
+                  {attomData?.attomId && (
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 font-medium">
+                      ✓ ATTOM Verified
+                    </span>
+                  )}
+                  {!attomData?.attomId && (
+                    <button
+                      onClick={async () => {
+                        setAttomLoading(true);
+                        try {
+                          const r = await compsAPI.attomEnrich(leadId);
+                          setAttomData(r.data);
+                          const lr = await leadsAPI.get(leadId);
+                          setLead(lr.data);
+                        } catch {}
+                        setAttomLoading(false);
+                      }}
+                      disabled={attomLoading}
+                      className="text-xs text-indigo-600 hover:text-indigo-800 font-medium"
+                    >
+                      {attomLoading ? '⏳' : '📡 Enrich with ATTOM'}
+                    </button>
+                  )}
+                </div>
+              </div>
               <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
                 <InfoItem label="Address" value={lead.propertyAddress} />
                 <InfoItem label="Location" value={`${lead.propertyCity}, ${lead.propertyState} ${lead.propertyZip}`} />
                 <InfoItem label="Beds / Baths" value={`${lead.bedrooms || '?'} bd / ${lead.bathrooms || '?'} ba`} />
                 <InfoItem label="Sq Ft" value={lead.sqft?.toLocaleString() || '—'} />
                 <InfoItem label="Asking Price" value={lead.askingPrice ? `$${lead.askingPrice.toLocaleString()}` : '—'} />
-                <InfoItem label="Condition" value={lead.conditionLevel || '—'} />
+                <InfoItem label="Condition" value={(attomData?.propertyCondition && attomData.propertyCondition !== lead.conditionLevel) ? `${lead.conditionLevel || '—'} (ATTOM: ${attomData.propertyCondition})` : (lead.conditionLevel || '—')} />
               </div>
+
+              {/* ATTOM discrepancy warnings */}
+              {attomData?.attomId && (() => {
+                const warnings: string[] = [];
+                if (attomData.sqft && lead.sqft && Math.abs(attomData.sqft - lead.sqft) / lead.sqft > 0.1)
+                  warnings.push(`Sqft mismatch: lead shows ${lead.sqft.toLocaleString()}, ATTOM records ${attomData.sqft.toLocaleString()}`);
+                if (attomData.bedrooms && lead.bedrooms && attomData.bedrooms !== lead.bedrooms)
+                  warnings.push(`Bed count mismatch: lead shows ${lead.bedrooms}, ATTOM records ${attomData.bedrooms}`);
+                if (attomData.bathrooms && lead.bathrooms && Math.abs(attomData.bathrooms - lead.bathrooms) >= 1)
+                  warnings.push(`Bath count mismatch: lead shows ${lead.bathrooms}, ATTOM records ${attomData.bathrooms}`);
+                if (warnings.length === 0) return null;
+                return (
+                  <div className="mt-3 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 space-y-1">
+                    {warnings.map((w, i) => (
+                      <div key={i} className="text-xs text-amber-700 flex items-center gap-1.5">
+                        <span>⚠️</span> {w} — <span className="font-medium">verify before calculating ARV</span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+
+              {/* ATTOM building detail strip */}
+              {attomData?.attomId && (attomData.yearBuilt || attomData.effectiveYearBuilt || attomData.stories || attomData.wallType || attomData.propertyQuality || attomData.subdivision) && (
+                <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500 border-t pt-3">
+                  {attomData.yearBuilt && <span>Built {attomData.yearBuilt}{attomData.effectiveYearBuilt && attomData.effectiveYearBuilt !== attomData.yearBuilt ? ` · Reno'd ${attomData.effectiveYearBuilt}` : ''}</span>}
+                  {attomData.stories && <span>{attomData.stories} {attomData.stories === 1 ? 'story' : 'stories'}</span>}
+                  {attomData.wallType && <span>{attomData.wallType}</span>}
+                  {attomData.propertyQuality && <span>Quality: {attomData.propertyQuality}</span>}
+                  {attomData.subdivision && <span>Subdivision: {attomData.subdivision}</span>}
+                  {attomData.annualTaxAmount && <span>Taxes: ${Math.round(attomData.annualTaxAmount).toLocaleString()}/yr</span>}
+                </div>
+              )}
             </div>
 
             {/* Toolbar */}
@@ -1201,6 +1260,38 @@ export default function CompsAnalysisPage() {
                     </div>
                   </div>
                 </div>
+
+                {/* ATTOM independent validation strip */}
+                {attomData?.attomAvm && (
+                  <div className="mb-5 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-xs font-semibold text-indigo-700 uppercase tracking-wide">ATTOM Independent Valuation</span>
+                      {attomData.attomAvmConfidence && (
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-600">{attomData.attomAvmConfidence}% confidence</span>
+                      )}
+                      {attomData.avmExcellentHigh && analysis?.arvEstimate && (() => {
+                        const delta = Math.abs(attomData.avmExcellentHigh - analysis.arvEstimate) / analysis.arvEstimate;
+                        if (delta > 0.15) return <span className="text-xs px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-medium">⚠️ {Math.round(delta * 100)}% divergence from comps</span>;
+                        if (delta <= 0.05) return <span className="text-xs px-1.5 py-0.5 rounded bg-green-100 text-green-700 font-medium">✓ Confirms comps ARV</span>;
+                        return <span className="text-xs px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">{Math.round(delta * 100)}% difference</span>;
+                      })()}
+                    </div>
+                    <div className="grid grid-cols-3 gap-3 text-center">
+                      <div className="bg-red-50 rounded-lg p-2 border border-red-200">
+                        <div className="text-xs text-red-600 font-medium mb-0.5">AS-IS / Distressed</div>
+                        <div className="text-base font-bold text-red-700">{attomData.avmPoorHigh ? `$${Math.round(attomData.avmPoorHigh).toLocaleString()}` : '—'}</div>
+                      </div>
+                      <div className="bg-yellow-50 rounded-lg p-2 border border-yellow-200">
+                        <div className="text-xs text-yellow-700 font-medium mb-0.5">Good Condition</div>
+                        <div className="text-base font-bold text-yellow-700">{attomData.avmGoodHigh ? `$${Math.round(attomData.avmGoodHigh).toLocaleString()}` : '—'}</div>
+                      </div>
+                      <div className="bg-green-50 rounded-lg p-2 border border-green-300 ring-1 ring-green-400">
+                        <div className="text-xs text-green-700 font-medium mb-0.5">After Repair (ARV)</div>
+                        <div className="text-base font-bold text-green-700">{attomData.avmExcellentHigh ? `$${Math.round(attomData.avmExcellentHigh).toLocaleString()}` : '—'}</div>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Stats Grid */}
                 <div className="grid grid-cols-3 md:grid-cols-6 gap-3 mb-6">
@@ -1941,8 +2032,8 @@ export default function CompsAnalysisPage() {
           </div>
         )}
 
-        {/* ═══════════════ PROPERTY INTEL (ATTOM) ═══════════════ */}
-        {activeSection === 'property-intel' && (
+        {/* ═══════════════ PROPERTY INTEL (ATTOM) — kept for reference, not shown as tab ═══════════════ */}
+        {false && activeSection === 'property-intel' && (
           <div className="space-y-6">
 
             {/* Header */}

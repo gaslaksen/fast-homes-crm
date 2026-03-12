@@ -207,10 +207,37 @@ export class CompAnalysisService {
             bedrooms: true,
             bathrooms: true,
             sqft: true,
+            yearBuilt: true,
+            lotSize: true,
             propertyType: true,
             askingPrice: true,
             arv: true,
             conditionLevel: true,
+            // ATTOM enrichment
+            attomId: true,
+            attomEnrichedAt: true,
+            attomAvm: true,
+            attomAvmLow: true,
+            attomAvmHigh: true,
+            attomAvmConfidence: true,
+            avmPoorLow: true,
+            avmPoorHigh: true,
+            avmGoodLow: true,
+            avmGoodHigh: true,
+            avmExcellentLow: true,
+            avmExcellentHigh: true,
+            propertyCondition: true,
+            propertyQuality: true,
+            wallType: true,
+            stories: true,
+            basementSqft: true,
+            effectiveYearBuilt: true,
+            subdivision: true,
+            annualTaxAmount: true,
+            taxAssessedValue: true,
+            marketAssessedValue: true,
+            lastSaleDate: true,
+            lastSalePrice: true,
           },
         },
       },
@@ -585,6 +612,13 @@ export class CompAnalysisService {
             propertyAddress: true, propertyCity: true, propertyState: true,
             bedrooms: true, bathrooms: true, sqft: true, yearBuilt: true,
             lotSize: true, conditionLevel: true, propertyType: true, askingPrice: true,
+            // ATTOM enrichment fields
+            attomAvm: true, attomAvmConfidence: true,
+            avmPoorHigh: true, avmGoodHigh: true, avmExcellentHigh: true,
+            avmExcellentLow: true, avmGoodLow: true, avmPoorLow: true,
+            propertyCondition: true, propertyQuality: true, wallType: true,
+            effectiveYearBuilt: true, basementSqft: true, stories: true,
+            annualTaxAmount: true, taxAssessedValue: true, subdivision: true,
           },
         },
       },
@@ -604,10 +638,27 @@ export class CompAnalysisService {
       lead.bedrooms ? `Beds: ${lead.bedrooms}` : null,
       lead.bathrooms ? `Baths: ${lead.bathrooms}` : null,
       lead.yearBuilt ? `Year Built: ${lead.yearBuilt}` : null,
+      lead.effectiveYearBuilt ? `Effective Year Built (post-reno): ${lead.effectiveYearBuilt}` : null,
       lead.lotSize ? `Lot: ${lead.lotSize.toFixed(2)} acres` : null,
-      lead.conditionLevel ? `Condition: ${lead.conditionLevel}` : null,
+      lead.stories ? `Stories: ${lead.stories}` : null,
+      lead.basementSqft ? `Basement: ${lead.basementSqft.toLocaleString()} sqft` : null,
+      lead.wallType ? `Wall Type: ${lead.wallType}` : null,
+      lead.conditionLevel ? `Seller-reported Condition: ${lead.conditionLevel}` : null,
+      lead.propertyCondition ? `ATTOM Condition: ${lead.propertyCondition}` : null,
+      lead.propertyQuality ? `ATTOM Quality: ${lead.propertyQuality}` : null,
+      lead.subdivision ? `Subdivision: ${lead.subdivision}` : null,
       lead.askingPrice ? `Asking Price: $${lead.askingPrice.toLocaleString()}` : null,
+      lead.annualTaxAmount ? `Annual Taxes: $${Math.round(lead.annualTaxAmount).toLocaleString()}/yr` : null,
     ].filter(Boolean).join('\n');
+
+    // Build ATTOM AVM context block (the investor's second opinion on value)
+    const attomContext = lead.attomAvm ? `
+ATTOM DATA SOLUTIONS — INDEPENDENT VALUATION:
+  AVM Estimate: $${Math.round(lead.attomAvm).toLocaleString()}${lead.attomAvmConfidence ? ` (${lead.attomAvmConfidence}% confidence)` : ''}
+  AS-IS / Distressed: ${lead.avmPoorHigh ? '$' + Math.round(lead.avmPoorHigh).toLocaleString() : 'N/A'}${lead.avmPoorLow ? ` (low: $${Math.round(lead.avmPoorLow).toLocaleString()})` : ''}
+  Good Condition:     ${lead.avmGoodHigh ? '$' + Math.round(lead.avmGoodHigh).toLocaleString() : 'N/A'}${lead.avmGoodLow ? ` (low: $${Math.round(lead.avmGoodLow).toLocaleString()})` : ''}
+  After Repair (ARV): ${lead.avmExcellentHigh ? '$' + Math.round(lead.avmExcellentHigh).toLocaleString() : 'N/A'}${lead.avmExcellentLow ? ` (low: $${Math.round(lead.avmExcellentLow).toLocaleString()})` : ''}
+NOTE: Use ATTOM's condition-adjusted ranges as a strong independent signal. If comps-based ARV and ATTOM after-repair value agree within 10%, high confidence. If they diverge >15%, explain why and which to trust more.` : '';
 
     // Photo condition if available
     let photoCondition = '';
@@ -640,6 +691,7 @@ export class CompAnalysisService {
 
 SUBJECT PROPERTY:
 ${subjectDesc}${photoCondition}
+${attomContext}
 
 COMPARABLE SALES WITH RULE-BASED ADJUSTMENTS:
 ${compSummaries}
@@ -648,7 +700,7 @@ Your task:
 1. Review each comp's adjustment — does it make sense given the data?
 2. Provide your own adjusted value for each comp (can confirm or override the rule-based one)
 3. Flag any comps that are poor matches and should be weighted down or removed
-4. Give an overall ARV conclusion with a confidence interval
+4. Give an overall ARV conclusion with a confidence interval — reconcile the comps-based value with ATTOM's independent AVM if provided
 
 Respond ONLY with valid JSON:
 {
@@ -736,11 +788,19 @@ Respond ONLY with valid JSON:
       return 'AI summary unavailable — Anthropic API key not configured.';
     }
 
-    const lead = analysis.lead;
+    const lead = analysis.lead as any;
     const selectedComps = analysis.comps.filter((c) => c.selected);
     const avgSoldPrice = selectedComps.length > 0
       ? Math.round(selectedComps.reduce((s, c) => s + c.soldPrice, 0) / selectedComps.length)
       : 0;
+
+    // ATTOM second-opinion block for summary prompt
+    const attomSummaryBlock = lead.attomAvm ? `
+ATTOM Independent Valuation:
+- AVM: $${Math.round(lead.attomAvm).toLocaleString()}${lead.attomAvmConfidence ? ` (${lead.attomAvmConfidence}% confidence)` : ''}
+- AS-IS value: ${lead.avmPoorHigh ? '$' + Math.round(lead.avmPoorHigh).toLocaleString() : 'N/A'}
+- After-repair ARV: ${lead.avmExcellentHigh ? '$' + Math.round(lead.avmExcellentHigh).toLocaleString() : 'N/A'}
+- ATTOM condition: ${lead.propertyCondition || 'N/A'} | Quality: ${lead.propertyQuality || 'N/A'}` : '';
 
     const prompt = `You are an expert real estate wholesaler analyzing comparable sales to determine ARV and offer strategy.
 
@@ -748,8 +808,10 @@ Subject Property:
 - Address: ${lead.propertyAddress}, ${lead.propertyCity}, ${lead.propertyState} ${lead.propertyZip}
 - ${lead.bedrooms || '?'}bd / ${lead.bathrooms || '?'}ba / ${lead.sqft?.toLocaleString() || '?'} sqft
 - Property Type: ${lead.propertyType || 'Unknown'}
-- Condition: ${lead.conditionLevel || 'Unknown'}
+- Seller-reported Condition: ${lead.conditionLevel || 'Unknown'}${lead.propertyCondition ? `\n- ATTOM Condition: ${lead.propertyCondition}${lead.propertyQuality ? ' | Quality: ' + lead.propertyQuality : ''}` : ''}
 - Asking Price: ${lead.askingPrice ? '$' + lead.askingPrice.toLocaleString() : 'Unknown'}
+${lead.annualTaxAmount ? `- Annual Tax: $${Math.round(lead.annualTaxAmount).toLocaleString()}/yr` : ''}
+${attomSummaryBlock}
 
 Selected Comparable Sales (${selectedComps.length}):
 ${selectedComps.map((c, i) =>
@@ -768,9 +830,9 @@ Analysis Results:
 - Confidence Score: ${analysis.confidenceScore || 0}/100
 
 Write a concise 3-4 sentence wholesaler's summary covering:
-1. ARV conclusion and confidence (is the comp pool strong or weak?)
+1. ARV conclusion and confidence — reconcile comps-based ARV with ATTOM's independent AVM if both are available
 2. Which comps are most relevant and why
-3. Any red flags (wide price spread, old comps, low match scores, missing data)
+3. Any red flags (wide price spread, old comps, low match scores, ATTOM/comps divergence >10%)
 4. Quick take on deal viability if asking price is known
 
 Be direct and practical — this is for a wholesaler deciding whether to pursue the deal.`;
@@ -939,7 +1001,7 @@ Respond with ONLY a JSON object: { "estimate": <number>, "breakdown": "<concise 
     if (!analysis) throw new Error('Analysis not found');
     if (!this.anthropic) return 'AI assessment unavailable — Anthropic API key not configured.';
 
-    const lead = analysis.lead;
+    const lead = analysis.lead as any;
     const allComps = analysis.comps;
     const selectedComps = allComps.filter((c) => c.selected);
 
@@ -955,16 +1017,31 @@ Respond with ONLY a JSON object: { "estimate": <number>, "breakdown": "<concise 
     }, 0) / (selectedComps.length || 1);
     const avgCorrelation = allComps.reduce((s, c) => s + (c.correlation || 0.5), 0) / (allComps.length || 1);
 
+    // ATTOM second-opinion block for assessment
+    const attomAssessmentBlock = lead.attomAvm ? `
+ATTOM DATA — INDEPENDENT PROPERTY INTELLIGENCE:
+  AVM Estimate: $${Math.round(lead.attomAvm).toLocaleString()}${lead.attomAvmConfidence ? ` (${lead.attomAvmConfidence}% confidence score)` : ''}
+  AS-IS / Distressed value:   ${lead.avmPoorHigh ? '$' + Math.round(lead.avmPoorHigh).toLocaleString() : 'N/A'}${lead.avmPoorLow ? ` – $${Math.round(lead.avmPoorLow).toLocaleString()} range` : ''}
+  Good-condition value:       ${lead.avmGoodHigh ? '$' + Math.round(lead.avmGoodHigh).toLocaleString() : 'N/A'}
+  After-repair ARV (excellent): ${lead.avmExcellentHigh ? '$' + Math.round(lead.avmExcellentHigh).toLocaleString() : 'N/A'}${lead.avmExcellentLow ? ` – $${Math.round(lead.avmExcellentLow).toLocaleString()} range` : ''}
+  ATTOM Condition Rating: ${lead.propertyCondition || 'N/A'} | Quality: ${lead.propertyQuality || 'N/A'}
+  Wall Type: ${lead.wallType || 'N/A'} | Stories: ${lead.stories || 'N/A'} | Basement: ${lead.basementSqft ? lead.basementSqft.toLocaleString() + ' sqft' : 'None'}
+  Effective Year Built: ${lead.effectiveYearBuilt || 'N/A'} | Annual Tax: ${lead.annualTaxAmount ? '$' + Math.round(lead.annualTaxAmount).toLocaleString() + '/yr ($' + Math.round(lead.annualTaxAmount / 12).toLocaleString() + '/mo hold cost)' : 'N/A'}
+  Assessed Value: ${lead.taxAssessedValue ? '$' + Math.round(lead.taxAssessedValue).toLocaleString() : 'N/A'} | Market Assessed: ${lead.marketAssessedValue ? '$' + Math.round(lead.marketAssessedValue).toLocaleString() : 'N/A'}
+  Last Sale: ${lead.lastSalePrice ? '$' + Math.round(lead.lastSalePrice).toLocaleString() : 'N/A'} on ${lead.lastSaleDate ? new Date(lead.lastSaleDate).toLocaleDateString() : 'N/A'}
+  Subdivision: ${lead.subdivision || 'N/A'}` : '';
+
     const prompt = `You are an expert real estate wholesaler analyzing a deal. Write a detailed property assessment for the following lead. Use clear section headers. Be direct, specific, and practical — no fluff.
 
 SUBJECT PROPERTY:
 Address: ${lead.propertyAddress}, ${lead.propertyCity}, ${lead.propertyState} ${lead.propertyZip}
 Size: ${lead.sqft ? lead.sqft.toLocaleString() + ' sqft' : 'Unknown'}, ${lead.bedrooms || '?'}bd/${lead.bathrooms || '?'}ba
-Type: ${lead.propertyType || 'Unknown'} | Condition: ${lead.conditionLevel || 'Unknown'}
+Type: ${lead.propertyType || 'Unknown'} | Seller Condition: ${lead.conditionLevel || 'Unknown'}
 Asking Price: ${lead.askingPrice ? '$' + lead.askingPrice.toLocaleString() : 'Not provided'}
-Current ARV Estimate: ${analysis.arvEstimate ? '$' + analysis.arvEstimate.toLocaleString() : 'Not calculated'}
+Comps-based ARV: ${analysis.arvEstimate ? '$' + analysis.arvEstimate.toLocaleString() : 'Not calculated'}
 ARV Range: ${analysis.arvLow ? '$' + analysis.arvLow.toLocaleString() : '?'} – ${analysis.arvHigh ? '$' + analysis.arvHigh.toLocaleString() : '?'}
 Confidence Score: ${analysis.confidenceScore}/100
+${attomAssessmentBlock}
 
 COMP POOL STATS:
 Total comps: ${allComps.length} | Selected: ${selectedComps.length}
@@ -981,12 +1058,13 @@ ${selectedComps.slice(0, 8).map((c, i) => {
 
 Write a 400-600 word assessment with these sections:
 **ARV Confidence & Comp Pool**
+**ATTOM Validation** (only if ATTOM data is present — compare comps ARV vs ATTOM after-repair value, flag if they diverge >10%, explain which is more reliable given the data)
 **Market Conditions**
 **Red Flags & Concerns**
 **Deal Viability**
 **Recommended Offer Range**
 
-Be specific with numbers. For deal viability, calculate MAO at 70% rule with $15k assignment fee and compare to asking price if known.`;
+Be specific with numbers. For deal viability, calculate MAO at 70% rule with $15k assignment fee and compare to asking price if known. Include monthly tax hold cost if ATTOM tax data is available.`;
 
     try {
       const response = await this.anthropic.messages.create({
