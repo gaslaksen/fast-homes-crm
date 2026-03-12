@@ -576,7 +576,7 @@ Your message must:
         lastTouchedAt: new Date(),
         touchCount: { increment: 1 },
         ...(lead.status === 'ATTEMPTING_CONTACT'
-          ? { status: 'CONTACT_MADE', stageChangedAt: new Date(), daysInStage: 0 }
+          ? { status: 'QUALIFYING', stageChangedAt: new Date(), daysInStage: 0 }
           : {}),
       },
     });

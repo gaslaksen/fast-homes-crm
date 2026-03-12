@@ -264,7 +264,7 @@ export class CallsService {
 
     // ── Lead status: advance pipeline based on call outcome ──────────────
     if (data.reachedSeller && lead.status === 'ATTEMPTING_CONTACT') {
-      updates.status = 'CONTACT_MADE';
+      updates.status = 'QUALIFYING';
     }
     if (data.interestLevel === 'not_interested') {
       updates.status = 'LOST';

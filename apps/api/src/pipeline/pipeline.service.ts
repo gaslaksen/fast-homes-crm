@@ -21,7 +21,7 @@ export class PipelineService {
   private readonly ACTIVE_STAGES = [
     'NEW',
     'ATTEMPTING_CONTACT',
-    'CONTACT_MADE',
+
     'QUALIFYING',
     'QUALIFIED',
     'OFFER_SENT',

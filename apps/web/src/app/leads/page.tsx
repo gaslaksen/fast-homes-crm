@@ -21,7 +21,7 @@ const INACTIVE_STATUSES = ['DEAD', 'CLOSED_WON', 'CLOSED_LOST'];
 const PIPELINE_STAGES = [
   { id: 'NEW',                name: 'New Leads',          color: 'bg-blue-100   border-blue-300   text-blue-800' },
   { id: 'ATTEMPTING_CONTACT', name: 'Attempting Contact', color: 'bg-yellow-100 border-yellow-300 text-yellow-800' },
-  { id: 'CONTACT_MADE',       name: 'Contact Made',       color: 'bg-green-100  border-green-300  text-green-800' },
+
   { id: 'QUALIFYING',         name: 'Qualifying',         color: 'bg-purple-100 border-purple-300 text-purple-800' },
   { id: 'OFFER_SENT',         name: 'Offer Made',         color: 'bg-orange-100 border-orange-300 text-orange-800' },
   { id: 'UNDER_CONTRACT',     name: 'Under Contract',     color: 'bg-teal-100   border-teal-300   text-teal-800' },
@@ -75,7 +75,7 @@ const BAND_LABELS: Record<string, string> = {
 const STATUS_LABELS: Record<string, string> = {
   NEW: 'New',
   ATTEMPTING_CONTACT: 'Contacting',
-  CONTACT_MADE: 'Contact Made',
+
   QUALIFYING: 'Qualifying',
   IN_QUALIFICATION: 'Qualifying',
   QUALIFIED: 'Qualified',
