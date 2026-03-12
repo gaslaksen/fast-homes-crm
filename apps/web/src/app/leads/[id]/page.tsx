@@ -640,10 +640,40 @@ export default function LeadDetailPage() {
                       </dd>
                     </div>
                   )}
+                  {(lead as any).hasPool && (
+                    <div>
+                      <dt className="text-sm font-medium text-gray-500">Pool</dt>
+                      <dd className="mt-1 text-sm text-gray-900">Yes 🏊</dd>
+                    </div>
+                  )}
+                  {(lead as any).coolingType && (
+                    <div>
+                      <dt className="text-sm font-medium text-gray-500">Cooling</dt>
+                      <dd className="mt-1 text-sm text-gray-900 capitalize">{(lead as any).coolingType.toLowerCase()}</dd>
+                    </div>
+                  )}
+                  {(lead as any).heatingType && (
+                    <div>
+                      <dt className="text-sm font-medium text-gray-500">Heating</dt>
+                      <dd className="mt-1 text-sm text-gray-900 capitalize">{(lead as any).heatingType.toLowerCase()}</dd>
+                    </div>
+                  )}
                   {lead.ownerOccupied != null && (
                     <div>
                       <dt className="text-sm font-medium text-gray-500">Owner Occupied</dt>
                       <dd className="mt-1 text-sm text-gray-900">{lead.ownerOccupied ? 'Yes' : 'No'}</dd>
+                    </div>
+                  )}
+                  {(lead as any).ownerName && (
+                    <div>
+                      <dt className="text-sm font-medium text-gray-500">Recorded Owner</dt>
+                      <dd className="mt-1 text-sm text-gray-900 font-medium">{(lead as any).ownerName}</dd>
+                    </div>
+                  )}
+                  {(lead as any).apn && (
+                    <div>
+                      <dt className="text-sm font-medium text-gray-500">APN</dt>
+                      <dd className="mt-1 text-sm text-gray-900 font-mono">{(lead as any).apn}</dd>
                     </div>
                   )}
                   {lead.hoaFee && (
@@ -837,6 +867,45 @@ export default function LeadDetailPage() {
               {/* ARV/Price */}
               <div className="card">
                 <h3 className="text-lg font-bold mb-4">Valuation</h3>
+                {/* ATTOM AVM block */}
+                {(lead as any).attomAvm && (
+                  <div className="mb-4 p-3 rounded-lg bg-indigo-50 border border-indigo-200">
+                    <div className="flex items-center gap-1.5 mb-2">
+                      <span className="text-xs font-semibold text-indigo-700">ATTOM AVM</span>
+                      {(lead as any).attomAvmConfidence && (
+                        <span className="text-xs text-indigo-500">{(lead as any).attomAvmConfidence}% confidence</span>
+                      )}
+                    </div>
+                    <div className="text-xl font-bold text-indigo-700">${Math.round((lead as any).attomAvm).toLocaleString()}</div>
+                    {((lead as any).attomAvmLow && (lead as any).attomAvmHigh) && (
+                      <div className="text-xs text-indigo-500 mt-0.5">
+                        Range: ${Math.round((lead as any).attomAvmLow).toLocaleString()} – ${Math.round((lead as any).attomAvmHigh).toLocaleString()}
+                      </div>
+                    )}
+                    {((lead as any).avmPoorHigh || (lead as any).avmExcellentHigh) && (
+                      <div className="mt-2 space-y-1 text-xs">
+                        {(lead as any).avmPoorHigh && (
+                          <div className="flex justify-between">
+                            <span className="text-gray-500">AS-IS (distressed)</span>
+                            <span className="font-semibold text-red-600">${Math.round((lead as any).avmPoorHigh).toLocaleString()}</span>
+                          </div>
+                        )}
+                        {(lead as any).avmGoodHigh && (
+                          <div className="flex justify-between">
+                            <span className="text-gray-500">Good condition</span>
+                            <span className="font-semibold text-yellow-700">${Math.round((lead as any).avmGoodHigh).toLocaleString()}</span>
+                          </div>
+                        )}
+                        {(lead as any).avmExcellentHigh && (
+                          <div className="flex justify-between">
+                            <span className="text-gray-500">After repair (ARV)</span>
+                            <span className="font-bold text-green-600">${Math.round((lead as any).avmExcellentHigh).toLocaleString()}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
                 {lead.arv && (
                   <div className="mb-3">
                     <div className="text-sm text-gray-500">ARV</div>

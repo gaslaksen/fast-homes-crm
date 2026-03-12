@@ -9,7 +9,7 @@ const ATTOM_BASE = 'https://api.gateway.attomdata.com/propertyapi/v1.0.0';
 
 interface AttomProperty {
   identifier: { Id: number; fips?: string; apn?: string; attomId: number };
-  lot?: { lotnum?: string; lotsize1?: number; lotsize2?: number; pooltype?: string };
+  lot?: { lotnum?: string; lotsize1?: number; lotsize2?: number; pooltype?: string; poolind?: string };
   area?: {
     countrysecsubd?: string;
     munname?: string;
@@ -117,6 +117,10 @@ interface AttomProperty {
       taxYear?: number;
     };
     improvementPercent?: number;
+    owner?: {
+      owner1?: { fullName?: string; lastName?: string; firstNameAndMi?: string };
+      absenteeOwnerStatus?: string;
+    };
   };
   avm?: {
     eventDate?: string;
@@ -216,6 +220,11 @@ export interface AttomEnrichmentResult {
   // Ownership
   ownerOccupied?: boolean;
   sellerName?: string;
+  // Additional property details
+  apn?:         string;
+  ownerName?:   string;
+  coolingType?: string;
+  heatingType?: string;
 }
 
 // ─── Service ─────────────────────────────────────────────────────────────────
@@ -429,7 +438,7 @@ export class AttomService {
       // Building features
       basementSqft:  interior?.bsmtsize,
       hasBasement:   (interior?.bsmtsize ?? 0) > 0 || interior?.bsmttype ? true : undefined,
-      hasPool:       prop.lot?.pooltype ? !prop.lot.pooltype.toLowerCase().includes('no pool') : undefined,
+      hasPool:       prop.lot?.poolind === 'YES' || (prop.lot?.pooltype ? !prop.lot.pooltype.toLowerCase().includes('no pool') : undefined),
       hasGarage:     parking?.garagetype ? !parking.garagetype.toLowerCase().includes('no garage') : undefined,
       garageSpaces:  parking?.prkgSpaces ? parseInt(parking.prkgSpaces) : undefined,
       hasFireplace:  interior?.fplcind === 'Y',
@@ -478,6 +487,11 @@ export class AttomService {
       // Ownership
       ownerOccupied: prop.summary?.absenteeInd?.toLowerCase().includes('owner occupied'),
       sellerName:    sale?.sellerName,
+      // Additional details
+      apn:         prop.identifier?.apn,
+      ownerName:   (profile || avmData)?.assessment?.owner?.owner1?.fullName,
+      coolingType: prop.utilities?.coolingtype,
+      heatingType: prop.utilities?.heatingtype,
     };
 
     // ── Persist to Lead: fill missing fields + ATTOM-specific columns ──
@@ -527,6 +541,11 @@ export class AttomService {
       basementSqft:      e.basementSqft     ?? null,
       effectiveYearBuilt: e.effectiveYearBuilt ?? null,
       subdivision:       e.subdivision      ?? null,
+      coolingType:       e.coolingType      ?? null,
+      heatingType:       e.heatingType      ?? null,
+      apn:               e.apn              ?? null,
+      ownerName:         e.ownerName        ?? null,
+      ...(e.hasPool !== undefined && { hasPool: e.hasPool }),
     };
 
     // Only fill property details if they're missing on the lead

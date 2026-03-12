@@ -108,6 +108,10 @@ model Lead {
   basementSqft         Int?      // Basement square footage
   effectiveYearBuilt   Int?      // Renovation/effective year (from ATTOM)
   subdivision          String?   // Subdivision/neighborhood name
+  coolingType          String?   // ATTOM: CENTRAL / EVAPORATIVE / etc.
+  heatingType          String?   // ATTOM: FORCED AIR / BASEBOARD / etc.
+  apn                  String?   // Assessor's Parcel Number (from ATTOM)
+  ownerName            String?   // Owner name from ATTOM assessment records
   
   challengeScore    Int      @default(0)
   authorityScore    Int      @default(0)

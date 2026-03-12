@@ -5,6 +5,7 @@ import { MessagesService } from '../messages/messages.service';
 import { PhotosService } from '../photos/photos.service';
 import { RentCastService } from '../comps/rentcast.service';
 import { CompsService } from '../comps/comps.service';
+import { AttomService } from '../comps/attom.service';
 import { PipelineService } from '../pipeline/pipeline.service';
 import { LeadStatus, LeadSource, formatPhoneNumber } from '@fast-homes/shared';
 import { Prisma } from '@prisma/client';
@@ -42,6 +43,7 @@ export class LeadsService {
     @Optional() private photosService: PhotosService,
     private rentCastService: RentCastService,
     private compsService: CompsService,
+    private attomService: AttomService,
     private pipelineService: PipelineService,
   ) {}
 
@@ -251,6 +253,18 @@ export class LeadsService {
           type: 'FIELD_UPDATED',
           description: 'Property details not found in public records — manual entry may be needed',
         },
+      });
+    }
+
+    // ATTOM enrichment: AVM, tax assessment, pool, cooling, APN, owner name, condition-adjusted ARV
+    if (this.attomService.isConfigured) {
+      this.attomService.enrichLead(leadId, {
+        street: data.propertyAddress,
+        city: data.propertyCity,
+        state: data.propertyState,
+        zip: data.propertyZip,
+      }).catch((err) => {
+        this.logger.error(`ATTOM enrichment failed for lead ${leadId}: ${err.message}`);
       });
     }
 
