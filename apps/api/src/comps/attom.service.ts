@@ -152,7 +152,17 @@ interface AttomProperty {
   };
 }
 
+export interface AttomSaleRecord {
+  saleTransDate: string;
+  saleRecDate?: string;
+  saleAmt: number;
+  saleTransType?: string;
+  pricePerSqft?: number;
+  sellerName?: string;
+}
+
 export interface AttomEnrichmentResult {
+  saleHistory?: AttomSaleRecord[];
   attomId: string;
   // Property characteristics
   bedsFromAttom?: number;
@@ -273,6 +283,33 @@ export class AttomService {
     }
   }
 
+  // ─── Get full sale history ────────────────────────────────────────────────
+
+  async getSaleHistory(
+    address: { street: string; city: string; state: string; zip: string },
+  ): Promise<AttomSaleRecord[]> {
+    if (!this.apiKey) return [];
+    const params = this.buildAddressParams(address);
+    try {
+      const response = await axios.get<{ property: Array<{ salehistory?: any[] }> }>(
+        `${ATTOM_BASE}/saleshistory/detail`,
+        { params, headers: { apikey: this.apiKey, Accept: 'application/json' }, timeout: 12000 },
+      );
+      const history = response.data?.property?.[0]?.salehistory || [];
+      return history.map((h: any) => ({
+        saleTransDate:  h.saleTransDate || h.saleSearchDate,
+        saleRecDate:    h.amount?.salerecdate,
+        saleAmt:        h.amount?.saleamt || 0,
+        saleTransType:  h.amount?.saletranstype,
+        pricePerSqft:   h.calculation?.pricepersizeunit,
+        sellerName:     h.sellerName,
+      })).filter((h: AttomSaleRecord) => h.saleAmt > 0);
+    } catch (error) {
+      this.handleError(error, 'getSaleHistory');
+      return [];
+    }
+  }
+
   // ─── Get AVM with condition ranges ────────────────────────────────────────
 
   async getAVM(
@@ -348,14 +385,16 @@ export class AttomService {
       }
     }
 
-    // ── Fetch both endpoints in parallel ──
-    const [profileResult, avmResult] = await Promise.allSettled([
+    // ── Fetch all endpoints in parallel ──
+    const [profileResult, avmResult, historyResult] = await Promise.allSettled([
       this.getExpandedProfile(address),
       this.getAVM(address),
+      this.getSaleHistory(address),
     ]);
 
-    const profile = profileResult.status === 'fulfilled' ? profileResult.value : null;
-    const avmData = avmResult.status === 'fulfilled' ? avmResult.value : null;
+    const profile    = profileResult.status === 'fulfilled' ? profileResult.value : null;
+    const avmData    = avmResult.status    === 'fulfilled' ? avmResult.value    : null;
+    const saleHistory = historyResult.status === 'fulfilled' ? historyResult.value : [];
 
     if (!profile && !avmData) {
       this.logger.warn(`ATTOM enrichment: no data from either endpoint for lead ${leadId}`);
@@ -429,9 +468,12 @@ export class AttomService {
       taxYear:        assessment?.tax?.taxYear ? Math.round(assessment.tax.taxYear) : undefined,
       pricePerSqft:   avm?.calculations?.perSizeUnit,
 
-      // Prior sale
+      // Prior sale (from expandedprofile — most recent)
       lastSaleDateFromAttom:  sale?.amount?.saleRecDate || sale?.saleTransDate,
       lastSalePriceFromAttom: sale?.amount?.saleAmt,
+
+      // Full sale history
+      saleHistory: saleHistory.length > 0 ? saleHistory : undefined,
 
       // Ownership
       ownerOccupied: prop.summary?.absenteeInd?.toLowerCase().includes('owner occupied'),
@@ -475,6 +517,8 @@ export class AttomService {
       taxAssessedValue: e.assessedValue     ?? null,
       marketAssessedValue: e.marketValue    ?? null,
       annualTaxAmount:  e.annualTaxAmount   ?? null,
+      // Sale history
+      attomSaleHistory: e.saleHistory ?? undefined,
       // Building details (always save from ATTOM)
       propertyCondition: e.condition        ?? null,
       propertyQuality:   e.quality          ?? null,

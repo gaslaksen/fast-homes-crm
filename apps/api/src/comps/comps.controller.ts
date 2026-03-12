@@ -121,6 +121,7 @@ export class CompsController {
         taxAssessedValue: true, marketAssessedValue: true, annualTaxAmount: true,
         propertyCondition: true, propertyQuality: true, wallType: true,
         stories: true, basementSqft: true, effectiveYearBuilt: true, subdivision: true,
+        attomSaleHistory: true,
         // Also include property basics for context
         bedrooms: true, bathrooms: true, sqft: true, yearBuilt: true, lotSize: true,
         latitude: true, longitude: true, lastSaleDate: true, lastSalePrice: true,

@@ -88,6 +88,7 @@ model Lead {
   // ── ATTOM enrichment ─────────────────────────────────────────────────────
   attomId              String?   // ATTOM property ID for lookups
   attomEnrichedAt      DateTime? // when ATTOM data was last fetched
+  attomSaleHistory     Json?     // Array of prior sales from ATTOM /saleshistory/detail
   attomAvm             Float?    // ATTOM AVM estimate
   attomAvmLow          Float?
   attomAvmHigh         Float?

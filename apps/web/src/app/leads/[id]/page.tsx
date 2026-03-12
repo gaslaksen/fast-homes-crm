@@ -545,15 +545,31 @@ export default function LeadDetailPage() {
               {/* Property Details */}
               <div className="card">
                 <div className="flex justify-between items-center mb-4">
-                  <h2 className="text-xl font-bold">Property Details</h2>
-                  {(lead.bedrooms || lead.sqft) && (
-                    <span className="text-xs text-green-600 font-medium">
-                      Auto-populated from public records
-                    </span>
-                  )}
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-xl font-bold">Property Details</h2>
+                    {(lead as any).attomId && (
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 font-medium">
+                        ✓ ATTOM Verified
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    onClick={async () => {
+                      try {
+                        await leadsAPI.refreshPropertyDetails(leadId);
+                        loadLead();
+                      } catch (error) {
+                        console.error('Failed to refresh property details:', error);
+                      }
+                    }}
+                    className="btn btn-secondary btn-sm"
+                  >
+                    Refresh
+                  </button>
                 </div>
-                {/* Property specs */}
-                <dl className="grid grid-cols-2 gap-4 mb-5">
+
+                {/* Core specs */}
+                <dl className="grid grid-cols-2 gap-4 mb-4">
                   <div>
                     <dt className="text-sm font-medium text-gray-500">Type</dt>
                     <dd className="mt-1 text-sm text-gray-900">{lead.propertyType || 'Unknown'}</dd>
@@ -567,33 +583,61 @@ export default function LeadDetailPage() {
                     <dd className="mt-1 text-sm text-gray-900">{lead.bathrooms ?? 'Unknown'}</dd>
                   </div>
                   <div>
-                    <dt className="text-sm font-medium text-gray-500">Sqft</dt>
+                    <dt className="text-sm font-medium text-gray-500">Sq Ft</dt>
                     <dd className="mt-1 text-sm text-gray-900">{lead.sqft?.toLocaleString() || 'Unknown'}</dd>
                   </div>
                   <div>
                     <dt className="text-sm font-medium text-gray-500">Year Built</dt>
-                    <dd className="mt-1 text-sm text-gray-900">{lead.yearBuilt ?? 'Unknown'}</dd>
+                    <dd className="mt-1 text-sm text-gray-900">
+                      {lead.yearBuilt ?? 'Unknown'}
+                      {(lead as any).effectiveYearBuilt && (lead as any).effectiveYearBuilt !== lead.yearBuilt && (
+                        <span className="text-xs text-gray-400 ml-1">(reno'd {(lead as any).effectiveYearBuilt})</span>
+                      )}
+                    </dd>
                   </div>
                   <div>
                     <dt className="text-sm font-medium text-gray-500">Lot Size</dt>
                     <dd className="mt-1 text-sm text-gray-900">
                       {lead.lotSize
-                        ? lead.lotSize < 10
-                          ? `${lead.lotSize.toFixed(2)} acres`
-                          : `${(lead.lotSize / 43560).toFixed(2)} acres`
+                        ? lead.lotSize < 10 ? `${lead.lotSize.toFixed(2)} acres` : `${(lead.lotSize / 43560).toFixed(2)} acres`
                         : 'Unknown'}
                     </dd>
                   </div>
+                  {(lead as any).stories && (
+                    <div>
+                      <dt className="text-sm font-medium text-gray-500">Stories</dt>
+                      <dd className="mt-1 text-sm text-gray-900">{(lead as any).stories}</dd>
+                    </div>
+                  )}
+                  {(lead as any).basementSqft > 0 && (
+                    <div>
+                      <dt className="text-sm font-medium text-gray-500">Basement</dt>
+                      <dd className="mt-1 text-sm text-gray-900">{(lead as any).basementSqft.toLocaleString()} sqft</dd>
+                    </div>
+                  )}
+                  {(lead as any).wallType && (
+                    <div>
+                      <dt className="text-sm font-medium text-gray-500">Construction</dt>
+                      <dd className="mt-1 text-sm text-gray-900">{(lead as any).wallType}</dd>
+                    </div>
+                  )}
                   {lead.conditionLevel && (
                     <div>
                       <dt className="text-sm font-medium text-gray-500">Condition</dt>
-                      <dd className="mt-1 text-sm text-gray-900">{lead.conditionLevel}</dd>
+                      <dd className="mt-1 text-sm text-gray-900">
+                        {lead.conditionLevel}
+                        {(lead as any).propertyCondition && (lead as any).propertyCondition !== lead.conditionLevel && (
+                          <span className="text-xs text-indigo-600 ml-1">(ATTOM: {(lead as any).propertyCondition})</span>
+                        )}
+                      </dd>
                     </div>
                   )}
-                  {lead.hoaFee && (
+                  {!(lead.conditionLevel) && (lead as any).propertyCondition && (
                     <div>
-                      <dt className="text-sm font-medium text-gray-500">HOA Fee</dt>
-                      <dd className="mt-1 text-sm text-gray-900">${lead.hoaFee.toLocaleString()}/mo</dd>
+                      <dt className="text-sm font-medium text-gray-500">Condition</dt>
+                      <dd className="mt-1 text-sm text-gray-900">{(lead as any).propertyCondition}
+                        {(lead as any).propertyQuality && <span className="text-xs text-gray-400 ml-1">· {(lead as any).propertyQuality} quality</span>}
+                      </dd>
                     </div>
                   )}
                   {lead.ownerOccupied != null && (
@@ -602,106 +646,168 @@ export default function LeadDetailPage() {
                       <dd className="mt-1 text-sm text-gray-900">{lead.ownerOccupied ? 'Yes' : 'No'}</dd>
                     </div>
                   )}
+                  {lead.hoaFee && (
+                    <div>
+                      <dt className="text-sm font-medium text-gray-500">HOA Fee</dt>
+                      <dd className="mt-1 text-sm text-gray-900">${lead.hoaFee.toLocaleString()}/mo</dd>
+                    </div>
+                  )}
+                  {(lead as any).subdivision && (
+                    <div>
+                      <dt className="text-sm font-medium text-gray-500">Subdivision</dt>
+                      <dd className="mt-1 text-sm text-gray-900">{(lead as any).subdivision}</dd>
+                    </div>
+                  )}
                 </dl>
 
-                {/* Sale & Assessment History */}
-                {(lead.lastSaleDate || lead.lastSalePrice || lead.taxAssessedValue) && (
+                {/* ── Tax & Assessment ── */}
+                {((lead as any).annualTaxAmount || (lead as any).taxAssessedValue || (lead as any).marketAssessedValue) && (
                   <div className="border-t border-gray-100 pt-4 mb-4">
                     <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-1.5">
-                      🏷️ Sale & Assessment History
+                      🏦 Tax & Assessment
                     </h3>
                     <dl className="grid grid-cols-2 gap-4">
-                      {lead.lastSaleDate && (
+                      {(lead as any).annualTaxAmount && (
                         <div>
-                          <dt className="text-sm font-medium text-gray-500">Last Sale Date</dt>
-                          <dd className="mt-1 text-sm font-semibold text-gray-900">
-                            {new Date(lead.lastSaleDate).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}
+                          <dt className="text-sm font-medium text-gray-500">Annual Property Tax</dt>
+                          <dd className="mt-1 text-sm font-bold text-gray-900">
+                            ${Math.round((lead as any).annualTaxAmount).toLocaleString()}/yr
+                          </dd>
+                          <dd className="text-xs text-gray-400 mt-0.5">
+                            ${Math.round((lead as any).annualTaxAmount / 12).toLocaleString()}/mo hold cost
                           </dd>
                         </div>
                       )}
-                      {lead.lastSalePrice && (
-                        <div>
-                          <dt className="text-sm font-medium text-gray-500">Last Sale Price</dt>
-                          <dd className="mt-1 text-sm font-bold text-blue-700">
-                            ${lead.lastSalePrice.toLocaleString()}
-                          </dd>
-                          {lead.arv && (
-                            <dd className="text-xs text-gray-400 mt-0.5">
-                              {((lead.lastSalePrice / lead.arv) * 100).toFixed(0)}% of ARV
-                            </dd>
-                          )}
-                        </div>
-                      )}
-                      {lead.taxAssessedValue && (
+                      {(lead as any).taxAssessedValue && (
                         <div>
                           <dt className="text-sm font-medium text-gray-500">Tax Assessed Value</dt>
                           <dd className="mt-1 text-sm font-semibold text-gray-900">
-                            ${lead.taxAssessedValue.toLocaleString()}
+                            ${Math.round((lead as any).taxAssessedValue).toLocaleString()}
                           </dd>
                           {lead.arv && (
                             <dd className="text-xs text-gray-400 mt-0.5">
-                              {((lead.taxAssessedValue / lead.arv) * 100).toFixed(0)}% of ARV
+                              {(((lead as any).taxAssessedValue / lead.arv) * 100).toFixed(0)}% of ARV
                             </dd>
                           )}
                         </div>
                       )}
-                      {lead.lastSalePrice && lead.askingPrice && (
+                      {(lead as any).marketAssessedValue && (
                         <div>
-                          <dt className="text-sm font-medium text-gray-500">vs. Asking Price</dt>
-                          <dd className={`mt-1 text-sm font-bold ${lead.askingPrice >= lead.lastSalePrice ? 'text-green-600' : 'text-red-600'}`}>
-                            {lead.askingPrice >= lead.lastSalePrice ? '+' : ''}${(lead.askingPrice - lead.lastSalePrice).toLocaleString()}
+                          <dt className="text-sm font-medium text-gray-500">Market Assessed Value</dt>
+                          <dd className="mt-1 text-sm font-semibold text-gray-900">
+                            ${Math.round((lead as any).marketAssessedValue).toLocaleString()}
                           </dd>
-                          <dd className="text-xs text-gray-400 mt-0.5">
-                            {lead.askingPrice >= lead.lastSalePrice ? 'above' : 'below'} last sale
+                        </div>
+                      )}
+                      {lead.arv && (lead as any).annualTaxAmount && (
+                        <div>
+                          <dt className="text-sm font-medium text-gray-500">Tax Rate (est.)</dt>
+                          <dd className="mt-1 text-sm text-gray-900">
+                            {(((lead as any).annualTaxAmount / lead.arv) * 100).toFixed(2)}% of ARV
                           </dd>
                         </div>
                       )}
                     </dl>
-
-                    {/* Seller equity callout */}
-                    {lead.lastSalePrice && lead.arv && (
-                      <div className={`mt-3 rounded-lg px-3 py-2 text-xs flex items-center gap-2 ${
-                        lead.lastSalePrice < lead.arv * 0.6
-                          ? 'bg-green-50 text-green-800 border border-green-200'
-                          : lead.lastSalePrice < lead.arv * 0.8
-                          ? 'bg-yellow-50 text-yellow-800 border border-yellow-200'
-                          : 'bg-red-50 text-red-800 border border-red-200'
-                      }`}>
-                        <span className="text-base">
-                          {lead.lastSalePrice < lead.arv * 0.6 ? '💚' : lead.lastSalePrice < lead.arv * 0.8 ? '⚠️' : '🔴'}
-                        </span>
-                        <span>
-                          {lead.lastSalePrice < lead.arv * 0.6
-                            ? `Strong equity position — paid $${lead.lastSalePrice.toLocaleString()}, ARV $${lead.arv.toLocaleString()}`
-                            : lead.lastSalePrice < lead.arv * 0.8
-                            ? `Moderate equity — paid $${lead.lastSalePrice.toLocaleString()}, limited spread`
-                            : `Thin equity — paid $${lead.lastSalePrice.toLocaleString()}, close to ARV`}
-                        </span>
-                      </div>
-                    )}
                   </div>
                 )}
 
-                {/* Mortgage note */}
-                <div className="border-t border-gray-100 pt-4 mb-1">
+                {/* ── Sale History ── */}
+                {(() => {
+                  const saleHistory: any[] = (lead as any).attomSaleHistory || [];
+                  const hasAnySale = lead.lastSaleDate || lead.lastSalePrice || saleHistory.length > 0;
+                  if (!hasAnySale) return null;
+                  return (
+                    <div className="border-t border-gray-100 pt-4 mb-4">
+                      <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-1.5">
+                        🏷️ Sale History
+                        {saleHistory.length > 0 && (
+                          <span className="text-xs text-gray-400 font-normal">via ATTOM</span>
+                        )}
+                      </h3>
+
+                      {saleHistory.length > 0 ? (
+                        <div className="space-y-2">
+                          {saleHistory.map((sale: any, i: number) => {
+                            const isMostRecent = i === 0;
+                            const saleDate = sale.saleTransDate || sale.saleRecDate;
+                            const yearsHeld = saleHistory[i + 1]?.saleTransDate
+                              ? Math.round((new Date(saleDate).getTime() - new Date(saleHistory[i + 1].saleTransDate).getTime()) / (365.25 * 24 * 60 * 60 * 1000))
+                              : null;
+                            return (
+                              <div key={i} className={`flex items-center justify-between rounded-lg px-3 py-2.5 ${isMostRecent ? 'bg-blue-50 border border-blue-200' : 'bg-gray-50 border border-gray-100'}`}>
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <span className={`text-sm font-bold ${isMostRecent ? 'text-blue-700' : 'text-gray-700'}`}>
+                                      ${Math.round(sale.saleAmt).toLocaleString()}
+                                    </span>
+                                    {sale.saleTransType && (
+                                      <span className="text-xs text-gray-400">{sale.saleTransType}</span>
+                                    )}
+                                    {isMostRecent && <span className="text-xs px-1.5 py-0.5 rounded bg-blue-100 text-blue-600 font-medium">Most Recent</span>}
+                                  </div>
+                                  <div className="text-xs text-gray-500 mt-0.5">
+                                    {saleDate ? new Date(saleDate).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : '—'}
+                                    {yearsHeld !== null && yearsHeld > 0 && <span className="ml-1">· held {yearsHeld}yr</span>}
+                                    {sale.pricePerSqft && <span className="ml-1">· ${Math.round(sale.pricePerSqft)}/sqft</span>}
+                                  </div>
+                                </div>
+                                {lead.arv && (
+                                  <div className="text-right">
+                                    <div className={`text-xs font-medium ${sale.saleAmt < lead.arv * 0.6 ? 'text-green-600' : sale.saleAmt < lead.arv * 0.8 ? 'text-yellow-600' : 'text-red-500'}`}>
+                                      {((sale.saleAmt / lead.arv) * 100).toFixed(0)}% of ARV
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                          {/* Equity callout using most recent sale */}
+                          {saleHistory[0]?.saleAmt && lead.arv && (
+                            <div className={`mt-1 rounded-lg px-3 py-2 text-xs flex items-center gap-2 ${
+                              saleHistory[0].saleAmt < lead.arv * 0.6 ? 'bg-green-50 text-green-800 border border-green-200'
+                              : saleHistory[0].saleAmt < lead.arv * 0.8 ? 'bg-yellow-50 text-yellow-800 border border-yellow-200'
+                              : 'bg-red-50 text-red-800 border border-red-200'
+                            }`}>
+                              <span>{saleHistory[0].saleAmt < lead.arv * 0.6 ? '💚' : saleHistory[0].saleAmt < lead.arv * 0.8 ? '⚠️' : '🔴'}</span>
+                              <span>
+                                {saleHistory[0].saleAmt < lead.arv * 0.6
+                                  ? `Strong equity — paid $${Math.round(saleHistory[0].saleAmt).toLocaleString()}, ARV $${lead.arv.toLocaleString()} (+$${(lead.arv - saleHistory[0].saleAmt).toLocaleString()})`
+                                  : saleHistory[0].saleAmt < lead.arv * 0.8
+                                  ? `Moderate equity — paid $${Math.round(saleHistory[0].saleAmt).toLocaleString()}, limited upside`
+                                  : `Thin equity — paid $${Math.round(saleHistory[0].saleAmt).toLocaleString()}, near ARV`}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        /* Fallback: single sale from lead fields */
+                        <dl className="grid grid-cols-2 gap-4">
+                          {lead.lastSaleDate && (
+                            <div>
+                              <dt className="text-sm font-medium text-gray-500">Last Sale Date</dt>
+                              <dd className="mt-1 text-sm font-semibold text-gray-900">
+                                {new Date(lead.lastSaleDate).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}
+                              </dd>
+                            </div>
+                          )}
+                          {lead.lastSalePrice && (
+                            <div>
+                              <dt className="text-sm font-medium text-gray-500">Last Sale Price</dt>
+                              <dd className="mt-1 text-sm font-bold text-blue-700">${lead.lastSalePrice.toLocaleString()}</dd>
+                            </div>
+                          )}
+                        </dl>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                {/* ── Mortgage note ── */}
+                <div className="border-t border-gray-100 pt-3">
                   <p className="text-xs text-gray-400 italic">
-                    💡 Mortgage & lien data not available from public records API — verify via county recorder or title search.
+                    💡 Mortgage & lien data requires a higher ATTOM tier — verify via county recorder or title search.
                   </p>
                 </div>
-                <button
-                  onClick={async () => {
-                    try {
-                      await leadsAPI.refreshPropertyDetails(leadId);
-                      loadLead();
-                    } catch (error) {
-                      console.error('Failed to refresh property details:', error);
-                      alert('Failed to refresh property details');
-                    }
-                  }}
-                  className="btn btn-secondary btn-sm mt-4"
-                >
-                  Refresh Property Details
-                </button>
               </div>
             </div>
 
