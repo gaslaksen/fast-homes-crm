@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Fast Homes CRM API",
   "scripts": {
-    "build": "prisma generate && nest build",
+    "build": "prisma generate && rm -rf dist && nest build",
     "dev": "nest start --watch",
     "start": "node dist/main",
     "test": "jest",
