@@ -78,10 +78,11 @@ export class DashboardService {
     const closedWon = await this.prisma.lead.count({ where: { status: 'CLOSED_WON' } });
     const conversionRate = allLeads > 0 ? (closedWon / allLeads) * 100 : 0;
 
-    // Avg time to contract
+    // Avg time to contract (skip contracts with no date)
     let avgTimeToContract = 0;
-    if (contracts.length > 0) {
-      const times = contracts.map(c => (c.contractDate.getTime() - c.lead.createdAt.getTime()) / (1000 * 60 * 60 * 24));
+    const timedContracts = contracts.filter(c => c.contractDate != null);
+    if (timedContracts.length > 0) {
+      const times = timedContracts.map(c => (c.contractDate!.getTime() - c.lead.createdAt.getTime()) / (1000 * 60 * 60 * 24));
       avgTimeToContract = times.reduce((a, b) => a + b, 0) / times.length;
     }
 

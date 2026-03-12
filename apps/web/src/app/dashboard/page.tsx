@@ -144,7 +144,7 @@ export default function DashboardPage() {
         {/* Greeting + date */}
         <div className="flex items-baseline justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Good morning, Geoff</h1>
+            <h1 className="text-2xl font-bold text-gray-900">{(() => { const h = today.getHours(); return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'; })()}, Geoff</h1>
             <p className="text-sm text-gray-400 mt-0.5">{format(today, 'EEEE, MMMM d, yyyy')}</p>
           </div>
           <Link href="/leads/new" className="btn btn-primary btn-sm">+ New Lead</Link>

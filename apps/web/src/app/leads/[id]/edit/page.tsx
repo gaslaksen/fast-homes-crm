@@ -171,7 +171,7 @@ export default function EditLeadPage() {
                 <select name="status" value={formData.status} onChange={handleChange} className="input">
                   <option value="NEW">New</option>
                   <option value="ATTEMPTING_CONTACT">Attempting Contact</option>
-                  <option value="CONTACT_MADE">Contact Made</option>
+
                   <option value="QUALIFYING">Qualifying</option>
                   <option value="OFFER_SENT">Offer Made</option>
                   <option value="UNDER_CONTRACT">Under Contract</option>
