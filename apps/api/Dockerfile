@@ -24,6 +24,9 @@ COPY apps/api ./apps/api
 # Generate Prisma client FIRST (needed for TypeScript compilation)
 RUN cd apps/api && npx prisma generate
 
+# Cache-bust ARG — increment to force a full rebuild on Railway
+ARG CACHE_BUST=3
+
 # Build shared package, then API
 RUN pnpm --filter @fast-homes/shared build
 RUN pnpm --filter @fast-homes/api build
