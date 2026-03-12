@@ -223,8 +223,6 @@ export interface AttomEnrichmentResult {
   // Additional property details
   apn?:         string;
   ownerName?:   string;
-  coolingType?: string;
-  heatingType?: string;
 }
 
 // ─── Service ─────────────────────────────────────────────────────────────────
@@ -490,8 +488,6 @@ export class AttomService {
       // Additional details
       apn:         prop.identifier?.apn,
       ownerName:   (profile || avmData)?.assessment?.owner?.owner1?.fullName,
-      coolingType: prop.utilities?.coolingtype,
-      heatingType: prop.utilities?.heatingtype,
     };
 
     // ── Persist to Lead: fill missing fields + ATTOM-specific columns ──

@@ -10,6 +10,7 @@ import PhotoGallery from '@/components/PhotoGallery';
 import AppNav from '@/components/AppNav';
 import AiSummaryBox from '@/components/AiSummaryBox';
 import { format } from 'date-fns';
+import { formatPhoneDisplay } from '@/lib/format';
 
 function getNextCampFocus(lead: any): string | null {
   if (!lead.campPriorityComplete) return 'Priority (Timeline)';
@@ -531,7 +532,7 @@ export default function LeadDetailPage() {
                   </div>
                   <div>
                     <dt className="text-sm font-medium text-gray-500">Phone</dt>
-                    <dd className="mt-1 text-sm text-gray-900">{lead.sellerPhone}</dd>
+                    <dd className="mt-1 text-sm text-gray-900">{formatPhoneDisplay(lead.sellerPhone)}</dd>
                   </div>
                   {lead.sellerEmail && (
                     <div>
@@ -1143,7 +1144,7 @@ export default function LeadDetailPage() {
 
                 {lead.sellerPhone && (
                   <p className="text-sm text-gray-600 mb-3">
-                    Phone: <span className="font-medium text-gray-900">{lead.sellerPhone}</span>
+                    Phone: <span className="font-medium text-gray-900">{formatPhoneDisplay(lead.sellerPhone)}</span>
                   </p>
                 )}
 

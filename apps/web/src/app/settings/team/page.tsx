@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import AppNav from '@/components/AppNav';
 import { authAPI } from '@/lib/api';
+import { formatPhoneDisplay } from '@/lib/format';
 
 const ROLE_LABELS: Record<string, string> = {
   ADMIN: 'Admin',
@@ -239,7 +240,7 @@ export default function TeamPage() {
                         </div>
                         <div className="flex items-center gap-3 text-xs text-gray-400 mt-0.5 flex-wrap">
                           <span>{m.email}</span>
-                          {m.phone && <span>📞 {m.phone}</span>}
+                          {m.phone && <span>📞 {formatPhoneDisplay(m.phone)}</span>}
                         </div>
                       </div>
                       <div className="flex items-center gap-3 flex-shrink-0 ml-4">
