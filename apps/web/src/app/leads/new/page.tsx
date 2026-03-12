@@ -5,6 +5,14 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { leadsAPI } from '@/lib/api';
 
+/** Normalize any US phone input to E.164 (+1XXXXXXXXXX). Returns null if invalid. */
+function normalizePhone(raw: string): string | null {
+  const digits = raw.replace(/\D/g, '');
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
+  return null;
+}
+
 export default function NewLeadPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -24,8 +32,8 @@ export default function NewLeadPage() {
     sellerEmail: '',
     timeline: '',
     askingPrice: '',
-    conditionLevel: 'good',
-    ownershipStatus: 'sole_owner',
+    conditionLevel: '',
+    ownershipStatus: '',
   });
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -33,13 +41,24 @@ export default function NewLeadPage() {
     setLoading(true);
 
     try {
+      const normalizedPhone = normalizePhone(formData.sellerPhone);
+      if (!normalizedPhone) {
+        alert('Please enter a valid 10-digit US phone number.');
+        setLoading(false);
+        return;
+      }
+
       const payload = {
         ...formData,
+        sellerPhone: normalizedPhone,
         bedrooms: formData.bedrooms ? parseInt(formData.bedrooms) : undefined,
         bathrooms: formData.bathrooms ? parseFloat(formData.bathrooms) : undefined,
         sqft: formData.sqft ? parseInt(formData.sqft) : undefined,
         timeline: formData.timeline ? parseInt(formData.timeline) : undefined,
         askingPrice: formData.askingPrice ? parseFloat(formData.askingPrice) : undefined,
+        // Don't send blank CAMP fields — let the AI drip fill them in
+        conditionLevel: formData.conditionLevel || undefined,
+        ownershipStatus: formData.ownershipStatus || undefined,
       };
 
       const response = await leadsAPI.create(payload);
@@ -59,11 +78,11 @@ export default function NewLeadPage() {
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <header className="bg-white shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center py-4">
             <h1 className="text-2xl font-bold text-gray-900">Create New Lead</h1>
             <Link href="/leads" className="text-primary-600 hover:text-primary-700">
-              ← Back to Leads
+              &larr; Back to Leads
             </Link>
           </div>
         </div>
@@ -77,7 +96,7 @@ export default function NewLeadPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="md:col-span-2">
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Address *
+                  Street Address *
                 </label>
                 <input
                   type="text"
@@ -85,9 +104,11 @@ export default function NewLeadPage() {
                   value={formData.propertyAddress}
                   onChange={handleChange}
                   className="input"
+                  placeholder="123 Main St"
                   required
                 />
               </div>
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   City *
@@ -97,7 +118,7 @@ export default function NewLeadPage() {
                   name="propertyCity"
                   value={formData.propertyCity}
                   onChange={handleChange}
-                  className="input"
+                  className="input bg-gray-50"
                   required
                 />
               </div>
@@ -110,7 +131,7 @@ export default function NewLeadPage() {
                   name="propertyState"
                   value={formData.propertyState}
                   onChange={handleChange}
-                  className="input"
+                  className="input bg-gray-50"
                   maxLength={2}
                   placeholder="NC"
                   required
@@ -125,7 +146,7 @@ export default function NewLeadPage() {
                   name="propertyZip"
                   value={formData.propertyZip}
                   onChange={handleChange}
-                  className="input"
+                  className="input bg-gray-50"
                   placeholder="28202"
                   required
                 />
@@ -230,9 +251,16 @@ export default function NewLeadPage() {
                   value={formData.sellerPhone}
                   onChange={handleChange}
                   className="input"
-                  placeholder="+17045551234"
+                  placeholder="(704) 555-1234"
                   required
                 />
+                {formData.sellerPhone && (
+                  <p className={`text-xs mt-1 ${normalizePhone(formData.sellerPhone) ? 'text-green-600' : 'text-red-500'}`}>
+                    {normalizePhone(formData.sellerPhone)
+                      ? `Will be saved as ${normalizePhone(formData.sellerPhone)}`
+                      : 'Enter a valid 10-digit US number'}
+                  </p>
+                )}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -294,6 +322,7 @@ export default function NewLeadPage() {
                   onChange={handleChange}
                   className="input"
                 >
+                  <option value=""></option>
                   <option value="excellent">Excellent</option>
                   <option value="good">Good</option>
                   <option value="fair">Fair</option>
@@ -311,6 +340,7 @@ export default function NewLeadPage() {
                   onChange={handleChange}
                   className="input"
                 >
+                  <option value=""></option>
                   <option value="sole_owner">Sole Owner</option>
                   <option value="co_owner">Co-Owner</option>
                   <option value="heir">Heir</option>

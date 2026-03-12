@@ -33,4 +33,12 @@ export class MessagesController {
   ) {
     return this.messagesService.rescoreLead(leadId, body.userId);
   }
+
+  @Post('simulate-reply')
+  async simulateReply(
+    @Param('leadId') leadId: string,
+    @Body() body: { message: string },
+  ) {
+    return this.messagesService.simulateReply(leadId, body.message);
+  }
 }

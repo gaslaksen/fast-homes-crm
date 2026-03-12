@@ -8,6 +8,12 @@ import { ScoringModule } from './scoring/scoring.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 import { AuthModule } from './auth/auth.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { DripModule } from './drip/drip.module';
+import { SettingsModule } from './settings/settings.module';
+import { PhotosModule } from './photos/photos.module';
+import { PipelineModule } from './pipeline/pipeline.module';
+import { VapiModule } from './vapi/vapi.module';
+import { CallsModule } from './calls/calls.module';
 
 @Module({
   imports: [
@@ -22,6 +28,12 @@ import { DashboardModule } from './dashboard/dashboard.module';
     ScoringModule,
     WebhooksModule,
     DashboardModule,
+    DripModule,
+    SettingsModule,
+    PhotosModule,
+    PipelineModule,
+    VapiModule,
+    CallsModule,
   ],
 })
 export class AppModule {}

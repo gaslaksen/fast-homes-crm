@@ -1,18 +1,37 @@
-import { Controller, Get, Post, Patch, Body, Param, Query, HttpException, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Put, Delete, Body, Param, Query, Headers, Res, HttpException, HttpStatus } from '@nestjs/common';
+import { Response } from 'express';
 import { LeadsService } from './leads.service';
+import { RentCastService } from '../comps/rentcast.service';
 import { LeadStatus, LeadSource } from '@fast-homes/shared';
+import * as jwt from 'jsonwebtoken';
 
 @Controller('leads')
 export class LeadsController {
-  constructor(private leadsService: LeadsService) {}
+  constructor(
+    private leadsService: LeadsService,
+    private rentCastService: RentCastService,
+  ) {}
+
+  private decodeToken(authHeader?: string): { userId?: string; organizationId?: string; role?: string } {
+    try {
+      const token = authHeader?.replace('Bearer ', '');
+      if (!token) return {};
+      return jwt.decode(token) as any || {};
+    } catch { return {}; }
+  }
 
   @Post()
-  async createLead(@Body() body: any) {
-    return this.leadsService.createLead(body);
+  async createLead(
+    @Body() body: any,
+    @Headers('authorization') authHeader?: string,
+  ) {
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.leadsService.createLead({ ...body, organizationId: body.organizationId || organizationId });
   }
 
   @Get()
   async listLeads(
+    @Headers('authorization') authHeader?: string,
     @Query('source') source?: LeadSource,
     @Query('status') status?: LeadStatus,
     @Query('scoreBand') scoreBand?: string,
@@ -26,6 +45,7 @@ export class LeadsController {
     @Query('page') page?: string,
     @Query('limit') limit?: string,
   ) {
+    const { organizationId } = this.decodeToken(authHeader);
     return this.leadsService.listLeads({
       source,
       status,
@@ -39,7 +59,57 @@ export class LeadsController {
       createdBefore,
       page: page ? parseInt(page) : undefined,
       limit: limit ? parseInt(limit) : undefined,
+      organizationId,
     });
+  }
+
+  @Post('backfill-addresses')
+  async backfillAddresses() {
+    return this.leadsService.backfillMissingCityState();
+  }
+
+  @Post('bulk-delete')
+  async bulkDelete(@Body() body: { ids: string[] }) {
+    return this.leadsService.bulkDelete(body.ids);
+  }
+
+  @Post('bulk-status')
+  async bulkUpdateStatus(@Body() body: { ids: string[]; status: LeadStatus }) {
+    return this.leadsService.bulkUpdateStatus(body.ids, body.status);
+  }
+
+  @Post('export-csv')
+  async exportCsv(@Body() body: any, @Res() res: Response) {
+    const csv = await this.leadsService.exportCsv(body);
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename=leads-export.csv');
+    res.send(csv);
+  }
+
+  @Get('stats')
+  async getStats() {
+    return this.leadsService.getLeadStats();
+  }
+
+  @Get('test-property-details')
+  async testPropertyDetails(@Query('address') address?: string): Promise<Record<string, any>> {
+    const testAddress = address || '248 Clairborne Ct, Matthews, NC 28104';
+    try {
+      const data = await this.rentCastService.getPropertyDetails(testAddress);
+      return {
+        success: !!data,
+        address: testAddress,
+        apiKeyConfigured: this.rentCastService.isConfigured,
+        data: data || null,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        address: testAddress,
+        apiKeyConfigured: this.rentCastService.isConfigured,
+        error: error.message,
+      };
+    }
   }
 
   @Get(':id')
@@ -73,9 +143,97 @@ export class LeadsController {
     return this.leadsService.addNote(leadId, body.content, body.userId);
   }
 
+  @Post(':id/send-outreach')
+  async sendInitialOutreach(@Param('id') id: string) {
+    try {
+      const result = await this.leadsService.triggerInitialOutreach(id);
+      return { success: true, result };
+    } catch (error) {
+      throw new HttpException(
+        error.message || 'Failed to send outreach',
+        error.status || HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  /** One-time: normalize all stored phone numbers to E.164 format */
+  @Post('admin/normalize-phones')
+  async normalizePhones() {
+    const result = await this.leadsService.normalizeAllPhones();
+    return { success: true, ...result };
+  }
+
+  @Patch(':id/auto-respond')
+  async toggleAutoRespond(
+    @Param('id') id: string,
+    @Body() body: { autoRespond: boolean },
+  ) {
+    return this.leadsService.updateLead(id, { autoRespond: body.autoRespond });
+  }
+
+  @Post(':id/property-details/refresh')
+  async refreshPropertyDetails(@Param('id') id: string) {
+    try {
+      return await this.leadsService.refreshPropertyDetails(id);
+    } catch (error) {
+      throw new HttpException(
+        error.message || 'Failed to refresh property details',
+        error.status || HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Patch(':id/assign')
+  async assignLead(
+    @Param('id') id: string,
+    @Body() body: { userId: string; stage: string },
+  ) {
+    return this.leadsService.assignLead(id, body.userId, body.stage);
+  }
+
+  @Patch(':id/unassign')
+  async unassignLead(@Param('id') id: string) {
+    return this.leadsService.unassignLead(id);
+  }
+
   @Post(':id/contract')
+  @Put(':id/contract')
   async upsertContract(@Param('id') leadId: string, @Body() body: any) {
     return this.leadsService.upsertContract(leadId, body);
+  }
+
+  // ── Dispo summary ─────────────────────────────────────────────────────────
+  @Get(':id/dispo')
+  async getDispoSummary(@Param('id') leadId: string) {
+    return this.leadsService.getDispoSummary(leadId);
+  }
+
+  // ── Offers ────────────────────────────────────────────────────────────────
+  @Get(':id/offers')
+  async listOffers(@Param('id') leadId: string) {
+    return this.leadsService.listOffers(leadId);
+  }
+
+  @Post(':id/offers')
+  async createOffer(@Param('id') leadId: string, @Body() body: any) {
+    return this.leadsService.createOffer(leadId, body);
+  }
+
+  @Patch(':id/offers/:offerId')
+  async updateOffer(
+    @Param('id') leadId: string,
+    @Param('offerId') offerId: string,
+    @Body() body: any,
+  ) {
+    return this.leadsService.updateOffer(leadId, offerId, body);
+  }
+
+  @Delete(':id/offers/:offerId')
+  async deleteOffer(
+    @Param('id') leadId: string,
+    @Param('offerId') offerId: string,
+  ) {
+    return this.leadsService.deleteOffer(leadId, offerId);
   }
 }
 

@@ -24,8 +24,11 @@ export class DashboardController {
 
   @Get('hot-leads')
   async getHotLeads(@Query('limit') limit?: string) {
-    return this.dashboardService.getHotLeads(
-      limit ? parseInt(limit) : undefined,
-    );
+    return this.dashboardService.getHotLeads(limit ? parseInt(limit) : undefined);
+  }
+
+  @Get('stale-leads')
+  async getStaleLeads(@Query('limit') limit?: string) {
+    return this.dashboardService.getStaleLeads(limit ? parseInt(limit) : undefined);
   }
 }

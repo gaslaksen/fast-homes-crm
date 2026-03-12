@@ -150,7 +150,7 @@ export default function EditLeadPage() {
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <header className="bg-white shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center py-4">
             <h1 className="text-2xl font-bold text-gray-900">Edit Lead</h1>
             <Link href={`/leads/${leadId}`} className="text-primary-600 hover:text-primary-700">
@@ -171,12 +171,15 @@ export default function EditLeadPage() {
                 <select name="status" value={formData.status} onChange={handleChange} className="input">
                   <option value="NEW">New</option>
                   <option value="ATTEMPTING_CONTACT">Attempting Contact</option>
-                  <option value="QUALIFIED">Qualified</option>
-                  <option value="OFFER_SENT">Offer Sent</option>
+                  <option value="CONTACT_MADE">Contact Made</option>
+                  <option value="QUALIFYING">Qualifying</option>
+                  <option value="OFFER_SENT">Offer Made</option>
                   <option value="UNDER_CONTRACT">Under Contract</option>
                   <option value="CLOSING">Closing</option>
                   <option value="CLOSED_WON">Closed Won</option>
                   <option value="CLOSED_LOST">Closed Lost</option>
+                  <option value="NURTURE">Nurture</option>
+                  <option value="DEAD">💀 Dead</option>
                 </select>
               </div>
               <div>
@@ -209,13 +212,14 @@ export default function EditLeadPage() {
             <h2 className="text-lg font-bold mb-4">Property Information</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-1">Address *</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Street Address *</label>
                 <input
                   type="text"
                   name="propertyAddress"
                   value={formData.propertyAddress}
                   onChange={handleChange}
                   className="input"
+                  placeholder="123 Main St"
                   required
                 />
               </div>

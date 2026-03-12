@@ -41,6 +41,9 @@ Thumbs.db
 # Prisma
 apps/api/prisma/migrations/*_dev/
 
+# Uploads
+uploads/
+
 # Misc
 *.pem
 .turbo

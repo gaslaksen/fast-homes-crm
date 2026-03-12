@@ -2,12 +2,17 @@
 export enum LeadStatus {
   NEW = 'NEW',
   ATTEMPTING_CONTACT = 'ATTEMPTING_CONTACT',
+  CONTACT_MADE = 'CONTACT_MADE',
+  QUALIFYING = 'QUALIFYING',
   QUALIFIED = 'QUALIFIED',
   OFFER_SENT = 'OFFER_SENT',
+  NEGOTIATING = 'NEGOTIATING',
   UNDER_CONTRACT = 'UNDER_CONTRACT',
   CLOSING = 'CLOSING',
   CLOSED_WON = 'CLOSED_WON',
   CLOSED_LOST = 'CLOSED_LOST',
+  NURTURE = 'NURTURE',
+  DEAD = 'DEAD',
 }
 
 // Lead Source
@@ -150,9 +155,13 @@ export interface ScoringResult {
 export interface AIExtractionResult {
   timeline_days?: number;
   asking_price?: number;
+  asking_price_high?: number;    // upper bound when seller gives a range (e.g. "70 to 80")
+  asking_price_raw?: string;     // exactly what seller said, for natural acknowledgment
   condition_level?: string;
   distress_signals?: string[];
   ownership_status?: string;
+  seller_motivation?: string;
+  fields_addressed?: string[];   // CAMP topics seller mentioned, even vaguely ("timeline", "asking_price", "condition", "ownership")
   confidence?: number;
 }
 
