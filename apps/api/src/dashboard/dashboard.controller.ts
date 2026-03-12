@@ -7,7 +7,12 @@ export class DashboardController {
 
   @Get('stats')
   async getStats() {
-    return this.dashboardService.getStats();
+    try {
+      return await this.dashboardService.getStats();
+    } catch (e) {
+      console.error('[dashboard/stats] ERROR:', e?.message, e?.stack);
+      throw e;
+    }
   }
 
   @Get('activity')
