@@ -122,13 +122,19 @@ export class GmailService {
    */
   async sendEmail(
     userId: string,
-    orgId: string,
+    orgId: string | null | undefined,
     data: { to: string; subject: string; bodyHtml?: string; bodyText: string; leadId?: string },
   ) {
     const oauth2Client = await this.getClient(userId);
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
     const token = await this.prisma.gmailToken.findUnique({ where: { userId } });
+
+    // Resolve orgId from DB if not in JWT
+    if (!orgId) {
+      const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { organizationId: true } });
+      orgId = user?.organizationId ?? 'unknown';
+    }
     const fromAddress = token!.email;
 
     // Build RFC 2822 message
@@ -192,10 +198,15 @@ export class GmailService {
   /**
    * Sync recent inbound emails from Gmail
    */
-  async syncInbound(userId: string, orgId: string): Promise<number> {
+  async syncInbound(userId: string, orgId: string | null | undefined): Promise<number> {
     const oauth2Client = await this.getClient(userId);
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
     const token = await this.prisma.gmailToken.findUnique({ where: { userId } });
+
+    if (!orgId) {
+      const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { organizationId: true } });
+      orgId = user?.organizationId ?? 'unknown';
+    }
     const myEmail = token!.email;
 
     // Fetch last 50 messages in INBOX
