@@ -353,6 +353,40 @@ export class GmailService {
   }
 
   /**
+   * Re-match orphaned emails (leadId = null) to leads by email address
+   */
+  async rematchEmails(orgId: string): Promise<number> {
+    const leads = await this.prisma.lead.findMany({
+      where: { organizationId: orgId, sellerEmail: { not: null } },
+      select: { id: true, sellerEmail: true },
+    });
+    const emailToLeadId = new Map<string, string>();
+    for (const lead of leads) {
+      if (lead.sellerEmail) emailToLeadId.set(lead.sellerEmail.toLowerCase(), lead.id);
+    }
+
+    const orphans = await this.prisma.email.findMany({
+      where: { orgId, leadId: null },
+      select: { id: true, fromAddress: true, toAddress: true },
+    });
+
+    let matched = 0;
+    for (const email of orphans) {
+      const candidates = [email.fromAddress, email.toAddress].map(e => e.toLowerCase());
+      for (const addr of candidates) {
+        const leadId = emailToLeadId.get(addr);
+        if (leadId) {
+          await this.prisma.email.update({ where: { id: email.id }, data: { leadId } });
+          matched++;
+          break;
+        }
+      }
+    }
+    this.logger.log(`Re-matched ${matched} orphaned emails to leads`);
+    return matched;
+  }
+
+  /**
    * Get connection status for a user
    */
   async getStatus(userId: string): Promise<{ connected: boolean; email?: string }> {

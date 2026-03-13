@@ -107,8 +107,14 @@ export class GmailController {
   @Post('gmail/sync')
   async syncInbound(@Headers('authorization') authHeader: string) {
     const decoded = this.getUser(authHeader);
-    const count = await this.gmailService.syncInbound(decoded.userId, decoded.organizationId);
-    return { imported: count };
+    let resolvedOrgId = decoded.organizationId;
+    if (!resolvedOrgId) {
+      const user = await this.gmailService['prisma'].user.findUnique({ where: { id: decoded.userId }, select: { organizationId: true } });
+      resolvedOrgId = user?.organizationId ?? 'unknown';
+    }
+    const imported = await this.gmailService.syncInbound(decoded.userId, resolvedOrgId);
+    const rematched = await this.gmailService.rematchEmails(resolvedOrgId);
+    return { imported, rematched };
   }
 
   /**
