@@ -47,11 +47,15 @@ export default function LeadDetailPage() {
     return tab && DETAIL_TABS.includes(tab as any) ? tab : 'overview';
   });
 
-  // Redirect if URL has a comps-analysis tab key
+  // Sync activeTab with URL changes (tab link clicks)
   useEffect(() => {
     const tab = searchParams.get('tab');
     if (tab && COMPS_TABS.includes(tab as any)) {
       router.replace(`/leads/${leadId}/comps-analysis?tab=${tab}`);
+    } else if (tab && DETAIL_TABS.includes(tab as any)) {
+      setActiveTab(tab);
+    } else if (!tab) {
+      setActiveTab('overview');
     }
   }, [searchParams, leadId, router]);
   const [messageDrafts, setMessageDrafts] = useState<any>(null);
