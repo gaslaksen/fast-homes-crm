@@ -231,8 +231,9 @@ export class GmailService {
     let imported = 0;
 
     // Get all leads with email addresses for matching
+    const realOrg = orgId && orgId !== 'unknown';
     const leads = await this.prisma.lead.findMany({
-      where: { organizationId: orgId, sellerEmail: { not: null } },
+      where: { ...(realOrg ? { organizationId: orgId } : {}), sellerEmail: { not: null } },
       select: { id: true, sellerEmail: true },
     });
     const emailToLeadId = new Map<string, string>();
@@ -356,8 +357,10 @@ export class GmailService {
    * Re-match orphaned emails (leadId = null) to leads by email address
    */
   async rematchEmails(orgId: string): Promise<number> {
+    const realOrg = orgId && orgId !== 'unknown';
+
     const leads = await this.prisma.lead.findMany({
-      where: { organizationId: orgId, sellerEmail: { not: null } },
+      where: { ...(realOrg ? { organizationId: orgId } : {}), sellerEmail: { not: null } },
       select: { id: true, sellerEmail: true },
     });
     const emailToLeadId = new Map<string, string>();
@@ -366,7 +369,7 @@ export class GmailService {
     }
 
     const orphans = await this.prisma.email.findMany({
-      where: { orgId, leadId: null },
+      where: { ...(realOrg ? { orgId } : {}), leadId: null },
       select: { id: true, fromAddress: true, toAddress: true },
     });
 
