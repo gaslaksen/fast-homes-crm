@@ -111,19 +111,19 @@ export default function DashboardPage() {
   const today = new Date();
 
   useEffect(() => {
-    Promise.all([
+    Promise.allSettled([
       dashboardAPI.stats(),
       dashboardAPI.hotLeads(8),
       dashboardAPI.staleLeads(5),
       dashboardAPI.tasks(),
       dashboardAPI.newLeads(10),
     ]).then(([s, h, stale, t, nl]) => {
-      setStats(s.data);
-      setHotLeads(h.data);
-      setStaleLeads(stale.data);
-      setTasks(t.data);
-      setNewLeads(nl.data);
-    }).catch(console.error).finally(() => setLoading(false));
+      if (s.status === 'fulfilled') setStats(s.value.data);
+      if (h.status === 'fulfilled') setHotLeads(h.value.data);
+      if (stale.status === 'fulfilled') setStaleLeads(stale.value.data);
+      if (t.status === 'fulfilled') setTasks(t.value.data);
+      if (nl.status === 'fulfilled') setNewLeads(nl.value.data);
+    }).finally(() => setLoading(false));
   }, []);
 
   if (loading) {
