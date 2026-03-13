@@ -3,11 +3,12 @@
 import { useEffect, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { leadsAPI, messagesAPI, compsAPI, settingsAPI, photosAPI, pipelineAPI, callsAPI, authAPI, tasksAPI } from '@/lib/api';
+import { leadsAPI, messagesAPI, compsAPI, settingsAPI, photosAPI, callsAPI, authAPI, tasksAPI } from '@/lib/api';
 import PropertyPhoto from '@/components/PropertyPhoto';
 import DispoTab from '@/components/DispoTab';
 import PhotoGallery from '@/components/PhotoGallery';
 import AppNav from '@/components/AppNav';
+import LeadTabNav, { DETAIL_TABS, COMPS_TABS } from '@/components/LeadTabNav';
 import Avatar from '@/components/Avatar';
 import AiSummaryBox from '@/components/AiSummaryBox';
 import { format } from 'date-fns';
@@ -39,20 +40,20 @@ export default function LeadDetailPage() {
   const [lead, setLead] = useState<any>(null);
   const [activeTab, setActiveTab] = useState(() => {
     const tab = searchParams.get('tab');
-    return tab && ['overview', 'dispo', 'analysis', 'communications', 'notes', 'activity'].includes(tab)
-      ? tab
-      : 'overview';
+    // Redirect comps-analysis tabs to the comps-analysis page
+    if (tab && COMPS_TABS.includes(tab as any)) {
+      return '__redirect__';
+    }
+    return tab && DETAIL_TABS.includes(tab as any) ? tab : 'overview';
   });
 
-  const handleTabClick = (tab: string) => {
-    if (tab === 'comps') {
-      router.push(`/leads/${leadId}/comps-analysis`);
-      return;
+  // Redirect if URL has a comps-analysis tab key
+  useEffect(() => {
+    const tab = searchParams.get('tab');
+    if (tab && COMPS_TABS.includes(tab as any)) {
+      router.replace(`/leads/${leadId}/comps-analysis?tab=${tab}`);
     }
-    setActiveTab(tab);
-    // Keep URL in sync so browser back/forward and comps-nav links work
-    router.replace(`/leads/${leadId}?tab=${tab}`, { scroll: false });
-  };
+  }, [searchParams, leadId, router]);
   const [messageDrafts, setMessageDrafts] = useState<any>(null);
   const [selectedDraft, setSelectedDraft] = useState('');
   const [loading, setLoading] = useState(true);
@@ -415,33 +416,7 @@ export default function LeadDetailPage() {
       </header>
 
       {/* Tab Nav */}
-      <div className="bg-white border-b border-gray-200">
-        <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8">
-          <nav className="flex space-x-4 text-sm overflow-x-auto scrollbar-none">
-            {[
-              { key: 'overview', label: 'Overview' },
-              { key: 'dispo', label: 'Dispo' },
-              { key: 'comps', label: 'Comps' },
-              { key: 'analysis', label: 'AI Insights' },
-              { key: 'communications', label: 'Messages' },
-              { key: 'notes', label: `Notes${lead.notes?.length ? ` (${lead.notes.length})` : ''}` },
-              { key: 'activity', label: 'Activity' },
-            ].map((tab) => (
-              <button
-                key={tab.key}
-                onClick={() => handleTabClick(tab.key)}
-                className={`py-3 px-1 border-b-2 font-medium whitespace-nowrap ${
-                  activeTab === tab.key
-                    ? 'border-primary-500 text-primary-600'
-                    : 'border-transparent text-gray-400 hover:text-gray-600'
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </nav>
-        </div>
-      </div>
+      <LeadTabNav leadId={leadId} activeTab={activeTab} />
 
       <main className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
 
@@ -1062,7 +1037,7 @@ export default function LeadDetailPage() {
               <AiSummaryBox
                 lead={lead}
                 onRefresh={loadLead}
-                onViewAnalysis={() => setActiveTab('analysis')}
+                onViewAnalysis={() => router.push(`/leads/${leadId}/comps-analysis?tab=deal-analysis`)}
               />
 
               {/* Deal Tier */}
@@ -1153,8 +1128,8 @@ export default function LeadDetailPage() {
           </div>
         )}
 
-        {/* Dispo Tab */}
-        {activeTab === 'dispo' && (
+        {/* Disposition Tab */}
+        {activeTab === 'disposition' && (
           <DispoTab leadId={leadId} leadAddress={lead.propertyAddress} />
         )}
 
@@ -1400,225 +1375,75 @@ export default function LeadDetailPage() {
                 </div>
               </div>
             )}
-          </div>
-        )}
 
-        {/* Comps Tab */}
-        {activeTab === 'comps' && (
-          <div className="card">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-bold">
-                Comparables
-                {lead.comps?.length > 0 && (
-                  <span className="text-sm font-normal text-gray-500 ml-2">({lead.comps.length})</span>
-                )}
-              </h2>
-              <div className="flex gap-2">
+            {/* Notes Section (merged into Communications) */}
+            <div className="lg:col-span-2 space-y-6 mt-6 border-t border-gray-200 pt-6">
+              {/* Add Note Form */}
+              <div className="card">
+                <h2 className="text-xl font-bold mb-4">Notes</h2>
+                <textarea
+                  value={noteText}
+                  onChange={(e) => setNoteText(e.target.value)}
+                  placeholder="Add a conversation note, follow-up detail, or anything relevant about this lead..."
+                  className="input w-full mb-3"
+                  rows={3}
+                />
                 <button
-                  onClick={() => handleFetchComps(true)}
-                  disabled={fetchingComps}
-                  className="btn btn-secondary btn-sm"
+                  onClick={handleAddNote}
+                  disabled={addingNote || !noteText.trim() || !currentUser}
+                  className="btn btn-primary btn-sm"
                 >
-                  {fetchingComps ? 'Fetching...' : 'Refresh Comps'}
+                  {addingNote ? 'Saving...' : 'Save Note'}
                 </button>
-                <Link href={`/leads/${leadId}/comps-analysis?tab=map`} className="btn btn-secondary btn-sm">
-                  Map View
-                </Link>
-                <Link href={`/leads/${leadId}/comps-analysis`} className="btn btn-primary btn-sm">
-                  Full Analysis
-                </Link>
+                {!currentUser && (
+                  <p className="text-xs text-gray-400 mt-2">Loading user info...</p>
+                )}
               </div>
-            </div>
 
-            {fetchingComps && (
-              <div className="text-center py-4 text-primary-600 text-sm font-medium">
-                Fetching live comps from RentCast...
-              </div>
-            )}
-
-            {lead.comps?.length > 0 ? (
-              <>
-                <div className="space-y-3">
-                  {lead.comps.map((comp: any) => (
-                    <div key={comp.id} className={`p-4 rounded-lg ${comp.selected ? 'bg-blue-50 border border-blue-200' : 'bg-gray-50'}`}>
-                      <div className="flex justify-between items-start">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="font-medium">{comp.address}</span>
-                            {comp.similarityScore != null && (
-                              <span className={`text-xs px-1.5 py-0.5 rounded font-bold ${
-                                comp.similarityScore >= 90 ? 'bg-green-100 text-green-700' :
-                                comp.similarityScore >= 80 ? 'bg-yellow-100 text-yellow-700' :
-                                'bg-red-100 text-red-700'
-                              }`}>
-                                {comp.similarityScore}% match
-                              </span>
-                            )}
-                            {comp.source && comp.source !== 'manual' && (
-                              <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
-                                comp.source === 'rentcast' ? 'bg-blue-100 text-blue-700' :
-                                comp.source === 'chatarv' ? 'bg-purple-100 text-purple-700' :
-                                'bg-gray-100 text-gray-600'
-                              }`}>
-                                {comp.source === 'rentcast' ? 'RentCast' :
-                                 comp.source === 'chatarv' ? 'ChatARV' : comp.source}
-                              </span>
-                            )}
-                          </div>
-                          <div className="text-sm text-gray-600">
-                            {comp.bedrooms || '?'}bd {comp.bathrooms || '?'}ba &bull; {comp.sqft?.toLocaleString() || '?'} sqft
-                            {comp.yearBuilt ? ` &bull; Built ${comp.yearBuilt}` : ''}
-                            {comp.lotSize ? ` &bull; ${comp.lotSize} acres` : ''}
-                          </div>
-                          <div className="text-sm text-gray-600">
-                            {comp.distance.toFixed(2)} mi &bull; Sold {format(new Date(comp.soldDate), 'MMM yyyy')}
-                            {comp.correlation ? ` &bull; ${(comp.correlation * 100).toFixed(0)}% match` : ''}
-                          </div>
-                          {(comp.hasPool || comp.hasGarage) && (
-                            <div className="flex gap-1.5 mt-1">
-                              {comp.hasPool && (
-                                <span className="text-xs px-1.5 py-0.5 rounded bg-cyan-50 text-cyan-700">Pool</span>
-                              )}
-                              {comp.hasGarage && (
-                                <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">Garage</span>
-                              )}
-                            </div>
-                          )}
-                          {comp.notes && (
-                            <div className="text-xs text-gray-500 italic mt-1">{comp.notes}</div>
-                          )}
+              {/* Notes List */}
+              {lead.notes?.length > 0 ? (
+                <div className="card">
+                  <h3 className="text-lg font-bold mb-4">Notes ({lead.notes.length})</h3>
+                  <div className="space-y-4">
+                    {lead.notes.map((note: any) => (
+                      <div key={note.id} className={`p-4 rounded-lg border ${note.content?.startsWith('[Dead]') ? 'border-red-200 bg-red-50' : 'border-blue-100 bg-blue-50'}`}>
+                        <div className="flex justify-between items-start mb-2">
+                          <span className={`text-xs font-semibold ${note.content?.startsWith('[Dead]') ? 'text-red-700' : 'text-blue-700'}`}>
+                            {note.content?.startsWith('[Dead]') ? '💀 ' : '📝 '}
+                            {note.user ? `${note.user.firstName} ${note.user.lastName}` : '🤖 AI'}
+                          </span>
+                          <span className="text-xs text-gray-400">
+                            {format(new Date(note.createdAt), 'MMM d, yyyy h:mm a')}
+                          </span>
                         </div>
-                        <div className="text-right">
-                          <div className="text-lg font-bold">${comp.soldPrice.toLocaleString()}</div>
-                          {comp.sqft && (
-                            <div className="text-xs text-gray-500">
-                              ${Math.round(comp.soldPrice / comp.sqft)}/sqft
-                            </div>
-                          )}
-                          {comp.daysOnMarket != null && (
-                            <div className="text-xs text-gray-500">{comp.daysOnMarket} DOM</div>
-                          )}
+                        <div className="text-sm text-gray-800 whitespace-pre-wrap">
+                          {note.content?.startsWith('[Dead] ') ? note.content.slice(7) : note.content}
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
-                <div className="mt-4 text-xs text-gray-400 text-center">
-                  Powered by RentCast
-                  {lead.lastCompsDate && (
-                    <span> &bull; Last updated {format(new Date(lead.lastCompsDate), 'MMM d, yyyy h:mm a')}</span>
-                  )}
+              ) : (
+                <div className="card text-center py-8 text-gray-400">
+                  <div className="text-3xl mb-2">📝</div>
+                  <p className="text-sm">No notes yet. Add your first note above.</p>
                 </div>
-              </>
-            ) : (
-              <div className="text-center py-8 text-gray-500">
-                {fetchingComps ? null : (
-                  <>
-                    No comps fetched yet
-                    <br />
-                    <div className="flex justify-center gap-3 mt-4">
-                      <button
-                        onClick={() => handleFetchComps(false)}
-                        disabled={fetchingComps}
-                        className="btn btn-primary btn-sm"
-                      >
-                        Fetch Live Comps (RentCast)
-                      </button>
-                      <Link href={`/leads/${leadId}/comps-analysis`} className="btn btn-secondary btn-sm">
-                        Run Full Analysis
-                      </Link>
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Notes Tab */}
-        {activeTab === 'notes' && (
-          <div className="max-w-3xl space-y-6">
-            {/* Add Note Form */}
-            <div className="card">
-              <h2 className="text-xl font-bold mb-4">Add Note</h2>
-              <textarea
-                value={noteText}
-                onChange={(e) => setNoteText(e.target.value)}
-                placeholder="Add a conversation note, follow-up detail, or anything relevant about this lead..."
-                className="input w-full mb-3"
-                rows={4}
-              />
-              <button
-                onClick={handleAddNote}
-                disabled={addingNote || !noteText.trim() || !currentUser}
-                className="btn btn-primary"
-              >
-                {addingNote ? 'Saving...' : 'Save Note'}
-              </button>
-              {!currentUser && (
-                <p className="text-xs text-gray-400 mt-2">Loading user info...</p>
               )}
             </div>
-
-            {/* Notes List */}
-            {lead.notes?.length > 0 ? (
-              <div className="card">
-                <h2 className="text-xl font-bold mb-4">Notes ({lead.notes.length})</h2>
-                <div className="space-y-4">
-                  {lead.notes.map((note: any) => (
-                    <div key={note.id} className={`p-4 rounded-lg border ${note.content?.startsWith('[Dead]') ? 'border-red-200 bg-red-50' : 'border-blue-100 bg-blue-50'}`}>
-                      <div className="flex justify-between items-start mb-2">
-                        <span className={`text-xs font-semibold ${note.content?.startsWith('[Dead]') ? 'text-red-700' : 'text-blue-700'}`}>
-                          {note.content?.startsWith('[Dead]') ? '💀 ' : '📝 '}
-                          {note.user ? `${note.user.firstName} ${note.user.lastName}` : '🤖 AI'}
-                        </span>
-                        <span className="text-xs text-gray-400">
-                          {format(new Date(note.createdAt), 'MMM d, yyyy h:mm a')}
-                        </span>
-                      </div>
-                      <div className="text-sm text-gray-800 whitespace-pre-wrap">
-                        {note.content?.startsWith('[Dead] ') ? note.content.slice(7) : note.content}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <div className="card text-center py-12 text-gray-400">
-                <div className="text-4xl mb-3">📝</div>
-                <p className="text-sm">No notes yet. Add your first note above.</p>
-              </div>
-            )}
           </div>
-        )}
-
-        {/* Analysis Tab */}
-        {activeTab === 'analysis' && (
-          <AnalysisTab
-            leadId={leadId}
-            lead={lead}
-            aiAnalysis={aiAnalysis}
-            setAiAnalysis={setAiAnalysis}
-            analysisLoading={analysisLoading}
-            setAnalysisLoading={setAnalysisLoading}
-            onLeadRefresh={loadLead}
-          />
         )}
 
         {/* Activity Tab */}
         {activeTab === 'activity' && (
           <div className="space-y-6">
 
-            {/* Notes */}
+            {/* Notes summary */}
             <div className="card">
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-xl font-bold">Notes{lead.notes?.length > 0 ? ` (${lead.notes.length})` : ''}</h2>
-                <button
-                  onClick={() => setActiveTab('notes')}
-                  className="text-sm text-primary-600 hover:underline"
-                >
+                <Link href={`/leads/${leadId}?tab=communications`} className="text-sm text-primary-600 hover:underline">
                   Add / View all →
-                </button>
+                </Link>
               </div>
               {lead.notes?.length > 0 ? (
                 <div className="space-y-3">
@@ -1639,17 +1464,17 @@ export default function LeadDetailPage() {
                     </div>
                   ))}
                   {lead.notes.length > 3 && (
-                    <button onClick={() => setActiveTab('notes')} className="text-sm text-primary-600 hover:underline">
+                    <Link href={`/leads/${leadId}?tab=communications`} className="text-sm text-primary-600 hover:underline block">
                       + {lead.notes.length - 3} more note{lead.notes.length - 3 !== 1 ? 's' : ''}
-                    </button>
+                    </Link>
                   )}
                 </div>
               ) : (
                 <p className="text-sm text-gray-400">
                   No notes yet.{' '}
-                  <button onClick={() => setActiveTab('notes')} className="text-primary-600 hover:underline">
+                  <Link href={`/leads/${leadId}?tab=communications`} className="text-primary-600 hover:underline">
                     Add one →
-                  </button>
+                  </Link>
                 </p>
               )}
             </div>
@@ -1740,203 +1565,6 @@ function ScoreBar({ label, score, max }: { label: string; score: number; max: nu
           style={{ width: `${percentage}%` }}
         />
       </div>
-    </div>
-  );
-}
-
-function AnalysisTab({
-  leadId,
-  lead,
-  aiAnalysis,
-  setAiAnalysis,
-  analysisLoading,
-  setAnalysisLoading,
-  onLeadRefresh,
-}: {
-  leadId: string;
-  lead: any;
-  aiAnalysis: any;
-  setAiAnalysis: (a: any) => void;
-  analysisLoading: boolean;
-  setAnalysisLoading: (l: boolean) => void;
-  onLeadRefresh: () => void;
-}) {
-  // Load cached analysis from lead data on first render
-  useEffect(() => {
-    if (!aiAnalysis && lead?.aiAnalysis) {
-      try {
-        setAiAnalysis(JSON.parse(lead.aiAnalysis));
-      } catch {
-        // ignore parse errors
-      }
-    }
-  }, [lead?.aiAnalysis]);
-
-  const handleGenerate = async (forceRefresh = false) => {
-    setAnalysisLoading(true);
-    try {
-      const res = forceRefresh
-        ? await pipelineAPI.refreshLeadAnalysis(leadId)
-        : await pipelineAPI.getLeadAnalysis(leadId);
-      setAiAnalysis(res.data);
-      onLeadRefresh();
-    } catch (error) {
-      console.error('Failed to generate analysis:', error);
-      alert('Failed to generate AI analysis');
-    } finally {
-      setAnalysisLoading(false);
-    }
-  };
-
-  return (
-    <div className="space-y-6">
-      {/* Trigger Button */}
-      {!aiAnalysis && !analysisLoading && (
-        <div className="card text-center py-12">
-          <div className="text-4xl mb-4">🤖</div>
-          <h3 className="text-xl font-bold mb-2">AI Lead Analysis</h3>
-          <p className="text-gray-600 mb-6 max-w-md mx-auto">
-            Get an AI-powered assessment of this deal including data gaps, deal quality rating, recommended actions, and red flags.
-          </p>
-          <button
-            onClick={() => handleGenerate(false)}
-            className="btn btn-primary"
-          >
-            Run AI Analysis
-          </button>
-        </div>
-      )}
-
-      {/* Loading State */}
-      {analysisLoading && (
-        <div className="card text-center py-12">
-          <div className="text-4xl mb-4 animate-pulse">🤖</div>
-          <h3 className="text-lg font-bold mb-2">Analyzing Lead...</h3>
-          <p className="text-gray-500 text-sm">Claude is reviewing property data, CAMP scores, comps, and activity history...</p>
-        </div>
-      )}
-
-      {/* Analysis Results */}
-      {aiAnalysis && !analysisLoading && (
-        <>
-          {/* Top Row: Deal Rating + Worthiness */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="card text-center">
-              <h3 className="text-sm font-medium text-gray-500 mb-2">Deal Rating</h3>
-              <div className={`text-5xl font-bold mb-1 ${
-                aiAnalysis.dealRating >= 7 ? 'text-green-600' :
-                aiAnalysis.dealRating >= 4 ? 'text-yellow-600' :
-                'text-red-600'
-              }`}>
-                {aiAnalysis.dealRating}/10
-              </div>
-              <p className="text-xs text-gray-500 mt-2">{aiAnalysis.dealRatingExplanation}</p>
-            </div>
-
-            <div className="card text-center">
-              <h3 className="text-sm font-medium text-gray-500 mb-2">Deal Worthiness</h3>
-              <div className={`text-3xl font-bold mb-1 ${
-                aiAnalysis.dealWorthiness === 'YES' ? 'text-green-600' :
-                aiAnalysis.dealWorthiness === 'NEED_MORE_DATA' ? 'text-yellow-600' :
-                'text-red-600'
-              }`}>
-                {aiAnalysis.dealWorthiness === 'NEED_MORE_DATA' ? 'NEED DATA' : aiAnalysis.dealWorthiness}
-              </div>
-              <p className="text-xs text-gray-500 mt-2">{aiAnalysis.worthinessReason}</p>
-            </div>
-
-            <div className="card text-center">
-              <h3 className="text-sm font-medium text-gray-500 mb-2">Confidence</h3>
-              <div className="text-5xl font-bold text-primary-600 mb-1">
-                {aiAnalysis.confidenceLevel}%
-              </div>
-              <div className="mt-2">
-                <span className="text-xs text-gray-500">Profit Potential: </span>
-                <span className={`text-xs font-bold ${
-                  aiAnalysis.estimatedProfitPotential === 'HIGH' ? 'text-green-600' :
-                  aiAnalysis.estimatedProfitPotential === 'MEDIUM' ? 'text-yellow-600' :
-                  aiAnalysis.estimatedProfitPotential === 'LOW' ? 'text-red-600' :
-                  'text-gray-500'
-                }`}>
-                  {aiAnalysis.estimatedProfitPotential}
-                </span>
-              </div>
-              {aiAnalysis.estimatedProfit !== null && aiAnalysis.estimatedProfit !== undefined && (
-                <div className={`text-sm font-bold mt-1 ${aiAnalysis.estimatedProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                  {aiAnalysis.estimatedProfit >= 0 ? '+' : ''}${aiAnalysis.estimatedProfit.toLocaleString()}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Middle Row: Data Gaps + Next Actions */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="card">
-              <h3 className="text-lg font-bold mb-3">
-                Data Gaps
-                {aiAnalysis.missingDataCount > 0 && (
-                  <span className="text-sm font-normal text-red-500 ml-2">
-                    ({aiAnalysis.missingDataCount} missing)
-                  </span>
-                )}
-              </h3>
-              {aiAnalysis.dataGaps?.length > 0 ? (
-                <ol className="space-y-2">
-                  {aiAnalysis.dataGaps.map((gap: string, i: number) => (
-                    <li key={i} className="flex items-start gap-2">
-                      <span className="flex-shrink-0 w-5 h-5 rounded-full bg-red-100 text-red-600 text-xs font-bold flex items-center justify-center mt-0.5">
-                        {i + 1}
-                      </span>
-                      <span className="text-sm text-gray-700">{gap}</span>
-                    </li>
-                  ))}
-                </ol>
-              ) : (
-                <p className="text-sm text-green-600">All key data collected!</p>
-              )}
-            </div>
-
-            <div className="card">
-              <h3 className="text-lg font-bold mb-3">Recommended Actions</h3>
-              <ol className="space-y-2">
-                {aiAnalysis.nextActions?.map((action: string, i: number) => (
-                  <li key={i} className="flex items-start gap-2">
-                    <span className="flex-shrink-0 w-5 h-5 rounded-full bg-primary-100 text-primary-600 text-xs font-bold flex items-center justify-center mt-0.5">
-                      {i + 1}
-                    </span>
-                    <span className="text-sm text-gray-700">{action}</span>
-                  </li>
-                ))}
-              </ol>
-            </div>
-          </div>
-
-          {/* Red Flags */}
-          {aiAnalysis.redFlags?.length > 0 && (
-            <div className="card border-2 border-red-200 bg-red-50">
-              <h3 className="text-lg font-bold text-red-800 mb-3">Red Flags</h3>
-              <ul className="space-y-2">
-                {aiAnalysis.redFlags.map((flag: string, i: number) => (
-                  <li key={i} className="flex items-start gap-2">
-                    <span className="text-red-500 mt-0.5">&#x26A0;</span>
-                    <span className="text-sm text-red-700">{flag}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {/* Refresh Button */}
-          <div className="text-center">
-            <button
-              onClick={() => handleGenerate(true)}
-              className="btn btn-secondary btn-sm"
-            >
-              Refresh Analysis
-            </button>
-          </div>
-        </>
-      )}
     </div>
   );
 }

@@ -1,11 +1,13 @@
 'use client';
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { leadsAPI, compsAPI, compAnalysisAPI, photosAPI } from '@/lib/api';
 import AppNav from '@/components/AppNav';
+import LeadTabNav, { COMPS_TABS, DETAIL_TABS } from '@/components/LeadTabNav';
+import AnalysisTab from '@/components/AnalysisTab';
 import PropertyPhoto from '@/components/PropertyPhoto';
 
 const CompsMap = dynamic(() => import('@/components/CompsMap'), { ssr: false, loading: () => <div className="w-full h-64 bg-gray-100 rounded-lg animate-pulse" /> });
@@ -109,13 +111,24 @@ const MAO_OPTIONS = [60, 65, 70, 75, 80, 85, 90];
 export default function CompsAnalysisPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const leadId = params.id as string;
+
+  // Derive active tab from URL; redirect detail-page tabs back
+  const rawTab = searchParams.get('tab') || 'comps';
+  const activeSection = COMPS_TABS.includes(rawTab as any) ? rawTab : 'comps';
+
+  useEffect(() => {
+    if (rawTab && DETAIL_TABS.includes(rawTab as any)) {
+      router.replace(`/leads/${leadId}?tab=${rawTab}`);
+    }
+  }, [rawTab, leadId, router]);
 
   const [lead, setLead] = useState<Lead | null>(null);
   const [aiAnalysis, setAiAnalysis] = useState<any>(null);
+  const [analysisLoading, setAnalysisLoading] = useState(false);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeSection, setActiveSection] = useState<string>('comps');
   const [fetchingComps, setFetchingComps] = useState(false);
   const [sortField, setSortField] = useState<string>('distance');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
@@ -232,7 +245,7 @@ export default function CompsAnalysisPage() {
       const full = await compAnalysisAPI.get(leadId, res.data.id);
       setAnalysis(full.data);
       setDealArv(full.data.arvEstimate || leadRes.data.arv || result.data.arv || 0);
-      setActiveSection('comps');
+      router.replace(`/leads/${leadId}/comps-analysis?tab=comps`, { scroll: false });
     } catch (error: any) {
       console.error('Failed to fetch comps:', error);
       alert(error.response?.data?.message || 'Failed to fetch comps from RentCast');
@@ -311,7 +324,7 @@ export default function CompsAnalysisPage() {
       const arvRes = await compAnalysisAPI.calculateArv(leadId, analysis.id, 'weighted');
       setDealArv(arvRes.data.arv || 0);
       await refreshAnalysis();
-      setActiveSection('results');
+      router.replace(`/leads/${leadId}/comps-analysis?tab=arv`, { scroll: false });
     } catch (error) {
       console.error('Calculation failed:', error);
       alert('Calculation failed');
@@ -341,7 +354,7 @@ export default function CompsAnalysisPage() {
     try {
       await compAnalysisAPI.aiAdjustComps(leadId, analysis.id);
       await refreshAnalysis();
-      setActiveSection('results');
+      router.replace(`/leads/${leadId}/comps-analysis?tab=arv`, { scroll: false });
     } catch (error) {
       console.error('AI adjustment failed:', error);
       alert('AI adjustment failed — please try again');
@@ -575,9 +588,7 @@ export default function CompsAnalysisPage() {
                 <div className="flex items-center gap-1.5 mb-1 text-xs text-gray-400">
                   <Link href="/leads" className="hover:text-gray-700">Leads</Link>
                   <span>/</span>
-                  <Link href={`/leads/${leadId}`} className="hover:text-gray-700">{lead.propertyAddress}</Link>
-                  <span>/</span>
-                  <span className="text-gray-600 font-medium">Comp Analysis</span>
+                  <span className="text-gray-600 font-medium">{lead.propertyAddress}</span>
                 </div>
                 <h1 className="text-xl font-bold text-gray-900">{lead.propertyAddress}</h1>
                 <p className="text-gray-600 text-sm">{lead.propertyCity}, {lead.propertyState} {lead.propertyZip}</p>
@@ -610,60 +621,8 @@ export default function CompsAnalysisPage() {
         </div>
       </header>
 
-      {/* Parent lead nav */}
-      <div className="bg-white border-b border-gray-200">
-        <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8">
-          <nav className="flex space-x-4 text-sm overflow-x-auto scrollbar-none">
-            {[
-              { label: 'Overview',    href: `/leads/${leadId}` },
-              { label: 'Dispo',       href: `/leads/${leadId}?tab=dispo` },
-              { label: 'Comps',       href: `/leads/${leadId}/comps-analysis`, active: true },
-              { label: 'AI Insights', href: `/leads/${leadId}?tab=analysis` },
-              { label: 'Messages',    href: `/leads/${leadId}?tab=communications` },
-              { label: 'Notes',       href: `/leads/${leadId}?tab=notes` },
-              { label: 'Activity',    href: `/leads/${leadId}?tab=activity` },
-            ].map((item) => (
-              <Link
-                key={item.label}
-                href={item.href}
-                className={`py-3 px-1 border-b-2 font-medium whitespace-nowrap ${
-                  item.active
-                    ? 'border-primary-500 text-primary-600'
-                    : 'border-transparent text-gray-400 hover:text-gray-600'
-                }`}
-              >
-                {item.label}
-              </Link>
-            ))}
-          </nav>
-        </div>
-      </div>
-
-      {/* Comp Analysis Sub-Nav */}
-      <div className="bg-white border-b">
-        <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8">
-          <nav className="flex space-x-6 overflow-x-auto scrollbar-none">
-            {[
-              { key: 'comps', label: `Comps (${allComps.length})` },
-              { key: 'results', label: 'Results & ARV' },
-              { key: 'deal', label: 'Deal Analysis' },
-              { key: 'repairs', label: 'Repairs' },
-            ].map((tab) => (
-              <button
-                key={tab.key}
-                onClick={() => setActiveSection(tab.key)}
-                className={`py-3 px-1 border-b-2 font-medium text-sm ${
-                  activeSection === tab.key
-                    ? 'border-primary-500 text-primary-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </nav>
-        </div>
-      </div>
+      {/* Unified Tab Nav */}
+      <LeadTabNav leadId={leadId} activeTab={activeSection} />
 
       <main className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
 
@@ -1020,8 +979,8 @@ export default function CompsAnalysisPage() {
           </div>
         )}
 
-        {/* ═══════════════ RESULTS SECTION ═══════════════ */}
-        {activeSection === 'results' && (
+        {/* ═══════════════ ARV SECTION ═══════════════ */}
+        {activeSection === 'arv' && (
           <div className="space-y-6">
             {/* AI Summary */}
             {analysis?.aiSummary && (
@@ -1449,7 +1408,8 @@ export default function CompsAnalysisPage() {
         )}
 
         {/* ═══════════════ DEAL ANALYSIS SECTION ═══════════════ */}
-        {activeSection === 'deal' && (
+        {activeSection === 'deal-analysis' && (
+          <>
           <div className="space-y-6">
             <div className="card">
               <div className="flex items-center gap-3 mb-6">
@@ -1607,6 +1567,24 @@ export default function CompsAnalysisPage() {
               </div>
             </div>
           </div>
+
+          {/* AI Insights (merged from lead detail) */}
+          <div className="mt-8 border-t border-gray-200 pt-6">
+            <h2 className="text-lg font-bold mb-4">AI Insights</h2>
+            <AnalysisTab
+              leadId={leadId}
+              lead={lead}
+              aiAnalysis={aiAnalysis}
+              setAiAnalysis={setAiAnalysis}
+              analysisLoading={analysisLoading}
+              setAnalysisLoading={setAnalysisLoading}
+              onLeadRefresh={async () => {
+                const lr = await leadsAPI.get(leadId);
+                setLead(lr.data);
+              }}
+            />
+          </div>
+          </>
         )}
 
         {/* ═══════════════ REPAIRS SECTION ═══════════════ */}
