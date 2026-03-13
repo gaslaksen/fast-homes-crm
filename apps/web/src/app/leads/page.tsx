@@ -670,7 +670,7 @@ function LeadsPageInner() {
           /* ─── TABLE VIEW ─── */
           <div className="overflow-x-auto -mx-6 px-6 md:mx-0 md:px-0">
           <div className="bg-white rounded-xl border border-gray-200 overflow-hidden min-w-[900px]">
-            <div className="grid grid-cols-[auto_44px_2fr_100px_72px_72px_76px_76px_72px_72px] gap-2 px-4 py-2.5 border-b border-gray-100 bg-gray-50/80">
+            <div className="grid grid-cols-[auto_44px_2fr_110px_68px_72px_72px_72px_80px_72px] gap-3 px-4 py-2.5 border-b border-gray-100 bg-gray-50/80">
               <input
                 type="checkbox"
                 checked={selectedIds.size === filtered.length && filtered.length > 0}
@@ -704,7 +704,7 @@ function LeadsPageInner() {
                 return (
                   <div
                     key={lead.id}
-                    className={`grid grid-cols-[auto_44px_2fr_100px_72px_72px_76px_76px_72px_72px] gap-2 items-center px-4 py-2.5 hover:bg-gray-50 transition-colors group ${
+                    className={`grid grid-cols-[auto_44px_2fr_110px_68px_72px_72px_72px_80px_72px] gap-3 items-center px-4 py-2.5 hover:bg-gray-50 transition-colors group ${
                       selectedIds.has(lead.id) ? 'bg-blue-50/40' : ''
                     } ${lead.status === 'DEAD' ? 'opacity-60' : ''}`}
                   >
@@ -746,27 +746,27 @@ function LeadsPageInner() {
                     <Link href={`/leads/${lead.id}`}>
                       <TierBadge tier={tier} />
                     </Link>
-                    <Link href={`/leads/${lead.id}`} className="flex justify-center">
+                    <Link href={`/leads/${lead.id}`}>
                       <ScorePill band={lead.scoreBand} score={lead.totalScore} />
                     </Link>
-                    <Link href={`/leads/${lead.id}`} className="text-right">
+                    <Link href={`/leads/${lead.id}`}>
                       {lead.arv
                         ? <span className="text-xs font-semibold text-gray-700">${(lead.arv / 1000).toFixed(0)}k</span>
                         : <span className="text-xs text-gray-300">—</span>}
                     </Link>
-                    <Link href={`/leads/${lead.id}`} className="text-right">
+                    <Link href={`/leads/${lead.id}`}>
                       {lead.askingPrice
                         ? <span className="text-xs text-gray-600">${(lead.askingPrice / 1000).toFixed(0)}k</span>
                         : <span className="text-xs text-gray-300">—</span>}
                     </Link>
-                    <Link href={`/leads/${lead.id}`} className="text-right">
+                    <Link href={`/leads/${lead.id}`}>
                       {s !== null
                         ? <span className={`text-xs font-bold ${s >= 0 ? 'text-green-600' : 'text-red-500'}`}>
                             {s >= 0 ? '+' : ''}${(s / 1000).toFixed(0)}k
                           </span>
                         : <span className="text-xs text-gray-300">—</span>}
                     </Link>
-                    <Link href={`/leads/${lead.id}`} className="text-right">
+                    <Link href={`/leads/${lead.id}`}>
                       {hoursAgo !== null
                         ? <span className={`text-xs ${stale ? 'text-amber-600 font-semibold' : 'text-gray-400'}`}>
                             {hoursAgo < 24 ? `${hoursAgo}h` : `${Math.round(hoursAgo / 24)}d`}
