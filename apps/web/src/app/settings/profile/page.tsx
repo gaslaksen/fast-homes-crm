@@ -1,12 +1,12 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { settingsAPI, gmailAPI } from '@/lib/api';
 import AppNav from '@/components/AppNav';
 import Avatar from '@/components/Avatar';
 
-export default function ProfilePage() {
+function ProfilePageInner() {
   const [profile, setProfile] = useState<any>(null);
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -256,5 +256,13 @@ export default function ProfilePage() {
         </div>
       </main>
     </div>
+  );
+}
+
+export default function ProfilePage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-gray-50 flex items-center justify-center"><div className="text-gray-400 text-sm animate-pulse">Loading profile...</div></div>}>
+      <ProfilePageInner />
+    </Suspense>
   );
 }
