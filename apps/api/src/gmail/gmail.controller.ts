@@ -92,7 +92,13 @@ export class GmailController {
     @Body() body: { leadId?: string; to: string; subject: string; bodyHtml?: string; bodyText: string },
   ) {
     const decoded = this.getUser(authHeader);
-    return this.gmailService.sendEmail(decoded.userId, decoded.organizationId, body);
+    try {
+      return await this.gmailService.sendEmail(decoded.userId, decoded.organizationId, body);
+    } catch (e: any) {
+      const detail = e?.response?.data || e?.message || String(e);
+      console.error('[gmail/send] ERROR:', JSON.stringify(detail), e?.stack);
+      throw e;
+    }
   }
 
   /**
