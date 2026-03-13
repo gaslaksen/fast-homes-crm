@@ -30,6 +30,7 @@ export class AuthService {
       firstName: user.firstName,
       lastName: user.lastName,
       role: user.role,
+      avatarUrl: user.avatarUrl || null,
       organizationId: user.organizationId,
       organization: user.organization
         ? { id: user.organization.id, name: user.organization.name, plan: user.organization.plan }
@@ -141,7 +142,7 @@ export class AuthService {
       where: { organizationId },
       select: {
         id: true, email: true, firstName: true, lastName: true,
-        role: true, phone: true, title: true, createdAt: true,
+        role: true, phone: true, title: true, avatarUrl: true, createdAt: true,
       },
       orderBy: { createdAt: 'asc' },
     });

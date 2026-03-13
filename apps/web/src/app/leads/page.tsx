@@ -6,6 +6,7 @@ import { useSearchParams } from 'next/navigation';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 import { leadsAPI, authAPI, pipelineAPI } from '@/lib/api';
 import PropertyPhoto from '@/components/PropertyPhoto';
+import Avatar from '@/components/Avatar';
 import AppNav from '@/components/AppNav';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -735,12 +736,11 @@ function LeadsPageInner() {
                     <Link href={`/leads/${lead.id}`} className="flex items-center gap-1">
                       <StatusBadge status={lead.status} />
                       {lead.assignedTo && (
-                        <span
-                          className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-primary-100 text-primary-700 text-[10px] font-bold flex-shrink-0"
-                          title={`${lead.assignedTo.firstName} ${lead.assignedTo.lastName}`}
-                        >
-                          {lead.assignedTo.firstName?.[0]}{lead.assignedTo.lastName?.[0]}
-                        </span>
+                        <Avatar
+                          name={`${lead.assignedTo.firstName} ${lead.assignedTo.lastName}`}
+                          avatarUrl={lead.assignedTo.avatarUrl}
+                          size="sm"
+                        />
                       )}
                     </Link>
                     <Link href={`/leads/${lead.id}`}>
@@ -863,12 +863,11 @@ function LeadsPageInner() {
                                               {lead.sellerFirstName} {lead.sellerLastName}
                                             </span>
                                             {lead.assignedTo && (
-                                              <span
-                                                className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-primary-100 text-primary-700 text-[9px] font-bold flex-shrink-0"
-                                                title={`${lead.assignedTo.firstName} ${lead.assignedTo.lastName}`}
-                                              >
-                                                {lead.assignedTo.firstName?.[0]}{lead.assignedTo.lastName?.[0]}
-                                              </span>
+                                              <Avatar
+                                                name={`${lead.assignedTo.firstName} ${lead.assignedTo.lastName}`}
+                                                avatarUrl={lead.assignedTo.avatarUrl}
+                                                size="sm"
+                                              />
                                             )}
                                           </div>
 

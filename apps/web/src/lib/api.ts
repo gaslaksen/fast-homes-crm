@@ -155,6 +155,7 @@ export const dashboardAPI = {
   tasks: (userId?: string) => api.get('/dashboard/tasks', { params: { userId } }),
   hotLeads: (limit?: number) => api.get('/dashboard/hot-leads', { params: { limit } }),
   staleLeads: (limit?: number) => api.get('/dashboard/stale-leads', { params: { limit } }),
+  newLeads: (limit?: number) => api.get('/dashboard/new-leads', { params: { limit } }),
 };
 
 // Settings API
@@ -171,6 +172,11 @@ export const settingsAPI = {
     callDelayMs?: number;
   }) => api.patch('/settings/drip', data),
   sendDemoLead: () => api.post('/settings/drip/demo-lead'),
+  getProfile: () => api.get('/settings/profile'),
+  updateProfile: (data: { firstName?: string; lastName?: string; avatarUrl?: string }) =>
+    api.patch('/settings/profile', data),
+  uploadAvatar: (base64: string) =>
+    api.post('/settings/profile/avatar', { base64 }),
 };
 
 // Prompts API

@@ -105,6 +105,7 @@ export default function DashboardPage() {
   const [stats, setStats] = useState<any>(null);
   const [hotLeads, setHotLeads] = useState<any[]>([]);
   const [staleLeads, setStaleLeads] = useState<any[]>([]);
+  const [newLeads, setNewLeads] = useState<any[]>([]);
   const [tasks, setTasks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const today = new Date();
@@ -115,11 +116,13 @@ export default function DashboardPage() {
       dashboardAPI.hotLeads(8),
       dashboardAPI.staleLeads(5),
       dashboardAPI.tasks(),
-    ]).then(([s, h, stale, t]) => {
+      dashboardAPI.newLeads(10),
+    ]).then(([s, h, stale, t, nl]) => {
       setStats(s.data);
       setHotLeads(h.data);
       setStaleLeads(stale.data);
       setTasks(t.data);
+      setNewLeads(nl.data);
     }).catch(console.error).finally(() => setLoading(false));
   }, []);
 
@@ -252,6 +255,60 @@ export default function DashboardPage() {
               ) : (
                 <div className="divide-y divide-gray-50 py-1">
                   {staleLeads.map((lead) => <LeadRow key={lead.id} lead={lead} showLastTouched />)}
+                </div>
+              )}
+            </div>
+
+            {/* New Leads */}
+            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+              <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+                <h2 className="font-bold text-gray-900">🆕 New Leads</h2>
+                <Link href="/leads?sort=created" className="text-xs text-blue-600 hover:underline font-medium">
+                  View all →
+                </Link>
+              </div>
+              {newLeads.length === 0 ? (
+                <div className="px-5 py-8 text-center text-sm text-gray-400">No leads yet.</div>
+              ) : (
+                <div className="divide-y divide-gray-50">
+                  {newLeads.map((lead) => {
+                    const statusColors: Record<string, string> = {
+                      NEW: 'bg-blue-100 text-blue-700',
+                      ATTEMPTING_CONTACT: 'bg-yellow-100 text-yellow-700',
+                      QUALIFYING: 'bg-purple-100 text-purple-700',
+                      OFFER_SENT: 'bg-orange-100 text-orange-700',
+                      UNDER_CONTRACT: 'bg-teal-100 text-teal-700',
+                      CLOSED_WON: 'bg-green-100 text-green-700',
+                      DEAD: 'bg-gray-100 text-gray-400',
+                    };
+                    const statusLabel: Record<string, string> = {
+                      NEW: 'New', ATTEMPTING_CONTACT: 'Contacting', QUALIFYING: 'Qualifying',
+                      OFFER_SENT: 'Offer Made', UNDER_CONTRACT: 'Under Contract',
+                      CLOSED_WON: 'Closed', DEAD: 'Dead',
+                    };
+                    return (
+                      <Link
+                        key={lead.id}
+                        href={`/leads/${lead.id}`}
+                        className="flex items-center justify-between px-5 py-3 hover:bg-gray-50 transition-colors"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="text-sm font-medium text-gray-900 truncate">{lead.propertyAddress}</div>
+                          <div className="text-xs text-gray-400 mt-0.5">
+                            {lead.propertyCity}, {lead.propertyState}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 flex-shrink-0 ml-3">
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${statusColors[lead.status] || 'bg-gray-100 text-gray-500'}`}>
+                            {statusLabel[lead.status] || lead.status.replace(/_/g, ' ')}
+                          </span>
+                          <span className="text-xs text-gray-300">
+                            {formatDistanceToNow(new Date(lead.createdAt), { addSuffix: true })}
+                          </span>
+                        </div>
+                      </Link>
+                    );
+                  })}
                 </div>
               )}
             </div>

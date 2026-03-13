@@ -1,8 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import { authAPI } from '@/lib/api';
+import Avatar from '@/components/Avatar';
 
 const NAV_ITEMS = [
   { label: 'Dashboard', href: '/dashboard' },
@@ -15,6 +17,25 @@ export default function AppNav() {
   const pathname = usePathname();
   const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [user, setUser] = useState<any>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    authAPI.getMe().then(res => setUser(res.data)).catch(() => {});
+  }, []);
+
+  // Click-outside handler for profile dropdown
+  useEffect(() => {
+    if (!profileOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setProfileOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [profileOpen]);
 
   const isActive = (href: string) =>
     href === '/dashboard'
@@ -25,6 +46,8 @@ export default function AppNav() {
     localStorage.removeItem('auth_token');
     router.push('/login');
   };
+
+  const userName = user ? `${user.firstName} ${user.lastName}` : '';
 
   return (
     <header className="bg-white border-b border-gray-200 sticky top-0 z-50">
@@ -54,12 +77,52 @@ export default function AppNav() {
 
         {/* Right side */}
         <div className="flex items-center gap-3">
-          <button
-            onClick={handleSignOut}
-            className="hidden md:block text-xs text-gray-400 hover:text-gray-700 transition-colors"
-          >
-            Sign out
-          </button>
+          {/* Profile dropdown (desktop) */}
+          <div className="hidden md:block relative" ref={dropdownRef}>
+            <button
+              onClick={() => setProfileOpen(o => !o)}
+              className="flex items-center gap-2 hover:opacity-80 transition-opacity"
+            >
+              <Avatar
+                name={userName || 'User'}
+                avatarUrl={user?.avatarUrl}
+                size="sm"
+              />
+            </button>
+
+            {profileOpen && (
+              <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-50">
+                {user && (
+                  <div className="px-4 py-2 border-b border-gray-100">
+                    <div className="text-sm font-medium text-gray-900 truncate">{userName}</div>
+                    <div className="text-xs text-gray-400 truncate">{user.email}</div>
+                  </div>
+                )}
+                <Link
+                  href="/settings/profile"
+                  onClick={() => setProfileOpen(false)}
+                  className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                >
+                  Profile
+                </Link>
+                <Link
+                  href="/settings"
+                  onClick={() => setProfileOpen(false)}
+                  className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                >
+                  Settings
+                </Link>
+                <div className="border-t border-gray-100">
+                  <button
+                    onClick={handleSignOut}
+                    className="block w-full text-left px-4 py-2 text-sm text-gray-400 hover:text-gray-700 hover:bg-gray-50 transition-colors"
+                  >
+                    Sign out
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Hamburger (mobile only) */}
           <button
@@ -91,6 +154,13 @@ export default function AppNav() {
               {label}
             </Link>
           ))}
+          <Link
+            href="/settings/profile"
+            onClick={() => setMobileOpen(false)}
+            className="block px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors"
+          >
+            Profile
+          </Link>
           <div className="border-t border-gray-100 pt-2 mt-2">
             <button
               onClick={handleSignOut}

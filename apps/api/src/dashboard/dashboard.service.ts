@@ -200,6 +200,24 @@ export class DashboardService {
     });
   }
 
+  async getNewLeads(limit = 10) {
+    return this.prisma.lead.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      select: {
+        id: true,
+        propertyAddress: true,
+        propertyCity: true,
+        propertyState: true,
+        status: true,
+        scoreBand: true,
+        totalScore: true,
+        createdAt: true,
+        primaryPhoto: true,
+      },
+    });
+  }
+
   async getStaleLeads(limit = 5) {
     const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
     return this.prisma.lead.findMany({

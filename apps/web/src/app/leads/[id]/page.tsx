@@ -8,6 +8,7 @@ import PropertyPhoto from '@/components/PropertyPhoto';
 import DispoTab from '@/components/DispoTab';
 import PhotoGallery from '@/components/PhotoGallery';
 import AppNav from '@/components/AppNav';
+import Avatar from '@/components/Avatar';
 import AiSummaryBox from '@/components/AiSummaryBox';
 import { format } from 'date-fns';
 import { formatPhoneDisplay } from '@/lib/format';
@@ -338,6 +339,34 @@ export default function LeadDetailPage() {
                   )}
                 </div>
                 <p className="text-gray-600 text-sm">{lead.propertyCity}, {lead.propertyState} {lead.propertyZip}</p>
+                <div className="flex items-center gap-2 mt-1.5">
+                  {/* Status badge */}
+                  <span className={`text-xs font-semibold px-2.5 py-0.5 rounded-full ${
+                    lead.status === 'CLOSED_WON' ? 'bg-green-100 text-green-700' :
+                    lead.status === 'DEAD' || lead.status === 'CLOSED_LOST' ? 'bg-gray-100 text-gray-400' :
+                    lead.status === 'UNDER_CONTRACT' ? 'bg-teal-100 text-teal-700' :
+                    lead.status === 'OFFER_SENT' ? 'bg-orange-100 text-orange-700' :
+                    lead.status === 'QUALIFYING' ? 'bg-purple-100 text-purple-700' :
+                    'bg-blue-50 text-blue-600'
+                  }`}>
+                    {({
+                      NEW: 'New', ATTEMPTING_CONTACT: 'Contacting', QUALIFYING: 'Qualifying',
+                      OFFER_SENT: 'Offer Made', UNDER_CONTRACT: 'Under Contract', CLOSING: 'Closing',
+                      CLOSED_WON: 'Closed', CLOSED_LOST: 'Lost', NURTURE: 'Nurture', DEAD: 'Dead',
+                    } as Record<string, string>)[lead.status] || lead.status.replace(/_/g, ' ')}
+                  </span>
+                  {/* Assignee avatar */}
+                  {lead.assignedTo && (
+                    <div className="flex items-center gap-1.5">
+                      <Avatar
+                        name={`${lead.assignedTo.firstName} ${lead.assignedTo.lastName}`}
+                        avatarUrl={lead.assignedTo.avatarUrl}
+                        size="sm"
+                      />
+                      <span className="text-xs text-gray-500">{lead.assignedTo.firstName} {lead.assignedTo.lastName}</span>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
             <div className="flex items-center gap-5">
