@@ -41,6 +41,7 @@ model User {
   notes         Note[]
   tasks         Task[]
   activities    Activity[]
+  gmailToken    GmailToken?
 
   @@map("users")
 }
@@ -167,6 +168,7 @@ model Lead {
   aiSummary         String?   // Brief summary for overview
 
   messages          Message[]
+  emails            Email[]
   comps             Comp[]
   compAnalyses      CompAnalysis[]
   tasks             Task[]
@@ -435,4 +437,37 @@ model CallLog {
   updatedAt    DateTime @updatedAt
 
   @@map("call_logs")
+}
+
+model GmailToken {
+  id           String   @id @default(cuid())
+  userId       String   @unique
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken  String
+  refreshToken String
+  expiresAt    DateTime
+  email        String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@map("gmail_tokens")
+}
+
+model Email {
+  id          String   @id @default(cuid())
+  orgId       String
+  leadId      String?
+  lead        Lead?    @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  gmailMsgId  String?  @unique
+  threadId    String?
+  direction   String
+  fromAddress String
+  toAddress   String
+  subject     String
+  bodyHtml    String?  @db.Text
+  bodyText    String   @db.Text
+  sentAt      DateTime
+  createdAt   DateTime @default(now())
+
+  @@map("emails")
 }

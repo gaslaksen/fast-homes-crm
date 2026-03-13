@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { leadsAPI, messagesAPI, compsAPI, settingsAPI, photosAPI, callsAPI, authAPI, tasksAPI } from '@/lib/api';
+import { leadsAPI, messagesAPI, compsAPI, settingsAPI, photosAPI, callsAPI, authAPI, tasksAPI, gmailAPI } from '@/lib/api';
 import PropertyPhoto from '@/components/PropertyPhoto';
 import DispoTab from '@/components/DispoTab';
 import PhotoGallery from '@/components/PhotoGallery';
@@ -77,12 +77,22 @@ export default function LeadDetailPage() {
   const [deadReason, setDeadReason] = useState('');
   const [markingDead, setMarkingDead] = useState(false);
   const [settingTier, setSettingTier] = useState(false);
+  const [emails, setEmails] = useState<any[]>([]);
+  const [gmailConnected, setGmailConnected] = useState(false);
+  const [showComposeEmail, setShowComposeEmail] = useState(false);
+  const [emailTo, setEmailTo] = useState('');
+  const [emailSubject, setEmailSubject] = useState('');
+  const [emailBody, setEmailBody] = useState('');
+  const [sendingEmail, setSendingEmail] = useState(false);
+  const [expandedEmailId, setExpandedEmailId] = useState<string | null>(null);
 
   useEffect(() => {
     loadLead();
     settingsAPI.getDrip().then((res) => setDemoMode(res.data.demoMode ?? false)).catch(() => {});
     authAPI.getTeam().then((res) => setTeamMembers(res.data || [])).catch(() => {});
     authAPI.getMe().then((res) => setCurrentUser(res.data)).catch(() => {});
+    gmailAPI.status().then((res) => setGmailConnected(res.data.connected)).catch(() => {});
+    gmailAPI.emails(leadId).then((res) => setEmails(res.data || [])).catch(() => {});
   }, [leadId]);
 
   const loadLead = async () => {
@@ -1310,6 +1320,165 @@ export default function LeadDetailPage() {
                       {simulatingReply ? 'Sending...' : 'Simulate Reply'}
                     </button>
                   </div>
+                )}
+              </div>
+
+              {/* Divider */}
+              <div className="border-t border-gray-200" />
+
+              {/* Email Section */}
+              <div className="card">
+                <div className="flex justify-between items-center mb-4">
+                  <div className="flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-600" viewBox="0 0 20 20" fill="currentColor">
+                      <path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z" />
+                      <path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z" />
+                    </svg>
+                    <h2 className="text-xl font-bold">Emails</h2>
+                  </div>
+                  {gmailConnected && (
+                    <button
+                      onClick={() => {
+                        setEmailTo(lead.sellerEmail || '');
+                        setEmailSubject('');
+                        setEmailBody('');
+                        setShowComposeEmail(true);
+                      }}
+                      className="btn btn-primary btn-sm"
+                    >
+                      Compose Email
+                    </button>
+                  )}
+                </div>
+
+                {!gmailConnected ? (
+                  <div className="p-4 rounded-lg bg-blue-50 border border-blue-200 text-sm text-blue-700 flex items-center justify-between">
+                    <span>Connect Gmail in Settings to send and view emails</span>
+                    <Link href="/settings/profile" className="font-medium hover:underline">
+                      Connect Gmail
+                    </Link>
+                  </div>
+                ) : (
+                  <>
+                    {/* Compose form */}
+                    {showComposeEmail && (
+                      <div className="mb-4 p-4 border border-gray-200 rounded-lg bg-gray-50 space-y-3">
+                        <div>
+                          <label className="block text-xs font-medium text-gray-500 mb-1">To</label>
+                          <input
+                            type="email"
+                            value={emailTo}
+                            onChange={(e) => setEmailTo(e.target.value)}
+                            className="input w-full"
+                            placeholder="recipient@example.com"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-500 mb-1">Subject</label>
+                          <input
+                            type="text"
+                            value={emailSubject}
+                            onChange={(e) => setEmailSubject(e.target.value)}
+                            className="input w-full"
+                            placeholder="Subject line"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-500 mb-1">Message</label>
+                          <textarea
+                            value={emailBody}
+                            onChange={(e) => setEmailBody(e.target.value)}
+                            className="input w-full"
+                            rows={5}
+                            placeholder="Type your message..."
+                          />
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={async () => {
+                              if (!emailTo.trim() || !emailSubject.trim() || !emailBody.trim()) return;
+                              setSendingEmail(true);
+                              try {
+                                await gmailAPI.send({
+                                  leadId,
+                                  to: emailTo,
+                                  subject: emailSubject,
+                                  bodyText: emailBody,
+                                });
+                                setShowComposeEmail(false);
+                                setEmailTo('');
+                                setEmailSubject('');
+                                setEmailBody('');
+                                // Refresh emails
+                                const res = await gmailAPI.emails(leadId);
+                                setEmails(res.data || []);
+                              } catch (error) {
+                                console.error('Failed to send email:', error);
+                                alert('Failed to send email');
+                              } finally {
+                                setSendingEmail(false);
+                              }
+                            }}
+                            disabled={sendingEmail || !emailTo.trim() || !emailSubject.trim() || !emailBody.trim()}
+                            className="btn btn-primary btn-sm"
+                          >
+                            {sendingEmail ? 'Sending...' : 'Send Email'}
+                          </button>
+                          <button
+                            onClick={() => setShowComposeEmail(false)}
+                            className="btn btn-secondary btn-sm"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Email thread */}
+                    {emails.length > 0 ? (
+                      <div className="space-y-3">
+                        {emails.map((email: any) => (
+                          <div
+                            key={email.id}
+                            className={`p-3 rounded-lg cursor-pointer transition-colors ${
+                              email.direction === 'outbound'
+                                ? 'bg-primary-50 ml-8 hover:bg-primary-100'
+                                : 'bg-gray-100 mr-8 hover:bg-gray-200'
+                            }`}
+                            onClick={() => setExpandedEmailId(expandedEmailId === email.id ? null : email.id)}
+                          >
+                            <div className="flex justify-between items-start mb-1">
+                              <div className="text-xs text-gray-500">
+                                <span className={`font-medium ${email.direction === 'outbound' ? 'text-primary-700' : 'text-gray-700'}`}>
+                                  {email.direction === 'outbound' ? 'Sent' : 'Received'}
+                                </span>
+                                {' · '}
+                                {email.direction === 'outbound' ? `To: ${email.toAddress}` : `From: ${email.fromAddress}`}
+                              </div>
+                              <span className="text-xs text-gray-400">
+                                {format(new Date(email.sentAt), 'MMM d, h:mm a')}
+                              </span>
+                            </div>
+                            <div className="text-sm font-medium text-gray-800 mb-1">{email.subject}</div>
+                            {expandedEmailId === email.id ? (
+                              <div className="text-sm text-gray-700 whitespace-pre-wrap mt-2 pt-2 border-t border-gray-200">
+                                {email.bodyText}
+                              </div>
+                            ) : (
+                              <div className="text-sm text-gray-500 truncate">
+                                {email.bodyText?.substring(0, 120)}
+                                {email.bodyText?.length > 120 ? '...' : ''}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-gray-400 text-center py-4">
+                        No emails for this lead yet. Click "Compose Email" to send one, or sync your inbox in Settings.
+                      </p>
+                    )}
+                  </>
                 )}
               </div>
             </div>

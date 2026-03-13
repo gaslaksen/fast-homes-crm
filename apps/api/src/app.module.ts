@@ -14,6 +14,7 @@ import { PhotosModule } from './photos/photos.module';
 import { PipelineModule } from './pipeline/pipeline.module';
 import { VapiModule } from './vapi/vapi.module';
 import { CallsModule } from './calls/calls.module';
+import { GmailModule } from './gmail/gmail.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { CallsModule } from './calls/calls.module';
     PipelineModule,
     VapiModule,
     CallsModule,
+    GmailModule,
   ],
 })
 export class AppModule {}

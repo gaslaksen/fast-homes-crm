@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
-import { settingsAPI } from '@/lib/api';
+import { useSearchParams } from 'next/navigation';
+import { settingsAPI, gmailAPI } from '@/lib/api';
 import AppNav from '@/components/AppNav';
 import Avatar from '@/components/Avatar';
 
@@ -12,7 +13,11 @@ export default function ProfilePage() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [preview, setPreview] = useState<string | null>(null);
+  const [gmailStatus, setGmailStatus] = useState<{ connected: boolean; email?: string } | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const searchParams = useSearchParams();
 
   useEffect(() => {
     settingsAPI.getProfile().then(res => {
@@ -20,7 +25,11 @@ export default function ProfilePage() {
       setFirstName(res.data.firstName);
       setLastName(res.data.lastName);
     }).catch(console.error);
+    gmailAPI.status().then(res => setGmailStatus(res.data)).catch(() => {});
   }, []);
+
+  // Show flash message if just connected/errored
+  const gmailParam = searchParams.get('gmail');
 
   const handleSave = async () => {
     setSaving(true);
@@ -167,6 +176,83 @@ export default function ProfilePage() {
             </button>
             {saved && <span className="text-sm text-green-600 font-medium">Saved</span>}
           </div>
+        </div>
+
+        {/* Gmail Integration */}
+        <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
+          <h2 className="font-semibold text-gray-900">Gmail Integration</h2>
+          {gmailParam === 'connected' && (
+            <div className="px-3 py-2 rounded-lg bg-green-50 border border-green-200 text-sm text-green-700">
+              Gmail connected successfully!
+            </div>
+          )}
+          {gmailParam === 'error' && (
+            <div className="px-3 py-2 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700">
+              Failed to connect Gmail. Please try again.
+            </div>
+          )}
+          {gmailStatus?.connected ? (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-green-100 text-green-800 text-xs font-medium">
+                  Connected
+                </span>
+                <span className="text-sm text-gray-700">{gmailStatus.email}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={async () => {
+                    setSyncing(true);
+                    try {
+                      const res = await gmailAPI.sync();
+                      alert(`Synced ${res.data.imported} emails from Gmail`);
+                    } catch {
+                      alert('Failed to sync inbox');
+                    } finally {
+                      setSyncing(false);
+                    }
+                  }}
+                  disabled={syncing}
+                  className="px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                >
+                  {syncing ? 'Syncing...' : 'Sync Inbox'}
+                </button>
+                <button
+                  onClick={async () => {
+                    if (!confirm('Disconnect Gmail? You can reconnect anytime.')) return;
+                    setDisconnecting(true);
+                    try {
+                      await gmailAPI.disconnect();
+                      setGmailStatus({ connected: false });
+                    } catch {
+                      alert('Failed to disconnect');
+                    } finally {
+                      setDisconnecting(false);
+                    }
+                  }}
+                  disabled={disconnecting}
+                  className="px-3 py-1.5 border border-gray-200 text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                >
+                  {disconnecting ? 'Disconnecting...' : 'Disconnect'}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <p className="text-sm text-gray-500">
+                Connect your Gmail account to send and receive emails directly from the CRM.
+              </p>
+              <button
+                onClick={() => {
+                  const token = localStorage.getItem('auth_token');
+                  window.location.href = `${gmailAPI.getAuthUrl()}?token=${token}`;
+                }}
+                className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                Connect Gmail
+              </button>
+            </div>
+          )}
         </div>
       </main>
     </div>

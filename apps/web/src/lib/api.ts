@@ -239,6 +239,17 @@ export const photosAPI = {
     api.patch(`/leads/${leadId}/photos/primary`, { photoId }),
 };
 
+// Gmail API
+export const gmailAPI = {
+  status: () => api.get('/gmail/status'),
+  send: (data: { leadId?: string; to: string; subject: string; bodyHtml?: string; bodyText: string }) =>
+    api.post('/gmail/send', data),
+  sync: () => api.post('/gmail/sync'),
+  emails: (leadId: string) => api.get(`/gmail/emails/${leadId}`),
+  disconnect: () => api.delete('/gmail/disconnect'),
+  getAuthUrl: () => `${API_URL}/auth/gmail`,
+};
+
 export const dispoAPI = {
   getSummary: (leadId: string) => api.get(`/leads/${leadId}/dispo`),
   updateDealNumbers: (leadId: string, data: { arv?: number | null; repairCosts?: number | null; askingPrice?: number | null }) =>
