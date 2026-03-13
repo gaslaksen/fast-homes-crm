@@ -1416,9 +1416,10 @@ export default function LeadDetailPage() {
                                 // Refresh emails
                                 const res = await gmailAPI.emails(leadId);
                                 setEmails(res.data || []);
-                              } catch (error) {
+                              } catch (error: any) {
                                 console.error('Failed to send email:', error);
-                                alert('Failed to send email');
+                                const msg = error?.response?.data?.message || error?.message || 'Unknown error';
+                                alert('Failed to send email: ' + msg);
                               } finally {
                                 setSendingEmail(false);
                               }
