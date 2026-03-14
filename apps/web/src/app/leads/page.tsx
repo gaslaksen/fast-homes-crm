@@ -205,6 +205,63 @@ function SortHeader({
   );
 }
 
+function MobileLeadCard({ lead, spread: s }: { lead: any; spread: number | null }) {
+  const tier = lead._tier as 1 | 2 | 3;
+  const hoursAgo = lead.lastTouchedAt
+    ? Math.round((Date.now() - new Date(lead.lastTouchedAt).getTime()) / 3600000)
+    : null;
+  const stale = hoursAgo !== null && hoursAgo > 72 && !INACTIVE_STATUSES.includes(lead.status);
+
+  return (
+    <Link
+      href={`/leads/${lead.id}`}
+      className={`bg-white rounded-xl border border-gray-200 p-3 flex flex-col gap-2 active:bg-gray-50 ${
+        lead.status === 'DEAD' ? 'opacity-60' : ''
+      }`}
+    >
+      {/* Row 1: Photo + address */}
+      <div className="flex items-start gap-3">
+        <PropertyPhoto
+          src={lead.primaryPhoto}
+          scoreBand={lead.scoreBand}
+          address={lead.propertyAddress}
+          size="sm"
+        />
+        <div className="min-w-0 flex-1">
+          <div className="font-semibold text-sm text-gray-900 truncate">{lead.propertyAddress}</div>
+          <div className="text-xs text-gray-400 truncate">
+            {lead.propertyCity}, {lead.propertyState} · {lead.sellerFirstName} {lead.sellerLastName}
+          </div>
+        </div>
+      </div>
+      {/* Row 2: Badges + ARV */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <TierBadge tier={tier} />
+          <StatusBadge status={lead.status} />
+        </div>
+        {lead.arv ? (
+          <span className="text-xs font-semibold text-green-600">ARV ${(lead.arv / 1000).toFixed(0)}k</span>
+        ) : (
+          <span className="text-xs text-gray-300">—</span>
+        )}
+      </div>
+      {/* Row 3: Score + touched */}
+      <div className="flex items-center justify-between">
+        <ScorePill band={lead.scoreBand} score={lead.totalScore} />
+        {hoursAgo !== null ? (
+          <span className={`text-xs ${stale ? 'text-amber-600 font-semibold' : 'text-gray-400'}`}>
+            {hoursAgo < 24 ? `${hoursAgo}h ago` : `${Math.round(hoursAgo / 24)}d ago`}
+            {stale ? ' ⚠' : ''}
+          </span>
+        ) : (
+          <span className="text-xs text-gray-300">—</span>
+        )}
+      </div>
+    </Link>
+  );
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 function LeadsPageInner() {
@@ -426,7 +483,7 @@ function LeadsPageInner() {
   return (
     <div className="min-h-screen bg-gray-50">
       <AppNav />
-      <main className="max-w-screen-2xl mx-auto px-6 py-6 space-y-4">
+      <main className="max-w-screen-2xl mx-auto px-3 py-4 sm:px-6 sm:py-6 pb-16 md:pb-0 space-y-4">
 
         {/* Page Header */}
         <div className="flex items-center justify-between">
@@ -500,42 +557,46 @@ function LeadsPageInner() {
 
           {/* Tier quick filters */}
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs text-gray-400 font-medium">Tier:</span>
-            <FilterChip
-              label="All active"
-              active={tierFilter === 0}
-              onClick={() => { setTierFilter(0); setShowInactive(false); }}
-            />
-            {([1, 2, 3] as const).map(t => {
-              const cfg = TIER_CONFIG[t];
-              return (
-                <FilterChip
-                  key={t}
-                  label={`${cfg.emoji} ${cfg.label}${tierCounts[t] ? ` (${tierCounts[t]})` : ''}`}
-                  active={tierFilter === t}
-                  activeClass={cfg.chipActive}
-                  onClick={() => {
-                    setTierFilter(tierFilter === t ? 0 : t);
-                    if (t === 3) setShowInactive(true); // Tier 3 = show dead
-                  }}
-                />
-              );
-            })}
-
-            <span className="text-gray-200 select-none">|</span>
-
-            <span className="text-xs text-gray-400 font-medium">Score:</span>
-            <FilterChip label="All" active={!bandFilter} onClick={() => setBandFilter('')} />
-            {['STRIKE_ZONE', 'HOT', 'WORKABLE', 'DEAD_COLD'].map(band => (
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-gray-400 font-medium">Tier:</span>
               <FilterChip
-                key={band}
-                label={`${BAND_LABELS[band]}${bandCounts[band] ? ` (${bandCounts[band]})` : ''}`}
-                active={bandFilter === band}
-                onClick={() => setBandFilter(bandFilter === band ? '' : band)}
+                label="All active"
+                active={tierFilter === 0}
+                onClick={() => { setTierFilter(0); setShowInactive(false); }}
               />
-            ))}
+              {([1, 2, 3] as const).map(t => {
+                const cfg = TIER_CONFIG[t];
+                return (
+                  <FilterChip
+                    key={t}
+                    label={`${cfg.emoji} ${cfg.label}${tierCounts[t] ? ` (${tierCounts[t]})` : ''}`}
+                    active={tierFilter === t}
+                    activeClass={cfg.chipActive}
+                    onClick={() => {
+                      setTierFilter(tierFilter === t ? 0 : t);
+                      if (t === 3) setShowInactive(true); // Tier 3 = show dead
+                    }}
+                  />
+                );
+              })}
+            </div>
 
-            <span className="text-gray-200 select-none">|</span>
+            <span className="text-gray-200 select-none hidden sm:inline">|</span>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-gray-400 font-medium">Score:</span>
+              <FilterChip label="All" active={!bandFilter} onClick={() => setBandFilter('')} />
+              {['STRIKE_ZONE', 'HOT', 'WORKABLE', 'DEAD_COLD'].map(band => (
+                <FilterChip
+                  key={band}
+                  label={`${BAND_LABELS[band]}${bandCounts[band] ? ` (${bandCounts[band]})` : ''}`}
+                  active={bandFilter === band}
+                  onClick={() => setBandFilter(bandFilter === band ? '' : band)}
+                />
+              ))}
+            </div>
+
+            <span className="text-gray-200 select-none hidden sm:inline">|</span>
             <button
               onClick={() => setShowInactive(v => !v)}
               className={`px-3 py-1 rounded-full text-xs font-medium border transition-all ${
@@ -669,7 +730,16 @@ function LeadsPageInner() {
         ) : viewMode === 'table' ? (
 
           /* ─── TABLE VIEW ─── */
-          <div className="overflow-x-auto -mx-6 px-6 md:mx-0 md:px-0">
+          <>
+          {/* Mobile card list */}
+          <div className="block md:hidden space-y-2">
+            {filtered.map(lead => (
+              <MobileLeadCard key={lead.id} lead={lead} spread={spread(lead)} />
+            ))}
+          </div>
+
+          {/* Desktop table */}
+          <div className="hidden md:block overflow-x-auto -mx-6 px-6 md:mx-0 md:px-0">
           <div className="bg-white rounded-xl border border-gray-200 overflow-hidden min-w-[900px]">
             <div className="grid grid-cols-[auto_44px_2fr_110px_68px_72px_72px_72px_80px_72px] gap-3 px-4 py-2.5 border-b border-gray-100 bg-gray-50/80">
               <input
@@ -780,6 +850,7 @@ function LeadsPageInner() {
             </div>
           </div>
           </div>
+          </>
 
         ) : (
 

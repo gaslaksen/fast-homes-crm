@@ -13,6 +13,13 @@ const NAV_ITEMS = [
   { label: 'Settings',  href: '/settings' },
 ];
 
+const BOTTOM_NAV_ITEMS = [
+  { label: 'Dashboard', href: '/dashboard', icon: '📊' },
+  { label: 'Leads',     href: '/leads',     icon: '🏠' },
+  { label: 'Team',      href: '/settings/team', icon: '👥' },
+  { label: 'Settings',  href: '/settings',  icon: '⚙️' },
+];
+
 export default function AppNav() {
   const pathname = usePathname();
   const router = useRouter();
@@ -50,6 +57,7 @@ export default function AppNav() {
   const userName = user ? `${user.firstName} ${user.lastName}` : '';
 
   return (
+    <>
     <header className="bg-white border-b border-gray-200 sticky top-0 z-50">
       <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 flex items-center justify-between h-14">
 
@@ -172,5 +180,25 @@ export default function AppNav() {
         </div>
       )}
     </header>
+
+    {/* Mobile bottom nav */}
+    <nav className="fixed bottom-0 left-0 right-0 z-50 md:hidden bg-white border-t border-gray-200 flex items-stretch h-16 safe-area-inset-bottom">
+      {BOTTOM_NAV_ITEMS.map(({ label, href, icon }) => {
+        const active = isActive(href);
+        return (
+          <Link
+            key={href}
+            href={href}
+            className={`flex-1 flex flex-col items-center justify-center gap-0.5 text-[11px] font-medium transition-colors ${
+              active ? 'text-blue-600' : 'text-gray-400 hover:text-gray-700'
+            }`}
+          >
+            <span className="text-xl leading-none">{icon}</span>
+            <span>{label}</span>
+          </Link>
+        );
+      })}
+    </nav>
+    </>
   );
 }
