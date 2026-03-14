@@ -32,4 +32,4 @@ RUN pnpm --filter @fast-homes/shared build
 RUN pnpm --filter @fast-homes/api build
 
 EXPOSE 3001
-CMD ["sh", "-c", "cd /app/apps/api && npx prisma db push && node dist/main.js"]
+CMD ["sh", "-c", "cd /app/apps/api && npx prisma migrate deploy && node dist/main.js"]

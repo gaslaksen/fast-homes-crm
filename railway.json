@@ -5,7 +5,7 @@
     "buildCommand": "pnpm install && pnpm --filter @fast-homes/shared run build && pnpm --filter @fast-homes/api run prisma:generate && rm -rf apps/api/dist && pnpm --filter @fast-homes/api run build"
   },
   "deploy": {
-    "startCommand": "cd apps/api && npx prisma migrate deploy && cd ../.. && node apps/api/dist/main",
+    "startCommand": "node apps/api/dist/main",
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10
   }
