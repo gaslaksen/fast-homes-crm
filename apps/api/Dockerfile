@@ -25,7 +25,7 @@ COPY apps/api ./apps/api
 RUN cd apps/api && npx prisma generate
 
 # Cache-bust ARG — increment to force a full rebuild on Railway
-ARG CACHE_BUST=3
+ARG CACHE_BUST=4
 
 # Build shared package, then API
 RUN pnpm --filter @fast-homes/shared build
