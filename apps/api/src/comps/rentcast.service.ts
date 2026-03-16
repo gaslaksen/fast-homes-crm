@@ -391,10 +391,13 @@ export class RentCastService {
 
     const seenAddresses = new Set<string>();
     const validComps = comps.filter((c) => {
-      // Must be a confirmed sold property (missing status is OK — some API tiers don't include it)
+      // Status check: RentCast uses "Sold" or "Inactive" for closed sales, "Active"/"Pending" for live listings.
+      // "Inactive" = listing removed from market (most commonly because it sold — verify via lastSaleDate below).
+      // Accept: "Sold", "Inactive" (with lastSaleDate), or missing status.
+      // Reject: "Active", "Pending" — these are not closed sales.
       const status = (c.status || '').toLowerCase();
-      if (status && status !== 'sold') {
-        this.logger.debug(`Skipping comp ${c.formattedAddress} — status="${c.status}" (not sold)`);
+      if (status === 'active' || status === 'pending') {
+        this.logger.debug(`Skipping comp ${c.formattedAddress} — status="${c.status}" (not a closed sale)`);
         return false;
       }
 
