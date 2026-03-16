@@ -51,16 +51,19 @@ interface RentCastProperty {
 }
 
 interface RentCastComparable extends RentCastProperty {
-  status?: string;
-  price?: number;
+  status?: string;          // "Sold" | "Active" | "Pending" — MUST be "Sold" to use as comp
+  price?: number;           // Listing price or AVM estimate — NOT necessarily the sale price
   listingType?: string;
-  listedDate?: string;
-  removedDate?: string;
+  listedDate?: string;      // When listed — NOT a sale date
+  removedDate?: string;     // When removed from MLS — NOT a sale date (could be cancelled/expired)
   lastSeenDate?: string;
   daysOnMarket?: number;
   distance?: number;
   daysOld?: number;
   correlation?: number;
+  // Inherited from RentCastProperty (the real sale data from public records):
+  // lastSaleDate?: string   — ACTUAL recorded sale date — use this for soldDate
+  // lastSalePrice?: number  — ACTUAL recorded sale price — use this for soldPrice
 }
 
 interface RentCastAVMResponse {
@@ -382,15 +385,57 @@ export class RentCastService {
       });
     }
 
-    // ── Filter comps: must have price and sale info ──
+    // ── Filter comps: must be sold, have sale date/price, within 12 months, deduplicated ──
+    const now = new Date();
+    const twelveMonthsAgo = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
+
+    const seenAddresses = new Set<string>();
     const validComps = comps.filter((c) => {
-      const price = c.price || c.lastSalePrice;
-      return price && price > 0;
+      // Must be a confirmed sold property (missing status is OK — some API tiers don't include it)
+      const status = (c.status || '').toLowerCase();
+      if (status && status !== 'sold') {
+        this.logger.debug(`Skipping comp ${c.formattedAddress} — status="${c.status}" (not sold)`);
+        return false;
+      }
+
+      // Must have an actual recorded sale date
+      if (!c.lastSaleDate) {
+        this.logger.debug(`Skipping comp ${c.formattedAddress} — no lastSaleDate`);
+        return false;
+      }
+
+      // Must have a sale price
+      const price = c.lastSalePrice || c.price;
+      if (!price || price <= 0) {
+        this.logger.debug(`Skipping comp ${c.formattedAddress} — no valid price`);
+        return false;
+      }
+
+      // Must be within last 12 months
+      const saleDate = new Date(c.lastSaleDate);
+      if (saleDate < twelveMonthsAgo) {
+        this.logger.debug(`Skipping comp ${c.formattedAddress} — sold ${c.lastSaleDate} (>12 months ago)`);
+        return false;
+      }
+
+      // Deduplicate by address
+      const addrKey = (c.formattedAddress || c.addressLine1 || '').toLowerCase().trim();
+      if (addrKey && seenAddresses.has(addrKey)) {
+        this.logger.debug(`Skipping duplicate comp: ${c.formattedAddress}`);
+        return false;
+      }
+      if (addrKey) seenAddresses.add(addrKey);
+
+      return true;
     });
 
+    const skippedCount = comps.length - validComps.length;
     this.logger.log(
-      `RentCast returned ${comps.length} comps, ${validComps.length} valid — ` +
-      `ARV: $${arv.toLocaleString()} (range: $${arvLow.toLocaleString()} - $${arvHigh.toLocaleString()})`,
+      `RentCast comp filtering: ${comps.length} raw → ${validComps.length} valid (${skippedCount} skipped — non-sold, no date, too old, or duplicate)`,
+    );
+
+    this.logger.log(
+      `RentCast ARV: $${arv.toLocaleString()} (range: $${arvLow.toLocaleString()} - $${arvHigh.toLocaleString()})`,
     );
 
     // ── Clear old RentCast comps for this lead (keep manual/analysis comps) ──
@@ -401,9 +446,13 @@ export class RentCastService {
     // ── Save new comps ──
     let savedCount = 0;
     for (const comp of validComps) {
-      const soldPrice = comp.price || comp.lastSalePrice || 0;
-      const soldDate = comp.removedDate || comp.lastSaleDate || comp.listedDate;
-      if (!soldDate) continue;
+      // Use actual recorded sale price — lastSalePrice is from public records
+      // Fall back to comp.price only if we have a confirmed lastSaleDate (status=Sold)
+      const soldPrice = comp.lastSalePrice || comp.price || 0;
+
+      // Use only the actual recorded sale date — never removedDate or listedDate
+      const soldDate = comp.lastSaleDate;
+      if (!soldDate || soldPrice <= 0) continue; // double-safety check
 
       // Calculate distance
       let distance = comp.distance || 0;
@@ -415,6 +464,9 @@ export class RentCastService {
 
       // Build feature notes
       const featureNotes: string[] = [];
+      if (comp.status && comp.status.toLowerCase() !== 'sold') {
+        featureNotes.push(`Status: ${comp.status}`); // shouldn't reach here after filter, but safety
+      }
       if (comp.features?.pool) featureNotes.push('Has pool');
       if (comp.features?.garage) featureNotes.push(`Garage (${comp.features.garageSpaces || '?'} spaces)`);
       if (comp.features?.fireplace) featureNotes.push('Fireplace');
