@@ -96,6 +96,34 @@ interface Analysis {
   dealType: string;
   assignmentFee: number;
   maoPercent: number;
+  // Phase 1: Three-model valuation
+  costApproachValue?: number;
+  costApproachLandValue?: number;
+  costApproachBuildCost?: number;
+  incomeApproachValue?: number;
+  marketRent?: number;
+  grossRentMultiplier?: number;
+  triangulatedArv?: number;
+  triangulatedArvLow?: number;
+  triangulatedArvHigh?: number;
+  methodsUsed?: Record<string, number>;
+  methodDivergence?: number;
+  neighborhoodCeiling?: number;
+  neighborhoodCeilingBreached?: boolean;
+  confidenceTier?: string;
+  // Phase 2: Risk flags
+  riskAdjustedArv?: number;
+  riskFlags?: string[];
+  sellerMotivationTier?: string;
+  sellerMotivationMaoPercent?: number;
+  conditionTier?: string;
+  repairCostLow?: number;
+  repairCostHigh?: number;
+  negotiationRangeLow?: number;
+  negotiationRangeHigh?: number;
+  functionalObsolescenceAdj?: number;
+  buyerPoolReduction?: number;
+  landUtilityReduction?: number;
   comps: Comp[];
   lead: Lead;
 }
@@ -198,7 +226,7 @@ export default function CompsAnalysisPage() {
         setDealArv(full.data.arvEstimate || full.data.lead?.arv || 0);
         setRepairCosts(full.data.repairCosts || 0);
         setAssignmentFee(full.data.assignmentFee || 15000);
-        setMaoPercent(full.data.maoPercent || 70);
+        setMaoPercent(full.data.sellerMotivationMaoPercent || full.data.maoPercent || 70);
         setRepairLevel(full.data.repairFinishLevel || 'flip');
         setSelectedRepairs(full.data.repairItems || []);
       } else {
@@ -1220,6 +1248,93 @@ export default function CompsAnalysisPage() {
                   </div>
                 </div>
 
+                {/* Triangulated ARV — Three-Model Valuation */}
+                {analysis.triangulatedArv && (
+                  <div className="bg-gradient-to-r from-purple-50 to-indigo-50 border border-purple-200 rounded-2xl p-5 mb-5">
+                    <div className="flex items-center justify-between mb-3">
+                      <div>
+                        <div className="text-xs font-semibold text-purple-700 uppercase tracking-wide mb-1">Triangulated ARV</div>
+                        <div className="text-4xl font-bold text-purple-700">${(analysis.triangulatedArv).toLocaleString()}</div>
+                        {analysis.triangulatedArvLow && analysis.triangulatedArvHigh && (
+                          <div className="text-sm text-purple-600 mt-1">
+                            Range: ${analysis.triangulatedArvLow.toLocaleString()} – ${analysis.triangulatedArvHigh.toLocaleString()}
+                          </div>
+                        )}
+                      </div>
+                      {analysis.confidenceTier && (
+                        <span className={`text-sm px-3 py-1.5 rounded-full font-semibold ${
+                          analysis.confidenceTier === 'High' ? 'bg-green-100 text-green-700' :
+                          analysis.confidenceTier === 'Medium' ? 'bg-yellow-100 text-yellow-700' :
+                          'bg-red-100 text-red-700'
+                        }`}>
+                          {analysis.confidenceTier} Confidence
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Method breakdown */}
+                    {analysis.methodsUsed && Object.keys(analysis.methodsUsed).length > 1 && (
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3">
+                        {Object.entries(analysis.methodsUsed).map(([method, value]) => (
+                          <div key={method} className="bg-white/70 rounded-lg p-2 text-center">
+                            <div className="text-xs text-purple-500 uppercase tracking-wide">{method}</div>
+                            <div className="text-sm font-bold text-purple-800">${Number(value).toLocaleString()}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Divergence warning */}
+                    {analysis.methodDivergence != null && analysis.methodDivergence > 10 && (
+                      <div className="mt-3 flex items-center gap-2 text-amber-700 bg-amber-50 rounded-lg px-3 py-2 text-xs">
+                        <span>&#9888;&#65039;</span>
+                        <span>Valuation methods diverge by {analysis.methodDivergence.toFixed(0)}% — review data quality before making an offer</span>
+                      </div>
+                    )}
+
+                    {/* Neighborhood ceiling breach */}
+                    {analysis.neighborhoodCeilingBreached && analysis.neighborhoodCeiling && (
+                      <div className="mt-2 flex items-center gap-2 text-red-700 bg-red-50 rounded-lg px-3 py-2 text-xs">
+                        <span>&#128683;</span>
+                        <span>ARV exceeds neighborhood ceiling of ${analysis.neighborhoodCeiling.toLocaleString()} — top 3 comps suggest this may be optimistic</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Risk-Adjusted ARV */}
+                {analysis.riskAdjustedArv && analysis.riskAdjustedArv !== analysis.triangulatedArv && (
+                  <div className="bg-orange-50 border border-orange-200 rounded-2xl p-5 mb-5">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="text-xs font-semibold text-orange-700 uppercase tracking-wide mb-1">Risk-Adjusted ARV</div>
+                        <div className="text-4xl font-bold text-orange-700">${analysis.riskAdjustedArv.toLocaleString()}</div>
+                        <div className="text-xs text-orange-600 mt-1">After functional obsolescence, buyer pool, and land utility deductions</div>
+                      </div>
+                      {analysis.riskAdjustedArv && analysis.triangulatedArv && (
+                        <div className="text-right">
+                          <div className="text-xs text-orange-500">Deduction</div>
+                          <div className="text-xl font-bold text-orange-600">
+                            -${(analysis.triangulatedArv - analysis.riskAdjustedArv).toLocaleString()}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Risk flags */}
+                    {analysis.riskFlags && (analysis.riskFlags as string[]).length > 0 && (
+                      <div className="mt-3 space-y-1.5">
+                        {(analysis.riskFlags as string[]).map((flag, i) => (
+                          <div key={i} className="flex items-start gap-2 text-xs text-orange-800 bg-orange-100 rounded-lg px-3 py-1.5">
+                            <span className="shrink-0">&#9888;&#65039;</span>
+                            <span>{flag}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* ATTOM independent validation strip */}
                 {attomData?.attomAvm && (
                   <div className="mb-5 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3">
@@ -1279,6 +1394,40 @@ export default function CompsAnalysisPage() {
                       : '—'
                   } />
                 </div>
+
+                {/* Valuation Method Breakdown */}
+                {(analysis.costApproachValue || analysis.incomeApproachValue) && (
+                  <div className="mt-4">
+                    <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Valuation Methods</div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      {analysis.arvEstimate && (
+                        <div className="bg-blue-50 rounded-xl p-3 text-center border border-blue-100">
+                          <div className="text-xs text-blue-500 font-medium uppercase tracking-wide">Comps</div>
+                          <div className="text-lg font-bold text-blue-700 mt-1">${analysis.arvEstimate.toLocaleString()}</div>
+                          <div className="text-xs text-blue-400">Weight: 50%</div>
+                        </div>
+                      )}
+                      {analysis.costApproachValue && (
+                        <div className="bg-purple-50 rounded-xl p-3 text-center border border-purple-100">
+                          <div className="text-xs text-purple-500 font-medium uppercase tracking-wide">Cost Approach</div>
+                          <div className="text-lg font-bold text-purple-700 mt-1">${analysis.costApproachValue.toLocaleString()}</div>
+                          {analysis.costApproachLandValue && (
+                            <div className="text-xs text-purple-400">Land: ${analysis.costApproachLandValue.toLocaleString()}</div>
+                          )}
+                        </div>
+                      )}
+                      {analysis.incomeApproachValue && (
+                        <div className="bg-green-50 rounded-xl p-3 text-center border border-green-100">
+                          <div className="text-xs text-green-500 font-medium uppercase tracking-wide">Income</div>
+                          <div className="text-lg font-bold text-green-700 mt-1">${analysis.incomeApproachValue.toLocaleString()}</div>
+                          {analysis.marketRent && (
+                            <div className="text-xs text-green-400">${analysis.marketRent.toLocaleString()}/mo × {analysis.grossRentMultiplier} GRM</div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -1475,6 +1624,11 @@ export default function CompsAnalysisPage() {
                         </button>
                       ))}
                     </div>
+                    {(analysis?.repairCostLow != null || analysis?.repairCostHigh != null) && (
+                      <div className="text-xs text-gray-400 mt-1">
+                        Range: ${(analysis?.repairCostLow || 0).toLocaleString()} – ${(analysis?.repairCostHigh || 0).toLocaleString()}
+                      </div>
+                    )}
                   </div>
 
                   <div>
@@ -1561,6 +1715,35 @@ export default function CompsAnalysisPage() {
                           </span>
                         ) : null}
                       </div>
+                    </div>
+                  )}
+
+                  {/* Negotiation Range */}
+                  {(analysis?.negotiationRangeLow || analysis?.negotiationRangeHigh) && (
+                    <div className="pt-3 border-t border-gray-100">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-gray-600 font-medium">Negotiation Range</span>
+                        <span className="font-bold text-blue-700">
+                          ${(analysis.negotiationRangeLow || 0).toLocaleString()} – ${(analysis.negotiationRangeHigh || 0).toLocaleString()}
+                        </span>
+                      </div>
+                      <div className="text-xs text-gray-400 mt-0.5">90% to 102% of MAO — your offer window</div>
+                    </div>
+                  )}
+
+                  {/* Seller Motivation Tier */}
+                  {analysis?.sellerMotivationTier && (
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-gray-600">Seller Motivation</span>
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
+                        analysis.sellerMotivationTier === 'foreclosure' ? 'bg-red-100 text-red-700' :
+                        analysis.sellerMotivationTier === 'severe_distress' ? 'bg-orange-100 text-orange-700' :
+                        analysis.sellerMotivationTier === 'distressed' ? 'bg-amber-100 text-amber-700' :
+                        analysis.sellerMotivationTier === 'minor_distress' ? 'bg-yellow-100 text-yellow-700' :
+                        'bg-gray-100 text-gray-600'
+                      }`}>
+                        {analysis.sellerMotivationTier.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
+                      </span>
                     </div>
                   )}
                 </div>

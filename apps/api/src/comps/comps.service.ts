@@ -60,13 +60,11 @@ export class CompsService {
       arv: number; arvLow?: number; arvHigh?: number; confidence: number; compsCount: number; source: string;
     };
 
-    // 1) Try RentCast
+    // 1) Try RentCast with tiered radius expansion
     if (this.rentCastService.isConfigured) {
       try {
         this.logger.log(`Fetching comps via RentCast for lead ${leadId}`);
-        compsResult = await this.rentCastService.fetchAndSaveComps(leadId, address, {
-          forceRefresh: options?.forceRefresh,
-        });
+        compsResult = await this.fetchWithTieredRadius(leadId, address, options);
       } catch (error) {
         this.logger.error(`RentCast fetch failed, trying fallbacks: ${error.message}`);
         compsResult = await this.fetchCompsWithFallback(leadId, address);
@@ -79,6 +77,37 @@ export class CompsService {
     const attom = await attomPromise;
 
     return { ...compsResult, attom };
+  }
+
+  /**
+   * Tiered radius expansion: if fewer than 3 comps are returned,
+   * automatically widen the search radius up to 3 miles.
+   */
+  private async fetchWithTieredRadius(
+    leadId: string,
+    address: { street: string; city: string; state: string; zip: string },
+    options?: { forceRefresh?: boolean },
+  ) {
+    const radiusTiers = [0.5, 1.0, 2.0, 3.0]; // miles
+    let result: { arv: number; arvLow?: number; arvHigh?: number; confidence: number; compsCount: number; source: string } | null = null;
+    let compsCount = 0;
+
+    for (const radius of radiusTiers) {
+      try {
+        result = await this.rentCastService.fetchAndSaveComps(leadId, address, {
+          forceRefresh: options?.forceRefresh || radius > radiusTiers[0], // always force on expansion
+          maxRadius: radius,
+        });
+        compsCount = result.compsCount;
+        this.logger.log(`Tiered comp search: radius=${radius}mi returned ${compsCount} comps`);
+        if (compsCount >= 3) break; // enough comps found — stop expanding
+      } catch (err) {
+        this.logger.warn(`Comp search at radius=${radius}mi failed: ${err.message}`);
+      }
+    }
+
+    if (result) return result;
+    return this.createPlaceholderComps(leadId, address);
   }
 
   private async fetchCompsWithFallback(
@@ -372,5 +401,72 @@ export class CompsService {
     }
 
     return maxScore > 0 ? Math.round((score / maxScore) * 100) : 0;
+  }
+
+  /**
+   * Calculate zip-code $/sqft baseline from local comps and other leads in same zip.
+   */
+  async getZipCodeBaseline(leadId: string): Promise<{
+    medianPricePerSqft: number;
+    sampleSize: number;
+    source: string;
+  } | null> {
+    const lead = await this.prisma.lead.findUnique({
+      where: { id: leadId },
+      select: { propertyZip: true },
+    });
+    if (!lead?.propertyZip) return null;
+
+    const priceSqftValues: number[] = [];
+
+    // 1) Comps for this lead with both soldPrice and sqft
+    const comps = await this.prisma.comp.findMany({
+      where: { leadId },
+      select: { soldPrice: true, sqft: true },
+    });
+    for (const c of comps) {
+      if (c.soldPrice > 0 && c.sqft && c.sqft > 0) {
+        priceSqftValues.push(c.soldPrice / c.sqft);
+      }
+    }
+
+    // 2) Other leads in the same zip with arv + sqft
+    const zipLeads = await this.prisma.lead.findMany({
+      where: {
+        propertyZip: lead.propertyZip,
+        id: { not: leadId },
+        arv: { not: null, gt: 0 },
+        sqft: { not: null, gt: 0 },
+      },
+      select: { arv: true, sqft: true },
+    });
+    for (const l of zipLeads) {
+      if (l.arv && l.sqft && l.sqft > 0) {
+        priceSqftValues.push(l.arv / l.sqft);
+      }
+    }
+
+    if (priceSqftValues.length < 3) {
+      this.logger.log(`Zip baseline for ${lead.propertyZip}: only ${priceSqftValues.length} data points (need 3+)`);
+      return null;
+    }
+
+    // Calculate median
+    priceSqftValues.sort((a, b) => a - b);
+    const mid = Math.floor(priceSqftValues.length / 2);
+    const median = priceSqftValues.length % 2 === 0
+      ? (priceSqftValues[mid - 1] + priceSqftValues[mid]) / 2
+      : priceSqftValues[mid];
+
+    const source = zipLeads.length > 0 ? 'local_comps+zip_leads' : 'local_comps';
+    this.logger.log(
+      `Zip baseline for ${lead.propertyZip}: $${Math.round(median)}/sqft from ${priceSqftValues.length} data points (${source})`,
+    );
+
+    return {
+      medianPricePerSqft: Math.round(median * 100) / 100,
+      sampleSize: priceSqftValues.length,
+      source,
+    };
   }
 }

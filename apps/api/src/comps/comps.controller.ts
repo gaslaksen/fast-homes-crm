@@ -87,6 +87,11 @@ export class CompsController {
     return this.compsService.getComps(leadId);
   }
 
+  @Get('zip-baseline')
+  async getZipBaseline(@Param('leadId') leadId: string) {
+    return this.compsService.getZipCodeBaseline(leadId);
+  }
+
   /** Fetch/refresh ATTOM enrichment for a lead's subject property */
   @Post('attom-enrich')
   async attomEnrich(
