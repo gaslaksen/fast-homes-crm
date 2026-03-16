@@ -141,6 +141,14 @@ export class CompAnalysisController {
     return this.compAnalysisService.analyzePhotos(analysisId, photos);
   }
 
+  @Post(':analysisId/risk-flags')
+  async assessRiskFlags(
+    @Param('analysisId') analysisId: string,
+    @Body() body: { functionalObsolescenceAdj?: number; buyerPoolReduction?: number; landUtilityReduction?: number },
+  ) {
+    return this.compAnalysisService.assessRiskFlags(analysisId, body);
+  }
+
   @Post(':analysisId/cost-approach')
   async calculateCostApproach(@Param('analysisId') analysisId: string) {
     return this.compAnalysisService.calculateCostApproach(analysisId);

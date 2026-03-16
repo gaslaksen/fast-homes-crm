@@ -27,6 +27,22 @@ const DEFAULT_ADJUSTMENTS: AdjustmentConfig = {
   annualAppreciationRate: 0.04,
 };
 
+const CONDITION_REPAIR_RATES: Record<string, { low: number; high: number; label: string }> = {
+  move_in_ready:  { low: 0,   high: 10,  label: 'Move-In Ready' },
+  light_cosmetic: { low: 15,  high: 30,  label: 'Light Cosmetic Rehab' },
+  moderate_rehab: { low: 30,  high: 60,  label: 'Moderate Rehab' },
+  heavy_rehab:    { low: 60,  high: 100, label: 'Heavy Rehab' },
+  full_gut:       { low: 100, high: 150, label: 'Full Gut Renovation' },
+};
+
+const MOTIVATION_TIERS: Record<string, { maoPercent: number; label: string }> = {
+  normal:          { maoPercent: 85, label: 'Normal Sale' },
+  minor_distress:  { maoPercent: 75, label: 'Minor Distress' },
+  distressed:      { maoPercent: 65, label: 'Distressed' },
+  severe_distress: { maoPercent: 58, label: 'Severe Distress' },
+  foreclosure:     { maoPercent: 52, label: 'Foreclosure' },
+};
+
 // Condition tiers mapped to $ adjustment relative to "Fair" baseline
 const CONDITION_ADJUSTMENTS: Record<string, number> = {
   'Good':     15000,
@@ -561,6 +577,13 @@ export class CompAnalysisService {
       return null;
     });
 
+    // Auto-assess risk flags after triangulation
+    try {
+      await this.assessRiskFlags(analysisId);
+    } catch (e) {
+      this.logger.warn(`Risk flag assessment failed (non-fatal): ${(e as Error).message}`);
+    }
+
     return { arv, arvLow, arvHigh, pricePerSqft, confidence, method, triangulation };
   }
 
@@ -967,11 +990,15 @@ Respond with ONLY a JSON object: { "estimate": <number>, "breakdown": "<concise 
     });
     if (!analysis) throw new Error('Analysis not found');
 
-    const arv = params.arv || analysis.arvEstimate || 0;
+    // Use riskAdjustedArv if available, else fall back to arvEstimate
+    const arv = params.arv || analysis.riskAdjustedArv || analysis.arvEstimate || 0;
+    const riskAdjustedArv = analysis.riskAdjustedArv ?? null;
     const repairCosts = params.repairCosts ?? analysis.repairCosts ?? 0;
     const assignmentFee = params.assignmentFee ?? analysis.assignmentFee;
-    const maoPercent = params.maoPercent ?? analysis.maoPercent;
+    // Use seller motivation MAO% as default if params.maoPercent not passed
+    const maoPercent = params.maoPercent ?? analysis.sellerMotivationMaoPercent ?? analysis.maoPercent;
     const dealType = params.dealType || analysis.dealType;
+    const sellerMotivationTier = analysis.sellerMotivationTier ?? 'normal';
 
     // MAO = (ARV * maoPercent%) - repairs - assignment fee
     const mao = (arv * maoPercent / 100) - repairCosts - assignmentFee;
@@ -979,6 +1006,9 @@ Respond with ONLY a JSON object: { "estimate": <number>, "breakdown": "<concise 
     const initialOffer = Math.round(mao * 0.95);
     // Sale price to buyer = MAO + assignment fee
     const salePrice = Math.round(mao + assignmentFee);
+    // Negotiation range
+    const negotiationRangeLow = Math.round(mao * 0.90);
+    const negotiationRangeHigh = Math.round(mao * 1.02);
 
     await this.prisma.compAnalysis.update({
       where: { id: analysisId },
@@ -987,17 +1017,27 @@ Respond with ONLY a JSON object: { "estimate": <number>, "breakdown": "<concise 
         maoPercent,
         dealType,
         repairCosts,
+        negotiationRangeLow: Math.max(negotiationRangeLow, 0),
+        negotiationRangeHigh: Math.max(negotiationRangeHigh, 0),
+        sellerMotivationTier,
+        sellerMotivationMaoPercent: maoPercent,
       },
     });
 
     return {
       arv,
+      riskAdjustedArv,
       repairCosts,
       assignmentFee,
       maoPercent,
       mao: Math.round(mao),
       initialOffer: Math.max(initialOffer, 0),
       salePrice: Math.max(salePrice, 0),
+      negotiationRangeLow: Math.max(negotiationRangeLow, 0),
+      negotiationRangeHigh: Math.max(negotiationRangeHigh, 0),
+      sellerMotivationTier,
+      confidenceTier: analysis.confidenceTier,
+      riskFlags: analysis.riskFlags,
     };
   }
 
@@ -1537,6 +1577,216 @@ Use Midwest/rural Ohio pricing. Be specific about what you see — don't general
       neighborhoodCeilingBreached,
       confidenceTier,
       confidenceScore: score,
+    };
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // PHASE 2: RISK FLAGS, CONDITION TIERS, SELLER MOTIVATION
+  // ══════════════════════════════════════════════════════════════════════════════
+
+  async assessRiskFlags(analysisId: string, overrides?: {
+    functionalObsolescenceAdj?: number;
+    buyerPoolReduction?: number;
+    landUtilityReduction?: number;
+  }) {
+    // 3a. Fetch analysis + lead
+    const analysis = await this.prisma.compAnalysis.findUnique({
+      where: { id: analysisId },
+      include: {
+        lead: {
+          select: {
+            bedrooms: true, bathrooms: true, sqft: true, propertyType: true,
+            conditionLevel: true, distressSignals: true, sellerMotivation: true,
+            lotSize: true, attomId: true, propertyCondition: true,
+          },
+        },
+      },
+    });
+    if (!analysis) throw new Error('Analysis not found');
+
+    const lead = analysis.lead as any;
+    const riskFlags: string[] = [];
+
+    // 3b. Functional Obsolescence — auto-detect
+    let functionalObsolescenceAdj = 0;
+    const functionalNotes: string[] = [];
+
+    if (overrides?.functionalObsolescenceAdj != null) {
+      functionalObsolescenceAdj = overrides.functionalObsolescenceAdj;
+      functionalNotes.push(`Manual override: $${functionalObsolescenceAdj.toLocaleString()}`);
+    } else {
+      const propType = (lead.propertyType || '').toLowerCase();
+
+      if (lead.bedrooms != null && lead.bedrooms <= 2 && propType.includes('residential') || propType.includes('single')) {
+        functionalObsolescenceAdj += 20000;
+        const flag = '2BR home — reduced buyer pool vs 3BR market';
+        functionalNotes.push(flag);
+        riskFlags.push(flag);
+      }
+
+      if (lead.bathrooms != null && lead.bathrooms < 1.5 && (lead.sqft ?? 0) > 1200) {
+        functionalObsolescenceAdj += 12000;
+        const flag = 'Insufficient bathrooms for property size';
+        functionalNotes.push(flag);
+        riskFlags.push(flag);
+      }
+
+      if (propType.includes('manufactured') || propType.includes('mobile')) {
+        functionalObsolescenceAdj += 25000;
+        const flag = 'Manufactured home — limited financing options';
+        functionalNotes.push(flag);
+        riskFlags.push(flag);
+      }
+    }
+
+    this.logger.log(`Risk flags — functional obsolescence: $${functionalObsolescenceAdj.toLocaleString()} for ${analysisId}`);
+
+    // 3c. Buyer Pool Shrinkage
+    let buyerPoolReduction = 0;
+    const buyerPoolNotes: string[] = [];
+
+    if (overrides?.buyerPoolReduction != null) {
+      buyerPoolReduction = overrides.buyerPoolReduction;
+      buyerPoolNotes.push(`Manual override: ${(buyerPoolReduction * 100).toFixed(0)}%`);
+    } else {
+      const propType = (lead.propertyType || '').toLowerCase();
+
+      if (propType.includes('manufactured') || propType.includes('mobile')) {
+        buyerPoolReduction += 0.10;
+        const flag = 'Manufactured/mobile home buyer pool';
+        buyerPoolNotes.push(flag);
+        riskFlags.push(flag);
+      }
+
+      if ((lead.lotSize ?? 0) > 10) {
+        buyerPoolReduction += 0.05;
+        const flag = 'Large rural acreage — limited buyer pool';
+        buyerPoolNotes.push(flag);
+        riskFlags.push(flag);
+      }
+
+      buyerPoolReduction = Math.min(buyerPoolReduction, 0.20);
+    }
+
+    // 3d. Land Utility
+    let landUtilityReduction = 0;
+    const landUtilityNotes: string[] = [];
+
+    if (overrides?.landUtilityReduction != null) {
+      landUtilityReduction = overrides.landUtilityReduction;
+      landUtilityNotes.push(`Manual override: ${(landUtilityReduction * 100).toFixed(0)}%`);
+    } else {
+      if (lead.attomId && (lead.lotSize ?? 0) > 5) {
+        landUtilityReduction = 0.05;
+        const flag = 'Large rural parcel — verify flood zone and access';
+        landUtilityNotes.push(flag);
+        riskFlags.push(flag);
+      }
+    }
+
+    // 3e. Risk-Adjusted ARV
+    const base = analysis.triangulatedArv ?? analysis.arvEstimate ?? 0;
+    const afterFunctional = base - functionalObsolescenceAdj;
+    const afterBuyerPool = afterFunctional * (1 - buyerPoolReduction);
+    const afterLand = afterBuyerPool * (1 - landUtilityReduction);
+    const riskAdjustedArv = Math.round(afterLand);
+
+    this.logger.log(
+      `Risk-adjusted ARV for ${analysisId}: $${base.toLocaleString()} → $${riskAdjustedArv.toLocaleString()} ` +
+      `(functional=-$${functionalObsolescenceAdj.toLocaleString()}, buyerPool=-${(buyerPoolReduction * 100).toFixed(0)}%, land=-${(landUtilityReduction * 100).toFixed(0)}%)`,
+    );
+
+    // 3f. Seller Motivation Tier
+    const signals = ((lead.distressSignals as string[]) ?? []).map(s => s.toLowerCase());
+    let sellerMotivationTier: string;
+
+    if (signals.includes('foreclosure') || signals.includes('pre_foreclosure') || signals.includes('tax_lien')) {
+      sellerMotivationTier = 'foreclosure';
+    } else if (signals.includes('vacant') || signals.includes('code_violations') || signals.includes('major_repairs') || signals.includes('bankruptcy')) {
+      sellerMotivationTier = 'severe_distress';
+    } else if (signals.includes('divorce') || signals.includes('job_loss') || signals.includes('behind_on_payments') || signals.includes('estate_sale')) {
+      sellerMotivationTier = 'distressed';
+    } else if (signals.length > 0 || /motivated|need to sell|moving/i.test(lead.sellerMotivation || '')) {
+      sellerMotivationTier = 'minor_distress';
+    } else {
+      sellerMotivationTier = 'normal';
+    }
+
+    const sellerMotivationMaoPercent = MOTIVATION_TIERS[sellerMotivationTier].maoPercent;
+    this.logger.log(`Seller motivation tier for ${analysisId}: ${sellerMotivationTier} (MAO ${sellerMotivationMaoPercent}%)`);
+
+    // 3g. Condition Tier
+    let conditionTier = 'moderate_rehab'; // default
+    const conditionLevel = (lead.conditionLevel || '').toLowerCase();
+
+    if (/gut|tear|demolish/.test(conditionLevel)) {
+      conditionTier = 'full_gut';
+    } else if (/heavy|major|significant|complete/.test(conditionLevel)) {
+      conditionTier = 'heavy_rehab';
+    } else if (/moderate|medium|some/.test(conditionLevel)) {
+      conditionTier = 'moderate_rehab';
+    } else if (/light|cosmetic|minor|paint|carpet/.test(conditionLevel)) {
+      conditionTier = 'light_cosmetic';
+    } else if (/move|ready|excellent|great|updated|remodel/.test(conditionLevel)) {
+      conditionTier = 'move_in_ready';
+    } else if (lead.propertyCondition) {
+      // ATTOM fallback
+      const attomCond = lead.propertyCondition.toUpperCase();
+      if (attomCond === 'POOR') conditionTier = 'heavy_rehab';
+      else if (attomCond === 'FAIR') conditionTier = 'moderate_rehab';
+      else if (attomCond === 'GOOD') conditionTier = 'light_cosmetic';
+    }
+
+    const sqft = lead.sqft ?? 1500;
+    const rate = CONDITION_REPAIR_RATES[conditionTier];
+    const repairCostLow = Math.round(sqft * rate.low);
+    const repairCostHigh = Math.round(sqft * rate.high);
+    const repairCostMid = Math.round((repairCostLow + repairCostHigh) / 2);
+
+    this.logger.log(
+      `Condition tier for ${analysisId}: ${conditionTier} (${rate.label}) — ` +
+      `repairs $${repairCostLow.toLocaleString()}–$${repairCostHigh.toLocaleString()} (mid=$${repairCostMid.toLocaleString()}) on ${sqft} sqft`,
+    );
+
+    // 3i. Save to CompAnalysis
+    const updated = await this.prisma.compAnalysis.update({
+      where: { id: analysisId },
+      data: {
+        functionalObsolescenceAdj,
+        functionalObsolescenceNotes: functionalNotes.join('; ') || null,
+        buyerPoolReduction,
+        buyerPoolNotes: buyerPoolNotes.join('; ') || null,
+        landUtilityReduction,
+        landUtilityNotes: landUtilityNotes.join('; ') || null,
+        riskAdjustedArv,
+        riskFlags,
+        sellerMotivationTier,
+        sellerMotivationMaoPercent,
+        conditionTier,
+        repairCostLow,
+        repairCostHigh,
+        repairCosts: repairCostMid,
+      },
+    });
+
+    return {
+      functionalObsolescenceAdj,
+      functionalObsolescenceNotes: functionalNotes,
+      buyerPoolReduction,
+      buyerPoolNotes,
+      landUtilityReduction,
+      landUtilityNotes,
+      riskAdjustedArv,
+      riskFlags,
+      sellerMotivationTier,
+      sellerMotivationMaoPercent,
+      sellerMotivationLabel: MOTIVATION_TIERS[sellerMotivationTier].label,
+      conditionTier,
+      conditionLabel: rate.label,
+      repairCostLow,
+      repairCostHigh,
+      repairCostMid,
+      baseArv: base,
     };
   }
 

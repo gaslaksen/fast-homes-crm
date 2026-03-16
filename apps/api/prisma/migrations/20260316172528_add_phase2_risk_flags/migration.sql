@@ -1,0 +1,16 @@
+-- AlterTable
+ALTER TABLE "comp_analyses" ADD COLUMN     "buyerPoolNotes" TEXT,
+ADD COLUMN     "buyerPoolReduction" DOUBLE PRECISION,
+ADD COLUMN     "conditionTier" TEXT,
+ADD COLUMN     "functionalObsolescenceAdj" DOUBLE PRECISION,
+ADD COLUMN     "functionalObsolescenceNotes" TEXT,
+ADD COLUMN     "landUtilityNotes" TEXT,
+ADD COLUMN     "landUtilityReduction" DOUBLE PRECISION,
+ADD COLUMN     "negotiationRangeHigh" DOUBLE PRECISION,
+ADD COLUMN     "negotiationRangeLow" DOUBLE PRECISION,
+ADD COLUMN     "repairCostHigh" DOUBLE PRECISION,
+ADD COLUMN     "repairCostLow" DOUBLE PRECISION,
+ADD COLUMN     "riskAdjustedArv" DOUBLE PRECISION,
+ADD COLUMN     "riskFlags" JSONB,
+ADD COLUMN     "sellerMotivationMaoPercent" DOUBLE PRECISION,
+ADD COLUMN     "sellerMotivationTier" TEXT;
