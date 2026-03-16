@@ -554,7 +554,14 @@ export class CompAnalysisService {
     });
 
     this.logger.log(`ARV calculated: $${arv.toLocaleString()} (${method}) range $${arvLow.toLocaleString()}–$${arvHigh.toLocaleString()} confidence=${confidence}`);
-    return { arv, arvLow, arvHigh, pricePerSqft, confidence, method };
+
+    // Auto-triangulate when ARV is recalculated
+    const triangulation = await this.triangulateArv(analysisId).catch((err) => {
+      this.logger.warn(`Triangulation after ARV calc failed: ${err.message}`);
+      return null;
+    });
+
+    return { arv, arvLow, arvHigh, pricePerSqft, confidence, method, triangulation };
   }
 
   private calculateConfidence(comps: any[], lead: any, arvLow?: number, arvHigh?: number, arv?: number): number {
@@ -1242,6 +1249,295 @@ Use Midwest/rural Ohio pricing. Be specific about what you see — don't general
     });
 
     return { success: true };
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // THREE-MODEL VALUATION
+  // ══════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Cost Approach: Land value + depreciated replacement cost
+   */
+  async calculateCostApproach(analysisId: string) {
+    const analysis = await this.prisma.compAnalysis.findUnique({
+      where: { id: analysisId },
+      include: {
+        lead: {
+          select: {
+            sqft: true, yearBuilt: true, propertyType: true, lotSize: true,
+            taxAssessedValue: true, effectiveYearBuilt: true, propertyCity: true,
+            propertyState: true,
+          },
+        },
+      },
+    });
+    if (!analysis) throw new Error('Analysis not found');
+
+    const lead = analysis.lead as any;
+    const sqft = lead.sqft;
+    if (!sqft) {
+      this.logger.warn(`Cost approach skipped for analysis ${analysisId}: no sqft data`);
+      return null;
+    }
+
+    // Land value estimate
+    let landValue: number;
+    if (lead.taxAssessedValue) {
+      landValue = Math.round(lead.taxAssessedValue * 0.20);
+    } else {
+      landValue = Math.round(sqft * 30);
+    }
+    landValue = Math.min(landValue, 150000);
+
+    // Construction cost per sqft — default $150 as safe middle ground
+    const constructionCostPerSqft = 150;
+
+    // Depreciation: straight-line 1%/year, capped at 60%
+    const currentYear = new Date().getFullYear();
+    const effectiveYear = lead.effectiveYearBuilt ?? lead.yearBuilt ?? (currentYear - 20);
+    const age = currentYear - effectiveYear;
+    const depreciationRate = Math.min(Math.max(age, 0) * 0.01, 0.60);
+
+    const buildCost = Math.round(sqft * constructionCostPerSqft);
+    const costApproachValue = Math.round(landValue + buildCost * (1 - depreciationRate));
+
+    await this.prisma.compAnalysis.update({
+      where: { id: analysisId },
+      data: {
+        costApproachValue,
+        costApproachLandValue: landValue,
+        costApproachBuildCost: buildCost,
+        costApproachDepreciation: Math.round(depreciationRate * 100) / 100,
+      },
+    });
+
+    this.logger.log(
+      `Cost approach for ${analysisId}: $${costApproachValue.toLocaleString()} ` +
+      `(land=$${landValue.toLocaleString()}, build=$${buildCost.toLocaleString()}, ` +
+      `depr=${Math.round(depreciationRate * 100)}%, age=${age}yr)`,
+    );
+
+    return {
+      costApproachValue,
+      landValue,
+      buildCost,
+      depreciationRate: Math.round(depreciationRate * 100) / 100,
+      age,
+      constructionCostPerSqft,
+    };
+  }
+
+  /**
+   * Income Approach: Market rent × 12 × GRM
+   */
+  async calculateIncomeApproach(
+    analysisId: string,
+    marketRentOverride?: number,
+    grmOverride?: number,
+  ) {
+    const analysis = await this.prisma.compAnalysis.findUnique({
+      where: { id: analysisId },
+      include: {
+        lead: {
+          select: {
+            propertyCity: true, propertyState: true, propertyAddress: true,
+            propertyZip: true,
+          },
+        },
+      },
+    });
+    if (!analysis) throw new Error('Analysis not found');
+
+    const marketRent = marketRentOverride ?? null;
+    if (!marketRent) {
+      this.logger.warn(
+        `Income approach skipped for analysis ${analysisId}: no market rent available. ` +
+        `Provide marketRent override.`,
+      );
+      return {
+        incomeApproachValue: null,
+        note: 'No market rent data available. Provide a marketRent override to use income approach.',
+      };
+    }
+
+    // GRM: default 10, allow override
+    const grm = grmOverride ?? 10;
+
+    const incomeApproachValue = Math.round(marketRent * 12 * grm);
+
+    await this.prisma.compAnalysis.update({
+      where: { id: analysisId },
+      data: {
+        incomeApproachValue,
+        marketRent,
+        grossRentMultiplier: grm,
+      },
+    });
+
+    this.logger.log(
+      `Income approach for ${analysisId}: $${incomeApproachValue.toLocaleString()} ` +
+      `(rent=$${marketRent.toLocaleString()}/mo × 12 × GRM ${grm})`,
+    );
+
+    return {
+      incomeApproachValue,
+      marketRent,
+      grossRentMultiplier: grm,
+      annualRent: marketRent * 12,
+    };
+  }
+
+  /**
+   * Triangulated ARV: Weighted average of all available valuation methods
+   * with divergence detection, neighborhood ceiling, and confidence tier.
+   */
+  async triangulateArv(analysisId: string) {
+    const analysis = await this.prisma.compAnalysis.findUnique({
+      where: { id: analysisId },
+      include: {
+        comps: { where: { selected: true }, orderBy: { soldPrice: 'desc' } },
+        lead: {
+          select: {
+            avmExcellentHigh: true, avmExcellentLow: true,
+          },
+        },
+      },
+    });
+    if (!analysis) throw new Error('Analysis not found');
+
+    const lead = analysis.lead as any;
+
+    // Collect available method values
+    const methods: Record<string, number> = {};
+    if (analysis.arvEstimate) methods.comps = analysis.arvEstimate;
+    if (analysis.costApproachValue) methods.cost = analysis.costApproachValue;
+    if (analysis.incomeApproachValue) methods.income = analysis.incomeApproachValue;
+    if (lead.avmExcellentHigh) methods.attom = lead.avmExcellentHigh;
+
+    const methodKeys = Object.keys(methods);
+    if (methodKeys.length === 0) {
+      this.logger.warn(`Triangulation skipped for ${analysisId}: no method values available`);
+      return null;
+    }
+
+    // Weights (renormalize to available methods only)
+    const baseWeights: Record<string, number> = {
+      comps: 0.50,
+      attom: 0.25,
+      cost: 0.15,
+      income: 0.10,
+    };
+
+    const totalBaseWeight = methodKeys.reduce((s, k) => s + (baseWeights[k] || 0), 0);
+    const weights: Record<string, number> = {};
+    for (const k of methodKeys) {
+      weights[k] = (baseWeights[k] || 0) / totalBaseWeight;
+    }
+
+    // Weighted average
+    let triangulatedArv = 0;
+    for (const k of methodKeys) {
+      triangulatedArv += methods[k] * weights[k];
+    }
+    triangulatedArv = Math.round(triangulatedArv);
+
+    // Divergence check
+    const values = Object.values(methods);
+    const maxVal = Math.max(...values);
+    const minVal = Math.min(...values);
+    const methodDivergence = triangulatedArv > 0
+      ? Math.round(((maxVal - minVal) / triangulatedArv) * 10000) / 100
+      : 0;
+
+    if (methodDivergence > 20) {
+      this.logger.warn(
+        `HIGH DIVERGENCE (${methodDivergence}%) for ${analysisId}: ` +
+        `${JSON.stringify(methods)} → triangulated $${triangulatedArv.toLocaleString()}`,
+      );
+    } else if (methodDivergence > 10) {
+      this.logger.log(
+        `Moderate divergence (${methodDivergence}%) for ${analysisId}: ${JSON.stringify(methods)}`,
+      );
+    }
+
+    // Neighborhood ceiling: top 3 comp sold prices
+    let neighborhoodCeiling: number | null = null;
+    let neighborhoodCeilingBreached = false;
+    const selectedComps = analysis.comps;
+    if (selectedComps.length > 0) {
+      const topPrices = selectedComps
+        .map((c) => c.soldPrice as number)
+        .filter(Boolean)
+        .sort((a, b) => b - a)
+        .slice(0, 3);
+      if (topPrices.length > 0) {
+        neighborhoodCeiling = Math.round(
+          topPrices.reduce((s, p) => s + p, 0) / topPrices.length,
+        );
+        neighborhoodCeilingBreached = triangulatedArv > neighborhoodCeiling * 1.05;
+      }
+    }
+
+    // Confidence tier from existing confidenceScore
+    const score = analysis.confidenceScore;
+    let confidenceTier: string;
+    if (selectedComps.length === 0) {
+      confidenceTier = 'Low';
+    } else if (score >= 70) {
+      confidenceTier = 'High';
+    } else if (score >= 40) {
+      confidenceTier = 'Medium';
+    } else {
+      confidenceTier = 'Low';
+    }
+
+    // Range spread based on confidence
+    const spreadPct = confidenceTier === 'High' ? 0.05
+      : confidenceTier === 'Medium' ? 0.10
+      : 0.15;
+    const triangulatedArvLow = Math.round(triangulatedArv * (1 - spreadPct));
+    const triangulatedArvHigh = Math.round(triangulatedArv * (1 + spreadPct));
+
+    // Build method breakdown for storage
+    const methodsUsed = methodKeys.map((k) => ({
+      method: k,
+      value: methods[k],
+      weight: Math.round(weights[k] * 1000) / 1000,
+    }));
+
+    await this.prisma.compAnalysis.update({
+      where: { id: analysisId },
+      data: {
+        triangulatedArv,
+        triangulatedArvLow,
+        triangulatedArvHigh,
+        methodsUsed,
+        methodDivergence,
+        neighborhoodCeiling,
+        neighborhoodCeilingBreached,
+        confidenceTier,
+      },
+    });
+
+    this.logger.log(
+      `Triangulated ARV for ${analysisId}: $${triangulatedArv.toLocaleString()} ` +
+      `[${triangulatedArvLow.toLocaleString()}–${triangulatedArvHigh.toLocaleString()}] ` +
+      `methods=${methodKeys.join('+')} divergence=${methodDivergence}% ` +
+      `ceiling=${neighborhoodCeiling ? '$' + neighborhoodCeiling.toLocaleString() : 'N/A'}` +
+      `${neighborhoodCeilingBreached ? ' ⚠ BREACHED' : ''} tier=${confidenceTier}`,
+    );
+
+    return {
+      triangulatedArv,
+      triangulatedArvLow,
+      triangulatedArvHigh,
+      methods: methodsUsed,
+      methodDivergence,
+      neighborhoodCeiling,
+      neighborhoodCeilingBreached,
+      confidenceTier,
+      confidenceScore: score,
+    };
   }
 
   async updateAnalysis(analysisId: string, data: any) {

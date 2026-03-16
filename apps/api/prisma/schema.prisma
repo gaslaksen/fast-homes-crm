@@ -271,6 +271,24 @@ model CompAnalysis {
   assignmentFee     Float    @default(15000)
   maoPercent        Float    @default(70)
   savedToLead       Boolean  @default(false)
+
+  // ── Three-model valuation ─────────────────────────────────────────────────
+  costApproachValue     Float?   // Cost approach estimated value
+  costApproachLandValue Float?   // Land value component
+  costApproachBuildCost Float?   // Replacement build cost component
+  costApproachDepreciation Float? // Depreciation applied
+  incomeApproachValue   Float?   // Income/rental approach estimated value
+  marketRent            Float?   // Market rent used in income approach
+  grossRentMultiplier   Float?   // GRM used (8-14 typical)
+  triangulatedArv       Float?   // Final weighted triangulated value
+  triangulatedArvLow    Float?
+  triangulatedArvHigh   Float?
+  methodsUsed           Json?    // Which valuation methods contributed
+  methodDivergence      Float?   // % spread between highest and lowest method value
+  neighborhoodCeiling   Float?   // Top 3 comp average as ceiling reference
+  neighborhoodCeilingBreached Boolean @default(false)
+  confidenceTier        String?  // "High" | "Medium" | "Low"
+
   comps             Comp[]
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt

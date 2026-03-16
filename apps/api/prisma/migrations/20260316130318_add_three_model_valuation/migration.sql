@@ -1,0 +1,16 @@
+-- AlterTable
+ALTER TABLE "comp_analyses" ADD COLUMN     "confidenceTier" TEXT,
+ADD COLUMN     "costApproachBuildCost" DOUBLE PRECISION,
+ADD COLUMN     "costApproachDepreciation" DOUBLE PRECISION,
+ADD COLUMN     "costApproachLandValue" DOUBLE PRECISION,
+ADD COLUMN     "costApproachValue" DOUBLE PRECISION,
+ADD COLUMN     "grossRentMultiplier" DOUBLE PRECISION,
+ADD COLUMN     "incomeApproachValue" DOUBLE PRECISION,
+ADD COLUMN     "marketRent" DOUBLE PRECISION,
+ADD COLUMN     "methodDivergence" DOUBLE PRECISION,
+ADD COLUMN     "methodsUsed" JSONB,
+ADD COLUMN     "neighborhoodCeiling" DOUBLE PRECISION,
+ADD COLUMN     "neighborhoodCeilingBreached" BOOLEAN NOT NULL DEFAULT false,
+ADD COLUMN     "triangulatedArv" DOUBLE PRECISION,
+ADD COLUMN     "triangulatedArvHigh" DOUBLE PRECISION,
+ADD COLUMN     "triangulatedArvLow" DOUBLE PRECISION;

@@ -140,4 +140,26 @@ export class CompAnalysisController {
   ) {
     return this.compAnalysisService.analyzePhotos(analysisId, photos);
   }
+
+  @Post(':analysisId/cost-approach')
+  async calculateCostApproach(@Param('analysisId') analysisId: string) {
+    return this.compAnalysisService.calculateCostApproach(analysisId);
+  }
+
+  @Post(':analysisId/income-approach')
+  async calculateIncomeApproach(
+    @Param('analysisId') analysisId: string,
+    @Body() body: { marketRent?: number; grmOverride?: number },
+  ) {
+    return this.compAnalysisService.calculateIncomeApproach(
+      analysisId,
+      body.marketRent,
+      body.grmOverride,
+    );
+  }
+
+  @Post(':analysisId/triangulate')
+  async triangulateArv(@Param('analysisId') analysisId: string) {
+    return this.compAnalysisService.triangulateArv(analysisId);
+  }
 }
