@@ -401,11 +401,17 @@ export class RentCastService {
         return false;
       }
 
-      // Must have an actual recorded sale date
-      if (!c.lastSaleDate) {
-        this.logger.debug(`Skipping comp ${c.formattedAddress} — no lastSaleDate`);
+      // Must have a usable sale date.
+      // RentCast AVM comparables often lack lastSaleDate on the comparable object itself.
+      // For Inactive comps, removedDate (when listing was pulled from MLS) is an acceptable proxy.
+      // For Sold comps, prefer lastSaleDate, fall back to removedDate.
+      const effectiveDate = c.lastSaleDate || (status === 'inactive' || status === 'sold' ? c.removedDate : null);
+      if (!effectiveDate) {
+        this.logger.debug(`Skipping comp ${c.formattedAddress} — no usable sale date`);
         return false;
       }
+      // Attach effective date so we can use it below
+      (c as any)._effectiveDate = effectiveDate;
 
       // Must have a sale price
       const price = c.lastSalePrice || c.price;
@@ -415,9 +421,9 @@ export class RentCastService {
       }
 
       // Must be within last 12 months
-      const saleDate = new Date(c.lastSaleDate);
+      const saleDate = new Date((c as any)._effectiveDate);
       if (saleDate < twelveMonthsAgo) {
-        this.logger.debug(`Skipping comp ${c.formattedAddress} — sold ${c.lastSaleDate} (>12 months ago)`);
+        this.logger.debug(`Skipping comp ${c.formattedAddress} — date ${(c as any)._effectiveDate} (>12 months ago)`);
         return false;
       }
 
@@ -450,11 +456,11 @@ export class RentCastService {
     let savedCount = 0;
     for (const comp of validComps) {
       // Use actual recorded sale price — lastSalePrice is from public records
-      // Fall back to comp.price only if we have a confirmed lastSaleDate (status=Sold)
+      // Fall back to comp.price (listing/AVM price) when lastSalePrice is absent
       const soldPrice = comp.lastSalePrice || comp.price || 0;
 
-      // Use only the actual recorded sale date — never removedDate or listedDate
-      const soldDate = comp.lastSaleDate;
+      // Use the effective date resolved during filtering (lastSaleDate preferred, removedDate fallback for Inactive)
+      const soldDate = (comp as any)._effectiveDate || comp.lastSaleDate;
       if (!soldDate || soldPrice <= 0) continue; // double-safety check
 
       // Calculate distance
