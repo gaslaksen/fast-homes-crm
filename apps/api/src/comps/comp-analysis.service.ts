@@ -688,6 +688,14 @@ export class CompAnalysisService {
       this.logger.warn(`Risk flag assessment failed (non-fatal): ${(e as Error).message}`);
     }
 
+    // Auto-save ARV to lead so Overview tab always stays in sync
+    try {
+      await this.saveToLead(analysisId);
+      this.logger.log(`✅ ARV auto-saved to lead for analysis ${analysisId}`);
+    } catch (e) {
+      this.logger.warn(`ARV auto-save to lead failed (non-fatal): ${(e as Error).message}`);
+    }
+
     return { arv, arvLow, arvHigh, pricePerSqft, medianPricePerSqft: medianPpsf, comparableSalesValue, confidence, method, triangulation };
   }
 
