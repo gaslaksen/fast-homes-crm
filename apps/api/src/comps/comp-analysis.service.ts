@@ -1396,6 +1396,49 @@ Use Midwest/rural Ohio pricing. Be specific about what you see — don't general
     }
   }
 
+  /**
+   * Auto-analyze photos already saved on a lead (as base64 data URIs).
+   * Used by the MMS webhook to trigger photo repair analysis without a multipart upload.
+   */
+  async analyzePhotosFromLead(
+    analysisId: string,
+    leadId: string,
+    source = 'seller-mms',
+  ): Promise<{ assessment: string; repairLow: number; repairHigh: number }> {
+    const lead = await this.prisma.lead.findUnique({ where: { id: leadId } });
+    if (!lead) throw new Error('Lead not found');
+
+    const allPhotos = (lead.photos as any[]) || [];
+    const mmsPhotos = allPhotos.filter((p: any) => p.source === source);
+
+    if (mmsPhotos.length === 0) {
+      throw new Error(`No ${source} photos found for lead ${leadId}`);
+    }
+
+    // Convert base64 data URIs back to Multer-like objects for analyzePhotos()
+    const multerFiles: Express.Multer.File[] = mmsPhotos.map((p: any, i: number) => {
+      let buffer: Buffer;
+      if (typeof p.url === 'string' && p.url.startsWith('data:')) {
+        const base64Data = p.url.split(',')[1];
+        buffer = Buffer.from(base64Data, 'base64');
+      } else {
+        throw new Error(`Photo ${p.id} is not a base64 data URI`);
+      }
+
+      return {
+        fieldname: 'photos',
+        originalname: `seller-mms-${i}.jpg`,
+        encoding: '7bit',
+        mimetype: 'image/jpeg',
+        buffer,
+        size: buffer.length,
+      } as Express.Multer.File;
+    });
+
+    this.logger.log(`Auto-analyzing ${multerFiles.length} ${source} photos for lead ${leadId}`);
+    return this.analyzePhotos(analysisId, multerFiles);
+  }
+
   async saveToLead(analysisId: string) {
     const analysis = await this.prisma.compAnalysis.findUnique({
       where: { id: analysisId },

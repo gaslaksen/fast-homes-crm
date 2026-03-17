@@ -1,23 +1,10 @@
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { ValidationPipe } from '@nestjs/common';
-import { join } from 'path';
-import { mkdirSync } from 'fs';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
-  // Ensure uploads directory exists
-  const uploadsDir = join(process.cwd(), 'uploads', 'properties');
-  mkdirSync(uploadsDir, { recursive: true });
-  console.log('📁 Uploads directory ready:', uploadsDir);
-
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
-
-  // Serve uploaded photos as static files
-  app.useStaticAssets(join(process.cwd(), 'uploads'), {
-    prefix: '/uploads/',
-  });
-  console.log('📂 Static file serving enabled: /uploads/');
 
   // Health check endpoint for Railway
   const httpAdapter = app.getHttpAdapter();

@@ -5,15 +5,12 @@ import { SerpApiService } from './serpapi.service';
 import { RedfinService } from './redfin.service';
 import { ZillowService } from './zillow.service';
 import sharp from 'sharp';
-import * as fs from 'fs';
-import * as path from 'path';
 import { randomUUID } from 'crypto';
 import axios from 'axios';
 
 @Injectable()
 export class PhotosService {
   private readonly logger = new Logger(PhotosService.name);
-  private readonly uploadsDir = path.join(process.cwd(), 'uploads', 'properties');
 
   constructor(
     private prisma: PrismaService,
@@ -22,8 +19,7 @@ export class PhotosService {
     private redfinService: RedfinService,
     private zillowService: ZillowService,
   ) {
-    fs.mkdirSync(this.uploadsDir, { recursive: true });
-    console.log(`📁 PhotosService initialized, uploads dir: ${this.uploadsDir}`);
+    console.log(`📸 PhotosService initialized (base64 storage)`);
   }
 
   /**
@@ -128,26 +124,22 @@ export class PhotosService {
     const lead = await this.prisma.lead.findUnique({ where: { id: leadId } });
     if (!lead) throw new Error('Lead not found');
 
-    const timestamp = Date.now();
-    const mainFilename = `${leadId}-${timestamp}-main.jpg`;
-    const thumbFilename = `${leadId}-${timestamp}-thumb.jpg`;
-
-    // Process main image (max 800px wide, JPEG 80%)
-    await sharp(buffer)
+    // Process main image (max 800px wide, JPEG 80%) → base64 data URI
+    const mainBuffer = await sharp(buffer)
       .resize(800, null, { withoutEnlargement: true })
       .jpeg({ quality: 80 })
-      .toFile(path.join(this.uploadsDir, mainFilename));
+      .toBuffer();
 
-    // Process thumbnail (200px wide)
-    await sharp(buffer)
-      .resize(200, null, { withoutEnlargement: true })
+    // Process thumbnail (400px wide) → base64 data URI
+    const thumbBuffer = await sharp(buffer)
+      .resize(400, null, { withoutEnlargement: true })
       .jpeg({ quality: 70 })
-      .toFile(path.join(this.uploadsDir, thumbFilename));
+      .toBuffer();
 
     const photo: any = {
       id: randomUUID(),
-      url: `/uploads/properties/${mainFilename}`,
-      thumbnailUrl: `/uploads/properties/${thumbFilename}`,
+      url: `data:image/jpeg;base64,${mainBuffer.toString('base64')}`,
+      thumbnailUrl: `data:image/jpeg;base64,${thumbBuffer.toString('base64')}`,
       source,
       uploadedAt: new Date().toISOString(),
     };
@@ -160,7 +152,7 @@ export class PhotosService {
       where: { id: leadId },
       data: {
         photos: updatedPhotos,
-        primaryPhoto: lead.primaryPhoto || photo.url,
+        primaryPhoto: lead.primaryPhoto || photo.thumbnailUrl,
       },
     });
 
@@ -173,7 +165,7 @@ export class PhotosService {
       },
     });
 
-    console.log(`✅ Photo saved for lead ${leadId}: ${photo.url}`);
+    console.log(`✅ Photo saved for lead ${leadId} (${source}, ${Math.round(mainBuffer.length / 1024)}KB)`);
     return photo;
   }
 
@@ -184,12 +176,6 @@ export class PhotosService {
     const currentPhotos = (lead.photos as any[]) || [];
     const photo = currentPhotos.find((p) => p.id === photoId);
     if (!photo) throw new Error('Photo not found');
-
-    // Remove files from disk
-    const mainPath = path.join(process.cwd(), photo.url);
-    const thumbPath = path.join(process.cwd(), photo.thumbnailUrl);
-    try { fs.unlinkSync(mainPath); } catch {}
-    try { fs.unlinkSync(thumbPath); } catch {}
 
     const updatedPhotos = currentPhotos.filter((p) => p.id !== photoId);
 

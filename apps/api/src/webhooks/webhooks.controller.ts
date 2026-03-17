@@ -1,9 +1,11 @@
-import { Controller, Post, Body, Req, Res, HttpCode } from '@nestjs/common';
+import { Controller, Post, Body, Req, Res, HttpCode, Logger } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { LeadsService } from '../leads/leads.service';
 import { MessagesService } from '../messages/messages.service';
 import { DripService } from '../drip/drip.service';
 import { CallsService } from '../calls/calls.service';
+import { PhotosService } from '../photos/photos.service';
+import { CompAnalysisService } from '../comps/comp-analysis.service';
 import { SlackLeadService } from './slack-lead.service';
 import { InvestorFuseService } from './investorfuse.service';
 import { formatPhoneNumber, LeadSource } from '@fast-homes/shared';
@@ -11,11 +13,15 @@ import { normalizeLeadAddressAsync } from './address-parser';
 
 @Controller('webhooks')
 export class WebhooksController {
+  private readonly logger = new Logger(WebhooksController.name);
+
   constructor(
     private leadsService: LeadsService,
     private messagesService: MessagesService,
     private dripService: DripService,
     private callsService: CallsService,
+    private photosService: PhotosService,
+    private compAnalysisService: CompAnalysisService,
     private slackLeadService: SlackLeadService,
     private investorFuseService: InvestorFuseService,
   ) {}
@@ -262,6 +268,64 @@ export class WebhooksController {
           });
 
           console.log('✅ smsIncoming processed:', result);
+
+          // ── MMS: capture seller photos ────────────────────────────────
+          const mediaUrls: string[] = [];
+          if (body.mediaUrls && Array.isArray(body.mediaUrls)) {
+            mediaUrls.push(...body.mediaUrls);
+          } else if (body.mediaUrl) {
+            mediaUrls.push(body.mediaUrl);
+          } else if (body.media_url) {
+            mediaUrls.push(body.media_url);
+          }
+
+          if (mediaUrls.length > 0 && result?.leadId) {
+            // Run in background — don't block the webhook response
+            setImmediate(async () => {
+              try {
+                for (const url of mediaUrls) {
+                  this.logger.log(`📸 Downloading MMS photo for lead ${result.leadId}: ${url}`);
+                  const response = await fetch(url, {
+                    signal: AbortSignal.timeout(15000),
+                  });
+                  if (!response.ok) {
+                    this.logger.warn(`Failed to download MMS photo: ${response.status} ${response.statusText}`);
+                    continue;
+                  }
+                  const arrayBuffer = await response.arrayBuffer();
+                  const buffer = Buffer.from(arrayBuffer);
+                  await this.photosService.processAndSave(result.leadId, buffer, 'seller-mms');
+                  this.logger.log(`✅ Seller MMS photo saved for lead ${result.leadId}`);
+                }
+
+                // Check if we now have 2+ seller-mms photos → auto-trigger repair analysis
+                const lead = await this.leadsService['prisma'].lead.findUnique({
+                  where: { id: result.leadId },
+                });
+                const photos = (lead?.photos as any[]) || [];
+                const mmsCount = photos.filter((p: any) => p.source === 'seller-mms').length;
+
+                if (mmsCount >= 2) {
+                  // Find the most recent CompAnalysis for this lead
+                  const latestAnalysis = await this.compAnalysisService['prisma'].compAnalysis.findFirst({
+                    where: { leadId: result.leadId },
+                    orderBy: { createdAt: 'desc' },
+                  });
+
+                  if (latestAnalysis) {
+                    this.logger.log(`🔍 Auto-triggering photo repair analysis for lead ${result.leadId} (${mmsCount} MMS photos, analysis ${latestAnalysis.id})`);
+                    await this.compAnalysisService.analyzePhotosFromLead(latestAnalysis.id, result.leadId);
+                    this.logger.log(`✅ Auto photo repair analysis complete for lead ${result.leadId}`);
+                  } else {
+                    this.logger.log(`ℹ️ Lead ${result.leadId} has ${mmsCount} MMS photos but no CompAnalysis — skipping auto-analysis`);
+                  }
+                }
+              } catch (err: any) {
+                this.logger.error(`Failed to process MMS photos for lead ${result.leadId}: ${err.message}`);
+              }
+            });
+          }
+
           return { success: true };
         }
 

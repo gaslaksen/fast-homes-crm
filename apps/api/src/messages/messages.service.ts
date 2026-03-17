@@ -647,7 +647,7 @@ Your message must:
     // Schedule auto-response with a delay (don't reply instantly — simulate human)
     this.scheduleAutoResponse(lead.id, updateData);
 
-    return { success: true, messageId: message.id };
+    return { success: true, messageId: message.id, leadId: lead.id };
   }
 
   /**
