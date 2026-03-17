@@ -1989,7 +1989,7 @@ Use Midwest/rural Ohio pricing. Be specific about what you see — don't general
       sellerMotivationMaoPercent,
       sellerMotivationLabel: MOTIVATION_TIERS[sellerMotivationTier].label,
       conditionTier,
-      conditionLabel: rate.label,
+      conditionLabel: conditionTier ? CONDITION_REPAIR_RATES[conditionTier]?.label ?? null : null,
       repairCostLow,
       repairCostHigh,
       repairCostMid,

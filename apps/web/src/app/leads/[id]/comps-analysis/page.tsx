@@ -377,12 +377,16 @@ export default function CompsAnalysisPage() {
     }
   };
 
-  // ─── AI Adjustment Engine ───────────────────────────────────────────────────
+  // ─── AI Adjust & Calculate ARV (full pipeline) ───────────────────────────
   const handleAiAdjustComps = async () => {
     if (!analysis) return;
     setAiAdjusting(true);
     try {
+      // Step 1: AI adjusts comps
       await compAnalysisAPI.aiAdjustComps(leadId, analysis.id);
+      // Step 2: Calculate ARV (includes auto cost+income+triangulate+risk)
+      const arvRes = await compAnalysisAPI.calculateArv(leadId, analysis.id, 'weighted');
+      setDealArv(arvRes.data.riskAdjustedArv || arvRes.data.triangulatedArv || arvRes.data.arv || 0);
       await refreshAnalysis();
       router.replace(`/leads/${leadId}/comps-analysis?tab=arv`, { scroll: false });
     } catch (error) {
@@ -1035,32 +1039,18 @@ export default function CompsAnalysisPage() {
               {allComps.length >= 1 && (
                 <div className="mt-6 flex items-center gap-3">
                   <button
-                    onClick={handleCalculate}
-                    disabled={calculating || aiAdjusting || selectedComps.length === 0}
-                    className="btn btn-secondary"
-                  >
-                    {calculating ? 'Calculating...' : `Rule-Based ARV (${selectedComps.length} comps)`}
-                  </button>
-                  <button
                     onClick={handleAiAdjustComps}
-                    disabled={aiAdjusting || calculating || selectedComps.length === 0}
+                    disabled={aiAdjusting || selectedComps.length === 0}
                     className="btn btn-primary flex items-center gap-2"
                   >
                     {aiAdjusting ? (
                       <>
                         <span className="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
-                        AI Adjusting Comps...
+                        Calculating ARV...
                       </>
                     ) : (
                       <>✨ AI Adjust &amp; Calculate ARV</>
                     )}
-                  </button>
-                  <button
-                    onClick={handleAiSummary}
-                    disabled={generatingAi || selectedComps.length === 0}
-                    className="btn btn-secondary"
-                  >
-                    {generatingAi ? 'Generating...' : 'Generate AI Summary'}
                   </button>
                 </div>
               )}
@@ -1645,15 +1635,7 @@ export default function CompsAnalysisPage() {
               >
                 {saving ? 'Saving...' : 'Save ARV to Lead'}
               </button>
-              {!analysis?.aiSummary && selectedComps.length > 0 && (
-                <button
-                  onClick={handleAiSummary}
-                  disabled={generatingAi}
-                  className="btn btn-secondary"
-                >
-                  {generatingAi ? 'Generating...' : 'Generate AI Summary'}
-                </button>
-              )}
+
             </div>
           </div>
         )}
