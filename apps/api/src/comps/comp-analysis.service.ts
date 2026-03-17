@@ -368,7 +368,7 @@ export class CompAnalysisService {
         comps: { where: { selected: true } },
         lead: {
           select: {
-            bedrooms: true, bathrooms: true, sqft: true, yearBuilt: true,
+            bedrooms: true, bathrooms: true, sqft: true, sqftOverride: true, yearBuilt: true,
             lotSize: true, conditionLevel: true, propertyType: true,
             propertyAddress: true, propertyCity: true, propertyState: true,
           },
@@ -407,8 +407,9 @@ export class CompAnalysisService {
       let adjustment = 0;
 
       // ── 1. Size adjustment ($/sqft × diff) ──
-      if (lead.sqft && comp.sqft) {
-        const sqftDiff = lead.sqft - comp.sqft;
+      const effectiveSqftForAdj = (lead as any).sqftOverride || lead.sqft;
+      if (effectiveSqftForAdj && comp.sqft) {
+        const sqftDiff = effectiveSqftForAdj - comp.sqft;
         if (sqftDiff !== 0) {
           const sqftAdj = sqftDiff * adj.pricePerSqft;
           adjustment += sqftAdj;
@@ -772,7 +773,7 @@ export class CompAnalysisService {
     const subjectDesc = [
       `Address: ${lead.propertyAddress}, ${lead.propertyCity}, ${lead.propertyState}`,
       lead.propertyType ? `Type: ${lead.propertyType}` : null,
-      lead.sqft ? `Size: ${lead.sqft.toLocaleString()} sqft` : null,
+      ((lead as any).sqftOverride || lead.sqft) ? `Size: ${((lead as any).sqftOverride || lead.sqft).toLocaleString()} sqft${(lead as any).sqftOverride ? ` (override; ATTOM: ${lead.sqft?.toLocaleString()})` : ''}` : null,
       lead.bedrooms ? `Beds: ${lead.bedrooms}` : null,
       lead.bathrooms ? `Baths: ${lead.bathrooms}` : null,
       lead.yearBuilt ? `Year Built: ${lead.yearBuilt}` : null,
@@ -944,7 +945,7 @@ ATTOM Independent Valuation:
 
 Subject Property:
 - Address: ${lead.propertyAddress}, ${lead.propertyCity}, ${lead.propertyState} ${lead.propertyZip}
-- ${lead.bedrooms || '?'}bd / ${lead.bathrooms || '?'}ba / ${lead.sqft?.toLocaleString() || '?'} sqft
+- ${lead.bedrooms || '?'}bd / ${lead.bathrooms || '?'}ba / ${((lead as any).sqftOverride || lead.sqft)?.toLocaleString() || '?'} sqft${(lead as any).sqftOverride ? ` (override; ATTOM: ${lead.sqft?.toLocaleString()})` : ''}
 - Property Type: ${lead.propertyType || 'Unknown'}
 - Seller-reported Condition: ${lead.conditionLevel || 'Unknown'}${lead.propertyCondition ? `\n- ATTOM Condition: ${lead.propertyCondition}${lead.propertyQuality ? ' | Quality: ' + lead.propertyQuality : ''}` : ''}
 - Asking Price: ${lead.askingPrice ? '$' + lead.askingPrice.toLocaleString() : 'Unknown'}
@@ -1190,7 +1191,7 @@ ATTOM DATA — INDEPENDENT PROPERTY INTELLIGENCE:
 
 SUBJECT PROPERTY:
 Address: ${lead.propertyAddress}, ${lead.propertyCity}, ${lead.propertyState} ${lead.propertyZip}
-Size: ${lead.sqft ? lead.sqft.toLocaleString() + ' sqft' : 'Unknown'}, ${lead.bedrooms || '?'}bd/${lead.bathrooms || '?'}ba
+Size: ${((lead as any).sqftOverride || lead.sqft)?.toLocaleString() || 'Unknown'} sqft${(lead as any).sqftOverride ? ` (override; ATTOM: ${lead.sqft?.toLocaleString()})` : ''}, ${lead.bedrooms || '?'}bd/${lead.bathrooms || '?'}ba
 Type: ${lead.propertyType || 'Unknown'} | Seller Condition: ${lead.conditionLevel || 'Unknown'}
 Asking Price: ${lead.askingPrice ? '$' + lead.askingPrice.toLocaleString() : 'Not provided'}
 AI Estimated ARV: ${analysis.arvEstimate ? '$' + analysis.arvEstimate.toLocaleString() : 'Not calculated'} (weighted average of AI-adjusted comps)
@@ -1306,7 +1307,7 @@ Rules:
     const textPrompt = `You are an expert real estate wholesaler evaluating property condition from seller photos.
 
 Property: ${lead.propertyAddress}, ${lead.propertyCity}, ${lead.propertyState}
-Size: ${lead.sqft ? lead.sqft.toLocaleString() + ' sqft' : 'Unknown'}, built ${(lead as any).yearBuilt || 'unknown'}
+Size: ${((lead as any).sqftOverride || lead.sqft)?.toLocaleString() || 'Unknown'} sqft${(lead as any).sqftOverride ? ` (override)` : ''}, built ${(lead as any).yearBuilt || 'unknown'}
 ARV Estimate: ${analysis.arvEstimate ? '$' + analysis.arvEstimate.toLocaleString() : 'Unknown'}
 
 Analyze these ${photos.length} property photo(s) and respond ONLY with valid JSON (no markdown, no explanation outside the JSON).
