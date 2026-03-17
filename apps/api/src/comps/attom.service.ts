@@ -683,10 +683,12 @@ export class AttomService {
         validComps = [];
 
         for (const prop of properties) {
-          const saleAmt = prop.sale?.amount?.saleAmt ?? 0;
+          // ATTOM /sale/detail uses all-lowercase keys in amount block
+          const amountBlock = prop.sale?.amount as any || {};
+          const saleAmt = amountBlock.saleamt ?? amountBlock.saleAmt ?? 0;
           if (saleAmt <= 0) continue;
 
-          const transType = prop.sale?.amount?.saleTransType || '';
+          const transType = (amountBlock.saletranstype ?? amountBlock.saleTransType ?? '') as string;
           if (/construction loan|financing/i.test(transType)) continue;
 
           const addr = prop.address?.oneLine || '';
@@ -695,7 +697,7 @@ export class AttomService {
           if (seenAddresses.has(addrKey)) continue;
           seenAddresses.add(addrKey);
 
-          const saleDate = prop.sale?.amount?.saleRecDate || prop.sale?.saleTransDate;
+          const saleDate = (amountBlock.salerecdate ?? amountBlock.saleRecDate) || prop.sale?.saleTransDate;
 
           const comp = {
             address: addr,
