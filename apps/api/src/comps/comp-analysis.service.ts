@@ -636,6 +636,29 @@ export class CompAnalysisService {
 
     this.logger.log(`ARV calculated: $${arv.toLocaleString()} (${method}) range $${arvLow.toLocaleString()}–$${arvHigh.toLocaleString()} confidence=${confidence}`);
 
+    // Auto-calculate cost approach (uses sqft + yearBuilt + taxAssessed — always available)
+    await this.calculateCostApproach(analysisId).catch((err) => {
+      this.logger.warn(`Cost approach auto-calc failed: ${err.message}`);
+    });
+
+    // Auto-estimate income approach using sqft-based market rent when no override exists
+    const currentAnalysis = await this.prisma.compAnalysis.findUnique({
+      where: { id: analysisId },
+      select: { marketRent: true, lead: { select: { sqft: true, sqftOverride: true, propertyState: true } } },
+    });
+    if (!currentAnalysis?.marketRent) {
+      // Estimate market rent: $1.00–$1.25/sqft/month is a reasonable national baseline
+      // Use sqftOverride if set, otherwise ATTOM sqft
+      const rentSqft = (currentAnalysis?.lead as any)?.sqftOverride || (currentAnalysis?.lead as any)?.sqft;
+      if (rentSqft) {
+        const estimatedRent = Math.round(rentSqft * 1.1); // $1.10/sqft/month midpoint
+        await this.calculateIncomeApproach(analysisId, estimatedRent, 10, true).catch((err) => {
+          this.logger.warn(`Income approach auto-calc failed: ${err.message}`);
+        });
+        this.logger.log(`Income approach auto-estimated: $${estimatedRent}/mo (${rentSqft} sqft × $1.10/sqft) — flagged as estimate`);
+      }
+    }
+
     // Auto-triangulate when ARV is recalculated
     const triangulation = await this.triangulateArv(analysisId).catch((err) => {
       this.logger.warn(`Triangulation after ARV calc failed: ${err.message}`);
@@ -1345,10 +1368,12 @@ Use Midwest/rural Ohio pricing. Be specific about what you see — don't general
     });
     if (!analysis) throw new Error('Analysis not found');
 
+    // Use riskAdjustedArv as the primary system ARV; fall back to triangulated, then estimated
+    const finalArv = analysis.riskAdjustedArv ?? analysis.triangulatedArv ?? analysis.arvEstimate;
     await this.prisma.lead.update({
       where: { id: analysis.leadId },
       data: {
-        arv: analysis.arvEstimate,
+        arv: finalArv,
         arvConfidence: analysis.confidenceScore,
         lastCompsDate: new Date(),
       },
@@ -1459,6 +1484,7 @@ Use Midwest/rural Ohio pricing. Be specific about what you see — don't general
     analysisId: string,
     marketRentOverride?: number,
     grmOverride?: number,
+    isEstimated = false,
   ) {
     const analysis = await this.prisma.compAnalysis.findUnique({
       where: { id: analysisId },
@@ -1496,12 +1522,13 @@ Use Midwest/rural Ohio pricing. Be specific about what you see — don't general
         incomeApproachValue,
         marketRent,
         grossRentMultiplier: grm,
+        marketRentEstimated: isEstimated,
       },
     });
 
     this.logger.log(
       `Income approach for ${analysisId}: $${incomeApproachValue.toLocaleString()} ` +
-      `(rent=$${marketRent.toLocaleString()}/mo × 12 × GRM ${grm})`,
+      `(rent=$${marketRent.toLocaleString()}/mo × 12 × GRM ${grm}${isEstimated ? ' [estimated]' : ''})`,
     );
 
     return {
@@ -1509,6 +1536,7 @@ Use Midwest/rural Ohio pricing. Be specific about what you see — don't general
       marketRent,
       grossRentMultiplier: grm,
       annualRent: marketRent * 12,
+      isEstimated,
     };
   }
 

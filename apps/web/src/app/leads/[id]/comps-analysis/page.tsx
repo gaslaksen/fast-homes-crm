@@ -226,7 +226,7 @@ export default function CompsAnalysisPage() {
         const latest = analyses.data[0];
         const full = await compAnalysisAPI.get(leadId, latest.id);
         setAnalysis(full.data);
-        setDealArv(full.data.arvEstimate || full.data.lead?.arv || 0);
+        setDealArv(full.data.riskAdjustedArv || full.data.triangulatedArv || full.data.arvEstimate || full.data.lead?.arv || 0);
         setRepairCosts(full.data.repairCosts || 0);
         setAssignmentFee(full.data.assignmentFee || 15000);
         setMaoPercent(full.data.sellerMotivationMaoPercent || full.data.maoPercent || 70);
@@ -241,7 +241,7 @@ export default function CompsAnalysisPage() {
           });
           const full = await compAnalysisAPI.get(leadId, res.data.id);
           setAnalysis(full.data);
-          setDealArv(full.data.arvEstimate || leadRes.data.arv || 0);
+          setDealArv(full.data.riskAdjustedArv || full.data.triangulatedArv || full.data.arvEstimate || leadRes.data.arv || 0);
         }
       }
     } catch (error) {
@@ -274,7 +274,7 @@ export default function CompsAnalysisPage() {
       });
       const full = await compAnalysisAPI.get(leadId, res.data.id);
       setAnalysis(full.data);
-      setDealArv(full.data.arvEstimate || leadRes.data.arv || result.data.arv || 0);
+      setDealArv(full.data.riskAdjustedArv || full.data.triangulatedArv || full.data.arvEstimate || leadRes.data.arv || result.data.arv || 0);
       router.replace(`/leads/${leadId}/comps-analysis?tab=comps`, { scroll: false });
     } catch (error: any) {
       console.error('Failed to fetch comps:', error);
@@ -1251,62 +1251,32 @@ export default function CompsAnalysisPage() {
                   )}
                 </div>
 
-                {/* Primary ARV display with confidence interval */}
-                <div className="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-2xl p-6 mb-5">
-                  <div className="flex items-end justify-between flex-wrap gap-4">
+                {/* $/sqft summary strip */}
+                <div className="flex items-center gap-6 mb-5 px-1">
+                  <div>
+                    <div className="text-xs text-gray-500 mb-0.5">Avg $/sqft (comps)</div>
+                    <div className="text-2xl font-bold text-gray-800">${analysis.pricePerSqft || avgPricePerSqft || 0}</div>
+                    {(analysis as any).medianPricePerSqft && (
+                      <div className="text-xs text-gray-400">median ${(analysis as any).medianPricePerSqft}/sqft</div>
+                    )}
+                  </div>
+                  {analysis.avgAdjustment ? (
                     <div>
-                      <div className="text-xs font-semibold text-green-700 uppercase tracking-wide mb-1">Estimated ARV</div>
-                      <div className="text-5xl font-bold text-green-700">${(analysis.arvEstimate || 0).toLocaleString()}</div>
-                      {(analysis.arvLow && analysis.arvHigh) ? (
-                        <div className="mt-2">
-                          <div className="text-sm text-green-600 font-medium mb-1">
-                            Range: ${(analysis.arvLow).toLocaleString()} – ${(analysis.arvHigh).toLocaleString()}
-                            <span className="text-green-500 ml-2">
-                              (±${Math.round(((analysis.arvHigh - analysis.arvLow) / (analysis.arvEstimate || 1)) * 50).toLocaleString()}%)
-                            </span>
-                          </div>
-                          {/* Confidence interval bar */}
-                          <div className="relative h-3 bg-green-200 rounded-full w-64 mt-1">
-                            {(() => {
-                              const range = analysis.arvHigh - analysis.arvLow;
-                              const span = range * 1.4;
-                              const base = (analysis.arvEstimate || 0) - span / 2;
-                              const lowPct = Math.max(0, ((analysis.arvLow - base) / span) * 100);
-                              const highPct = Math.min(100, ((analysis.arvHigh - base) / span) * 100);
-                              const midPct = (((analysis.arvEstimate ?? 0) - base) / span) * 100;
-                              return (
-                                <>
-                                  <div className="absolute h-3 bg-green-400 rounded-full" style={{ left: `${lowPct}%`, width: `${highPct - lowPct}%` }} />
-                                  <div className="absolute h-5 w-1 bg-green-800 rounded-full top-[-4px]" style={{ left: `${midPct}%` }} />
-                                </>
-                              );
-                            })()}
-                          </div>
-                          <div className="flex justify-between text-xs text-green-500 mt-1 w-64">
-                            <span>Low</span><span>Point estimate</span><span>High</span>
-                          </div>
-                        </div>
-                      ) : null}
-                    </div>
-                    <div className="flex items-center gap-6">
-                      <DonutStat
-                        value={analysis.confidenceScore || 0}
-                        max={100}
-                        label="Confidence"
-                        color={(analysis.confidenceScore || 0) >= 80 ? '#10b981' : (analysis.confidenceScore || 0) >= 60 ? '#f59e0b' : '#ef4444'}
-                        size={80}
-                      />
-                      <div className="text-right">
-                        <div className="text-xs text-gray-500 mb-1">$/sqft</div>
-                        <div className="text-2xl font-bold text-gray-700">${analysis.pricePerSqft || avgPricePerSqft || 0}</div>
-                        {analysis.avgAdjustment ? (
-                          <div className={`text-xs font-medium ${(analysis.avgAdjustment || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                            {(analysis.avgAdjustment || 0) >= 0 ? '+' : ''}${(analysis.avgAdjustment || 0).toLocaleString()} avg adj
-                          </div>
-                        ) : null}
+                      <div className="text-xs text-gray-500 mb-0.5">Avg adjustment</div>
+                      <div className={`text-lg font-bold ${(analysis.avgAdjustment || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        {(analysis.avgAdjustment || 0) >= 0 ? '+' : ''}${(analysis.avgAdjustment || 0).toLocaleString()}
                       </div>
                     </div>
-                  </div>
+                  ) : null}
+                  {analysis.confidenceTier && (
+                    <span className={`ml-auto text-sm px-3 py-1.5 rounded-full font-semibold ${
+                      analysis.confidenceTier === 'High' ? 'bg-green-100 text-green-700' :
+                      analysis.confidenceTier === 'Medium' ? 'bg-yellow-100 text-yellow-700' :
+                      'bg-red-100 text-red-700'
+                    }`}>
+                      {analysis.confidenceTier} Confidence
+                    </span>
+                  )}
                 </div>
 
                 {/* Valuation Breakdown — Three-Method + Triangulated ARV */}
@@ -1343,15 +1313,6 @@ export default function CompsAnalysisPage() {
                     <div className="bg-gradient-to-r from-purple-50 to-indigo-50 border border-purple-200 rounded-2xl p-5 mb-5">
                       <div className="flex items-center justify-between mb-4">
                         <h3 className="text-sm font-bold text-purple-900 uppercase tracking-wide">Valuation Breakdown</h3>
-                        {analysis.confidenceTier && (
-                          <span className={`text-sm px-3 py-1.5 rounded-full font-semibold ${
-                            analysis.confidenceTier === 'High' ? 'bg-green-100 text-green-700' :
-                            analysis.confidenceTier === 'Medium' ? 'bg-yellow-100 text-yellow-700' :
-                            'bg-red-100 text-red-700'
-                          }`}>
-                            {analysis.confidenceTier} Confidence
-                          </span>
-                        )}
                       </div>
 
                       {/* Method table */}
@@ -1377,12 +1338,40 @@ export default function CompsAnalysisPage() {
                                   {entry ? `${Math.round(weight * 100)}%` : ''}
                                 </div>
                               </div>
-                              {/* Sub-detail for comps: show avg/median ppsf */}
-                              {key === 'comps' && entry && (analysis.pricePerSqft || analysis.medianPricePerSqft) && (
-                                <div className="grid grid-cols-12 gap-2 pb-2 border-b border-purple-50">
-                                  <div className="col-span-6 col-start-1 pl-4 text-xs text-purple-500">
-                                    avg $/sqft: <span className="font-medium text-purple-700">${analysis.pricePerSqft || '—'}</span>
-                                    {' '}median $/sqft: <span className="font-medium text-purple-700">${analysis.medianPricePerSqft || '—'}</span>
+                              {/* Sub-detail for comps: show avg/median ppsf and sqft used */}
+                              {key === 'comps' && entry && (
+                                <div className="grid grid-cols-12 gap-2 pb-2.5 border-b border-purple-50">
+                                  <div className="col-span-12 pl-4 text-xs text-purple-500 space-y-0.5">
+                                    {(analysis.pricePerSqft || (analysis as any).medianPricePerSqft) && (
+                                      <div>
+                                        avg $/sqft: <span className="font-semibold text-purple-700">${analysis.pricePerSqft || '—'}</span>
+                                        {' · '}median $/sqft: <span className="font-semibold text-purple-700">${(analysis as any).medianPricePerSqft || '—'}</span>
+                                      </div>
+                                    )}
+                                    {lead && (
+                                      <div>
+                                        sqft used: <span className="font-semibold text-purple-700">
+                                          {(lead as any).sqftOverride
+                                            ? <>{(lead as any).sqftOverride.toLocaleString()} <span className="text-amber-600">(override)</span></>
+                                            : (lead.sqft ? lead.sqft.toLocaleString() : '—')
+                                          }
+                                        </span>
+                                        {(lead as any).sqftOverride && lead.sqft && (
+                                          <span className="text-purple-400 ml-1">ATTOM: {lead.sqft.toLocaleString()}</span>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                              {/* Sub-detail for income: show rent and flag if estimated */}
+                              {key === 'income' && entry && analysis.marketRent && (
+                                <div className="grid grid-cols-12 gap-2 pb-2.5 border-b border-purple-50">
+                                  <div className="col-span-12 pl-4 text-xs text-purple-500">
+                                    ${(analysis.marketRent).toLocaleString()}/mo × 12 × GRM {analysis.grossRentMultiplier || 10}
+                                    {(analysis as any).marketRentEstimated && (
+                                      <span className="ml-1.5 px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-medium">estimated — override in Income Approach</span>
+                                    )}
                                   </div>
                                 </div>
                               )}
@@ -1391,18 +1380,24 @@ export default function CompsAnalysisPage() {
                         })}
                       </div>
 
-                      {/* Triangulated ARV footer */}
+                      {/* Triangulated ARV footer — secondary, inside breakdown card */}
                       {analysis.triangulatedArv && (
-                        <div className="mt-4 pt-4 border-t-2 border-purple-300 flex items-center justify-between">
+                        <div className="mt-4 pt-3 border-t border-purple-200 flex items-center justify-between">
                           <div>
-                            <div className="text-xs font-semibold text-purple-600 uppercase tracking-wide mb-1">Triangulated ARV (System Estimate)</div>
-                            <div className="text-3xl font-bold text-purple-700">${analysis.triangulatedArv.toLocaleString()}</div>
+                            <div className="text-xs text-purple-500 uppercase tracking-wide mb-0.5">Weighted Triangulated ARV</div>
+                            <div className="text-xl font-bold text-purple-700">${analysis.triangulatedArv.toLocaleString()}</div>
                             {analysis.triangulatedArvLow && analysis.triangulatedArvHigh && (
-                              <div className="text-sm text-purple-500 mt-0.5">
+                              <div className="text-xs text-purple-400 mt-0.5">
                                 Range: ${analysis.triangulatedArvLow.toLocaleString()} – ${analysis.triangulatedArvHigh.toLocaleString()}
                               </div>
                             )}
                           </div>
+                          {analysis.riskAdjustedArv && analysis.riskAdjustedArv !== analysis.triangulatedArv && (
+                            <div className="text-right text-xs text-purple-400">
+                              <div>Risk deduction</div>
+                              <div className="font-semibold text-purple-500">−${(analysis.triangulatedArv - analysis.riskAdjustedArv).toLocaleString()}</div>
+                            </div>
+                          )}
                         </div>
                       )}
 
@@ -1425,31 +1420,40 @@ export default function CompsAnalysisPage() {
                   );
                 })()}
 
-                {/* Risk-Adjusted ARV */}
-                {analysis.riskAdjustedArv && analysis.riskAdjustedArv !== analysis.triangulatedArv && (
-                  <div className="bg-orange-50 border border-orange-200 rounded-2xl p-5 mb-5">
-                    <div className="flex items-center justify-between">
+                {/* Risk-Adjusted ARV — PRIMARY green hero number */}
+                {analysis.riskAdjustedArv && (
+                  <div className="bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-300 rounded-2xl p-6 mb-5">
+                    <div className="flex items-start justify-between flex-wrap gap-4">
                       <div>
-                        <div className="text-xs font-semibold text-orange-700 uppercase tracking-wide mb-1">Risk-Adjusted ARV</div>
-                        <div className="text-4xl font-bold text-orange-700">${analysis.riskAdjustedArv.toLocaleString()}</div>
-                        <div className="text-xs text-orange-600 mt-1">After functional obsolescence, buyer pool, and land utility deductions</div>
-                      </div>
-                      {analysis.riskAdjustedArv && analysis.triangulatedArv && (
-                        <div className="text-right">
-                          <div className="text-xs text-orange-500">Deduction</div>
-                          <div className="text-xl font-bold text-orange-600">
-                            -${(analysis.triangulatedArv - analysis.riskAdjustedArv).toLocaleString()}
-                          </div>
+                        <div className="text-xs font-semibold text-green-700 uppercase tracking-wide mb-1">🏠 Risk-Adjusted ARV — System Estimate</div>
+                        <div className="text-5xl font-bold text-green-700">${analysis.riskAdjustedArv.toLocaleString()}</div>
+                        <div className="text-sm text-green-600 mt-1">
+                          After functional obsolescence, buyer pool &amp; land utility adjustments
                         </div>
-                      )}
+                        {analysis.riskAdjustedArv && analysis.triangulatedArv && analysis.riskAdjustedArv !== analysis.triangulatedArv && (
+                          <div className="text-xs text-green-500 mt-0.5">
+                            Triangulated base: ${analysis.triangulatedArv.toLocaleString()}
+                            <span className="ml-1.5 text-green-400">
+                              (−${(analysis.triangulatedArv - analysis.riskAdjustedArv).toLocaleString()} risk deduction)
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                      <DonutStat
+                        value={analysis.confidenceScore || 0}
+                        max={100}
+                        label="Confidence"
+                        color={(analysis.confidenceScore || 0) >= 80 ? '#10b981' : (analysis.confidenceScore || 0) >= 60 ? '#f59e0b' : '#ef4444'}
+                        size={80}
+                      />
                     </div>
 
                     {/* Risk flags */}
                     {analysis.riskFlags && (analysis.riskFlags as string[]).length > 0 && (
-                      <div className="mt-3 space-y-1.5">
+                      <div className="mt-4 space-y-1.5">
                         {(analysis.riskFlags as string[]).map((flag, i) => (
-                          <div key={i} className="flex items-start gap-2 text-xs text-orange-800 bg-orange-100 rounded-lg px-3 py-1.5">
-                            <span className="shrink-0">&#9888;&#65039;</span>
+                          <div key={i} className="flex items-start gap-2 text-xs text-green-800 bg-green-100 rounded-lg px-3 py-1.5">
+                            <span className="shrink-0">⚑</span>
                             <span>{flag}</span>
                           </div>
                         ))}

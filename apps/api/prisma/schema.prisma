@@ -282,6 +282,7 @@ model CompAnalysis {
   costApproachDepreciation Float? // Depreciation applied
   incomeApproachValue   Float?   // Income/rental approach estimated value
   marketRent            Float?   // Market rent used in income approach
+  marketRentEstimated   Boolean  @default(false)  // true = system-estimated (sqft-based), false = user-provided
   grossRentMultiplier   Float?   // GRM used (8-14 typical)
   triangulatedArv       Float?   // Final weighted triangulated value
   triangulatedArvLow    Float?
