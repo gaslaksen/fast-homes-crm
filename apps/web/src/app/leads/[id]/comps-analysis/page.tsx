@@ -1242,55 +1242,47 @@ export default function CompsAnalysisPage() {
                 </div>
 
                 {/* ── PRIMARY: AI Estimated ARV hero card ── */}
-                {(() => {
-                  const displayArv = analysis.arvEstimate;
-                  if (!displayArv) return null;
-                  const sqftUsed = (lead as any)?.sqftOverride || lead?.sqft;
-                  return (
-                    <div className="bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-300 rounded-2xl p-6 mb-5">
-                      <div className="flex items-end justify-between flex-wrap gap-4">
-                        <div>
-                          <div className="text-xs font-semibold text-green-700 uppercase tracking-wide mb-1">AI Estimated ARV</div>
-                          <div className="text-5xl font-bold text-green-700">${Math.round(displayArv).toLocaleString()}</div>
-                          <div className="flex items-center gap-4 mt-2">
-                            {(analysis.pricePerSqft || avgPricePerSqft) && sqftUsed && (
-                              <div className="text-sm text-green-600">
-                                ${analysis.pricePerSqft || avgPricePerSqft}/sqft × {sqftUsed.toLocaleString()} sqft
-                                {(lead as any)?.sqftOverride && <span className="ml-1 text-amber-600 text-xs">(override)</span>}
-                              </div>
-                            )}
-                            {(analysis as any).medianPricePerSqft && (
-                              <div className="text-xs text-green-500">median ${(analysis as any).medianPricePerSqft}/sqft</div>
-                            )}
-                          </div>
-                          {analysis.avgAdjustment ? (
-                            <div className={`text-xs mt-1 ${(analysis.avgAdjustment || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                              {(analysis.avgAdjustment || 0) >= 0 ? '+' : ''}${(analysis.avgAdjustment || 0).toLocaleString()} avg AI adjustment
-                            </div>
-                          ) : null}
-                        </div>
-                        <div className="flex flex-col items-end gap-2">
-                          <DonutStat
-                            value={analysis.confidenceScore || 0}
-                            max={100}
-                            label="Confidence"
-                            color={(analysis.confidenceScore || 0) >= 80 ? '#10b981' : (analysis.confidenceScore || 0) >= 60 ? '#f59e0b' : '#ef4444'}
-                            size={80}
-                          />
-                          {analysis.confidenceTier && (
-                            <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${
-                              analysis.confidenceTier === 'High' ? 'bg-green-200 text-green-800' :
-                              analysis.confidenceTier === 'Medium' ? 'bg-yellow-100 text-yellow-800' :
-                              'bg-red-100 text-red-700'
-                            }`}>
-                              {analysis.confidenceTier} Confidence
+                {analysis.arvEstimate && (
+                  <div className="bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-300 rounded-2xl p-6 mb-5">
+                    <div className="flex items-end justify-between flex-wrap gap-4">
+                      <div>
+                        <div className="text-xs font-semibold text-green-700 uppercase tracking-wide mb-1">AI Estimated ARV</div>
+                        <div className="text-5xl font-bold text-green-700">${analysis.arvEstimate.toLocaleString()}</div>
+                        <div className="text-sm text-green-600 mt-2">
+                          Weighted average of {selectedComps.length} AI-adjusted comp{selectedComps.length !== 1 ? 's' : ''}
+                          {analysis.arvLow && analysis.arvHigh && (
+                            <span className="ml-2 text-green-500">
+                              Range: ${analysis.arvLow.toLocaleString()} – ${analysis.arvHigh.toLocaleString()}
                             </span>
                           )}
                         </div>
+                        {analysis.avgAdjustment ? (
+                          <div className={`text-xs mt-1 ${(analysis.avgAdjustment || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                            {(analysis.avgAdjustment || 0) >= 0 ? '+' : ''}${(analysis.avgAdjustment || 0).toLocaleString()} avg AI adjustment per comp
+                          </div>
+                        ) : null}
+                      </div>
+                      <div className="flex flex-col items-end gap-2">
+                        <DonutStat
+                          value={analysis.confidenceScore || 0}
+                          max={100}
+                          label="Confidence"
+                          color={(analysis.confidenceScore || 0) >= 80 ? '#10b981' : (analysis.confidenceScore || 0) >= 60 ? '#f59e0b' : '#ef4444'}
+                          size={80}
+                        />
+                        {analysis.confidenceTier && (
+                          <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${
+                            analysis.confidenceTier === 'High' ? 'bg-green-200 text-green-800' :
+                            analysis.confidenceTier === 'Medium' ? 'bg-yellow-100 text-yellow-800' :
+                            'bg-red-100 text-red-700'
+                          }`}>
+                            {analysis.confidenceTier} Confidence
+                          </span>
+                        )}
                       </div>
                     </div>
-                  );
-                })()}
+                  </div>
+                )}
 
                 {/* ── Valuation Breakdown — three methods + triangulated ── */}
                 {(() => {

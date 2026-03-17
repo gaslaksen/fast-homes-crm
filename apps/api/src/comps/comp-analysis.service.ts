@@ -1098,8 +1098,8 @@ Respond with ONLY a JSON object: { "estimate": <number>, "breakdown": "<concise 
     });
     if (!analysis) throw new Error('Analysis not found');
 
-    // Use riskAdjustedArv if available, else fall back to arvEstimate
-    const arv = params.arv || analysis.riskAdjustedArv || analysis.arvEstimate || 0;
+    // Use arvEstimate (AI weighted comps) as the single ARV truth
+    const arv = params.arv || analysis.arvEstimate || 0;
     const riskAdjustedArv = analysis.riskAdjustedArv ?? null;
     const repairCosts = params.repairCosts ?? analysis.repairCosts ?? 0;
     const assignmentFee = params.assignmentFee ?? analysis.assignmentFee;
@@ -1193,9 +1193,8 @@ Address: ${lead.propertyAddress}, ${lead.propertyCity}, ${lead.propertyState} ${
 Size: ${lead.sqft ? lead.sqft.toLocaleString() + ' sqft' : 'Unknown'}, ${lead.bedrooms || '?'}bd/${lead.bathrooms || '?'}ba
 Type: ${lead.propertyType || 'Unknown'} | Seller Condition: ${lead.conditionLevel || 'Unknown'}
 Asking Price: ${lead.askingPrice ? '$' + lead.askingPrice.toLocaleString() : 'Not provided'}
-Risk-Adjusted ARV (system estimate): ${analysis.riskAdjustedArv ? '$' + analysis.riskAdjustedArv.toLocaleString() : 'Not calculated'}
-Triangulated ARV: ${analysis.triangulatedArv ? '$' + analysis.triangulatedArv.toLocaleString() : 'Not calculated'}
-Comparable Sales Value: ${analysis.comparableSalesValue ? '$' + Math.round(analysis.comparableSalesValue).toLocaleString() : 'Not calculated'}
+AI Estimated ARV: ${analysis.arvEstimate ? '$' + analysis.arvEstimate.toLocaleString() : 'Not calculated'} (weighted average of AI-adjusted comps)
+ARV Range: ${analysis.arvLow ? '$' + analysis.arvLow.toLocaleString() : '?'} – ${analysis.arvHigh ? '$' + analysis.arvHigh.toLocaleString() : '?'}
 Confidence Score: ${analysis.confidenceScore}/100
 ${attomAssessmentBlock}
 
@@ -1221,7 +1220,7 @@ Respond ONLY with a valid JSON object in this exact shape — no markdown, no ex
 }
 
 Rules:
-- wholesalerNote: plain English, use the Risk-Adjusted ARV as the basis for MAO (70% × Risk-Adjusted ARV − $15k assignment fee), compare to asking price if known
+- wholesalerNote: plain English, use the AI Estimated ARV as the basis for MAO (70% × AI Estimated ARV − $15k assignment fee), compare to asking price if known
 - method: reference the confidence score and comp count specifically
 - keyFactors: 3-5 bullet points — location, condition, seller motivation, equity position, market velocity
 - risks: 2-4 bullet points — red flags, ARV uncertainty, market risks, property-specific concerns
