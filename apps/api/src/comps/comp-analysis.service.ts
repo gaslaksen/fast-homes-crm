@@ -1211,15 +1211,20 @@ ${selectedComps.slice(0, 8).map((c, i) => {
   return `${i + 1}. ${c.address} | $${c.soldPrice.toLocaleString()} | ${c.bedrooms || '?'}bd/${c.bathrooms || '?'}ba | ${c.sqft?.toLocaleString() || '?'}sqft | ${c.distance.toFixed(1)}mi | ${monthsAgo}mo ago | ${c.correlation ? (c.correlation * 100).toFixed(0) + '% match' : ''}`;
 }).join('\n')}
 
-Write a 400-600 word assessment with these sections:
-**ARV Confidence & Comp Pool**
-**ATTOM Validation** (only if ATTOM data is present — compare comps ARV vs ATTOM after-repair value, flag if they diverge >10%, explain which is more reliable given the data)
-**Market Conditions**
-**Red Flags & Concerns**
-**Deal Viability**
-**Recommended Offer Range**
+Respond ONLY with a valid JSON object in this exact shape — no markdown, no explanation outside the JSON:
+{
+  "wholesalerNote": "<2-3 sentence bottom-line take: is this a deal, why or why not, what to watch>",
+  "method": "<1-2 sentences on ARV confidence and comp quality — avg distance, recency, spread>",
+  "keyFactors": ["<factor 1>", "<factor 2>", "<factor 3>", "<factor 4>"],
+  "risks": ["<risk 1>", "<risk 2>", "<risk 3>"]
+}
 
-Be specific with numbers. For deal viability, calculate MAO at 70% rule with $15k assignment fee and compare to asking price if known. Include monthly tax hold cost if ATTOM tax data is available.`;
+Rules:
+- wholesalerNote: plain English, include MAO at 70% rule minus $15k assignment fee vs asking price if known
+- method: reference the confidence score and comp count specifically
+- keyFactors: 3-5 bullet points — location, condition, seller motivation, equity position, market velocity
+- risks: 2-4 bullet points — red flags, ARV uncertainty, market risks, property-specific concerns
+- Be specific with dollar figures wherever possible`;
 
     try {
       const response = await this.anthropic.messages.create({
@@ -1227,7 +1232,37 @@ Be specific with numbers. For deal viability, calculate MAO at 70% rule with $15
         max_tokens: 800,
         messages: [{ role: 'user', content: prompt }],
       });
-      const assessment = (response.content[0] as any)?.text || 'Unable to generate assessment.';
+      const raw = (response.content[0] as any)?.text || '';
+
+      // Parse JSON — store the structured object so the UI can render boxes
+      let assessment = raw;
+      try {
+        const stripped = raw.replace(/^```[\w]*\s*/m, '').replace(/\s*```$/m, '').trim();
+        const m = stripped.match(/\{[\s\S]*/);
+        if (m) {
+          let j = m[0];
+          let opens = 0, arrOpens = 0, inStr = false, esc = false;
+          for (const ch of j) {
+            if (esc) { esc = false; continue; }
+            if (ch === '\\') { esc = true; continue; }
+            if (ch === '"' && !inStr) { inStr = true; continue; }
+            if (ch === '"' && inStr) { inStr = false; continue; }
+            if (!inStr) {
+              if (ch === '{') opens++;
+              else if (ch === '}') opens--;
+              else if (ch === '[') arrOpens++;
+              else if (ch === ']') arrOpens--;
+            }
+          }
+          if (inStr) j += '"';
+          j += ']'.repeat(Math.max(0, arrOpens)) + '}'.repeat(Math.max(0, opens));
+          JSON.parse(j); // validate
+          assessment = j; // store the repaired JSON
+        }
+      } catch {
+        // Keep raw text as fallback — prose renderer will handle it
+        this.logger.warn(`Assessment JSON parse failed for ${analysisId} — storing raw text`);
+      }
 
       await this.prisma.compAnalysis.update({
         where: { id: analysisId },
