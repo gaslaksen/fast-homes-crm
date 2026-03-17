@@ -160,6 +160,29 @@ export class CompAnalysisService {
     this.logger.log(
       `Imported ${existingComps.length} existing comps into analysis ${analysisId} — ${autoSelected} auto-selected (≤1 mi, sold ≤12 months)`,
     );
+
+    // Immediately calculate initial confidence score so it's not stuck at default 0/1
+    if (existingComps.length > 0) {
+      const selected = existingComps.filter(c => c.distance <= 1.0 && this.isRecentSale(c.soldDate, 12));
+      const compsForScore = selected.length > 0 ? selected : existingComps;
+      const initialConfidence = this.calculateConfidence(compsForScore, null, undefined, undefined, undefined);
+
+      const avgDist = compsForScore.reduce((s, c) => s + c.distance, 0) / compsForScore.length;
+      const now = Date.now();
+      const avgMonthsAgo = compsForScore.reduce((s, c) =>
+        s + (now - new Date(c.soldDate).getTime()) / (30 * 24 * 60 * 60 * 1000), 0) / compsForScore.length;
+      const confidenceTier =
+        avgDist <= 0.5 && avgMonthsAgo <= 6 ? 'High' :
+        avgDist <= 3.0 && avgMonthsAgo <= 12 ? 'Medium' :
+        'Low';
+
+      await this.prisma.compAnalysis.update({
+        where: { id: analysisId },
+        data: { confidenceScore: initialConfidence, confidenceTier },
+      });
+      this.logger.log(`Initial confidence for analysis ${analysisId}: ${initialConfidence} (${confidenceTier})`);
+    }
+
     return existingComps.length;
   }
 
@@ -564,9 +587,22 @@ export class CompAnalysisService {
 
     const confidence = this.calculateConfidence(comps, lead, arvLow, arvHigh, arv);
 
+    // Confidence tier per partner framework:
+    // High   = comps within 0.5mi AND sold within 6 months
+    // Medium = comps within 1–3mi OR sold within 12 months
+    // Low    = sparse/distant comps or zip-level fallback
+    const avgDist = comps.reduce((s, c) => s + c.distance, 0) / comps.length;
+    const now2 = Date.now();
+    const avgMonthsAgo = comps.reduce((s, c) =>
+      s + (now2 - new Date(c.soldDate).getTime()) / (30 * 24 * 60 * 60 * 1000), 0) / comps.length;
+    const confidenceTier =
+      avgDist <= 0.5 && avgMonthsAgo <= 6 ? 'High' :
+      avgDist <= 3.0 && avgMonthsAgo <= 12 ? 'Medium' :
+      'Low';
+
     await this.prisma.compAnalysis.update({
       where: { id: analysisId },
-      data: { arvEstimate: arv, arvLow, arvHigh, arvMethod: method, pricePerSqft, confidenceScore: confidence },
+      data: { arvEstimate: arv, arvLow, arvHigh, arvMethod: method, pricePerSqft, confidenceScore: confidence, confidenceTier },
     });
 
     this.logger.log(`ARV calculated: $${arv.toLocaleString()} (${method}) range $${arvLow.toLocaleString()}–$${arvHigh.toLocaleString()} confidence=${confidence}`);
