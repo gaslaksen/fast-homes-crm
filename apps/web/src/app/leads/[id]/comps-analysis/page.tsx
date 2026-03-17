@@ -88,6 +88,8 @@ interface Analysis {
   arvMethod: string;
   avgAdjustment?: number;
   pricePerSqft?: number;
+  medianPricePerSqft?: number;
+  comparableSalesValue?: number;
   adjustmentsEnabled: boolean;
   repairCosts?: number;
   repairFinishLevel?: string;
@@ -106,7 +108,7 @@ interface Analysis {
   triangulatedArv?: number;
   triangulatedArvLow?: number;
   triangulatedArvHigh?: number;
-  methodsUsed?: Record<string, number>;
+  methodsUsed?: { method: string; value: number; weight: number }[];
   methodDivergence?: number;
   neighborhoodCeiling?: number;
   neighborhoodCeilingBreached?: boolean;
@@ -1302,59 +1304,121 @@ export default function CompsAnalysisPage() {
                   </div>
                 </div>
 
-                {/* Triangulated ARV — Three-Model Valuation */}
-                {analysis.triangulatedArv && (
-                  <div className="bg-gradient-to-r from-purple-50 to-indigo-50 border border-purple-200 rounded-2xl p-5 mb-5">
-                    <div className="flex items-center justify-between mb-3">
-                      <div>
-                        <div className="text-xs font-semibold text-purple-700 uppercase tracking-wide mb-1">Triangulated ARV</div>
-                        <div className="text-4xl font-bold text-purple-700">${(analysis.triangulatedArv).toLocaleString()}</div>
-                        {analysis.triangulatedArvLow && analysis.triangulatedArvHigh && (
-                          <div className="text-sm text-purple-600 mt-1">
-                            Range: ${analysis.triangulatedArvLow.toLocaleString()} – ${analysis.triangulatedArvHigh.toLocaleString()}
-                          </div>
+                {/* Valuation Breakdown — Three-Method + Triangulated ARV */}
+                {(() => {
+                  const methodLabels: Record<string, string> = {
+                    comps: 'Comparable Sales ($/sqft)',
+                    cost: 'Cost Approach',
+                    income: 'Income Approach',
+                    attom: 'ATTOM AVM',
+                  };
+                  const methodOrder = ['comps', 'cost', 'income', 'attom'];
+                  const baseWeights: Record<string, number> = { comps: 0.50, cost: 0.25, income: 0.15, attom: 0.10 };
+
+                  // Build lookup from methodsUsed array
+                  const methodMap = new Map<string, { value: number; weight: number }>();
+                  if (analysis.methodsUsed && Array.isArray(analysis.methodsUsed)) {
+                    for (const m of analysis.methodsUsed) {
+                      methodMap.set(m.method, { value: m.value, weight: m.weight });
+                    }
+                  }
+
+                  // If no methods and no triangulatedArv, don't render the card
+                  if (methodMap.size === 0 && !analysis.triangulatedArv) return null;
+
+                  // Compute renormalized weights for display even if methodsUsed is empty
+                  const availableKeys = methodOrder.filter(k => methodMap.has(k));
+                  const totalBase = availableKeys.reduce((s, k) => s + baseWeights[k], 0);
+                  const renormalized: Record<string, number> = {};
+                  for (const k of availableKeys) {
+                    renormalized[k] = totalBase > 0 ? baseWeights[k] / totalBase : 0;
+                  }
+
+                  return (
+                    <div className="bg-gradient-to-r from-purple-50 to-indigo-50 border border-purple-200 rounded-2xl p-5 mb-5">
+                      <div className="flex items-center justify-between mb-4">
+                        <h3 className="text-sm font-bold text-purple-900 uppercase tracking-wide">Valuation Breakdown</h3>
+                        {analysis.confidenceTier && (
+                          <span className={`text-sm px-3 py-1.5 rounded-full font-semibold ${
+                            analysis.confidenceTier === 'High' ? 'bg-green-100 text-green-700' :
+                            analysis.confidenceTier === 'Medium' ? 'bg-yellow-100 text-yellow-700' :
+                            'bg-red-100 text-red-700'
+                          }`}>
+                            {analysis.confidenceTier} Confidence
+                          </span>
                         )}
                       </div>
-                      {analysis.confidenceTier && (
-                        <span className={`text-sm px-3 py-1.5 rounded-full font-semibold ${
-                          analysis.confidenceTier === 'High' ? 'bg-green-100 text-green-700' :
-                          analysis.confidenceTier === 'Medium' ? 'bg-yellow-100 text-yellow-700' :
-                          'bg-red-100 text-red-700'
-                        }`}>
-                          {analysis.confidenceTier} Confidence
-                        </span>
+
+                      {/* Method table */}
+                      <div className="border-t border-purple-200">
+                        {/* Header row */}
+                        <div className="grid grid-cols-12 gap-2 py-2 text-xs font-semibold text-purple-600 uppercase tracking-wide border-b border-purple-100">
+                          <div className="col-span-6">Method</div>
+                          <div className="col-span-4 text-right">Value</div>
+                          <div className="col-span-2 text-right">Weight</div>
+                        </div>
+
+                        {methodOrder.map((key) => {
+                          const entry = methodMap.get(key);
+                          const weight = renormalized[key];
+                          return (
+                            <div key={key}>
+                              <div className="grid grid-cols-12 gap-2 py-2.5 border-b border-purple-50 items-center">
+                                <div className="col-span-6 text-sm text-purple-900 font-medium">{methodLabels[key]}</div>
+                                <div className="col-span-4 text-right text-sm font-semibold text-purple-800">
+                                  {entry ? `$${entry.value.toLocaleString()}` : <span className="text-purple-400 font-normal">— Not calculated</span>}
+                                </div>
+                                <div className="col-span-2 text-right text-xs text-purple-500">
+                                  {entry ? `${Math.round(weight * 100)}%` : ''}
+                                </div>
+                              </div>
+                              {/* Sub-detail for comps: show avg/median ppsf */}
+                              {key === 'comps' && entry && (analysis.pricePerSqft || analysis.medianPricePerSqft) && (
+                                <div className="grid grid-cols-12 gap-2 pb-2 border-b border-purple-50">
+                                  <div className="col-span-6 col-start-1 pl-4 text-xs text-purple-500">
+                                    avg $/sqft: <span className="font-medium text-purple-700">${analysis.pricePerSqft || '—'}</span>
+                                    {' '}median $/sqft: <span className="font-medium text-purple-700">${analysis.medianPricePerSqft || '—'}</span>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Triangulated ARV footer */}
+                      {analysis.triangulatedArv && (
+                        <div className="mt-4 pt-4 border-t-2 border-purple-300 flex items-center justify-between">
+                          <div>
+                            <div className="text-xs font-semibold text-purple-600 uppercase tracking-wide mb-1">Triangulated ARV (System Estimate)</div>
+                            <div className="text-3xl font-bold text-purple-700">${analysis.triangulatedArv.toLocaleString()}</div>
+                            {analysis.triangulatedArvLow && analysis.triangulatedArvHigh && (
+                              <div className="text-sm text-purple-500 mt-0.5">
+                                Range: ${analysis.triangulatedArvLow.toLocaleString()} – ${analysis.triangulatedArvHigh.toLocaleString()}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Divergence warning */}
+                      {analysis.methodDivergence != null && analysis.methodDivergence > 10 && (
+                        <div className="mt-3 flex items-center gap-2 text-amber-700 bg-amber-50 rounded-lg px-3 py-2 text-xs">
+                          <span>&#9888;&#65039;</span>
+                          <span>Valuation methods diverge by {analysis.methodDivergence.toFixed(0)}% — review data quality before making an offer</span>
+                        </div>
+                      )}
+
+                      {/* Neighborhood ceiling breach */}
+                      {analysis.neighborhoodCeilingBreached && analysis.neighborhoodCeiling && (
+                        <div className="mt-2 flex items-center gap-2 text-red-700 bg-red-50 rounded-lg px-3 py-2 text-xs">
+                          <span>&#128683;</span>
+                          <span>ARV exceeds neighborhood ceiling of ${analysis.neighborhoodCeiling.toLocaleString()} — top 3 comps suggest this may be optimistic</span>
+                        </div>
                       )}
                     </div>
-
-                    {/* Method breakdown */}
-                    {analysis.methodsUsed && Object.keys(analysis.methodsUsed).length > 1 && (
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3">
-                        {Object.entries(analysis.methodsUsed).map(([method, value]) => (
-                          <div key={method} className="bg-white/70 rounded-lg p-2 text-center">
-                            <div className="text-xs text-purple-500 uppercase tracking-wide">{method}</div>
-                            <div className="text-sm font-bold text-purple-800">${Number(value).toLocaleString()}</div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Divergence warning */}
-                    {analysis.methodDivergence != null && analysis.methodDivergence > 10 && (
-                      <div className="mt-3 flex items-center gap-2 text-amber-700 bg-amber-50 rounded-lg px-3 py-2 text-xs">
-                        <span>&#9888;&#65039;</span>
-                        <span>Valuation methods diverge by {analysis.methodDivergence.toFixed(0)}% — review data quality before making an offer</span>
-                      </div>
-                    )}
-
-                    {/* Neighborhood ceiling breach */}
-                    {analysis.neighborhoodCeilingBreached && analysis.neighborhoodCeiling && (
-                      <div className="mt-2 flex items-center gap-2 text-red-700 bg-red-50 rounded-lg px-3 py-2 text-xs">
-                        <span>&#128683;</span>
-                        <span>ARV exceeds neighborhood ceiling of ${analysis.neighborhoodCeiling.toLocaleString()} — top 3 comps suggest this may be optimistic</span>
-                      </div>
-                    )}
-                  </div>
-                )}
+                  );
+                })()}
 
                 {/* Risk-Adjusted ARV */}
                 {analysis.riskAdjustedArv && analysis.riskAdjustedArv !== analysis.triangulatedArv && (

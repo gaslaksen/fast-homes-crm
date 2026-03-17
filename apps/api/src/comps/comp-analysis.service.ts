@@ -579,11 +579,31 @@ export class CompAnalysisService {
     const arvLow = Math.round(Math.min(...filtered));
     const arvHigh = Math.round(Math.max(...filtered));
 
-    // Price per sqft (use subject sqft if available, otherwise avg comp sqft)
-    const subjectSqft = lead?.sqft;
-    const avgCompSqft = comps.reduce((s, c) => s + (c.sqft || 0), 0) / comps.filter(c => c.sqft).length || 0;
-    const refSqft = subjectSqft || Math.round(avgCompSqft);
-    const pricePerSqft = refSqft > 0 ? Math.round(arv / refSqft) : 0;
+    // ── Comparable Sales Value (price/sqft anchoring) ──
+    const subjectSqft = lead?.sqft as number | null;
+    const compsWithSqft = comps.filter(c => c.sqft && c.sqft > 0);
+    let comparableSalesValue: number | null = null;
+    let avgPpsf: number | null = null;
+    let medianPpsf: number | null = null;
+
+    if (compsWithSqft.length > 0 && subjectSqft && subjectSqft > 0) {
+      const ppsfValues = compsWithSqft.map(c => {
+        const price = (useAdjusted && c.adjustedPrice ? c.adjustedPrice : c.soldPrice) as number;
+        return price / c.sqft!;
+      });
+      avgPpsf = Math.round(ppsfValues.reduce((s, v) => s + v, 0) / ppsfValues.length);
+      const sortedPpsf = [...ppsfValues].sort((a, b) => a - b);
+      const mid = Math.floor(sortedPpsf.length / 2);
+      medianPpsf = Math.round(
+        sortedPpsf.length % 2 === 0
+          ? (sortedPpsf[mid - 1] + sortedPpsf[mid]) / 2
+          : sortedPpsf[mid],
+      );
+      comparableSalesValue = Math.round(((avgPpsf + medianPpsf) / 2) * subjectSqft);
+    }
+
+    // pricePerSqft = avg ppsf from comps (not ARV/sqft)
+    const pricePerSqft = avgPpsf ?? 0;
 
     const confidence = this.calculateConfidence(comps, lead, arvLow, arvHigh, arv);
 
@@ -602,7 +622,14 @@ export class CompAnalysisService {
 
     await this.prisma.compAnalysis.update({
       where: { id: analysisId },
-      data: { arvEstimate: arv, arvLow, arvHigh, arvMethod: method, pricePerSqft, confidenceScore: confidence, confidenceTier },
+      data: {
+        arvEstimate: arv, arvLow, arvHigh, arvMethod: method,
+        pricePerSqft,
+        medianPricePerSqft: medianPpsf,
+        comparableSalesValue,
+        confidenceScore: confidence,
+        confidenceTier,
+      },
     });
 
     this.logger.log(`ARV calculated: $${arv.toLocaleString()} (${method}) range $${arvLow.toLocaleString()}–$${arvHigh.toLocaleString()} confidence=${confidence}`);
@@ -620,7 +647,7 @@ export class CompAnalysisService {
       this.logger.warn(`Risk flag assessment failed (non-fatal): ${(e as Error).message}`);
     }
 
-    return { arv, arvLow, arvHigh, pricePerSqft, confidence, method, triangulation };
+    return { arv, arvLow, arvHigh, pricePerSqft, medianPricePerSqft: medianPpsf, comparableSalesValue, confidence, method, triangulation };
   }
 
   private calculateConfidence(comps: any[], lead: any, arvLow?: number, arvHigh?: number, arv?: number): number {
@@ -1503,8 +1530,10 @@ Use Midwest/rural Ohio pricing. Be specific about what you see — don't general
     const lead = analysis.lead as any;
 
     // Collect available method values
+    // Use comparableSalesValue (ppsf-anchored) as primary comps signal; fall back to arvEstimate
     const methods: Record<string, number> = {};
-    if (analysis.arvEstimate) methods.comps = analysis.arvEstimate;
+    if (analysis.comparableSalesValue) methods.comps = analysis.comparableSalesValue;
+    else if (analysis.arvEstimate) methods.comps = analysis.arvEstimate;
     if (analysis.costApproachValue) methods.cost = analysis.costApproachValue;
     if (analysis.incomeApproachValue) methods.income = analysis.incomeApproachValue;
     if (lead.avmExcellentHigh) methods.attom = lead.avmExcellentHigh;
@@ -1518,9 +1547,9 @@ Use Midwest/rural Ohio pricing. Be specific about what you see — don't general
     // Weights (renormalize to available methods only)
     const baseWeights: Record<string, number> = {
       comps: 0.50,
-      attom: 0.25,
-      cost: 0.15,
-      income: 0.10,
+      cost: 0.25,
+      income: 0.15,
+      attom: 0.10,
     };
 
     const totalBaseWeight = methodKeys.reduce((s, k) => s + (baseWeights[k] || 0), 0);

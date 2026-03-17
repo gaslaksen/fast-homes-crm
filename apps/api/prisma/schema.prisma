@@ -261,6 +261,8 @@ model CompAnalysis {
   arvMethod         String   @default("average")
   avgAdjustment     Float?
   pricePerSqft      Float?
+  medianPricePerSqft Float?
+  comparableSalesValue Float?
   adjustmentsEnabled Boolean @default(true)
   adjustmentConfig  Json?
   repairCosts       Float?
