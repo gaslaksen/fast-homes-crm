@@ -719,7 +719,12 @@ export default function CompsAnalysisPage() {
                 <InfoItem label="Address" value={lead.propertyAddress} />
                 <InfoItem label="Location" value={`${lead.propertyCity}, ${lead.propertyState} ${lead.propertyZip}`} />
                 <InfoItem label="Beds / Baths" value={`${lead.bedrooms || '?'} bd / ${lead.bathrooms || '?'} ba`} />
-                <InfoItem label="Sq Ft" value={lead.sqft?.toLocaleString() || '—'} />
+                <InfoItem
+                  label="Sq Ft"
+                  value={(lead as any).sqftOverride
+                    ? `${(lead as any).sqftOverride.toLocaleString()} (override)`
+                    : lead.sqft?.toLocaleString() || '—'}
+                />
                 <InfoItem label="Asking Price" value={lead.askingPrice ? `$${lead.askingPrice.toLocaleString()}` : '—'} />
                 <InfoItem label="Condition" value={(attomData?.propertyCondition && attomData.propertyCondition !== lead.conditionLevel) ? `${lead.conditionLevel || '—'} (ATTOM: ${attomData.propertyCondition})` : (lead.conditionLevel || '—')} />
               </div>

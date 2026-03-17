@@ -603,7 +603,12 @@ export default function LeadDetailPage() {
                   </div>
                   <div>
                     <dt className="text-sm font-medium text-gray-500">Sq Ft</dt>
-                    <dd className="mt-1 text-sm text-gray-900">{lead.sqft?.toLocaleString() || 'Unknown'}</dd>
+                    <dd className="mt-1 text-sm text-gray-900">
+                      {(lead as any).sqftOverride
+                        ? <><span className="font-semibold text-amber-700">{(lead as any).sqftOverride.toLocaleString()}</span><span className="text-xs text-amber-600 ml-1">(override)</span><span className="text-xs text-gray-400 ml-1">ATTOM: {lead.sqft?.toLocaleString() || '—'}</span></>
+                        : lead.sqft?.toLocaleString() || 'Unknown'
+                      }
+                    </dd>
                   </div>
                   <div>
                     <dt className="text-sm font-medium text-gray-500">Year Built</dt>

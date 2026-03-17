@@ -30,6 +30,7 @@ export default function EditLeadPage() {
     bedrooms: '',
     bathrooms: '',
     sqft: '',
+    sqftOverride: '',
     sellerFirstName: '',
     sellerLastName: '',
     sellerPhone: '',
@@ -63,6 +64,7 @@ export default function EditLeadPage() {
         bedrooms: lead.bedrooms?.toString() || '',
         bathrooms: lead.bathrooms?.toString() || '',
         sqft: lead.sqft?.toString() || '',
+        sqftOverride: lead.sqftOverride?.toString() || '',
         sellerFirstName: lead.sellerFirstName || '',
         sellerLastName: lead.sellerLastName || '',
         sellerPhone: lead.sellerPhone || '',
@@ -119,6 +121,7 @@ export default function EditLeadPage() {
         bedrooms: formData.bedrooms ? parseInt(formData.bedrooms) : undefined,
         bathrooms: formData.bathrooms ? parseFloat(formData.bathrooms) : undefined,
         sqft: formData.sqft ? parseInt(formData.sqft) : undefined,
+        sqftOverride: formData.sqftOverride ? parseInt(formData.sqftOverride) : null,
         sellerFirstName: formData.sellerFirstName,
         sellerLastName: formData.sellerLastName,
         sellerPhone: formData.sellerPhone,
@@ -279,8 +282,23 @@ export default function EditLeadPage() {
                 <input type="number" name="bathrooms" value={formData.bathrooms} onChange={handleChange} className="input" step="0.5" min="0" />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Square Feet</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Square Feet <span className="text-xs text-gray-400">(from ATTOM)</span></label>
                 <input type="number" name="sqft" value={formData.sqft} onChange={handleChange} className="input" min="0" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Sq Ft Override
+                  <span className="ml-1 text-xs text-amber-600 font-normal">used for ARV if set</span>
+                </label>
+                <input
+                  type="number"
+                  name="sqftOverride"
+                  value={formData.sqftOverride}
+                  onChange={handleChange}
+                  className="input border-amber-300 focus:ring-amber-400"
+                  min="0"
+                  placeholder="e.g. 1868 (Zillow/agent reported)"
+                />
               </div>
             </div>
           </div>

@@ -521,7 +521,7 @@ export class CompAnalysisService {
       where: { id: analysisId },
       include: {
         comps: { where: { selected: true } },
-        lead: { select: { sqft: true, bedrooms: true, bathrooms: true, yearBuilt: true } },
+        lead: { select: { sqft: true, sqftOverride: true, bedrooms: true, bathrooms: true, yearBuilt: true } },
       },
     });
     if (!analysis) throw new Error('Analysis not found');
@@ -553,8 +553,9 @@ export class CompAnalysisService {
 
         // Size similarity weight: how close sqft is to subject
         let sizeW = 1.0;
-        if (lead?.sqft && c.sqft) {
-          const pctDiff = Math.abs(c.sqft - lead.sqft) / lead.sqft;
+        const effectiveSqft = lead?.sqftOverride || lead?.sqft;
+        if (effectiveSqft && c.sqft) {
+          const pctDiff = Math.abs(c.sqft - effectiveSqft) / effectiveSqft;
           sizeW = Math.max(0.3, 1 - pctDiff * 2); // 10% diff = 0.8 weight, 30% diff = 0.4
         }
 
@@ -580,7 +581,8 @@ export class CompAnalysisService {
     const arvHigh = Math.round(Math.max(...filtered));
 
     // ── Comparable Sales Value (price/sqft anchoring) ──
-    const subjectSqft = lead?.sqft as number | null;
+    // Use sqftOverride when set (manual correction), otherwise fall back to ATTOM sqft
+    const subjectSqft = (lead?.sqftOverride || lead?.sqft) as number | null;
     const compsWithSqft = comps.filter(c => c.sqft && c.sqft > 0);
     let comparableSalesValue: number | null = null;
     let avgPpsf: number | null = null;
@@ -667,9 +669,10 @@ export class CompAnalysisService {
     score += avgMonthsAgo <= 3 ? 20 : avgMonthsAgo <= 6 ? 16 : avgMonthsAgo <= 9 ? 12 : avgMonthsAgo <= 12 ? 8 : 4;
 
     // ── 4. Size similarity (max 15 pts) ──
-    if (lead?.sqft) {
-      const avgSqft = comps.reduce((s, c) => s + (c.sqft || lead.sqft), 0) / comps.length;
-      const pctDiff = Math.abs(avgSqft - lead.sqft) / lead.sqft;
+    const effectiveLeadSqft = lead?.sqftOverride || lead?.sqft;
+    if (effectiveLeadSqft) {
+      const avgSqft = comps.reduce((s, c) => s + (c.sqft || effectiveLeadSqft), 0) / comps.length;
+      const pctDiff = Math.abs(avgSqft - effectiveLeadSqft) / effectiveLeadSqft;
       score += pctDiff <= 0.05 ? 15 : pctDiff <= 0.1 ? 12 : pctDiff <= 0.2 ? 8 : pctDiff <= 0.3 ? 4 : 2;
     } else {
       score += 8;
@@ -1386,7 +1389,7 @@ Use Midwest/rural Ohio pricing. Be specific about what you see — don't general
       include: {
         lead: {
           select: {
-            sqft: true, yearBuilt: true, propertyType: true, lotSize: true,
+            sqft: true, sqftOverride: true, yearBuilt: true, propertyType: true, lotSize: true,
             taxAssessedValue: true, effectiveYearBuilt: true, propertyCity: true,
             propertyState: true,
           },
@@ -1396,7 +1399,7 @@ Use Midwest/rural Ohio pricing. Be specific about what you see — don't general
     if (!analysis) throw new Error('Analysis not found');
 
     const lead = analysis.lead as any;
-    const sqft = lead.sqft;
+    const sqft = lead.sqftOverride || lead.sqft;
     if (!sqft) {
       this.logger.warn(`Cost approach skipped for analysis ${analysisId}: no sqft data`);
       return null;
