@@ -1205,23 +1205,27 @@ Avg months ago: ${avgDaysOld.toFixed(1)} months
 Avg RentCast correlation: ${(avgCorrelation * 100).toFixed(0)}%
 Price spread (selected): $${minPrice.toLocaleString()} – $${maxPrice.toLocaleString()} ($${spread.toLocaleString()} spread)
 
-TOP COMPS:
+TOP COMPS (showing AI-adjusted prices — do NOT recalculate ARV from these):
 ${selectedComps.slice(0, 8).map((c, i) => {
   const monthsAgo = Math.round((Date.now() - new Date(c.soldDate).getTime()) / (30 * 24 * 60 * 60 * 1000));
-  return `${i + 1}. ${c.address} | $${c.soldPrice.toLocaleString()} | ${c.bedrooms || '?'}bd/${c.bathrooms || '?'}ba | ${c.sqft?.toLocaleString() || '?'}sqft | ${c.distance.toFixed(1)}mi | ${monthsAgo}mo ago | ${c.correlation ? (c.correlation * 100).toFixed(0) + '% match' : ''}`;
+  const adjPrice = c.adjustedPrice ? `$${c.adjustedPrice.toLocaleString()} (adj from $${c.soldPrice.toLocaleString()})` : `$${c.soldPrice.toLocaleString()}`;
+  return `${i + 1}. ${c.address} | ${adjPrice} | ${c.bedrooms || '?'}bd/${c.bathrooms || '?'}ba | ${c.sqft?.toLocaleString() || '?'}sqft | ${c.distance.toFixed(1)}mi | ${monthsAgo}mo ago`;
 }).join('\n')}
+
+IMPORTANT: The system has already calculated the ARV using a proximity/recency/size-weighted algorithm.
+DO NOT recalculate or override the ARV. Use ONLY the AI Estimated ARV value above ($${analysis.arvEstimate?.toLocaleString() || '?'}) in your analysis.
 
 Respond ONLY with a valid JSON object in this exact shape — no markdown, no explanation outside the JSON:
 {
   "wholesalerNote": "<2-3 sentence bottom-line take: is this a deal, why or why not, what to watch>",
-  "method": "<1-2 sentences on ARV confidence and comp quality — avg distance, recency, spread>",
+  "method": "<1-2 sentences describing comp quality — reference the ${analysis.confidenceScore}/100 confidence score, avg distance, recency, and that the ARV of $${analysis.arvEstimate?.toLocaleString() || '?'} was system-calculated>",
   "keyFactors": ["<factor 1>", "<factor 2>", "<factor 3>", "<factor 4>"],
   "risks": ["<risk 1>", "<risk 2>", "<risk 3>"]
 }
 
 Rules:
-- wholesalerNote: plain English, use the AI Estimated ARV as the basis for MAO (70% × AI Estimated ARV − $15k assignment fee), compare to asking price if known
-- method: reference the confidence score and comp count specifically
+- wholesalerNote: state the AI Estimated ARV is $${analysis.arvEstimate?.toLocaleString() || '?'}, MAO = 70% × $${analysis.arvEstimate?.toLocaleString() || '?'} − $15k = $${analysis.arvEstimate ? Math.round(analysis.arvEstimate * 0.70 - 15000).toLocaleString() : '?'}. Compare to asking price if known.
+- method: DO NOT state a different ARV number. Describe comp pool quality only.
 - keyFactors: 3-5 bullet points — location, condition, seller motivation, equity position, market velocity
 - risks: 2-4 bullet points — red flags, ARV uncertainty, market risks, property-specific concerns
 - Be specific with dollar figures wherever possible`;
