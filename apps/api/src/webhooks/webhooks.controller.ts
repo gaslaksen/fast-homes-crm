@@ -265,6 +265,72 @@ export class WebhooksController {
           return { success: true };
         }
 
+        // ── Outbound SMS sent from SmrtPhone UI (manual reply) ───────────
+        // When an agent texts a seller directly from SmrtPhone, autoRespond
+        // must be paused so the AI doesn't talk over them.
+        case 'smsOutgoing':
+        case 'smsSent': {
+          // { smsId, from, to, message, date, userName, contactName, event }
+          const toPhone: string = body.to || '';
+          const fromPhone: string = body.from || '';
+          const msgBody: string = body.message || body.body || '';
+          const outSmsId: string = body.smsId || `smrtphone-out-${Date.now()}`;
+
+          if (!toPhone || !msgBody) {
+            console.warn(`⚠️  ${event}: missing to/message fields`);
+            return { success: true };
+          }
+
+          // Find the lead this was sent to
+          const stripped = toPhone.replace(/\D/g, '').replace(/^1/, '');
+          const outboundLead = await this.leadsService['prisma'].lead.findFirst({
+            where: {
+              OR: [
+                { sellerPhone: toPhone },
+                { sellerPhone: stripped },
+                { sellerPhone: `1${stripped}` },
+              ],
+            },
+          });
+
+          if (!outboundLead) {
+            console.warn(`⚠️  ${event}: no lead found for ${toPhone}`);
+            return { success: true };
+          }
+
+          // Record the outbound message so the conversation thread stays in sync
+          await this.leadsService['prisma'].message.upsert({
+            where: { twilioSid: outSmsId },
+            create: {
+              leadId: outboundLead.id,
+              direction: 'OUTBOUND',
+              status: 'SENT',
+              body: msgBody,
+              from: fromPhone,
+              to: toPhone,
+              twilioSid: outSmsId,
+              sentAt: new Date(),
+            },
+            update: {},
+          });
+
+          // Pause AI auto-respond — a human has stepped in
+          await this.leadsService['prisma'].lead.update({
+            where: { id: outboundLead.id },
+            data: { autoRespond: false },
+          });
+
+          // Cancel any queued drip messages too
+          try {
+            await this.dripService.cancelByLeadId(outboundLead.id, 'Agent manually replied via SmrtPhone');
+          } catch {
+            // Drip may not exist — fine
+          }
+
+          console.log(`🤚 Manual reply detected for lead ${outboundLead.id} (${toPhone}) — AI auto-respond paused`);
+          return { success: true };
+        }
+
         // ── Delivery status ──────────────────────────────────────────────
         case 'smsDeliveryCallback': {
           // { smsId, status, event, failure_reason? }

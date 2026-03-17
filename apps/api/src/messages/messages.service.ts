@@ -144,13 +144,18 @@ export class MessagesService {
         },
       });
 
-      // If an agent manually sent a message, cancel any active drip
+      // If an agent manually sent a message, pause AI and cancel any active drip
       if (userId) {
+        await this.prisma.lead.update({
+          where: { id: leadId },
+          data: { autoRespond: false },
+        });
         try {
           await this.dripService.cancelByLeadId(leadId, 'Agent manually sent a message');
         } catch {
           // Drip may not exist — that's fine
         }
+        this.logger.log(`🤚 Agent manual send for lead ${leadId} — AI auto-respond paused`);
       }
 
       return message;
