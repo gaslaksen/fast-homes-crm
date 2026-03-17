@@ -15,6 +15,7 @@ export class CompsController {
   async fetchComps(
     @Param('leadId') leadId: string,
     @Query('forceRefresh') forceRefresh?: string,
+    @Query('source') source?: string,
   ) {
     const lead = await this.prisma.lead.findUnique({
       where: { id: leadId },
@@ -38,7 +39,10 @@ export class CompsController {
         state: lead.propertyState,
         zip: lead.propertyZip,
       },
-      { forceRefresh: forceRefresh === 'true' },
+      {
+        forceRefresh: forceRefresh === 'true',
+        preferSource: (source as 'attom' | 'rentcast' | 'auto') || 'auto',
+      },
     );
 
     // Log activity

@@ -158,6 +158,7 @@ export default function CompsAnalysisPage() {
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [loading, setLoading] = useState(true);
   const [fetchingComps, setFetchingComps] = useState(false);
+  const [compsSource, setCompsSource] = useState<'auto' | 'rentcast'>('auto');
   const [sortField, setSortField] = useState<string>('distance');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [hoveredCompId, setHoveredCompId] = useState<string | null>(null);
@@ -255,12 +256,11 @@ export default function CompsAnalysisPage() {
     setDealArv(res.data.arvEstimate || dealArv);
   }, [analysis, leadId, dealArv]);
 
-  // ─── Find Comps (trigger RentCast) ─────────────────────────────────────────
+  // ─── Find Comps (ATTOM primary, RentCast fallback) ──────────────────────────
   const handleFindComps = async (forceRefresh = false) => {
     setFetchingComps(true);
     try {
-      // Trigger RentCast fetch
-      const result = await compsAPI.fetch(leadId, forceRefresh);
+      const result = await compsAPI.fetch(leadId, forceRefresh, compsSource);
 
       // Refresh lead data (ARV gets updated)
       const leadRes = await leadsAPI.get(leadId);
@@ -276,7 +276,7 @@ export default function CompsAnalysisPage() {
       router.replace(`/leads/${leadId}/comps-analysis?tab=comps`, { scroll: false });
     } catch (error: any) {
       console.error('Failed to fetch comps:', error);
-      alert(error.response?.data?.message || 'Failed to fetch comps from RentCast');
+      alert(error.response?.data?.message || 'Failed to fetch comps');
     } finally {
       setFetchingComps(false);
     }
@@ -596,7 +596,9 @@ export default function CompsAnalysisPage() {
         selectedComps.filter(c => c.sqft).length || 0
       )
     : 0;
-  const compsWithSource = allComps.filter(c => c.source === 'rentcast').length;
+  const compsFromAttom = allComps.filter(c => c.source === 'attom').length;
+  const compsFromRentcast = allComps.filter(c => c.source === 'rentcast').length;
+  const compsWithSource = compsFromAttom + compsFromRentcast;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -764,13 +766,41 @@ export default function CompsAnalysisPage() {
                   <span className="text-sm text-gray-500">
                     {selectedComps.length} selected of {allComps.length}
                   </span>
-                  {compsWithSource > 0 && (
+                  {compsFromAttom > 0 && (
                     <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium">
-                      {compsWithSource} from RentCast
+                      {compsFromAttom} ATTOM verified
+                    </span>
+                  )}
+                  {compsFromRentcast > 0 && (
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 font-medium">
+                      {compsFromRentcast} RentCast
                     </span>
                   )}
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-3">
+                  {/* Source toggle */}
+                  <div className="flex rounded-lg overflow-hidden border border-gray-200 text-xs">
+                    <button
+                      onClick={() => setCompsSource('auto')}
+                      className={`px-3 py-1.5 font-medium transition-colors ${
+                        compsSource === 'auto'
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-white text-gray-600 hover:bg-gray-50'
+                      }`}
+                    >
+                      ATTOM
+                    </button>
+                    <button
+                      onClick={() => setCompsSource('rentcast')}
+                      className={`px-3 py-1.5 font-medium transition-colors ${
+                        compsSource === 'rentcast'
+                          ? 'bg-purple-600 text-white'
+                          : 'bg-white text-gray-600 hover:bg-gray-50'
+                      }`}
+                    >
+                      RentCast
+                    </button>
+                  </div>
                   <button
                     onClick={() => handleFindComps(true)}
                     disabled={fetchingComps}
@@ -779,7 +809,7 @@ export default function CompsAnalysisPage() {
                     {fetchingComps ? (
                       <span className="flex items-center gap-2">
                         <span className="animate-spin inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full" />
-                        Fetching...
+                        Fetching from {compsSource === 'rentcast' ? 'RentCast' : 'ATTOM'}...
                       </span>
                     ) : 'Refresh Comps'}
                   </button>
@@ -942,14 +972,38 @@ export default function CompsAnalysisPage() {
                   <div className="text-5xl mb-3">&#127968;</div>
                   <p className="font-medium text-lg">No comparables yet</p>
                   <p className="text-sm mt-1 mb-4">
-                    Click &quot;Find Comps&quot; to fetch comparable properties from RentCast
+                    Click &quot;Find Comps&quot; to fetch deed-verified comparable sales from ATTOM (or switch to RentCast)
                   </p>
+                  <div className="flex items-center justify-center gap-3 mb-3">
+                    <div className="flex rounded-lg overflow-hidden border border-gray-200 text-xs">
+                      <button
+                        onClick={() => setCompsSource('auto')}
+                        className={`px-3 py-1.5 font-medium transition-colors ${
+                          compsSource === 'auto'
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-white text-gray-600 hover:bg-gray-50'
+                        }`}
+                      >
+                        ATTOM
+                      </button>
+                      <button
+                        onClick={() => setCompsSource('rentcast')}
+                        className={`px-3 py-1.5 font-medium transition-colors ${
+                          compsSource === 'rentcast'
+                            ? 'bg-purple-600 text-white'
+                            : 'bg-white text-gray-600 hover:bg-gray-50'
+                        }`}
+                      >
+                        RentCast
+                      </button>
+                    </div>
+                  </div>
                   <button
                     onClick={() => handleFindComps(false)}
                     disabled={fetchingComps}
                     className="btn btn-primary"
                   >
-                    {fetchingComps ? 'Fetching from RentCast...' : 'Find Comps'}
+                    {fetchingComps ? `Fetching from ${compsSource === 'rentcast' ? 'RentCast' : 'ATTOM'}...` : 'Find Comps'}
                   </button>
                 </div>
               ) : (
@@ -2431,7 +2485,8 @@ export default function CompsAnalysisPage() {
       {/* Attribution */}
       {compsWithSource > 0 && (
         <div className="text-center text-xs text-gray-400 pb-4">
-          Comparable data powered by RentCast · Property intelligence powered by ATTOM
+          {compsFromAttom > 0 ? 'Deed-verified comparables powered by ATTOM' : 'Comparable data powered by RentCast'}
+          {compsFromAttom > 0 && compsFromRentcast > 0 ? ' · Additional comps from RentCast' : ''}
         </div>
       )}
     </div>
@@ -2460,8 +2515,11 @@ function StatBox({ label, value }: { label: string; value: string }) {
 
 function SourceBadge({ source }: { source?: string }) {
   if (!source || source === 'manual') return <span className="text-xs text-gray-400">Manual</span>;
+  if (source === 'attom') return (
+    <span className="text-xs px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 font-medium">ATTOM Verified</span>
+  );
   if (source === 'rentcast') return (
-    <span className="text-xs px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 font-medium">RentCast</span>
+    <span className="text-xs px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 font-medium">RentCast</span>
   );
   if (source === 'chatarv') return (
     <span className="text-xs px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 font-medium">ChatARV</span>

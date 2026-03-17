@@ -96,8 +96,13 @@ export const messagesAPI = {
 
 // Comps API
 export const compsAPI = {
-  fetch: (leadId: string, forceRefresh?: boolean) =>
-    api.post(`/leads/${leadId}/comps${forceRefresh ? '?forceRefresh=true' : ''}`),
+  fetch: (leadId: string, forceRefresh?: boolean, source?: string) => {
+    const params = new URLSearchParams();
+    if (forceRefresh) params.set('forceRefresh', 'true');
+    if (source) params.set('source', source);
+    const qs = params.toString();
+    return api.post(`/leads/${leadId}/comps${qs ? `?${qs}` : ''}`);
+  },
   list: (leadId: string) => api.get(`/leads/${leadId}/comps`),
   toggleComp: (leadId: string, compId: string) =>
     api.post(`/leads/${leadId}/comps/${compId}/toggle`),

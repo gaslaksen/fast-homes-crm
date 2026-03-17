@@ -34,13 +34,14 @@ export class CompsService {
 
   /**
    * Fetch comps and ARV for a property.
-   * Runs ATTOM enrichment in parallel with RentCast comps for maximum data.
-   * Priority: 1) RentCast, 2) ChatARV, 3) Placeholder
+   * Runs ATTOM enrichment in parallel.
+   * Priority: 1) ATTOM /sale/detail (deed-verified), 2) RentCast, 3) ChatARV, 4) Placeholder
+   * Use preferSource to override: 'rentcast' skips ATTOM comps, 'auto' tries ATTOM first.
    */
   async fetchComps(
     leadId: string,
     address: { street: string; city: string; state: string; zip: string },
-    options?: { forceRefresh?: boolean },
+    options?: { forceRefresh?: boolean; preferSource?: 'attom' | 'rentcast' | 'auto' },
   ): Promise<{
     arv: number;
     arvLow?: number;
@@ -50,7 +51,9 @@ export class CompsService {
     source: string;
     attom?: AttomEnrichmentResult | null;
   }> {
-    // Run ATTOM enrichment in parallel (non-blocking — it's bonus data)
+    const preferSource = options?.preferSource || 'auto';
+
+    // Run ATTOM enrichment in parallel (non-blocking — fills in property details)
     const attomPromise = this.attomService.isConfigured
       ? this.attomService.enrichLead(leadId, address, { forceRefresh: options?.forceRefresh })
           .catch(err => { this.logger.warn(`ATTOM enrichment failed (non-fatal): ${err.message}`); return null; })
@@ -60,7 +63,43 @@ export class CompsService {
       arv: number; arvLow?: number; arvHigh?: number; confidence: number; compsCount: number; source: string;
     };
 
-    // 1) Try RentCast with tiered radius expansion
+    // 1) Try ATTOM comp search (deed-verified sales) — unless user wants RentCast
+    if (this.attomService.isConfigured && preferSource !== 'rentcast') {
+      const lead = await this.prisma.lead.findUnique({
+        where: { id: leadId },
+        select: { latitude: true, longitude: true, propertyType: true, sqft: true, bedrooms: true },
+      });
+
+      if (lead?.latitude && lead?.longitude) {
+        try {
+          this.logger.log(`Fetching comps via ATTOM /sale/detail for lead ${leadId}`);
+          const result = await this.attomService.fetchCompsFromAttom(
+            leadId,
+            address,
+            { latitude: lead.latitude, longitude: lead.longitude },
+            {
+              forceRefresh: options?.forceRefresh,
+              propertyType: lead.propertyType || undefined,
+              sqft: lead.sqft || undefined,
+              bedrooms: lead.bedrooms || undefined,
+            },
+          );
+
+          if (result && result.compsCount >= 1) {
+            this.logger.log(`ATTOM comps: ${result.compsCount} deed-verified sales found`);
+            const attom = await attomPromise;
+            return { ...result, arv: result.arv!, attom };
+          }
+          this.logger.warn(`ATTOM returned 0 comps — falling back to RentCast`);
+        } catch (err) {
+          this.logger.warn(`ATTOM comp fetch failed (non-fatal): ${err.message} — falling back to RentCast`);
+        }
+      } else {
+        this.logger.warn(`No lat/lon for lead ${leadId} — skipping ATTOM comps, using RentCast`);
+      }
+    }
+
+    // 2) Try RentCast with tiered radius expansion
     if (this.rentCastService.isConfigured) {
       try {
         this.logger.log(`Fetching comps via RentCast for lead ${leadId}`);
@@ -73,7 +112,7 @@ export class CompsService {
       compsResult = await this.fetchCompsWithFallback(leadId, address);
     }
 
-    // Await ATTOM (it's been running in parallel the whole time)
+    // Await ATTOM enrichment (it's been running in parallel the whole time)
     const attom = await attomPromise;
 
     return { ...compsResult, attom };

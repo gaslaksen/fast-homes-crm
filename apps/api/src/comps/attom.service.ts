@@ -28,6 +28,7 @@ interface AttomProperty {
     accuracy?: string;
     latitude?: string;
     longitude?: string;
+    distance?: number;
   };
   summary?: {
     absenteeInd?: string;
@@ -594,6 +595,263 @@ export class AttomService {
       effectiveYearBuilt: lead.effectiveYearBuilt,
       subdivision: lead.subdivision,
     };
+  }
+
+  // ─── Fetch comparable sales from ATTOM /sale/detail (area search) ────────
+
+  async fetchCompsFromAttom(
+    leadId: string,
+    address: { street: string; city: string; state: string; zip: string },
+    coords: { latitude: number; longitude: number },
+    options?: {
+      forceRefresh?: boolean;
+      radiusOverride?: number;
+      propertyType?: string;
+      bedrooms?: number;
+      sqft?: number;
+    },
+  ): Promise<{
+    compsCount: number;
+    source: string;
+    arv?: number;
+    arvLow?: number;
+    arvHigh?: number;
+    confidence: number;
+  } | null> {
+    if (!this.apiKey) return null;
+
+    const lead = await this.prisma.lead.findUnique({
+      where: { id: leadId },
+      select: { bedrooms: true, bathrooms: true, sqft: true, propertyType: true },
+    });
+
+    const mappedType = this.mapPropertyTypeForComps(options?.propertyType || lead?.propertyType);
+    const now = new Date();
+    const twelveMonthsAgo = new Date(now);
+    twelveMonthsAgo.setFullYear(twelveMonthsAgo.getFullYear() - 1);
+    const today = now.toISOString().slice(0, 10);
+    const startDate = twelveMonthsAgo.toISOString().slice(0, 10);
+
+    const radiusTiers = options?.radiusOverride
+      ? [options.radiusOverride]
+      : [0.5, 1.0, 2.0, 3.0];
+
+    let validComps: Array<{
+      address: string;
+      soldPrice: number;
+      soldDate: Date;
+      distance: number;
+      bedrooms?: number;
+      bathrooms?: number;
+      sqft?: number;
+      lotSize?: number;
+      yearBuilt?: number;
+      hasGarage: boolean;
+      latitude?: number;
+      longitude?: number;
+      notes: string;
+      similarityScore: number;
+    }> = [];
+
+    for (const radius of radiusTiers) {
+      this.logger.log(`ATTOM comp search: radius=${radius}mi, type=${mappedType}, coords=(${coords.latitude}, ${coords.longitude})`);
+
+      try {
+        const response = await axios.get<{ property: AttomProperty[] }>(
+          `${ATTOM_BASE}/sale/detail`,
+          {
+            params: {
+              radius,
+              latitude: coords.latitude,
+              longitude: coords.longitude,
+              propertytype: mappedType,
+              minsaleamt: 10000,
+              startsalesearchdate: startDate,
+              endsalesearchdate: today,
+              pagesize: 25,
+            },
+            headers: { apikey: this.apiKey, Accept: 'application/json' },
+            timeout: 15000,
+          },
+        );
+
+        const properties = response.data?.property || [];
+        this.logger.log(`ATTOM /sale/detail returned ${properties.length} properties at radius=${radius}mi`);
+
+        // Filter and deduplicate
+        const seenAddresses = new Set<string>();
+        validComps = [];
+
+        for (const prop of properties) {
+          const saleAmt = prop.sale?.amount?.saleAmt ?? 0;
+          if (saleAmt <= 0) continue;
+
+          const transType = prop.sale?.amount?.saleTransType || '';
+          if (/construction loan|financing/i.test(transType)) continue;
+
+          const addr = prop.address?.oneLine || '';
+          if (!addr) continue;
+          const addrKey = addr.toLowerCase().trim();
+          if (seenAddresses.has(addrKey)) continue;
+          seenAddresses.add(addrKey);
+
+          const saleDate = prop.sale?.amount?.saleRecDate || prop.sale?.saleTransDate;
+
+          const comp = {
+            address: addr,
+            soldPrice: saleAmt,
+            soldDate: saleDate ? new Date(saleDate) : new Date(),
+            distance: prop.location?.distance ?? radius,
+            bedrooms: prop.building?.rooms?.beds ?? undefined,
+            bathrooms: prop.building?.rooms?.bathstotal ?? undefined,
+            sqft: prop.building?.size?.universalsize ?? undefined,
+            lotSize: prop.lot?.lotsize1 ?? undefined,
+            yearBuilt: prop.building?.summary?.yearbuilteffective ?? prop.summary?.yearbuilt ?? undefined,
+            hasGarage: !!prop.building?.parking?.garagetype,
+            latitude: prop.location?.latitude ? parseFloat(prop.location.latitude) : undefined,
+            longitude: prop.location?.longitude ? parseFloat(prop.location.longitude) : undefined,
+            notes: `ATTOM verified sale | ${transType || 'Resale'} | Deed: ${prop.sale?.amount?.saleRecDate || 'N/A'}`,
+            similarityScore: 0,
+          };
+
+          // Calculate similarity if lead data is available
+          if (lead) {
+            comp.similarityScore = this.calculateCompSimilarity(lead, comp);
+          }
+
+          validComps.push(comp);
+        }
+
+        this.logger.log(`ATTOM comp search: ${validComps.length} valid comps after filtering at radius=${radius}mi`);
+        if (validComps.length >= 3) break;
+      } catch (error) {
+        this.handleError(error, `fetchCompsFromAttom (radius=${radius})`);
+        // Continue to next radius tier on error
+      }
+    }
+
+    if (validComps.length === 0) {
+      this.logger.warn(`ATTOM comp search: 0 valid comps found across all radius tiers`);
+      return null;
+    }
+
+    // Clear old ATTOM comps (not part of an analysis)
+    await this.prisma.comp.deleteMany({
+      where: { leadId, source: 'attom', analysisId: null },
+    });
+
+    // Save comps
+    for (const comp of validComps) {
+      await this.prisma.comp.create({
+        data: {
+          leadId,
+          source: 'attom',
+          address: comp.address,
+          soldPrice: comp.soldPrice,
+          soldDate: comp.soldDate,
+          distance: comp.distance,
+          bedrooms: comp.bedrooms,
+          bathrooms: comp.bathrooms,
+          sqft: comp.sqft,
+          lotSize: comp.lotSize,
+          yearBuilt: comp.yearBuilt,
+          hasGarage: comp.hasGarage,
+          latitude: comp.latitude,
+          longitude: comp.longitude,
+          correlation: null,
+          notes: comp.notes,
+          selected: comp.distance <= 1.0,
+          similarityScore: comp.similarityScore,
+        },
+      });
+    }
+
+    this.logger.log(`ATTOM: saved ${validComps.length} comps for lead ${leadId}`);
+
+    // Calculate ARV (distance-weighted average)
+    const totalWeight = validComps.reduce((sum, c) => sum + (1 / Math.max(c.distance, 0.1)), 0);
+    const weightedArv = validComps.reduce(
+      (sum, c) => sum + (c.soldPrice * (1 / Math.max(c.distance, 0.1))),
+      0,
+    ) / totalWeight;
+    const arv = Math.round(weightedArv);
+
+    const prices = validComps.map((c) => c.soldPrice).sort((a, b) => a - b);
+    const arvLow = prices[0];
+    const arvHigh = prices[prices.length - 1];
+
+    // Confidence: count + proximity bonus
+    let confidence = validComps.length >= 5 ? 85 : validComps.length >= 3 ? 70 : 50;
+    const avgDistance = validComps.reduce((s, c) => s + c.distance, 0) / validComps.length;
+    if (avgDistance <= 0.5) confidence += 10;
+    else if (avgDistance <= 1.0) confidence += 5;
+    confidence = Math.min(confidence, 95);
+
+    // Update lead
+    await this.prisma.lead.update({
+      where: { id: leadId },
+      data: { arv, arvConfidence: confidence, lastCompsDate: new Date() },
+    });
+
+    return { compsCount: validComps.length, source: 'attom', arv, arvLow, arvHigh, confidence };
+  }
+
+  // ─── Property type mapping for comp search ────────────────────────────────
+
+  private mapPropertyTypeForComps(type?: string | null): string {
+    if (!type) return 'SFR';
+    const t = type.toLowerCase();
+    if (t.includes('single') || t.includes('sfr')) return 'SFR';
+    if (t.includes('condo')) return 'CONDO';
+    if (t.includes('townhouse') || t.includes('town')) return 'TOWNHOUSE';
+    if (t.includes('multi') || t.includes('duplex')) return 'MULTI-FAMILY';
+    return 'SFR';
+  }
+
+  // ─── Similarity score: beds/baths/sqft match (0-100) ──────────────────────
+
+  private calculateCompSimilarity(
+    subject: { bedrooms?: number | null; bathrooms?: number | null; sqft?: number | null; propertyType?: string | null },
+    comp: { bedrooms?: number; bathrooms?: number; sqft?: number },
+  ): number {
+    let score = 0;
+    let maxScore = 0;
+
+    // Bedrooms (25 pts)
+    maxScore += 25;
+    if (subject.bedrooms != null && comp.bedrooms != null) {
+      const diff = Math.abs(subject.bedrooms - comp.bedrooms);
+      if (diff === 0) score += 25;
+      else if (diff === 1) score += 15;
+      else if (diff === 2) score += 5;
+    }
+
+    // Bathrooms (25 pts)
+    maxScore += 25;
+    if (subject.bathrooms != null && comp.bathrooms != null) {
+      const diff = Math.abs(subject.bathrooms - comp.bathrooms);
+      if (diff === 0) score += 25;
+      else if (diff <= 0.5) score += 20;
+      else if (diff <= 1) score += 10;
+      else if (diff <= 1.5) score += 5;
+    }
+
+    // Sqft (40 pts)
+    maxScore += 40;
+    if (subject.sqft && comp.sqft && subject.sqft > 0) {
+      const pctDiff = (Math.abs(subject.sqft - comp.sqft) / subject.sqft) * 100;
+      if (pctDiff <= 5) score += 40;
+      else if (pctDiff <= 10) score += 35;
+      else if (pctDiff <= 15) score += 25;
+      else if (pctDiff <= 20) score += 15;
+      else if (pctDiff <= 30) score += 5;
+    }
+
+    // Property type (10 pts — not available in comp, give benefit of doubt)
+    maxScore += 10;
+    score += 10;
+
+    return maxScore > 0 ? Math.round((score / maxScore) * 100) : 0;
   }
 
   // ─── Error handler ────────────────────────────────────────────────────────
