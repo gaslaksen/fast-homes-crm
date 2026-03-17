@@ -1560,14 +1560,12 @@ Use Midwest/rural Ohio pricing. Be specific about what you see — don't general
 
     const lead = analysis.lead as any;
 
-    // Collect available method values
-    // Use comparableSalesValue (ppsf-anchored) as primary comps signal; fall back to arvEstimate
+    // Collect available method values — three core methods only (ATTOM excluded from triangulation)
     const methods: Record<string, number> = {};
     if (analysis.comparableSalesValue) methods.comps = analysis.comparableSalesValue;
     else if (analysis.arvEstimate) methods.comps = analysis.arvEstimate;
     if (analysis.costApproachValue) methods.cost = analysis.costApproachValue;
     if (analysis.incomeApproachValue) methods.income = analysis.incomeApproachValue;
-    if (lead.avmExcellentHigh) methods.attom = lead.avmExcellentHigh;
 
     const methodKeys = Object.keys(methods);
     if (methodKeys.length === 0) {
@@ -1575,12 +1573,11 @@ Use Midwest/rural Ohio pricing. Be specific about what you see — don't general
       return null;
     }
 
-    // Weights (renormalize to available methods only)
+    // Base weights: comps 50%, cost 25%, income 15% — renormalized to available methods
     const baseWeights: Record<string, number> = {
       comps: 0.50,
       cost: 0.25,
       income: 0.15,
-      attom: 0.10,
     };
 
     const totalBaseWeight = methodKeys.reduce((s, k) => s + (baseWeights[k] || 0), 0);
