@@ -1193,8 +1193,9 @@ Address: ${lead.propertyAddress}, ${lead.propertyCity}, ${lead.propertyState} ${
 Size: ${lead.sqft ? lead.sqft.toLocaleString() + ' sqft' : 'Unknown'}, ${lead.bedrooms || '?'}bd/${lead.bathrooms || '?'}ba
 Type: ${lead.propertyType || 'Unknown'} | Seller Condition: ${lead.conditionLevel || 'Unknown'}
 Asking Price: ${lead.askingPrice ? '$' + lead.askingPrice.toLocaleString() : 'Not provided'}
-Comps-based ARV: ${analysis.arvEstimate ? '$' + analysis.arvEstimate.toLocaleString() : 'Not calculated'}
-ARV Range: ${analysis.arvLow ? '$' + analysis.arvLow.toLocaleString() : '?'} – ${analysis.arvHigh ? '$' + analysis.arvHigh.toLocaleString() : '?'}
+Risk-Adjusted ARV (system estimate): ${analysis.riskAdjustedArv ? '$' + analysis.riskAdjustedArv.toLocaleString() : 'Not calculated'}
+Triangulated ARV: ${analysis.triangulatedArv ? '$' + analysis.triangulatedArv.toLocaleString() : 'Not calculated'}
+Comparable Sales Value: ${analysis.comparableSalesValue ? '$' + Math.round(analysis.comparableSalesValue).toLocaleString() : 'Not calculated'}
 Confidence Score: ${analysis.confidenceScore}/100
 ${attomAssessmentBlock}
 
@@ -1220,7 +1221,7 @@ Respond ONLY with a valid JSON object in this exact shape — no markdown, no ex
 }
 
 Rules:
-- wholesalerNote: plain English, include MAO at 70% rule minus $15k assignment fee vs asking price if known
+- wholesalerNote: plain English, use the Risk-Adjusted ARV as the basis for MAO (70% × Risk-Adjusted ARV − $15k assignment fee), compare to asking price if known
 - method: reference the confidence score and comp count specifically
 - keyFactors: 3-5 bullet points — location, condition, seller motivation, equity position, market velocity
 - risks: 2-4 bullet points — red flags, ARV uncertainty, market risks, property-specific concerns
@@ -1807,7 +1808,7 @@ Use Midwest/rural Ohio pricing. Be specific about what you see — don't general
     } else {
       const propType = (lead.propertyType || '').toLowerCase();
 
-      if (lead.bedrooms != null && lead.bedrooms <= 2 && propType.includes('residential') || propType.includes('single')) {
+      if (lead.bedrooms != null && lead.bedrooms <= 2 && (propType.includes('residential') || propType.includes('single'))) {
         functionalObsolescenceAdj += 20000;
         const flag = '2BR home — reduced buyer pool vs 3BR market';
         functionalNotes.push(flag);
@@ -1905,38 +1906,54 @@ Use Midwest/rural Ohio pricing. Be specific about what you see — don't general
     const sellerMotivationMaoPercent = MOTIVATION_TIERS[sellerMotivationTier].maoPercent;
     this.logger.log(`Seller motivation tier for ${analysisId}: ${sellerMotivationTier} (MAO ${sellerMotivationMaoPercent}%)`);
 
-    // 3g. Condition Tier
-    let conditionTier = 'moderate_rehab'; // default
+    // 3g. Condition Tier + Repair Costs
+    // Only calculate repair costs when we have explicit condition data from the seller
+    // or a photo analysis. Generic ATTOM values (fair/good/poor) are not reliable enough
+    // to generate repair estimates — leave repairs blank in that case.
+    let conditionTier: string | null = null;
     const conditionLevel = (lead.conditionLevel || '').toLowerCase();
+    const hasSellerCondition = conditionLevel.length > 0;
+    const hasPhotoAnalysis = !!(analysis as any).photoRepairLow;
 
-    if (/gut|tear|demolish/.test(conditionLevel)) {
-      conditionTier = 'full_gut';
-    } else if (/heavy|major|significant|complete/.test(conditionLevel)) {
-      conditionTier = 'heavy_rehab';
-    } else if (/moderate|medium|some/.test(conditionLevel)) {
-      conditionTier = 'moderate_rehab';
-    } else if (/light|cosmetic|minor|paint|carpet/.test(conditionLevel)) {
-      conditionTier = 'light_cosmetic';
-    } else if (/move|ready|excellent|great|updated|remodel/.test(conditionLevel)) {
-      conditionTier = 'move_in_ready';
-    } else if (lead.propertyCondition) {
-      // ATTOM fallback
-      const attomCond = lead.propertyCondition.toUpperCase();
-      if (attomCond === 'POOR') conditionTier = 'heavy_rehab';
-      else if (attomCond === 'FAIR') conditionTier = 'moderate_rehab';
-      else if (attomCond === 'GOOD') conditionTier = 'light_cosmetic';
+    if (hasSellerCondition) {
+      if (/gut|tear|demolish/.test(conditionLevel)) {
+        conditionTier = 'full_gut';
+      } else if (/heavy|major|significant|complete/.test(conditionLevel)) {
+        conditionTier = 'heavy_rehab';
+      } else if (/moderate|medium|some/.test(conditionLevel)) {
+        conditionTier = 'moderate_rehab';
+      } else if (/light|cosmetic|minor|paint|carpet/.test(conditionLevel)) {
+        conditionTier = 'light_cosmetic';
+      } else if (/move|ready|excellent|great|updated|remodel/.test(conditionLevel)) {
+        conditionTier = 'move_in_ready';
+      }
+      // Generic ATTOM-style words like "fair", "good", "poor" alone → no estimate
     }
 
-    const sqft = lead.sqft ?? 1500;
-    const rate = CONDITION_REPAIR_RATES[conditionTier];
-    const repairCostLow = Math.round(sqft * rate.low);
-    const repairCostHigh = Math.round(sqft * rate.high);
-    const repairCostMid = Math.round((repairCostLow + repairCostHigh) / 2);
+    // Photo analysis overrides seller condition for repair estimates
+    let repairCostLow: number | null = null;
+    let repairCostHigh: number | null = null;
+    let repairCostMid: number | null = null;
 
-    this.logger.log(
-      `Condition tier for ${analysisId}: ${conditionTier} (${rate.label}) — ` +
-      `repairs $${repairCostLow.toLocaleString()}–$${repairCostHigh.toLocaleString()} (mid=$${repairCostMid.toLocaleString()}) on ${sqft} sqft`,
-    );
+    if (hasPhotoAnalysis) {
+      repairCostLow = (analysis as any).photoRepairLow;
+      repairCostHigh = (analysis as any).photoRepairHigh;
+      repairCostMid = Math.round((repairCostLow! + repairCostHigh!) / 2);
+      conditionTier = conditionTier || 'moderate_rehab';
+      this.logger.log(`Repair costs from photo analysis for ${analysisId}: $${repairCostLow}–$${repairCostHigh}`);
+    } else if (conditionTier) {
+      const sqft = (lead.sqftOverride || lead.sqft) ?? 1500;
+      const rate = CONDITION_REPAIR_RATES[conditionTier];
+      repairCostLow = Math.round(sqft * rate.low);
+      repairCostHigh = Math.round(sqft * rate.high);
+      repairCostMid = Math.round((repairCostLow + repairCostHigh) / 2);
+      this.logger.log(
+        `Condition tier for ${analysisId}: ${conditionTier} (${rate.label}) — ` +
+        `repairs $${repairCostLow.toLocaleString()}–$${repairCostHigh.toLocaleString()} on ${sqft} sqft`,
+      );
+    } else {
+      this.logger.log(`No repair estimate for ${analysisId} — no seller condition data or photo analysis`);
+    }
 
     // 3i. Save to CompAnalysis
     const updated = await this.prisma.compAnalysis.update({
@@ -1952,10 +1969,10 @@ Use Midwest/rural Ohio pricing. Be specific about what you see — don't general
         riskFlags,
         sellerMotivationTier,
         sellerMotivationMaoPercent,
-        conditionTier,
-        repairCostLow,
-        repairCostHigh,
-        repairCosts: repairCostMid,
+        conditionTier: conditionTier || null,
+        repairCostLow: repairCostLow ?? null,
+        repairCostHigh: repairCostHigh ?? null,
+        repairCosts: repairCostMid ?? null,
       },
     });
 
