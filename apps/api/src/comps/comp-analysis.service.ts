@@ -1447,8 +1447,9 @@ Use Midwest/rural Ohio pricing. Be specific about what you see — don't general
     });
     if (!analysis) throw new Error('Analysis not found');
 
-    // Use riskAdjustedArv as the primary system ARV; fall back to triangulated, then estimated
-    const finalArv = analysis.riskAdjustedArv ?? analysis.triangulatedArv ?? analysis.arvEstimate;
+    // Use comparableSalesValue (AI estimated: avg $/sqft × sqft) as the primary ARV;
+    // fall back to arvEstimate, then triangulated
+    const finalArv = analysis.comparableSalesValue ?? analysis.arvEstimate ?? analysis.triangulatedArv;
     await this.prisma.lead.update({
       where: { id: analysis.leadId },
       data: {

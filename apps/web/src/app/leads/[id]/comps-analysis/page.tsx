@@ -226,7 +226,7 @@ export default function CompsAnalysisPage() {
         const latest = analyses.data[0];
         const full = await compAnalysisAPI.get(leadId, latest.id);
         setAnalysis(full.data);
-        setDealArv(full.data.riskAdjustedArv || full.data.triangulatedArv || full.data.arvEstimate || full.data.lead?.arv || 0);
+        setDealArv(full.data.comparableSalesValue || full.data.arvEstimate || full.data.lead?.arv || 0);
         setRepairCosts(full.data.repairCosts || 0);
         setAssignmentFee(full.data.assignmentFee || 15000);
         setMaoPercent(full.data.sellerMotivationMaoPercent || full.data.maoPercent || 70);
@@ -241,7 +241,7 @@ export default function CompsAnalysisPage() {
           });
           const full = await compAnalysisAPI.get(leadId, res.data.id);
           setAnalysis(full.data);
-          setDealArv(full.data.riskAdjustedArv || full.data.triangulatedArv || full.data.arvEstimate || leadRes.data.arv || 0);
+          setDealArv(full.data.comparableSalesValue || full.data.arvEstimate || leadRes.data.arv || 0);
         }
       }
     } catch (error) {
@@ -255,7 +255,7 @@ export default function CompsAnalysisPage() {
     if (!analysis) return;
     const res = await compAnalysisAPI.get(leadId, analysis.id);
     setAnalysis(res.data);
-    setDealArv(res.data.arvEstimate || dealArv);
+    setDealArv(res.data.comparableSalesValue || res.data.arvEstimate || dealArv);
   }, [analysis, leadId, dealArv]);
 
   // ─── Find Comps (ATTOM primary, RentCast fallback) ──────────────────────────
@@ -274,7 +274,7 @@ export default function CompsAnalysisPage() {
       });
       const full = await compAnalysisAPI.get(leadId, res.data.id);
       setAnalysis(full.data);
-      setDealArv(full.data.riskAdjustedArv || full.data.triangulatedArv || full.data.arvEstimate || leadRes.data.arv || result.data.arv || 0);
+      setDealArv(full.data.comparableSalesValue || full.data.arvEstimate || leadRes.data.arv || result.data.arv || 0);
       router.replace(`/leads/${leadId}/comps-analysis?tab=comps`, { scroll: false });
     } catch (error: any) {
       console.error('Failed to fetch comps:', error);
@@ -386,7 +386,7 @@ export default function CompsAnalysisPage() {
       await compAnalysisAPI.aiAdjustComps(leadId, analysis.id);
       // Step 2: Calculate ARV (includes auto cost+income+triangulate+risk)
       const arvRes = await compAnalysisAPI.calculateArv(leadId, analysis.id, 'weighted');
-      setDealArv(arvRes.data.riskAdjustedArv || arvRes.data.triangulatedArv || arvRes.data.arv || 0);
+      setDealArv(arvRes.data.comparableSalesValue || arvRes.data.arvEstimate || arvRes.data.arv || 0);
       await refreshAnalysis();
       router.replace(`/leads/${leadId}/comps-analysis?tab=arv`, { scroll: false });
     } catch (error) {
@@ -1241,82 +1241,56 @@ export default function CompsAnalysisPage() {
                   )}
                 </div>
 
-                {/* ── PRIMARY: Risk-Adjusted ARV hero card ── */}
-                {analysis.riskAdjustedArv && (
-                  <div className="bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-300 rounded-2xl p-6 mb-5">
-                    {/* Top row: ARV + confidence tier badge */}
-                    <div className="flex items-start justify-between gap-4 mb-4">
-                      <div>
-                        <div className="text-xs font-semibold text-green-700 uppercase tracking-wide mb-1">🏠 Risk-Adjusted ARV — System Estimate</div>
-                        <div className="text-5xl font-bold text-green-700">${analysis.riskAdjustedArv.toLocaleString()}</div>
-                        {analysis.triangulatedArv && analysis.riskAdjustedArv !== analysis.triangulatedArv && (
-                          <div className="text-xs text-green-500 mt-1">
-                            Triangulated base ${analysis.triangulatedArv.toLocaleString()}
-                            <span className="ml-1 text-green-400">(−${(analysis.triangulatedArv - analysis.riskAdjustedArv).toLocaleString()} risk adj)</span>
-                          </div>
-                        )}
-                      </div>
-                      <div className="flex flex-col items-end gap-2">
-                        {analysis.confidenceTier && (
-                          <span className={`text-sm px-3 py-1 rounded-full font-semibold ${
-                            analysis.confidenceTier === 'High' ? 'bg-green-200 text-green-800' :
-                            analysis.confidenceTier === 'Medium' ? 'bg-yellow-100 text-yellow-800' :
-                            'bg-red-100 text-red-700'
-                          }`}>
-                            {analysis.confidenceTier} Confidence
-                          </span>
-                        )}
-                        {analysis.confidenceScore != null && (
-                          <div className="text-xs text-green-600">{analysis.confidenceScore}/100 score</div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Avg $/sqft row */}
-                    {(analysis.pricePerSqft || avgPricePerSqft) && (
-                      <div className="flex items-center gap-6 pt-3 border-t border-green-200">
+                {/* ── PRIMARY: AI Estimated ARV hero card ── */}
+                {(() => {
+                  const displayArv = (analysis as any).comparableSalesValue || analysis.arvEstimate;
+                  if (!displayArv) return null;
+                  const sqftUsed = (lead as any)?.sqftOverride || lead?.sqft;
+                  return (
+                    <div className="bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-300 rounded-2xl p-6 mb-5">
+                      <div className="flex items-end justify-between flex-wrap gap-4">
                         <div>
-                          <div className="text-xs text-green-600 mb-0.5">Avg $/sqft (comps)</div>
-                          <div className="text-xl font-bold text-green-800">${analysis.pricePerSqft || avgPricePerSqft}</div>
-                          {(analysis as any).medianPricePerSqft && (
-                            <div className="text-xs text-green-500">median ${(analysis as any).medianPricePerSqft}/sqft</div>
-                          )}
-                        </div>
-                        {lead && (
-                          <div>
-                            <div className="text-xs text-green-600 mb-0.5">Sqft used</div>
-                            <div className="text-xl font-bold text-green-800">
-                              {(lead as any).sqftOverride ? (lead as any).sqftOverride.toLocaleString() : (lead.sqft?.toLocaleString() || '—')}
-                            </div>
-                            {(lead as any).sqftOverride && lead.sqft && (
-                              <div className="text-xs text-amber-600">override <span className="text-green-400">(ATTOM: {lead.sqft.toLocaleString()})</span></div>
+                          <div className="text-xs font-semibold text-green-700 uppercase tracking-wide mb-1">AI Estimated ARV</div>
+                          <div className="text-5xl font-bold text-green-700">${Math.round(displayArv).toLocaleString()}</div>
+                          <div className="flex items-center gap-4 mt-2">
+                            {(analysis.pricePerSqft || avgPricePerSqft) && sqftUsed && (
+                              <div className="text-sm text-green-600">
+                                ${analysis.pricePerSqft || avgPricePerSqft}/sqft × {sqftUsed.toLocaleString()} sqft
+                                {(lead as any)?.sqftOverride && <span className="ml-1 text-amber-600 text-xs">(override)</span>}
+                              </div>
+                            )}
+                            {(analysis as any).medianPricePerSqft && (
+                              <div className="text-xs text-green-500">median ${(analysis as any).medianPricePerSqft}/sqft</div>
                             )}
                           </div>
-                        )}
-                        {analysis.avgAdjustment ? (
-                          <div>
-                            <div className="text-xs text-green-600 mb-0.5">Avg adj</div>
-                            <div className={`text-lg font-bold ${(analysis.avgAdjustment || 0) >= 0 ? 'text-green-700' : 'text-red-600'}`}>
-                              {(analysis.avgAdjustment || 0) >= 0 ? '+' : ''}${(analysis.avgAdjustment || 0).toLocaleString()}
+                          {analysis.avgAdjustment ? (
+                            <div className={`text-xs mt-1 ${(analysis.avgAdjustment || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                              {(analysis.avgAdjustment || 0) >= 0 ? '+' : ''}${(analysis.avgAdjustment || 0).toLocaleString()} avg AI adjustment
                             </div>
-                          </div>
-                        ) : null}
+                          ) : null}
+                        </div>
+                        <div className="flex flex-col items-end gap-2">
+                          <DonutStat
+                            value={analysis.confidenceScore || 0}
+                            max={100}
+                            label="Confidence"
+                            color={(analysis.confidenceScore || 0) >= 80 ? '#10b981' : (analysis.confidenceScore || 0) >= 60 ? '#f59e0b' : '#ef4444'}
+                            size={80}
+                          />
+                          {analysis.confidenceTier && (
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${
+                              analysis.confidenceTier === 'High' ? 'bg-green-200 text-green-800' :
+                              analysis.confidenceTier === 'Medium' ? 'bg-yellow-100 text-yellow-800' :
+                              'bg-red-100 text-red-700'
+                            }`}>
+                              {analysis.confidenceTier} Confidence
+                            </span>
+                          )}
+                        </div>
                       </div>
-                    )}
-
-                    {/* Risk flags */}
-                    {analysis.riskFlags && (analysis.riskFlags as string[]).length > 0 && (
-                      <div className="mt-3 space-y-1.5">
-                        {(analysis.riskFlags as string[]).map((flag, i) => (
-                          <div key={i} className="flex items-start gap-2 text-xs text-green-800 bg-green-100 rounded-lg px-3 py-1.5">
-                            <span className="shrink-0">⚑</span>
-                            <span>{flag}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
+                    </div>
+                  );
+                })()}
 
                 {/* ── Valuation Breakdown — three methods + triangulated ── */}
                 {(() => {
@@ -1666,7 +1640,7 @@ export default function CompsAnalysisPage() {
                     </div>
                     {analysis?.arvEstimate && dealArv !== analysis.arvEstimate && (
                       <button
-                        onClick={() => setDealArv(analysis.arvEstimate || 0)}
+                        onClick={() => setDealArv((analysis as any).comparableSalesValue || analysis.arvEstimate || 0)}
                         className="text-xs text-primary-600 mt-1 hover:underline"
                       >
                         Reset to calculated ARV (${analysis.arvEstimate.toLocaleString()})
