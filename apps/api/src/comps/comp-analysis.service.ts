@@ -648,20 +648,28 @@ export class CompAnalysisService {
       score += 8;
     }
 
-    // ── 5. ARV spread tightness (max 15 pts) — use raw soldPrices with IQR
-    //    filtering so extreme AI adjustments don't corrupt this metric ──
-    const soldPrices = comps.map(c => c.soldPrice).filter((p): p is number => p != null && p > 0);
-    if (soldPrices.length >= 2) {
-      const sp = [...soldPrices].sort((a, b) => a - b);
+    // ── 5. ARV spread tightness (max 15 pts) ──
+    // Primary: use arvLow/arvHigh/arv (derived from adjusted prices — tight when adjustments normalize comps).
+    // Guard: if arv is < 30% of the median soldPrice the adjustments have gone haywire (e.g. AI marked
+    // all comps invalid and slashed prices). In that case fall back to soldPrice IQR spread instead.
+    const soldPricesForGuard = comps.map(c => c.soldPrice).filter((p): p is number => p != null && p > 0);
+    const medianSoldPrice = soldPricesForGuard.length > 0
+      ? [...soldPricesForGuard].sort((a, b) => a - b)[Math.floor(soldPricesForGuard.length / 2)]
+      : 0;
+    const arvIsSane = arv != null && arv > 0 && (medianSoldPrice === 0 || arv >= medianSoldPrice * 0.3);
+
+    if (arvIsSane && arvLow != null && arvHigh != null && arv != null && arv > 0) {
+      const spreadPct = (arvHigh - arvLow) / arv;
+      score += spreadPct <= 0.05 ? 15 : spreadPct <= 0.1 ? 12 : spreadPct <= 0.2 ? 8 : spreadPct <= 0.3 ? 4 : 1;
+    } else if (soldPricesForGuard.length >= 2) {
+      // Fallback: use IQR-filtered sold prices
+      const sp = [...soldPricesForGuard].sort((a, b) => a - b);
       const q1sp = sp[Math.floor(sp.length * 0.25)];
       const q3sp = sp[Math.floor(sp.length * 0.75)];
       const iqrsp = q3sp - q1sp;
       const filteredSp = sp.filter(p => p >= q1sp - 1.5 * iqrsp && p <= q3sp + 1.5 * iqrsp);
       const midSp = filteredSp.reduce((s, p) => s + p, 0) / filteredSp.length;
       const spreadPct = midSp > 0 ? (Math.max(...filteredSp) - Math.min(...filteredSp)) / midSp : 1;
-      score += spreadPct <= 0.05 ? 15 : spreadPct <= 0.1 ? 12 : spreadPct <= 0.2 ? 8 : spreadPct <= 0.3 ? 4 : 1;
-    } else if (arvLow != null && arvHigh != null && arv != null && arv > 0) {
-      const spreadPct = (arvHigh - arvLow) / arv;
       score += spreadPct <= 0.05 ? 15 : spreadPct <= 0.1 ? 12 : spreadPct <= 0.2 ? 8 : spreadPct <= 0.3 ? 4 : 1;
     } else {
       score += 5;
