@@ -1151,6 +1151,24 @@ export default function LeadDetailPage() {
         {activeTab === 'communications' && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2 space-y-6">
+
+              {/* AI paused banner — shown when a human has stepped in */}
+              {!lead.autoRespond && !lead.doNotContact && lead.status !== 'DEAD' && (
+                <div className="flex items-center justify-between gap-4 px-4 py-3 rounded-lg border border-amber-300 bg-amber-50">
+                  <div className="flex items-center gap-2 text-amber-800 text-sm">
+                    <span className="text-base">🤚</span>
+                    <span><strong>AI paused</strong> — you stepped in manually. The AI will not auto-respond until you resume it.</span>
+                  </div>
+                  <button
+                    onClick={handleToggleAutoRespond}
+                    disabled={togglingAutoRespond}
+                    className="shrink-0 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold transition-colors disabled:opacity-50"
+                  >
+                    {togglingAutoRespond ? 'Resuming...' : '▶ Resume AI'}
+                  </button>
+                </div>
+              )}
+
               {/* AI Voice Call Section */}
               <div className="card">
                 <div className="flex items-center gap-2 mb-4">
