@@ -385,24 +385,6 @@ export default function LeadDetailPage() {
               </div>
             </div>
             <div className="flex items-center gap-5">
-              {/* Lead score donut */}
-              <DonutStat
-                value={lead.totalScore}
-                max={12}
-                label={({ STRIKE_ZONE: 'Strike Zone', HOT: 'Hot', WORKABLE: 'Workable', DEAD_COLD: 'Cold' } as Record<string,string>)[lead.scoreBand] ?? lead.scoreBand.replace('_', ' ')}
-                color={lead.scoreBand === 'HOT' ? '#ef4444' : lead.scoreBand === 'WARM' ? '#f97316' : '#6b7280'}
-                size={60}
-              />
-              {/* AI analysis score donut */}
-              {aiAnalysis?.dealRating != null ? (
-                <DonutStat
-                  value={aiAnalysis.dealRating}
-                  max={10}
-                  label="AI Score"
-                  color={aiAnalysis.dealRating >= 7 ? '#10b981' : aiAnalysis.dealRating >= 4 ? '#f59e0b' : '#ef4444'}
-                  size={60}
-                />
-              ) : null}
               {/* Zillow quick-link */}
               <a
                 href={`https://www.zillow.com/homes/${encodeURIComponent(
@@ -867,100 +849,75 @@ export default function LeadDetailPage() {
 
             {/* Sidebar */}
             <div className="space-y-6">
-              {/* Score Breakdown */}
-              <div className="card">
-                <div className="flex justify-between items-center mb-4">
-                  <h3 className="text-lg font-bold">Score Breakdown</h3>
-                  <button onClick={handleRescore} className="btn btn-sm btn-secondary">
-                    Rescore
-                  </button>
-                </div>
-                <div className="space-y-3">
-                  <ScoreBar label="Challenge" score={lead.challengeScore} max={3} />
-                  <ScoreBar label="Authority" score={lead.authorityScore} max={3} />
-                  <ScoreBar label="Money" score={lead.moneyScore} max={3} />
-                  <ScoreBar label="Priority" score={lead.priorityScore} max={3} />
-                </div>
-                {lead.scoringRationale && (
-                  <p className="mt-4 text-sm text-gray-600 italic">
-                    {lead.scoringRationale}
-                  </p>
-                )}
-              </div>
-
-              {/* ARV/Price */}
+              {/* Valuation — Risk-Adjusted ARV, Asking Price, MAO */}
               <div className="card">
                 <h3 className="text-lg font-bold mb-4">Valuation</h3>
-                {/* ATTOM AVM block */}
-                {(lead as any).attomAvm && (
-                  <div className="mb-4 p-3 rounded-lg bg-indigo-50 border border-indigo-200">
-                    <div className="flex items-center gap-1.5 mb-2">
-                      <span className="text-xs font-semibold text-indigo-700">ATTOM AVM</span>
-                      {(lead as any).attomAvmConfidence && (
-                        <span className="text-xs text-indigo-500">{(lead as any).attomAvmConfidence}% confidence</span>
+
+                {/* Risk-Adjusted ARV (primary) */}
+                {lead.arv ? (
+                  <div className="mb-4 p-3 rounded-lg bg-green-50 border border-green-300">
+                    <div className="text-xs font-semibold text-green-700 mb-1">🏠 Risk-Adjusted ARV</div>
+                    <div className="text-3xl font-bold text-green-700">${lead.arv.toLocaleString()}</div>
+                    <div className="flex items-center gap-3 mt-1">
+                      {lead.arvConfidence && (
+                        <span className="text-xs text-green-600">{lead.arvConfidence}% confidence</span>
+                      )}
+                      {lead.lastCompsDate && (
+                        <span className="text-xs text-gray-400">Updated {format(new Date(lead.lastCompsDate), 'MMM d')}</span>
                       )}
                     </div>
-                    <div className="text-xl font-bold text-indigo-700">${Math.round((lead as any).attomAvm).toLocaleString()}</div>
-                    {((lead as any).attomAvmLow && (lead as any).attomAvmHigh) && (
-                      <div className="text-xs text-indigo-500 mt-0.5">
-                        Range: ${Math.round((lead as any).attomAvmLow).toLocaleString()} – ${Math.round((lead as any).attomAvmHigh).toLocaleString()}
-                      </div>
-                    )}
-                    {((lead as any).avmPoorHigh || (lead as any).avmExcellentHigh) && (
-                      <div className="mt-2 space-y-1 text-xs">
-                        {(lead as any).avmPoorHigh && (
-                          <div className="flex justify-between">
-                            <span className="text-gray-500">AS-IS (distressed)</span>
-                            <span className="font-semibold text-red-600">${Math.round((lead as any).avmPoorHigh).toLocaleString()}</span>
-                          </div>
-                        )}
-                        {(lead as any).avmGoodHigh && (
-                          <div className="flex justify-between">
-                            <span className="text-gray-500">Good condition</span>
-                            <span className="font-semibold text-yellow-700">${Math.round((lead as any).avmGoodHigh).toLocaleString()}</span>
-                          </div>
-                        )}
-                        {(lead as any).avmExcellentHigh && (
-                          <div className="flex justify-between">
-                            <span className="text-gray-500">After repair (ARV)</span>
-                            <span className="font-bold text-green-600">${Math.round((lead as any).avmExcellentHigh).toLocaleString()}</span>
-                          </div>
-                        )}
-                      </div>
-                    )}
+                  </div>
+                ) : (
+                  <div className="mb-4 p-3 rounded-lg bg-gray-50 border border-gray-200 text-sm text-gray-400 italic">
+                    No ARV yet — run Full Analysis to calculate
                   </div>
                 )}
-                {lead.arv && (
-                  <div className="mb-3">
-                    <div className="text-sm text-gray-500">ARV</div>
-                    <div className="text-2xl font-bold text-green-600">
-                      ${lead.arv.toLocaleString()}
-                    </div>
-                    {lead.arvConfidence && (
-                      <div className="text-xs text-gray-500">
-                        {lead.arvConfidence}% confidence
-                      </div>
-                    )}
-                    {lead.lastCompsDate && (
-                      <div className="text-xs text-gray-400">
-                        Updated {format(new Date(lead.lastCompsDate), 'MMM d, h:mm a')}
-                      </div>
-                    )}
-                  </div>
-                )}
-                {lead.askingPrice && (
-                  <div className="mb-3">
-                    <div className="text-sm text-gray-500">Asking Price</div>
-                    <div className="text-xl font-bold">
-                      ${lead.askingPrice.toLocaleString()}
+
+                {/* Asking Price */}
+                {lead.askingPrice ? (
+                  <div className="mb-3 flex items-center justify-between">
+                    <div>
+                      <div className="text-xs text-gray-500">Asking Price</div>
+                      <div className="text-xl font-bold text-gray-800">${lead.askingPrice.toLocaleString()}</div>
                     </div>
                     {lead.arv && (
-                      <div className="text-xs text-gray-500">
+                      <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                        lead.askingPrice / lead.arv < 0.7 ? 'bg-green-100 text-green-700' :
+                        lead.askingPrice / lead.arv < 0.85 ? 'bg-yellow-100 text-yellow-700' :
+                        'bg-red-100 text-red-700'
+                      }`}>
                         {((lead.askingPrice / lead.arv) * 100).toFixed(0)}% of ARV
-                      </div>
+                      </span>
                     )}
                   </div>
+                ) : (
+                  <div className="mb-3 text-xs text-gray-400 italic">Asking price not provided yet</div>
                 )}
+
+                {/* MAO */}
+                {lead.arv && (
+                  <div className="mb-4 p-3 rounded-lg bg-blue-50 border border-blue-200">
+                    <div className="text-xs font-semibold text-blue-700 mb-1">MAO (70% − $15k fee)</div>
+                    {(() => {
+                      const repairEst = (lead as any).repairCosts || 0;
+                      const mao = Math.round(lead.arv * 0.70 - 15000 - repairEst);
+                      return (
+                        <>
+                          <div className="text-2xl font-bold text-blue-700">${Math.max(mao, 0).toLocaleString()}</div>
+                          {repairEst > 0 && (
+                            <div className="text-xs text-blue-500 mt-0.5">incl. ~${repairEst.toLocaleString()} repairs</div>
+                          )}
+                          {lead.askingPrice && (
+                            <div className={`text-xs mt-1 font-medium ${lead.askingPrice <= mao ? 'text-green-600' : 'text-red-600'}`}>
+                              {lead.askingPrice <= mao ? '✓ Under MAO' : `$${(lead.askingPrice - mao).toLocaleString()} over MAO`}
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
+                  </div>
+                )}
+
                 {compsResult && (
                   <div className="mb-3 text-xs px-2 py-1.5 bg-green-50 text-green-700 rounded border border-green-200">
                     Found {compsResult.compsCount} comps via {compsResult.source}
@@ -979,15 +936,18 @@ export default function LeadDetailPage() {
                   </Link>
                 </div>
                 {lead.arv && (
-                  <button
-                    onClick={() => handleFetchComps(true)}
-                    disabled={fetchingComps}
-                    className="text-xs text-primary-600 hover:underline w-full text-center"
-                  >
+                  <button onClick={() => handleFetchComps(true)} disabled={fetchingComps} className="text-xs text-primary-600 hover:underline w-full text-center">
                     Force Refresh
                   </button>
                 )}
               </div>
+
+              {/* AI Summary Box */}
+              <AiSummaryBox
+                lead={lead}
+                onRefresh={loadLead}
+                onViewAnalysis={() => router.push(`/leads/${leadId}/comps-analysis?tab=deal-analysis`)}
+              />
 
               {/* Assignment */}
               <div className="card">
@@ -1051,13 +1011,6 @@ export default function LeadDetailPage() {
                   </div>
                 </div>
               </div>
-
-              {/* AI Summary Box */}
-              <AiSummaryBox
-                lead={lead}
-                onRefresh={loadLead}
-                onViewAnalysis={() => router.push(`/leads/${leadId}/comps-analysis?tab=deal-analysis`)}
-              />
 
               {/* Deal Tier */}
               <div className="card">
