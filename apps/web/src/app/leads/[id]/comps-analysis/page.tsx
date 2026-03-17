@@ -226,7 +226,7 @@ export default function CompsAnalysisPage() {
         const latest = analyses.data[0];
         const full = await compAnalysisAPI.get(leadId, latest.id);
         setAnalysis(full.data);
-        setDealArv(full.data.comparableSalesValue || full.data.arvEstimate || full.data.lead?.arv || 0);
+        setDealArv(full.data.arvEstimate || full.data.lead?.arv || 0);
         setRepairCosts(full.data.repairCosts || 0);
         setAssignmentFee(full.data.assignmentFee || 15000);
         setMaoPercent(full.data.sellerMotivationMaoPercent || full.data.maoPercent || 70);
@@ -241,7 +241,7 @@ export default function CompsAnalysisPage() {
           });
           const full = await compAnalysisAPI.get(leadId, res.data.id);
           setAnalysis(full.data);
-          setDealArv(full.data.comparableSalesValue || full.data.arvEstimate || leadRes.data.arv || 0);
+          setDealArv(full.data.arvEstimate || leadRes.data.arv || 0);
         }
       }
     } catch (error) {
@@ -255,7 +255,7 @@ export default function CompsAnalysisPage() {
     if (!analysis) return;
     const res = await compAnalysisAPI.get(leadId, analysis.id);
     setAnalysis(res.data);
-    setDealArv(res.data.comparableSalesValue || res.data.arvEstimate || dealArv);
+    setDealArv(res.data.arvEstimate || dealArv);
   }, [analysis, leadId, dealArv]);
 
   // ─── Find Comps (ATTOM primary, RentCast fallback) ──────────────────────────
@@ -274,7 +274,7 @@ export default function CompsAnalysisPage() {
       });
       const full = await compAnalysisAPI.get(leadId, res.data.id);
       setAnalysis(full.data);
-      setDealArv(full.data.comparableSalesValue || full.data.arvEstimate || leadRes.data.arv || result.data.arv || 0);
+      setDealArv(full.data.arvEstimate || leadRes.data.arv || result.data.arv || 0);
       router.replace(`/leads/${leadId}/comps-analysis?tab=comps`, { scroll: false });
     } catch (error: any) {
       console.error('Failed to fetch comps:', error);
@@ -386,7 +386,7 @@ export default function CompsAnalysisPage() {
       await compAnalysisAPI.aiAdjustComps(leadId, analysis.id);
       // Step 2: Calculate ARV (includes auto cost+income+triangulate+risk)
       const arvRes = await compAnalysisAPI.calculateArv(leadId, analysis.id, 'weighted');
-      setDealArv(arvRes.data.comparableSalesValue || arvRes.data.arvEstimate || arvRes.data.arv || 0);
+      setDealArv(arvRes.data.arvEstimate || arvRes.data.arv || 0);
       await refreshAnalysis();
       router.replace(`/leads/${leadId}/comps-analysis?tab=arv`, { scroll: false });
     } catch (error) {
@@ -1243,7 +1243,7 @@ export default function CompsAnalysisPage() {
 
                 {/* ── PRIMARY: AI Estimated ARV hero card ── */}
                 {(() => {
-                  const displayArv = (analysis as any).comparableSalesValue || analysis.arvEstimate;
+                  const displayArv = analysis.arvEstimate;
                   if (!displayArv) return null;
                   const sqftUsed = (lead as any)?.sqftOverride || lead?.sqft;
                   return (
@@ -1640,7 +1640,7 @@ export default function CompsAnalysisPage() {
                     </div>
                     {analysis?.arvEstimate && dealArv !== analysis.arvEstimate && (
                       <button
-                        onClick={() => setDealArv((analysis as any).comparableSalesValue || analysis.arvEstimate || 0)}
+                        onClick={() => setDealArv(analysis.arvEstimate || 0)}
                         className="text-xs text-primary-600 mt-1 hover:underline"
                       >
                         Reset to calculated ARV (${analysis.arvEstimate.toLocaleString()})
