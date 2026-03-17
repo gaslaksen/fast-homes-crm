@@ -17,6 +17,7 @@ export class CompAnalysisController {
       propertyStatus?: string[];
       propertyType?: string;
       selectedCompIds?: string[];
+      sourceFilter?: string;
     },
   ) {
     return this.compAnalysisService.createAnalysis(leadId, body);
@@ -65,6 +66,14 @@ export class CompAnalysisController {
   @Post(':analysisId/comps/:compId/toggle')
   async toggleCompSelection(@Param('compId') compId: string) {
     return this.compAnalysisService.toggleCompSelection(compId);
+  }
+
+  @Post(':analysisId/comps/select-all')
+  async selectAll(
+    @Param('analysisId') analysisId: string,
+    @Body() body: { selected: boolean; source?: string },
+  ) {
+    return this.compAnalysisService.setAllSelected(analysisId, body.selected, body.source);
   }
 
   @Post(':analysisId/calculate-adjustments')

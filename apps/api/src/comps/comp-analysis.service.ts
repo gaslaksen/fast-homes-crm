@@ -82,6 +82,7 @@ export class CompAnalysisService {
     propertyType?: string;
     importExistingComps?: boolean;
     selectedCompIds?: string[];
+    sourceFilter?: string;  // only import comps from this source (e.g. 'attom', 'rentcast')
   }) {
     const analysis = await this.prisma.compAnalysis.create({
       data: {
@@ -98,7 +99,7 @@ export class CompAnalysisService {
     if (params.selectedCompIds && params.selectedCompIds.length > 0) {
       await this.importSelectedComps(analysis.id, leadId, params.selectedCompIds);
     } else if (params.importExistingComps !== false) {
-      await this.importExistingComps(analysis.id, leadId);
+      await this.importExistingComps(analysis.id, leadId, params.sourceFilter);
     }
 
     return analysis;
@@ -108,13 +109,19 @@ export class CompAnalysisService {
    * Link existing lead-level comps (from RentCast/ChatARV fetch) into a CompAnalysis.
    * Copies the comps so they can be toggled/adjusted independently.
    */
-  async importExistingComps(analysisId: string, leadId: string): Promise<number> {
+  async importExistingComps(analysisId: string, leadId: string, sourceFilter?: string): Promise<number> {
+    const where: any = {
+      leadId,
+      analysisId: null,
+      source: { not: 'placeholder' },
+    };
+    // When a source filter is provided (e.g. on Refresh Comps), only import that source
+    if (sourceFilter) {
+      where.source = sourceFilter;
+      this.logger.log(`importExistingComps: filtering to source='${sourceFilter}' for lead ${leadId}`);
+    }
     const existingComps = await this.prisma.comp.findMany({
-      where: {
-        leadId,
-        analysisId: null, // Only lead-level comps (not already in an analysis)
-        source: { not: 'placeholder' },
-      },
+      where,
       orderBy: { distance: 'asc' },
     });
 
@@ -359,6 +366,13 @@ export class CompAnalysisService {
       where: { id: compId },
       data: { selected: !comp.selected },
     });
+  }
+
+  async setAllSelected(analysisId: string, selected: boolean, source?: string) {
+    const where: any = { analysisId };
+    if (source) where.source = source;
+    const result = await this.prisma.comp.updateMany({ where, data: { selected } });
+    return { updated: result.count, selected };
   }
 
   async calculateAdjustments(analysisId: string, config?: Partial<AdjustmentConfig>) {

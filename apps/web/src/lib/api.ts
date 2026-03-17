@@ -131,6 +131,8 @@ export const compAnalysisAPI = {
     api.delete(`/leads/${leadId}/comp-analysis/${analysisId}/comps/${compId}`),
   toggleComp: (leadId: string, analysisId: string, compId: string) =>
     api.post(`/leads/${leadId}/comp-analysis/${analysisId}/comps/${compId}/toggle`),
+  selectAll: (leadId: string, analysisId: string, selected: boolean, source?: string) =>
+    api.post(`/leads/${leadId}/comp-analysis/${analysisId}/comps/select-all`, { selected, source }),
   calculateAdjustments: (leadId: string, analysisId: string, config?: any) =>
     api.post(`/leads/${leadId}/comp-analysis/${analysisId}/calculate-adjustments`, { config }),
   calculateArv: (leadId: string, analysisId: string, method?: string) =>

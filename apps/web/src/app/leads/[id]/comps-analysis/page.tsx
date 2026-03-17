@@ -268,9 +268,10 @@ export default function CompsAnalysisPage() {
       const leadRes = await leadsAPI.get(leadId);
       setLead(leadRes.data);
 
-      // Create new analysis with imported comps
+      // Create new analysis — on force refresh, only import comps from the selected source
       const res = await compAnalysisAPI.create(leadId, {
         importExistingComps: true,
+        sourceFilter: forceRefresh ? (compsSource === 'rentcast' ? 'rentcast' : 'attom') : undefined,
       });
       const full = await compAnalysisAPI.get(leadId, res.data.id);
       setAnalysis(full.data);
@@ -786,6 +787,29 @@ export default function CompsAnalysisPage() {
                     <span className="text-xs px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 font-medium">
                       {compsFromRentcast} RentCast
                     </span>
+                  )}
+                  {/* Select / Deselect All */}
+                  {analysis && allComps.length > 0 && (
+                    <div className="flex rounded-lg overflow-hidden border border-gray-200 text-xs">
+                      <button
+                        onClick={async () => {
+                          await compAnalysisAPI.selectAll(leadId, analysis.id, true);
+                          await refreshAnalysis();
+                        }}
+                        className="px-3 py-1.5 bg-white text-gray-600 hover:bg-gray-50 font-medium border-r border-gray-200"
+                      >
+                        Select All
+                      </button>
+                      <button
+                        onClick={async () => {
+                          await compAnalysisAPI.selectAll(leadId, analysis.id, false);
+                          await refreshAnalysis();
+                        }}
+                        className="px-3 py-1.5 bg-white text-gray-600 hover:bg-gray-50 font-medium"
+                      >
+                        Deselect All
+                      </button>
+                    </div>
                   )}
                 </div>
                 <div className="flex items-center gap-3">
