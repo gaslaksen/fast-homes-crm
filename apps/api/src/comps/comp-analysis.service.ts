@@ -253,6 +253,7 @@ export class CompAnalysisService {
             bedrooms: true,
             bathrooms: true,
             sqft: true,
+            sqftOverride: true,
             yearBuilt: true,
             lotSize: true,
             propertyType: true,
@@ -763,7 +764,7 @@ export class CompAnalysisService {
         lead: {
           select: {
             propertyAddress: true, propertyCity: true, propertyState: true,
-            bedrooms: true, bathrooms: true, sqft: true, yearBuilt: true,
+            bedrooms: true, bathrooms: true, sqft: true, sqftOverride: true, yearBuilt: true,
             lotSize: true, conditionLevel: true, propertyType: true, askingPrice: true,
             // ATTOM enrichment fields
             attomAvm: true, attomAvmConfidence: true,
