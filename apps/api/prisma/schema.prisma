@@ -87,6 +87,9 @@ model Lead {
   arv               Float?
   arvConfidence     Float?
   lastCompsDate     DateTime?
+  repairCosts       Float?   // Deal-level repair cost override
+  assignmentFee     Float?   // Deal-level assignment fee override
+  maoPercent        Float?   // MAO % override (default 70)
 
   // ── ATTOM enrichment ─────────────────────────────────────────────────────
   attomId              String?   // ATTOM property ID for lookups

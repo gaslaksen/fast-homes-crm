@@ -195,6 +195,8 @@ export default function CompsAnalysisPage() {
   const [calculating, setCalculating] = useState(false);
   const [aiAdjusting, setAiAdjusting] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [savingDealNumbers, setSavingDealNumbers] = useState(false);
+  const [dealNumbersSaved, setDealNumbersSaved] = useState(false);
   const [generatingAi, setGeneratingAi] = useState(false);
   const [generatingAssessment, setGeneratingAssessment] = useState(false);
   const [analyzingPhotos, setAnalyzingPhotos] = useState(false);
@@ -546,6 +548,28 @@ export default function CompsAnalysisPage() {
       alert('Failed to save to lead');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleSaveDealNumbers = async () => {
+    setSavingDealNumbers(true);
+    setDealNumbersSaved(false);
+    try {
+      await leadsAPI.update(leadId, {
+        arv: dealArv || undefined,
+        repairCosts: repairCosts || undefined,
+        assignmentFee: assignmentFee || undefined,
+        maoPercent: maoPercent || undefined,
+      });
+      const lr = await leadsAPI.get(leadId);
+      setLead(lr.data);
+      setDealNumbersSaved(true);
+      setTimeout(() => setDealNumbersSaved(false), 4000);
+    } catch (error) {
+      console.error('Failed to save deal numbers:', error);
+      alert('Failed to save deal numbers');
+    } finally {
+      setSavingDealNumbers(false);
     }
   };
 
@@ -1743,6 +1767,22 @@ export default function CompsAnalysisPage() {
                       ))}
                     </div>
                   </div>
+                </div>
+
+                {/* Save Deal Numbers */}
+                <div className="md:col-span-2 flex items-center gap-3 pt-3 border-t border-gray-100">
+                  <button
+                    onClick={handleSaveDealNumbers}
+                    disabled={savingDealNumbers}
+                    className="btn btn-primary btn-sm"
+                  >
+                    {savingDealNumbers ? 'Saving...' : 'Save Deal Numbers'}
+                  </button>
+                  {dealNumbersSaved ? (
+                    <span className="text-sm text-green-600 font-medium">✓ Saved — reflected on overview &amp; disposition pages</span>
+                  ) : (
+                    <span className="text-xs text-gray-400">Save to persist these numbers to the lead, overview, and disposition page</span>
+                  )}
                 </div>
 
                 {/* Results */}

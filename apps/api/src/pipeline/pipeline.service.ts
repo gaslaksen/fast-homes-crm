@@ -296,16 +296,18 @@ Respond with ONE sentence only, no preamble.`;
     if (!lead.comps || lead.comps.length === 0)
       missingData.push('Comparable sales data');
 
-    // Calculate estimated profit
+    // Calculate estimated profit — use saved deal numbers if available
     let estimatedProfit: number | null = null;
     if (lead.arv && lead.askingPrice) {
-      const rehab =
-        lead.conditionLevel === 'poor' || lead.conditionLevel === 'distressed'
+      const repairEst = (lead as any).repairCosts ??
+        (lead.conditionLevel === 'poor' || lead.conditionLevel === 'distressed'
           ? 50000
           : lead.conditionLevel === 'fair'
             ? 30000
-            : 15000;
-      const mao = Math.round(lead.arv * 0.7 - rehab);
+            : 15000);
+      const savedMaoFactor = ((lead as any).maoPercent ?? 70) / 100;
+      const savedFee = (lead as any).assignmentFee ?? 15000;
+      const mao = Math.round(lead.arv * savedMaoFactor - repairEst - savedFee);
       estimatedProfit = mao - lead.askingPrice;
     }
 
@@ -318,14 +320,17 @@ Respond with ONE sentence only, no preamble.`;
     try {
       console.log(`🤖 Generating AI analysis for lead ${leadId}...`);
 
-      // Deal math
-      const assignmentFee = 15000;
-      const maoLight  = lead.arv ? Math.round(lead.arv * 0.70 - 20000 - assignmentFee) : null;
-      const maoMod    = lead.arv ? Math.round(lead.arv * 0.70 - 40000 - assignmentFee) : null;
-      const maoHeavy  = lead.arv ? Math.round(lead.arv * 0.70 - 60000 - assignmentFee) : null;
+      // Deal math — use lead-level overrides if set
+      const assignmentFee = (lead as any).assignmentFee ?? 15000;
+      const maoFactor = ((lead as any).maoPercent ?? 70) / 100;
+      const savedRepairs = (lead as any).repairCosts;
+      const maoLight  = lead.arv ? Math.round(lead.arv * maoFactor - 20000 - assignmentFee) : null;
+      const maoMod    = lead.arv ? Math.round(lead.arv * maoFactor - 40000 - assignmentFee) : null;
+      const maoHeavy  = lead.arv ? Math.round(lead.arv * maoFactor - 60000 - assignmentFee) : null;
+      const maoSaved  = lead.arv && savedRepairs != null ? Math.round(lead.arv * maoFactor - savedRepairs - assignmentFee) : null;
       const askingVsMao = (lead.arv && lead.askingPrice)
         ? `Asking is ${((lead.askingPrice / lead.arv) * 100).toFixed(0)}% of ARV. ` +
-          (maoMod && lead.askingPrice <= maoMod ? 'BELOW MAO — deal pencils.' : maoLight && lead.askingPrice <= maoLight ? 'Below light-repair MAO.' : 'ABOVE moderate MAO — needs negotiation or lower repair scenario.')
+          (maoSaved != null && lead.askingPrice <= maoSaved ? 'BELOW saved MAO — deal pencils.' : maoMod && lead.askingPrice <= maoMod ? 'Below moderate MAO.' : maoLight && lead.askingPrice <= maoLight ? 'Below light-repair MAO.' : 'ABOVE MAO — needs negotiation or lower repair scenario.')
         : 'Cannot compare — asking price or ARV unknown.';
 
       const compsStr = lead.comps.length > 0
@@ -346,7 +351,7 @@ Ownership: ${lead.ownershipStatus || 'Unknown'} | Timeline: ${lead.timeline ? le
 DEAL NUMBERS:
 ARV: ${lead.arv ? '$' + lead.arv.toLocaleString() : 'Not calculated'}
 Asking Price: ${lead.askingPrice ? '$' + lead.askingPrice.toLocaleString() : 'Unknown'}
-MAO (70% rule, $15k fee): Light repairs (~$20k): ${maoLight ? '$' + maoLight.toLocaleString() : '?'} | Moderate (~$40k): ${maoMod ? '$' + maoMod.toLocaleString() : '?'} | Heavy (~$60k): ${maoHeavy ? '$' + maoHeavy.toLocaleString() : '?'}
+MAO (${Math.round(maoFactor * 100)}% rule, $${assignmentFee.toLocaleString()} fee):${maoSaved != null ? ` Saved repairs ($${savedRepairs.toLocaleString()}): $${maoSaved.toLocaleString()} |` : ''} Light (~$20k): ${maoLight ? '$' + maoLight.toLocaleString() : '?'} | Moderate (~$40k): ${maoMod ? '$' + maoMod.toLocaleString() : '?'} | Heavy (~$60k): ${maoHeavy ? '$' + maoHeavy.toLocaleString() : '?'}
 Asking vs MAO: ${askingVsMao}
 Estimated Assignment Profit: ${estimatedProfit !== null ? '$' + estimatedProfit.toLocaleString() : 'Cannot calculate'}
 
