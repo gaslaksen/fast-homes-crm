@@ -11,9 +11,11 @@ interface DispoSummary {
   arv: number | null;
   repairCost: number | null;
   mao: number | null;
+  maoPercent: number | null;
   askingPrice: number | null;
   offerAmount: number | null;
   assignmentFee: number | null;
+  leadAssignmentFee: number | null;
   buyerPrice: number | null;
   buyerSpread: number | null;
   projectedProfit: number | null;
@@ -94,7 +96,7 @@ export default function DispoTab({
 
   // Deal Numbers edit mode
   const [editingNumbers, setEditingNumbers] = useState(false);
-  const [numbersForm, setNumbersForm] = useState({ arv: '', repairCosts: '', askingPrice: '' });
+  const [numbersForm, setNumbersForm] = useState({ arv: '', repairCosts: '', askingPrice: '', assignmentFee: '', maoPercent: '' });
   const [savingNumbers, setSavingNumbers] = useState(false);
 
   // Contract form state
@@ -221,6 +223,8 @@ export default function DispoTab({
       arv: s.arv != null ? String(s.arv) : '',
       repairCosts: s.repairCost != null ? String(s.repairCost) : '',
       askingPrice: s.askingPrice != null ? String(s.askingPrice) : '',
+      assignmentFee: s.leadAssignmentFee != null ? String(s.leadAssignmentFee) : '',
+      maoPercent: s.maoPercent != null ? String(s.maoPercent) : '70',
     });
     setEditingNumbers(true);
   };
@@ -228,10 +232,12 @@ export default function DispoTab({
   const handleSaveDealNumbers = async () => {
     setSavingNumbers(true);
     try {
-      const payload: { arv?: number | null; repairCosts?: number | null; askingPrice?: number | null } = {};
+      const payload: { arv?: number | null; repairCosts?: number | null; askingPrice?: number | null; assignmentFee?: number | null; maoPercent?: number | null } = {};
       payload.arv = numbersForm.arv !== '' ? parseFloat(numbersForm.arv) : null;
       payload.repairCosts = numbersForm.repairCosts !== '' ? parseFloat(numbersForm.repairCosts) : null;
       payload.askingPrice = numbersForm.askingPrice !== '' ? parseFloat(numbersForm.askingPrice) : null;
+      payload.assignmentFee = numbersForm.assignmentFee !== '' ? parseFloat(numbersForm.assignmentFee) : null;
+      payload.maoPercent = numbersForm.maoPercent !== '' ? parseFloat(numbersForm.maoPercent) : null;
       await dispoAPI.updateDealNumbers(leadId, payload);
       setEditingNumbers(false);
       await load();
@@ -247,7 +253,9 @@ export default function DispoTab({
   const liveArv = numbersForm.arv !== '' ? parseFloat(numbersForm.arv) : null;
   const liveRepairs = numbersForm.repairCosts !== '' ? parseFloat(numbersForm.repairCosts) : null;
   const liveAsking = numbersForm.askingPrice !== '' ? parseFloat(numbersForm.askingPrice) : null;
-  const liveMao = liveArv != null && liveRepairs != null ? liveArv * 0.7 - liveRepairs : null;
+  const liveMaoFactor = numbersForm.maoPercent !== '' ? parseFloat(numbersForm.maoPercent) / 100 : ((summary?.maoPercent ?? 70) / 100);
+  const liveFee = numbersForm.assignmentFee !== '' ? parseFloat(numbersForm.assignmentFee) : 0;
+  const liveMao = liveArv != null && liveRepairs != null ? liveArv * liveMaoFactor - liveRepairs : null;
   const liveOfferAmount = summary?.offerAmount ?? null;
   const liveAssignmentFee = summary?.assignmentFee ?? null;
   const liveBuyerPrice = liveOfferAmount != null && liveAssignmentFee != null ? liveOfferAmount + liveAssignmentFee : null;
@@ -359,6 +367,29 @@ export default function DispoTab({
                   placeholder="e.g. 180000"
                 />
               </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Assignment Fee ($)</label>
+                <input
+                  type="number"
+                  value={numbersForm.assignmentFee}
+                  onChange={(e) => setNumbersForm((f) => ({ ...f, assignmentFee: e.target.value }))}
+                  className="input w-full"
+                  placeholder="e.g. 15000"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">MAO % (e.g. 70)</label>
+                <input
+                  type="number"
+                  value={numbersForm.maoPercent}
+                  onChange={(e) => setNumbersForm((f) => ({ ...f, maoPercent: e.target.value }))}
+                  className="input w-full"
+                  placeholder="70"
+                  min="50"
+                  max="95"
+                />
+                <p className="text-xs text-gray-400 mt-1">Default 70 — adjust for seller motivation</p>
+              </div>
             </div>
 
             {/* Live-computed preview */}
@@ -367,7 +398,7 @@ export default function DispoTab({
                 Live Preview
               </div>
               <DealRow
-                label="MAO (70% Rule)"
+                label={`MAO (${Math.round(liveMaoFactor * 100)}% Rule)`}
                 value={fmt(liveMao)}
                 muted={liveMao == null}
                 highlight={
@@ -375,12 +406,12 @@ export default function DispoTab({
                     ? liveOfferAmount <= liveMao ? 'green' : 'red'
                     : undefined
                 }
-                sub="ARV × 70% − repairs"
+                sub={`ARV × ${Math.round(liveMaoFactor * 100)}% − repairs`}
               />
               <DealRow label="Offer to Seller" value={fmt(liveOfferAmount)} bold muted={!liveOfferAmount}
                 sub="Set in Contract Details below" />
-              <DealRow label="Assignment Fee" value={fmt(liveAssignmentFee)} bold muted={!liveAssignmentFee}
-                sub="Set in Contract Details below" />
+              <DealRow label="Assignment Fee" value={liveFee > 0 ? fmt(liveFee) : fmt(liveAssignmentFee)} bold muted={!liveFee && !liveAssignmentFee}
+                sub="From deal numbers or Contract Details" />
               <DealRow label="Buyer's All-In Price" value={fmt(liveBuyerPrice)} muted={liveBuyerPrice == null} divider />
               <DealRow label="Buyer's Spread" value={fmt(liveBuyerSpread)}
                 highlight={liveBuyerSpread != null ? (liveBuyerSpread > 0 ? 'green' : 'red') : undefined} />
@@ -402,14 +433,14 @@ export default function DispoTab({
             <DealRow label="Repair Estimate" value={fmt(s.repairCost)} muted={!s.repairCost}
               sub={s.latestCompAnalysis?.repairNotes ?? undefined} />
             <DealRow
-              label="MAO (70% Rule)"
+              label={`MAO (${s.maoPercent ?? 70}% Rule)`}
               value={fmt(s.mao)}
               highlight={
                 s.mao != null && s.offerAmount != null
                   ? s.offerAmount <= s.mao ? 'green' : 'red'
                   : undefined
               }
-              sub={s.mao != null ? `ARV × 70% − repairs` : undefined}
+              sub={s.mao != null ? `ARV × ${s.maoPercent ?? 70}% − repairs` : undefined}
             />
             <DealRow label="Seller Asking Price" value={fmt(s.askingPrice)} muted={!s.askingPrice} divider />
             <DealRow label="Offer to Seller" value={fmt(s.offerAmount)} bold muted={!s.offerAmount} />

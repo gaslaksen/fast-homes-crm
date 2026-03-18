@@ -897,12 +897,16 @@ export default function LeadDetailPage() {
                 {/* MAO */}
                 {lead.arv && (
                   <div className="mb-4 p-3 rounded-lg bg-blue-50 border border-blue-200">
-                    <div className="text-xs font-semibold text-blue-700 mb-1">MAO (70% − $15k fee)</div>
                     {(() => {
                       const repairEst = (lead as any).repairCosts || 0;
-                      const mao = Math.round(lead.arv * 0.70 - 15000 - repairEst);
+                      const fee = (lead as any).assignmentFee || 0;
+                      const maoPct = ((lead as any).maoPercent ?? 70) / 100;
+                      const mao = Math.round(lead.arv * maoPct - fee - repairEst);
+                      const maoPctDisplay = Math.round(maoPct * 100);
+                      const feeDisplay = fee > 0 ? ` − $${fee.toLocaleString()} fee` : '';
                       return (
                         <>
+                          <div className="text-xs font-semibold text-blue-700 mb-1">MAO ({maoPctDisplay}%{feeDisplay})</div>
                           <div className="text-2xl font-bold text-blue-700">${Math.max(mao, 0).toLocaleString()}</div>
                           {repairEst > 0 && (
                             <div className="text-xs text-blue-500 mt-0.5">incl. ~${repairEst.toLocaleString()} repairs</div>

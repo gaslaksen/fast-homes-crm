@@ -183,7 +183,7 @@ export default function CompsAnalysisPage() {
   // Deal calculator state
   const [dealArv, setDealArv] = useState(0);
   const [repairCosts, setRepairCosts] = useState(0);
-  const [assignmentFee, setAssignmentFee] = useState(15000);
+  const [assignmentFee, setAssignmentFee] = useState(0);
   const [maoPercent, setMaoPercent] = useState(70);
 
   // Repair estimator
@@ -228,10 +228,17 @@ export default function CompsAnalysisPage() {
         const latest = analyses.data[0];
         const full = await compAnalysisAPI.get(leadId, latest.id);
         setAnalysis(full.data);
-        setDealArv(full.data.arvEstimate || full.data.lead?.arv || 0);
-        setRepairCosts(full.data.repairCosts || 0);
-        setAssignmentFee(full.data.assignmentFee || 15000);
-        setMaoPercent(full.data.sellerMotivationMaoPercent || full.data.maoPercent || 70);
+        // Lead-level saved values take priority over CompAnalysis values
+        const savedArv = (leadRes.data as any).arv;
+        const savedRepairs = (leadRes.data as any).repairCosts;
+        const savedFee = (leadRes.data as any).assignmentFee;
+        const savedMao = (leadRes.data as any).maoPercent;
+        setDealArv(savedArv || full.data.arvEstimate || full.data.lead?.arv || 0);
+        setRepairCosts(savedRepairs ?? full.data.repairCosts ?? 0);
+        // Use lead-level fee if saved; never pull CompAnalysis default (it's always 15000)
+        setAssignmentFee(savedFee ?? 0);
+        // Use saved MAO% if present; otherwise default to 70 (ignore sellerMotivationMaoPercent — that's AI-inferred, not user-set)
+        setMaoPercent(savedMao ?? 70);
         setRepairLevel(full.data.repairFinishLevel || 'flip');
         setSelectedRepairs(full.data.repairItems || []);
       } else {
@@ -243,7 +250,7 @@ export default function CompsAnalysisPage() {
           });
           const full = await compAnalysisAPI.get(leadId, res.data.id);
           setAnalysis(full.data);
-          setDealArv(full.data.arvEstimate || leadRes.data.arv || 0);
+          setDealArv((leadRes.data as any).arv || full.data.arvEstimate || leadRes.data.arv || 0);
         }
       }
     } catch (error) {
@@ -257,8 +264,9 @@ export default function CompsAnalysisPage() {
     if (!analysis) return;
     const res = await compAnalysisAPI.get(leadId, analysis.id);
     setAnalysis(res.data);
-    setDealArv(res.data.arvEstimate || dealArv);
-  }, [analysis, leadId, dealArv]);
+    // Prefer lead-level saved ARV; only fall back to comp analysis estimate
+    setDealArv((lead as any)?.arv || res.data.arvEstimate || dealArv);
+  }, [analysis, leadId, dealArv, lead]);
 
   // ─── Find Comps (ATTOM primary, RentCast fallback) ──────────────────────────
   const handleFindComps = async (forceRefresh = false) => {
@@ -277,7 +285,9 @@ export default function CompsAnalysisPage() {
       });
       const full = await compAnalysisAPI.get(leadId, res.data.id);
       setAnalysis(full.data);
-      setDealArv(full.data.arvEstimate || leadRes.data.arv || result.data.arv || 0);
+      // Preserve any user-saved ARV; only update if the lead has no saved ARV yet
+      const savedLeadArv = (leadRes.data as any).arv;
+      setDealArv(savedLeadArv || full.data.arvEstimate || result.data.arv || 0);
       router.replace(`/leads/${leadId}/comps-analysis?tab=comps`, { scroll: false });
     } catch (error: any) {
       console.error('Failed to fetch comps:', error);
