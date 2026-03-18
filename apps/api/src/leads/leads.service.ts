@@ -980,8 +980,11 @@ export class LeadsService {
     const maoFactor = ((lead as any).maoPercent ?? 70) / 100;
     const mao = arv != null && repairCost != null ? arv * maoFactor - repairCost : null;
 
-    const offerAmount = lead.contract?.offerAmount ?? null;
-    const assignmentFee = lead.contract?.assignmentFee ?? (lead as any).assignmentFee ?? analysis?.assignmentFee ?? null;
+    const offers = lead.offers ?? [];
+    const acceptedOffer = [...offers].sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).find((o: any) => o.status === 'accepted') ?? null;
+    const offerAmount = lead.contract?.offerAmount ?? acceptedOffer?.offerAmount ?? null;
+    // Never fall back to analysis.assignmentFee (always 15000 default) — only use explicitly saved values
+    const assignmentFee = lead.contract?.assignmentFee ?? (lead as any).assignmentFee ?? null;
     const buyerPrice =
       offerAmount != null && assignmentFee != null ? offerAmount + assignmentFee : null;
     const buyerSpread = arv != null && buyerPrice != null ? arv - buyerPrice : null;

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { dispoAPI } from '@/lib/api';
 import { format } from 'date-fns';
 import Link from 'next/link';
@@ -458,6 +458,15 @@ export default function DispoTab({
         )}
       </div>
 
+      {/* ── Exit Strategy Costs ───────────────────────────────────────────── */}
+      <ExitStrategyCosts
+        arv={s.arv}
+        repairCost={s.repairCost}
+        offerAmount={s.offerAmount}
+        assignmentFee={s.assignmentFee}
+        defaultStrategy={s.contract?.exitStrategy ?? 'wholesale'}
+      />
+
       {/* ── Offer Tracker ─────────────────────────────────────────────────── */}
       <div className="card">
         <div className="flex items-center justify-between mb-4">
@@ -738,6 +747,151 @@ export default function DispoTab({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ─── Exit Strategy Costs ─────────────────────────────────────────────────────
+
+const EXIT_COSTS: Record<string, { label: string; agentPct: number; closingPct: number; holdingPct: number; financingPct: number }> = {
+  wholesale:    { label: 'Wholesale',        agentPct: 0, closingPct: 1,   holdingPct: 0, financingPct: 0   },
+  novation:     { label: 'Novation',         agentPct: 6, closingPct: 2.5, holdingPct: 2, financingPct: 0   },
+  flip:         { label: 'Fix & Flip',       agentPct: 6, closingPct: 3,   holdingPct: 2, financingPct: 3.5 },
+  wholetail:    { label: 'Wholetail',        agentPct: 3, closingPct: 2,   holdingPct: 1, financingPct: 1   },
+  'subject-to': { label: 'Subject-To',      agentPct: 6, closingPct: 2.5, holdingPct: 2, financingPct: 0   },
+  creative:     { label: 'Creative Finance', agentPct: 6, closingPct: 2.5, holdingPct: 2, financingPct: 1   },
+};
+
+function ExitStrategyCosts({
+  arv,
+  repairCost,
+  offerAmount,
+  assignmentFee,
+  defaultStrategy,
+}: {
+  arv: number | null;
+  repairCost: number | null;
+  offerAmount: number | null;
+  assignmentFee: number | null;
+  defaultStrategy: string;
+}) {
+  const [strategy, setStrategy] = React.useState(defaultStrategy);
+  const costs = EXIT_COSTS[strategy] ?? EXIT_COSTS.wholesale;
+  const fmtC = (n: number | null) => n != null ? `$${Math.round(n).toLocaleString()}` : '—';
+  const pctOf = (pct: number) => arv != null ? arv * pct / 100 : null;
+
+  const agentCost     = pctOf(costs.agentPct);
+  const closingCost   = pctOf(costs.closingPct);
+  const holdingCost   = pctOf(costs.holdingPct);
+  const financingCost = pctOf(costs.financingPct);
+  const totalPct      = costs.agentPct + costs.closingPct + costs.holdingPct + costs.financingPct;
+  const totalCost     = arv != null ? arv * totalPct / 100 : null;
+
+  // Net profit: ARV - all costs - repairs - purchase price (offer or assignment fee)
+  const purchase = offerAmount ?? 0;
+  const repairs  = repairCost ?? 0;
+  const netProfit = arv != null && totalCost != null
+    ? arv - totalCost - repairs - purchase
+    : null;
+
+  const costRows = [
+    { label: 'Agent Commissions', pct: costs.agentPct,     range: '~6%',   value: agentCost,     show: costs.agentPct > 0 },
+    { label: 'Closing Costs',     pct: costs.closingPct,   range: '2–4%',  value: closingCost,   show: true },
+    { label: 'Holding Costs',     pct: costs.holdingPct,   range: '1–3%',  value: holdingCost,   show: costs.holdingPct > 0 },
+    { label: 'Financing Costs',   pct: costs.financingPct, range: '2–5%',  value: financingCost, show: costs.financingPct > 0 },
+  ].filter(r => r.show);
+
+  return (
+    <div className="card">
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h2 className="text-xl font-bold">Exit Strategy Costs</h2>
+          <p className="text-xs text-gray-400 mt-0.5">Estimate costs based on your exit strategy</p>
+        </div>
+        <select
+          value={strategy}
+          onChange={(e) => setStrategy(e.target.value)}
+          className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary-500"
+        >
+          {Object.entries(EXIT_COSTS).map(([key, c]) => (
+            <option key={key} value={key}>{c.label}</option>
+          ))}
+        </select>
+      </div>
+
+      <div className="rounded-xl border border-gray-200 overflow-hidden text-sm mb-3">
+        {/* Header */}
+        <div className="grid grid-cols-12 gap-2 px-4 py-2 bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+          <div className="col-span-5">Cost Item</div>
+          <div className="col-span-3 text-center">Rate</div>
+          <div className="col-span-4 text-right">Amount</div>
+        </div>
+
+        {/* ARV baseline */}
+        {arv != null && (
+          <div className="grid grid-cols-12 gap-2 px-4 py-3 border-b border-gray-100 bg-blue-50">
+            <div className="col-span-5 text-blue-800 font-semibold">ARV (Base)</div>
+            <div className="col-span-3 text-center text-blue-600">—</div>
+            <div className="col-span-4 text-right font-bold text-blue-800">${arv.toLocaleString()}</div>
+          </div>
+        )}
+
+        {/* Purchase price */}
+        <div className="grid grid-cols-12 gap-2 px-4 py-3 border-b border-gray-100">
+          <div className="col-span-5 text-gray-700">Purchase / Offer</div>
+          <div className="col-span-3 text-center text-gray-400">—</div>
+          <div className="col-span-4 text-right font-semibold text-gray-800">{fmtC(offerAmount)}</div>
+        </div>
+
+        {/* Repairs */}
+        <div className="grid grid-cols-12 gap-2 px-4 py-3 border-b border-gray-100">
+          <div className="col-span-5 text-gray-700">Repair Estimate</div>
+          <div className="col-span-3 text-center text-gray-400">—</div>
+          <div className="col-span-4 text-right font-semibold text-gray-800">{fmtC(repairCost)}</div>
+        </div>
+
+        {/* Cost rows */}
+        {costRows.map((row) => (
+          <div key={row.label} className="grid grid-cols-12 gap-2 px-4 py-3 border-b border-gray-100 last:border-b-0">
+            <div className="col-span-5 text-gray-700">{row.label}</div>
+            <div className="col-span-3 text-center text-gray-500">{row.pct}%</div>
+            <div className="col-span-4 text-right text-gray-800">{fmtC(row.value)}</div>
+          </div>
+        ))}
+
+        {/* Total costs */}
+        <div className="grid grid-cols-12 gap-2 px-4 py-3 border-t-2 border-gray-300 bg-gray-50">
+          <div className="col-span-5 font-semibold text-gray-800">Total Transaction Costs</div>
+          <div className="col-span-3 text-center font-semibold text-gray-600">{totalPct}%</div>
+          <div className="col-span-4 text-right font-bold text-gray-900">{fmtC(totalCost)}</div>
+        </div>
+
+        {/* Net profit */}
+        <div className={`grid grid-cols-12 gap-2 px-4 py-4 border-t border-gray-200 ${
+          netProfit == null ? 'bg-gray-50' :
+          netProfit > 0 ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'
+        }`}>
+          <div className={`col-span-5 font-bold text-base ${netProfit == null ? 'text-gray-500' : netProfit > 0 ? 'text-green-800' : 'text-red-800'}`}>
+            Net Profit
+          </div>
+          <div className="col-span-3 text-center">
+            {netProfit != null && arv != null && (
+              <span className={`text-xs font-semibold px-1.5 py-0.5 rounded-full ${netProfit > 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                {((netProfit / arv) * 100).toFixed(1)}% of ARV
+              </span>
+            )}
+          </div>
+          <div className={`col-span-4 text-right font-bold text-lg tabular-nums ${
+            netProfit == null ? 'text-gray-400' : netProfit > 0 ? 'text-green-700' : 'text-red-700'
+          }`}>
+            {netProfit != null ? `${netProfit >= 0 ? '+' : ''}$${Math.round(netProfit).toLocaleString()}` : '—'}
+          </div>
+        </div>
+      </div>
+
+      <p className="text-xs text-gray-400">
+        💡 Typical investor costs: agent ~6%, closing 2–4%, holding 1–3%, financing 2–5% = <strong>10–12% of ARV</strong>. Wholesale avoids most of these.
+      </p>
     </div>
   );
 }

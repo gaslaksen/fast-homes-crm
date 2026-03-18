@@ -1779,23 +1779,7 @@ export default function CompsAnalysisPage() {
                   </div>
                 </div>
 
-                {/* Save Deal Numbers */}
-                <div className="md:col-span-2 flex items-center gap-3 pt-3 border-t border-gray-100">
-                  <button
-                    onClick={handleSaveDealNumbers}
-                    disabled={savingDealNumbers}
-                    className="btn btn-primary btn-sm"
-                  >
-                    {savingDealNumbers ? 'Saving...' : 'Save Deal Numbers'}
-                  </button>
-                  {dealNumbersSaved ? (
-                    <span className="text-sm text-green-600 font-medium">✓ Saved — reflected on overview &amp; disposition pages</span>
-                  ) : (
-                    <span className="text-xs text-gray-400">Save to persist these numbers to the lead, overview, and disposition page</span>
-                  )}
-                </div>
-
-                {/* Results */}
+                {/* Results — right column */}
                 <div className="space-y-4">
                   <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
                     <div className="text-xs text-gray-500 mb-1">Initial Offer to Seller</div>
@@ -1869,6 +1853,22 @@ export default function CompsAnalysisPage() {
                         {analysis.sellerMotivationTier.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
                       </span>
                     </div>
+                  )}
+                </div>
+
+                {/* Save Deal Numbers — full width below both columns */}
+                <div className="md:col-span-2 flex items-center gap-3 pt-3 border-t border-gray-100">
+                  <button
+                    onClick={handleSaveDealNumbers}
+                    disabled={savingDealNumbers}
+                    className="btn btn-primary btn-sm"
+                  >
+                    {savingDealNumbers ? 'Saving...' : 'Save Deal Numbers'}
+                  </button>
+                  {dealNumbersSaved ? (
+                    <span className="text-sm text-green-600 font-medium">✓ Saved — reflected on overview &amp; disposition pages</span>
+                  ) : (
+                    <span className="text-xs text-gray-400">Save to persist these numbers to the lead, overview, and disposition page</span>
                   )}
                 </div>
               </div>
