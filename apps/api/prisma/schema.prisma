@@ -442,6 +442,10 @@ model Contract {
   actualCloseDate      DateTime?
   dispositionNotes     String?   @db.Text
   outcome              String?
+  boldsignDocumentId   String?
+  boldsignStatus       String?   // pending/completed/declined/revoked
+  boldsignSigningUrl   String?   @db.Text
+  boldsignSentAt       DateTime?
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
 

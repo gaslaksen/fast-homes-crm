@@ -257,6 +257,13 @@ export const gmailAPI = {
   getAuthUrl: () => `${API_URL}/auth/gmail`,
 };
 
+export const boldSignAPI = {
+  send: (leadId: string, templateType: 'purchase' | 'aif') =>
+    api.post(`/leads/${leadId}/boldsign/send`, { templateType }),
+  status: (leadId: string) => api.get(`/leads/${leadId}/boldsign/status`),
+  templates: () => api.get('/boldsign/templates'),
+};
+
 export const dispoAPI = {
   getSummary: (leadId: string) => api.get(`/leads/${leadId}/dispo`),
   updateDealNumbers: (leadId: string, data: { arv?: number | null; repairCosts?: number | null; askingPrice?: number | null; assignmentFee?: number | null; maoPercent?: number | null }) =>

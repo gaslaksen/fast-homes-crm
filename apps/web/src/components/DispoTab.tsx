@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { dispoAPI } from '@/lib/api';
+import { dispoAPI, boldSignAPI } from '@/lib/api';
 import { format } from 'date-fns';
 import Link from 'next/link';
 
@@ -46,6 +46,10 @@ interface Contract {
   actualCloseDate: string | null;
   dispositionNotes: string | null;
   outcome: string | null;
+  boldsignDocumentId?: string | null;
+  boldsignStatus?: string | null;
+  boldsignSigningUrl?: string | null;
+  boldsignSentAt?: string | null;
 }
 
 interface Offer {
@@ -115,6 +119,10 @@ export default function DispoTab({
     dispositionNotes: '',
   };
   const [contractForm, setContractForm] = useState<any>(blankContract);
+
+  // BoldSign state
+  const [sendingDoc, setSendingDoc] = useState(false);
+  const [docSent, setDocSent] = useState<{ documentId: string; signingUrl: string; title: string } | null>(null);
 
   // Offer form state
   const [offerForm, setOfferForm] = useState({ offerAmount: '', notes: '', offerDate: '' });
@@ -746,6 +754,118 @@ export default function DispoTab({
             </div>
           </div>
         )}
+      </div>
+
+      {/* ── E-Signature via BoldSign ──────────────────────────────────────── */}
+      <div className="card border border-indigo-200">
+        <div className="flex items-center gap-2 mb-4">
+          <span className="text-xl">✍️</span>
+          <div>
+            <h2 className="text-xl font-bold">Send for Signature</h2>
+            <p className="text-xs text-gray-400 mt-0.5">Send documents for e-signature via BoldSign</p>
+          </div>
+          {s.contract?.boldsignStatus && (
+            <span className={`ml-auto text-xs font-semibold px-2 py-1 rounded-full ${
+              s.contract.boldsignStatus === 'completed' ? 'bg-green-100 text-green-800' :
+              s.contract.boldsignStatus === 'declined' ? 'bg-red-100 text-red-700' :
+              'bg-yellow-100 text-yellow-800'
+            }`}>
+              {s.contract.boldsignStatus === 'completed' ? '✓ Signed' :
+               s.contract.boldsignStatus === 'declined' ? '✕ Declined' : '⏳ Pending Signature'}
+            </span>
+          )}
+        </div>
+
+        {/* Show previously sent doc info */}
+        {s.contract?.boldsignDocumentId && (
+          <div className="mb-4 p-3 rounded-lg bg-indigo-50 border border-indigo-200 text-sm">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="font-medium text-indigo-900">Document sent for signature</div>
+                <div className="text-xs text-indigo-600 mt-0.5">
+                  Sent {s.contract.boldsignSentAt ? new Date(s.contract.boldsignSentAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : ''}
+                </div>
+              </div>
+              <button
+                onClick={async () => {
+                  await boldSignAPI.status(leadId);
+                  await load();
+                }}
+                className="text-xs text-indigo-600 hover:underline"
+              >
+                Refresh Status
+              </button>
+            </div>
+            {s.contract.boldsignSigningUrl && s.contract.boldsignStatus === 'pending' && (
+              <a
+                href={s.contract.boldsignSigningUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-2 block text-xs text-indigo-700 hover:underline"
+              >
+                📎 Direct signing link →
+              </a>
+            )}
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <button
+            onClick={async () => {
+              setSendingDoc(true);
+              try {
+                const res = await boldSignAPI.send(leadId, 'purchase');
+                setDocSent(res.data);
+                await load();
+              } catch (e: any) {
+                alert('Failed to send: ' + (e.response?.data?.message || e.message));
+              } finally {
+                setSendingDoc(false);
+              }
+            }}
+            disabled={sendingDoc}
+            className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-indigo-600 text-white font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+          >
+            {sendingDoc ? (
+              <><span className="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full" /> Sending...</>
+            ) : (
+              <><span>📄</span> Send Purchase Contract</>
+            )}
+          </button>
+
+          <button
+            onClick={async () => {
+              setSendingDoc(true);
+              try {
+                const res = await boldSignAPI.send(leadId, 'aif');
+                setDocSent(res.data);
+                await load();
+              } catch (e: any) {
+                alert('Failed to send: ' + (e.response?.data?.message || e.message));
+              } finally {
+                setSendingDoc(false);
+              }
+            }}
+            disabled={sendingDoc}
+            className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-purple-600 text-white font-semibold hover:bg-purple-700 disabled:opacity-50 transition-colors"
+          >
+            {sendingDoc ? (
+              <><span className="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full" /> Sending...</>
+            ) : (
+              <><span>📝</span> Send AIF w/ Notary</>
+            )}
+          </button>
+        </div>
+
+        {docSent && (
+          <div className="mt-3 p-3 rounded-lg bg-green-50 border border-green-200 text-sm text-green-800">
+            ✓ <strong>{docSent.title}</strong> sent for signature! Seller will receive an email from BoldSign.
+          </div>
+        )}
+
+        <p className="text-xs text-gray-400 mt-3">
+          Seller receives a BoldSign email with a secure signing link. Status updates automatically.
+        </p>
       </div>
     </div>
   );

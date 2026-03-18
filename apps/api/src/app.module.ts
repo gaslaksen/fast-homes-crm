@@ -15,6 +15,7 @@ import { PipelineModule } from './pipeline/pipeline.module';
 import { VapiModule } from './vapi/vapi.module';
 import { CallsModule } from './calls/calls.module';
 import { GmailModule } from './gmail/gmail.module';
+import { BoldSignModule } from './boldsign/boldsign.module';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { GmailModule } from './gmail/gmail.module';
     VapiModule,
     CallsModule,
     GmailModule,
+    BoldSignModule,
   ],
 })
 export class AppModule {}
