@@ -129,13 +129,14 @@ export class SmrtphoneSmsProvider implements SmsProvider {
     this.logger.log(`✅ SmrtPhone SMS sent to ${to} — response: ${responseText.substring(0, 100)}`);
 
     // SmrtPhone returns plain text or a message ID — extract if present
-    let sid = 'smrtphone-sent';
+    let sid = `smrtphone-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     try {
       const data = JSON.parse(responseText);
-      sid = data.messageId || data.id || data.smsId || sid;
+      const parsed = data.messageId || data.id || data.smsId;
+      if (parsed) sid = String(parsed);
     } catch {
-      // Plain text response — use it as the SID if it looks like an ID
-      if (responseText && responseText.length < 100 && !responseText.includes(' ')) {
+      // Plain text response — use it as the SID if it looks like a short unique ID
+      if (responseText && responseText.length < 64 && !responseText.includes(' ') && !responseText.toLowerCase().includes('ok') && !responseText.toLowerCase().includes('success')) {
         sid = responseText.trim();
       }
     }

@@ -195,7 +195,7 @@ model Message {
   body        String
   from        String
   to          String
-  twilioSid   String?   @unique
+  twilioSid   String?   // SmrtPhone message reference ID (not enforced unique — SmrtPhone doesn't guarantee unique IDs)
   sentAt      DateTime?
   deliveredAt DateTime?
   createdAt   DateTime  @default(now())

@@ -363,20 +363,24 @@ export class WebhooksController {
           }
 
           // Record the outbound message so the conversation thread stays in sync
-          await this.leadsService['prisma'].message.upsert({
-            where: { twilioSid: outSmsId },
-            create: {
-              leadId: outboundLead.id,
-              direction: 'OUTBOUND',
-              status: 'SENT',
-              body: msgBody,
-              from: fromPhone,
-              to: toPhone,
-              twilioSid: outSmsId,
-              sentAt: new Date(),
-            },
-            update: {},
-          });
+          // Use findFirst + create instead of upsert — twilioSid is no longer unique-indexed
+          const existingMsg = outSmsId
+            ? await this.leadsService['prisma'].message.findFirst({ where: { twilioSid: outSmsId } })
+            : null;
+          if (!existingMsg) {
+            await this.leadsService['prisma'].message.create({
+              data: {
+                leadId: outboundLead.id,
+                direction: 'OUTBOUND',
+                status: 'SENT',
+                body: msgBody,
+                from: fromPhone,
+                to: toPhone,
+                twilioSid: outSmsId,
+                sentAt: new Date(),
+              },
+            });
+          }
 
           // Pause AI auto-respond — a human has stepped in
           await this.leadsService['prisma'].lead.update({
