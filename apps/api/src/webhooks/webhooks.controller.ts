@@ -242,7 +242,9 @@ export class WebhooksController {
   @HttpCode(200)
   async handleSmrtphone(@Body() body: any) {
     const event: string = body.event || 'unknown';
-    console.log(`📥 SmrtPhone webhook [${event}]:`, JSON.stringify(body).substring(0, 300));
+    // Log full payload for smsIncoming (to capture any MMS/media fields SmrtPhone may send)
+    const logBody = event === 'smsIncoming' ? JSON.stringify(body) : JSON.stringify(body).substring(0, 300);
+    console.log(`📥 SmrtPhone webhook [${event}]:`, logBody);
 
     try {
       switch (event) {
@@ -255,35 +257,65 @@ export class WebhooksController {
           const text: string = body.message || '';
           const smsId: string = body.smsId || `smrtphone-${Date.now()}`;
 
-          if (!from || !text) {
-            console.warn('⚠️  smsIncoming: missing from/message fields');
+          if (!from) {
+            console.warn('⚠️  smsIncoming: missing from field');
             return { success: false, error: 'Missing required fields' };
+          }
+          // Allow empty text for MMS-only messages (photos with no caption)
+          if (!text && !body.mediaUrls && !body.mediaUrl && !body.media_url && !body.attachments && !body.mmsUrl && !body.imageUrl && !body.NumMedia && !body.numMedia) {
+            console.warn('⚠️  smsIncoming: no message text and no media — skipping');
+            return { success: false, error: 'No content' };
           }
 
           const result = await this.messagesService.handleInboundMessage({
             MessageSid: smsId,
             From: from,
             To: to,
-            Body: text,
+            Body: text || '[📷 Photo]',  // placeholder for MMS-only messages
           });
 
           console.log('✅ smsIncoming processed:', result);
 
           // ── MMS: capture seller photos ────────────────────────────────
+          // SmrtPhone MMS field names are not fully documented — collect from all known variants
           const mediaUrls: string[] = [];
+          // Array variants
           if (body.mediaUrls && Array.isArray(body.mediaUrls)) {
-            mediaUrls.push(...body.mediaUrls);
-          } else if (body.mediaUrl) {
-            mediaUrls.push(body.mediaUrl);
-          } else if (body.media_url) {
-            mediaUrls.push(body.media_url);
+            mediaUrls.push(...body.mediaUrls.filter(Boolean));
+          } else if (body.mediaItems && Array.isArray(body.mediaItems)) {
+            mediaUrls.push(...body.mediaItems.filter(Boolean));
+          } else if (body.attachments && Array.isArray(body.attachments)) {
+            // attachments may be URL strings or objects with url/mediaUrl
+            for (const a of body.attachments) {
+              if (typeof a === 'string') mediaUrls.push(a);
+              else if (a?.url) mediaUrls.push(a.url);
+              else if (a?.mediaUrl) mediaUrls.push(a.mediaUrl);
+            }
+          }
+          // Single-value variants
+          if (body.mediaUrl) mediaUrls.push(body.mediaUrl);
+          if (body.media_url) mediaUrls.push(body.media_url);
+          if (body.mmsUrl) mediaUrls.push(body.mmsUrl);
+          if (body.mms_url) mediaUrls.push(body.mms_url);
+          if (body.imageUrl) mediaUrls.push(body.imageUrl);
+          if (body.image_url) mediaUrls.push(body.image_url);
+          // Twilio-style numbered media (NumMedia / MediaUrl0, MediaUrl1, ...)
+          const numMedia = parseInt(body.NumMedia || body.numMedia || '0', 10);
+          for (let i = 0; i < numMedia; i++) {
+            const u = body[`MediaUrl${i}`] || body[`mediaUrl${i}`];
+            if (u) mediaUrls.push(u);
+          }
+          // Deduplicate
+          const uniqueMediaUrls = [...new Set(mediaUrls.filter(Boolean))];
+          if (uniqueMediaUrls.length > 0) {
+            this.logger.log(`📸 MMS detected: ${uniqueMediaUrls.length} media URL(s) from ${from}`);
           }
 
-          if (mediaUrls.length > 0 && result?.leadId) {
+          if (uniqueMediaUrls.length > 0 && result?.leadId) {
             // Run in background — don't block the webhook response
             setImmediate(async () => {
               try {
-                for (const url of mediaUrls) {
+                for (const url of uniqueMediaUrls) {
                   this.logger.log(`📸 Downloading MMS photo for lead ${result.leadId}: ${url}`);
                   const response = await fetch(url, {
                     signal: AbortSignal.timeout(15000),
