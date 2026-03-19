@@ -559,12 +559,26 @@ export class AttomService {
       if (e.ownerOccupied !== undefined) update.ownerOccupied = e.ownerOccupied;
     }
 
+    // Use ATTOM's "excellent condition" AVM as the initial ARV estimate.
+    // avmExcellentHigh = after-repair value at excellent condition = true ARV.
+    // Only set it if arv hasn't been set by a manual comps analysis yet
+    // (i.e. no lastCompsDate from a comp analysis run, or arv is currently 0/null).
+    const currentLead = await this.prisma.lead.findUnique({
+      where: { id: leadId },
+      select: { arv: true, lastCompsDate: true },
+    });
+    if (e.avmExcellentHigh && (!currentLead?.arv || !currentLead?.lastCompsDate)) {
+      update.arv = Math.round(e.avmExcellentHigh);
+      update.arvConfidence = e.attomAvmConfidence ?? 70;
+      update.lastCompsDate = new Date();
+    }
+
     await this.prisma.lead.update({ where: { id: leadId }, data: update });
 
     this.logger.log(
       `ATTOM enrichment saved for lead ${leadId}: ` +
       `AVM=$${e.attomAvm?.toLocaleString() ?? '?'}, ` +
-      `ARV(excellent)=$${e.avmExcellentHigh?.toLocaleString() ?? '?'}, ` +
+      `ARV(excellent)=$${e.avmExcellentHigh?.toLocaleString() ?? '?'} ${e.avmExcellentHigh ? '→ saved as lead.arv' : '(not available)'}, ` +
       `AS-IS=$${e.avmPoorHigh?.toLocaleString() ?? '?'}`,
     );
   }

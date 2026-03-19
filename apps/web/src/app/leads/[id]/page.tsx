@@ -849,14 +849,14 @@ export default function LeadDetailPage() {
 
             {/* Sidebar */}
             <div className="space-y-6">
-              {/* Valuation — Risk-Adjusted ARV, Asking Price, MAO */}
+              {/* Valuation — ARV, Asking Price, MAO */}
               <div className="card">
                 <h3 className="text-lg font-bold mb-4">Valuation</h3>
 
-                {/* Risk-Adjusted ARV (primary) */}
+                {/* ARV (primary) */}
                 {lead.arv ? (
                   <div className="mb-4 p-3 rounded-lg bg-green-50 border border-green-300">
-                    <div className="text-xs font-semibold text-green-700 mb-1">🏠 Risk-Adjusted ARV</div>
+                    <div className="text-xs font-semibold text-green-700 mb-1">🏠 ARV</div>
                     <div className="text-3xl font-bold text-green-700">${lead.arv.toLocaleString()}</div>
                     <div className="flex items-center gap-3 mt-1">
                       {lead.arvConfidence && (
@@ -869,7 +869,7 @@ export default function LeadDetailPage() {
                   </div>
                 ) : (
                   <div className="mb-4 p-3 rounded-lg bg-gray-50 border border-gray-200 text-sm text-gray-400 italic">
-                    No ARV yet — run Full Analysis to calculate
+                    ARV pending — ATTOM data loading or not available for this address
                   </div>
                 )}
 

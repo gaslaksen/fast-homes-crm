@@ -530,15 +530,10 @@ export class RentCastService {
     // ── Calculate confidence score ──
     const confidence = this.calculateConfidence(validComps, lead);
 
-    // ── Update lead with ARV ──
-    await this.prisma.lead.update({
-      where: { id: leadId },
-      data: {
-        arv,
-        arvConfidence: confidence,
-        lastCompsDate: new Date(),
-      },
-    });
+    // ── Do NOT overwrite lead.arv from RentCast comps ──
+    // ARV is set by ATTOM's condition-adjusted AVM (avmExcellentHigh) or by a
+    // manual comps analysis. RentCast comps are stored for reference only.
+    // We still record lastCompsDate so the UI knows comps have been fetched.
 
     return {
       arv,
