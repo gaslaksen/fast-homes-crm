@@ -581,9 +581,18 @@ Always respond with valid JSON only.`;
     // Determine if this is the first outreach (no conversation yet)
     const isFirstMessage = !context.conversationHistory || context.conversationHistory.length === 0;
 
-    // Build acknowledgment instruction
+    // Build acknowledgment instruction — include recent outbound messages so AI avoids repeating phrases
+    const recentOutbound = (context.conversationHistory ?? [])
+      .filter(line => line.startsWith('OUTBOUND:'))
+      .slice(-3)
+      .map(line => line.replace('OUTBOUND:', '').trim());
+    const recentOutboundNote = recentOutbound.length > 0
+      ? `\nYour last few messages: ${recentOutbound.map(m => `"${m}"`).join(' / ')}\nDo NOT repeat or closely echo the same opening phrase as those messages.`
+      : '';
+
     const acknowledgmentBlock = context.lastInboundMessage
-      ? `\nCRITICAL: Your response MUST first acknowledge what the seller just said (confirm you received their answer — neutral phrases like "Got it" or "Thanks for sharing"), then naturally transition to asking about the next topic. Do NOT re-introduce yourself. Do NOT ask about information already provided above. Do NOT agree to, validate, or commit to any price, timeline, or terms — never say things like "$250k works", "that price sounds good", "7 days works for us", or anything that implies you are accepting their terms. NEVER use em dashes (—) in your message.\n`
+      ? `\nCRITICAL: Your response MUST first briefly acknowledge what the seller just said, then naturally transition to asking about the next topic. Do NOT re-introduce yourself. Do NOT ask about information already provided above. Do NOT agree to, validate, or commit to any price, timeline, or terms — never say things like "$250k works", "that price sounds good", "7 days works for us", or anything that implies you are accepting their terms. NEVER use em dashes (—) in your message.
+VARIETY: Do NOT start with "Thank you" or "Thanks for sharing" if you used a similar phrase recently. Use varied, natural acknowledgments — e.g. "Got it!", "Appreciate that!", "Makes sense.", "Good to know.", "Perfect.", "Understood." — pick one that fits the context and hasn't been used in the last 2-3 messages.${recentOutboundNote}\n`
       : '';
 
     const prompt = `Seller: ${context.sellerName}
@@ -607,8 +616,9 @@ ${isFirstMessage ? '- Include "Reply STOP to opt out" at the end\n' : ''}- Sound
 - Do NOT ask about information already known (listed above)
 - Do NOT agree to, validate, or commit to any price, timeline, or terms the seller mentioned (e.g. never say "$250k works", "that price works for us", "7 days works", or anything implying agreement)
 - You are ONLY gathering information — all offers and decisions are made by the team, not in this message
-- When acknowledging what the seller said, simply confirm receipt (e.g. "Got it, thanks" / "Thanks for letting me know") — neutral, no judgment on whether the terms work
+- When acknowledging what the seller said, confirm receipt with a VARIED, natural phrase — rotate through options like "Got it!", "Makes sense.", "Appreciate that!", "Good to know.", "Perfect, thanks.", "Understood." — do NOT default to "Thank you" or "Thanks for sharing" every time, especially if it was used recently
 - NEVER use em dashes (—) in any message; use a comma, period, or rephrase instead
+- Read the full conversation history and make sure your reply flows naturally from what was said — do not re-ask something the seller already answered
 
 Return ONLY a JSON object:
 {
@@ -709,7 +719,7 @@ Return ONLY a JSON object:
       if (known.timeline == null) {
         return {
           direct: `${ack}How soon are you looking to sell?`,
-          friendly: `${ack}Quick question — do you have a timeline in mind for selling? No rush, just curious.`,
+          friendly: `${ack}Do you have a rough timeline in mind for selling? No pressure, just want to get a feel.`,
           professional: `${ack}May I ask what your ideal timeline would be for completing a sale?`,
         };
       }
@@ -745,9 +755,9 @@ Return ONLY a JSON object:
 
     // Generic follow-up when we have conversation but no knownData tracking
     return {
-      direct: `Thanks ${name}. What else can you tell me about the property?`,
-      friendly: `Thanks for sharing that, ${name}! What else can you tell me about your situation?`,
-      professional: `Thank you, ${name}. Could you share any additional details about the property?`,
+      direct: `Got it, ${name}. What else can you tell me about the property?`,
+      friendly: `Appreciate that, ${name}! Is there anything else about your situation I should know?`,
+      professional: `Understood, ${name}. Could you share any additional details about the property?`,
     };
   }
 }

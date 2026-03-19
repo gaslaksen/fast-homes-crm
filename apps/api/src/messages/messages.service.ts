@@ -7,7 +7,7 @@ import { SmsProvider, createSmsProvider } from './sms.provider';
 import { formatPhoneNumber, isOptOutMessage } from '@fast-homes/shared';
 
 const MAX_AUTO_RESPONSES_PER_DAY = 5;
-const AUTO_RESPONSE_DELAY_MS = 120_000;       // 2 minutes — simulate human typing
+const AUTO_RESPONSE_DELAY_MS = 180_000;       // 3 minutes — wait for seller to finish typing
 const DEMO_AUTO_RESPONSE_DELAY_MS = 2_000;    // 2 seconds in demo mode
 
 @Injectable()
@@ -15,6 +15,10 @@ export class MessagesService {
   private readonly logger = new Logger(MessagesService.name);
   private smsProvider: SmsProvider;
   private twilioNumber: string;
+  // Debounce map: leadId → pending timer handle. When a new inbound message arrives
+  // before the timer fires, we cancel the old one and schedule a fresh one so we
+  // always respond to the seller's LAST message, not each individual one.
+  private pendingResponseTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(
     private prisma: PrismaService,
@@ -652,7 +656,9 @@ Your message must:
 
   /**
    * Schedule an auto-response with a human-like delay.
-   * Uses setTimeout so the webhook can return immediately.
+   * Debounced: if another inbound message arrives before the timer fires,
+   * the old timer is cancelled and a new one starts. This prevents sending
+   * duplicate/stale replies when a seller sends multiple texts in quick succession.
    */
   private async scheduleAutoResponse(leadId: string, updateData: Record<string, any>) {
     let delay = AUTO_RESPONSE_DELAY_MS;
@@ -665,9 +671,17 @@ Your message must:
       // Use default delay
     }
 
+    // Cancel any existing pending timer for this lead
+    const existing = this.pendingResponseTimers.get(leadId);
+    if (existing) {
+      clearTimeout(existing);
+      this.logger.log(`⏱️  Cancelled previous pending auto-response for lead ${leadId} (new message arrived)`);
+    }
+
     this.logger.log(`⏱️  Auto-response for lead ${leadId} scheduled in ${delay}ms`);
 
-    setTimeout(async () => {
+    const timer = setTimeout(async () => {
+      this.pendingResponseTimers.delete(leadId);
       try {
         const responseBody = await this.sendAutoResponse(leadId, updateData);
         if (responseBody) {
@@ -677,6 +691,8 @@ Your message must:
         this.logger.error(`Auto-response failed for lead ${leadId}: ${error.message}`);
       }
     }, delay);
+
+    this.pendingResponseTimers.set(leadId, timer);
   }
 
   /**
