@@ -206,6 +206,8 @@ export class DashboardService {
       take: limit,
       select: {
         id: true,
+        sellerFirstName: true,
+        sellerLastName: true,
         propertyAddress: true,
         propertyCity: true,
         propertyState: true,

@@ -293,6 +293,11 @@ export default function DashboardPage() {
                         className="flex items-center justify-between px-5 py-3 hover:bg-gray-50 transition-colors"
                       >
                         <div className="min-w-0 flex-1">
+                          {(lead.sellerFirstName || lead.sellerLastName) && (
+                            <div className="text-xs font-semibold text-gray-700 truncate">
+                              {[lead.sellerFirstName, lead.sellerLastName].filter(Boolean).join(' ')}
+                            </div>
+                          )}
                           <div className="text-sm font-medium text-gray-900 truncate">{lead.propertyAddress}</div>
                           <div className="text-xs text-gray-400 mt-0.5">
                             {lead.propertyCity}, {lead.propertyState}
