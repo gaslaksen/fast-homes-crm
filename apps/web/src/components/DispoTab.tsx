@@ -16,6 +16,7 @@ interface DispoSummary {
   offerAmount: number | null;
   assignmentFee: number | null;
   leadAssignmentFee: number | null;
+  exitStrategy: string | null;
   buyerPrice: number | null;
   buyerSpread: number | null;
   projectedProfit: number | null;
@@ -452,13 +453,29 @@ export default function DispoTab({
             />
             <DealRow label="Seller Asking Price" value={fmt(s.askingPrice)} muted={!s.askingPrice} divider />
             <DealRow label="Offer to Seller" value={fmt(s.offerAmount)} bold muted={!s.offerAmount} />
-            <DealRow label="Assignment Fee" value={fmt(s.assignmentFee)} bold muted={!s.assignmentFee} />
-            <DealRow label="Buyer's All-In Price" value={fmt(s.buyerPrice)} divider />
-            <DealRow label="Buyer's Spread" value={fmt(s.buyerSpread)}
-              highlight={s.buyerSpread != null ? (s.buyerSpread > 0 ? 'green' : 'red') : undefined} />
+            {(s.exitStrategy === 'wholesale' || !s.exitStrategy) && (
+              <DealRow label="Assignment Fee" value={fmt(s.assignmentFee)} bold muted={!s.assignmentFee} />
+            )}
+            {(s.exitStrategy === 'wholesale' || !s.exitStrategy) && (
+              <DealRow label="Buyer's All-In Price" value={fmt(s.buyerPrice)}
+                sub="Offer to seller + assignment fee" divider />
+            )}
+            {(s.exitStrategy === 'novation' || s.exitStrategy === 'subject_to' || s.exitStrategy === 'owner_finance') && (
+              <DealRow label="Repair Estimate" value={fmt(s.repairCost)} muted={!s.repairCost} />
+            )}
+            {(s.exitStrategy === 'wholesale' || !s.exitStrategy) && (
+              <DealRow label="Buyer's Spread" value={fmt(s.buyerSpread)}
+                sub="ARV − buyer's all-in (buyer's equity)"
+                highlight={s.buyerSpread != null ? (s.buyerSpread > 0 ? 'green' : 'red') : undefined} />
+            )}
             <DealRow
               label="Your Profit"
               value={fmt(s.projectedProfit)}
+              sub={
+                s.exitStrategy === 'novation' || s.exitStrategy === 'subject_to' || s.exitStrategy === 'owner_finance'
+                  ? 'ARV − offer to seller − repairs'
+                  : 'Assignment fee'
+              }
               bold
               highlight={s.projectedProfit != null ? (s.projectedProfit > 0 ? 'green' : 'red') : undefined}
             />

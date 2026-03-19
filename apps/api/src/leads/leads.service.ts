@@ -985,10 +985,33 @@ export class LeadsService {
     const offerAmount = lead.contract?.offerAmount ?? acceptedOffer?.offerAmount ?? null;
     // Never fall back to analysis.assignmentFee (always 15000 default) — only use explicitly saved values
     const assignmentFee = lead.contract?.assignmentFee ?? (lead as any).assignmentFee ?? null;
-    const buyerPrice =
-      offerAmount != null && assignmentFee != null ? offerAmount + assignmentFee : null;
+    const exitStrategy = lead.contract?.exitStrategy ?? 'wholesale';
+
+    // Buyer's All-In Price: what the end buyer pays (offer to seller + assignment fee)
+    // For novation/sub-to, the "buyer" is the eventual end buyer — all-in = ARV (market price)
+    // For wholesale/creative, all-in = offer + assignment fee
+    const isWholesale = exitStrategy === 'wholesale' || exitStrategy === 'creative_finance';
+    const buyerPrice = isWholesale
+      ? (offerAmount != null && assignmentFee != null ? offerAmount + assignmentFee : null)
+      : arv; // novation/sub-to: end buyer pays market value (ARV)
+
+    // Buyer's Spread: equity left for the end buyer after purchase
     const buyerSpread = arv != null && buyerPrice != null ? arv - buyerPrice : null;
-    const projectedProfit = assignmentFee ?? null;
+
+    // Your Profit depends on exit strategy:
+    //   wholesale: your profit = assignment fee (you flip the contract)
+    //   novation/sub-to: your profit = ARV - offer to seller - repairs (you sell the property)
+    let projectedProfit: number | null = null;
+    if (exitStrategy === 'wholesale') {
+      projectedProfit = assignmentFee ?? null;
+    } else if (exitStrategy === 'novation' || exitStrategy === 'subject_to' || exitStrategy === 'owner_finance') {
+      projectedProfit = arv != null && offerAmount != null
+        ? arv - offerAmount - (repairCost ?? 0)
+        : null;
+    } else {
+      // fallback: use assignment fee if set, else ARV spread
+      projectedProfit = assignmentFee ?? (arv != null && offerAmount != null ? arv - offerAmount - (repairCost ?? 0) : null);
+    }
 
     return {
       arv,
@@ -999,6 +1022,7 @@ export class LeadsService {
       offerAmount,
       assignmentFee,
       leadAssignmentFee: (lead as any).assignmentFee ?? null,
+      exitStrategy,
       buyerPrice,
       buyerSpread,
       projectedProfit,
