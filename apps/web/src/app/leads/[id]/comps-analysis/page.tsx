@@ -395,11 +395,13 @@ export default function CompsAnalysisPage() {
     if (!analysis) return;
     setAiAdjusting(true);
     try {
-      // Step 1: AI adjusts comps
-      await compAnalysisAPI.aiAdjustComps(leadId, analysis.id);
-      // Step 2: Calculate ARV (includes auto cost+income+triangulate+risk)
-      const arvRes = await compAnalysisAPI.calculateArv(leadId, analysis.id, 'weighted');
-      setDealArv(arvRes.data.arvEstimate || arvRes.data.arv || 0);
+      // Step 1: AI adjusts comps — this also saves arvEstimate/arvLow/arvHigh from the AI recommendation
+      const aiRes = await compAnalysisAPI.aiAdjustComps(leadId, analysis.id);
+      // Step 2: Re-calculate supporting metrics (cost/income/triangulate/risk) WITHOUT overwriting
+      // the AI's ARV — pass aiArv flag so the backend skips overwriting arvEstimate
+      await compAnalysisAPI.calculateArv(leadId, analysis.id, 'weighted', true);
+      const aiArv = aiRes.data?.arvRecommendation?.point;
+      if (aiArv) setDealArv(aiArv);
       await refreshAnalysis();
       router.replace(`/leads/${leadId}/comps-analysis?tab=arv`, { scroll: false });
     } catch (error) {

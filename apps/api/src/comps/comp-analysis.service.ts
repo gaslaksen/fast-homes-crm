@@ -532,7 +532,7 @@ export class CompAnalysisService {
   }
 
 
-  async calculateArv(analysisId: string, method: string = 'weighted') {
+  async calculateArv(analysisId: string, method: string = 'weighted', preserveAiArv: boolean = false) {
     const analysis = await this.prisma.compAnalysis.findUnique({
       where: { id: analysisId },
       include: {
@@ -638,10 +638,16 @@ export class CompAnalysisService {
       avgDist <= 3.0 && avgMonthsAgo <= 12 ? 'Medium' :
       'Low';
 
+    // When called after AI adjustment, preserve the AI's arvEstimate/arvLow/arvHigh
+    // (the weighted-average algo produces different values from what the AI recommended)
+    const arvUpdateFields = preserveAiArv
+      ? {}
+      : { arvEstimate: arv, arvLow, arvHigh, arvMethod: method };
+
     await this.prisma.compAnalysis.update({
       where: { id: analysisId },
       data: {
-        arvEstimate: arv, arvLow, arvHigh, arvMethod: method,
+        ...arvUpdateFields,
         pricePerSqft,
         medianPricePerSqft: medianPpsf,
         comparableSalesValue,

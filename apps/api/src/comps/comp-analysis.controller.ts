@@ -92,9 +92,9 @@ export class CompAnalysisController {
   @Post(':analysisId/calculate-arv')
   async calculateArv(
     @Param('analysisId') analysisId: string,
-    @Body() body: { method?: string },
+    @Body() body: { method?: string; preserveAiArv?: boolean },
   ) {
-    return this.compAnalysisService.calculateArv(analysisId, body.method);
+    return this.compAnalysisService.calculateArv(analysisId, body.method, body.preserveAiArv);
   }
 
   @Post(':analysisId/ai-summary')
