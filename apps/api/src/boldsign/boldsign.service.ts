@@ -129,13 +129,21 @@ export class BoldSignService {
     const prefillFields: { id: string; value: string }[] = [];
 
     if (templateType === 'purchase') {
-      if (propertyAddress) prefillFields.push({ id: 'TextBox1', value: propertyAddress });
-      if (offerAmt) prefillFields.push({ id: 'TextBox5', value: offerAmt });
-      if (earnest) prefillFields.push({ id: 'TextBox8', value: earnest });
-      if (inspPeriod) prefillFields.push({ id: 'TextBox9', value: inspPeriod });
-      if (titleCo) prefillFields.push({ id: 'TextBox10', value: titleCo });
+      // Page 1 fields (by position):
+      //   TextBox1 = Seller mailing address (auto-filled from lead address in doc body — leave blank to avoid duplication)
+      //   TextBox2 = Subject Property address
+      //   TextBox3 = Parcel Number (leave blank — provided by Title Company)
+      //   TextBox4 = Sale Price
+      //   TextBox5 = Solar "If No, why?" — do not use
+      // Page 5 (Appendix) fields:
+      //   TextBox9  = Last 4 SS# (leave blank — seller fills in)
+      //   TextBox10 = Phone#
+      if (propertyAddress) prefillFields.push({ id: 'TextBox2', value: propertyAddress });
+      if (offerAmt) prefillFields.push({ id: 'TextBox4', value: offerAmt });
+      const sellerPhone = lead.sellerPhone || '';
+      if (sellerPhone) prefillFields.push({ id: 'TextBox10', value: sellerPhone });
     } else {
-      if (propertyAddress) prefillFields.push({ id: 'TextBox1', value: propertyAddress });
+      if (propertyAddress) prefillFields.push({ id: 'TextBox2', value: propertyAddress });
     }
 
     if (prefillFields.length > 0) {
