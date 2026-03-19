@@ -74,6 +74,19 @@ const STATUS_COLORS: Record<string, string> = {
   withdrawn: 'bg-gray-100 text-gray-500',
 };
 
+const EXIT_STRATEGY_LABELS: Record<string, string> = {
+  wholesale: 'Wholesale',
+  novation: 'Novation',
+  flip: 'Fix & Flip',
+  wholetail: 'Wholetail',
+  subject_to: 'Subject-To',
+  'subject-to': 'Subject-To',
+  owner_finance: 'Owner Finance',
+  creative_finance: 'Creative Finance',
+  creative: 'Creative Finance',
+  joint_venture: 'Joint Venture',
+};
+
 const CONTRACT_STATUS_LABELS: Record<string, string> = {
   draft: 'Draft',
   signed: 'Signed',
@@ -282,7 +295,14 @@ export default function DispoTab({
       {/* ── Deal Numbers ─────────────────────────────────────────────────── */}
       <div className="card">
         <div className="flex items-center justify-between mb-5">
-          <h2 className="text-xl font-bold">Deal Numbers</h2>
+          <div className="flex items-center gap-3">
+            <h2 className="text-xl font-bold">Deal Numbers</h2>
+            {s.exitStrategy && (
+              <span className="text-xs font-semibold px-2 py-1 rounded-full bg-indigo-100 text-indigo-800 capitalize">
+                {EXIT_STRATEGY_LABELS[s.exitStrategy] ?? s.exitStrategy}
+              </span>
+            )}
+          </div>
           <div className="flex items-center gap-2">
             {s.contract && (
               <span className={`text-xs font-semibold px-2 py-1 rounded-full ${
@@ -459,9 +479,6 @@ export default function DispoTab({
             {(s.exitStrategy === 'wholesale' || !s.exitStrategy) && (
               <DealRow label="Buyer's All-In Price" value={fmt(s.buyerPrice)}
                 sub="Offer to seller + assignment fee" divider />
-            )}
-            {(s.exitStrategy === 'novation' || s.exitStrategy === 'subject_to' || s.exitStrategy === 'owner_finance') && (
-              <DealRow label="Repair Estimate" value={fmt(s.repairCost)} muted={!s.repairCost} />
             )}
             {(s.exitStrategy === 'wholesale' || !s.exitStrategy) && (
               <DealRow label="Buyer's Spread" value={fmt(s.buyerSpread)}
