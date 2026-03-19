@@ -185,6 +185,7 @@ export default function CompsAnalysisPage() {
   const [repairCosts, setRepairCosts] = useState(0);
   const [assignmentFee, setAssignmentFee] = useState(0);
   const [maoPercent, setMaoPercent] = useState(70);
+  const [dealType, setDealType] = useState<string>('wholesale');
 
   // Repair estimator
   const [repairLevel, setRepairLevel] = useState('flip');
@@ -241,6 +242,9 @@ export default function CompsAnalysisPage() {
         setMaoPercent(savedMao ?? 70);
         setRepairLevel(full.data.repairFinishLevel || 'flip');
         setSelectedRepairs(full.data.repairItems || []);
+        // Set deal type from contract exitStrategy or comp analysis dealType
+        const contractExitStrategy = (leadRes.data as any).contract?.exitStrategy;
+        setDealType(contractExitStrategy ?? full.data.dealType ?? 'wholesale');
       } else {
         // Auto-create analysis importing existing comps
         const existingComps = await compsAPI.list(leadId);
@@ -573,6 +577,16 @@ export default function CompsAnalysisPage() {
         assignmentFee: assignmentFee || undefined,
         maoPercent: maoPercent || undefined,
       });
+
+      // exitStrategy lives on Contract, not Lead — save separately
+      // Use dispoAPI to upsert the contract with the new exitStrategy
+      try {
+        const { dispoAPI } = await import('@/lib/api');
+        await dispoAPI.upsertContract(leadId, { exitStrategy: dealType });
+      } catch {
+        // Non-fatal: contract might not exist yet; ignore
+      }
+
       const lr = await leadsAPI.get(leadId);
       setLead(lr.data);
       setDealNumbersSaved(true);
@@ -1673,7 +1687,19 @@ export default function CompsAnalysisPage() {
             <div className="card">
               <div className="flex items-center gap-3 mb-6">
                 <h2 className="text-lg font-bold">Deal Analysis</h2>
-                <span className="text-xs px-2 py-0.5 rounded-full bg-primary-100 text-primary-700 font-medium">Wholesale</span>
+                <select
+                  value={dealType}
+                  onChange={(e) => setDealType(e.target.value)}
+                  className="text-sm border border-gray-200 rounded-lg px-3 py-1.5"
+                >
+                  <option value="wholesale">Wholesale</option>
+                  <option value="novation">Novation</option>
+                  <option value="flip">Fix &amp; Flip</option>
+                  <option value="wholetail">Wholetail</option>
+                  <option value="subject_to">Subject-To</option>
+                  <option value="creative">Creative Finance</option>
+                  <option value="joint_venture">Joint Venture</option>
+                </select>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -1741,48 +1767,57 @@ export default function CompsAnalysisPage() {
                     )}
                   </div>
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Wholesale Assignment Fee</label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">$</span>
-                      <input
-                        type="number"
-                        value={assignmentFee || ''}
-                        onChange={(e) => setAssignmentFee(parseFloat(e.target.value) || 0)}
-                        className="input pl-7"
-                      />
+                  {/* Assignment Fee — only for wholesale / joint_venture */}
+                  {(dealType === 'wholesale' || dealType === 'joint_venture') && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        {dealType === 'joint_venture' ? 'JV Assignment Fee' : 'Wholesale Assignment Fee'}
+                      </label>
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">$</span>
+                        <input
+                          type="number"
+                          value={assignmentFee || ''}
+                          onChange={(e) => setAssignmentFee(parseFloat(e.target.value) || 0)}
+                          className="input pl-7"
+                        />
+                      </div>
                     </div>
-                  </div>
+                  )}
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Maximum Allowable Offer %
-                      {selectedComps.length > 0 && (
-                        <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-yellow-100 text-yellow-800 font-medium">
-                          Suggested: {avgPricePerSqft > 100 ? '70' : '65'}%
-                        </span>
-                      )}
-                    </label>
-                    <div className="flex flex-wrap gap-2">
-                      {MAO_OPTIONS.map((pct) => (
-                        <button
-                          key={pct}
-                          onClick={() => setMaoPercent(pct)}
-                          className={`px-3 py-1.5 rounded text-sm font-medium border transition-colors ${
-                            maoPercent === pct
-                              ? 'bg-primary-600 text-white border-primary-600'
-                              : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-                          }`}
-                        >
-                          {pct}%
-                        </button>
-                      ))}
+                  {/* MAO % — only for wholesale / joint_venture */}
+                  {(dealType === 'wholesale' || dealType === 'joint_venture') && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Maximum Allowable Offer %
+                        {selectedComps.length > 0 && (
+                          <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-yellow-100 text-yellow-800 font-medium">
+                            Suggested: {avgPricePerSqft > 100 ? '70' : '65'}%
+                          </span>
+                        )}
+                      </label>
+                      <div className="flex flex-wrap gap-2">
+                        {MAO_OPTIONS.map((pct) => (
+                          <button
+                            key={pct}
+                            onClick={() => setMaoPercent(pct)}
+                            className={`px-3 py-1.5 rounded text-sm font-medium border transition-colors ${
+                              maoPercent === pct
+                                ? 'bg-primary-600 text-white border-primary-600'
+                                : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                            }`}
+                          >
+                            {pct}%
+                          </button>
+                        ))}
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
 
                 {/* Results — right column */}
                 <div className="space-y-4">
+                  {/* Initial Offer to Seller — always shown */}
                   <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
                     <div className="text-xs text-gray-500 mb-1">Initial Offer to Seller</div>
                     <div className="text-2xl font-bold text-gray-900">
@@ -1791,27 +1826,45 @@ export default function CompsAnalysisPage() {
                     <div className="text-xs text-gray-500 mt-1">5% under max allowable offer</div>
                   </div>
 
-                  <div className="bg-primary-50 rounded-lg p-4 border border-primary-200">
-                    <div className="text-xs text-primary-700 mb-1">Maximum Allowable Offer</div>
-                    <div className="text-2xl font-bold text-primary-800">
-                      {dealArv > 0 ? `$${Math.max(mao, 0).toLocaleString()}` : '$—'}
+                  {/* MAO — only for wholesale / joint_venture */}
+                  {(dealType === 'wholesale' || dealType === 'joint_venture') && (
+                    <div className="bg-primary-50 rounded-lg p-4 border border-primary-200">
+                      <div className="text-xs text-primary-700 mb-1">Maximum Allowable Offer</div>
+                      <div className="text-2xl font-bold text-primary-800">
+                        {dealArv > 0 ? `$${Math.max(mao, 0).toLocaleString()}` : '$—'}
+                      </div>
+                      <div className="text-xs text-primary-600 mt-1">
+                        {maoPercent}% of ARV minus repairs &amp; fee
+                      </div>
                     </div>
-                    <div className="text-xs text-primary-600 mt-1">
-                      {maoPercent}% of ARV minus repairs & fee
-                    </div>
-                  </div>
+                  )}
 
-                  <div className="bg-green-50 rounded-lg p-4 border border-green-200">
-                    <div className="text-xs text-green-700 mb-1">Your Sale Price to Buyer</div>
-                    <div className="text-2xl font-bold text-green-800">
-                      {dealArv > 0 ? `$${Math.max(salePrice, 0).toLocaleString()}` : '$—'}
+                  {/* Sale Price / Projected Profit card — changes by deal type */}
+                  {(dealType === 'wholesale' || dealType === 'joint_venture') ? (
+                    <div className="bg-green-50 rounded-lg p-4 border border-green-200">
+                      <div className="text-xs text-green-700 mb-1">Your Sale Price to Buyer</div>
+                      <div className="text-2xl font-bold text-green-800">
+                        {dealArv > 0 ? `$${Math.max(salePrice, 0).toLocaleString()}` : '$—'}
+                      </div>
+                      <div className="text-xs text-green-600 mt-1">
+                        MAO + assignment fee
+                      </div>
                     </div>
-                    <div className="text-xs text-green-600 mt-1">
-                      {maoPercent}% of ARV minus repairs
+                  ) : (
+                    <div className="bg-green-50 rounded-lg p-4 border border-green-200">
+                      <div className="text-xs text-green-700 mb-1">Estimated Net Profit</div>
+                      <div className="text-2xl font-bold text-green-800">
+                        {dealArv > 0
+                          ? `$${Math.max(Math.round(dealArv - repairCosts - dealArv * 0.10), 0).toLocaleString()}`
+                          : '$—'}
+                      </div>
+                      <div className="text-xs text-green-600 mt-1">
+                        ARV − repairs − ~10% transaction costs (estimate)
+                      </div>
                     </div>
-                  </div>
+                  )}
 
-                  {dealArv > 0 && (
+                  {dealArv > 0 && (dealType === 'wholesale' || dealType === 'joint_venture') && (
                     <div className="bg-yellow-50 rounded-lg p-3 border border-yellow-200">
                       <div className="text-xs text-yellow-800">
                         <strong>Spread:</strong> ${assignmentFee.toLocaleString()} assignment fee
