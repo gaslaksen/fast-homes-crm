@@ -268,7 +268,7 @@ export const dispoAPI = {
   getSummary: (leadId: string) => api.get(`/leads/${leadId}/dispo`),
   updateDealNumbers: (leadId: string, data: { arv?: number | null; repairCosts?: number | null; askingPrice?: number | null; assignmentFee?: number | null; maoPercent?: number | null }) =>
     api.patch(`/leads/${leadId}`, data),
-  upsertContract: (leadId: string, data: any) => api.put(`/leads/${leadId}/contract`, data),
+  upsertContract: (leadId: string, data: any) => api.post(`/leads/${leadId}/contract`, data),
   createOffer: (leadId: string, data: any) => api.post(`/leads/${leadId}/offers`, data),
   updateOffer: (leadId: string, offerId: string, data: any) => api.patch(`/leads/${leadId}/offers/${offerId}`, data),
   deleteOffer: (leadId: string, offerId: string) => api.delete(`/leads/${leadId}/offers/${offerId}`),
