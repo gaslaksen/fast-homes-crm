@@ -231,11 +231,13 @@ export default function DispoTab({
 
       {/* ── Exit Strategy ─────────────────────────────────────────────────── */}
       <ExitStrategyCosts
+        leadId={leadId}
         arv={s.arv}
         repairCost={s.repairCost}
         offerAmount={s.offerAmount}
         assignmentFee={s.assignmentFee}
         defaultStrategy={s.contract?.exitStrategy ?? 'wholesale'}
+        onSaved={load}
       />
 
       {/* ── Offer Tracker ─────────────────────────────────────────────────── */}
@@ -649,17 +651,21 @@ const EXIT_COSTS: Record<string, { label: string; agentPct: number; closingPct: 
 };
 
 function ExitStrategyCosts({
+  leadId,
   arv,
   repairCost,
   offerAmount,
   assignmentFee,
   defaultStrategy,
+  onSaved,
 }: {
+  leadId: string;
   arv: number | null;
   repairCost: number | null;
   offerAmount: number | null;
   assignmentFee: number | null;
   defaultStrategy: string;
+  onSaved: () => void;
 }) {
   const [strategy, setStrategy] = React.useState(defaultStrategy);
   const defaults = EXIT_COSTS[strategy] ?? EXIT_COSTS.wholesale;
@@ -671,8 +677,14 @@ function ExitStrategyCosts({
     financingPct: defaults.financingPct,
   });
 
-  // Editable assignment fee for wholesale display
-  const [editableAssignmentFee, setEditableAssignmentFee] = React.useState<number>(assignmentFee ?? 0);
+  // Editable assignment fee — use string so the input can be truly empty / zero
+  const [feeInput, setFeeInput] = React.useState<string>(
+    assignmentFee != null ? String(assignmentFee) : ''
+  );
+  const editableAssignmentFee = feeInput === '' ? 0 : parseFloat(feeInput) || 0;
+
+  const [saving, setSaving] = React.useState(false);
+  const [saved, setSaved] = React.useState(false);
 
   const handleStrategyChange = (newStrategy: string) => {
     setStrategy(newStrategy);
@@ -683,6 +695,25 @@ function ExitStrategyCosts({
       holdingPct: c.holdingPct,
       financingPct: c.financingPct,
     });
+    setSaved(false);
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await dispoAPI.upsertContract(leadId, {
+        exitStrategy: strategy,
+        assignmentFee: editableAssignmentFee,
+      });
+      setSaved(true);
+      onSaved();
+      setTimeout(() => setSaved(false), 2500);
+    } catch (e) {
+      console.error('Failed to save exit strategy', e);
+      alert('Failed to save. Please try again.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const fmtC = (n: number | null) => n != null ? `$${Math.round(n).toLocaleString()}` : '—';
@@ -695,19 +726,33 @@ function ExitStrategyCosts({
   const totalPct      = rates.agentPct + rates.closingPct + rates.holdingPct + rates.financingPct;
   const totalCost     = arv != null ? arv * totalPct / 100 : null;
 
-  // Net profit: depends on strategy
+  // ── Net profit formula ────────────────────────────────────────────────────
+  // Wholesale:     (ARV - Purchase Price - Transaction Costs) + Assignment Fee
+  //   • Assignment fee is what you charge the end buyer on top of your purchase price
+  //   • Spread = ARV - Purchase - Costs is your baseline; assignment fee is your cut
+  //   • If you only want the assignment fee as profit, set ARV = Purchase + Costs + Fee
+  // Non-wholesale: ARV - Purchase - Repairs - Transaction Costs
   let netProfit: number | null = null;
   if (strategy === 'wholesale') {
-    // Wholesale: profit = assignment fee (flipping the contract)
+    // Wholesale profit = (ARV - purchase - transaction costs) + assignment fee
+    // In practice: you lock the property at Purchase, sell the contract for
+    // Purchase + AssignmentFee to an end buyer. Your profit IS the assignment fee.
+    // But the table should also show that ARV - purchase - costs validates the deal.
+    // We show the assignment fee as profit (what you actually pocket), and the ARV
+    // spread as context in a sub-row.
     netProfit = editableAssignmentFee;
   } else {
-    // Non-wholesale: ARV - all costs - repairs - purchase price
     const purchase = offerAmount ?? 0;
     const repairs  = repairCost ?? 0;
     netProfit = arv != null && totalCost != null
       ? arv - totalCost - repairs - purchase
       : null;
   }
+
+  // Wholesale equity spread (ARV - purchase - costs) shown as context
+  const wholesaleSpread = strategy === 'wholesale' && arv != null && totalCost != null
+    ? arv - (offerAmount ?? 0) - totalCost
+    : null;
 
   const costRowDefs = [
     { key: 'agentPct'     as const, label: 'Agent Commissions', amount: agentCost },
@@ -720,15 +765,24 @@ function ExitStrategyCosts({
     <div className="card">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-xl font-bold">Exit Strategy</h2>
-        <select
-          value={strategy}
-          onChange={(e) => handleStrategyChange(e.target.value)}
-          className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary-500"
-        >
-          {Object.entries(EXIT_COSTS).map(([key, c]) => (
-            <option key={key} value={key}>{c.label}</option>
-          ))}
-        </select>
+        <div className="flex items-center gap-2">
+          <select
+            value={strategy}
+            onChange={(e) => handleStrategyChange(e.target.value)}
+            className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary-500"
+          >
+            {Object.entries(EXIT_COSTS).map(([key, c]) => (
+              <option key={key} value={key}>{c.label}</option>
+            ))}
+          </select>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="btn btn-primary btn-sm"
+          >
+            {saving ? 'Saving…' : saved ? '✓ Saved' : 'Save'}
+          </button>
+        </div>
       </div>
 
       <div className="rounded-xl border border-gray-200 overflow-hidden text-sm mb-3">
@@ -767,15 +821,23 @@ function ExitStrategyCosts({
         {/* Wholesale Assignment Fee row */}
         {strategy === 'wholesale' && (
           <div className="grid grid-cols-12 gap-2 px-4 py-3 border-b border-gray-100 bg-green-50">
-            <div className="col-span-5 text-green-700 font-medium">Wholesale Assignment Fee</div>
+            <div className="col-span-5 text-green-700 font-medium">
+              Wholesale Assignment Fee
+              {wholesaleSpread != null && (
+                <span className="ml-2 text-xs text-gray-400 font-normal">
+                  (max spread: {fmtC(wholesaleSpread)})
+                </span>
+              )}
+            </div>
             <div className="col-span-3 text-center text-gray-400">—</div>
             <div className="col-span-4 text-right">
               <input
                 type="number"
-                value={editableAssignmentFee || ''}
-                onChange={(e) => setEditableAssignmentFee(parseFloat(e.target.value) || 0)}
+                value={feeInput}
+                onChange={(e) => { setFeeInput(e.target.value); setSaved(false); }}
                 className="w-28 text-right text-sm border border-green-300 rounded px-2 py-0.5 bg-white"
-                placeholder="15000"
+                placeholder="0"
+                min="0"
               />
             </div>
           </div>
@@ -789,7 +851,7 @@ function ExitStrategyCosts({
               <input
                 type="number"
                 value={rates[row.key]}
-                onChange={(e) => setRates((r) => ({ ...r, [row.key]: parseFloat(e.target.value) || 0 }))}
+                onChange={(e) => { setRates((r) => ({ ...r, [row.key]: parseFloat(e.target.value) || 0 })); setSaved(false); }}
                 className="w-14 text-center text-sm border border-gray-200 rounded px-1 py-0.5"
                 step="0.5"
                 min="0"
@@ -835,7 +897,6 @@ function ExitStrategyCosts({
         {/* Joint Venture split rows */}
         {strategy === 'joint_venture' && (
           <>
-            {/* Net profit before split */}
             <div className="grid grid-cols-12 gap-2 px-4 py-3 border-t border-gray-200 bg-purple-50">
               <div className="col-span-5 text-purple-700 font-medium">Net Profit (before split)</div>
               <div className="col-span-3 text-center">
@@ -847,16 +908,13 @@ function ExitStrategyCosts({
                 {netProfit != null ? `${netProfit >= 0 ? '+' : ''}$${Math.round(netProfit).toLocaleString()}` : '—'}
               </div>
             </div>
-            {/* JV Partner Share */}
             <div className="grid grid-cols-12 gap-2 px-4 py-3 border-t border-gray-100 bg-purple-50">
               <div className="col-span-5 text-purple-600">JV Partner Share (50%)</div>
               <div className="col-span-3 text-center text-purple-400 text-xs">50%</div>
               <div className="col-span-4 text-right text-purple-700">{netProfit != null ? fmtC(netProfit / 2) : '—'}</div>
             </div>
-            {/* Your Share */}
             <div className={`grid grid-cols-12 gap-2 px-4 py-4 border-t border-purple-200 ${
-              netProfit == null ? 'bg-gray-50' :
-              netProfit / 2 > 0 ? 'bg-green-50' : 'bg-red-50'
+              netProfit == null ? 'bg-gray-50' : netProfit / 2 > 0 ? 'bg-green-50' : 'bg-red-50'
             }`}>
               <div className={`col-span-5 font-bold text-base ${netProfit == null ? 'text-gray-500' : netProfit / 2 > 0 ? 'text-green-800' : 'text-red-800'}`}>
                 Your Share (50%)
