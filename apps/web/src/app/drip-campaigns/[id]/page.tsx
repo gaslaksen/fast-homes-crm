@@ -187,9 +187,9 @@ export default function CampaignDetailPage() {
               {campaign.steps?.map((step: any) => {
                 const sent = campaign.stepSentMap?.[step.id] || 0;
                 const maxSent = Math.max(
-                  ...Object.values(campaign.stepSentMap || {}),
+                  ...(Object.values(campaign.stepSentMap || {}) as number[]),
                   1,
-                ) as number;
+                );
                 const pct = Math.round((sent / maxSent) * 100);
 
                 return (
