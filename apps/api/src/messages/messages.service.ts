@@ -11,12 +11,12 @@ const MAX_AUTO_RESPONSES_PER_DAY = 5;
 const AUTO_RESPONSE_DELAY_MS = 180_000;       // 3 minutes — wait for seller to finish typing
 const DEMO_AUTO_RESPONSE_DELAY_MS = 2_000;    // 2 seconds in demo mode
 
-// Quiet hours: do not auto-respond between 9 PM and 8 AM in the seller's approximate timezone.
-// We use ET as a conservative default (most US sellers). If the response arrives inside quiet
-// hours we acknowledge the message immediately with a brief "we'll be in touch" note and
-// schedule the actual response for 8 AM ET next morning.
-const QUIET_HOUR_START = 21; // 9 PM
-const QUIET_HOUR_END   =  8; // 8 AM
+// Quiet hours: do not auto-respond between midnight and 6 AM ET.
+// We use ET as a conservative default (most US sellers). If a message arrives inside quiet
+// hours we acknowledge it immediately with a brief "we'll be in touch" note and
+// schedule the actual AI response for 6 AM ET.
+const QUIET_HOUR_START =  0; // midnight
+const QUIET_HOUR_END   =  6; // 6 AM
 
 /**
  * Return true if the current time (ET) is inside quiet hours.
@@ -36,11 +36,11 @@ function isQuietHours(): boolean {
 }
 
 /**
- * Return the number of milliseconds until 8 AM ET.
+ * Return the number of milliseconds until 6 AM ET.
  */
 function msUntilMorning(): number {
   const now = new Date();
-  // Build tomorrow-8am in ET
+  // Build today at 6 AM ET
   const etFormatter = new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/New_York',
     year: 'numeric', month: '2-digit', day: '2-digit',
@@ -48,8 +48,8 @@ function msUntilMorning(): number {
   const parts = etFormatter.formatToParts(now);
   const p: Record<string, string> = {};
   for (const { type, value } of parts) p[type] = value;
-  // Construct "today at 8 AM ET" in UTC via ISO string trick
-  const etMidnightStr = `${p.year}-${p.month}-${p.day}T08:00:00`;
+  // Construct "today at 6 AM ET" in UTC via ISO string trick
+  const etMidnightStr = `${p.year}-${p.month}-${p.day}T06:00:00`;
   // Use Intl to detect offset
   const etOffsetFormatter = new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/New_York',
@@ -72,7 +72,7 @@ function msUntilMorning(): number {
  */
 function buildAfterHoursAck(sellerFirstName: string, businessName: string): string {
   const name = sellerFirstName || 'there';
-  return `Hey ${name}, got your message! It's a bit late on our end — we'll be in touch first thing in the morning. Have a good night!`;
+  return `Hey ${name}, got your message! We are not available right now but will follow up first thing in the morning. Talk soon!`;
 }
 
 @Injectable()
@@ -876,7 +876,7 @@ Keep it human, warm, and under 160 characters. Ask only ONE question.`.trim();
     // In demo mode we skip quiet-hours so demos don't get blocked.
     if (!isDemoMode && isQuietHours()) {
       const msUntil = msUntilMorning();
-      this.logger.log(`🌙 Quiet hours — scheduling auto-response for lead ${leadId} at 8 AM ET (~${Math.round(msUntil / 60000)} min)`);
+      this.logger.log(`🌙 Quiet hours — scheduling auto-response for lead ${leadId} at 6 AM ET (~${Math.round(msUntil / 60000)} min)`);
 
       // Send an immediate acknowledgment so the seller knows we received their message
       try {
