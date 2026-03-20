@@ -559,9 +559,8 @@ export default function LeadDetailPage() {
                         ✓ ATTOM Verified
                       </span>
                     )}
-                    {/* MLS listing badge — sourced from Zapier webhook (is_listed) or Zillow check */}
-                    {((lead as any).sourceMetadata?.is_listed ||
-                      (lead as any).sourceMetadata?.isActiveListing ||
+                    {/* MLS listing badge — sourced only from our Zillow listing check, NOT raw Zapier is_listed (unreliable) */}
+                    {((lead as any).sourceMetadata?.isActiveListing === true ||
                       (lead as any).sourceMetadata?.listingStatus === 'active') && (
                       <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-semibold border border-amber-300 flex items-center gap-1">
                         🏷️ Active MLS Listing
@@ -723,9 +722,8 @@ export default function LeadDetailPage() {
                       <dd className="mt-1 text-sm text-gray-900">{(lead as any).subdivision}</dd>
                     </div>
                   )}
-                  {/* MLS Listing Status row */}
-                  {((lead as any).sourceMetadata?.is_listed ||
-                    (lead as any).sourceMetadata?.isActiveListing ||
+                  {/* MLS Listing Status row — only from verified Zillow check */}
+                  {((lead as any).sourceMetadata?.isActiveListing === true ||
                     (lead as any).sourceMetadata?.listingStatus === 'active') && (
                     <div className="col-span-2 mt-1 p-3 rounded-lg bg-amber-50 border border-amber-200">
                       <dt className="text-sm font-medium text-amber-800 flex items-center gap-1.5">

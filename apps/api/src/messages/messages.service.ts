@@ -420,12 +420,12 @@ export class MessagesService {
       propertyContextLines.push(`Public AVM estimate: ~$${Math.round(attomAvm).toLocaleString()} (team use only — do NOT mention this to the seller)`);
     }
 
-    // MLS / listing status awareness
+    // MLS / listing status awareness — only trust our own Zillow check (isActiveListing/listingStatus).
+    // The raw Zapier `is_listed` field is unreliable (InvestorFuse sets it to true for all Google Ads leads).
     const sourceMetadata = (lead as any).sourceMetadata as Record<string, any> | null;
     const isActiveListing =
-      sourceMetadata?.listingStatus === 'active' ||
-      sourceMetadata?.mlsStatus === 'Active' ||
-      (lead as any).source === 'mls_listing';
+      sourceMetadata?.isActiveListing === true ||
+      sourceMetadata?.listingStatus === 'active';
 
     if (isActiveListing) {
       const listPrice = sourceMetadata?.listPrice || sourceMetadata?.list_price;
@@ -609,15 +609,12 @@ Keep it human, warm, and under 160 characters. Ask only ONE question.`.trim();
     const attomAvm = (lead as any).attomAvm;
     const arv = (lead as any).arv || (lead as any).avmExcellentHigh;
 
-    // Check for active MLS listing — Zillow-scraped ZPID stored in sourceMetadata
-    // We don't have a dedicated MLS field yet, so we detect listing awareness from
-    // sourceMetadata or the sourceUrl field on the lead's photos.
-    // For now we flag it if the source indicates an active listing
+    // Check for active MLS listing — only trust our Zillow check results (isActiveListing/listingStatus).
+    // The raw Zapier `is_listed` field is unreliable (set to true on all Google Ads leads regardless).
     const sourceMetadata = (lead as any).sourceMetadata as Record<string, any> | null;
     const isActiveListing =
-      sourceMetadata?.listingStatus === 'active' ||
-      sourceMetadata?.mlsStatus === 'Active' ||
-      (lead as any).source === 'mls_listing';
+      sourceMetadata?.isActiveListing === true ||
+      sourceMetadata?.listingStatus === 'active';
 
     // Build the purpose string with all available context
     const propertyDescription = propertyContextParts.length > 0
