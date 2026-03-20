@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { ScoringService } from '../scoring/scoring.service';
 import { DripService } from '../drip/drip.service';
+import { CampaignEnrollmentService } from '../campaigns/campaign-enrollment.service';
 import { SmsProvider, createSmsProvider } from './sms.provider';
 import { formatPhoneNumber, isOptOutMessage } from '@fast-homes/shared';
 
@@ -26,6 +27,8 @@ export class MessagesService {
     private config: ConfigService,
     @Inject(forwardRef(() => DripService))
     private dripService: DripService,
+    @Inject(forwardRef(() => CampaignEnrollmentService))
+    private campaignEnrollmentService: CampaignEnrollmentService,
   ) {
     this.twilioNumber = this.config.get<string>('SMRTPHONE_PHONE_NUMBER') || this.config.get<string>('TWILIO_PHONE_NUMBER') || '';
     this.smsProvider = createSmsProvider(this.config);
@@ -596,6 +599,13 @@ Your message must:
       this.logger.log(`🛑 Drip paused for lead ${lead.id} — auto-response will handle follow-up`);
     } catch (error) {
       // Drip may not exist — that's fine
+    }
+
+    // Pause any active campaign enrollments for this lead
+    try {
+      await this.campaignEnrollmentService.handleReply(lead.id);
+    } catch (error) {
+      // Campaign enrollment may not exist — that's fine
     }
 
     // Extract signals from message using AI

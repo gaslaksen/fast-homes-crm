@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { leadsAPI, messagesAPI, compsAPI, settingsAPI, photosAPI, callsAPI, authAPI, tasksAPI, gmailAPI } from '@/lib/api';
+import { leadsAPI, messagesAPI, compsAPI, settingsAPI, photosAPI, callsAPI, authAPI, tasksAPI, gmailAPI, campaignAPI } from '@/lib/api';
 import PropertyPhoto from '@/components/PropertyPhoto';
 import DispoTab from '@/components/DispoTab';
 import PhotoGallery from '@/components/PhotoGallery';
@@ -89,6 +89,10 @@ export default function LeadDetailPage() {
   const [emailBody, setEmailBody] = useState('');
   const [sendingEmail, setSendingEmail] = useState(false);
   const [expandedEmailId, setExpandedEmailId] = useState<string | null>(null);
+  const [leadEnrollments, setLeadEnrollments] = useState<any[]>([]);
+  const [availableCampaigns, setAvailableCampaigns] = useState<any[]>([]);
+  const [selectedCampaignId, setSelectedCampaignId] = useState('');
+  const [enrollingInCampaign, setEnrollingInCampaign] = useState(false);
 
   useEffect(() => {
     loadLead();
@@ -97,6 +101,8 @@ export default function LeadDetailPage() {
     authAPI.getMe().then((res) => setCurrentUser(res.data)).catch(() => {});
     gmailAPI.status().then((res) => setGmailConnected(res.data.connected)).catch(() => {});
     gmailAPI.emails(leadId).then((res) => setEmails(res.data || [])).catch(() => {});
+    campaignAPI.leadCampaigns(leadId).then((res) => setLeadEnrollments(res.data || [])).catch(() => {});
+    campaignAPI.list().then((res) => setAvailableCampaigns(res.data || [])).catch(() => {});
   }, [leadId]);
 
   const loadLead = async () => {
@@ -1631,6 +1637,119 @@ export default function LeadDetailPage() {
                   </Link>
                 </p>
               )}
+            </div>
+
+            {/* Campaign Enrollments */}
+            <div className="card">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl font-bold">🔁 Drip Campaigns</h2>
+                <Link href="/drip-campaigns" className="text-sm text-primary-600 hover:underline">
+                  Manage →
+                </Link>
+              </div>
+
+              {/* Active enrollments */}
+              {leadEnrollments.length > 0 ? (
+                <div className="space-y-2 mb-4">
+                  {leadEnrollments.map((enrollment: any) => (
+                    <div key={enrollment.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-100">
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium text-sm text-gray-900 truncate">
+                          {enrollment.campaign?.name || 'Campaign'}
+                        </div>
+                        <div className="text-xs text-gray-500 mt-0.5">
+                          Step {enrollment.currentStepOrder} ·{' '}
+                          <span className={`font-medium ${
+                            enrollment.status === 'ACTIVE' ? 'text-green-600' :
+                            enrollment.status === 'PAUSED' ? 'text-yellow-600' :
+                            enrollment.status === 'REPLIED' ? 'text-purple-600' :
+                            'text-gray-500'
+                          }`}>
+                            {enrollment.status}
+                          </span>
+                          {enrollment.nextSendAt && enrollment.status === 'ACTIVE' && (
+                            <> · Next: {new Date(enrollment.nextSendAt).toLocaleDateString()}</>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        {enrollment.status === 'ACTIVE' && (
+                          <button
+                            onClick={async () => {
+                              await campaignAPI.pause(enrollment.id);
+                              setLeadEnrollments((prev) =>
+                                prev.map((e) => e.id === enrollment.id ? { ...e, status: 'PAUSED' } : e),
+                              );
+                            }}
+                            className="text-xs px-2 py-1 text-yellow-700 bg-yellow-50 hover:bg-yellow-100 rounded transition-colors"
+                          >
+                            Pause
+                          </button>
+                        )}
+                        {enrollment.status === 'PAUSED' && (
+                          <button
+                            onClick={async () => {
+                              await campaignAPI.resume(enrollment.id);
+                              setLeadEnrollments((prev) =>
+                                prev.map((e) => e.id === enrollment.id ? { ...e, status: 'ACTIVE' } : e),
+                              );
+                            }}
+                            className="text-xs px-2 py-1 text-green-700 bg-green-50 hover:bg-green-100 rounded transition-colors"
+                          >
+                            Resume
+                          </button>
+                        )}
+                        <button
+                          onClick={async () => {
+                            if (!confirm('Remove from this campaign?')) return;
+                            await campaignAPI.unenroll(enrollment.id);
+                            setLeadEnrollments((prev) => prev.filter((e) => e.id !== enrollment.id));
+                          }}
+                          className="text-xs px-2 py-1 text-red-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-gray-400 mb-4">Not enrolled in any campaigns.</p>
+              )}
+
+              {/* Enroll in campaign */}
+              <div className="flex gap-2">
+                <select
+                  value={selectedCampaignId}
+                  onChange={(e) => setSelectedCampaignId(e.target.value)}
+                  className="flex-1 border border-gray-200 rounded-lg px-3 py-1.5 text-sm"
+                >
+                  <option value="">Select a campaign...</option>
+                  {availableCampaigns.map((c: any) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  disabled={!selectedCampaignId || enrollingInCampaign}
+                  onClick={async () => {
+                    if (!selectedCampaignId) return;
+                    setEnrollingInCampaign(true);
+                    try {
+                      await campaignAPI.enrollLead(selectedCampaignId, leadId);
+                      const res = await campaignAPI.leadCampaigns(leadId);
+                      setLeadEnrollments(res.data || []);
+                      setSelectedCampaignId('');
+                    } finally {
+                      setEnrollingInCampaign(false);
+                    }
+                  }}
+                  className="px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+                >
+                  {enrollingInCampaign ? '...' : 'Enroll'}
+                </button>
+              </div>
             </div>
 
             {/* Activity Log */}

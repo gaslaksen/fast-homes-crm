@@ -3,9 +3,10 @@ import { MessagesController } from './messages.controller';
 import { MessagesService } from './messages.service';
 import { ScoringModule } from '../scoring/scoring.module';
 import { DripModule } from '../drip/drip.module';
+import { CampaignsModule } from '../campaigns/campaigns.module';
 
 @Module({
-  imports: [ScoringModule, forwardRef(() => DripModule)],
+  imports: [ScoringModule, forwardRef(() => DripModule), forwardRef(() => CampaignsModule)],
   controllers: [MessagesController],
   providers: [MessagesService],
   exports: [MessagesService],

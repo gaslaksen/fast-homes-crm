@@ -9,6 +9,7 @@ import Avatar from '@/components/Avatar';
 const NAV_ITEMS = [
   { label: 'Dashboard', href: '/dashboard' },
   { label: 'Leads',     href: '/leads' },
+  { label: 'Drip Campaigns', href: '/drip-campaigns' },
   { label: 'Team',      href: '/settings/team' },
   { label: 'Settings',  href: '/settings' },
 ];
@@ -16,6 +17,7 @@ const NAV_ITEMS = [
 const BOTTOM_NAV_ITEMS = [
   { label: 'Dashboard', href: '/dashboard', icon: '📊' },
   { label: 'Leads',     href: '/leads',     icon: '🏠' },
+  { label: 'Campaigns', href: '/drip-campaigns', icon: '🔁' },
   { label: 'Team',      href: '/settings/team', icon: '👥' },
   { label: 'Settings',  href: '/settings',  icon: '⚙️' },
 ];

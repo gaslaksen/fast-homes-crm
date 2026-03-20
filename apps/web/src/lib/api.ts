@@ -264,6 +264,34 @@ export const boldSignAPI = {
   templates: () => api.get('/boldsign/templates'),
 };
 
+// Campaign / Drip Campaign API
+export const campaignAPI = {
+  list: () => api.get('/campaigns'),
+  get: (id: string) => api.get(`/campaigns/${id}`),
+  create: (data: any) => api.post('/campaigns', data),
+  update: (id: string, data: any) => api.put(`/campaigns/${id}`, data),
+  delete: (id: string) => api.delete(`/campaigns/${id}`),
+  duplicate: (id: string) => api.post(`/campaigns/${id}/duplicate`),
+  toggle: (id: string, isActive: boolean) =>
+    api.patch(`/campaigns/${id}/toggle`, { isActive }),
+  enrollLead: (id: string, leadId: string) =>
+    api.post(`/campaigns/${id}/enroll/${leadId}`),
+  unenroll: (enrollmentId: string) =>
+    api.delete(`/campaigns/enrollments/${enrollmentId}`),
+  pause: (enrollmentId: string) =>
+    api.patch(`/campaigns/enrollments/${enrollmentId}/pause`),
+  resume: (enrollmentId: string) =>
+    api.patch(`/campaigns/enrollments/${enrollmentId}/resume`),
+  enrollments: (id: string, status?: string) =>
+    api.get(`/campaigns/${id}/enrollments`, { params: { status } }),
+  stats: (id: string) => api.get(`/campaigns/${id}/stats`),
+  leadCampaigns: (leadId: string) => api.get(`/leads/${leadId}/campaigns`),
+  aiSuggest: (data: any) => api.post('/campaigns/ai/suggest', data),
+  aiImprove: (data: any) => api.post('/campaigns/ai/improve', data),
+  aiGenerateSequence: (data: any) =>
+    api.post('/campaigns/ai/generate-sequence', data),
+};
+
 export const dispoAPI = {
   getSummary: (leadId: string) => api.get(`/leads/${leadId}/dispo`),
   updateDealNumbers: (leadId: string, data: { arv?: number | null; repairCosts?: number | null; askingPrice?: number | null; assignmentFee?: number | null; maoPercent?: number | null }) =>

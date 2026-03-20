@@ -182,6 +182,7 @@ model Lead {
   offers            Offer[]
   dripSequence      DripSequence?
   callLogs          CallLog[]
+  campaignEnrollments CampaignEnrollment[]
 
   @@map("leads")
 }
@@ -516,4 +517,105 @@ model Email {
   createdAt   DateTime @default(now())
 
   @@map("emails")
+}
+
+// ─── Campaign / Re-engagement System ─────────────────────────────────────────
+
+enum CampaignChannel {
+  TEXT
+  EMAIL
+}
+
+enum EnrollmentStatus {
+  ACTIVE
+  PAUSED
+  COMPLETED
+  REPLIED
+  OPTED_OUT
+  REMOVED
+}
+
+enum DripMessageStatus {
+  SENT
+  DELIVERED
+  BOUNCED
+  FAILED
+  OPENED
+  CLICKED
+  REPLIED
+}
+
+model Campaign {
+  id             String   @id @default(cuid())
+  name           String
+  description    String?
+  triggerDays    Int      @default(15)
+  isActive       Boolean  @default(true)
+  isDefault      Boolean  @default(false)
+  organizationId String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  steps       CampaignStep[]
+  enrollments CampaignEnrollment[]
+
+  @@map("campaigns")
+}
+
+model CampaignStep {
+  id              String          @id @default(cuid())
+  campaignId      String
+  campaign        Campaign        @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  stepOrder       Int
+  channel         CampaignChannel
+  delayDays       Int             @default(0)
+  delayHours      Int             @default(0)
+  sendWindowStart String?
+  sendWindowEnd   String?
+  subject         String?
+  body            String
+  isActive        Boolean         @default(true)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  messageLogs CampaignMessageLog[]
+
+  @@map("campaign_steps")
+}
+
+model CampaignEnrollment {
+  id               String           @id @default(cuid())
+  campaignId       String
+  campaign         Campaign         @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  leadId           String
+  lead             Lead             @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  enrolledAt       DateTime         @default(now())
+  currentStepOrder Int              @default(0)
+  status           EnrollmentStatus @default(ACTIVE)
+  nextSendAt       DateTime?
+  lastContactAt    DateTime?
+  completedAt      DateTime?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  messageLogs CampaignMessageLog[]
+
+  @@unique([campaignId, leadId])
+  @@map("campaign_enrollments")
+}
+
+model CampaignMessageLog {
+  id           String             @id @default(cuid())
+  enrollmentId String
+  enrollment   CampaignEnrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  stepId       String
+  step         CampaignStep       @relation(fields: [stepId], references: [id])
+  channel      CampaignChannel
+  sentAt       DateTime           @default(now())
+  messageBody  String
+  status       DripMessageStatus  @default(SENT)
+  externalId   String?
+  createdAt    DateTime           @default(now())
+
+  @@map("campaign_message_logs")
 }
