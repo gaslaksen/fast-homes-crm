@@ -559,6 +559,29 @@ export default function LeadDetailPage() {
                         ✓ ATTOM Verified
                       </span>
                     )}
+                    {/* MLS listing badge — sourced from Zapier webhook (is_listed) or Zillow check */}
+                    {((lead as any).sourceMetadata?.is_listed ||
+                      (lead as any).sourceMetadata?.isActiveListing ||
+                      (lead as any).sourceMetadata?.listingStatus === 'active') && (
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-semibold border border-amber-300 flex items-center gap-1">
+                        🏷️ Active MLS Listing
+                        {(lead as any).sourceMetadata?.listPrice && (
+                          <span className="font-normal">
+                            · ${Number((lead as any).sourceMetadata.listPrice).toLocaleString()}
+                          </span>
+                        )}
+                        {(lead as any).sourceMetadata?.listed_price && (
+                          <span className="font-normal">
+                            · ${Number((lead as any).sourceMetadata.listed_price).toLocaleString()}
+                          </span>
+                        )}
+                        {(lead as any).sourceMetadata?.price_listed && (
+                          <span className="font-normal">
+                            · ${Number((lead as any).sourceMetadata.price_listed).toLocaleString()}
+                          </span>
+                        )}
+                      </span>
+                    )}
                   </div>
                   <button
                     onClick={async () => {
@@ -698,6 +721,38 @@ export default function LeadDetailPage() {
                     <div>
                       <dt className="text-sm font-medium text-gray-500">Subdivision</dt>
                       <dd className="mt-1 text-sm text-gray-900">{(lead as any).subdivision}</dd>
+                    </div>
+                  )}
+                  {/* MLS Listing Status row */}
+                  {((lead as any).sourceMetadata?.is_listed ||
+                    (lead as any).sourceMetadata?.isActiveListing ||
+                    (lead as any).sourceMetadata?.listingStatus === 'active') && (
+                    <div className="col-span-2 mt-1 p-3 rounded-lg bg-amber-50 border border-amber-200">
+                      <dt className="text-sm font-medium text-amber-800 flex items-center gap-1.5">
+                        🏷️ MLS Listing Status
+                      </dt>
+                      <dd className="mt-1 text-sm font-semibold text-amber-900">
+                        Actively Listed for Sale
+                        {((lead as any).sourceMetadata?.listPrice ||
+                          (lead as any).sourceMetadata?.listed_price ||
+                          (lead as any).sourceMetadata?.price_listed) && (
+                          <span className="ml-2 font-normal text-amber-700">
+                            @ ${Number(
+                              (lead as any).sourceMetadata?.listPrice ||
+                              (lead as any).sourceMetadata?.listed_price ||
+                              (lead as any).sourceMetadata?.price_listed
+                            ).toLocaleString()}
+                          </span>
+                        )}
+                        {(lead as any).sourceMetadata?.daysOnMarket != null && (
+                          <span className="ml-2 text-xs font-normal text-amber-600">
+                            ({(lead as any).sourceMetadata.daysOnMarket} days on market)
+                          </span>
+                        )}
+                      </dd>
+                      <dd className="mt-0.5 text-xs text-amber-600">
+                        Seller is already marketing through an agent — consider positioning cash offer as a faster, no-commission alternative.
+                      </dd>
                     </div>
                   )}
                 </dl>
