@@ -32,7 +32,13 @@ function isQuietHours(): boolean {
     }).format(new Date()),
     10,
   );
-  return hour >= QUIET_HOUR_START || hour < QUIET_HOUR_END;
+  // When start < end the window doesn't cross midnight (e.g. 0–6): use AND.
+  // When start > end the window crosses midnight (e.g. 21–6): use OR.
+  if (QUIET_HOUR_START < QUIET_HOUR_END) {
+    return hour >= QUIET_HOUR_START && hour < QUIET_HOUR_END;
+  } else {
+    return hour >= QUIET_HOUR_START || hour < QUIET_HOUR_END;
+  }
 }
 
 /**
