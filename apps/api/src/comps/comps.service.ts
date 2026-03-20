@@ -65,57 +65,75 @@ export class CompsService {
 
     // 1) Try ATTOM comp search (deed-verified sales) — unless user wants RentCast
     if (this.attomService.isConfigured && preferSource !== 'rentcast') {
+      // Wait for the ATTOM enrichment to finish — it saves lat/lon that the comp search needs.
+      // This is critical for new leads where lat/lon isn't set yet at the time fetchComps runs.
+      const attomEnrichment = await attomPromise;
+
+      // Re-fetch the lead so we have the lat/lon that enrichment just saved
       const lead = await this.prisma.lead.findUnique({
         where: { id: leadId },
         select: { latitude: true, longitude: true, propertyType: true, sqft: true, bedrooms: true },
       });
 
-      if (lead?.latitude && lead?.longitude) {
+      // Use coordinates from DB (written by enrichment) or fall back to what enrichment returned
+      const latitude  = lead?.latitude  ?? attomEnrichment?.latitude;
+      const longitude = lead?.longitude ?? attomEnrichment?.longitude;
+
+      if (latitude && longitude) {
         try {
-          this.logger.log(`Fetching comps via ATTOM /sale/detail for lead ${leadId}`);
+          this.logger.log(`Fetching comps via ATTOM /sale/detail for lead ${leadId} (${latitude}, ${longitude})`);
           const result = await this.attomService.fetchCompsFromAttom(
             leadId,
             address,
-            { latitude: lead.latitude, longitude: lead.longitude },
+            { latitude, longitude },
             {
               forceRefresh: options?.forceRefresh,
-              propertyType: lead.propertyType || undefined,
-              sqft: lead.sqft || undefined,
-              bedrooms: lead.bedrooms || undefined,
+              propertyType: lead?.propertyType || undefined,
+              sqft: lead?.sqft || undefined,
+              bedrooms: lead?.bedrooms || undefined,
             },
           );
 
           if (result && result.compsCount >= 1) {
             this.logger.log(`ATTOM comps: ${result.compsCount} deed-verified sales found`);
-            const attom = await attomPromise;
-            return { ...result, arv: result.arv!, attom };
+            return { ...result, arv: result.arv!, attom: attomEnrichment };
           }
           this.logger.warn(`ATTOM returned 0 comps — falling back to RentCast`);
         } catch (err) {
           this.logger.warn(`ATTOM comp fetch failed (non-fatal): ${err.message} — falling back to RentCast`);
         }
       } else {
-        this.logger.warn(`No lat/lon for lead ${leadId} — skipping ATTOM comps, using RentCast`);
+        this.logger.warn(`No lat/lon available for lead ${leadId} (even after ATTOM enrichment) — falling back to RentCast`);
       }
+
+      // ATTOM enrichment already awaited above — no need to await again at the end
+      return { ...(await this.fetchRentCastOrFallback(leadId, address, options)), attom: attomEnrichment };
     }
 
-    // 2) Try RentCast with tiered radius expansion
+    // 2) RentCast path (ATTOM not configured, or user explicitly prefers RentCast)
+    // Await enrichment so lead data is complete before returning
+    const attom = await attomPromise;
+    return { ...(await this.fetchRentCastOrFallback(leadId, address, options)), attom };
+  }
+
+  /**
+   * RentCast with tiered radius, then ChatARV, then placeholder fallback.
+   */
+  private async fetchRentCastOrFallback(
+    leadId: string,
+    address: { street: string; city: string; state: string; zip: string },
+    options?: { forceRefresh?: boolean },
+  ): Promise<{ arv: number; arvLow?: number; arvHigh?: number; confidence: number; compsCount: number; source: string }> {
     if (this.rentCastService.isConfigured) {
       try {
         this.logger.log(`Fetching comps via RentCast for lead ${leadId}`);
-        compsResult = await this.fetchWithTieredRadius(leadId, address, options);
+        return await this.fetchWithTieredRadius(leadId, address, options);
       } catch (error) {
         this.logger.error(`RentCast fetch failed, trying fallbacks: ${error.message}`);
-        compsResult = await this.fetchCompsWithFallback(leadId, address);
+        return this.fetchCompsWithFallback(leadId, address);
       }
-    } else {
-      compsResult = await this.fetchCompsWithFallback(leadId, address);
     }
-
-    // Await ATTOM enrichment (it's been running in parallel the whole time)
-    const attom = await attomPromise;
-
-    return { ...compsResult, attom };
+    return this.fetchCompsWithFallback(leadId, address);
   }
 
   /**
