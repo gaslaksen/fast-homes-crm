@@ -229,4 +229,53 @@ export class PhotosService {
     const buffer = Buffer.from(response.data);
     return this.processAndSave(leadId, buffer, source, caption);
   }
+
+  /**
+   * Check Zillow for active listing status and persist the result to
+   * the lead's sourceMetadata field. Called non-blocking during lead enrichment.
+   */
+  async checkAndSaveListingStatus(leadId: string): Promise<void> {
+    const lead = await this.prisma.lead.findUnique({
+      where: { id: leadId },
+      select: { propertyAddress: true, propertyCity: true, propertyState: true, sourceMetadata: true },
+    });
+    if (!lead?.propertyAddress || !lead.propertyCity) return;
+
+    const result = await this.zillowService.checkListingStatus(
+      lead.propertyAddress,
+      lead.propertyCity,
+      lead.propertyState || '',
+    );
+
+    if (!result) return;
+
+    const existingMeta = (lead.sourceMetadata as Record<string, any>) || {};
+    const updated: Record<string, any> = {
+      ...existingMeta,
+      listingStatus: result.listingStatus,
+      isActiveListing: result.isListed,
+      listingCheckedAt: new Date().toISOString(),
+    };
+    if (result.listPrice) updated.listPrice = result.listPrice;
+    if (result.daysOnMarket != null) updated.daysOnMarket = result.daysOnMarket;
+    if (result.zpid) updated.zpid = result.zpid;
+
+    await this.prisma.lead.update({
+      where: { id: leadId },
+      data: { sourceMetadata: updated },
+    });
+
+    this.logger.log(`Listing status saved for lead ${leadId}: ${result.listingStatus}${result.listPrice ? ` @ $${result.listPrice.toLocaleString()}` : ''}`);
+
+    if (result.isListed) {
+      await this.prisma.activity.create({
+        data: {
+          leadId,
+          type: 'FIELD_UPDATED',
+          description: `Property is actively listed on Zillow${result.listPrice ? ` at $${result.listPrice.toLocaleString()}` : ''}${result.daysOnMarket != null ? ` (${result.daysOnMarket} days on market)` : ''}`,
+          metadata: { source: 'zillow_listing_check', ...result },
+        },
+      });
+    }
+  }
 }

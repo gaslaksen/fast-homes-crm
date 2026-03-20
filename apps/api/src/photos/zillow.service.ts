@@ -39,6 +39,71 @@ export class ZillowService {
     return await this.fetchPhotosByZpid(zpid);
   }
 
+  /**
+   * Check if a property is currently listed for sale on Zillow.
+   * Returns an object with listingStatus, listPrice, and daysOnMarket if found.
+   * Uses a targeted Google search so we stay within the SerpAPI budget.
+   */
+  async checkListingStatus(
+    address: string,
+    city: string,
+    state: string,
+  ): Promise<{ isListed: boolean; listingStatus?: string; listPrice?: number; daysOnMarket?: number; zpid?: string } | null> {
+    if (!this.serpApiKey) return null;
+
+    const query = `site:zillow.com "${address}" ${city} ${state}`;
+
+    try {
+      const results = await getJson({
+        engine: 'google',
+        q: query,
+        api_key: this.serpApiKey,
+        num: 5,
+      });
+
+      for (const result of (results.organic_results || [])) {
+        const link: string = result.link || '';
+        const title: string = (result.title || '').toLowerCase();
+        const snippet: string = (result.snippet || '').toLowerCase();
+
+        const zpidMatch = link.match(/\/(\d{7,9})_zpid/);
+        if (!zpidMatch) continue;
+
+        const zpid = zpidMatch[1];
+
+        // Detect active listing from title/snippet keywords
+        const isForSale = title.includes('for sale') || snippet.includes('for sale') || title.includes('listing');
+        const isRecentlySold = title.includes('recently sold') || snippet.includes('recently sold') || snippet.includes('sold on');
+        const isOffMarket = title.includes('off market') || snippet.includes('off market');
+
+        // Try to extract list price from snippet (e.g. "$325,000" or "325K")
+        const priceMatch = snippet.match(/\$([0-9]{2,3}(?:,[0-9]{3})*)/);
+        const listPrice = priceMatch ? parseInt(priceMatch[1].replace(/,/g, ''), 10) : undefined;
+
+        // Days on market
+        const domMatch = snippet.match(/(\d+)\s*(?:days?)\s*on\s*(?:zillow|market)/i);
+        const daysOnMarket = domMatch ? parseInt(domMatch[1], 10) : undefined;
+
+        const listingStatus = isForSale ? 'active' : isRecentlySold ? 'recently_sold' : isOffMarket ? 'off_market' : 'unknown';
+
+        this.logger.log(`Zillow listing check for ${address}: status=${listingStatus}, price=${listPrice}, dom=${daysOnMarket}, zpid=${zpid}`);
+
+        return {
+          isListed: isForSale,
+          listingStatus,
+          listPrice,
+          daysOnMarket,
+          zpid,
+        };
+      }
+
+      return { isListed: false, listingStatus: 'not_found' };
+    } catch (err: any) {
+      this.logger.warn(`Zillow listing check failed for ${address}: ${err.message}`);
+      return null;
+    }
+  }
+
   private async findZpid(address: string, city: string, state: string): Promise<string | null> {
     const query = `site:zillow.com "${address}" ${city} ${state}`;
 

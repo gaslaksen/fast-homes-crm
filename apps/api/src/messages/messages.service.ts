@@ -11,6 +11,70 @@ const MAX_AUTO_RESPONSES_PER_DAY = 5;
 const AUTO_RESPONSE_DELAY_MS = 180_000;       // 3 minutes — wait for seller to finish typing
 const DEMO_AUTO_RESPONSE_DELAY_MS = 2_000;    // 2 seconds in demo mode
 
+// Quiet hours: do not auto-respond between 9 PM and 8 AM in the seller's approximate timezone.
+// We use ET as a conservative default (most US sellers). If the response arrives inside quiet
+// hours we acknowledge the message immediately with a brief "we'll be in touch" note and
+// schedule the actual response for 8 AM ET next morning.
+const QUIET_HOUR_START = 21; // 9 PM
+const QUIET_HOUR_END   =  8; // 8 AM
+
+/**
+ * Return true if the current time (ET) is inside quiet hours.
+ * We use Intl.DateTimeFormat to get the actual ET hour so daylight saving
+ * is handled automatically without any extra library.
+ */
+function isQuietHours(): boolean {
+  const hour = parseInt(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York',
+      hour: 'numeric',
+      hour12: false,
+    }).format(new Date()),
+    10,
+  );
+  return hour >= QUIET_HOUR_START || hour < QUIET_HOUR_END;
+}
+
+/**
+ * Return the number of milliseconds until 8 AM ET.
+ */
+function msUntilMorning(): number {
+  const now = new Date();
+  // Build tomorrow-8am in ET
+  const etFormatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  });
+  const parts = etFormatter.formatToParts(now);
+  const p: Record<string, string> = {};
+  for (const { type, value } of parts) p[type] = value;
+  // Construct "today at 8 AM ET" in UTC via ISO string trick
+  const etMidnightStr = `${p.year}-${p.month}-${p.day}T08:00:00`;
+  // Use Intl to detect offset
+  const etOffsetFormatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    timeZoneName: 'shortOffset',
+  });
+  const offsetStr = etOffsetFormatter.formatToParts(now).find(x => x.type === 'timeZoneName')?.value || 'GMT-4';
+  const offsetMatch = offsetStr.match(/GMT([+-]\d+)/);
+  const offsetHours = offsetMatch ? parseInt(offsetMatch[1], 10) : -4;
+  const targetUtc = new Date(`${etMidnightStr}${offsetHours >= 0 ? '+' : ''}${offsetHours}:00`);
+  // If 8 AM ET today has already passed, use tomorrow
+  if (targetUtc.getTime() <= now.getTime()) {
+    targetUtc.setDate(targetUtc.getDate() + 1);
+  }
+  return targetUtc.getTime() - now.getTime();
+}
+
+/**
+ * Build a brief "after-hours acknowledgment" message — tells the seller we
+ * received their message and will follow up in the morning. Warm and human.
+ */
+function buildAfterHoursAck(sellerFirstName: string, businessName: string): string {
+  const name = sellerFirstName || 'there';
+  return `Hey ${name}, got your message! It's a bit late on our end — we'll be in touch first thing in the morning. Have a good night!`;
+}
+
 @Injectable()
 export class MessagesService {
   private readonly logger = new Logger(MessagesService.name);
@@ -292,7 +356,7 @@ export class MessagesService {
       ? `The seller just told you ${justExtractedDescriptions.join(' and ')}. Simply confirm you received their answer (e.g. "Got it", "Thanks for sharing that") — do NOT agree to, commit to, or validate their price or timeline. You are gathering information only, not making any offer or promise.`
       : '';
 
-    // Determine NEXT single CAMP field to ask about (Priority → Money → Challenge → Authority)
+    // ── Determine what CAMP data we still need ────────────────────────────────
     const campFieldLabels: { field: string; label: string; question: string; keywords: string[] }[] = [
       { field: 'timeline', label: 'TIMELINE', question: 'how soon they want to sell',
         keywords: ['timeline', 'how soon', 'when are you', 'when do you', 'timeframe', 'time frame', 'sell by', 'hoping to sell', 'looking to sell'] },
@@ -309,7 +373,6 @@ export class MessagesService {
     // extraction couldn't parse a clean value.
     const hasBeenAddressedInConversation = (keywords: string[]): boolean => {
       const msgs = lead.messages;
-      // Find the LAST outbound message that asked about this topic
       let lastAskedIdx = -1;
       for (let i = msgs.length - 1; i >= 0; i--) {
         if (msgs[i].direction === 'OUTBOUND') {
@@ -321,7 +384,6 @@ export class MessagesService {
         }
       }
       if (lastAskedIdx === -1) return false;
-      // Check if seller replied after that ask
       return msgs.slice(lastAskedIdx + 1).some(m => m.direction === 'INBOUND');
     };
 
@@ -335,14 +397,51 @@ export class MessagesService {
       }
     }
 
-    let purpose: string;
     const campComplete = !nextField;
 
-    if (nextField) {
-      purpose = justExtractedSummary
-        ? `${justExtractedSummary} Then ask about their ${nextField.label} — ${nextField.question}.`
-        : `Continue the conversation naturally. Ask about their ${nextField.label} — ${nextField.question}.`;
-    } else {
+    // ── Build rich property context so the AI can respond intelligently ────────
+    // Things the AI should know about the property that enrich the conversation
+    const propertyContextLines: string[] = [];
+    const attomAvm = (lead as any).attomAvm;
+    const arv = (lead as any).arv || (lead as any).avmExcellentHigh;
+    const beds = (lead as any).bedrooms;
+    const baths = (lead as any).bathrooms;
+    const sqft = (lead as any).sqft;
+    const yearBuilt = (lead as any).yearBuilt;
+
+    if (beds || baths || sqft) {
+      propertyContextLines.push(
+        `Property specs: ${[beds ? `${beds}bd` : '', baths ? `${baths}ba` : '', sqft ? `${sqft.toLocaleString()} sqft` : ''].filter(Boolean).join('/')}${yearBuilt ? `, built ${yearBuilt}` : ''}`
+      );
+    }
+    if (arv) {
+      propertyContextLines.push(`Estimated after-repair value (ARV): ~$${Math.round(arv).toLocaleString()} (team use only — do NOT mention this to the seller)`);
+    } else if (attomAvm) {
+      propertyContextLines.push(`Public AVM estimate: ~$${Math.round(attomAvm).toLocaleString()} (team use only — do NOT mention this to the seller)`);
+    }
+
+    // MLS / listing status awareness
+    const sourceMetadata = (lead as any).sourceMetadata as Record<string, any> | null;
+    const isActiveListing =
+      sourceMetadata?.listingStatus === 'active' ||
+      sourceMetadata?.mlsStatus === 'Active' ||
+      (lead as any).source === 'mls_listing';
+
+    if (isActiveListing) {
+      const listPrice = sourceMetadata?.listPrice || sourceMetadata?.list_price;
+      propertyContextLines.push(
+        `IMPORTANT CONTEXT: This property is currently listed for sale on the MLS${listPrice ? ` at $${Number(listPrice).toLocaleString()}` : ''}. The seller is ALREADY trying to sell through a real estate agent. DO NOT ask "are you thinking about selling?" or similar — they clearly are. Instead, acknowledge you can offer a cash alternative, or ask about why they're exploring other options alongside the listing.`
+      );
+    }
+
+    const propertyContext = propertyContextLines.length > 0
+      ? `\nProperty context (for your reference):\n${propertyContextLines.map(l => `  - ${l}`).join('\n')}\n`
+      : '';
+
+    // ── Build the purpose string — contextual, not formulaic ──────────────────
+    let purpose: string;
+
+    if (campComplete) {
       // CAMP is complete — close the conversation warmly, no more questions
       const knownSummary = [
         lead.timeline != null ? `timeline of ${lead.timeline === 365 ? 'no specific urgency' : `~${lead.timeline} days`}` : null,
@@ -351,14 +450,30 @@ export class MessagesService {
         lead.ownershipStatus != null ? `ownership: ${lead.ownershipStatus.replace('_', ' ')}` : null,
       ].filter(Boolean).join(', ');
 
-      purpose = `CAMP COMPLETE — DO NOT ASK ANY MORE QUESTIONS. This is your closing message.
+      purpose = `${propertyContext}CAMP COMPLETE — DO NOT ASK ANY MORE QUESTIONS. This is your closing message.
 What you know: ${knownSummary || 'gathered all key details'}.
 Your message must:
 1. Thank ${lead.sellerFirstName} sincerely for their time and for sharing
 2. Tell them someone from the team will review the information and reach out soon to discuss next steps
 3. Keep it warm and brief — under 160 characters if possible
 4. Do NOT ask anything. Do NOT request more info. End the conversation professionally.
-5. Do NOT repeat back their price or timeline in a way that implies agreement or commitment (e.g. do NOT say "We'll do $250k" or "We can close in 7 days") — the team will handle those discussions separately.`;
+5. Do NOT repeat back their price or timeline in a way that implies agreement or commitment.`;
+    } else {
+      // CAMP not yet complete — ask the next question, but do it conversationally.
+      // The key instruction: react naturally to WHAT THE SELLER JUST SAID, then
+      // weave in the next CAMP question only if it flows naturally. If the seller
+      // seems confused, frustrated, or has asked a direct question, address THAT
+      // first before pivoting to data gathering.
+      const nextQuestion = nextField
+        ? `The next piece of information we need is: ${nextField.label} — ${nextField.question}.`
+        : '';
+
+      purpose = `${propertyContext}${justExtractedSummary ? justExtractedSummary + ' ' : ''}
+Read the seller's last message carefully. React to it naturally — address anything they asked or said before asking your own question.
+${isActiveListing ? 'Remember: this property IS already listed for sale. Do not ask if they want to sell — ask about their experience with the listing or why they are exploring a cash offer.' : ''}
+${nextQuestion}
+IMPORTANT: If the seller seems confused, annoyed, or asked you something specific, answer THEM first — then gently ask the next question. Don't just bulldoze through CAMP if the conversation isn't flowing naturally.
+Keep it human, warm, and under 160 characters. Ask only ONE question.`.trim();
     }
 
     const knownData = {
@@ -440,6 +555,12 @@ Your message must:
   /**
    * Send the initial outreach message for a new lead.
    * Called automatically after lead creation with a delay.
+   *
+   * We now build a rich context block from everything we know about the
+   * property at this point (AVM, beds/baths, ARV, listing status) so the
+   * opening message references the specific property intelligently rather
+   * than using a generic opener. We also make it clear we're following up
+   * on their form submission — not cold-contacting them.
    */
   async sendInitialOutreach(leadId: string): Promise<string | null> {
     if (!(await this.canAutoRespond(leadId))) {
@@ -466,6 +587,63 @@ Your message must:
       return null;
     }
 
+    // ── Build property context for a smarter opening message ──────────────────
+    const propertyContextParts: string[] = [];
+
+    // Beds/baths/sqft from any enrichment source
+    const beds = (lead as any).bedrooms;
+    const baths = (lead as any).bathrooms;
+    const sqft = (lead as any).sqft;
+    const yearBuilt = (lead as any).yearBuilt;
+    const propertyType = (lead as any).propertyType;
+    if (beds || baths) {
+      const bdStr = beds ? `${beds}bd` : '';
+      const baStr = baths ? `${baths}ba` : '';
+      propertyContextParts.push([bdStr, baStr].filter(Boolean).join('/'));
+    }
+    if (sqft) propertyContextParts.push(`${sqft.toLocaleString()} sqft`);
+    if (yearBuilt) propertyContextParts.push(`built ${yearBuilt}`);
+    if (propertyType && propertyType !== 'Auto') propertyContextParts.push(propertyType);
+
+    // AVM / ARV awareness
+    const attomAvm = (lead as any).attomAvm;
+    const arv = (lead as any).arv || (lead as any).avmExcellentHigh;
+
+    // Check for active MLS listing — Zillow-scraped ZPID stored in sourceMetadata
+    // We don't have a dedicated MLS field yet, so we detect listing awareness from
+    // sourceMetadata or the sourceUrl field on the lead's photos.
+    // For now we flag it if the source indicates an active listing
+    const sourceMetadata = (lead as any).sourceMetadata as Record<string, any> | null;
+    const isActiveListing =
+      sourceMetadata?.listingStatus === 'active' ||
+      sourceMetadata?.mlsStatus === 'Active' ||
+      (lead as any).source === 'mls_listing';
+
+    // Build the purpose string with all available context
+    const propertyDescription = propertyContextParts.length > 0
+      ? `The property is a ${propertyContextParts.join(', ')}.`
+      : '';
+    const arvHint = arv
+      ? ` We've pulled some data and the estimated value is around $${Math.round(arv / 1000) * 1000 >= 1000 ? `${Math.round(arv / 1000)}k` : arv.toLocaleString()}.`
+      : attomAvm
+      ? ` Public records show an estimated value around $${Math.round(attomAvm / 1000) * 1000 >= 1000 ? `${Math.round(attomAvm / 1000)}k` : attomAvm.toLocaleString()}.`
+      : '';
+    const listingHint = isActiveListing
+      ? ` We also see the property is currently listed on the market — we work alongside traditional listings and can offer a no-commission cash offer alternative.`
+      : '';
+
+    const purpose = [
+      `First outreach to a seller who submitted a lead form about their property at ${lead.propertyAddress}.`,
+      `They reached out to us first — acknowledge that you're following up on their inquiry (do NOT say you "found" or "saw" their property as if cold-contacting them).`,
+      propertyDescription,
+      `Briefly introduce yourself as ${businessName}, reference their inquiry, and ask ONE open-ended question to start the conversation (e.g. what prompted them to reach out, or what they're hoping to accomplish).`,
+      arvHint,
+      listingHint,
+      `Keep it warm, personal, and under 160 characters.`,
+      `End with "Reply STOP to opt out."`,
+    ].filter(Boolean).join(' ');
+    // ──────────────────────────────────────────────────────────────────────────
+
     try {
       const drafts = await this.scoringService.generateMessageDrafts(
         {
@@ -473,7 +651,7 @@ Your message must:
           propertyAddress: lead.propertyAddress,
           businessName,
           conversationHistory: [],
-          purpose: `First outreach to a new seller lead. Introduce yourself as ${businessName} and include "Reply STOP to opt out" at the end.`,
+          purpose,
         },
         undefined,
         lead,
@@ -669,13 +847,19 @@ Your message must:
    * Debounced: if another inbound message arrives before the timer fires,
    * the old timer is cancelled and a new one starts. This prevents sending
    * duplicate/stale replies when a seller sends multiple texts in quick succession.
+   *
+   * Quiet-hours aware: if it is currently between 9 PM and 8 AM ET we send a
+   * brief acknowledgment immediately ("got your message, we'll follow up in the
+   * morning") and defer the full AI response until 8 AM ET.
    */
   private async scheduleAutoResponse(leadId: string, updateData: Record<string, any>) {
     let delay = AUTO_RESPONSE_DELAY_MS;
+    let isDemoMode = false;
     try {
       const settings = await this.prisma.dripSettings.findUnique({ where: { id: 'default' } });
       if (settings?.demoMode) {
         delay = DEMO_AUTO_RESPONSE_DELAY_MS;
+        isDemoMode = true;
       }
     } catch {
       // Use default delay
@@ -687,6 +871,45 @@ Your message must:
       clearTimeout(existing);
       this.logger.log(`⏱️  Cancelled previous pending auto-response for lead ${leadId} (new message arrived)`);
     }
+
+    // ── Quiet-hours check ──────────────────────────────────────────────────────
+    // In demo mode we skip quiet-hours so demos don't get blocked.
+    if (!isDemoMode && isQuietHours()) {
+      const msUntil = msUntilMorning();
+      this.logger.log(`🌙 Quiet hours — scheduling auto-response for lead ${leadId} at 8 AM ET (~${Math.round(msUntil / 60000)} min)`);
+
+      // Send an immediate acknowledgment so the seller knows we received their message
+      try {
+        const lead = await this.prisma.lead.findUnique({
+          where: { id: leadId },
+          include: { organization: true },
+        });
+        if (lead) {
+          const businessName = (lead as any).organization?.name || 'Fast Homes for Cash';
+          const ack = buildAfterHoursAck(lead.sellerFirstName, businessName);
+          await this.sendMessage(leadId, ack);
+          this.logger.log(`🌙 After-hours ack sent for lead ${leadId}`);
+        }
+      } catch (err) {
+        this.logger.warn(`Could not send after-hours ack for lead ${leadId}: ${err.message}`);
+      }
+
+      const timer = setTimeout(async () => {
+        this.pendingResponseTimers.delete(leadId);
+        try {
+          const responseBody = await this.sendAutoResponse(leadId, updateData);
+          if (responseBody) {
+            this.logger.log(`💬 Morning auto-response sent for lead ${leadId}: "${responseBody.substring(0, 80)}"`);
+          }
+        } catch (error) {
+          this.logger.error(`Morning auto-response failed for lead ${leadId}: ${error.message}`);
+        }
+      }, msUntil);
+
+      this.pendingResponseTimers.set(leadId, timer);
+      return;
+    }
+    // ──────────────────────────────────────────────────────────────────────────
 
     this.logger.log(`⏱️  Auto-response for lead ${leadId} scheduled in ${delay}ms`);
 
