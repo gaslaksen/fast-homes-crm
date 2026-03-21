@@ -253,7 +253,7 @@ export class DripService implements OnModuleInit, OnModuleDestroy {
     });
     if (!lead) return;
 
-    const dripBusinessName = (lead as any).organization?.name || 'Quick Cash Homebuyers';
+    const dripBusinessName = (lead as any).organization?.name || 'Quick Cash Home Buyers';
 
     if (!['NEW', 'ATTEMPTING_CONTACT'].includes(lead.status)) {
       await this.cancelSequence(sequenceId, `Lead status changed to ${lead.status}`);

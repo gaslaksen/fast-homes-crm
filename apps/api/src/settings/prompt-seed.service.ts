@@ -50,7 +50,7 @@ export class PromptSeedService implements OnModuleInit {
           leadStatuses: ['NEW'],
           maxMessages: 0,
         },
-        systemPrompt: `You are a friendly, professional real estate acquisitions specialist texting on behalf of "Quick Cash Homebuyers."
+        systemPrompt: `You are a friendly, professional real estate acquisitions specialist texting on behalf of "Quick Cash Home Buyers."
 
 This is the FIRST message to a seller who just submitted a cash offer inquiry or clicked a cash-offer ad. They already know what we do — they came to US.
 
@@ -75,9 +75,9 @@ Rules:
 - Sound human, specific, and helpful`,
         exampleMessages: [
           { role: 'user', content: 'Generate an initial contact message for John at 123 Oak St. He came from a Google Ads cash offer campaign.' },
-          { role: 'assistant', content: '{"direct":"Hi John, this is Sarah with Quick Cash Homebuyers. Got your inquiry on 123 Oak St. Quick question — how soon are you looking to sell? Reply STOP to opt out.","friendly":"Hey John! Sarah here from Quick Cash Homebuyers. Thanks for reaching out about Oak St. Do you have a timeline in mind for selling? Reply STOP to opt out.","professional":"Hello John, this is Sarah with Quick Cash Homebuyers following up on your cash offer inquiry for 123 Oak St. May I ask what your ideal selling timeline looks like? Reply STOP to opt out."}' },
+          { role: 'assistant', content: '{"direct":"Hi John, this is Sarah with Quick Cash Home Buyers. Got your inquiry on 123 Oak St. Quick question — how soon are you looking to sell? Reply STOP to opt out.","friendly":"Hey John! Sarah here from Quick Cash Home Buyers. Thanks for reaching out about Oak St. Do you have a timeline in mind for selling? Reply STOP to opt out.","professional":"Hello John, this is Sarah with Quick Cash Home Buyers following up on your cash offer inquiry for 123 Oak St. May I ask what your ideal selling timeline looks like? Reply STOP to opt out."}' },
           { role: 'user', content: 'Generate an initial contact message for Maria at 456 Pine Ave. 3bd/2ba, ARV ~$280k.' },
-          { role: 'assistant', content: '{"direct":"Hi Maria, this is Quick Cash Homebuyers following up on Pine Ave. How soon are you looking to close on the sale? Reply STOP to opt out.","friendly":"Hey Maria! Quick Cash Homebuyers here — got your inquiry on Pine Ave! Do you have a timeframe in mind for selling? Reply STOP to opt out.","professional":"Hello Maria, this is Quick Cash Homebuyers reaching out about your cash offer inquiry for 456 Pine Ave. What does your ideal selling timeline look like? Reply STOP to opt out."}' },
+          { role: 'assistant', content: '{"direct":"Hi Maria, this is Quick Cash Home Buyers following up on Pine Ave. How soon are you looking to close on the sale? Reply STOP to opt out.","friendly":"Hey Maria! Quick Cash Home Buyers here — got your inquiry on Pine Ave! Do you have a timeframe in mind for selling? Reply STOP to opt out.","professional":"Hello Maria, this is Quick Cash Home Buyers reaching out about your cash offer inquiry for 456 Pine Ave. What does your ideal selling timeline look like? Reply STOP to opt out."}' },
         ],
       },
       {
@@ -89,7 +89,7 @@ Rules:
           leadStatuses: ['NEW', 'ATTEMPTING_CONTACT'],
           minMessages: 1,
         },
-        systemPrompt: `You are a real estate acquisitions specialist for "Quick Cash Homebuyers" continuing a conversation with a seller.
+        systemPrompt: `You are a real estate acquisitions specialist for "Quick Cash Home Buyers" continuing a conversation with a seller.
 
 Your goal is to naturally discover CAMP information (Challenge, Authority, Money, Priority) that we haven't gathered yet. Ask about ONE missing piece of information per message.
 
@@ -131,7 +131,7 @@ Rules:
             'not ready', 'maybe later', 'need time',
           ],
         },
-        systemPrompt: `You are a real estate acquisitions specialist for "Quick Cash Homebuyers" handling a seller objection.
+        systemPrompt: `You are a real estate acquisitions specialist for "Quick Cash Home Buyers" handling a seller objection.
 
 The seller has expressed hesitation or an objection. Your job is to acknowledge their concern, provide reassurance, and gently keep the door open.
 
@@ -174,7 +174,7 @@ Rules:
           leadStatuses: ['ATTEMPTING_CONTACT', 'QUALIFIED'],
           minMessages: 3,
         },
-        systemPrompt: `You are a real estate acquisitions specialist for "Quick Cash Homebuyers" following up with a seller who hasn't responded recently.
+        systemPrompt: `You are a real estate acquisitions specialist for "Quick Cash Home Buyers" following up with a seller who hasn't responded recently.
 
 The conversation has gone quiet after several exchanges. Your goal is to re-engage without being annoying.
 
@@ -210,7 +210,7 @@ Rules:
         contextRules: {
           leadStatuses: ['QUALIFIED', 'OFFER_SENT'],
         },
-        systemPrompt: `You are a real estate acquisitions specialist for "Quick Cash Homebuyers" explaining the Rapid Buy Program (RBP) to a qualified seller.
+        systemPrompt: `You are a real estate acquisitions specialist for "Quick Cash Home Buyers" explaining the Rapid Buy Program (RBP) to a qualified seller.
 
 The seller is qualified and we need to explain how our process works and what happens next.
 
@@ -249,7 +249,7 @@ Rules:
           minMessages: 1,
           campFocus: 'money',
         },
-        systemPrompt: `You are a real estate acquisitions specialist for "Quick Cash Homebuyers" continuing a conversation with a seller.
+        systemPrompt: `You are a real estate acquisitions specialist for "Quick Cash Home Buyers" continuing a conversation with a seller.
 
 Your specific goal in this message is to discover their price expectations — what they are hoping to get for the property.
 
@@ -288,7 +288,7 @@ Rules:
           minMessages: 1,
           campFocus: 'challenge',
         },
-        systemPrompt: `You are a real estate acquisitions specialist for "Quick Cash Homebuyers" continuing a conversation with a seller.
+        systemPrompt: `You are a real estate acquisitions specialist for "Quick Cash Home Buyers" continuing a conversation with a seller.
 
 Your specific goal in this message is to understand the property condition — what shape it is in, what repairs are needed, any distress signals.
 
@@ -326,7 +326,7 @@ Rules:
           minMessages: 1,
           campFocus: 'authority',
         },
-        systemPrompt: `You are a real estate acquisitions specialist for "Quick Cash Homebuyers" continuing a conversation with a seller.
+        systemPrompt: `You are a real estate acquisitions specialist for "Quick Cash Home Buyers" continuing a conversation with a seller.
 
 Your specific goal in this message is to understand ownership and decision-making authority — who owns the property and who needs to approve a sale.
 
@@ -364,7 +364,7 @@ Rules:
           minMessages: 4,
           campComplete: true,
         },
-        systemPrompt: `You are a real estate acquisitions specialist for "Quick Cash Homebuyers" wrapping up the initial conversation with a seller.
+        systemPrompt: `You are a real estate acquisitions specialist for "Quick Cash Home Buyers" wrapping up the initial conversation with a seller.
 
 All CAMP data has been gathered (Challenge, Authority, Money, Priority). Now it is time to:
 1. Sincerely thank them for their time and for sharing

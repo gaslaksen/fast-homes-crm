@@ -316,7 +316,7 @@ export class MessagesService {
     });
     if (!lead) return null;
 
-    const autoBusinessName = (lead as any).organization?.name || 'Quick Cash Homebuyers';
+    const autoBusinessName = (lead as any).organization?.name || 'Quick Cash Home Buyers';
     const conversationHistory = lead.messages.map(
       (m) => `${m.direction}: ${m.body}`,
     );
@@ -582,7 +582,7 @@ Keep it human, warm, and under 160 characters. Ask only ONE question.`.trim();
     });
     if (!lead) return null;
 
-    const businessName = (lead as any).organization?.name || 'Quick Cash Homebuyers';
+    const businessName = (lead as any).organization?.name || 'Quick Cash Home Buyers';
 
     // Don't send if any real messages exist (ignore SIMULATED sids from old broken attempts)
     const realMessages = lead.messages.filter(
@@ -761,7 +761,7 @@ Keep it human, warm, and under 160 characters. Ask only ONE question.`.trim();
         await this.smsProvider.sendSms(
           data.From,
           data.To,
-          `You have been unsubscribed from ${(lead as any).organization?.name || 'Quick Cash Homebuyers'}. You will not receive further messages.`,
+          `You have been unsubscribed from ${(lead as any).organization?.name || 'Quick Cash Home Buyers'}. You will not receive further messages.`,
         );
       } catch (err) {
         this.logger.warn(`Could not send opt-out confirmation: ${err.message}`);
@@ -920,7 +920,7 @@ Keep it human, warm, and under 160 characters. Ask only ONE question.`.trim();
           include: { organization: true },
         });
         if (lead) {
-          const businessName = (lead as any).organization?.name || 'Quick Cash Homebuyers';
+          const businessName = (lead as any).organization?.name || 'Quick Cash Home Buyers';
           const ack = buildAfterHoursAck(lead.sellerFirstName, businessName);
           await this.sendMessage(leadId, ack);
           this.logger.log(`🌙 After-hours ack sent for lead ${leadId}`);
