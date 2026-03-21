@@ -535,7 +535,7 @@ Return ONLY valid JSON, no other text.`;
         fewShotMessages = selected.exampleMessages || [];
       } else {
         // Fallback: safe follow-up prompt that will NEVER introduce itself
-        systemMessage = `You are a real estate acquisitions specialist for "${context.businessName || 'Fast Homes for Cash'}" continuing a conversation with a seller.
+        systemMessage = `You are a real estate acquisitions specialist for "${context.businessName || 'Quick Cash Homebuyers'}" continuing a conversation with a seller.
 Continue the natural flow of conversation. Show you listened to what they've already said.
 Be empathetic. Ask ONE question at a time. Keep under 160 characters. Sound human.
 NEVER introduce yourself or the company — you are already in a conversation.
@@ -685,7 +685,7 @@ Return ONLY a JSON object:
     const extracted = context.justExtracted;
 
     // If there's no conversation yet, send intro
-    const bizName = context.businessName || 'Fast Homes for Cash';
+    const bizName = context.businessName || 'Quick Cash Homebuyers';
     if (!hasConversation) {
       return {
         direct: `Hi ${name}, this is ${bizName}. I noticed your property at ${context.propertyAddress} — are you considering selling? Reply STOP to opt out.`,
