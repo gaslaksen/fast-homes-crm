@@ -635,14 +635,46 @@ Keep it human, warm, and under 160 characters. Ask only ONE question.`.trim();
       ? ` We also see the property is currently listed on the market — we work alongside traditional listings and can offer a no-commission cash offer alternative.`
       : '';
 
+    // Detect lead source to tailor the opener tone.
+    // Google Ads / paid leads came from a cash-offer ad — they already know what we do.
+    // Organic / direct leads may need a slightly softer intro.
+    const source = (lead as any).source as string | null;
+    const isPaidAdLead = source === 'GOOGLE_ADS' || source === 'FACEBOOK_ADS' || source === 'PAID';
+
+    // Build a one-liner about the property we can drop into the message naturally.
+    // This signals we actually pulled their data, not that we're sending a blast.
+    const propertySnippet = propertyContextParts.length > 0
+      ? `(${propertyContextParts.join(', ')})`
+      : '';
+
+    // Decide which first CAMP question to ask. Timeline is the lowest-friction opener —
+    // "when are you looking to sell?" feels natural regardless of motivation.
+    // If we somehow already know timeline (rare at this stage), fall through to price.
+    const hasTimeline = (lead as any).timeline != null;
+    const hasPrice = (lead as any).askingPrice != null;
+
+    let firstCampQuestion: string;
+    if (!hasTimeline) {
+      firstCampQuestion = isPaidAdLead
+        ? `Ask what their ideal timeline or timeframe for selling looks like — e.g. "How soon are you hoping to close?" or "Do you have a timeline in mind?" Keep it simple and direct.`
+        : `Ask when they are thinking about selling or what their timeline looks like. Keep it light.`;
+    } else if (!hasPrice) {
+      firstCampQuestion = `Ask what price they are hoping to get for the property. Keep it conversational.`;
+    } else {
+      firstCampQuestion = `Ask about the current condition of the property. Reassure them you buy as-is.`;
+    }
+
     const purpose = [
-      `First outreach to a seller who submitted a lead form about their property at ${lead.propertyAddress}.`,
-      `They reached out to us first — acknowledge that you're following up on their inquiry (do NOT say you "found" or "saw" their property as if cold-contacting them).`,
-      propertyDescription,
-      `Briefly introduce yourself as ${businessName}, reference their inquiry, and ask ONE open-ended question to start the conversation (e.g. what prompted them to reach out, or what they're hoping to accomplish).`,
+      `First outreach to a seller who just submitted an inquiry about their property at ${lead.propertyAddress} ${propertySnippet}.`,
+      `IMPORTANT CONTEXT: They contacted US — they clicked an ad or filled out a form asking for a cash offer. They already know we buy houses. Do NOT ask "what made you decide to reach out" — that's tone-deaf. They want a cash offer.`,
+      `Do NOT say you "found" or "saw" their property as if cold-contacting them. You are following up on THEIR request.`,
+      isPaidAdLead
+        ? `They came from a paid cash-offer ad, so they already know what we do. You can reference the cash offer inquiry directly — it is not pushy, it is contextually relevant.`
+        : `They filled out an inquiry form. Reference their inquiry naturally.`,
       arvHint,
       listingHint,
-      `Keep it warm, personal, and under 160 characters.`,
+      `Your message should: (1) Briefly introduce yourself as ${businessName}, (2) Acknowledge their inquiry for a cash offer on ${lead.propertyAddress}, (3) ${firstCampQuestion}`,
+      `Keep it warm, conversational, and under 160 characters. Sound like a real person texting, not a template.`,
       `End with "Reply STOP to opt out."`,
     ].filter(Boolean).join(' ');
     // ──────────────────────────────────────────────────────────────────────────
