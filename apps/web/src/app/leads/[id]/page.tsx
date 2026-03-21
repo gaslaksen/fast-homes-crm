@@ -722,37 +722,109 @@ export default function LeadDetailPage() {
                       <dd className="mt-1 text-sm text-gray-900">{(lead as any).subdivision}</dd>
                     </div>
                   )}
-                  {/* MLS Listing Status row — only from verified Zillow check */}
-                  {((lead as any).sourceMetadata?.isActiveListing === true ||
-                    (lead as any).sourceMetadata?.listingStatus === 'active') && (
-                    <div className="col-span-2 mt-1 p-3 rounded-lg bg-amber-50 border border-amber-200">
-                      <dt className="text-sm font-medium text-amber-800 flex items-center gap-1.5">
-                        🏷️ MLS Listing Status
-                      </dt>
-                      <dd className="mt-1 text-sm font-semibold text-amber-900">
-                        Actively Listed for Sale
-                        {((lead as any).sourceMetadata?.listPrice ||
-                          (lead as any).sourceMetadata?.listed_price ||
-                          (lead as any).sourceMetadata?.price_listed) && (
-                          <span className="ml-2 font-normal text-amber-700">
-                            @ ${Number(
-                              (lead as any).sourceMetadata?.listPrice ||
-                              (lead as any).sourceMetadata?.listed_price ||
-                              (lead as any).sourceMetadata?.price_listed
-                            ).toLocaleString()}
-                          </span>
+                  {/* MLS Listing Status row — Zillow check + manual override */}
+                  <div className="col-span-2 mt-1">
+                    {((lead as any).sourceMetadata?.isActiveListing === true ||
+                      (lead as any).sourceMetadata?.listingStatus === 'active') ? (
+                      <div className="p-3 rounded-lg bg-amber-50 border border-amber-200">
+                        <dt className="text-sm font-medium text-amber-800 flex items-center gap-1.5">
+                          🏷️ MLS Listing Status
+                        </dt>
+                        <dd className="mt-1 text-sm font-semibold text-amber-900">
+                          Actively Listed for Sale
+                          {((lead as any).sourceMetadata?.listPrice ||
+                            (lead as any).sourceMetadata?.listed_price ||
+                            (lead as any).sourceMetadata?.price_listed) && (
+                            <span className="ml-2 font-normal text-amber-700">
+                              @ ${Number(
+                                (lead as any).sourceMetadata?.listPrice ||
+                                (lead as any).sourceMetadata?.listed_price ||
+                                (lead as any).sourceMetadata?.price_listed
+                              ).toLocaleString()}
+                            </span>
+                          )}
+                          {(lead as any).sourceMetadata?.daysOnMarket != null && (
+                            <span className="ml-2 text-xs font-normal text-amber-600">
+                              ({(lead as any).sourceMetadata.daysOnMarket} days on market)
+                            </span>
+                          )}
+                        </dd>
+                        <dd className="mt-0.5 text-xs text-amber-600">
+                          Seller is already marketing through an agent — consider positioning cash offer as a faster, no-commission alternative.
+                        </dd>
+                        <div className="mt-2 flex gap-2">
+                          <button
+                            onClick={async () => {
+                              try {
+                                await fetch(`${process.env.NEXT_PUBLIC_API_URL}/leads/${leadId}/listing-status/check`, { method: 'POST' });
+                                loadLead();
+                              } catch (e) { console.error(e); }
+                            }}
+                            className="text-xs px-2 py-1 rounded bg-amber-100 hover:bg-amber-200 text-amber-800 border border-amber-300"
+                          >
+                            🔄 Re-check Zillow
+                          </button>
+                          <button
+                            onClick={async () => {
+                              if (!confirm('Mark this property as NOT listed on MLS?')) return;
+                              try {
+                                await fetch(`${process.env.NEXT_PUBLIC_API_URL}/leads/${leadId}/listing-status/override`, {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ isActiveListing: false }),
+                                });
+                                loadLead();
+                              } catch (e) { console.error(e); }
+                            }}
+                            className="text-xs px-2 py-1 rounded bg-white hover:bg-red-50 text-red-700 border border-red-200"
+                          >
+                            ✗ Mark as Not Listed
+                          </button>
+                        </div>
+                        {(lead as any).sourceMetadata?.listingOverriddenBy === 'manual' && (
+                          <p className="mt-1 text-xs text-amber-500 italic">Manually overridden</p>
                         )}
-                        {(lead as any).sourceMetadata?.daysOnMarket != null && (
-                          <span className="ml-2 text-xs font-normal text-amber-600">
-                            ({(lead as any).sourceMetadata.daysOnMarket} days on market)
-                          </span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-gray-400">
+                          {(lead as any).sourceMetadata?.listingCheckedAt
+                            ? `MLS: Not listed (checked ${new Date((lead as any).sourceMetadata.listingCheckedAt).toLocaleDateString()})`
+                            : 'MLS status not checked yet'}
+                        </span>
+                        <button
+                          onClick={async () => {
+                            try {
+                              await fetch(`${process.env.NEXT_PUBLIC_API_URL}/leads/${leadId}/listing-status/check`, { method: 'POST' });
+                              loadLead();
+                            } catch (e) { console.error(e); }
+                          }}
+                          className="text-xs px-2 py-1 rounded bg-gray-100 hover:bg-gray-200 text-gray-600 border border-gray-200"
+                        >
+                          🔄 Check Zillow
+                        </button>
+                        <button
+                          onClick={async () => {
+                            if (!confirm('Mark this property as Active on MLS?')) return;
+                            try {
+                              await fetch(`${process.env.NEXT_PUBLIC_API_URL}/leads/${leadId}/listing-status/override`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ isActiveListing: true }),
+                              });
+                              loadLead();
+                            } catch (e) { console.error(e); }
+                          }}
+                          className="text-xs px-2 py-1 rounded bg-white hover:bg-amber-50 text-amber-700 border border-amber-200"
+                        >
+                          + Mark as Listed
+                        </button>
+                        {(lead as any).sourceMetadata?.listingOverriddenBy === 'manual' && (
+                          <p className="text-xs text-gray-400 italic">Manually set</p>
                         )}
-                      </dd>
-                      <dd className="mt-0.5 text-xs text-amber-600">
-                        Seller is already marketing through an agent — consider positioning cash offer as a faster, no-commission alternative.
-                      </dd>
-                    </div>
-                  )}
+                      </div>
+                    )}
+                  </div>
                 </dl>
 
                 {/* ── Tax & Assessment ── */}

@@ -71,22 +71,58 @@ export class ZillowService {
 
         const zpid = zpidMatch[1];
 
-        // Detect active listing from title/snippet keywords
-        const isForSale = title.includes('for sale') || snippet.includes('for sale') || title.includes('listing');
-        const isRecentlySold = title.includes('recently sold') || snippet.includes('recently sold') || snippet.includes('sold on');
-        const isOffMarket = title.includes('off market') || snippet.includes('off market');
+        // ── Listing status detection ───────────────────────────────────────────
+        // Be CONSERVATIVE: only flag as "for sale" when there is an explicit,
+        // unambiguous signal. Zillow uses the word "listing" generically on every
+        // property page (even off-market ones), so title.includes('listing') is
+        // far too broad and causes false-positive "Active MLS" badges.
+        //
+        // Explicit "for sale" signals:
+        const titleForSale = title.includes('for sale');
+        const snippetForSale = snippet.includes('for sale');
+        // A listed price in the snippet is a strong secondary signal (off-market
+        // pages typically show a Zestimate, not a list price label).
+        const hasListPriceLabel = snippet.includes('listed') && /\$[0-9]/.test(snippet);
+        // Days on market is unambiguous — only present on active listings.
+        const hasDom = /\d+\s*days?\s*on\s*(zillow|market)/i.test(snippet);
 
-        // Try to extract list price from snippet (e.g. "$325,000" or "325K")
-        const priceMatch = snippet.match(/\$([0-9]{2,3}(?:,[0-9]{3})*)/);
+        const isForSale = titleForSale || snippetForSale || hasListPriceLabel || hasDom;
+
+        // "Recently sold" signals — checked before off-market to avoid overlap
+        const isRecentlySold =
+          title.includes('recently sold') ||
+          snippet.includes('recently sold') ||
+          snippet.includes('sold on') ||
+          snippet.includes('sold for $');
+
+        // Off-market: explicit label OR Zestimate page with no for-sale signal
+        const isOffMarket =
+          title.includes('off market') ||
+          snippet.includes('off market') ||
+          (!isForSale && !isRecentlySold && snippet.includes('zestimate'));
+
+        // Try to extract list price from snippet (e.g. "$325,000")
+        // Only accept prices that look like home values (6-7 digits), not zip codes etc.
+        const priceMatch = snippet.match(/\$([0-9]{2,3}(?:,[0-9]{3})+)/);
         const listPrice = priceMatch ? parseInt(priceMatch[1].replace(/,/g, ''), 10) : undefined;
 
-        // Days on market
+        // Days on market — only present on active listings
         const domMatch = snippet.match(/(\d+)\s*(?:days?)\s*on\s*(?:zillow|market)/i);
         const daysOnMarket = domMatch ? parseInt(domMatch[1], 10) : undefined;
 
-        const listingStatus = isForSale ? 'active' : isRecentlySold ? 'recently_sold' : isOffMarket ? 'off_market' : 'unknown';
+        const listingStatus = isForSale
+          ? 'active'
+          : isRecentlySold
+          ? 'recently_sold'
+          : isOffMarket
+          ? 'off_market'
+          : 'not_listed'; // default: no clear signal → treat as not listed
 
-        this.logger.log(`Zillow listing check for ${address}: status=${listingStatus}, price=${listPrice}, dom=${daysOnMarket}, zpid=${zpid}`);
+        this.logger.log(
+          `Zillow listing check for ${address}: status=${listingStatus} ` +
+          `(titleForSale=${titleForSale}, snippetForSale=${snippetForSale}, hasDom=${hasDom}), ` +
+          `price=${listPrice}, dom=${daysOnMarket}, zpid=${zpid}`,
+        );
 
         return {
           isListed: isForSale,

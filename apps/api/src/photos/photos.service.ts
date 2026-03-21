@@ -278,4 +278,41 @@ export class PhotosService {
       });
     }
   }
+
+  /**
+   * Manually override the MLS listing status for a lead.
+   * Used when the automated Zillow check returns an incorrect result.
+   */
+  async overrideListingStatus(leadId: string, isActiveListing: boolean): Promise<void> {
+    const lead = await this.prisma.lead.findUnique({
+      where: { id: leadId },
+      select: { sourceMetadata: true },
+    });
+    if (!lead) return;
+
+    const existingMeta = (lead.sourceMetadata as Record<string, any>) || {};
+    const updated: Record<string, any> = {
+      ...existingMeta,
+      isActiveListing,
+      listingStatus: isActiveListing ? 'active' : 'not_listed',
+      listingOverriddenAt: new Date().toISOString(),
+      listingOverriddenBy: 'manual',
+    };
+
+    await this.prisma.lead.update({
+      where: { id: leadId },
+      data: { sourceMetadata: updated },
+    });
+
+    await this.prisma.activity.create({
+      data: {
+        leadId,
+        type: 'FIELD_UPDATED',
+        description: `MLS listing status manually set to: ${isActiveListing ? 'Active Listing' : 'Not Listed'}`,
+        metadata: { source: 'manual_override', isActiveListing },
+      },
+    });
+
+    this.logger.log(`Listing status overridden for lead ${leadId}: isActiveListing=${isActiveListing}`);
+  }
 }

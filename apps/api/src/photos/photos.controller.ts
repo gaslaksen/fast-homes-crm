@@ -77,6 +77,22 @@ export class PhotosController {
     return { success: true, ...result };
   }
 
+  @Post(':id/listing-status/check')
+  async checkListingStatus(@Param('id') leadId: string) {
+    console.log(`🏷️ Listing status re-check requested for lead ${leadId}`);
+    await this.photosService.checkAndSaveListingStatus(leadId);
+    return { success: true };
+  }
+
+  @Post(':id/listing-status/override')
+  async overrideListingStatus(
+    @Param('id') leadId: string,
+    @Body() body: { isActiveListing: boolean },
+  ) {
+    await this.photosService.overrideListingStatus(leadId, body.isActiveListing);
+    return { success: true };
+  }
+
   @Post(':id/photos/url')
   async addFromUrl(
     @Param('id') leadId: string,
