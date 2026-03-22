@@ -237,6 +237,94 @@ export class RentCastService {
   }
 
   /**
+   * Check RentCast /listings/sale for an active MLS listing at this address.
+   *
+   * RentCast's listing endpoint returns structured data (status, price, mlsName,
+   * mlsNumber, listedDate) and returns 404 when the property is not listed — no
+   * text-parsing or heuristics required.
+   *
+   * Returns null when the API key is not configured or an unexpected error occurs.
+   */
+  async checkListingStatus(
+    address: string,
+    city: string,
+    state: string,
+    zip?: string,
+  ): Promise<{
+    isListed: boolean;
+    listingStatus: 'active' | 'pending' | 'not_listed';
+    listPrice?: number;
+    daysOnMarket?: number;
+    mlsName?: string;
+    mlsNumber?: string;
+    listedDate?: string;
+  } | null> {
+    if (!this.apiKey) return null;
+
+    // Build the full address string RentCast expects
+    const fullAddress = zip
+      ? `${address}, ${city}, ${state} ${zip}`
+      : `${address}, ${city}, ${state}`;
+
+    this.logger.log(`RentCast listing check for: ${fullAddress}`);
+
+    try {
+      const response = await axios.get<any[]>(`${RENTCAST_BASE_URL}/listings/sale`, {
+        params: { address: fullAddress, status: 'Active', limit: 1 },
+        headers: { 'X-Api-Key': this.apiKey },
+        timeout: 12000,
+      });
+
+      const listings = response.data || [];
+      if (listings.length === 0) {
+        this.logger.log(`RentCast listing check: no active listing for ${fullAddress}`);
+        return { isListed: false, listingStatus: 'not_listed' };
+      }
+
+      const listing = listings[0];
+      const status = (listing.status || '').toLowerCase();
+      const isPending = status === 'pending';
+
+      this.logger.log(
+        `RentCast listing check: ACTIVE listing found for ${fullAddress} — ` +
+        `$${listing.price?.toLocaleString() ?? '?'}, MLS: ${listing.mlsName ?? '?'} #${listing.mlsNumber ?? '?'}, ` +
+        `${listing.daysOnMarket ?? '?'} DOM`,
+      );
+
+      return {
+        isListed: true,
+        listingStatus: isPending ? 'pending' : 'active',
+        listPrice: listing.price,
+        daysOnMarket: listing.daysOnMarket,
+        mlsName: listing.mlsName,
+        mlsNumber: listing.mlsNumber,
+        listedDate: listing.listedDate,
+      };
+    } catch (error) {
+      if (error instanceof AxiosError) {
+        const status = error.response?.status;
+        if (status === 404) {
+          // 404 = definitively not listed
+          this.logger.log(`RentCast listing check: 404 — not listed (${fullAddress})`);
+          return { isListed: false, listingStatus: 'not_listed' };
+        }
+        if (status === 429) {
+          this.logger.warn(`RentCast listing check: rate limited — skipping`);
+          return null;
+        }
+        if (status === 401) {
+          this.logger.error(`RentCast listing check: invalid API key`);
+          return null;
+        }
+        this.logger.warn(`RentCast listing check failed (${status}): ${error.message}`);
+      } else {
+        this.logger.warn(`RentCast listing check error: ${error}`);
+      }
+      return null;
+    }
+  }
+
+  /**
    * Search for recently sold properties (uses /properties endpoint with saleDateRange)
    */
   async searchSoldProperties(

@@ -4,6 +4,7 @@ import { StreetViewService } from './street-view.service';
 import { SerpApiService } from './serpapi.service';
 import { RedfinService } from './redfin.service';
 import { ZillowService } from './zillow.service';
+import { RentCastService } from '../comps/rentcast.service';
 import sharp from 'sharp';
 import { randomUUID } from 'crypto';
 import axios from 'axios';
@@ -18,6 +19,7 @@ export class PhotosService {
     private serpApiService: SerpApiService,
     private redfinService: RedfinService,
     private zillowService: ZillowService,
+    private rentCastService: RentCastService,
   ) {
     console.log(`📸 PhotosService initialized (base64 storage)`);
   }
@@ -231,21 +233,71 @@ export class PhotosService {
   }
 
   /**
-   * Check Zillow for active listing status and persist the result to
-   * the lead's sourceMetadata field. Called non-blocking during lead enrichment.
+   * Check MLS listing status for a lead and persist the result to sourceMetadata.
+   *
+   * Strategy (in order):
+   * 1. RentCast /listings/sale — structured, reliable, 404 = definitively not listed
+   * 2. Zillow SerpAPI — fallback if RentCast returns null (rate-limited / key issue)
+   *
+   * Called non-blocking during lead enrichment.
    */
   async checkAndSaveListingStatus(leadId: string): Promise<void> {
     const lead = await this.prisma.lead.findUnique({
       where: { id: leadId },
-      select: { propertyAddress: true, propertyCity: true, propertyState: true, sourceMetadata: true },
+      select: {
+        propertyAddress: true,
+        propertyCity: true,
+        propertyState: true,
+        propertyZip: true,
+        sourceMetadata: true,
+      },
     });
     if (!lead?.propertyAddress || !lead.propertyCity) return;
 
-    const result = await this.zillowService.checkListingStatus(
+    // ── 1. Try RentCast first (structured API, no text-parsing) ───────────
+    let result: {
+      isListed: boolean;
+      listingStatus: string;
+      listPrice?: number;
+      daysOnMarket?: number;
+      mlsName?: string;
+      mlsNumber?: string;
+      listedDate?: string;
+      zpid?: string;
+      source?: string;
+    } | null = null;
+
+    const rcResult = await this.rentCastService.checkListingStatus(
       lead.propertyAddress,
       lead.propertyCity,
       lead.propertyState || '',
+      lead.propertyZip || undefined,
     );
+
+    if (rcResult !== null) {
+      // RentCast gave us a definitive answer (including "not listed")
+      result = { ...rcResult, source: 'rentcast' };
+      this.logger.log(
+        `Listing status from RentCast for lead ${leadId}: ${result.listingStatus}` +
+        `${result.listPrice ? ` @ $${result.listPrice.toLocaleString()}` : ''}` +
+        `${result.mlsName ? ` (${result.mlsName} #${result.mlsNumber})` : ''}`,
+      );
+    } else {
+      // ── 2. Fall back to Zillow SerpAPI ──────────────────────────────────
+      this.logger.log(`RentCast unavailable for lead ${leadId} — falling back to Zillow`);
+      const zillowResult = await this.zillowService.checkListingStatus(
+        lead.propertyAddress,
+        lead.propertyCity,
+        lead.propertyState || '',
+      );
+      if (zillowResult) {
+        result = { ...zillowResult, listingStatus: zillowResult.listingStatus ?? 'not_listed', source: 'zillow' };
+        this.logger.log(
+          `Listing status from Zillow (fallback) for lead ${leadId}: ${result.listingStatus}` +
+          `${result.listPrice ? ` @ $${result.listPrice.toLocaleString()}` : ''}`,
+        );
+      }
+    }
 
     if (!result) return;
 
@@ -255,25 +307,31 @@ export class PhotosService {
       listingStatus: result.listingStatus,
       isActiveListing: result.isListed,
       listingCheckedAt: new Date().toISOString(),
+      listingCheckSource: result.source,
     };
-    if (result.listPrice) updated.listPrice = result.listPrice;
+    if (result.listPrice)       updated.listPrice     = result.listPrice;
     if (result.daysOnMarket != null) updated.daysOnMarket = result.daysOnMarket;
-    if (result.zpid) updated.zpid = result.zpid;
+    if (result.zpid)            updated.zpid          = result.zpid;
+    if (result.mlsName)         updated.mlsName       = result.mlsName;
+    if (result.mlsNumber)       updated.mlsNumber     = result.mlsNumber;
+    if (result.listedDate)      updated.listedDate    = result.listedDate;
 
     await this.prisma.lead.update({
       where: { id: leadId },
       data: { sourceMetadata: updated },
     });
 
-    this.logger.log(`Listing status saved for lead ${leadId}: ${result.listingStatus}${result.listPrice ? ` @ $${result.listPrice.toLocaleString()}` : ''}`);
-
     if (result.isListed) {
+      const sourceLabel = result.source === 'rentcast' ? 'RentCast MLS' : 'Zillow';
       await this.prisma.activity.create({
         data: {
           leadId,
           type: 'FIELD_UPDATED',
-          description: `Property is actively listed on Zillow${result.listPrice ? ` at $${result.listPrice.toLocaleString()}` : ''}${result.daysOnMarket != null ? ` (${result.daysOnMarket} days on market)` : ''}`,
-          metadata: { source: 'zillow_listing_check', ...result },
+          description: `Property is actively listed on ${sourceLabel}` +
+            `${result.listPrice ? ` at $${result.listPrice.toLocaleString()}` : ''}` +
+            `${result.daysOnMarket != null ? ` (${result.daysOnMarket} days on market)` : ''}` +
+            `${result.mlsName ? ` — MLS: ${result.mlsName} #${result.mlsNumber}` : ''}`,
+          metadata: { source: result.source, ...result },
         },
       });
     }

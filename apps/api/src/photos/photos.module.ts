@@ -5,8 +5,10 @@ import { StreetViewService } from './street-view.service';
 import { SerpApiService } from './serpapi.service';
 import { RedfinService } from './redfin.service';
 import { ZillowService } from './zillow.service';
+import { CompsModule } from '../comps/comps.module';
 
 @Module({
+  imports: [CompsModule],
   controllers: [PhotosController],
   providers: [PhotosService, StreetViewService, SerpApiService, RedfinService, ZillowService],
   exports: [PhotosService, StreetViewService, SerpApiService, RedfinService, ZillowService],
