@@ -2031,6 +2031,254 @@ Use Midwest/rural Ohio pricing. Be specific about what you see — don't general
     };
   }
 
+  // ══════════════════════════════════════════════════════════════════════════════
+  // DEAL INTELLIGENCE — Full investor reasoning layer
+  // ══════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Generates a comprehensive deal intelligence report that mirrors how an
+   * experienced wholesaler thinks through a property:
+   *
+   * 1. Market velocity — pending comps, DOM, price reductions, what the market is doing
+   * 2. $/sqft anchoring — sold comps normalized to $/sqft to control for size differences
+   * 3. Lot value isolation — when large lot exists, what is the land worth separately
+   * 4. Multi-scenario exits — as-is, modest remodel, full ARV with realistic price ranges
+   * 5. Risk scenarios — how condition/clutter/buyer pool affects achievable price
+   * 6. Deal viability — clear go/no-go with the math laid out
+   * 7. Seller pitch — how to frame the conversation with this specific seller
+   */
+  async generateDealIntelligence(analysisId: string): Promise<string> {
+    const analysis = await this.getAnalysis(analysisId);
+    if (!analysis) throw new Error('Analysis not found');
+    if (!this.anthropic) return 'AI unavailable — Anthropic API key not configured.';
+
+    const lead = analysis.lead as any;
+    const allComps = analysis.comps;
+
+    if (allComps.length === 0) {
+      return JSON.stringify({
+        error: 'No comps available. Fetch comps before generating deal intelligence.',
+      });
+    }
+
+    const selectedComps = allComps.filter((c) => c.selected);
+    const sqft = lead.sqftOverride || lead.sqft;
+    const now = Date.now();
+
+    // ── Build pending comp context ──────────────────────────────────────────
+    // RentCast returns pending/active comps in some datasets — flag them
+    const pendingComps = allComps.filter((c) =>
+      (c.notes || '').toLowerCase().includes('pending') ||
+      (c.notes || '').toLowerCase().includes('under contract') ||
+      (c.notes || '').toLowerCase().includes('active'),
+    );
+
+    // ── Build sold comp $/sqft table ────────────────────────────────────────
+    const soldCompsWithSqft = selectedComps.filter(
+      (c) => c.sqft && c.sqft > 0 && c.soldPrice > 0,
+    );
+    const ppsfTable = soldCompsWithSqft.map((c) => ({
+      address: c.address,
+      soldPrice: c.soldPrice,
+      sqft: c.sqft,
+      ppsf: Math.round(c.soldPrice / c.sqft!),
+      lotSize: c.lotSize,
+      distance: c.distance,
+      monthsAgo: Math.round((now - new Date(c.soldDate).getTime()) / (30 * 24 * 60 * 60 * 1000)),
+      daysOnMarket: c.daysOnMarket,
+      isRenovated: c.isRenovated,
+      notes: c.notes,
+    }));
+
+    const avgPpsf = ppsfTable.length > 0
+      ? Math.round(ppsfTable.reduce((s, c) => s + c.ppsf, 0) / ppsfTable.length)
+      : null;
+    const ppsfAnchoredValue = avgPpsf && sqft ? Math.round(avgPpsf * sqft) : null;
+
+    // ── ATTOM condition-adjusted AVM context ────────────────────────────────
+    const attomBlock = lead.attomAvm ? {
+      avm: Math.round(lead.attomAvm),
+      asIs: lead.avmPoorHigh ? Math.round(lead.avmPoorHigh) : null,
+      goodCondition: lead.avmGoodHigh ? Math.round(lead.avmGoodHigh) : null,
+      afterRepair: lead.avmExcellentHigh ? Math.round(lead.avmExcellentHigh) : null,
+      confidence: lead.attomAvmConfidence,
+    } : null;
+
+    // ── Prior analysis results ───────────────────────────────────────────────
+    const analysisContext = {
+      arvEstimate: analysis.arvEstimate,
+      arvLow: analysis.arvLow,
+      arvHigh: analysis.arvHigh,
+      triangulatedArv: (analysis as any).triangulatedArv,
+      riskAdjustedArv: (analysis as any).riskAdjustedArv,
+      confidenceScore: analysis.confidenceScore,
+      confidenceTier: (analysis as any).confidenceTier,
+      riskFlags: (analysis as any).riskFlags,
+      repairCostLow: (analysis as any).repairCostLow,
+      repairCostHigh: (analysis as any).repairCostHigh,
+      sellerMotivationTier: (analysis as any).sellerMotivationTier,
+      sellerMotivationMaoPercent: (analysis as any).sellerMotivationMaoPercent,
+    };
+
+    const prompt = `You are an expert real estate wholesaler and investor. Think through this deal exactly like an experienced wholesaler walking a property and reviewing comps — thorough, specific, and practical.
+
+SUBJECT PROPERTY:
+Address: ${lead.propertyAddress}, ${lead.propertyCity}, ${lead.propertyState} ${lead.propertyZip}
+Size: ${sqft?.toLocaleString() || 'Unknown'} sqft | ${lead.bedrooms || '?'}bd / ${lead.bathrooms || '?'}ba | Built: ${lead.yearBuilt || '?'}
+Lot Size: ${lead.lotSize ? lead.lotSize.toFixed(2) + ' acres' : 'Unknown'}
+Property Type: ${lead.propertyType || 'Unknown'}
+Seller-reported Condition: ${lead.conditionLevel || 'Unknown'}
+Asking Price: ${lead.askingPrice ? '$' + lead.askingPrice.toLocaleString() : 'Not provided'}
+Seller Name: ${lead.sellerFirstName || 'Seller'} ${lead.sellerLastName || ''}
+${lead.sellerMotivation ? 'Seller Motivation: ' + lead.sellerMotivation : ''}
+
+ATTOM INDEPENDENT VALUATION:
+${attomBlock ? `- AVM: $${attomBlock.avm.toLocaleString()}${attomBlock.confidence ? ` (${attomBlock.confidence}% confidence)` : ''}
+- As-Is / Distressed: ${attomBlock.asIs ? '$' + attomBlock.asIs.toLocaleString() : 'N/A'}
+- Good Condition: ${attomBlock.goodCondition ? '$' + attomBlock.goodCondition.toLocaleString() : 'N/A'}
+- After Repair (ARV): ${attomBlock.afterRepair ? '$' + attomBlock.afterRepair.toLocaleString() : 'N/A'}` : 'Not available'}
+
+PRIOR ANALYSIS RESULTS:
+- System ARV: ${analysisContext.arvEstimate ? '$' + Math.round(analysisContext.arvEstimate).toLocaleString() : 'Not calculated'}
+- ARV Range: ${analysisContext.arvLow ? '$' + Math.round(analysisContext.arvLow).toLocaleString() : '?'} – ${analysisContext.arvHigh ? '$' + Math.round(analysisContext.arvHigh).toLocaleString() : '?'}
+- Triangulated ARV: ${analysisContext.triangulatedArv ? '$' + Math.round(analysisContext.triangulatedArv).toLocaleString() : 'N/A'}
+- Risk-Adjusted ARV: ${analysisContext.riskAdjustedArv ? '$' + Math.round(analysisContext.riskAdjustedArv).toLocaleString() : 'N/A'}
+- Confidence: ${analysisContext.confidenceScore}/100 (${analysisContext.confidenceTier || 'Unknown'})
+- Risk Flags: ${analysisContext.riskFlags?.length ? (analysisContext.riskFlags as string[]).join(', ') : 'None'}
+- Repair Estimate: ${analysisContext.repairCostLow ? '$' + Math.round(analysisContext.repairCostLow).toLocaleString() + ' – $' + Math.round(analysisContext.repairCostHigh!).toLocaleString() : 'Not estimated'}
+- Seller Motivation: ${analysisContext.sellerMotivationTier || 'Unknown'} (MAO ${analysisContext.sellerMotivationMaoPercent || 70}%)
+
+COMP POOL — $/SQFT TABLE (selected comps with sqft data):
+${ppsfTable.length > 0 ? ppsfTable.map((c, i) =>
+  `${i + 1}. ${c.address}
+     Sold: $${c.soldPrice.toLocaleString()} | $/sqft: $${c.ppsf} | ${c.sqft?.toLocaleString()} sqft | ${c.distance.toFixed(2)} mi | ${c.monthsAgo} mo ago
+     Lot: ${c.lotSize ? c.lotSize.toFixed(2) + ' acres' : 'N/A'} | DOM: ${c.daysOnMarket ?? 'N/A'} | ${c.isRenovated ? 'RENOVATED' : 'Standard sale'}${c.notes ? ' | ' + c.notes.substring(0, 80) : ''}`
+).join('\n') : 'No comps with sqft data available'}
+
+${avgPpsf ? `AVERAGE $/SQFT FROM COMPS: $${avgPpsf}/sqft → anchored value for subject (${sqft?.toLocaleString()} sqft): $${ppsfAnchoredValue?.toLocaleString()}` : ''}
+
+${pendingComps.length > 0 ? `PENDING / ACTIVE COMPS (market velocity signal):
+${pendingComps.map((c, i) => `${i + 1}. ${c.address} | Listed/Pending at $${c.soldPrice.toLocaleString()} | ${c.sqft?.toLocaleString() || '?'} sqft | DOM: ${c.daysOnMarket ?? 'N/A'}${c.notes ? ' | ' + c.notes.substring(0, 100) : ''}`).join('\n')}` : ''}
+
+ALL SELECTED COMPS (for context):
+${selectedComps.map((c, i) => {
+  const monthsAgo = Math.round((now - new Date(c.soldDate).getTime()) / (30 * 24 * 60 * 60 * 1000));
+  return `${i + 1}. ${c.address} | $${c.soldPrice.toLocaleString()} | ${c.bedrooms || '?'}bd/${c.bathrooms || '?'}ba | ${c.sqft?.toLocaleString() || '?'} sqft | ${c.lotSize ? c.lotSize.toFixed(2) + 'ac' : '?'} lot | ${c.distance.toFixed(2)}mi | ${monthsAgo}mo ago | DOM: ${c.daysOnMarket ?? 'N/A'}${c.isRenovated ? ' | RENOVATED' : ''}`;
+}).join('\n')}
+
+Now think through this deal systematically. Respond ONLY with a valid JSON object in exactly this shape:
+
+{
+  "marketVelocity": {
+    "summary": "2-3 sentences: what are pending/active comps telling us about current market demand and pricing pressure? DOM trends, price reductions if visible, absorption rate sentiment.",
+    "verdict": "hot" | "normal" | "slow" | "unknown"
+  },
+  "ppsfAnalysis": {
+    "avgPpsf": number or null,
+    "anchoredValue": number or null,
+    "summary": "2-3 sentences: what does $/sqft tell us? Reference the specific comps. Note if renovated comps are skewing it upward. What $/sqft range is realistic for this property in its current condition vs remodeled?",
+    "asIsPpsf": number or null,
+    "remodledPpsf": number or null
+  },
+  "lotValueAnalysis": {
+    "applicable": true | false,
+    "estimatedLotValue": number or null,
+    "basis": "sentence explaining how lot value was derived (comparable land sale, % of total, etc)",
+    "summary": "Is the lot a meaningful part of the value? How does it affect the deal math?"
+  },
+  "exitScenarios": [
+    {
+      "name": "As-Is Sale",
+      "description": "Sell as-is without any work",
+      "estimatedSalePrice": number,
+      "saleRange": { "low": number, "high": number },
+      "timeToSell": "estimated days on market",
+      "notes": "key assumptions and risks for this scenario"
+    },
+    {
+      "name": "Modest Remodel",
+      "description": "Light cosmetic work — paint, flooring, clean-up",
+      "estimatedSalePrice": number,
+      "saleRange": { "low": number, "high": number },
+      "estimatedRepairCost": number,
+      "timeToSell": "estimated days on market",
+      "notes": "what work is needed, realistic buyer pool"
+    },
+    {
+      "name": "Full ARV",
+      "description": "Fully renovated / move-in ready",
+      "estimatedSalePrice": number,
+      "saleRange": { "low": number, "high": number },
+      "estimatedRepairCost": number,
+      "timeToSell": "estimated days on market",
+      "notes": "what defines 'full ARV' for this property and market"
+    }
+  ],
+  "dealMath": {
+    "recommendedExitStrategy": "As-Is Sale" | "Modest Remodel" | "Full ARV" | "Wholesale",
+    "targetArv": number,
+    "repairEstimate": number,
+    "maoAt70Percent": number,
+    "maoAt65Percent": number,
+    "suggestedOfferRange": { "low": number, "high": number },
+    "breakEvenPrice": number or null,
+    "assignmentFeeBuiltIn": number,
+    "summary": "2-3 sentences: is this a deal at the asking price? What offer range makes sense? What's the maximum we can pay and still profit?"
+  },
+  "riskFactors": [
+    {
+      "factor": "factor name",
+      "impact": "high" | "medium" | "low",
+      "detail": "specific impact on this deal"
+    }
+  ],
+  "sellerPitch": {
+    "keyPoints": ["point 1", "point 2", "point 3"],
+    "framingStrategy": "1-2 sentences: how to position your offer — what angle resonates with THIS seller's situation?",
+    "suggestedScript": "3-5 sentence conversational script for the actual seller call or meeting. Reference their specific property and situation. Be empathetic but honest about the challenges.",
+    "objectionHandling": {
+      "priceObjection": "How to respond if they say your offer is too low",
+      "listingObjection": "How to respond if they say they'll just list with a realtor"
+    }
+  },
+  "bottomLine": "2-3 sentence executive summary: go/no-go verdict, the number that makes this work, and one key thing to watch out for."
+}`;
+
+    try {
+      const response = await this.anthropic.messages.create({
+        model: 'claude-opus-4-5',
+        max_tokens: 4096,
+        messages: [{ role: 'user', content: prompt }],
+      });
+
+      const raw = (response.content[0] as any)?.text || '';
+      let output = raw;
+
+      // Parse and validate JSON
+      try {
+        const stripped = raw.replace(/^```[\w]*\s*/m, '').replace(/\s*```$/m, '').trim();
+        const m = stripped.match(/\{[\s\S]*\}/);
+        if (m) {
+          JSON.parse(m[0]); // validate
+          output = m[0];
+        }
+      } catch (e) {
+        this.logger.warn(`Deal intelligence JSON parse failed for ${analysisId} — storing raw`);
+      }
+
+      await this.prisma.compAnalysis.update({
+        where: { id: analysisId },
+        data: { dealIntelligence: output },
+      });
+
+      this.logger.log(`Deal intelligence generated for analysis ${analysisId}`);
+      return output;
+    } catch (error) {
+      this.logger.error('Deal intelligence generation failed:', error);
+      throw new Error(`Deal intelligence failed: ${(error as Error).message}`);
+    }
+  }
+
   async updateAnalysis(analysisId: string, data: any) {
     return this.prisma.compAnalysis.update({
       where: { id: analysisId },

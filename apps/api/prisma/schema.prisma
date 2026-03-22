@@ -314,6 +314,10 @@ model CompAnalysis {
   negotiationRangeLow         Float?
   negotiationRangeHigh        Float?
 
+  // Deal intelligence: full investor reasoning (market velocity, $/sqft anchoring,
+  // multi-scenario exits, lot value, seller pitch)
+  dealIntelligence  String?  @db.Text
+
   comps             Comp[]
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt

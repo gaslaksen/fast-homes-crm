@@ -179,4 +179,10 @@ export class CompAnalysisController {
   async triangulateArv(@Param('analysisId') analysisId: string) {
     return this.compAnalysisService.triangulateArv(analysisId);
   }
+
+  @Post(':analysisId/deal-intelligence')
+  async generateDealIntelligence(@Param('analysisId') analysisId: string) {
+    const intelligence = await this.compAnalysisService.generateDealIntelligence(analysisId);
+    return { intelligence };
+  }
 }
