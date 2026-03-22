@@ -149,6 +149,8 @@ export const compAnalysisAPI = {
     api.post(`/leads/${leadId}/comp-analysis/${analysisId}/save-to-lead`),
   generateAssessment: (leadId: string, analysisId: string) =>
     api.post(`/leads/${leadId}/comp-analysis/${analysisId}/assessment`),
+  dealIntelligence: (leadId: string, analysisId: string) =>
+    api.post(`/leads/${leadId}/comp-analysis/${analysisId}/deal-intelligence`),
   analyzePhotos: (leadId: string, analysisId: string, formData: FormData) =>
     api.post(`/leads/${leadId}/comp-analysis/${analysisId}/analyze-photos`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },

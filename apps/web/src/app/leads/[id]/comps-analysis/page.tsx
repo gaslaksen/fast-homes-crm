@@ -126,6 +126,7 @@ interface Analysis {
   functionalObsolescenceAdj?: number;
   buyerPoolReduction?: number;
   landUtilityReduction?: number;
+  dealIntelligence?: string;
   comps: Comp[];
   lead: Lead;
 }
@@ -200,6 +201,7 @@ export default function CompsAnalysisPage() {
   const [dealNumbersSaved, setDealNumbersSaved] = useState(false);
   const [generatingAi, setGeneratingAi] = useState(false);
   const [generatingAssessment, setGeneratingAssessment] = useState(false);
+  const [generatingDealIntel, setGeneratingDealIntel] = useState(false);
   const [analyzingPhotos, setAnalyzingPhotos] = useState(false);
   const [selectedPhotos, setSelectedPhotos] = useState<File[]>([]);
   const [photoThumbnails, setPhotoThumbnails] = useState<{file: File; url: string; status: 'ready'|'uploading'|'done'}[]>([]);
@@ -428,6 +430,22 @@ export default function CompsAnalysisPage() {
       alert('Failed to generate assessment');
     } finally {
       setGeneratingAssessment(false);
+    }
+  };
+
+  // ─── Deal Intelligence ──────────────────────────────────────────────────────
+  const handleGenerateDealIntelligence = async () => {
+    if (!analysis) return;
+    setGeneratingDealIntel(true);
+    try {
+      await compAnalysisAPI.dealIntelligence(leadId, analysis.id);
+      const updated = await compAnalysisAPI.get(leadId, analysis.id);
+      setAnalysis(updated.data);
+    } catch (error) {
+      console.error("Deal intelligence failed:", error);
+      alert("Failed to generate deal intelligence");
+    } finally {
+      setGeneratingDealIntel(false);
     }
   };
 
@@ -1945,6 +1963,212 @@ export default function CompsAnalysisPage() {
                 setLead(lr.data);
               }}
             />
+          </div>
+
+          {/* Deal Intelligence */}
+          <div className="card border border-emerald-200 mt-6">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <span className="text-xl">🎯</span>
+                <h3 className="font-bold text-gray-900">Deal Intelligence</h3>
+                {(analysis as any)?.dealIntelligence && (
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium">Generated</span>
+                )}
+              </div>
+              <button
+                onClick={handleGenerateDealIntelligence}
+                disabled={generatingDealIntel || !analysis || allComps.length === 0}
+                className="btn btn-sm bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+              >
+                {generatingDealIntel ? (
+                  <span className="flex items-center gap-2">
+                    <span className="animate-spin inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full" />
+                    Analyzing...
+                  </span>
+                ) : (analysis as any)?.dealIntelligence ? "Regenerate" : "Generate Deal Intelligence"}
+              </button>
+            </div>
+            {(() => {
+              const raw = (analysis as any)?.dealIntelligence;
+              if (!raw) {
+                return (
+                  <p className="text-sm text-gray-500 italic">
+                    {allComps.length === 0
+                      ? "Fetch comps and run ARV calculation first."
+                      : "Generate a full investor reasoning report: market velocity, $/sqft anchoring, exit scenarios, deal math, and a ready-to-use seller pitch."}
+                  </p>
+                );
+              }
+              let parsed: any = null;
+              try {
+                const stripped = raw.replace(/^```[\w]*\s*/m, "").replace(/\s*```$/m, "").trim();
+                const m = stripped.match(/\{[\s\S]*/);
+                if (m) parsed = JSON.parse(m[0]);
+              } catch {}
+              if (!parsed) {
+                return <p className="text-sm text-gray-500 italic">Could not parse deal intelligence output.</p>;
+              }
+              return (
+                <div className="space-y-5">
+                  {parsed.bottomLine && (
+                    <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
+                      <div className="text-xs font-semibold text-emerald-700 uppercase tracking-wide mb-1">🎯 Bottom Line</div>
+                      <p className="text-sm text-emerald-900 leading-relaxed font-medium">{parsed.bottomLine}</p>
+                    </div>
+                  )}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {parsed.marketVelocity && (
+                      <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+                        <div className="flex items-center gap-2 mb-2">
+                          <div className="text-xs font-semibold text-blue-700 uppercase tracking-wide">📈 Market Velocity</div>
+                          {parsed.marketVelocity.verdict && (
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${parsed.marketVelocity.verdict === "hot" ? "bg-red-100 text-red-700" : parsed.marketVelocity.verdict === "normal" ? "bg-green-100 text-green-700" : parsed.marketVelocity.verdict === "slow" ? "bg-yellow-100 text-yellow-700" : "bg-gray-100 text-gray-600"}`}>{parsed.marketVelocity.verdict}</span>
+                          )}
+                        </div>
+                        <p className="text-sm text-blue-900">{parsed.marketVelocity.summary}</p>
+                      </div>
+                    )}
+                    {parsed.ppsfAnalysis && (
+                      <div className="bg-purple-50 border border-purple-200 rounded-xl p-4">
+                        <div className="text-xs font-semibold text-purple-700 uppercase tracking-wide mb-2">📐 $/sqft Analysis</div>
+                        <div className="flex gap-4 mb-2">
+                          {parsed.ppsfAnalysis.avgPpsf && (
+                            <div>
+                              <div className="text-lg font-bold text-purple-800">${parsed.ppsfAnalysis.avgPpsf}/sqft</div>
+                              <div className="text-xs text-purple-600">Avg from comps</div>
+                            </div>
+                          )}
+                          {parsed.ppsfAnalysis.anchoredValue && (
+                            <div>
+                              <div className="text-lg font-bold text-purple-800">${parsed.ppsfAnalysis.anchoredValue.toLocaleString()}</div>
+                              <div className="text-xs text-purple-600">Anchored value</div>
+                            </div>
+                          )}
+                        </div>
+                        <p className="text-sm text-purple-900">{parsed.ppsfAnalysis.summary}</p>
+                      </div>
+                    )}
+                  </div>
+                  {parsed.lotValueAnalysis?.applicable && (
+                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+                      <div className="flex items-center gap-2 mb-2">
+                        <div className="text-xs font-semibold text-amber-700 uppercase tracking-wide">🌳 Lot Value</div>
+                        {parsed.lotValueAnalysis.estimatedLotValue && (
+                          <span className="text-sm font-bold text-amber-800">${parsed.lotValueAnalysis.estimatedLotValue.toLocaleString()}</span>
+                        )}
+                      </div>
+                      <p className="text-sm text-amber-900">{parsed.lotValueAnalysis.summary}</p>
+                    </div>
+                  )}
+                  {parsed.exitScenarios?.length > 0 && (
+                    <div>
+                      <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">🚪 Exit Scenarios</div>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        {parsed.exitScenarios.map((scenario: any, i: number) => (
+                          <div key={i} className="bg-gray-50 border border-gray-200 rounded-xl p-4">
+                            <div className="font-semibold text-sm text-gray-800 mb-1">{scenario.name}</div>
+                            <div className="text-xl font-bold text-gray-900 mb-0.5">${scenario.estimatedSalePrice?.toLocaleString()}</div>
+                            <div className="text-xs text-gray-500 mb-2">${scenario.saleRange?.low?.toLocaleString()} – ${scenario.saleRange?.high?.toLocaleString()}</div>
+                            {scenario.estimatedRepairCost ? (
+                              <div className="text-xs text-orange-600 mb-1">Repairs: ${scenario.estimatedRepairCost.toLocaleString()}</div>
+                            ) : null}
+                            {scenario.timeToSell && (
+                              <div className="text-xs text-gray-500 mb-2">⏱ {scenario.timeToSell}</div>
+                            )}
+                            <p className="text-xs text-gray-600 leading-relaxed">{scenario.notes}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {parsed.dealMath && (
+                    <div className="bg-gray-900 text-white rounded-xl p-5">
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide">💰 Deal Math</div>
+                        {parsed.dealMath.recommendedExitStrategy && (
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-700 text-emerald-100 font-medium">Recommended: {parsed.dealMath.recommendedExitStrategy}</span>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+                        {parsed.dealMath.targetArv ? (
+                          <div>
+                            <div className="text-xs text-gray-400 mb-0.5">Target ARV</div>
+                            <div className="text-lg font-bold text-white">${parsed.dealMath.targetArv.toLocaleString()}</div>
+                          </div>
+                        ) : null}
+                        {parsed.dealMath.maoAt70Percent ? (
+                          <div>
+                            <div className="text-xs text-gray-400 mb-0.5">MAO @ 70%</div>
+                            <div className="text-lg font-bold text-yellow-400">${parsed.dealMath.maoAt70Percent.toLocaleString()}</div>
+                          </div>
+                        ) : null}
+                        {parsed.dealMath.maoAt65Percent ? (
+                          <div>
+                            <div className="text-xs text-gray-400 mb-0.5">MAO @ 65%</div>
+                            <div className="text-lg font-bold text-orange-400">${parsed.dealMath.maoAt65Percent.toLocaleString()}</div>
+                          </div>
+                        ) : null}
+                        {parsed.dealMath.suggestedOfferRange ? (
+                          <div>
+                            <div className="text-xs text-gray-400 mb-0.5">Offer Range</div>
+                            <div className="text-lg font-bold text-emerald-400">${parsed.dealMath.suggestedOfferRange.low?.toLocaleString()} – ${parsed.dealMath.suggestedOfferRange.high?.toLocaleString()}</div>
+                          </div>
+                        ) : null}
+                      </div>
+                      {parsed.dealMath.summary && (
+                        <p className="text-sm text-gray-300 leading-relaxed">{parsed.dealMath.summary}</p>
+                      )}
+                    </div>
+                  )}
+                  {parsed.riskFactors?.length > 0 && (
+                    <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+                      <div className="text-xs font-semibold text-red-700 uppercase tracking-wide mb-3">⚠️ Risk Factors</div>
+                      <div className="space-y-2">
+                        {parsed.riskFactors.map((rf: any, i: number) => (
+                          <div key={i} className="flex items-start gap-2">
+                            <span className={`text-xs px-1.5 py-0.5 rounded font-medium shrink-0 mt-0.5 ${rf.impact === "high" ? "bg-red-200 text-red-800" : rf.impact === "medium" ? "bg-yellow-200 text-yellow-800" : "bg-gray-200 text-gray-700"}`}>{rf.impact}</span>
+                            <div>
+                              <span className="text-sm font-medium text-red-900">{rf.factor}: </span>
+                              <span className="text-sm text-red-800">{rf.detail}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {parsed.sellerPitch && (
+                    <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-5">
+                      <div className="text-xs font-semibold text-indigo-700 uppercase tracking-wide mb-3">🗣 Seller Pitch</div>
+                      {parsed.sellerPitch.framingStrategy && (
+                        <p className="text-sm text-indigo-800 mb-3 italic">{parsed.sellerPitch.framingStrategy}</p>
+                      )}
+                      {parsed.sellerPitch.suggestedScript && (
+                        <div className="bg-white border border-indigo-200 rounded-lg p-3 mb-3">
+                          <div className="text-xs font-medium text-indigo-600 mb-1">Suggested Script</div>
+                          <p className="text-sm text-gray-800 leading-relaxed">{parsed.sellerPitch.suggestedScript}</p>
+                        </div>
+                      )}
+                      {parsed.sellerPitch.objectionHandling && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          {parsed.sellerPitch.objectionHandling.priceObjection && (
+                            <div className="bg-white border border-indigo-200 rounded-lg p-3">
+                              <div className="text-xs font-medium text-indigo-600 mb-1">💬 If they say the price is too low...</div>
+                              <p className="text-xs text-gray-700 leading-relaxed">{parsed.sellerPitch.objectionHandling.priceObjection}</p>
+                            </div>
+                          )}
+                          {parsed.sellerPitch.objectionHandling.listingObjection && (
+                            <div className="bg-white border border-indigo-200 rounded-lg p-3">
+                              <div className="text-xs font-medium text-indigo-600 mb-1">💬 If they want to list with a realtor...</div>
+                              <p className="text-xs text-gray-700 leading-relaxed">{parsed.sellerPitch.objectionHandling.listingObjection}</p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
           </>
         )}
