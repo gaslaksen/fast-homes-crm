@@ -612,7 +612,7 @@ Rules:
 - Keep each under 160 characters
 - Ask only 1 question per message
 - Be respectful and compliant
-${isFirstMessage ? '- Include "Reply STOP to opt out" at the end\n' : ''}- Sound human, not spammy
+- Sound human, not spammy
 - Do NOT ask about information already known (listed above)
 - Do NOT agree to, validate, or commit to any price, timeline, or terms the seller mentioned (e.g. never say "$250k works", "that price works for us", "7 days works", or anything implying agreement)
 - You are ONLY gathering information — all offers and decisions are made by the team, not in this message
@@ -685,12 +685,13 @@ Return ONLY a JSON object:
     const extracted = context.justExtracted;
 
     // If there's no conversation yet, send intro
-    const bizName = context.businessName || 'Quick Cash Home Buyers';
     if (!hasConversation) {
+      // Note: SmrtPhone automatically prepends the company name and appends opt-out text.
+      // Do NOT include either in the message body.
       return {
-        direct: `Hi ${name}, this is ${bizName}. I noticed your property at ${context.propertyAddress} — are you considering selling? Reply STOP to opt out.`,
-        friendly: `Hey ${name}! I'm with ${bizName} and saw your place at ${context.propertyAddress}. Would love to learn more if you have a sec. Reply STOP to opt out.`,
-        professional: `Hello ${name}, this is ${bizName} reaching out about ${context.propertyAddress}. Would you have a moment to discuss your property? Reply STOP to opt out.`,
+        direct: `Hi ${name}, got your cash offer request for ${context.propertyAddress}. How soon are you looking to sell?`,
+        friendly: `Hey ${name}! Thanks for reaching out about ${context.propertyAddress}. How soon are you hoping to sell?`,
+        professional: `Hello ${name}, following up on your cash offer inquiry for ${context.propertyAddress}. What is your ideal timeline for selling?`,
       };
     }
 

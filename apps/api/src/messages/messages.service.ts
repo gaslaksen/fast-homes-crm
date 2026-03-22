@@ -681,15 +681,15 @@ Keep it human, warm, and under 160 characters. Ask only ONE question.`.trim();
       `IMPORTANT CONTEXT: They contacted US — they clicked an ad or filled out a form asking for a cash offer. They already know we buy houses. Do NOT ask "what made you decide to reach out" — that's tone-deaf. They want a cash offer.`,
       `Do NOT say you "found" or "saw" their property as if cold-contacting them. You are following up on THEIR request.`,
       `FORBIDDEN: Never use vague phrases like "wrap things up", "wrapping things up", "close things out", or "finalize things" — these are confusing and unprofessional for a first text to a seller.`,
-      `The message MUST: (1) say "Quick Cash Home Buyers", (2) reference their property address, (3) ask a clear timeline question like "How soon are you looking to sell?".`,
+      `DO NOT include "Reply STOP to opt out" or any opt-out language — this is automatically appended by SmrtPhone. DO NOT mention the company name "Quick Cash Home Buyers" — this is also automatically prepended by SmrtPhone. Including either will cause them to appear twice.`,
+      `The message MUST: (1) greet the seller by first name, (2) reference their property address, (3) ask a clear timeline question like "How soon are you looking to sell?".`,
       isPaidAdLead
         ? `They came from a paid cash-offer ad, so they already know what we do. You can reference the cash offer inquiry directly — it is not pushy, it is contextually relevant.`
         : `They filled out an inquiry form. Reference their inquiry naturally.`,
       arvHint,
       listingHint,
-      `Your message should: (1) Briefly introduce yourself as ${businessName}, (2) Acknowledge their inquiry for a cash offer on ${lead.propertyAddress}, (3) ${firstCampQuestion}`,
+      `Your message should: (1) Greet ${lead.sellerFirstName} by name, (2) Acknowledge their inquiry for a cash offer on ${lead.propertyAddress}, (3) ${firstCampQuestion}`,
       `Keep it warm, conversational, and under 160 characters. Sound like a real person texting, not a template.`,
-      `End with "Reply STOP to opt out."`,
     ].filter(Boolean).join(' ');
     // ──────────────────────────────────────────────────────────────────────────
 
