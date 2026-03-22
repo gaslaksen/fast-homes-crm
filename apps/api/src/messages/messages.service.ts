@@ -639,7 +639,19 @@ Keep it human, warm, and under 160 characters. Ask only ONE question.`.trim();
     // Google Ads / paid leads came from a cash-offer ad — they already know what we do.
     // Organic / direct leads may need a slightly softer intro.
     const source = (lead as any).source as string | null;
-    const isPaidAdLead = source === 'GOOGLE_ADS' || source === 'FACEBOOK_ADS' || source === 'PAID';
+    // Treat as a paid ad lead if source is explicitly a paid channel, OR if the
+    // Zapier sourceMetadata contains a campaign name referencing Google/Facebook ads.
+    // PROPERTY_LEADS is the generic Zapier source for InvestorFuse-originated leads —
+    // check the campaign name to determine if it came from a paid ad.
+    const campaignName = ((lead as any).sourceMetadata as any)?.campaign_name as string | undefined;
+    const campaignIsPaid = campaignName
+      ? /google\s*ads?|facebook\s*ads?|bolt\s*deals?|paid/i.test(campaignName)
+      : false;
+    const isPaidAdLead =
+      source === 'GOOGLE_ADS' ||
+      source === 'FACEBOOK_ADS' ||
+      source === 'PAID' ||
+      campaignIsPaid;
 
     // Build a one-liner about the property we can drop into the message naturally.
     // This signals we actually pulled their data, not that we're sending a blast.
@@ -668,6 +680,8 @@ Keep it human, warm, and under 160 characters. Ask only ONE question.`.trim();
       `First outreach to a seller who just submitted an inquiry about their property at ${lead.propertyAddress} ${propertySnippet}.`,
       `IMPORTANT CONTEXT: They contacted US — they clicked an ad or filled out a form asking for a cash offer. They already know we buy houses. Do NOT ask "what made you decide to reach out" — that's tone-deaf. They want a cash offer.`,
       `Do NOT say you "found" or "saw" their property as if cold-contacting them. You are following up on THEIR request.`,
+      `FORBIDDEN: Never use vague phrases like "wrap things up", "wrapping things up", "close things out", or "finalize things" — these are confusing and unprofessional for a first text to a seller.`,
+      `The message MUST: (1) say "Quick Cash Home Buyers", (2) reference their property address, (3) ask a clear timeline question like "How soon are you looking to sell?".`,
       isPaidAdLead
         ? `They came from a paid cash-offer ad, so they already know what we do. You can reference the cash offer inquiry directly — it is not pushy, it is contextually relevant.`
         : `They filled out an inquiry form. Reference their inquiry naturally.`,
