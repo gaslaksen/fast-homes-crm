@@ -1717,6 +1717,7 @@ export default function CompsAnalysisPage() {
                   <option value="subject_to">Subject-To</option>
                   <option value="creative">Creative Finance</option>
                   <option value="joint_venture">Joint Venture</option>
+                  <option value="concierge_listing">Concierge Listing</option>
                 </select>
               </div>
 

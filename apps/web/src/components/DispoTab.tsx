@@ -393,6 +393,7 @@ export default function DispoTab({
                   <option value="subject-to">Subject-To</option>
                   <option value="creative">Creative Finance</option>
                   <option value="joint_venture">Joint Venture</option>
+                  <option value="concierge_listing">Concierge Listing</option>
                 </select>
               </div>
               {/* Offer Amount */}
@@ -640,14 +641,15 @@ export default function DispoTab({
 
 // ─── Exit Strategy Costs ─────────────────────────────────────────────────────
 
-const EXIT_COSTS: Record<string, { label: string; agentPct: number; closingPct: number; holdingPct: number; financingPct: number }> = {
-  wholesale:     { label: 'Wholesale',        agentPct: 0, closingPct: 1,   holdingPct: 0, financingPct: 0   },
-  novation:      { label: 'Novation',         agentPct: 6, closingPct: 2.5, holdingPct: 2, financingPct: 0   },
-  flip:          { label: 'Fix & Flip',       agentPct: 6, closingPct: 3,   holdingPct: 2, financingPct: 3.5 },
-  wholetail:     { label: 'Wholetail',        agentPct: 3, closingPct: 2,   holdingPct: 1, financingPct: 1   },
-  'subject-to':  { label: 'Subject-To',       agentPct: 6, closingPct: 2.5, holdingPct: 2, financingPct: 0   },
-  creative:      { label: 'Creative Finance', agentPct: 6, closingPct: 2.5, holdingPct: 2, financingPct: 1   },
-  joint_venture: { label: 'Joint Venture',    agentPct: 6, closingPct: 2.5, holdingPct: 2, financingPct: 0   },
+const EXIT_COSTS: Record<string, { label: string; agentPct: number; closingPct: number; holdingPct: number; financingPct: number; fixedCosts?: number }> = {
+  wholesale:          { label: 'Wholesale',           agentPct: 0, closingPct: 1,   holdingPct: 0, financingPct: 0   },
+  novation:           { label: 'Novation',            agentPct: 6, closingPct: 2.5, holdingPct: 2, financingPct: 0   },
+  flip:               { label: 'Fix & Flip',          agentPct: 6, closingPct: 3,   holdingPct: 2, financingPct: 3.5 },
+  wholetail:          { label: 'Wholetail',           agentPct: 3, closingPct: 2,   holdingPct: 1, financingPct: 1   },
+  'subject-to':       { label: 'Subject-To',          agentPct: 6, closingPct: 2.5, holdingPct: 2, financingPct: 0   },
+  creative:           { label: 'Creative Finance',    agentPct: 6, closingPct: 2.5, holdingPct: 2, financingPct: 1   },
+  joint_venture:      { label: 'Joint Venture',       agentPct: 6, closingPct: 2.5, holdingPct: 2, financingPct: 0   },
+  concierge_listing:  { label: 'Concierge Listing',   agentPct: 0, closingPct: 2,   holdingPct: 1, financingPct: 0, fixedCosts: 598 },
 };
 
 function ExitStrategyCosts({
@@ -724,7 +726,8 @@ function ExitStrategyCosts({
   const holdingCost   = pctOf(rates.holdingPct);
   const financingCost = pctOf(rates.financingPct);
   const totalPct      = rates.agentPct + rates.closingPct + rates.holdingPct + rates.financingPct;
-  const totalCost     = arv != null ? arv * totalPct / 100 : null;
+  const fixedCosts    = EXIT_COSTS[strategy]?.fixedCosts ?? 0;
+  const totalCost     = arv != null ? arv * totalPct / 100 + fixedCosts : null;
 
   // ── Net profit formula ────────────────────────────────────────────────────
   // Wholesale:     (ARV - Purchase Price - Transaction Costs) + Assignment Fee
@@ -863,10 +866,22 @@ function ExitStrategyCosts({
           </div>
         ))}
 
+        {/* Fixed platform costs — Concierge Listing only */}
+        {fixedCosts > 0 && (
+          <div className="grid grid-cols-12 gap-2 px-4 py-3 border-b border-gray-100">
+            <div className="col-span-5 text-gray-700">
+              Platform &amp; Listing Fees
+              <div className="text-xs text-gray-400 mt-0.5">Homejab photos $249 · Houzeo $249 · Lockbox $100</div>
+            </div>
+            <div className="col-span-3 text-center text-gray-400">fixed</div>
+            <div className="col-span-4 text-right text-gray-800">{fmtC(fixedCosts)}</div>
+          </div>
+        )}
+
         {/* Total costs */}
         <div className="grid grid-cols-12 gap-2 px-4 py-3 border-t-2 border-gray-300 bg-gray-50">
           <div className="col-span-5 font-semibold text-gray-800">Total Transaction Costs</div>
-          <div className="col-span-3 text-center font-semibold text-gray-600">{totalPct.toFixed(1)}%</div>
+          <div className="col-span-3 text-center font-semibold text-gray-600">{totalPct.toFixed(1)}%{fixedCosts > 0 ? ` + $${fixedCosts.toLocaleString()}` : ''}</div>
           <div className="col-span-4 text-right font-bold text-gray-900">{fmtC(totalCost)}</div>
         </div>
 
