@@ -361,21 +361,44 @@ export default function LeadDetailPage() {
                 </div>
                 <p className="text-gray-600 text-sm">{lead.propertyCity}, {lead.propertyState} {lead.propertyZip}</p>
                 <div className="flex items-center gap-2 mt-1.5">
-                  {/* Status badge */}
-                  <span className={`text-xs font-semibold px-2.5 py-0.5 rounded-full ${
-                    lead.status === 'CLOSED_WON' ? 'bg-green-100 text-green-700' :
-                    lead.status === 'DEAD' || lead.status === 'CLOSED_LOST' ? 'bg-gray-100 text-gray-400' :
-                    lead.status === 'UNDER_CONTRACT' ? 'bg-teal-100 text-teal-700' :
-                    lead.status === 'OFFER_SENT' ? 'bg-orange-100 text-orange-700' :
-                    lead.status === 'QUALIFYING' ? 'bg-purple-100 text-purple-700' :
-                    'bg-blue-50 text-blue-600'
-                  }`}>
-                    {({
-                      NEW: 'New', ATTEMPTING_CONTACT: 'Contacting', QUALIFYING: 'Qualifying',
-                      OFFER_SENT: 'Offer Made', UNDER_CONTRACT: 'Under Contract', CLOSING: 'Closing',
-                      CLOSED_WON: 'Closed', CLOSED_LOST: 'Lost', NURTURE: 'Nurture', DEAD: 'Dead',
-                    } as Record<string, string>)[lead.status] || lead.status.replace(/_/g, ' ')}
-                  </span>
+                  {/* Status — inline editable dropdown */}
+                  <select
+                    value={lead.status}
+                    onChange={async (e) => {
+                      const newStatus = e.target.value;
+                      try {
+                        await leadsAPI.update(leadId, { status: newStatus });
+                        setLead((prev: any) => prev ? { ...prev, status: newStatus } : prev);
+                      } catch (err) {
+                        console.error('Failed to update status', err);
+                      }
+                    }}
+                    className={`text-xs font-semibold px-2.5 py-0.5 rounded-full border-0 cursor-pointer appearance-none focus:ring-2 focus:ring-offset-1 ${
+                      lead.status === 'CLOSED_WON'                               ? 'bg-green-100 text-green-700 focus:ring-green-400' :
+                      lead.status === 'DEAD' || lead.status === 'CLOSED_LOST'    ? 'bg-gray-100 text-gray-500 focus:ring-gray-400' :
+                      lead.status === 'UNDER_CONTRACT'                           ? 'bg-teal-100 text-teal-700 focus:ring-teal-400' :
+                      lead.status === 'OFFER_SENT'                               ? 'bg-orange-100 text-orange-700 focus:ring-orange-400' :
+                      lead.status === 'NEGOTIATING'                              ? 'bg-amber-100 text-amber-700 focus:ring-amber-400' :
+                      lead.status === 'QUALIFYING' || lead.status === 'QUALIFIED'? 'bg-purple-100 text-purple-700 focus:ring-purple-400' :
+                      lead.status === 'CLOSING'                                  ? 'bg-emerald-100 text-emerald-700 focus:ring-emerald-400' :
+                      lead.status === 'NURTURE'                                  ? 'bg-sky-100 text-sky-700 focus:ring-sky-400' :
+                      'bg-blue-50 text-blue-600 focus:ring-blue-400'
+                    }`}
+                    title="Click to change stage"
+                  >
+                    <option value="NEW">New Lead</option>
+                    <option value="ATTEMPTING_CONTACT">Attempting Contact</option>
+                    <option value="QUALIFYING">Qualifying</option>
+                    <option value="QUALIFIED">Qualified</option>
+                    <option value="OFFER_SENT">Offer Made</option>
+                    <option value="NEGOTIATING">Negotiating</option>
+                    <option value="UNDER_CONTRACT">Under Contract</option>
+                    <option value="CLOSING">Closing</option>
+                    <option value="CLOSED_WON">Closed / Won</option>
+                    <option value="CLOSED_LOST">Closed / Lost</option>
+                    <option value="NURTURE">Nurture</option>
+                    <option value="DEAD">Dead</option>
+                  </select>
                   {/* Assignee avatar */}
                   {lead.assignedTo && (
                     <div className="flex items-center gap-1.5">
@@ -1114,7 +1137,53 @@ export default function LeadDetailPage() {
 
         {/* Disposition Tab */}
         {activeTab === 'disposition' && (
-          <DispoTab leadId={leadId} leadAddress={lead.propertyAddress} />
+          <div className="space-y-6">
+            {/* Pipeline Stage — always-visible status changer */}
+            <div className="card flex items-center justify-between gap-4">
+              <div>
+                <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Pipeline Stage</div>
+                <div className="text-sm text-gray-500">Track where this lead is in your process. Stage advances automatically when offers are made or contracts are signed.</div>
+              </div>
+              <select
+                value={lead.status}
+                onChange={async (e) => {
+                  const newStatus = e.target.value;
+                  try {
+                    await leadsAPI.update(leadId, { status: newStatus });
+                    setLead((prev: any) => prev ? { ...prev, status: newStatus } : prev);
+                  } catch (err) {
+                    console.error('Failed to update status', err);
+                    alert('Failed to update stage');
+                  }
+                }}
+                className={`text-sm font-semibold px-4 py-2 rounded-lg border cursor-pointer focus:outline-none focus:ring-2 focus:ring-offset-1 min-w-[180px] ${
+                  lead.status === 'CLOSED_WON'                               ? 'bg-green-50 text-green-700 border-green-200 focus:ring-green-400' :
+                  lead.status === 'DEAD' || lead.status === 'CLOSED_LOST'    ? 'bg-gray-50 text-gray-500 border-gray-200 focus:ring-gray-400' :
+                  lead.status === 'UNDER_CONTRACT'                           ? 'bg-teal-50 text-teal-700 border-teal-200 focus:ring-teal-400' :
+                  lead.status === 'OFFER_SENT'                               ? 'bg-orange-50 text-orange-700 border-orange-200 focus:ring-orange-400' :
+                  lead.status === 'NEGOTIATING'                              ? 'bg-amber-50 text-amber-700 border-amber-200 focus:ring-amber-400' :
+                  lead.status === 'QUALIFYING' || lead.status === 'QUALIFIED'? 'bg-purple-50 text-purple-700 border-purple-200 focus:ring-purple-400' :
+                  lead.status === 'CLOSING'                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200 focus:ring-emerald-400' :
+                  lead.status === 'NURTURE'                                  ? 'bg-sky-50 text-sky-700 border-sky-200 focus:ring-sky-400' :
+                  'bg-blue-50 text-blue-600 border-blue-200 focus:ring-blue-400'
+                }`}
+              >
+                <option value="NEW">New Lead</option>
+                <option value="ATTEMPTING_CONTACT">Attempting Contact</option>
+                <option value="QUALIFYING">Qualifying</option>
+                <option value="QUALIFIED">Qualified</option>
+                <option value="OFFER_SENT">Offer Made</option>
+                <option value="NEGOTIATING">Negotiating</option>
+                <option value="UNDER_CONTRACT">Under Contract</option>
+                <option value="CLOSING">Closing</option>
+                <option value="CLOSED_WON">Closed / Won</option>
+                <option value="CLOSED_LOST">Closed / Lost</option>
+                <option value="NURTURE">Nurture</option>
+                <option value="DEAD">Dead</option>
+              </select>
+            </div>
+            <DispoTab leadId={leadId} leadAddress={lead.propertyAddress} />
+          </div>
         )}
 
         {/* Communications Tab */}

@@ -1072,11 +1072,11 @@ export class LeadsService {
       },
     });
 
-    // Advance lead status to OFFER_MADE if not already further along
+    // Advance lead status to OFFER_SENT if not already further along
     const lead = await this.prisma.lead.findUnique({ where: { id: leadId } });
-    const advanceStatuses = ['NEW', 'ATTEMPTING_CONTACT', 'QUALIFYING'];
+    const advanceStatuses = ['NEW', 'ATTEMPTING_CONTACT', 'QUALIFYING', 'QUALIFIED'];
     if (lead && advanceStatuses.includes(lead.status)) {
-      await this.updateLead(leadId, { status: 'OFFER_MADE' as any });
+      await this.updateLead(leadId, { status: LeadStatus.OFFER_SENT });
     }
 
     return offer;
