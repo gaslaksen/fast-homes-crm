@@ -20,13 +20,15 @@ type ViewMode = 'table' | 'cards';
 const INACTIVE_STATUSES = ['DEAD', 'CLOSED_WON', 'CLOSED_LOST'];
 
 const PIPELINE_STAGES = [
-  { id: 'NEW',                name: 'New Leads',          color: 'bg-blue-100   border-blue-300   text-blue-800' },
-  { id: 'ATTEMPTING_CONTACT', name: 'Attempting Contact', color: 'bg-yellow-100 border-yellow-300 text-yellow-800' },
-
-  { id: 'QUALIFYING',         name: 'Qualifying',         color: 'bg-purple-100 border-purple-300 text-purple-800' },
-  { id: 'OFFER_SENT',         name: 'Offer Made',         color: 'bg-orange-100 border-orange-300 text-orange-800' },
-  { id: 'UNDER_CONTRACT',     name: 'Under Contract',     color: 'bg-teal-100   border-teal-300   text-teal-800' },
-  { id: 'NURTURE',            name: 'Nurture',            color: 'bg-gray-100   border-gray-300   text-gray-600' },
+  { id: 'NEW',                name: 'New Leads',          color: 'bg-blue-100    border-blue-300    text-blue-800'    },
+  { id: 'ATTEMPTING_CONTACT', name: 'Attempting Contact', color: 'bg-yellow-100  border-yellow-300  text-yellow-800'  },
+  { id: 'QUALIFYING',         name: 'Qualifying',         color: 'bg-purple-100  border-purple-300  text-purple-800'  },
+  { id: 'QUALIFIED',          name: 'Qualified',          color: 'bg-violet-100  border-violet-300  text-violet-800'  },
+  { id: 'OFFER_SENT',         name: 'Offer Made',         color: 'bg-orange-100  border-orange-300  text-orange-800'  },
+  { id: 'NEGOTIATING',        name: 'Negotiating',        color: 'bg-amber-100   border-amber-300   text-amber-800'   },
+  { id: 'UNDER_CONTRACT',     name: 'Under Contract',     color: 'bg-teal-100    border-teal-300    text-teal-800'    },
+  { id: 'CLOSING',            name: 'Closing',            color: 'bg-emerald-100 border-emerald-300 text-emerald-800' },
+  { id: 'NURTURE',            name: 'Nurture',            color: 'bg-sky-100     border-sky-300     text-sky-700'     },
 ];
 
 function pipelineTimeAgo(date: string) {

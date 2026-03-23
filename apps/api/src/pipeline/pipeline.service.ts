@@ -21,12 +21,13 @@ export class PipelineService {
   private readonly ACTIVE_STAGES = [
     'NEW',
     'ATTEMPTING_CONTACT',
-
     'QUALIFYING',
     'QUALIFIED',
     'OFFER_SENT',
     'NEGOTIATING',
     'UNDER_CONTRACT',
+    'CLOSING',
+    'NURTURE',
   ];
 
   async getLeadsByStage() {
