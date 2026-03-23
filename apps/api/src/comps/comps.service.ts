@@ -96,6 +96,13 @@ export class CompsService {
 
           if (result && result.compsCount >= 1) {
             this.logger.log(`ATTOM comps: ${result.compsCount} deed-verified sales found`);
+            // Clear any stale RentCast comps — ATTOM is the preferred source
+            const deleted = await this.prisma.comp.deleteMany({
+              where: { leadId, source: 'rentcast', analysisId: null },
+            });
+            if (deleted.count > 0) {
+              this.logger.log(`Cleared ${deleted.count} stale RentCast comps for lead ${leadId} (ATTOM succeeded)`);
+            }
             return { ...result, arv: result.arv!, attom: attomEnrichment };
           }
           this.logger.warn(`ATTOM returned 0 comps — falling back to RentCast`);

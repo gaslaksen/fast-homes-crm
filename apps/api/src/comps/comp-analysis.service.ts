@@ -119,6 +119,16 @@ export class CompAnalysisService {
     if (sourceFilter) {
       where.source = sourceFilter;
       this.logger.log(`importExistingComps: filtering to source='${sourceFilter}' for lead ${leadId}`);
+    } else {
+      // No explicit filter: prefer ATTOM — if ATTOM comps exist, exclude RentCast entirely.
+      // RentCast is a fallback only; mixing sources inflates comp count and distorts ARV.
+      const attomCount = await this.prisma.comp.count({
+        where: { leadId, source: 'attom', analysisId: null },
+      });
+      if (attomCount > 0) {
+        where.source = 'attom';
+        this.logger.log(`importExistingComps: ATTOM comps available (${attomCount}) — excluding RentCast for lead ${leadId}`);
+      }
     }
     const existingComps = await this.prisma.comp.findMany({
       where,
