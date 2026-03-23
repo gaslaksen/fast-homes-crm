@@ -146,11 +146,9 @@ export class LeadsService {
       this.photosService.fetchAllPhotos(lead.id).catch((err) => {
         console.log(`⚠️ Photo fetch failed for ${lead.id}: ${err.message}`);
       });
-      // Non-blocking MLS/listing status check — populates sourceMetadata so
-      // the AI messaging engine can reference listing status in its replies.
-      this.photosService.checkAndSaveListingStatus(lead.id).catch((err) => {
-        console.log(`⚠️ Listing status check failed for ${lead.id}: ${err.message}`);
-      });
+      // MLS listing status check disabled — RentCast/Zillow data is unreliable
+      // and was producing false positives on almost every lead. Re-enable once
+      // a reliable data source is identified.
     } else {
       console.log(`📍 Lead created: ${lead.id} - ${data.propertyAddress}. No PhotosService available.`);
     }
