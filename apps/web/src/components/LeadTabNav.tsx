@@ -9,7 +9,7 @@ const TABS = [
   { key: 'arv',            label: 'ARV',             page: 'comps-analysis' },
   { key: 'repairs',        label: 'Repairs',         page: 'comps-analysis' },
   { key: 'deal-analysis',  label: 'Deal Analysis',   page: 'comps-analysis' },
-  { key: 'deal-intel',     label: 'Deal Intel 🎯',   page: 'comps-analysis' },
+  { key: 'deal-intel',     label: 'Deal Intel',      page: 'comps-analysis' },
   { key: 'disposition',    label: 'Disposition',     page: 'detail' },
   { key: 'communications', label: 'Communications',  page: 'detail' },
   { key: 'activity',       label: 'Activity',        page: 'detail' },

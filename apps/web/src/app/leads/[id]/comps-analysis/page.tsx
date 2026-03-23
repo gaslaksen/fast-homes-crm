@@ -1966,7 +1966,7 @@ export default function CompsAnalysisPage() {
           </div>
 
           <div className="mt-6 text-center">
-            <Link href={`/leads/${leadId}/comps-analysis?tab=deal-intel`} className="btn btn-primary">View Deal Intelligence 🎯</Link>
+            <Link href={`/leads/${leadId}/comps-analysis?tab=deal-intel`} className="btn btn-primary">View Deal Intelligence</Link>
           </div>
           </>
         )}
@@ -1978,7 +1978,7 @@ export default function CompsAnalysisPage() {
           <div className="card border border-emerald-200">
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
-                <span className="text-xl">🎯</span>
+                
                 <h3 className="font-bold text-gray-900">Deal Intelligence</h3>
                 {(analysis as any)?.dealIntelligence && (
                   <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium">Generated</span>
@@ -2021,7 +2021,7 @@ export default function CompsAnalysisPage() {
                 <div className="space-y-5">
                   {parsed.bottomLine && (
                     <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
-                      <div className="text-xs font-semibold text-emerald-700 uppercase tracking-wide mb-1">🎯 Bottom Line</div>
+                      <div className="text-xs font-semibold text-emerald-700 uppercase tracking-wide mb-1">Bottom Line</div>
                       <p className="text-sm text-emerald-900 leading-relaxed font-medium">{parsed.bottomLine}</p>
                     </div>
                   )}
@@ -2029,7 +2029,7 @@ export default function CompsAnalysisPage() {
                     {parsed.marketVelocity && (
                       <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
                         <div className="flex items-center gap-2 mb-2">
-                          <div className="text-xs font-semibold text-blue-700 uppercase tracking-wide">📈 Market Velocity</div>
+                          <div className="text-xs font-semibold text-blue-700 uppercase tracking-wide">Market Velocity</div>
                           {parsed.marketVelocity.verdict && (
                             <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${parsed.marketVelocity.verdict === "hot" ? "bg-red-100 text-red-700" : parsed.marketVelocity.verdict === "normal" ? "bg-green-100 text-green-700" : parsed.marketVelocity.verdict === "slow" ? "bg-yellow-100 text-yellow-700" : "bg-gray-100 text-gray-600"}`}>{parsed.marketVelocity.verdict}</span>
                           )}
@@ -2039,7 +2039,7 @@ export default function CompsAnalysisPage() {
                     )}
                     {parsed.ppsfAnalysis && (
                       <div className="bg-purple-50 border border-purple-200 rounded-xl p-4">
-                        <div className="text-xs font-semibold text-purple-700 uppercase tracking-wide mb-2">📐 $/sqft Analysis</div>
+                        <div className="text-xs font-semibold text-purple-700 uppercase tracking-wide mb-2">$/sqft Analysis</div>
                         <div className="flex gap-4 mb-2">
                           {parsed.ppsfAnalysis.avgPpsf && (
                             <div>
@@ -2061,7 +2061,7 @@ export default function CompsAnalysisPage() {
                   {parsed.lotValueAnalysis?.applicable && (
                     <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
                       <div className="flex items-center gap-2 mb-2">
-                        <div className="text-xs font-semibold text-amber-700 uppercase tracking-wide">🌳 Lot Value</div>
+                        <div className="text-xs font-semibold text-amber-700 uppercase tracking-wide">Lot Value</div>
                         {parsed.lotValueAnalysis.estimatedLotValue && (
                           <span className="text-sm font-bold text-amber-800">${parsed.lotValueAnalysis.estimatedLotValue.toLocaleString()}</span>
                         )}
@@ -2071,7 +2071,7 @@ export default function CompsAnalysisPage() {
                   )}
                   {parsed.exitScenarios?.length > 0 && (
                     <div>
-                      <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">🚪 Exit Scenarios</div>
+                      <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Exit Scenarios</div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                         {parsed.exitScenarios.map((scenario: any, i: number) => (
                           <div key={i} className="bg-gray-50 border border-gray-200 rounded-xl p-4">
@@ -2096,7 +2096,7 @@ export default function CompsAnalysisPage() {
                   {parsed.dealMath && (
                     <div className="bg-gray-900 text-white rounded-xl p-5">
                       <div className="flex items-center justify-between mb-4">
-                        <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide">💰 Deal Math</div>
+                        <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Deal Math</div>
                         {parsed.dealMath.recommendedExitStrategy && (
                           <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-700 text-emerald-100 font-medium">Recommended: {parsed.dealMath.recommendedExitStrategy}</span>
                         )}
@@ -2170,7 +2170,7 @@ export default function CompsAnalysisPage() {
                   {/* Offer Strategy */}
                   {parsed.offerStrategy && (
                     <div>
-                      <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">🎯 Offer Strategy</div>
+                      <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Offer Strategy</div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         {parsed.offerStrategy.primaryOffer && (
                           <div className="bg-green-50 border border-green-200 rounded-xl p-5">
@@ -2207,7 +2207,7 @@ export default function CompsAnalysisPage() {
                   )}
                   {parsed.riskFactors?.length > 0 && (
                     <div className="bg-red-50 border border-red-200 rounded-xl p-4">
-                      <div className="text-xs font-semibold text-red-700 uppercase tracking-wide mb-3">⚠️ Risk Factors</div>
+                      <div className="text-xs font-semibold text-red-700 uppercase tracking-wide mb-3">Risk Factors</div>
                       <div className="space-y-2">
                         {parsed.riskFactors.map((rf: any, i: number) => (
                           <div key={i} className="flex items-start gap-2">
@@ -2223,7 +2223,7 @@ export default function CompsAnalysisPage() {
                   )}
                   {parsed.sellerPitch && (
                     <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-5">
-                      <div className="text-xs font-semibold text-indigo-700 uppercase tracking-wide mb-3">🗣 Seller Pitch</div>
+                      <div className="text-xs font-semibold text-indigo-700 uppercase tracking-wide mb-3">Seller Pitch</div>
                       {parsed.sellerPitch.framingStrategy && (
                         <p className="text-sm text-indigo-800 mb-3 italic">{parsed.sellerPitch.framingStrategy}</p>
                       )}
@@ -2235,7 +2235,7 @@ export default function CompsAnalysisPage() {
                       )}
                       {parsed.sellerPitch.novationPitch && (
                         <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 mb-3">
-                          <div className="text-xs font-medium text-purple-600 mb-1">🔄 Novation / Listing Pitch</div>
+                          <div className="text-xs font-medium text-purple-600 mb-1">Novation / Listing Pitch</div>
                           <p className="text-sm text-gray-800 leading-relaxed">{parsed.sellerPitch.novationPitch}</p>
                         </div>
                       )}
@@ -2243,13 +2243,13 @@ export default function CompsAnalysisPage() {
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           {parsed.sellerPitch.objectionHandling.priceObjection && (
                             <div className="bg-white border border-indigo-200 rounded-lg p-3">
-                              <div className="text-xs font-medium text-indigo-600 mb-1">💬 If they say the price is too low...</div>
+                              <div className="text-xs font-medium text-indigo-600 mb-1">If they say the price is too low...</div>
                               <p className="text-xs text-gray-700 leading-relaxed">{parsed.sellerPitch.objectionHandling.priceObjection}</p>
                             </div>
                           )}
                           {parsed.sellerPitch.objectionHandling.listingObjection && (
                             <div className="bg-white border border-indigo-200 rounded-lg p-3">
-                              <div className="text-xs font-medium text-indigo-600 mb-1">💬 If they want to list with a realtor...</div>
+                              <div className="text-xs font-medium text-indigo-600 mb-1">If they want to list with a realtor...</div>
                               <p className="text-xs text-gray-700 leading-relaxed">{parsed.sellerPitch.objectionHandling.listingObjection}</p>
                             </div>
                           )}
