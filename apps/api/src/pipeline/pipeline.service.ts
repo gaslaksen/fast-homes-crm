@@ -254,18 +254,30 @@ Respond with ONE sentence only, no preamble.`;
     }
   }
 
-  /** Return cached analysis if fresh (<24h), otherwise generate new */
+  /** Return cached analysis if fresh (<24h) AND key numbers haven't changed, otherwise generate new */
   async getCachedOrGenerateAnalysis(leadId: string) {
     const lead = await this.prisma.lead.findUnique({
       where: { id: leadId },
-      select: { aiAnalysis: true, aiLastUpdated: true },
+      select: { aiAnalysis: true, aiLastUpdated: true, arv: true, askingPrice: true },
     });
 
     if (lead?.aiAnalysis && lead.aiLastUpdated) {
       const hoursSinceUpdate = (Date.now() - new Date(lead.aiLastUpdated).getTime()) / (1000 * 60 * 60);
       if (hoursSinceUpdate < 24) {
-        console.log(`✅ Returning cached AI analysis for lead ${leadId}`);
-        return JSON.parse(lead.aiAnalysis);
+        // Validate cached numbers still match current lead data — if ARV or asking price
+        // changed since the cache was written, force a refresh so the rating is accurate.
+        try {
+          const cached = JSON.parse(lead.aiAnalysis);
+          const arvMatch     = cached._cacheArv      == null || cached._cacheArv      === lead.arv;
+          const askingMatch  = cached._cacheAsking   == null || cached._cacheAsking   === lead.askingPrice;
+          if (arvMatch && askingMatch) {
+            console.log(`✅ Returning cached AI analysis for lead ${leadId}`);
+            return cached;
+          }
+          console.log(`🔄 Key numbers changed (ARV or asking price) — regenerating analysis for lead ${leadId}`);
+        } catch {
+          // Cache corrupt — regenerate
+        }
       }
     }
 
@@ -329,9 +341,20 @@ Respond with ONE sentence only, no preamble.`;
       const maoMod    = lead.arv ? Math.round(lead.arv * maoFactor - 40000 - assignmentFee) : null;
       const maoHeavy  = lead.arv ? Math.round(lead.arv * maoFactor - 60000 - assignmentFee) : null;
       const maoSaved  = lead.arv && savedRepairs != null ? Math.round(lead.arv * maoFactor - savedRepairs - assignmentFee) : null;
+      // Primary benchmark: saved MAO (actual repair estimate). Falls back to repair scenarios.
+      // The MAO = ARV * factor - repairs - fee. If asking <= MAO, the deal pencils as-is.
+      const bestMao = maoSaved ?? maoLight;
       const askingVsMao = (lead.arv && lead.askingPrice)
-        ? `Asking is ${((lead.askingPrice / lead.arv) * 100).toFixed(0)}% of ARV. ` +
-          (maoSaved != null && lead.askingPrice <= maoSaved ? 'BELOW saved MAO — deal pencils.' : maoMod && lead.askingPrice <= maoMod ? 'Below moderate MAO.' : maoLight && lead.askingPrice <= maoLight ? 'Below light-repair MAO.' : 'ABOVE MAO — needs negotiation or lower repair scenario.')
+        ? `Asking $${lead.askingPrice.toLocaleString()} is ${((lead.askingPrice / lead.arv) * 100).toFixed(0)}% of ARV $${lead.arv.toLocaleString()}. ` +
+          (maoSaved != null
+            ? lead.askingPrice <= maoSaved
+              ? `BELOW saved MAO ($${maoSaved.toLocaleString()}) — deal pencils at current numbers.`
+              : `Above saved MAO ($${maoSaved.toLocaleString()}) by $${(lead.askingPrice - maoSaved).toLocaleString()} — gap requires negotiation.`
+            : lead.askingPrice <= (maoLight ?? Infinity)
+              ? `Below light-repair MAO ($${maoLight?.toLocaleString()}) — deal pencils on light rehab.`
+              : lead.askingPrice <= (maoMod ?? Infinity)
+              ? `Below moderate-repair MAO ($${maoMod?.toLocaleString()}) — pencils on moderate rehab.`
+              : `Above all MAO scenarios — needs price reduction or very low repair cost.`)
         : 'Cannot compare — asking price or ARV unknown.';
 
       const compsStr = lead.comps.length > 0
@@ -397,7 +420,7 @@ Analyze this as a wholesaler deciding whether to pursue and at what price. Respo
       await this.prisma.lead.update({
         where: { id: leadId },
         data: {
-          aiAnalysis: JSON.stringify({ ...analysis, missingDataCount: missingData.length, estimatedProfit }),
+          aiAnalysis: JSON.stringify({ ...analysis, missingDataCount: missingData.length, estimatedProfit, _cacheArv: lead.arv, _cacheAsking: lead.askingPrice }),
           aiDealRating: analysis.dealRating,
           aiDealWorthiness: analysis.dealWorthiness,
           aiProfitPotential: analysis.estimatedProfitPotential,
