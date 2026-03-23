@@ -2176,6 +2176,8 @@ ${selectedComps.map((c, i) => {
   return `${i + 1}. ${c.address} | $${c.soldPrice.toLocaleString()} | ${c.bedrooms || '?'}bd/${c.bathrooms || '?'}ba | ${c.sqft?.toLocaleString() || '?'} sqft | ${c.lotSize ? c.lotSize.toFixed(2) + 'ac' : '?'} lot | ${c.distance.toFixed(2)}mi | ${monthsAgo}mo ago | DOM: ${c.daysOnMarket ?? 'N/A'}${c.isRenovated ? ' | RENOVATED' : ''}`;
 }).join('\n')}
 
+Standard investor benchmarks: $50/sqft remodel cost for standard flip. Net proceeds = ARV × 0.92 (6% commissions + 2% closing). Minimum profit target = $20,000 for a flip to make sense. If cash offer does not work, pivot to novation/listing deal where seller stays in title and you market/sell for a fee.
+
 Now think through this deal systematically. Respond ONLY with a valid JSON object in exactly this shape:
 
 {
@@ -2222,6 +2224,15 @@ Now think through this deal systematically. Respond ONLY with a valid JSON objec
       "estimatedRepairCost": number,
       "timeToSell": "estimated days on market",
       "notes": "what defines 'full ARV' for this property and market"
+    },
+    {
+      "name": "Novation/Listing",
+      "description": "Seller stays in title, we market and sell for a fee",
+      "estimatedSalePrice": number,
+      "saleRange": { "low": number, "high": number },
+      "netToSeller": number,
+      "timeToSell": "estimated days on market",
+      "notes": "list price, net to seller after commissions (~6%), timeline, and why this works if cash offer fails"
     }
   ],
   "dealMath": {
@@ -2233,19 +2244,39 @@ Now think through this deal systematically. Respond ONLY with a valid JSON objec
     "suggestedOfferRange": { "low": number, "high": number },
     "breakEvenPrice": number or null,
     "assignmentFeeBuiltIn": number,
-    "summary": "2-3 sentences: is this a deal at the asking price? What offer range makes sense? What's the maximum we can pay and still profit?"
+    "netProceedsEstimate": number,
+    "profitAtAskingPrice": number,
+    "profitAtSuggestedOffer": number,
+    "novationListPrice": number or null,
+    "meetsMinimumProfit": true | false,
+    "summary": "2-3 sentences: is this a deal at the asking price? What offer range makes sense? What's the maximum we can pay and still profit? netProceedsEstimate = ARV × 0.92. profitAtAskingPrice = netProceedsEstimate - askingPrice - repairEstimate (can be negative). profitAtSuggestedOffer = netProceedsEstimate - suggestedOffer.mid - repairEstimate. novationListPrice: if flip profit is thin (<$15k), what list price makes this a novation deal. meetsMinimumProfit: does suggestedOffer yield >= $20k profit?"
+  },
+  "offerStrategy": {
+    "primaryOffer": {
+      "amount": number,
+      "rationale": "why this specific number based on deal math",
+      "contractTerms": "e.g. 90-day close, as-is, no contingencies"
+    },
+    "fallbackOffer": {
+      "amount": number,
+      "strategy": "novation" | "listing",
+      "rationale": "if seller wont accept cash offer, this is the alternative",
+      "sellerBenefit": "frame benefit to seller — e.g. we handle all marketing, no upfront cost"
+    },
+    "walkAwayPrice": number
   },
   "riskFactors": [
     {
       "factor": "factor name",
       "impact": "high" | "medium" | "low",
-      "detail": "specific impact on this deal"
+      "detail": "specific impact on this deal — ALWAYS flag these if applicable: main road / high-traffic location (harder retail resale), DOM >90 days in comps (slow market), price reductions visible in comps, repair cost >$100k, oversized lot that buyers wont pay premium for"
     }
   ],
   "sellerPitch": {
     "keyPoints": ["point 1", "point 2", "point 3"],
     "framingStrategy": "1-2 sentences: how to position your offer — what angle resonates with THIS seller's situation?",
     "suggestedScript": "3-5 sentence conversational script for the actual seller call or meeting. Reference their specific property and situation. Be empathetic but honest about the challenges.",
+    "novationPitch": "Script for when seller wont accept cash offer — offer to list/market for them instead, handle all due diligence, get bids, photos, etc. Frame it as: you stay in title, we handle everything, no upfront cost to you.",
     "objectionHandling": {
       "priceObjection": "How to respond if they say your offer is too low",
       "listingObjection": "How to respond if they say they'll just list with a realtor"

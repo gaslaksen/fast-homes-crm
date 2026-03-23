@@ -1081,7 +1081,7 @@ export default function LeadDetailPage() {
               <AiSummaryBox
                 lead={lead}
                 onRefresh={loadLead}
-                onViewAnalysis={() => router.push(`/leads/${leadId}/comps-analysis?tab=deal-analysis`)}
+                onViewAnalysis={() => router.push(`/leads/${leadId}/comps-analysis?tab=deal-intel`)}
               />
 
               {/* Assignment */}

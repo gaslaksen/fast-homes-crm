@@ -1965,8 +1965,17 @@ export default function CompsAnalysisPage() {
             />
           </div>
 
+          <div className="mt-6 text-center">
+            <Link href={`/leads/${leadId}/comps-analysis?tab=deal-intel`} className="btn btn-primary">View Deal Intelligence 🎯</Link>
+          </div>
+          </>
+        )}
+
+        {/* ═══════════════ DEAL INTEL SECTION ═══════════════ */}
+        {activeSection === 'deal-intel' && (
+          <div className="space-y-6">
           {/* Deal Intelligence */}
-          <div className="card border border-emerald-200 mt-6">
+          <div className="card border border-emerald-200">
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
                 <span className="text-xl">🎯</span>
@@ -2063,7 +2072,7 @@ export default function CompsAnalysisPage() {
                   {parsed.exitScenarios?.length > 0 && (
                     <div>
                       <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">🚪 Exit Scenarios</div>
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                         {parsed.exitScenarios.map((scenario: any, i: number) => (
                           <div key={i} className="bg-gray-50 border border-gray-200 rounded-xl p-4">
                             <div className="font-semibold text-sm text-gray-800 mb-1">{scenario.name}</div>
@@ -2074,6 +2083,9 @@ export default function CompsAnalysisPage() {
                             ) : null}
                             {scenario.timeToSell && (
                               <div className="text-xs text-gray-500 mb-2">⏱ {scenario.timeToSell}</div>
+                            )}
+                            {scenario.netToSeller != null && (
+                              <div className="text-xs text-green-600 mb-1">Net to seller: ${scenario.netToSeller.toLocaleString()}</div>
                             )}
                             <p className="text-xs text-gray-600 leading-relaxed">{scenario.notes}</p>
                           </div>
@@ -2115,8 +2127,81 @@ export default function CompsAnalysisPage() {
                           </div>
                         ) : null}
                       </div>
+                      {/* New deal math fields */}
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-4 pt-3 border-t border-gray-700">
+                        {parsed.dealMath.netProceedsEstimate != null && (
+                          <div>
+                            <div className="text-xs text-gray-400 mb-0.5">Net Proceeds Est</div>
+                            <div className="text-lg font-bold text-blue-400">${parsed.dealMath.netProceedsEstimate.toLocaleString()}</div>
+                          </div>
+                        )}
+                        {parsed.dealMath.profitAtAskingPrice != null && (
+                          <div>
+                            <div className="text-xs text-gray-400 mb-0.5">Profit @ Asking</div>
+                            <div className={`text-lg font-bold ${parsed.dealMath.profitAtAskingPrice < 0 ? 'text-red-400' : parsed.dealMath.profitAtAskingPrice <= 20000 ? 'text-yellow-400' : 'text-green-400'}`}>
+                              {parsed.dealMath.profitAtAskingPrice < 0 ? '-' : ''}${Math.abs(parsed.dealMath.profitAtAskingPrice).toLocaleString()}
+                            </div>
+                          </div>
+                        )}
+                        {parsed.dealMath.profitAtSuggestedOffer != null && (
+                          <div>
+                            <div className="text-xs text-gray-400 mb-0.5">Profit @ Offer</div>
+                            <div className={`text-lg font-bold ${parsed.dealMath.profitAtSuggestedOffer < 0 ? 'text-red-400' : parsed.dealMath.profitAtSuggestedOffer <= 20000 ? 'text-yellow-400' : 'text-green-400'}`}>
+                              {parsed.dealMath.profitAtSuggestedOffer < 0 ? '-' : ''}${Math.abs(parsed.dealMath.profitAtSuggestedOffer).toLocaleString()}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                      {parsed.dealMath.meetsMinimumProfit != null && (
+                        <div className={`text-xs px-2 py-1 rounded inline-block mb-3 ${parsed.dealMath.meetsMinimumProfit ? 'bg-green-800 text-green-200' : 'bg-red-800 text-red-200'}`}>
+                          {parsed.dealMath.meetsMinimumProfit ? '✓ Meets $20k minimum profit target' : '✗ Does NOT meet $20k minimum profit target'}
+                        </div>
+                      )}
+                      {parsed.dealMath.novationListPrice != null && (
+                        <div className="text-xs text-gray-400 mb-3">
+                          Novation list price: <span className="text-indigo-400 font-bold">${parsed.dealMath.novationListPrice.toLocaleString()}</span>
+                        </div>
+                      )}
                       {parsed.dealMath.summary && (
                         <p className="text-sm text-gray-300 leading-relaxed">{parsed.dealMath.summary}</p>
+                      )}
+                    </div>
+                  )}
+                  {/* Offer Strategy */}
+                  {parsed.offerStrategy && (
+                    <div>
+                      <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">🎯 Offer Strategy</div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {parsed.offerStrategy.primaryOffer && (
+                          <div className="bg-green-50 border border-green-200 rounded-xl p-5">
+                            <div className="text-xs font-semibold text-green-700 uppercase tracking-wide mb-2">Primary Offer</div>
+                            <div className="text-2xl font-bold text-green-800 mb-2">${parsed.offerStrategy.primaryOffer.amount?.toLocaleString()}</div>
+                            <p className="text-sm text-green-900 mb-2">{parsed.offerStrategy.primaryOffer.rationale}</p>
+                            {parsed.offerStrategy.primaryOffer.contractTerms && (
+                              <div className="text-xs text-green-700 bg-green-100 rounded px-2 py-1 inline-block">{parsed.offerStrategy.primaryOffer.contractTerms}</div>
+                            )}
+                          </div>
+                        )}
+                        {parsed.offerStrategy.fallbackOffer && (
+                          <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-5">
+                            <div className="flex items-center gap-2 mb-2">
+                              <div className="text-xs font-semibold text-indigo-700 uppercase tracking-wide">Fallback Offer</div>
+                              {parsed.offerStrategy.fallbackOffer.strategy && (
+                                <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-200 text-indigo-800 font-medium">{parsed.offerStrategy.fallbackOffer.strategy}</span>
+                              )}
+                            </div>
+                            <div className="text-2xl font-bold text-indigo-800 mb-2">${parsed.offerStrategy.fallbackOffer.amount?.toLocaleString()}</div>
+                            <p className="text-sm text-indigo-900 mb-2">{parsed.offerStrategy.fallbackOffer.rationale}</p>
+                            {parsed.offerStrategy.fallbackOffer.sellerBenefit && (
+                              <div className="text-xs text-indigo-700 bg-indigo-100 rounded px-2 py-1">{parsed.offerStrategy.fallbackOffer.sellerBenefit}</div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                      {parsed.offerStrategy.walkAwayPrice != null && (
+                        <div className="mt-3 text-center text-sm text-gray-500">
+                          Walk-away price: <span className="font-bold text-red-600">${parsed.offerStrategy.walkAwayPrice.toLocaleString()}</span>
+                        </div>
                       )}
                     </div>
                   )}
@@ -2148,6 +2233,12 @@ export default function CompsAnalysisPage() {
                           <p className="text-sm text-gray-800 leading-relaxed">{parsed.sellerPitch.suggestedScript}</p>
                         </div>
                       )}
+                      {parsed.sellerPitch.novationPitch && (
+                        <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 mb-3">
+                          <div className="text-xs font-medium text-purple-600 mb-1">🔄 Novation / Listing Pitch</div>
+                          <p className="text-sm text-gray-800 leading-relaxed">{parsed.sellerPitch.novationPitch}</p>
+                        </div>
+                      )}
                       {parsed.sellerPitch.objectionHandling && (
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           {parsed.sellerPitch.objectionHandling.priceObjection && (
@@ -2170,7 +2261,7 @@ export default function CompsAnalysisPage() {
               );
             })()}
           </div>
-          </>
+          </div>
         )}
 
         {/* ═══════════════ REPAIRS SECTION ═══════════════ */}

@@ -9,6 +9,7 @@ const TABS = [
   { key: 'arv',            label: 'ARV',             page: 'comps-analysis' },
   { key: 'repairs',        label: 'Repairs',         page: 'comps-analysis' },
   { key: 'deal-analysis',  label: 'Deal Analysis',   page: 'comps-analysis' },
+  { key: 'deal-intel',     label: 'Deal Intel 🎯',   page: 'comps-analysis' },
   { key: 'disposition',    label: 'Disposition',     page: 'detail' },
   { key: 'communications', label: 'Communications',  page: 'detail' },
   { key: 'activity',       label: 'Activity',        page: 'detail' },
@@ -17,7 +18,7 @@ const TABS = [
 export type LeadTab = (typeof TABS)[number]['key'];
 
 export const DETAIL_TABS: LeadTab[] = ['overview', 'disposition', 'communications', 'activity'];
-export const COMPS_TABS: LeadTab[] = ['comps', 'arv', 'repairs', 'deal-analysis'];
+export const COMPS_TABS: LeadTab[] = ['comps', 'arv', 'repairs', 'deal-analysis', 'deal-intel'];
 
 interface LeadTabNavProps {
   leadId: string;
