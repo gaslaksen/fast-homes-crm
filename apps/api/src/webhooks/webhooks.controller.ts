@@ -492,27 +492,196 @@ export class WebhooksController {
           return { success: true };
         }
 
+        // ── SmrtPhone Call Events ─────────────────────────────────────────
+        case 'callInitiated': {
+          // { callId, from, to, date, callerIdName, userName, contactName, device, event }
+          const callFrom: string = body.from || '';
+          const callTo: string = body.to || '';
+          const smrtCallId: string = body.callId || '';
+
+          console.log(`📞 Call initiated [${smrtCallId}]: ${callFrom} → ${callTo}`);
+
+          // Determine which phone belongs to the seller (outbound = to, inbound = from)
+          const sellerPhone = callTo || callFrom;
+          const foundLead = await this.findLeadByPhone(sellerPhone);
+
+          if (foundLead) {
+            await this.leadsService['prisma'].callLog.create({
+              data: {
+                leadId: foundLead.id,
+                smrtphoneCallId: smrtCallId || undefined,
+                status: 'in-progress',
+                type: 'smrtphone_call',
+              },
+            });
+            await this.leadsService['prisma'].activity.create({
+              data: {
+                leadId: foundLead.id,
+                type: 'CALL_INITIATED',
+                description: `Call started via SmrtPhone (${body.userName || 'agent'} → ${body.contactName || sellerPhone})`,
+              },
+            });
+            console.log(`✅ CallLog created for lead ${foundLead.id}`);
+          } else {
+            console.warn(`⚠️  callInitiated: no lead found for ${sellerPhone}`);
+          }
+          return { success: true };
+        }
+
+        case 'callCompleted': {
+          // { callId, from, to, date, callerIdName, userName, contactName, callNotes, callOutcome, device, recordingUrl, event }
+          const completedCallId: string = body.callId || '';
+          const outcome: string = body.callOutcome || '';
+          const notes: string = body.callNotes || '';
+          const recording: string = body.recordingUrl || '';
+
+          console.log(`📞 Call completed [${completedCallId}]: outcome=${outcome}`);
+
+          // Try to find existing CallLog from callInitiated
+          let callLog = completedCallId
+            ? await this.leadsService['prisma'].callLog.findUnique({
+                where: { smrtphoneCallId: completedCallId },
+              })
+            : null;
+
+          if (callLog) {
+            // Update existing CallLog
+            await this.leadsService['prisma'].callLog.update({
+              where: { id: callLog.id },
+              data: {
+                status: 'completed',
+                recordingUrl: recording || undefined,
+                summary: [outcome, notes].filter(Boolean).join(' — ') || undefined,
+              },
+            });
+          } else {
+            // callInitiated was missed — create a new record
+            const completedPhone = body.to || body.from || '';
+            const completedLead = await this.findLeadByPhone(completedPhone);
+            if (completedLead) {
+              callLog = await this.leadsService['prisma'].callLog.create({
+                data: {
+                  leadId: completedLead.id,
+                  smrtphoneCallId: completedCallId || undefined,
+                  status: 'completed',
+                  type: 'smrtphone_call',
+                  recordingUrl: recording || undefined,
+                  summary: [outcome, notes].filter(Boolean).join(' — ') || undefined,
+                },
+              });
+            }
+          }
+
+          // Log activity
+          if (callLog?.leadId) {
+            await this.leadsService['prisma'].activity.create({
+              data: {
+                leadId: callLog.leadId,
+                type: 'CALL_COMPLETED',
+                description: `Call completed via SmrtPhone — ${outcome || 'no outcome'}${recording ? ' (recording available)' : ''}`,
+                metadata: { recordingUrl: recording, callOutcome: outcome },
+              },
+            });
+          }
+          console.log(`✅ Call completed processed${callLog ? ` for lead ${callLog.leadId}` : ''}`);
+          return { success: true };
+        }
+
+        case 'callStatusUpdated': {
+          // { callId, callStatus, date, event }
+          const statusCallId: string = body.callId || '';
+          const newStatus: string = body.callStatus || '';
+
+          console.log(`📞 Call status updated [${statusCallId}]: ${newStatus}`);
+
+          if (statusCallId) {
+            await this.leadsService['prisma'].callLog.updateMany({
+              where: { smrtphoneCallId: statusCallId },
+              data: { status: newStatus.toLowerCase() },
+            });
+          }
+          return { success: true };
+        }
+
+        case 'callNotesUpdated': {
+          // { callId, callNotes, date, event }
+          const notesCallId: string = body.callId || '';
+          if (notesCallId && body.callNotes) {
+            await this.leadsService['prisma'].callLog.updateMany({
+              where: { smrtphoneCallId: notesCallId },
+              data: { summary: body.callNotes },
+            });
+            console.log(`✅ Call notes updated for call ${notesCallId}`);
+          }
+          return { success: true };
+        }
+
         // ── AI Tools: call transcript/summary/keywords ───────────────────
         case 'aiTools': {
           // { callId, timestamp, ai_keywords, ai_summary, ai_transcript, event }
-          console.log(`🧠 AI Tools data for call ${body.callId}:`, {
+          const aiCallId: string = body.callId || '';
+          console.log(`🧠 AI Tools data for call ${aiCallId}:`, {
             keywords: body.ai_keywords,
             summary: body.ai_summary?.substring(0, 100),
           });
-          // TODO: match callId to a lead and store transcript/summary
-          // Requires callId → leadId mapping when calls are initiated
+
+          if (aiCallId) {
+            const updated = await this.leadsService['prisma'].callLog.updateMany({
+              where: { smrtphoneCallId: aiCallId },
+              data: {
+                transcript: body.ai_transcript || undefined,
+                summary: body.ai_summary || undefined,
+              },
+            });
+            if (updated.count > 0) {
+              console.log(`✅ AI transcript/summary stored for call ${aiCallId}`);
+            } else {
+              console.warn(`⚠️  aiTools: no CallLog found for callId ${aiCallId}`);
+            }
+          }
           return { success: true };
         }
 
         // ── smrtAgent: AI voice agent call ended ─────────────────────────
         case 'smrtAgentCallEnded': {
           // { callId, id, agentName, timestamp, summary, transcript, callDetails, event }
-          // callDetails includes: Property Address, Reason For Sale, Ownership Status, Sale Timeline
-          console.log(`🤖 smrtAgent call ended [${body.callId}]:`, {
+          const agentCallId: string = body.callId || '';
+          console.log(`🤖 smrtAgent call ended [${agentCallId}]:`, {
             summary: body.summary?.substring(0, 150),
             callDetails: body.callDetails,
           });
-          // TODO: parse callDetails HTML, match to lead, update qualification fields
+
+          if (agentCallId) {
+            // Try to update existing CallLog
+            const agentUpdated = await this.leadsService['prisma'].callLog.updateMany({
+              where: { smrtphoneCallId: agentCallId },
+              data: {
+                status: 'completed',
+                transcript: body.transcript || undefined,
+                summary: body.summary || undefined,
+                type: 'smrtagent_call',
+              },
+            });
+
+            if (agentUpdated.count === 0) {
+              // No existing record — try to create one by looking up lead from callDetails
+              const agentPhone = body.from || body.to || '';
+              const agentLead = agentPhone ? await this.findLeadByPhone(agentPhone) : null;
+              if (agentLead) {
+                await this.leadsService['prisma'].callLog.create({
+                  data: {
+                    leadId: agentLead.id,
+                    smrtphoneCallId: agentCallId,
+                    status: 'completed',
+                    type: 'smrtagent_call',
+                    transcript: body.transcript || undefined,
+                    summary: body.summary || undefined,
+                  },
+                });
+                console.log(`✅ smrtAgent CallLog created for lead ${agentLead.id}`);
+              }
+            }
+          }
           return { success: true };
         }
 
@@ -588,5 +757,23 @@ export class WebhooksController {
       console.error('❌ Twilio status webhook error:', error);
       return { success: false };
     }
+  }
+
+  // ─── Helper: find lead by phone number (normalizes + checks variants) ───
+
+  private async findLeadByPhone(phone: string) {
+    if (!phone) return null;
+    const stripped = phone.replace(/\D/g, '').replace(/^1/, '');
+    if (!stripped) return null;
+    return this.leadsService['prisma'].lead.findFirst({
+      where: {
+        OR: [
+          { sellerPhone: phone },
+          { sellerPhone: stripped },
+          { sellerPhone: `1${stripped}` },
+          { sellerPhone: `+1${stripped}` },
+        ],
+      },
+    });
   }
 }

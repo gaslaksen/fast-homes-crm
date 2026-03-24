@@ -561,7 +561,20 @@ export default function LeadDetailPage() {
                   </div>
                   <div>
                     <dt className="text-sm font-medium text-gray-500">Phone</dt>
-                    <dd className="mt-1 text-sm text-gray-900">{formatPhoneDisplay(lead.sellerPhone)}</dd>
+                    <dd className="mt-1 text-sm text-gray-900 flex items-center gap-2">
+                      {formatPhoneDisplay(lead.sellerPhone)}
+                      {!lead.doNotContact && (
+                        <a
+                          href={`tel:${lead.sellerPhone}`}
+                          title="Call via SmrtPhone"
+                          className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-green-50 text-green-600 hover:bg-green-100 hover:text-green-800 transition-colors"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+                            <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" />
+                          </svg>
+                        </a>
+                      )}
+                    </dd>
                   </div>
                   {lead.sellerEmail && (
                     <div>
@@ -1208,18 +1221,18 @@ export default function LeadDetailPage() {
                 </div>
               )}
 
-              {/* AI Voice Call Section */}
+              {/* Voice Call Section */}
               <div className="card">
                 <div className="flex items-center gap-2 mb-4">
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-green-600" viewBox="0 0 20 20" fill="currentColor">
                     <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" />
                   </svg>
-                  <h2 className="text-xl font-bold">AI Voice Call</h2>
+                  <h2 className="text-xl font-bold">Voice Call</h2>
                 </div>
 
                 {lead.sellerPhone && (
                   <p className="text-sm text-gray-600 mb-3">
-                    Phone: <span className="font-medium text-gray-900">{formatPhoneDisplay(lead.sellerPhone)}</span>
+                    Phone: <a href={`tel:${lead.sellerPhone}`} className="font-medium text-green-700 hover:text-green-900 underline decoration-dotted">{formatPhoneDisplay(lead.sellerPhone)}</a>
                   </p>
                 )}
 
@@ -1229,17 +1242,31 @@ export default function LeadDetailPage() {
                   </div>
                 )}
 
-                <button
-                  onClick={handleAiCall}
-                  disabled={initiatingCall || lead.doNotContact}
-                  className="btn flex items-center gap-2"
-                  style={{ backgroundColor: '#16a34a', color: 'white', opacity: initiatingCall || lead.doNotContact ? 0.5 : 1 }}
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                    <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" />
-                  </svg>
-                  {initiatingCall ? 'Initiating Call...' : 'Start AI Call'}
-                </button>
+                <div className="flex gap-2">
+                  {lead.sellerPhone && !lead.doNotContact && (
+                    <a
+                      href={`tel:${lead.sellerPhone}`}
+                      className="btn flex items-center gap-2"
+                      style={{ backgroundColor: '#16a34a', color: 'white' }}
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                        <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" />
+                      </svg>
+                      Start Call
+                    </a>
+                  )}
+                  <button
+                    onClick={handleAiCall}
+                    disabled={initiatingCall || lead.doNotContact}
+                    className="btn flex items-center gap-2"
+                    style={{ backgroundColor: 'white', color: '#16a34a', border: '1px solid #16a34a', opacity: initiatingCall || lead.doNotContact ? 0.5 : 1 }}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                      <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" />
+                    </svg>
+                    {initiatingCall ? 'Initiating...' : 'Start AI Call'}
+                  </button>
+                </div>
 
                 {/* Call Log History */}
                 {lead.callLogs?.length > 0 ? (
@@ -1250,6 +1277,13 @@ export default function LeadDetailPage() {
                         <div key={log.id} className="bg-gray-50 rounded-lg p-3 text-sm">
                           <div className="flex justify-between items-center">
                             <div className="flex items-center gap-2">
+                              <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                                log.type === 'smrtphone_call' ? 'bg-purple-100 text-purple-800' :
+                                log.type === 'smrtagent_call' ? 'bg-indigo-100 text-indigo-800' :
+                                'bg-blue-100 text-blue-800'
+                              }`}>
+                                {log.type === 'smrtphone_call' ? 'SmrtPhone' : log.type === 'smrtagent_call' ? 'smrtAgent' : 'AI Call'}
+                              </span>
                               <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
                                 log.status === 'completed' ? 'bg-green-100 text-green-800' :
                                 log.status === 'in-progress' ? 'bg-blue-100 text-blue-800' :
@@ -1268,15 +1302,27 @@ export default function LeadDetailPage() {
                               {format(new Date(log.createdAt), 'MMM d, h:mm a')}
                             </span>
                           </div>
+                          {log.summary && !log.transcript && (
+                            <p className="mt-1 text-xs text-gray-500">{log.summary}</p>
+                          )}
                           {log.transcript && (
                             <details className="mt-2">
                               <summary className="text-xs text-primary-600 cursor-pointer hover:text-primary-800 font-medium">
                                 View transcript &amp; summary
                               </summary>
+                              {log.summary && (
+                                <p className="mt-1 mb-1 text-xs text-gray-600 font-medium">{log.summary}</p>
+                              )}
                               <div className="mt-2 p-2 bg-white border border-gray-200 rounded text-xs text-gray-700 whitespace-pre-wrap max-h-64 overflow-y-auto">
                                 {log.transcript}
                               </div>
                             </details>
+                          )}
+                          {log.recordingUrl && (
+                            <a href={log.recordingUrl} target="_blank" rel="noopener noreferrer" className="mt-1 text-xs text-primary-600 hover:text-primary-800 inline-flex items-center gap-1">
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" /></svg>
+                              Recording
+                            </a>
                           )}
                         </div>
                       ))}
