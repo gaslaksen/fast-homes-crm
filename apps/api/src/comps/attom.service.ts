@@ -870,6 +870,8 @@ export class AttomService {
         // Backfill missing fields only
         const rooms = profile.building?.rooms;
         const size = profile.building?.size;
+        const before = { beds: comp.bedrooms, baths: comp.bathrooms, sqft: comp.sqft };
+
         if (comp.bedrooms == null && rooms?.beds != null) comp.bedrooms = rooms.beds;
         if (comp.bathrooms == null && rooms?.bathstotal != null) comp.bathrooms = rooms.bathstotal;
         if (comp.sqft == null && size?.universalsize != null) comp.sqft = size.universalsize;
@@ -877,7 +879,17 @@ export class AttomService {
           comp.yearBuilt = profile.building?.summary?.yearbuilteffective ?? profile.summary?.yearbuilt ?? undefined;
         }
 
-        return comp.address;
+        const filled = [
+          comp.bedrooms !== before.beds ? `beds=${comp.bedrooms}` : null,
+          comp.bathrooms !== before.baths ? `baths=${comp.bathrooms}` : null,
+          comp.sqft !== before.sqft ? `sqft=${comp.sqft}` : null,
+        ].filter(Boolean);
+
+        this.logger.log(
+          `ATTOM enrichment [${comp.address}]: profile has beds=${rooms?.beds ?? 'null'}, baths=${rooms?.bathstotal ?? 'null'}, sqft=${size?.universalsize ?? 'null'} → ${filled.length > 0 ? `backfilled: ${filled.join(', ')}` : 'no new data found in profile'}`,
+        );
+
+        return filled.length > 0 ? comp.address : null;
       }),
     );
 
