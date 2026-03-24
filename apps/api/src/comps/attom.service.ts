@@ -666,6 +666,8 @@ export class AttomService {
       notes: string;
       similarityScore: number;
     }> = [];
+    // Map comp address → raw AttomProperty for enrichment lookups
+    const compSourceProps = new Map<string, AttomProperty>();
 
     for (const radius of radiusTiers) {
       this.logger.log(`ATTOM comp search: radius=${radius}mi, type=${mappedType}, coords=(${coords.latitude}, ${coords.longitude})`);
@@ -736,6 +738,7 @@ export class AttomService {
           }
 
           validComps.push(comp);
+          compSourceProps.set(addr, prop);
         }
 
         this.logger.log(`ATTOM comp search: ${validComps.length} valid comps after filtering at radius=${radius}mi`);
@@ -749,6 +752,16 @@ export class AttomService {
     if (validComps.length === 0) {
       this.logger.warn(`ATTOM comp search: 0 valid comps found across all radius tiers`);
       return null;
+    }
+
+    // Enrich comps missing bedrooms/bathrooms via expandedprofile
+    await this.enrichCompDetails(validComps, compSourceProps);
+
+    // Recalculate similarity scores after enrichment (bed/bath data may have changed)
+    if (lead) {
+      for (const comp of validComps) {
+        comp.similarityScore = this.calculateCompSimilarity(lead, comp);
+      }
     }
 
     // Clear old ATTOM comps (not part of an analysis)
@@ -810,6 +823,74 @@ export class AttomService {
     });
 
     return { compsCount: validComps.length, source: 'attom', arv, arvLow, arvHigh, confidence };
+  }
+
+  // ─── Enrich comps missing bedrooms/bathrooms via /property/expandedprofile ─
+
+  private async enrichCompDetails(
+    validComps: Array<{
+      address: string;
+      bedrooms?: number;
+      bathrooms?: number;
+      sqft?: number;
+      yearBuilt?: number;
+      [key: string]: any;
+    }>,
+    compSourceProps: Map<string, AttomProperty>,
+  ): Promise<void> {
+    const compsToEnrich = validComps.filter((c) => c.bedrooms == null);
+    if (compsToEnrich.length === 0) {
+      this.logger.log('ATTOM enrichment: all comps already have bedroom data, skipping');
+      return;
+    }
+
+    this.logger.log(
+      `ATTOM enrichment: ${compsToEnrich.length}/${validComps.length} comps missing bedrooms, fetching profiles...`,
+    );
+
+    const results = await Promise.allSettled(
+      compsToEnrich.map(async (comp) => {
+        const sourceProp = compSourceProps.get(comp.address);
+        if (!sourceProp?.address) return null;
+
+        // Build structured address from /sale/detail response fields
+        const street = sourceProp.address.line1;
+        const city = sourceProp.address.locality;
+        const state = sourceProp.address.countrySubd;
+        const zip = sourceProp.address.postal1;
+
+        if (!street || !city || !state || !zip) {
+          this.logger.warn(`ATTOM enrichment: incomplete address for ${comp.address}, skipping`);
+          return null;
+        }
+
+        const profile = await this.getExpandedProfile({ street, city, state, zip });
+        if (!profile) return null;
+
+        // Backfill missing fields only
+        const rooms = profile.building?.rooms;
+        const size = profile.building?.size;
+        if (comp.bedrooms == null && rooms?.beds != null) comp.bedrooms = rooms.beds;
+        if (comp.bathrooms == null && rooms?.bathstotal != null) comp.bathrooms = rooms.bathstotal;
+        if (comp.sqft == null && size?.universalsize != null) comp.sqft = size.universalsize;
+        if (comp.yearBuilt == null) {
+          comp.yearBuilt = profile.building?.summary?.yearbuilteffective ?? profile.summary?.yearbuilt ?? undefined;
+        }
+
+        return comp.address;
+      }),
+    );
+
+    const enriched = results.filter(
+      (r) => r.status === 'fulfilled' && r.value != null,
+    ).length;
+    const failed = results.filter(
+      (r) => r.status === 'rejected',
+    ).length;
+
+    this.logger.log(
+      `ATTOM enrichment complete: ${enriched} enriched, ${compsToEnrich.length - enriched - failed} no profile found, ${failed} failed`,
+    );
   }
 
   // ─── Property type mapping for comp search ────────────────────────────────
