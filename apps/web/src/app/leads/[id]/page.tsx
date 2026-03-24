@@ -70,8 +70,6 @@ export default function LeadDetailPage() {
   const [aiAnalysis, setAiAnalysis] = useState<any>(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [initiatingCall, setInitiatingCall] = useState(false);
-  const [showQuickText, setShowQuickText] = useState(false);
-  const [quickTextMsg, setQuickTextMsg] = useState('');
   const [teamMembers, setTeamMembers] = useState<any[]>([]);
   const [assignUserId, setAssignUserId] = useState('');
   const [assignStage, setAssignStage] = useState('');
@@ -563,7 +561,20 @@ export default function LeadDetailPage() {
                   </div>
                   <div>
                     <dt className="text-sm font-medium text-gray-500">Phone</dt>
-                    <dd className="mt-1 text-sm text-gray-900">{formatPhoneDisplay(lead.sellerPhone)}</dd>
+                    <dd className="mt-1 text-sm text-gray-900 flex items-center gap-2">
+                      {formatPhoneDisplay(lead.sellerPhone)}
+                      {!lead.doNotContact && (
+                        <a
+                          href={`tel:${lead.sellerPhone}`}
+                          title="Call via SmrtPhone"
+                          className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-green-50 text-green-600 hover:bg-green-100 hover:text-green-800 transition-colors"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+                            <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" />
+                          </svg>
+                        </a>
+                      )}
+                    </dd>
                   </div>
                   {lead.sellerEmail && (
                     <div>
@@ -1232,11 +1243,23 @@ export default function LeadDetailPage() {
                 )}
 
                 <div className="flex gap-2">
+                  {lead.sellerPhone && !lead.doNotContact && (
+                    <a
+                      href={`tel:${lead.sellerPhone}`}
+                      className="btn flex items-center gap-2"
+                      style={{ backgroundColor: '#16a34a', color: 'white' }}
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                        <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" />
+                      </svg>
+                      Start Call
+                    </a>
+                  )}
                   <button
                     onClick={handleAiCall}
                     disabled={initiatingCall || lead.doNotContact}
                     className="btn flex items-center gap-2"
-                    style={{ backgroundColor: '#16a34a', color: 'white', opacity: initiatingCall || lead.doNotContact ? 0.5 : 1 }}
+                    style={{ backgroundColor: 'white', color: '#16a34a', border: '1px solid #16a34a', opacity: initiatingCall || lead.doNotContact ? 0.5 : 1 }}
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
                       <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" />
@@ -1336,62 +1359,8 @@ export default function LeadDetailPage() {
                   <button onClick={handleDraftMessage} className="btn btn-primary btn-sm">
                     Draft Message
                   </button>
-                  {!lead.doNotContact && (
-                    <button
-                      onClick={() => {
-                        const input = document.querySelector<HTMLTextAreaElement>('#quick-text-input');
-                        if (input) { input.focus(); input.scrollIntoView({ behavior: 'smooth' }); }
-                        else setShowQuickText(true);
-                      }}
-                      className="btn btn-sm flex items-center gap-1"
-                      style={{ backgroundColor: '#2563eb', color: 'white' }}
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
-                        <path fillRule="evenodd" d="M18 10c0 3.866-3.582 7-8 7a8.841 8.841 0 01-4.083-.98L2 17l1.338-3.123C2.493 12.767 2 11.434 2 10c0-3.866 3.582-7 8-7s8 3.134 8 7zM7 9H5v2h2V9zm8 0h-2v2h2V9zm-4 0H9v2h2V9z" clipRule="evenodd" />
-                      </svg>
-                      Send Text
-                    </button>
-                  )}
                   </div>
                 </div>
-                {showQuickText && (
-                  <div className="mb-4 flex gap-2">
-                    <textarea
-                      id="quick-text-input"
-                      value={quickTextMsg}
-                      onChange={(e) => setQuickTextMsg(e.target.value)}
-                      placeholder="Type a message..."
-                      className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
-                      rows={2}
-                      autoFocus
-                    />
-                    <div className="flex flex-col gap-1">
-                      <button
-                        onClick={async () => {
-                          if (!quickTextMsg.trim()) return;
-                          try {
-                            await messagesAPI.send(leadId, quickTextMsg.trim());
-                            setQuickTextMsg('');
-                            setShowQuickText(false);
-                            loadLead();
-                          } catch (e: any) {
-                            alert('Failed to send: ' + (e.response?.data?.message || e.message));
-                          }
-                        }}
-                        className="btn btn-sm text-xs"
-                        style={{ backgroundColor: '#2563eb', color: 'white' }}
-                      >
-                        Send
-                      </button>
-                      <button
-                        onClick={() => { setShowQuickText(false); setQuickTextMsg(''); }}
-                        className="btn btn-sm text-xs text-gray-500 hover:text-gray-700"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                )}
                 <div className="space-y-3">
                   {lead.messages?.map((msg: any) => (
                     <div
