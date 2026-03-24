@@ -626,6 +626,7 @@ export class WebhooksController {
           });
 
           if (aiCallId) {
+            // Store transcript and summary on the CallLog
             const updated = await this.leadsService['prisma'].callLog.updateMany({
               where: { smrtphoneCallId: aiCallId },
               data: {
@@ -637,6 +638,20 @@ export class WebhooksController {
               console.log(`✅ AI transcript/summary stored for call ${aiCallId}`);
             } else {
               console.warn(`⚠️  aiTools: no CallLog found for callId ${aiCallId}`);
+            }
+
+            // Extract CAMP data from transcript and update lead fields
+            if (body.ai_transcript) {
+              const callLog = await this.leadsService['prisma'].callLog.findUnique({
+                where: { smrtphoneCallId: aiCallId },
+              });
+              if (callLog?.leadId) {
+                await this.callsService.processSmrtPhoneTranscript(
+                  callLog.leadId,
+                  body.ai_transcript,
+                  body.ai_summary,
+                );
+              }
             }
           }
           return { success: true };
@@ -679,6 +694,20 @@ export class WebhooksController {
                   },
                 });
                 console.log(`✅ smrtAgent CallLog created for lead ${agentLead.id}`);
+              }
+            }
+
+            // Extract CAMP data from smrtAgent transcript and update lead
+            if (body.transcript) {
+              const agentLog = await this.leadsService['prisma'].callLog.findUnique({
+                where: { smrtphoneCallId: agentCallId },
+              });
+              if (agentLog?.leadId) {
+                await this.callsService.processSmrtPhoneTranscript(
+                  agentLog.leadId,
+                  body.transcript,
+                  body.summary,
+                );
               }
             }
           }

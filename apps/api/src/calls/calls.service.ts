@@ -1,8 +1,10 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { VapiService } from '../vapi/vapi.service';
 import { ScoringService } from '../scoring/scoring.service';
 import { formatPhoneNumber } from '@fast-homes/shared';
+import Anthropic from '@anthropic-ai/sdk';
 
 const DEFAULT_CALL_DELAY_MS = 120_000; // 2 minutes
 
@@ -10,11 +12,17 @@ const DEFAULT_CALL_DELAY_MS = 120_000; // 2 minutes
 export class CallsService {
   private readonly logger = new Logger(CallsService.name);
 
+  private anthropic: Anthropic | null;
+
   constructor(
     private prisma: PrismaService,
+    private config: ConfigService,
     private vapiService: VapiService,
     private scoringService: ScoringService,
-  ) {}
+  ) {
+    const apiKey = this.config.get<string>('ANTHROPIC_API_KEY');
+    this.anthropic = apiKey ? new Anthropic({ apiKey }) : null;
+  }
 
   /**
    * Schedule an AI outbound call after a configurable delay.
@@ -216,7 +224,7 @@ export class CallsService {
    * Syncs structured data extracted by Vapi's analysis back onto the lead record.
    * Only overwrites fields that are currently blank, so manual edits are preserved.
    */
-  private async syncStructuredDataToLead(
+  async syncStructuredDataToLead(
     leadId: string,
     data: Record<string, any>,
     summary?: string,
@@ -286,6 +294,53 @@ export class CallsService {
       // Refresh CAMP completion flags so the UI reflects the new data immediately
       await this.scoringService.refreshCampFlags(leadId);
       this.logger.log(`CAMP flags refreshed for lead ${leadId}`);
+    }
+  }
+
+  /**
+   * Process a SmrtPhone call transcript using Claude to extract CAMP data
+   * and update the lead, same as Vapi's structured analysis does.
+   */
+  async processSmrtPhoneTranscript(leadId: string, transcript: string, summary?: string) {
+    if (!this.anthropic || !transcript) return;
+
+    this.logger.log(`Extracting CAMP data from SmrtPhone transcript for lead ${leadId}`);
+
+    try {
+      const response = await this.anthropic.messages.create({
+        model: 'claude-haiku-4-5',
+        max_tokens: 500,
+        system: 'You extract structured data from real estate seller call transcripts. Respond with valid JSON only. No markdown, no explanation.',
+        messages: [
+          {
+            role: 'user',
+            content: `Extract the following fields from this phone call transcript between a real estate investor and a property seller. Return a JSON object with ONLY the fields where information was mentioned. Omit any field where the data was not discussed.
+
+Fields to extract:
+- askingPriceMentioned: number (dollar amount if seller mentioned a price)
+- timelineDays: number (estimated days until they want to sell; "ASAP"=7, "this month"=30, "few months"=90, "no rush"=180)
+- motivationSummary: string (brief reason for selling: divorce, foreclosure, inherited, downsizing, relocating, etc.)
+- conditionLevel: "excellent" | "good" | "fair" | "poor" | "distressed"
+- conditionNotes: string (specific issues mentioned: roof, foundation, water damage, etc.)
+- isDecisionMaker: boolean (true if caller is the owner/decision-maker)
+- reachedSeller: boolean (true if actually spoke with the seller, false if voicemail/no answer)
+- interestLevel: "interested" | "not_interested" | "undecided"
+
+Transcript:
+${transcript}`,
+          },
+        ],
+      });
+
+      const text = response.content[0]?.type === 'text' ? response.content[0].text : '';
+      const cleaned = text.replace(/```json\n?|\n?```/g, '').trim();
+      const extracted = JSON.parse(cleaned);
+
+      this.logger.log(`SmrtPhone transcript extraction: ${JSON.stringify(extracted)}`);
+
+      await this.syncStructuredDataToLead(leadId, extracted, summary);
+    } catch (error) {
+      this.logger.error(`SmrtPhone transcript extraction failed: ${error.message}`);
     }
   }
 }
