@@ -391,7 +391,8 @@ export class WebhooksController {
           });
 
           if (!outboundLead) {
-            console.warn(`⚠️  ${event}: no lead found for ${toPhone}`);
+            // Expected when SmrtPhone sends to contacts not in this CRM (e.g. drip campaigns)
+            console.log(`ℹ️  ${event}: no lead found for ${toPhone} — skipping`);
             return { success: true };
           }
 
@@ -619,19 +620,31 @@ export class WebhooksController {
 
         // ── AI Tools: call transcript/summary/keywords ───────────────────
         case 'aiTools': {
-          // { callId, timestamp, ai_keywords, ai_summary, ai_transcript, event }
+          // { callId, timestamp, ai_keywords, ai_summary, ai_transcript: [{timestamp, speaker, segment}], event }
           const aiCallId: string = body.callId || '';
           console.log(`🧠 AI Tools data for call ${aiCallId}:`, {
             keywords: body.ai_keywords,
             summary: body.ai_summary?.substring(0, 100),
+            transcriptSegments: Array.isArray(body.ai_transcript) ? body.ai_transcript.length : 0,
           });
+
+          // ai_transcript is an array of {timestamp, speaker, segment} — flatten to readable string
+          let transcriptText: string | undefined;
+          if (Array.isArray(body.ai_transcript) && body.ai_transcript.length > 0) {
+            transcriptText = body.ai_transcript
+              .map((seg: any) => `[${seg.timestamp || ''}] ${seg.speaker || 'Unknown'}: ${seg.segment || ''}`)
+              .join('\n')
+              .trim();
+          } else if (typeof body.ai_transcript === 'string') {
+            transcriptText = body.ai_transcript;
+          }
 
           if (aiCallId) {
             // Store transcript and summary on the CallLog
             const updated = await this.leadsService['prisma'].callLog.updateMany({
               where: { smrtphoneCallId: aiCallId },
               data: {
-                transcript: body.ai_transcript || undefined,
+                transcript: transcriptText || undefined,
                 summary: body.ai_summary || undefined,
               },
             });
@@ -642,14 +655,14 @@ export class WebhooksController {
             }
 
             // Extract CAMP data from transcript and update lead fields
-            if (body.ai_transcript) {
+            if (transcriptText) {
               const callLog = await this.leadsService['prisma'].callLog.findUnique({
                 where: { smrtphoneCallId: aiCallId },
               });
               if (callLog?.leadId) {
                 await this.callsService.processSmrtPhoneTranscript(
                   callLog.leadId,
-                  body.ai_transcript,
+                  transcriptText,
                   body.ai_summary,
                 );
               }
