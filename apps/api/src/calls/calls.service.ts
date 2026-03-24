@@ -233,24 +233,37 @@ export class CallsService {
     if (!lead) return;
 
     const updates: Record<string, any> = {};
+    const previousValues: Record<string, any> = {};
 
     // ── Money: asking price ──────────────────────────────────────────────
-    if (data.askingPriceMentioned && !lead.askingPrice) {
-      updates.askingPrice = data.askingPriceMentioned;
+    if (data.askingPriceMentioned) {
+      if (lead.askingPrice !== data.askingPriceMentioned) {
+        if (lead.askingPrice != null) previousValues.askingPrice = lead.askingPrice;
+        updates.askingPrice = data.askingPriceMentioned;
+      }
     }
 
     // ── Priority: timeline + motivation ─────────────────────────────────
-    if (data.timelineDays && !lead.timeline) {
-      updates.timeline = data.timelineDays;
+    if (data.timelineDays) {
+      if (lead.timeline !== data.timelineDays) {
+        if (lead.timeline != null) previousValues.timeline = lead.timeline;
+        updates.timeline = data.timelineDays;
+      }
     }
-    if (data.motivationSummary && !lead.sellerMotivation) {
-      updates.sellerMotivation = data.motivationSummary;
+    if (data.motivationSummary) {
+      if (lead.sellerMotivation !== data.motivationSummary) {
+        if (lead.sellerMotivation) previousValues.sellerMotivation = lead.sellerMotivation;
+        updates.sellerMotivation = data.motivationSummary;
+      }
     }
 
     // ── Challenge: condition — now a direct enum from the AI ─────────────
     const validConditions = ['excellent', 'good', 'fair', 'poor', 'distressed'];
-    if (data.conditionLevel && validConditions.includes(data.conditionLevel) && !lead.conditionLevel) {
-      updates.conditionLevel = data.conditionLevel;
+    if (data.conditionLevel && validConditions.includes(data.conditionLevel)) {
+      if (lead.conditionLevel !== data.conditionLevel) {
+        if (lead.conditionLevel) previousValues.conditionLevel = lead.conditionLevel;
+        updates.conditionLevel = data.conditionLevel;
+      }
     }
     // Append condition notes to distressSignals if present
     if (data.conditionNotes) {
@@ -261,11 +274,14 @@ export class CallsService {
     }
 
     // ── Authority: ownership / decision-maker ────────────────────────────
-    if (!lead.ownershipStatus) {
-      if (data.isDecisionMaker === true) {
+    if (data.isDecisionMaker === true) {
+      if (lead.ownershipStatus !== 'sole_owner') {
+        if (lead.ownershipStatus) previousValues.ownershipStatus = lead.ownershipStatus;
         updates.ownershipStatus = 'sole_owner';
-      } else if (data.isDecisionMaker === false) {
-        // Co-decision-maker situation (spouse, partner, co-owner, estate, etc.)
+      }
+    } else if (data.isDecisionMaker === false) {
+      if (lead.ownershipStatus !== 'co_owner') {
+        if (lead.ownershipStatus) previousValues.ownershipStatus = lead.ownershipStatus;
         updates.ownershipStatus = 'co_owner';
       }
     }
@@ -282,12 +298,18 @@ export class CallsService {
       await this.prisma.lead.update({ where: { id: leadId }, data: updates });
       this.logger.log(`Lead ${leadId} updated from AI call: ${Object.keys(updates).join(', ')}`);
 
+      // Build descriptive activity message showing what changed
+      const changedFields = Object.keys(updates).map((field) => {
+        const prev = previousValues[field];
+        return prev != null ? `${field}: ${prev} → ${updates[field]}` : `${field}: ${updates[field]}`;
+      });
+
       await this.prisma.activity.create({
         data: {
           leadId,
           type: 'FIELD_UPDATED',
-          description: `AI call updated lead fields: ${Object.keys(updates).join(', ')}`,
-          metadata: { source: 'vapi-call', interestLevel: data.interestLevel, ...updates },
+          description: `Call updated lead: ${changedFields.join(', ')}`,
+          metadata: { source: 'call-transcript', previousValues, ...updates },
         },
       });
 
