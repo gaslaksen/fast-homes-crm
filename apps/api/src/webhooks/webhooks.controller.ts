@@ -242,8 +242,9 @@ export class WebhooksController {
   @HttpCode(200)
   async handleSmrtphone(@Body() body: any) {
     const event: string = body.event || 'unknown';
-    // Log full payload for smsIncoming (to capture any MMS/media fields SmrtPhone may send)
-    const logBody = event === 'smsIncoming' ? JSON.stringify(body) : JSON.stringify(body).substring(0, 300);
+    // Log full payload for SMS and call events (to capture all fields)
+    const fullLogEvents = ['smsIncoming', 'callInitiated', 'callCompleted', 'aiTools', 'smrtAgentCallEnded'];
+    const logBody = fullLogEvents.includes(event) ? JSON.stringify(body) : JSON.stringify(body).substring(0, 300);
     console.log(`📥 SmrtPhone webhook [${event}]:`, logBody);
 
     try {
