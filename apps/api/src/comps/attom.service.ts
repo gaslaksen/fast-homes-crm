@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
+import { RentCastService } from './rentcast.service';
 import axios, { AxiosError } from 'axios';
 
 const ATTOM_BASE = 'https://api.gateway.attomdata.com/propertyapi/v1.0.0';
@@ -236,6 +237,7 @@ export class AttomService {
   constructor(
     private prisma: PrismaService,
     private config: ConfigService,
+    private rentcast: RentCastService,
   ) {
     this.apiKey = this.config.get<string>('ATTOM_API_KEY');
   }
@@ -902,6 +904,56 @@ export class AttomService {
 
     this.logger.log(
       `ATTOM enrichment complete: ${enriched} enriched, ${compsToEnrich.length - enriched - failed} no profile found, ${failed} failed`,
+    );
+
+    // ── RentCast fallback: try RentCast /properties for comps still missing bedrooms ──
+    if (!this.rentcast.isConfigured) return;
+
+    const stillMissing = validComps.filter((c) => c.bedrooms == null);
+    if (stillMissing.length === 0) return;
+
+    this.logger.log(
+      `RentCast fallback: ${stillMissing.length} comps still missing bedrooms after ATTOM, trying RentCast...`,
+    );
+
+    const rcResults = await Promise.allSettled(
+      stillMissing.map(async (comp) => {
+        const sourceProp = compSourceProps.get(comp.address);
+        if (!sourceProp?.address) return null;
+
+        const { line1: street, locality: city, countrySubd: state, postal1: zip } = sourceProp.address;
+        if (!street || !city || !state || !zip) return null;
+
+        const fullAddr = `${street}, ${city}, ${state} ${zip}`;
+        const property = await this.rentcast.getPropertyDetails(fullAddr);
+        if (!property) return null;
+
+        const before = { beds: comp.bedrooms, baths: comp.bathrooms, sqft: comp.sqft };
+
+        if (comp.bedrooms == null && property.bedrooms != null) comp.bedrooms = property.bedrooms;
+        if (comp.bathrooms == null && property.bathrooms != null) comp.bathrooms = property.bathrooms;
+        if (comp.sqft == null && property.squareFootage != null) comp.sqft = property.squareFootage;
+        if (comp.yearBuilt == null && property.yearBuilt != null) comp.yearBuilt = property.yearBuilt;
+
+        const filled = [
+          comp.bedrooms !== before.beds ? `beds=${comp.bedrooms}` : null,
+          comp.bathrooms !== before.baths ? `baths=${comp.bathrooms}` : null,
+          comp.sqft !== before.sqft ? `sqft=${comp.sqft}` : null,
+        ].filter(Boolean);
+
+        this.logger.log(
+          `RentCast fallback [${comp.address}]: beds=${property.bedrooms ?? 'null'}, baths=${property.bathrooms ?? 'null'}, sqft=${property.squareFootage ?? 'null'} → ${filled.length > 0 ? `backfilled: ${filled.join(', ')}` : 'no new data'}`,
+        );
+
+        return filled.length > 0 ? comp.address : null;
+      }),
+    );
+
+    const rcEnriched = rcResults.filter((r) => r.status === 'fulfilled' && r.value != null).length;
+    const rcFailed = rcResults.filter((r) => r.status === 'rejected').length;
+
+    this.logger.log(
+      `RentCast fallback complete: ${rcEnriched}/${stillMissing.length} comps enriched${rcFailed > 0 ? `, ${rcFailed} failed` : ''}`,
     );
   }
 
