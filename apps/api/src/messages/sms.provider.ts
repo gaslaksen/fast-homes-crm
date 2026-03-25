@@ -72,12 +72,15 @@ export class TwilioSmsProvider implements SmsProvider {
 // ---------------------------------------------------------------------------
 export class SmrtphoneSmsProvider implements SmsProvider {
   private readonly logger = new Logger(SmrtphoneSmsProvider.name);
+  private readonly groupId?: string;
 
   constructor(
     private readonly apiKey: string,
     private readonly phoneNumber: string,
     private readonly config?: ConfigService,
-  ) {}
+  ) {
+    this.groupId = config?.get<string>('SMRTPHONE_GROUP_ID');
+  }
 
   isConfigured() {
     return !!this.apiKey;
@@ -102,6 +105,11 @@ export class SmrtphoneSmsProvider implements SmsProvider {
       to,
       message: body,
     });
+
+    // Route to the shared team inbox so all group members see the conversation
+    if (this.groupId) {
+      params.set('smrtPhoneGroupId', this.groupId);
+    }
 
     let response: Response;
     try {
