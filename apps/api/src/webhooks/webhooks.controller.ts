@@ -398,23 +398,51 @@ export class WebhooksController {
 
           // Record the outbound message so the conversation thread stays in sync
           // Use findFirst + create instead of upsert — twilioSid is no longer unique-indexed
+          // Check if this message was already sent by our app (AI, drip, or draft).
+          // Primary: match by twilioSid. Fallback: match by lead + body + recent timestamp
+          // to handle cases where Smrtphone returns a different ID in the webhook.
           const existingMsg = outSmsId
             ? await this.leadsService['prisma'].message.findFirst({ where: { twilioSid: outSmsId } })
             : null;
-          if (!existingMsg) {
-            await this.leadsService['prisma'].message.create({
-              data: {
-                leadId: outboundLead.id,
-                direction: 'OUTBOUND',
-                status: 'SENT',
-                body: msgBody,
-                from: fromPhone,
-                to: toPhone,
-                twilioSid: outSmsId,
-                sentAt: new Date(),
-              },
-            });
+
+          const recentCutoff = new Date(Date.now() - 2 * 60 * 1000); // 2 minutes ago
+          const existingByContent = !existingMsg
+            ? await this.leadsService['prisma'].message.findFirst({
+                where: {
+                  leadId: outboundLead.id,
+                  direction: 'OUTBOUND',
+                  body: msgBody,
+                  sentAt: { gte: recentCutoff },
+                },
+              })
+            : null;
+
+          if (existingMsg || existingByContent) {
+            // Message already in our DB — this was sent by our app (AI or Draft).
+            // Update the twilioSid if we matched by content so future delivery callbacks work.
+            if (existingByContent && !existingMsg) {
+              await this.leadsService['prisma'].message.update({
+                where: { id: existingByContent.id },
+                data: { twilioSid: outSmsId },
+              });
+            }
+            console.log(`ℹ️  ${event}: message ${outSmsId} already recorded (app-originated) — skipping AI pause`);
+            return { success: true };
           }
+
+          // Genuinely new outbound message sent from SmrtPhone UI — record it
+          await this.leadsService['prisma'].message.create({
+            data: {
+              leadId: outboundLead.id,
+              direction: 'OUTBOUND',
+              status: 'SENT',
+              body: msgBody,
+              from: fromPhone,
+              to: toPhone,
+              twilioSid: outSmsId,
+              sentAt: new Date(),
+            },
+          });
 
           // Pause AI auto-respond — a human has stepped in
           await this.leadsService['prisma'].lead.update({
