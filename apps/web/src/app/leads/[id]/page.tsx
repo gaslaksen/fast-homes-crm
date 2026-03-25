@@ -433,10 +433,10 @@ export default function LeadDetailPage() {
                   Zillow
                 </a>
                 <a
-                  href={`https://www.realtor.com/realestateandhomes-detail/${encodeURIComponent(
+                  href={`https://www.realtor.com/realestateandhomes-search/${
                     [lead.propertyAddress, lead.propertyCity, lead.propertyState, lead.propertyZip]
-                      .filter(Boolean).join('-').replace(/[\s,]+/g, '-').replace(/-+/g, '-')
-                  )}`}
+                      .filter(Boolean).join(', ').replace(/\s+/g, '-').replace(/,/g, '')
+                  }`}
                   target="_blank"
                   rel="noopener noreferrer"
                   title="View on Realtor.com"
