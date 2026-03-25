@@ -405,6 +405,9 @@ export class WebhooksController {
             ? await this.leadsService['prisma'].message.findFirst({ where: { twilioSid: outSmsId } })
             : null;
 
+          // Use createdAt (auto-set by Prisma) instead of sentAt for the time window.
+          // PENDING records have sentAt=NULL because it's only set after the SMS API
+          // responds, but the webhook can arrive before that update completes.
           const recentCutoff = new Date(Date.now() - 2 * 60 * 1000); // 2 minutes ago
           const existingByContent = !existingMsg
             ? await this.leadsService['prisma'].message.findFirst({
@@ -412,7 +415,7 @@ export class WebhooksController {
                   leadId: outboundLead.id,
                   direction: 'OUTBOUND',
                   body: msgBody,
-                  sentAt: { gte: recentCutoff },
+                  createdAt: { gte: recentCutoff },
                 },
               })
             : null;
