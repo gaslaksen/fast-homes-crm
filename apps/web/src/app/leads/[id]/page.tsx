@@ -414,24 +414,41 @@ export default function LeadDetailPage() {
               </div>
             </div>
             <div className="flex items-center gap-5">
-              {/* Zillow quick-link */}
-              <a
-                href={`https://www.zillow.com/homes/${encodeURIComponent(
-                  [lead.propertyAddress, lead.propertyCity, lead.propertyState, lead.propertyZip]
-                    .filter(Boolean).join(', ')
-                )}_rb/`}
-                target="_blank"
-                rel="noopener noreferrer"
-                title="View on Zillow"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 bg-white hover:border-[#006AFF] hover:bg-blue-50 transition-colors text-xs font-semibold text-[#006AFF]"
-              >
-                {/* Zillow "Z" wordmark */}
-                <svg width="14" height="14" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M16 0C7.163 0 0 7.163 0 16s7.163 16 16 16 16-7.163 16-16S24.837 0 16 0z" fill="#006AFF"/>
-                  <path d="M22.4 21.6H9.6v-1.92l8.064-8.064H9.6V9.6h12.8v1.92l-8.064 8.064H22.4v2.016z" fill="white"/>
-                </svg>
-                Zillow
-              </a>
+              {/* Property listing quick-links */}
+              <div className="flex flex-col gap-1.5">
+                <a
+                  href={`https://www.zillow.com/homes/${encodeURIComponent(
+                    [lead.propertyAddress, lead.propertyCity, lead.propertyState, lead.propertyZip]
+                      .filter(Boolean).join(', ')
+                  )}_rb/`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="View on Zillow"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 bg-white hover:border-[#006AFF] hover:bg-blue-50 transition-colors text-xs font-semibold text-[#006AFF]"
+                >
+                  <svg width="14" height="14" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M16 0C7.163 0 0 7.163 0 16s7.163 16 16 16 16-7.163 16-16S24.837 0 16 0z" fill="#006AFF"/>
+                    <path d="M22.4 21.6H9.6v-1.92l8.064-8.064H9.6V9.6h12.8v1.92l-8.064 8.064H22.4v2.016z" fill="white"/>
+                  </svg>
+                  Zillow
+                </a>
+                <a
+                  href={`https://www.realtor.com/realestateandhomes-detail/${encodeURIComponent(
+                    [lead.propertyAddress, lead.propertyCity, lead.propertyState, lead.propertyZip]
+                      .filter(Boolean).join('-').replace(/[\s,]+/g, '-').replace(/-+/g, '-')
+                  )}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="View on Realtor.com"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 bg-white hover:border-[#D92228] hover:bg-red-50 transition-colors text-xs font-semibold text-[#D92228]"
+                >
+                  <svg width="14" height="14" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M16 0C7.163 0 0 7.163 0 16s7.163 16 16 16 16-7.163 16-16S24.837 0 16 0z" fill="#D92228"/>
+                    <path d="M12.8 9.6h4.8c1.6 0 2.88.48 3.68 1.28.64.64.96 1.52.96 2.56 0 1.76-1.04 2.88-2.56 3.36l2.88 4.8h-2.72l-2.56-4.32H15.2v4.32h-2.4V9.6zm4.64 5.76c1.28 0 2.08-.64 2.08-1.76s-.8-1.76-2.08-1.76H15.2v3.52h2.24z" fill="white"/>
+                  </svg>
+                  Realtor.com
+                </a>
+              </div>
               <Link href={`/leads/${leadId}/edit`} className="btn btn-primary">
                 Edit Lead
               </Link>
