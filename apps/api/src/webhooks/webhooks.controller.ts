@@ -405,6 +405,12 @@ export class WebhooksController {
             ? await this.leadsService['prisma'].message.findFirst({ where: { twilioSid: outSmsId } })
             : null;
 
+          // SmrtPhone appends a compliance footer ("This message was sent by …")
+          // to outbound messages, so the webhook body is longer than what we stored.
+          // Strip the footer before comparing, and also try a startsWith fallback
+          // in case the footer format changes.
+          const coreBody = msgBody.split(/\n\s*This message was sent by/i)[0].trim();
+
           // Use createdAt (auto-set by Prisma) instead of sentAt for the time window.
           // PENDING records have sentAt=NULL because it's only set after the SMS API
           // responds, but the webhook can arrive before that update completes.
@@ -414,8 +420,16 @@ export class WebhooksController {
                 where: {
                   leadId: outboundLead.id,
                   direction: 'OUTBOUND',
-                  body: msgBody,
                   createdAt: { gte: recentCutoff },
+                  OR: [
+                    { body: coreBody },
+                    { body: msgBody },
+                    // Fallback: match if our stored body starts with the first 80 chars
+                    // (handles edge cases where footer format varies)
+                    ...(coreBody.length >= 80
+                      ? [{ body: { startsWith: coreBody.substring(0, 80) } }]
+                      : []),
+                  ],
                 },
               })
             : null;
