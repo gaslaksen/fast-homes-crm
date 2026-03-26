@@ -10,6 +10,7 @@ import { PipelineService } from '../pipeline/pipeline.service';
 import { LeadStatus, LeadSource, formatPhoneNumber } from '@fast-homes/shared';
 import { Prisma } from '@prisma/client';
 import { enrichAddressFromZip, cleanStreetAddress, lookupCityStateFromZip } from '../webhooks/address-parser';
+import * as XLSX from 'xlsx';
 
 const INITIAL_OUTREACH_DELAY_MS = 60_000; // 1 minute
 const DEMO_OUTREACH_DELAY_MS = 3_000;     // 3 seconds in demo mode
@@ -877,6 +878,113 @@ export class LeadsService {
     ].join(','));
 
     return [headers.join(','), ...rows].join('\n');
+  }
+
+  // ── Enhanced export with field selection and XLSX support ────────────────
+
+  private static readonly EXPORT_FIELD_DEFS: { key: string; label: string; accessor: (l: any) => any }[] = [
+    { key: 'sellerFirstName', label: 'First Name', accessor: (l) => l.sellerFirstName },
+    { key: 'sellerLastName', label: 'Last Name', accessor: (l) => l.sellerLastName },
+    { key: 'sellerPhone', label: 'Phone', accessor: (l) => l.sellerPhone },
+    { key: 'sellerEmail', label: 'Email', accessor: (l) => l.sellerEmail },
+    { key: 'propertyAddress', label: 'Property Address', accessor: (l) => l.propertyAddress },
+    { key: 'propertyCity', label: 'City', accessor: (l) => l.propertyCity },
+    { key: 'propertyState', label: 'State', accessor: (l) => l.propertyState },
+    { key: 'propertyZip', label: 'Zip', accessor: (l) => l.propertyZip },
+    { key: 'propertyType', label: 'Property Type', accessor: (l) => l.propertyType },
+    { key: 'bedrooms', label: 'Bedrooms', accessor: (l) => l.bedrooms },
+    { key: 'bathrooms', label: 'Bathrooms', accessor: (l) => l.bathrooms },
+    { key: 'sqft', label: 'Sqft', accessor: (l) => l.sqft },
+    { key: 'lotSize', label: 'Lot Size', accessor: (l) => l.lotSize },
+    { key: 'yearBuilt', label: 'Year Built', accessor: (l) => l.yearBuilt },
+    { key: 'subdivision', label: 'Subdivision', accessor: (l) => l.subdivision },
+    { key: 'status', label: 'Status', accessor: (l) => l.status },
+    { key: 'source', label: 'Source', accessor: (l) => l.source },
+    { key: 'totalScore', label: 'Score', accessor: (l) => l.totalScore },
+    { key: 'scoreBand', label: 'Score Band', accessor: (l) => l.scoreBand },
+    { key: 'tier', label: 'Tier', accessor: (l) => l.tier },
+    { key: 'askingPrice', label: 'Asking Price', accessor: (l) => l.askingPrice },
+    { key: 'arv', label: 'ARV', accessor: (l) => l.arv },
+    { key: 'timeline', label: 'Timeline', accessor: (l) => l.timeline },
+    { key: 'conditionLevel', label: 'Condition', accessor: (l) => l.conditionLevel },
+    { key: 'ownershipStatus', label: 'Ownership', accessor: (l) => l.ownershipStatus },
+    { key: 'sellerMotivation', label: 'Motivation', accessor: (l) => l.sellerMotivation },
+    { key: 'touchCount', label: 'Touches', accessor: (l) => l.touchCount },
+    { key: 'lastTouchedAt', label: 'Last Touched', accessor: (l) => l.lastTouchedAt ? new Date(l.lastTouchedAt).toISOString().split('T')[0] : '' },
+    { key: 'createdAt', label: 'Created', accessor: (l) => l.createdAt ? new Date(l.createdAt).toISOString().split('T')[0] : '' },
+    { key: 'latitude', label: 'Latitude', accessor: (l) => l.latitude },
+    { key: 'longitude', label: 'Longitude', accessor: (l) => l.longitude },
+    { key: 'repairCosts', label: 'Repair Costs', accessor: (l) => l.repairCosts },
+    { key: 'assignmentFee', label: 'Assignment Fee', accessor: (l) => l.assignmentFee },
+    { key: 'maoPercent', label: 'MAO %', accessor: (l) => l.maoPercent },
+  ];
+
+  async exportLeads(
+    filters: {
+      source?: LeadSource;
+      status?: LeadStatus;
+      scoreBand?: string;
+      search?: string;
+      createdAfter?: string;
+      createdBefore?: string;
+    },
+    fields?: string[],
+    format: 'csv' | 'xlsx' = 'csv',
+  ): Promise<string | Buffer> {
+    const where: Prisma.LeadWhereInput = {};
+    if (filters.source) where.source = filters.source;
+    if (filters.status) where.status = filters.status;
+    if (filters.scoreBand) where.scoreBand = filters.scoreBand as any;
+    if (filters.search) {
+      where.OR = [
+        { propertyAddress: { contains: filters.search, mode: 'insensitive' } },
+        { sellerFirstName: { contains: filters.search, mode: 'insensitive' } },
+        { sellerLastName: { contains: filters.search, mode: 'insensitive' } },
+        { sellerPhone: { contains: filters.search, mode: 'insensitive' } },
+      ];
+    }
+    if (filters.createdAfter || filters.createdBefore) {
+      const dateFilter: Prisma.DateTimeFilter<'Lead'> = {};
+      if (filters.createdAfter) dateFilter.gte = new Date(filters.createdAfter);
+      if (filters.createdBefore) dateFilter.lte = new Date(filters.createdBefore);
+      where.createdAt = dateFilter;
+    }
+
+    const leads = await this.prisma.lead.findMany({ where, orderBy: { createdAt: 'desc' } });
+
+    // Pick fields to export
+    const selectedDefs = fields?.length
+      ? LeadsService.EXPORT_FIELD_DEFS.filter((d) => fields.includes(d.key))
+      : LeadsService.EXPORT_FIELD_DEFS;
+
+    const headers = selectedDefs.map((d) => d.label);
+    const dataRows = leads.map((l) => selectedDefs.map((d) => {
+      const val = d.accessor(l);
+      return val != null ? val : '';
+    }));
+
+    if (format === 'xlsx') {
+      const wb = XLSX.utils.book_new();
+      const wsData = [headers, ...dataRows];
+      const ws = XLSX.utils.aoa_to_sheet(wsData);
+      // Auto-size columns
+      ws['!cols'] = headers.map((h, i) => {
+        const maxLen = Math.max(h.length, ...dataRows.map((r) => String(r[i] || '').length));
+        return { wch: Math.min(maxLen + 2, 40) };
+      });
+      XLSX.utils.book_append_sheet(wb, ws, 'Leads');
+      return Buffer.from(XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }));
+    }
+
+    // CSV format
+    const csvEscape = (val: any) => {
+      if (val == null) return '';
+      const str = String(val);
+      return str.includes(',') || str.includes('"') || str.includes('\n')
+        ? `"${str.replace(/"/g, '""')}"` : str;
+    };
+    const csvRows = dataRows.map((row) => row.map(csvEscape).join(','));
+    return [headers.join(','), ...csvRows].join('\n');
   }
 
   /**

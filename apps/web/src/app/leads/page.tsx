@@ -296,6 +296,14 @@ function LeadsPageInner() {
   const [selectedIds,   setSelectedIds]   = useState<Set<string>>(new Set());
   const [bulkStatus,    setBulkStatus]    = useState('');
   const [showFilters,   setShowFilters]   = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportFormat, setExportFormat] = useState<'csv' | 'xlsx'>('csv');
+  const [exportFields, setExportFields] = useState<Set<string>>(new Set([
+    'sellerFirstName', 'sellerLastName', 'sellerPhone', 'sellerEmail',
+    'propertyAddress', 'propertyCity', 'propertyState', 'propertyZip',
+    'status', 'totalScore', 'scoreBand', 'source', 'askingPrice', 'arv', 'createdAt',
+  ]));
+  const [exporting, setExporting] = useState(false);
 
   // URL param initial filters
   useEffect(() => {
@@ -440,13 +448,51 @@ function LeadsPageInner() {
   };
 
   const handleExport = async () => {
-    const res = await leadsAPI.exportCsv({});
-    const url = URL.createObjectURL(new Blob([res.data], { type: 'text/csv' }));
-    const a   = document.createElement('a');
-    a.href = url;
-    a.download = `leads-${new Date().toISOString().split('T')[0]}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    setExporting(true);
+    try {
+      const fields = Array.from(exportFields);
+      const mime = exportFormat === 'xlsx'
+        ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        : 'text/csv';
+      const res = await leadsAPI.exportLeads({}, fields, exportFormat);
+      const url = URL.createObjectURL(new Blob([res.data], { type: mime }));
+      const a   = document.createElement('a');
+      a.href = url;
+      a.download = `leads-${new Date().toISOString().split('T')[0]}.${exportFormat}`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setShowExportModal(false);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const EXPORT_FIELD_OPTIONS = [
+    { key: 'sellerFirstName', label: 'First Name' }, { key: 'sellerLastName', label: 'Last Name' },
+    { key: 'sellerPhone', label: 'Phone' }, { key: 'sellerEmail', label: 'Email' },
+    { key: 'propertyAddress', label: 'Address' }, { key: 'propertyCity', label: 'City' },
+    { key: 'propertyState', label: 'State' }, { key: 'propertyZip', label: 'Zip' },
+    { key: 'propertyType', label: 'Property Type' }, { key: 'bedrooms', label: 'Beds' },
+    { key: 'bathrooms', label: 'Baths' }, { key: 'sqft', label: 'Sqft' },
+    { key: 'lotSize', label: 'Lot Size' }, { key: 'yearBuilt', label: 'Year Built' },
+    { key: 'subdivision', label: 'Subdivision' }, { key: 'status', label: 'Status' },
+    { key: 'source', label: 'Source' }, { key: 'totalScore', label: 'Score' },
+    { key: 'scoreBand', label: 'Score Band' }, { key: 'tier', label: 'Tier' },
+    { key: 'askingPrice', label: 'Asking Price' }, { key: 'arv', label: 'ARV' },
+    { key: 'timeline', label: 'Timeline' }, { key: 'conditionLevel', label: 'Condition' },
+    { key: 'ownershipStatus', label: 'Ownership' }, { key: 'sellerMotivation', label: 'Motivation' },
+    { key: 'touchCount', label: 'Touches' }, { key: 'lastTouchedAt', label: 'Last Touched' },
+    { key: 'createdAt', label: 'Created' }, { key: 'latitude', label: 'Latitude' },
+    { key: 'longitude', label: 'Longitude' }, { key: 'repairCosts', label: 'Repair Costs' },
+    { key: 'assignmentFee', label: 'Assignment Fee' }, { key: 'maoPercent', label: 'MAO %' },
+  ];
+
+  const toggleExportField = (key: string) => {
+    setExportFields(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
   };
 
   const clearFilters = () => {
@@ -515,7 +561,8 @@ function LeadsPageInner() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={handleExport} className="btn btn-secondary btn-sm text-xs">Export CSV</button>
+            <Link href="/leads/import" className="btn btn-secondary btn-sm text-xs">Import</Link>
+            <button onClick={() => setShowExportModal(true)} className="btn btn-secondary btn-sm text-xs">Export</button>
             <Link href="/leads/new" className="btn btn-primary btn-sm">+ New Lead</Link>
           </div>
         </div>
@@ -1002,6 +1049,72 @@ function LeadsPageInner() {
         )}
 
       </main>
+
+      {/* Export Modal */}
+      {showExportModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setShowExportModal(false)}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-gray-200 flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-gray-900">Export Leads</h2>
+              <button onClick={() => setShowExportModal(false)} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+            </div>
+            <div className="px-5 py-4 overflow-y-auto flex-1 space-y-4">
+              {/* Format */}
+              <div>
+                <label className="text-sm font-medium text-gray-700 block mb-2">Format</label>
+                <div className="flex gap-2">
+                  {(['csv', 'xlsx'] as const).map((fmt) => (
+                    <button
+                      key={fmt}
+                      onClick={() => setExportFormat(fmt)}
+                      className={`px-4 py-1.5 text-sm rounded-lg border font-medium ${
+                        exportFormat === fmt
+                          ? 'bg-blue-50 border-blue-300 text-blue-700'
+                          : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                      }`}
+                    >
+                      {fmt.toUpperCase()}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {/* Fields */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-sm font-medium text-gray-700">Fields</label>
+                  <div className="flex gap-2 text-xs">
+                    <button onClick={() => setExportFields(new Set(EXPORT_FIELD_OPTIONS.map(f => f.key)))} className="text-blue-600 hover:underline">All</button>
+                    <button onClick={() => setExportFields(new Set())} className="text-blue-600 hover:underline">None</button>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-1">
+                  {EXPORT_FIELD_OPTIONS.map((f) => (
+                    <label key={f.key} className="flex items-center gap-2 py-1 px-2 rounded hover:bg-gray-50 text-sm cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={exportFields.has(f.key)}
+                        onChange={() => toggleExportField(f.key)}
+                        className="rounded text-blue-600"
+                      />
+                      <span className="text-gray-700">{f.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="px-5 py-3 border-t border-gray-200 flex justify-end gap-2">
+              <button onClick={() => setShowExportModal(false)} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Cancel</button>
+              <button
+                onClick={handleExport}
+                disabled={exportFields.size === 0 || exporting}
+                className="px-5 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+              >
+                {exporting ? 'Exporting...' : `Export ${exportFormat.toUpperCase()}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

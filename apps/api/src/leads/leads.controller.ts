@@ -1,14 +1,36 @@
-import { Controller, Get, Post, Patch, Put, Delete, Body, Param, Query, Headers, Res, HttpException, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Put, Delete, Body, Param, Query, Headers, Res, HttpException, HttpStatus, UseInterceptors, UploadedFile, BadRequestException } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { Response } from 'express';
 import { LeadsService } from './leads.service';
+import { LeadImportService, IMPORTABLE_FIELDS } from './lead-import.service';
 import { RentCastService } from '../comps/rentcast.service';
 import { LeadStatus, LeadSource } from '@fast-homes/shared';
 import * as jwt from 'jsonwebtoken';
+
+const IMPORT_UPLOAD_OPTIONS = {
+  storage: memoryStorage(),
+  fileFilter: (_req: any, file: any, cb: any) => {
+    const allowed = [
+      'text/csv',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/octet-stream',
+    ];
+    if (allowed.includes(file.mimetype) || file.originalname.match(/\.(csv|xlsx|xls)$/i)) {
+      cb(null, true);
+    } else {
+      cb(new BadRequestException('Only CSV and Excel files are allowed'), false);
+    }
+  },
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
+};
 
 @Controller('leads')
 export class LeadsController {
   constructor(
     private leadsService: LeadsService,
+    private leadImportService: LeadImportService,
     private rentCastService: RentCastService,
   ) {}
 
@@ -84,6 +106,57 @@ export class LeadsController {
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', 'attachment; filename=leads-export.csv');
     res.send(csv);
+  }
+
+  @Post('export')
+  async exportLeads(@Body() body: any, @Res() res: Response) {
+    const { filters, fields, format } = body;
+    const result = await this.leadsService.exportLeads(filters || {}, fields, format || 'csv');
+    if (format === 'xlsx') {
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', 'attachment; filename=leads-export.xlsx');
+      res.send(result);
+    } else {
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', 'attachment; filename=leads-export.csv');
+      res.send(result);
+    }
+  }
+
+  // ── Import ─────────────────────────────────────────────────────────────────
+
+  @Get('import/fields')
+  getImportableFields() {
+    return { fields: IMPORTABLE_FIELDS };
+  }
+
+  @Post('import/parse')
+  @UseInterceptors(FileInterceptor('file', IMPORT_UPLOAD_OPTIONS))
+  async parseImportFile(@UploadedFile() file: Express.Multer.File) {
+    if (!file) throw new BadRequestException('No file uploaded');
+    const { headers, sampleRows, totalRows, detectedMapping } =
+      this.leadImportService.parseUpload(file.buffer, file.mimetype);
+    return { headers, sampleRows, totalRows, detectedMapping, availableFields: IMPORTABLE_FIELDS };
+  }
+
+  @Post('import/execute')
+  @UseInterceptors(FileInterceptor('file', IMPORT_UPLOAD_OPTIONS))
+  async executeImport(
+    @UploadedFile() file: Express.Multer.File,
+    @Body() body: any,
+    @Headers('authorization') authHeader?: string,
+  ) {
+    if (!file) throw new BadRequestException('No file uploaded');
+    const { userId, organizationId } = this.decodeToken(authHeader);
+    const mapping = typeof body.mapping === 'string' ? JSON.parse(body.mapping) : body.mapping;
+    const options = typeof body.options === 'string' ? JSON.parse(body.options) : (body.options || {});
+
+    const { headers, allRows } = this.leadImportService.parseUpload(file.buffer, file.mimetype);
+    return this.leadImportService.executeImport(headers, allRows, mapping, {
+      ...options,
+      organizationId: options.organizationId || organizationId,
+      userId,
+    });
   }
 
   @Get('stats')

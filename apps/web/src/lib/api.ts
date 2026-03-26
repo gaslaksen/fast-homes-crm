@@ -78,6 +78,25 @@ export const leadsAPI = {
     api.post('/leads/bulk-status', { ids, status }),
   exportCsv: (filters: any) =>
     api.post('/leads/export-csv', filters, { responseType: 'blob' }),
+  exportLeads: (filters: any, fields?: string[], format?: 'csv' | 'xlsx') =>
+    api.post('/leads/export', { filters, fields, format }, { responseType: 'blob' }),
+  importParse: (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.post('/leads/import/parse', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+  importExecute: (file: File, mapping: Record<string, string>, options?: any) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('mapping', JSON.stringify(mapping));
+    formData.append('options', JSON.stringify(options || {}));
+    return api.post('/leads/import/execute', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+  importFields: () => api.get('/leads/import/fields'),
   stats: () => api.get('/leads/stats'),
 };
 
