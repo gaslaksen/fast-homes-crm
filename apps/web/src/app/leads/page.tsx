@@ -749,7 +749,7 @@ function LeadsPageInner() {
           {/* Desktop table */}
           <div className="hidden md:block overflow-x-auto -mx-6 px-6 md:mx-0 md:px-0">
           <div className="bg-white rounded-xl border border-gray-200 overflow-hidden min-w-[900px]">
-            <div className="grid grid-cols-[auto_44px_2fr_110px_68px_72px_72px_72px_80px_72px] gap-3 px-4 py-2.5 border-b border-gray-100 bg-gray-50/80">
+            <div className="grid grid-cols-[auto_44px_2fr_110px_68px_72px_72px_72px_80px_60px_72px] gap-3 px-4 py-2.5 border-b border-gray-100 bg-gray-50/80">
               <input
                 type="checkbox"
                 checked={selectedIds.size === filtered.length && filtered.length > 0}
@@ -769,6 +769,7 @@ function LeadsPageInner() {
               <SortHeader label="Asking"            sortKey="asking"  current={sortKey} dir={sortDir} onClick={handleSort} />
               <SortHeader label="Spread"            sortKey="arv"     current={sortKey} dir={sortDir} onClick={handleSort} />
               <SortHeader label="Touches"           sortKey="touches" current={sortKey} dir={sortDir} onClick={handleSort} />
+              <SortHeader label="Last Touch"        sortKey="touched" current={sortKey} dir={sortDir} onClick={handleSort} />
             </div>
 
             <div className="divide-y divide-gray-50">
@@ -783,7 +784,7 @@ function LeadsPageInner() {
                 return (
                   <div
                     key={lead.id}
-                    className={`grid grid-cols-[auto_44px_2fr_110px_68px_72px_72px_72px_80px_72px] gap-3 items-center px-4 py-2.5 hover:bg-gray-50 transition-colors group ${
+                    className={`grid grid-cols-[auto_44px_2fr_110px_68px_72px_72px_72px_80px_60px_72px] gap-3 items-center px-4 py-2.5 hover:bg-gray-50 transition-colors group ${
                       selectedIds.has(lead.id) ? 'bg-blue-50/40' : ''
                     } ${lead.status === 'DEAD' ? 'opacity-60' : ''}`}
                   >
@@ -844,16 +845,18 @@ function LeadsPageInner() {
                           </span>
                         : <span className="text-xs text-gray-300">—</span>}
                     </Link>
-                    <Link href={`/leads/${lead.id}`} className="flex items-center gap-1.5">
+                    <Link href={`/leads/${lead.id}`}>
                       <span className="text-xs font-semibold text-gray-600 bg-gray-100 rounded-full px-1.5 py-0.5 min-w-[20px] text-center">
                         {lead.touchCount ?? 0}
                       </span>
+                    </Link>
+                    <Link href={`/leads/${lead.id}`}>
                       {hoursAgo !== null
-                        ? <span className={`text-[11px] ${stale ? 'text-amber-600 font-semibold' : 'text-gray-400'}`}>
+                        ? <span className={`text-xs ${stale ? 'text-amber-600 font-semibold' : 'text-gray-400'}`}>
                             {hoursAgo < 24 ? `${hoursAgo}h` : `${Math.round(hoursAgo / 24)}d`}
                             {stale ? ' ⚠' : ''}
                           </span>
-                        : <span className="text-[11px] text-gray-300">—</span>}
+                        : <span className="text-xs text-gray-300">—</span>}
                     </Link>
                   </div>
                 );
