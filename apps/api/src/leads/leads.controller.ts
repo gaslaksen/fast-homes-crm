@@ -163,6 +163,13 @@ export class LeadsController {
     return { success: true, ...result };
   }
 
+  /** One-time: backfill touchCount from outbound messages + completed calls */
+  @Post('admin/backfill-touches')
+  async backfillTouches() {
+    const result = await this.leadsService.backfillTouchCounts();
+    return { success: true, ...result };
+  }
+
   @Patch(':id/auto-respond')
   async toggleAutoRespond(
     @Param('id') id: string,

@@ -11,7 +11,7 @@ import AppNav from '@/components/AppNav';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type SortKey = 'score' | 'arv' | 'asking' | 'created' | 'touched' | 'address' | 'tier';
+type SortKey = 'score' | 'arv' | 'asking' | 'created' | 'touched' | 'touches' | 'address' | 'tier';
 type SortDir = 'asc' | 'desc';
 type ViewMode = 'table' | 'cards';
 
@@ -248,17 +248,22 @@ function MobileLeadCard({ lead, spread: s }: { lead: any; spread: number | null 
           <span className="text-xs text-gray-300">—</span>
         )}
       </div>
-      {/* Row 3: Score + touched */}
+      {/* Row 3: Score + touches */}
       <div className="flex items-center justify-between">
         <ScorePill band={lead.scoreBand} score={lead.totalScore} />
-        {hoursAgo !== null ? (
-          <span className={`text-xs ${stale ? 'text-amber-600 font-semibold' : 'text-gray-400'}`}>
-            {hoursAgo < 24 ? `${hoursAgo}h ago` : `${Math.round(hoursAgo / 24)}d ago`}
-            {stale ? ' ⚠' : ''}
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs font-semibold text-gray-600 bg-gray-100 rounded-full px-1.5 py-0.5 min-w-[20px] text-center">
+            {lead.touchCount ?? 0}
           </span>
-        ) : (
-          <span className="text-xs text-gray-300">—</span>
-        )}
+          {hoursAgo !== null ? (
+            <span className={`text-xs ${stale ? 'text-amber-600 font-semibold' : 'text-gray-400'}`}>
+              {hoursAgo < 24 ? `${hoursAgo}h` : `${Math.round(hoursAgo / 24)}d`}
+              {stale ? ' ⚠' : ''}
+            </span>
+          ) : (
+            <span className="text-xs text-gray-300">—</span>
+          )}
+        </div>
       </div>
     </Link>
   );
@@ -376,6 +381,7 @@ function LeadsPageInner() {
         if (sortKey === 'asking')  { av = a.askingPrice || 0;                         bv = b.askingPrice || 0; }
         if (sortKey === 'created') { av = new Date(a.createdAt).getTime();            bv = new Date(b.createdAt).getTime(); }
         if (sortKey === 'touched') { av = new Date(a.lastTouchedAt || 0).getTime();   bv = new Date(b.lastTouchedAt || 0).getTime(); }
+        if (sortKey === 'touches') { av = a.touchCount || 0;                         bv = b.touchCount || 0; }
         if (sortKey === 'address') { av = a.propertyAddress;                          bv = b.propertyAddress; }
         if (av < bv) return sortDir === 'desc' ? 1 : -1;
         if (av > bv) return sortDir === 'desc' ? -1 : 1;
@@ -762,7 +768,7 @@ function LeadsPageInner() {
               <SortHeader label="ARV"               sortKey="arv"     current={sortKey} dir={sortDir} onClick={handleSort} />
               <SortHeader label="Asking"            sortKey="asking"  current={sortKey} dir={sortDir} onClick={handleSort} />
               <SortHeader label="Spread"            sortKey="arv"     current={sortKey} dir={sortDir} onClick={handleSort} />
-              <SortHeader label="Touched"           sortKey="touched" current={sortKey} dir={sortDir} onClick={handleSort} />
+              <SortHeader label="Touches"           sortKey="touches" current={sortKey} dir={sortDir} onClick={handleSort} />
             </div>
 
             <div className="divide-y divide-gray-50">
@@ -838,13 +844,16 @@ function LeadsPageInner() {
                           </span>
                         : <span className="text-xs text-gray-300">—</span>}
                     </Link>
-                    <Link href={`/leads/${lead.id}`}>
+                    <Link href={`/leads/${lead.id}`} className="flex items-center gap-1.5">
+                      <span className="text-xs font-semibold text-gray-600 bg-gray-100 rounded-full px-1.5 py-0.5 min-w-[20px] text-center">
+                        {lead.touchCount ?? 0}
+                      </span>
                       {hoursAgo !== null
-                        ? <span className={`text-xs ${stale ? 'text-amber-600 font-semibold' : 'text-gray-400'}`}>
+                        ? <span className={`text-[11px] ${stale ? 'text-amber-600 font-semibold' : 'text-gray-400'}`}>
                             {hoursAgo < 24 ? `${hoursAgo}h` : `${Math.round(hoursAgo / 24)}d`}
                             {stale ? ' ⚠' : ''}
                           </span>
-                        : <span className="text-xs text-gray-300">—</span>}
+                        : <span className="text-[11px] text-gray-300">—</span>}
                     </Link>
                   </div>
                 );
@@ -956,10 +965,15 @@ function LeadsPageInner() {
                                                 </span>
                                               )}
                                             </div>
-                                            <span className={`${stale ? 'text-amber-500 font-semibold' : 'text-gray-300'}`}>
-                                              {hoursAgo !== null ? pipelineTimeAgo(lead.lastTouchedAt) : '—'}
-                                              {stale ? ' ⚠' : ''}
-                                            </span>
+                                            <div className="flex items-center gap-1">
+                                              <span className="font-semibold text-gray-500 bg-gray-100 rounded-full px-1 min-w-[16px] text-center text-[10px]">
+                                                {lead.touchCount ?? 0}
+                                              </span>
+                                              <span className={`${stale ? 'text-amber-500 font-semibold' : 'text-gray-300'}`}>
+                                                {hoursAgo !== null ? pipelineTimeAgo(lead.lastTouchedAt) : '—'}
+                                                {stale ? ' ⚠' : ''}
+                                              </span>
+                                            </div>
                                           </div>
                                         </div>
                                       </Link>
