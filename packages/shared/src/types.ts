@@ -121,6 +121,10 @@ export interface Lead {
   doNotContact: boolean;
   unsubscribedAt?: Date;
   
+  // Touch tracking
+  touchCount: number;
+  lastTouchedAt?: Date;
+
   // Metadata
   sourceMetadata?: Record<string, any>; // Original payload from source
   createdAt: Date;

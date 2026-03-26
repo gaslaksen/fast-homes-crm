@@ -679,6 +679,38 @@ export class LeadsService {
   }
 
   /**
+   * Backfill touchCount for all leads based on actual outbound messages + completed calls.
+   * Safe to run multiple times — overwrites touchCount with the real count.
+   */
+  async backfillTouchCounts(): Promise<{ updated: number; total: number }> {
+    const leads = await this.prisma.lead.findMany({ select: { id: true, touchCount: true } });
+    let updated = 0;
+
+    for (const lead of leads) {
+      const [outboundMessages, completedCalls] = await Promise.all([
+        this.prisma.message.count({
+          where: { leadId: lead.id, direction: 'OUTBOUND' },
+        }),
+        this.prisma.callLog.count({
+          where: { leadId: lead.id, status: 'completed' },
+        }),
+      ]);
+
+      const realCount = outboundMessages + completedCalls;
+      if (realCount !== lead.touchCount) {
+        await this.prisma.lead.update({
+          where: { id: lead.id },
+          data: { touchCount: realCount },
+        });
+        updated++;
+      }
+    }
+
+    this.logger.log(`backfillTouchCounts: updated=${updated}, total=${leads.length}`);
+    return { updated, total: leads.length };
+  }
+
+  /**
    * Manually trigger initial outreach for a lead (useful for testing / retroactive sends)
    */
   async triggerInitialOutreach(leadId: string): Promise<string | null> {
