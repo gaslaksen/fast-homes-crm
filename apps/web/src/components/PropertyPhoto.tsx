@@ -43,7 +43,7 @@ export default function PropertyPhoto({
   const colors = BAND_COLORS[band] || BAND_COLORS.DEAD_COLD;
 
   const fullSrc = src && !imgError
-    ? (src.startsWith('http') ? src : `${API_URL}${src}`)
+    ? (src.startsWith('http') || src.startsWith('data:') ? src : `${API_URL}${src}`)
     : null;
 
   const sizeClass = SIZES[size];

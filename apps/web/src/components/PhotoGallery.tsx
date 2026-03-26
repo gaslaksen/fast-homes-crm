@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
 function resolveUrl(url: string) {
-  return url.startsWith('http') ? url : `${API_URL}${url}`;
+  return url.startsWith('http') || url.startsWith('data:') ? url : `${API_URL}${url}`;
 }
 
 function sourceLabel(source: string): string {
