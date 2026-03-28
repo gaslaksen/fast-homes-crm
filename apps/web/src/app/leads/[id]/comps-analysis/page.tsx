@@ -2070,6 +2070,30 @@ export default function CompsAnalysisPage() {
                       <p className="text-sm text-amber-900">{parsed.lotValueAnalysis.summary}</p>
                     </div>
                   )}
+                  {parsed.sellerEquity && (
+                    <div className={`border rounded-xl p-4 ${parsed.sellerEquity.cashOfferViable === false ? 'bg-red-50 border-red-200' : 'bg-teal-50 border-teal-200'}`}>
+                      <div className="flex items-center gap-2 mb-2">
+                        <div className={`text-xs font-semibold uppercase tracking-wide ${parsed.sellerEquity.cashOfferViable === false ? 'text-red-700' : 'text-teal-700'}`}>Seller Purchase History</div>
+                        {parsed.sellerEquity.lastPurchasePrice && (
+                          <span className={`text-sm font-bold ${parsed.sellerEquity.cashOfferViable === false ? 'text-red-800' : 'text-teal-800'}`}>
+                            Paid ${parsed.sellerEquity.lastPurchasePrice.toLocaleString()}
+                            {parsed.sellerEquity.lastPurchaseDate && (
+                              <span className="font-normal text-xs ml-1">({parsed.sellerEquity.lastPurchaseDate})</span>
+                            )}
+                          </span>
+                        )}
+                        {parsed.sellerEquity.equityPosition && parsed.sellerEquity.equityPosition !== 'unknown' && (
+                          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                            parsed.sellerEquity.equityPosition === 'deep' ? 'bg-green-100 text-green-700' :
+                            parsed.sellerEquity.equityPosition === 'moderate' ? 'bg-yellow-100 text-yellow-700' :
+                            parsed.sellerEquity.equityPosition === 'thin' ? 'bg-orange-100 text-orange-700' :
+                            'bg-red-100 text-red-700'
+                          }`}>{parsed.sellerEquity.equityPosition} equity</span>
+                        )}
+                      </div>
+                      <p className={`text-sm ${parsed.sellerEquity.cashOfferViable === false ? 'text-red-900' : 'text-teal-900'}`}>{parsed.sellerEquity.summary}</p>
+                    </div>
+                  )}
                   {parsed.exitScenarios?.length > 0 && (
                     <div>
                       <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Exit Scenarios</div>

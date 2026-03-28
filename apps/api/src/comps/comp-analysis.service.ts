@@ -295,6 +295,7 @@ export class CompAnalysisService {
             marketAssessedValue: true,
             lastSaleDate: true,
             lastSalePrice: true,
+            attomSaleHistory: true,
           },
         },
       },
@@ -2105,6 +2106,20 @@ Use Midwest/rural Ohio pricing. Be specific about what you see — don't general
       : null;
     const ppsfAnchoredValue = avgPpsf && sqft ? Math.round(avgPpsf * sqft) : null;
 
+    // ── Seller purchase history ─────────────────────────────────────────────
+    const saleHistory = lead.attomSaleHistory as any[] | null;
+    const lastPurchaseDate = lead.lastSaleDate
+      ? new Date(lead.lastSaleDate)
+      : saleHistory?.[0]?.saleTransDate
+        ? new Date(saleHistory[0].saleTransDate)
+        : null;
+    const lastPurchasePrice = lead.lastSalePrice
+      ?? saleHistory?.[0]?.saleAmt
+      ?? null;
+    const yearsSinceLastPurchase = lastPurchaseDate
+      ? Math.round((now - lastPurchaseDate.getTime()) / (365.25 * 24 * 60 * 60 * 1000) * 10) / 10
+      : null;
+
     // ── ATTOM condition-adjusted AVM context ────────────────────────────────
     const attomBlock = lead.attomAvm ? {
       avm: Math.round(lead.attomAvm),
@@ -2148,6 +2163,12 @@ ${attomBlock ? `- AVM: $${attomBlock.avm.toLocaleString()}${attomBlock.confidenc
 - Good Condition: ${attomBlock.goodCondition ? '$' + attomBlock.goodCondition.toLocaleString() : 'N/A'}
 - After Repair (ARV): ${attomBlock.afterRepair ? '$' + attomBlock.afterRepair.toLocaleString() : 'N/A'}` : 'Not available'}
 
+SELLER PURCHASE HISTORY:
+${lastPurchasePrice ? `- Last Purchase Price: $${lastPurchasePrice.toLocaleString()}` : '- Last Purchase Price: Unknown'}
+${lastPurchaseDate ? `- Last Purchase Date: ${lastPurchaseDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })} (${yearsSinceLastPurchase} years ago)` : '- Last Purchase Date: Unknown'}
+${saleHistory && saleHistory.length > 1 ? `- Prior Sales:\n${saleHistory.slice(1, 4).map((s: any) => `  · ${s.saleTransDate ? new Date(s.saleTransDate).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) : '?'}: $${(s.saleAmt || 0).toLocaleString()}${s.saleTransType ? ' (' + s.saleTransType + ')' : ''}`).join('\n')}` : ''}
+${lastPurchasePrice && lead.askingPrice ? `- Seller's Basis vs Asking: Paid $${lastPurchasePrice.toLocaleString()}, asking $${lead.askingPrice.toLocaleString()} (${lead.askingPrice >= lastPurchasePrice ? '+' : ''}${Math.round((lead.askingPrice - lastPurchasePrice) / lastPurchasePrice * 100)}% from purchase)` : ''}
+
 PRIOR ANALYSIS RESULTS:
 - System ARV: ${analysisContext.arvEstimate ? '$' + Math.round(analysisContext.arvEstimate).toLocaleString() : 'Not calculated'}
 - ARV Range: ${analysisContext.arvLow ? '$' + Math.round(analysisContext.arvLow).toLocaleString() : '?'} – ${analysisContext.arvHigh ? '$' + Math.round(analysisContext.arvHigh).toLocaleString() : '?'}
@@ -2178,6 +2199,8 @@ ${selectedComps.map((c, i) => {
 
 Standard investor benchmarks: $50/sqft remodel cost for standard flip. Net proceeds = ARV × 0.92 (6% commissions + 2% closing). Minimum profit target = $20,000 for a flip to make sense. If cash offer does not work, pivot to novation/listing deal where seller stays in title and you market/sell for a fee.
 
+CRITICAL — SELLER'S BASIS ANALYSIS: If the seller recently purchased the property (especially within the last 3 years), their purchase price is a psychological and financial floor. A seller who bought for $850K in 2024 will almost never accept $600K — they'd rather hold or list retail. Factor this into your offer strategy, risk assessment, and seller pitch. If the MAO is below the seller's purchase price, this is a MAJOR obstacle that must be addressed head-on. Consider whether novation/listing is the only viable path. Also consider equity position: a seller with little/no equity has less flexibility, while a seller who bought decades ago at a fraction of current value has more room to negotiate.
+
 Now think through this deal systematically. Respond ONLY with a valid JSON object in exactly this shape:
 
 {
@@ -2197,6 +2220,15 @@ Now think through this deal systematically. Respond ONLY with a valid JSON objec
     "estimatedLotValue": number or null,
     "basis": "sentence explaining how lot value was derived (comparable land sale, % of total, etc)",
     "summary": "Is the lot a meaningful part of the value? How does it affect the deal math?"
+  },
+  "sellerEquity": {
+    "lastPurchasePrice": number or null,
+    "lastPurchaseDate": "month/year string or null",
+    "yearsSincePurchase": number or null,
+    "estimatedEquity": number or null,
+    "equityPosition": "deep" | "moderate" | "thin" | "underwater" | "unknown",
+    "cashOfferViable": true | false,
+    "summary": "2-3 sentences: How does the seller's purchase history affect this deal? If they bought recently at a high price, explain why a cash offer below their basis is unlikely to work. If they bought decades ago, note the built-up equity gives room to negotiate. If purchase history is unknown, say so."
   },
   "exitScenarios": [
     {
