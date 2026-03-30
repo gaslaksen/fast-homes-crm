@@ -141,11 +141,11 @@ function StepEditor({
   }
 
   return (
-    <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mt-2 space-y-4">
+    <div className="bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-xl p-4 mt-2 space-y-4">
       {/* Channel toggle */}
       <div className="flex items-center gap-2">
-        <span className="text-sm font-medium text-gray-700">Channel:</span>
-        <div className="flex rounded-lg overflow-hidden border border-gray-200 bg-white">
+        <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Channel:</span>
+        <div className="flex rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
           {(['TEXT', 'EMAIL'] as const).map((ch) => (
             <button
               key={ch}
@@ -153,7 +153,7 @@ function StepEditor({
               className={`px-3 py-1.5 text-sm font-medium transition-colors ${
                 step.channel === ch
                   ? 'bg-blue-600 text-white'
-                  : 'text-gray-600 hover:bg-gray-50'
+                  : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
               }`}
             >
               {ch === 'TEXT' ? '📱 SMS' : '✉️ Email'}
@@ -164,16 +164,16 @@ function StepEditor({
 
       {/* Delay */}
       <div className="flex items-center gap-3 flex-wrap">
-        <span className="text-sm font-medium text-gray-700">Send after:</span>
+        <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Send after:</span>
         <div className="flex items-center gap-1">
           <input
             type="number"
             min={0}
             value={step.delayDays}
             onChange={(e) => onChange({ ...step, delayDays: parseInt(e.target.value) || 0 })}
-            className="w-16 border border-gray-200 rounded-lg px-2 py-1 text-sm text-center"
+            className="w-16 border border-gray-200 dark:border-gray-700 rounded-lg px-2 py-1 text-sm text-center dark:bg-gray-800 dark:text-gray-100"
           />
-          <span className="text-sm text-gray-600">days</span>
+          <span className="text-sm text-gray-600 dark:text-gray-400">days</span>
         </div>
         <div className="flex items-center gap-1">
           <input
@@ -182,54 +182,54 @@ function StepEditor({
             max={23}
             value={step.delayHours}
             onChange={(e) => onChange({ ...step, delayHours: parseInt(e.target.value) || 0 })}
-            className="w-16 border border-gray-200 rounded-lg px-2 py-1 text-sm text-center"
+            className="w-16 border border-gray-200 dark:border-gray-700 rounded-lg px-2 py-1 text-sm text-center dark:bg-gray-800 dark:text-gray-100"
           />
-          <span className="text-sm text-gray-600">hours</span>
+          <span className="text-sm text-gray-600 dark:text-gray-400">hours</span>
         </div>
       </div>
 
       {/* Send window */}
       <div className="flex items-center gap-3 flex-wrap">
-        <span className="text-sm font-medium text-gray-700">Send window:</span>
+        <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Send window:</span>
         <input
           type="time"
           value={step.sendWindowStart}
           onChange={(e) => onChange({ ...step, sendWindowStart: e.target.value })}
-          className="border border-gray-200 rounded-lg px-2 py-1 text-sm"
+          className="border border-gray-200 dark:border-gray-700 rounded-lg px-2 py-1 text-sm dark:bg-gray-800 dark:text-gray-100"
         />
-        <span className="text-sm text-gray-500">to</span>
+        <span className="text-sm text-gray-500 dark:text-gray-400">to</span>
         <input
           type="time"
           value={step.sendWindowEnd}
           onChange={(e) => onChange({ ...step, sendWindowEnd: e.target.value })}
-          className="border border-gray-200 rounded-lg px-2 py-1 text-sm"
+          className="border border-gray-200 dark:border-gray-700 rounded-lg px-2 py-1 text-sm dark:bg-gray-800 dark:text-gray-100"
         />
       </div>
 
       {/* Subject (email only) */}
       {!isSms && (
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Subject</label>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Subject</label>
           <input
             type="text"
             value={step.subject}
             onChange={(e) => onChange({ ...step, subject: e.target.value })}
             placeholder="Email subject line..."
-            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
+            className="w-full border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-sm dark:bg-gray-800 dark:text-gray-100"
           />
         </div>
       )}
 
       {/* Merge field buttons */}
       <div>
-        <div className="text-xs text-gray-500 mb-1.5">Insert merge field:</div>
+        <div className="text-xs text-gray-500 dark:text-gray-400 mb-1.5">Insert merge field:</div>
         <div className="flex flex-wrap gap-1.5">
           {MERGE_FIELDS.map((f) => (
             <button
               key={f.label}
               onClick={() => insertMerge(f.label)}
               title={f.desc}
-              className="text-xs bg-white border border-gray-200 text-blue-700 px-2 py-1 rounded-md hover:bg-blue-50 transition-colors"
+              className="text-xs bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-blue-700 dark:text-blue-400 px-2 py-1 rounded-md hover:bg-blue-50 dark:hover:bg-blue-950 transition-colors"
             >
               {f.label}
             </button>
@@ -240,8 +240,8 @@ function StepEditor({
       {/* Body */}
       <div>
         <div className="flex items-center justify-between mb-1">
-          <label className="text-sm font-medium text-gray-700">Message body</label>
-          <span className={`text-xs ${charWarning ? 'text-red-600 font-medium' : 'text-gray-400'}`}>
+          <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Message body</label>
+          <span className={`text-xs ${charWarning ? 'text-red-600 font-medium' : 'text-gray-400 dark:text-gray-500'}`}>
             {charCount} chars {isSms && '/ 160'}
           </span>
         </div>
@@ -251,24 +251,24 @@ function StepEditor({
           onChange={(e) => onChange({ ...step, body: e.target.value })}
           rows={isSms ? 3 : 6}
           placeholder={isSms ? 'Your SMS message... (keep under 160 chars)' : 'Your email body...'}
-          className={`w-full border rounded-lg px-3 py-2 text-sm resize-y ${
-            charWarning ? 'border-red-400' : 'border-gray-200'
+          className={`w-full border rounded-lg px-3 py-2 text-sm resize-y dark:bg-gray-800 dark:text-gray-100 ${
+            charWarning ? 'border-red-400' : 'border-gray-200 dark:border-gray-700'
           }`}
         />
       </div>
 
       {/* Live preview */}
       {step.body && (
-        <div className="bg-white border border-gray-100 rounded-lg p-3">
-          <div className="text-xs font-medium text-gray-500 mb-1">
+        <div className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-lg p-3">
+          <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
             Preview (sample data):
           </div>
           {!isSms && step.subject && (
-            <div className="text-xs font-medium text-gray-700 mb-1">
+            <div className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
               Subject: {renderPreview(step.subject)}
             </div>
           )}
-          <div className="text-sm text-gray-800 whitespace-pre-wrap">
+          <div className="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap">
             {renderPreview(step.body)}
           </div>
         </div>
@@ -278,15 +278,15 @@ function StepEditor({
       <div>
         <button
           onClick={() => setAiOpen((o) => !o)}
-          className="text-sm flex items-center gap-1.5 text-purple-700 hover:text-purple-900 font-medium"
+          className="text-sm flex items-center gap-1.5 text-purple-700 dark:text-purple-400 hover:text-purple-900 font-medium"
         >
           ✨ AI Suggest {aiOpen ? '▲' : '▼'}
         </button>
 
         {aiOpen && (
-          <div className="mt-3 bg-white border border-purple-100 rounded-xl p-4 space-y-3">
+          <div className="mt-3 bg-white dark:bg-gray-900 border border-purple-100 dark:border-purple-800 rounded-xl p-4 space-y-3">
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-sm text-gray-700 font-medium">Tone:</span>
+              <span className="text-sm text-gray-700 dark:text-gray-300 font-medium">Tone:</span>
               {['Friendly', 'Professional', 'Urgent', 'Empathetic'].map((t) => (
                 <button
                   key={t}
@@ -294,7 +294,7 @@ function StepEditor({
                   className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
                     aiTone === t
                       ? 'bg-purple-600 text-white border-purple-600'
-                      : 'border-gray-200 text-gray-600 hover:border-purple-300'
+                      : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-purple-300 dark:hover:border-purple-800'
                   }`}
                 >
                   {t}
@@ -306,7 +306,7 @@ function StepEditor({
               onChange={(e) => setAiInstructions(e.target.value)}
               placeholder="Optional: extra instructions for AI (e.g. 'mention we pay closing costs')"
               rows={2}
-              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
+              className="w-full border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-sm dark:bg-gray-800 dark:text-gray-100"
             />
             <button
               onClick={handleAiSuggest}
@@ -317,14 +317,14 @@ function StepEditor({
             </button>
 
             {aiResult && (
-              <div className="bg-purple-50 rounded-lg p-3 space-y-2">
+              <div className="bg-purple-50 dark:bg-purple-950 rounded-lg p-3 space-y-2">
                 {aiResult.subject && (
-                  <div className="text-xs text-gray-600 font-medium">
+                  <div className="text-xs text-gray-600 dark:text-gray-400 font-medium">
                     Subject: {aiResult.subject}
                   </div>
                 )}
-                <div className="text-sm text-gray-800 whitespace-pre-wrap">{aiResult.body}</div>
-                <div className="text-xs text-gray-500 italic">{aiResult.reasoning}</div>
+                <div className="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap">{aiResult.body}</div>
+                <div className="text-xs text-gray-500 dark:text-gray-400 italic">{aiResult.reasoning}</div>
                 <div className="flex gap-2 pt-1">
                   <button
                     onClick={applyAiResult}
@@ -334,7 +334,7 @@ function StepEditor({
                   </button>
                   <button
                     onClick={handleAiSuggest}
-                    className="flex-1 py-1.5 bg-white border border-purple-200 text-purple-700 text-xs font-medium rounded-lg hover:bg-purple-50 transition-colors"
+                    className="flex-1 py-1.5 bg-white dark:bg-gray-900 border border-purple-200 dark:border-purple-800 text-purple-700 dark:text-purple-400 text-xs font-medium rounded-lg hover:bg-purple-50 dark:hover:bg-purple-950 transition-colors"
                   >
                     Regenerate
                   </button>
@@ -411,13 +411,13 @@ function AiSequenceModal({
 
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+      <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
         <div className="p-6">
           <div className="flex items-center justify-between mb-6">
-            <h2 className="text-lg font-bold text-gray-900">✨ Generate Full Sequence with AI</h2>
+            <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">✨ Generate Full Sequence with AI</h2>
             <button
               onClick={onClose}
-              className="text-gray-400 hover:text-gray-600 text-xl leading-none"
+              className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400 text-xl leading-none"
             >
               ×
             </button>
@@ -426,7 +426,7 @@ function AiSequenceModal({
           <div className="space-y-4">
             {/* Num steps */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 Number of steps: {numSteps}
               </label>
               <input
@@ -437,14 +437,14 @@ function AiSequenceModal({
                 onChange={(e) => setNumSteps(parseInt(e.target.value))}
                 className="w-full"
               />
-              <div className="flex justify-between text-xs text-gray-400">
+              <div className="flex justify-between text-xs text-gray-400 dark:text-gray-500">
                 <span>3</span><span>10</span>
               </div>
             </div>
 
             {/* Channel mix */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Channel mix</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Channel mix</label>
               <div className="flex gap-2 flex-wrap">
                 {[
                   { value: 'ALL_SMS', label: '📱 All SMS' },
@@ -457,7 +457,7 @@ function AiSequenceModal({
                     className={`px-3 py-1.5 text-sm rounded-lg border transition-colors ${
                       channelMix === value
                         ? 'bg-blue-600 text-white border-blue-600'
-                        : 'border-gray-200 text-gray-600 hover:border-blue-300'
+                        : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-blue-300 dark:hover:border-blue-800'
                     }`}
                   >
                     {label}
@@ -468,7 +468,7 @@ function AiSequenceModal({
 
             {/* Tone */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Tone</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Tone</label>
               <div className="flex gap-2 flex-wrap">
                 {['Friendly', 'Professional', 'Urgent', 'Empathetic'].map((t) => (
                   <button
@@ -477,7 +477,7 @@ function AiSequenceModal({
                     className={`px-3 py-1.5 text-sm rounded-lg border transition-colors ${
                       tone === t
                         ? 'bg-purple-600 text-white border-purple-600'
-                        : 'border-gray-200 text-gray-600 hover:border-purple-300'
+                        : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-purple-300 dark:hover:border-purple-800'
                     }`}
                   >
                     {t}
@@ -488,7 +488,7 @@ function AiSequenceModal({
 
             {/* Goal */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 Campaign goal *
               </label>
               <textarea
@@ -496,7 +496,7 @@ function AiSequenceModal({
                 onChange={(e) => setGoal(e.target.value)}
                 placeholder="e.g. Re-engage leads who went cold 30+ days ago and get them to agree to a call or accept an offer"
                 rows={3}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
+                className="w-full border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-sm dark:bg-gray-800 dark:text-gray-100"
               />
             </div>
 
@@ -511,26 +511,26 @@ function AiSequenceModal({
             {/* Results */}
             {result && (
               <div className="space-y-3">
-                <div className="text-sm font-semibold text-gray-900">
+                <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">
                   Generated {result.length} steps — preview:
                 </div>
                 {result.map((s: any, i: number) => (
-                  <div key={i} className="bg-gray-50 rounded-xl p-3 space-y-1">
+                  <div key={i} className="bg-gray-50 dark:bg-gray-950 rounded-xl p-3 space-y-1">
                     <div className="flex items-center gap-2">
-                      <span className="text-xs font-bold text-gray-500">Step {i + 1}</span>
-                      <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
+                      <span className="text-xs font-bold text-gray-500 dark:text-gray-400">Step {i + 1}</span>
+                      <span className="text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 px-2 py-0.5 rounded-full">
                         {s.channel === 'TEXT' ? '📱 SMS' : '✉️ Email'}
                       </span>
-                      <span className="text-xs text-gray-400">
+                      <span className="text-xs text-gray-400 dark:text-gray-500">
                         {s.delayDays === 0 ? 'Immediately' : `After ${s.delayDays}d`}
                       </span>
                     </div>
                     {s.subject && (
-                      <div className="text-xs font-medium text-gray-700">Subject: {s.subject}</div>
+                      <div className="text-xs font-medium text-gray-700 dark:text-gray-300">Subject: {s.subject}</div>
                     )}
-                    <div className="text-sm text-gray-800 line-clamp-3">{s.body}</div>
+                    <div className="text-sm text-gray-800 dark:text-gray-200 line-clamp-3">{s.body}</div>
                     {s.reasoning && (
-                      <div className="text-xs text-gray-400 italic">{s.reasoning}</div>
+                      <div className="text-xs text-gray-400 dark:text-gray-500 italic">{s.reasoning}</div>
                     )}
                   </div>
                 ))}
@@ -648,12 +648,12 @@ export default function CampaignBuilder({ initial, onSave }: CampaignBuilderProp
               onChange={(e) => setCampaign((c) => ({ ...c, name: e.target.value }))}
               onBlur={() => setNameEditing(false)}
               autoFocus
-              className="text-2xl font-bold text-gray-900 border-b-2 border-blue-400 bg-transparent w-full outline-none pb-1"
+              className="text-2xl font-bold text-gray-900 dark:text-gray-100 border-b-2 border-blue-400 bg-transparent w-full outline-none pb-1"
             />
           ) : (
             <button
               onClick={() => setNameEditing(true)}
-              className="text-2xl font-bold text-gray-900 hover:text-blue-600 transition-colors text-left"
+              className="text-2xl font-bold text-gray-900 dark:text-gray-100 hover:text-blue-600 transition-colors text-left"
             >
               {campaign.name || 'Untitled Campaign'}
             </button>
@@ -662,7 +662,7 @@ export default function CampaignBuilder({ initial, onSave }: CampaignBuilderProp
         <div className="flex items-center gap-2 flex-shrink-0">
           <button
             onClick={() => setShowAiModal(true)}
-            className="px-3 py-2 text-sm font-medium bg-purple-50 text-purple-700 border border-purple-200 rounded-lg hover:bg-purple-100 transition-colors"
+            className="px-3 py-2 text-sm font-medium bg-purple-50 dark:bg-purple-950 text-purple-700 dark:text-purple-400 border border-purple-200 dark:border-purple-800 rounded-lg hover:bg-purple-100 dark:hover:bg-purple-900/30 transition-colors"
           >
             ✨ AI Sequence
           </button>
@@ -677,38 +677,38 @@ export default function CampaignBuilder({ initial, onSave }: CampaignBuilderProp
       </div>
 
       {/* Description + trigger */}
-      <div className="bg-white rounded-xl border border-gray-200 p-5 mb-6 space-y-4">
+      <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5 mb-6 space-y-4">
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Description</label>
           <textarea
             value={campaign.description}
             onChange={(e) => setCampaign((c) => ({ ...c, description: e.target.value }))}
             placeholder="What is this campaign for?"
             rows={2}
-            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
+            className="w-full border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-sm dark:bg-gray-800 dark:text-gray-100"
           />
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-sm text-gray-700">Enroll leads with no contact for</span>
+          <span className="text-sm text-gray-700 dark:text-gray-300">Enroll leads with no contact for</span>
           <input
             type="number"
             min={1}
             value={campaign.triggerDays}
             onChange={(e) => setCampaign((c) => ({ ...c, triggerDays: parseInt(e.target.value) || 15 }))}
-            className="w-20 border border-gray-200 rounded-lg px-2 py-1 text-sm text-center"
+            className="w-20 border border-gray-200 dark:border-gray-700 rounded-lg px-2 py-1 text-sm dark:bg-gray-800 dark:text-gray-100 text-center"
           />
-          <span className="text-sm text-gray-700">days</span>
+          <span className="text-sm text-gray-700 dark:text-gray-300">days</span>
         </div>
       </div>
 
       {/* Steps timeline */}
       <div className="space-y-3">
-        <div className="text-sm font-semibold text-gray-700 mb-1">
+        <div className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">
           Campaign steps ({campaign.steps.length})
         </div>
 
         {campaign.steps.length === 0 && (
-          <div className="text-center py-10 bg-white rounded-xl border border-dashed border-gray-200 text-gray-400">
+          <div className="text-center py-10 bg-white dark:bg-gray-900 rounded-xl border border-dashed border-gray-200 dark:border-gray-700 text-gray-400 dark:text-gray-500">
             <div className="text-4xl mb-2">📋</div>
             <div className="text-sm">No steps yet. Add your first step below.</div>
           </div>
@@ -728,7 +728,7 @@ export default function CampaignBuilder({ initial, onSave }: CampaignBuilderProp
                 <div className="flex justify-center my-1">
                   <button
                     onClick={() => addStep(idx - 1)}
-                    className="text-xs text-blue-500 hover:text-blue-700 px-2 py-0.5 rounded-full border border-dashed border-blue-200 hover:border-blue-400 transition-colors"
+                    className="text-xs text-blue-500 hover:text-blue-700 dark:text-blue-400 px-2 py-0.5 rounded-full border border-dashed border-blue-200 dark:border-blue-800 hover:border-blue-400 transition-colors"
                   >
                     + Add step here
                   </button>
@@ -736,31 +736,31 @@ export default function CampaignBuilder({ initial, onSave }: CampaignBuilderProp
               )}
 
               <div
-                className={`bg-white rounded-xl border transition-colors ${
-                  isEditing ? 'border-blue-400 shadow-sm' : 'border-gray-200'
+                className={`bg-white dark:bg-gray-900 rounded-xl border transition-colors ${
+                  isEditing ? 'border-blue-400 shadow-sm' : 'border-gray-200 dark:border-gray-700'
                 } ${!step.isActive ? 'opacity-60' : ''}`}
               >
                 <div className="p-4 flex items-center gap-3">
                   {/* Step badge */}
-                  <div className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-100 text-blue-700 text-sm font-bold flex items-center justify-center">
+                  <div className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 text-sm font-bold flex items-center justify-center">
                     {step.stepOrder}
                   </div>
 
                   {/* Info */}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-sm font-medium text-gray-700">
+                      <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
                         {step.channel === 'TEXT' ? '📱 SMS' : '✉️ Email'}
                       </span>
-                      <span className="text-xs text-gray-400">{delayLabel}</span>
+                      <span className="text-xs text-gray-400 dark:text-gray-500">{delayLabel}</span>
                       {step.channel === 'EMAIL' && step.subject && (
-                        <span className="text-xs text-gray-500 truncate max-w-[200px]">
+                        <span className="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[200px]">
                           "{step.subject}"
                         </span>
                       )}
                     </div>
                     {step.body && (
-                      <div className="text-xs text-gray-500 mt-0.5 truncate">
+                      <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate">
                         {step.body.slice(0, 80)}{step.body.length > 80 ? '…' : ''}
                       </div>
                     )}
@@ -773,21 +773,21 @@ export default function CampaignBuilder({ initial, onSave }: CampaignBuilderProp
                       title={step.isActive ? 'Disable step' : 'Enable step'}
                       className={`text-xs px-2 py-1 rounded-md transition-colors ${
                         step.isActive
-                          ? 'text-green-600 bg-green-50 hover:bg-green-100'
-                          : 'text-gray-400 bg-gray-50 hover:bg-gray-100'
+                          ? 'text-green-600 bg-green-50 dark:bg-green-950 hover:bg-green-100 dark:hover:bg-green-900/30'
+                          : 'text-gray-400 dark:text-gray-500 bg-gray-50 dark:bg-gray-950 hover:bg-gray-100 dark:hover:bg-gray-700'
                       }`}
                     >
                       {step.isActive ? 'ON' : 'OFF'}
                     </button>
                     <button
                       onClick={() => setEditingStepIdx(isEditing ? null : idx)}
-                      className="text-xs px-2 py-1 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors"
+                      className="text-xs px-2 py-1 text-blue-600 bg-blue-50 dark:bg-blue-950 hover:bg-blue-100 dark:hover:bg-blue-900/30 rounded-md transition-colors"
                     >
                       {isEditing ? 'Close' : 'Edit'}
                     </button>
                     <button
                       onClick={() => deleteStep(idx)}
-                      className="text-xs px-2 py-1 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
+                      className="text-xs px-2 py-1 text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950 rounded-md transition-colors"
                     >
                       🗑
                     </button>
@@ -811,7 +811,7 @@ export default function CampaignBuilder({ initial, onSave }: CampaignBuilderProp
         {/* Add step button */}
         <button
           onClick={() => addStep()}
-          className="w-full py-3 border-2 border-dashed border-gray-200 rounded-xl text-sm text-gray-500 hover:border-blue-300 hover:text-blue-600 transition-colors"
+          className="w-full py-3 border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-xl text-sm text-gray-500 dark:text-gray-400 hover:border-blue-300 dark:hover:border-blue-800 hover:text-blue-600 transition-colors"
         >
           + Add Step
         </button>

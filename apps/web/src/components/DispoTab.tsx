@@ -66,11 +66,11 @@ const fmt = (n: number | null | undefined) =>
   n != null ? `$${Math.round(n).toLocaleString()}` : '—';
 
 const STATUS_COLORS: Record<string, string> = {
-  pending: 'bg-yellow-100 text-yellow-800',
-  accepted: 'bg-green-100 text-green-800',
-  rejected: 'bg-red-100 text-red-800',
-  countered: 'bg-blue-100 text-blue-800',
-  withdrawn: 'bg-gray-100 text-gray-500',
+  pending: 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-400',
+  accepted: 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-400',
+  rejected: 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-400',
+  countered: 'bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-400',
+  withdrawn: 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400',
 };
 
 const CONTRACT_STATUS_LABELS: Record<string, string> = {
@@ -221,7 +221,7 @@ export default function DispoTab({
   };
 
   if (loading) {
-    return <div className="card text-center py-12 text-gray-400">Loading dispo data...</div>;
+    return <div className="card text-center py-12 text-gray-400 dark:text-gray-500">Loading dispo data...</div>;
   }
 
   const s = summary!;
@@ -254,11 +254,11 @@ export default function DispoTab({
 
         {/* Add offer inline form */}
         {showOfferForm && (
-          <div className="mb-5 p-4 bg-gray-50 rounded-xl border border-gray-200 space-y-3">
-            <h4 className="text-sm font-semibold text-gray-700">New Offer</h4>
+          <div className="mb-5 p-4 bg-gray-50 dark:bg-gray-950 rounded-xl border border-gray-200 dark:border-gray-700 space-y-3">
+            <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300">New Offer</h4>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Offer Amount *</label>
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Offer Amount *</label>
                 <input
                   type="number"
                   value={offerForm.offerAmount}
@@ -268,7 +268,7 @@ export default function DispoTab({
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Date</label>
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Date</label>
                 <input
                   type="date"
                   value={offerForm.offerDate}
@@ -278,7 +278,7 @@ export default function DispoTab({
               </div>
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Notes</label>
+              <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Notes</label>
               <input
                 type="text"
                 value={offerForm.notes}
@@ -297,38 +297,38 @@ export default function DispoTab({
         )}
 
         {s.offers.length === 0 ? (
-          <p className="text-sm text-gray-400 text-center py-6">No offers yet. Click "+ Add Offer" to track your first offer.</p>
+          <p className="text-sm text-gray-400 dark:text-gray-500 text-center py-6">No offers yet. Click "+ Add Offer" to track your first offer.</p>
         ) : (
           <div className="space-y-2">
             {s.offers.map((offer) => (
-              <div key={offer.id} className="flex items-start gap-3 p-3 rounded-lg bg-gray-50 border border-gray-200">
+              <div key={offer.id} className="flex items-start gap-3 p-3 rounded-lg bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-bold text-gray-900">{fmt(offer.offerAmount)}</span>
-                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${STATUS_COLORS[offer.status] ?? 'bg-gray-100 text-gray-600'}`}>
+                    <span className="font-bold text-gray-900 dark:text-gray-100">{fmt(offer.offerAmount)}</span>
+                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${STATUS_COLORS[offer.status] ?? 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'}`}>
                       {offer.status}
                     </span>
                     {offer.counterAmount && (
-                      <span className="text-xs text-gray-500">Counter: {fmt(offer.counterAmount)}</span>
+                      <span className="text-xs text-gray-500 dark:text-gray-400">Counter: {fmt(offer.counterAmount)}</span>
                     )}
-                    <span className="text-xs text-gray-400">
+                    <span className="text-xs text-gray-400 dark:text-gray-500">
                       {format(new Date(offer.offerDate), 'MMM d, yyyy')}
                     </span>
                   </div>
-                  {offer.notes && <p className="text-xs text-gray-500 mt-1">{offer.notes}</p>}
+                  {offer.notes && <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{offer.notes}</p>}
                 </div>
                 <div className="flex items-center gap-1 flex-shrink-0">
                   {offer.status === 'pending' && (
                     <>
                       <button
                         onClick={() => handleOfferAction(offer.id, 'accepted')}
-                        className="text-xs px-2 py-1 rounded bg-green-100 text-green-800 hover:bg-green-200 font-medium"
+                        className="text-xs px-2 py-1 rounded bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-400 hover:bg-green-200 font-medium"
                       >
                         Accept
                       </button>
                       <button
                         onClick={() => handleOfferAction(offer.id, 'rejected')}
-                        className="text-xs px-2 py-1 rounded bg-red-100 text-red-700 hover:bg-red-200 font-medium"
+                        className="text-xs px-2 py-1 rounded bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 hover:bg-red-200 font-medium"
                       >
                         Reject
                       </button>
@@ -336,7 +336,7 @@ export default function DispoTab({
                   )}
                   <button
                     onClick={() => handleDeleteOffer(offer.id)}
-                    className="text-xs px-2 py-1 rounded bg-gray-100 text-gray-500 hover:bg-gray-200"
+                    className="text-xs px-2 py-1 rounded bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700"
                   >
                     ✕
                   </button>
@@ -359,7 +359,7 @@ export default function DispoTab({
         </div>
 
         {!showContractForm ? (
-          <p className="text-sm text-gray-400 text-center py-6">
+          <p className="text-sm text-gray-400 dark:text-gray-500 text-center py-6">
             No contract yet. Click "+ Create Contract" once an offer is accepted.
           </p>
         ) : (
@@ -367,7 +367,7 @@ export default function DispoTab({
             <div className="grid grid-cols-2 gap-4">
               {/* Status */}
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Contract Status</label>
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Contract Status</label>
                 <select
                   value={contractForm.contractStatus}
                   onChange={(e) => setContractForm((f: any) => ({ ...f, contractStatus: e.target.value }))}
@@ -380,7 +380,7 @@ export default function DispoTab({
               </div>
               {/* Exit Strategy */}
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Exit Strategy</label>
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Exit Strategy</label>
                 <select
                   value={contractForm.exitStrategy}
                   onChange={(e) => setContractForm((f: any) => ({ ...f, exitStrategy: e.target.value }))}
@@ -398,7 +398,7 @@ export default function DispoTab({
               </div>
               {/* Offer Amount */}
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Offer to Seller ($)</label>
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Offer to Seller ($)</label>
                 <input
                   type="number"
                   value={contractForm.offerAmount}
@@ -409,7 +409,7 @@ export default function DispoTab({
               </div>
               {/* Assignment Fee */}
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Assignment Fee ($)</label>
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Assignment Fee ($)</label>
                 <input
                   type="number"
                   value={contractForm.assignmentFee}
@@ -420,7 +420,7 @@ export default function DispoTab({
               </div>
               {/* EMD */}
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Earnest Money Deposit ($)</label>
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Earnest Money Deposit ($)</label>
                 <input
                   type="number"
                   value={contractForm.earnestMoney}
@@ -431,7 +431,7 @@ export default function DispoTab({
               </div>
               {/* Inspection Period */}
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Inspection Period (days)</label>
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Inspection Period (days)</label>
                 <input
                   type="number"
                   value={contractForm.inspectionPeriodDays}
@@ -442,7 +442,7 @@ export default function DispoTab({
               </div>
               {/* Contract Date */}
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Contract Date</label>
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Contract Date</label>
                 <input
                   type="date"
                   value={contractForm.contractDate}
@@ -452,7 +452,7 @@ export default function DispoTab({
               </div>
               {/* Expected Close */}
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Expected Close Date</label>
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Expected Close Date</label>
                 <input
                   type="date"
                   value={contractForm.expectedCloseDate}
@@ -462,7 +462,7 @@ export default function DispoTab({
               </div>
               {/* Buyer Name */}
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Buyer Name</label>
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Buyer Name</label>
                 <input
                   type="text"
                   value={contractForm.buyerName}
@@ -473,7 +473,7 @@ export default function DispoTab({
               </div>
               {/* Title Company */}
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Title Company</label>
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Title Company</label>
                 <input
                   type="text"
                   value={contractForm.titleCompany}
@@ -493,14 +493,14 @@ export default function DispoTab({
                 onChange={(e) => setContractForm((f: any) => ({ ...f, sellerFinancing: e.target.checked }))}
                 className="h-4 w-4 rounded border-gray-300 text-primary-600"
               />
-              <label htmlFor="sellerFinancing" className="text-sm font-medium text-gray-700">
+              <label htmlFor="sellerFinancing" className="text-sm font-medium text-gray-700 dark:text-gray-300">
                 Seller Financing involved
               </label>
             </div>
 
             {/* Disposition Notes */}
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Disposition Notes</label>
+              <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Disposition Notes</label>
               <textarea
                 value={contractForm.dispositionNotes}
                 onChange={(e) => setContractForm((f: any) => ({ ...f, dispositionNotes: e.target.value }))}
@@ -525,18 +525,18 @@ export default function DispoTab({
       </div>
 
       {/* ── E-Signature via BoldSign ──────────────────────────────────────── */}
-      <div className="card border border-indigo-200">
+      <div className="card border border-indigo-200 dark:border-indigo-800">
         <div className="flex items-center gap-2 mb-4">
           <span className="text-xl">✍️</span>
           <div>
             <h2 className="text-xl font-bold">Send for Signature</h2>
-            <p className="text-xs text-gray-400 mt-0.5">Send documents for e-signature via BoldSign</p>
+            <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Send documents for e-signature via BoldSign</p>
           </div>
           {s.contract?.boldsignStatus && (
             <span className={`ml-auto text-xs font-semibold px-2 py-1 rounded-full ${
-              s.contract.boldsignStatus === 'completed' ? 'bg-green-100 text-green-800' :
-              s.contract.boldsignStatus === 'declined' ? 'bg-red-100 text-red-700' :
-              'bg-yellow-100 text-yellow-800'
+              s.contract.boldsignStatus === 'completed' ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-400' :
+              s.contract.boldsignStatus === 'declined' ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400' :
+              'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-400'
             }`}>
               {s.contract.boldsignStatus === 'completed' ? '✓ Signed' :
                s.contract.boldsignStatus === 'declined' ? '✕ Declined' : '⏳ Pending Signature'}
@@ -546,7 +546,7 @@ export default function DispoTab({
 
         {/* Show previously sent doc info */}
         {s.contract?.boldsignDocumentId && (
-          <div className="mb-4 p-3 rounded-lg bg-indigo-50 border border-indigo-200 text-sm">
+          <div className="mb-4 p-3 rounded-lg bg-indigo-50 dark:bg-indigo-950 border border-indigo-200 dark:border-indigo-800 text-sm">
             <div className="flex items-center justify-between">
               <div>
                 <div className="font-medium text-indigo-900">Document sent for signature</div>
@@ -626,12 +626,12 @@ export default function DispoTab({
         </div>
 
         {docSent && (
-          <div className="mt-3 p-3 rounded-lg bg-green-50 border border-green-200 text-sm text-green-800">
+          <div className="mt-3 p-3 rounded-lg bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 text-sm text-green-800 dark:text-green-400">
             ✓ <strong>{docSent.title}</strong> sent for signature! Seller will receive an email from BoldSign.
           </div>
         )}
 
-        <p className="text-xs text-gray-400 mt-3">
+        <p className="text-xs text-gray-400 dark:text-gray-500 mt-3">
           Seller receives a BoldSign email with a secure signing link. Status updates automatically.
         </p>
       </div>
@@ -772,7 +772,7 @@ function ExitStrategyCosts({
           <select
             value={strategy}
             onChange={(e) => handleStrategyChange(e.target.value)}
-            className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary-500"
+            className="text-sm border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary-500 dark:bg-gray-800 dark:text-gray-100"
           >
             {Object.entries(EXIT_COSTS).map(([key, c]) => (
               <option key={key} value={key}>{c.label}</option>
@@ -788,9 +788,9 @@ function ExitStrategyCosts({
         </div>
       </div>
 
-      <div className="rounded-xl border border-gray-200 overflow-hidden text-sm mb-3">
+      <div className="rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden text-sm mb-3">
         {/* Header */}
-        <div className="grid grid-cols-12 gap-2 px-4 py-2 bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+        <div className="grid grid-cols-12 gap-2 px-4 py-2 bg-gray-50 dark:bg-gray-950 border-b border-gray-200 dark:border-gray-700 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
           <div className="col-span-5">Cost Item</div>
           <div className="col-span-3 text-center">Rate</div>
           <div className="col-span-4 text-right">Amount</div>
@@ -798,7 +798,7 @@ function ExitStrategyCosts({
 
         {/* ARV baseline */}
         {arv != null && (
-          <div className="grid grid-cols-12 gap-2 px-4 py-3 border-b border-gray-100 bg-blue-50">
+          <div className="grid grid-cols-12 gap-2 px-4 py-3 border-b border-gray-100 dark:border-gray-800 bg-blue-50 dark:bg-blue-950">
             <div className="col-span-5 text-blue-800 font-semibold">ARV (Base)</div>
             <div className="col-span-3 text-center text-blue-600">—</div>
             <div className="col-span-4 text-right font-bold text-blue-800">${arv.toLocaleString()}</div>
@@ -806,39 +806,39 @@ function ExitStrategyCosts({
         )}
 
         {/* Purchase price */}
-        <div className="grid grid-cols-12 gap-2 px-4 py-3 border-b border-gray-100">
-          <div className="col-span-5 text-gray-700">Purchase / Offer</div>
-          <div className="col-span-3 text-center text-gray-400">—</div>
-          <div className="col-span-4 text-right font-semibold text-gray-800">{fmtC(offerAmount)}</div>
+        <div className="grid grid-cols-12 gap-2 px-4 py-3 border-b border-gray-100 dark:border-gray-800">
+          <div className="col-span-5 text-gray-700 dark:text-gray-300">Purchase / Offer</div>
+          <div className="col-span-3 text-center text-gray-400 dark:text-gray-500">—</div>
+          <div className="col-span-4 text-right font-semibold text-gray-800 dark:text-gray-200">{fmtC(offerAmount)}</div>
         </div>
 
         {/* Repairs — non-wholesale only */}
         {strategy !== 'wholesale' && (
-          <div className="grid grid-cols-12 gap-2 px-4 py-3 border-b border-gray-100">
-            <div className="col-span-5 text-gray-700">Repair Estimate</div>
-            <div className="col-span-3 text-center text-gray-400">—</div>
-            <div className="col-span-4 text-right font-semibold text-gray-800">{fmtC(repairCost)}</div>
+          <div className="grid grid-cols-12 gap-2 px-4 py-3 border-b border-gray-100 dark:border-gray-800">
+            <div className="col-span-5 text-gray-700 dark:text-gray-300">Repair Estimate</div>
+            <div className="col-span-3 text-center text-gray-400 dark:text-gray-500">—</div>
+            <div className="col-span-4 text-right font-semibold text-gray-800 dark:text-gray-200">{fmtC(repairCost)}</div>
           </div>
         )}
 
         {/* Wholesale Assignment Fee row */}
         {strategy === 'wholesale' && (
-          <div className="grid grid-cols-12 gap-2 px-4 py-3 border-b border-gray-100 bg-green-50">
-            <div className="col-span-5 text-green-700 font-medium">
+          <div className="grid grid-cols-12 gap-2 px-4 py-3 border-b border-gray-100 dark:border-gray-800 bg-green-50 dark:bg-green-950">
+            <div className="col-span-5 text-green-700 dark:text-green-400 font-medium">
               Wholesale Assignment Fee
               {wholesaleSpread != null && (
-                <span className="ml-2 text-xs text-gray-400 font-normal">
+                <span className="ml-2 text-xs text-gray-400 dark:text-gray-500 font-normal">
                   (max spread: {fmtC(wholesaleSpread)})
                 </span>
               )}
             </div>
-            <div className="col-span-3 text-center text-gray-400">—</div>
+            <div className="col-span-3 text-center text-gray-400 dark:text-gray-500">—</div>
             <div className="col-span-4 text-right">
               <input
                 type="number"
                 value={feeInput}
                 onChange={(e) => { setFeeInput(e.target.value); setSaved(false); }}
-                className="w-28 text-right text-sm border border-green-300 rounded px-2 py-0.5 bg-white"
+                className="w-28 text-right text-sm border border-green-300 dark:border-green-800 rounded px-2 py-0.5 bg-white dark:bg-gray-900 dark:text-gray-100"
                 placeholder="0"
                 min="0"
               />
@@ -848,61 +848,61 @@ function ExitStrategyCosts({
 
         {/* Cost rows — each has an editable rate input */}
         {costRowDefs.map((row) => (
-          <div key={row.key} className="grid grid-cols-12 gap-2 px-4 py-3 border-b border-gray-100 last:border-b-0">
-            <div className="col-span-5 text-gray-700">{row.label}</div>
+          <div key={row.key} className="grid grid-cols-12 gap-2 px-4 py-3 border-b border-gray-100 dark:border-gray-800 last:border-b-0">
+            <div className="col-span-5 text-gray-700 dark:text-gray-300">{row.label}</div>
             <div className="col-span-3 text-center flex items-center justify-center gap-1">
               <input
                 type="number"
                 value={rates[row.key]}
                 onChange={(e) => { setRates((r) => ({ ...r, [row.key]: parseFloat(e.target.value) || 0 })); setSaved(false); }}
-                className="w-14 text-center text-sm border border-gray-200 rounded px-1 py-0.5"
+                className="w-14 text-center text-sm border border-gray-200 dark:border-gray-700 rounded px-1 py-0.5 dark:bg-gray-800 dark:text-gray-100"
                 step="0.5"
                 min="0"
                 max="20"
               />
-              <span className="text-xs text-gray-400">%</span>
+              <span className="text-xs text-gray-400 dark:text-gray-500">%</span>
             </div>
-            <div className="col-span-4 text-right text-gray-800">{fmtC(row.amount)}</div>
+            <div className="col-span-4 text-right text-gray-800 dark:text-gray-200">{fmtC(row.amount)}</div>
           </div>
         ))}
 
         {/* Fixed platform costs — Concierge Listing only */}
         {fixedCosts > 0 && (
-          <div className="grid grid-cols-12 gap-2 px-4 py-3 border-b border-gray-100">
-            <div className="col-span-5 text-gray-700">
+          <div className="grid grid-cols-12 gap-2 px-4 py-3 border-b border-gray-100 dark:border-gray-800">
+            <div className="col-span-5 text-gray-700 dark:text-gray-300">
               Platform &amp; Listing Fees
-              <div className="text-xs text-gray-400 mt-0.5">Homejab photos $249 · Houzeo $249 · Lockbox $100</div>
+              <div className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Homejab photos $249 · Houzeo $249 · Lockbox $100</div>
             </div>
-            <div className="col-span-3 text-center text-gray-400">fixed</div>
-            <div className="col-span-4 text-right text-gray-800">{fmtC(fixedCosts)}</div>
+            <div className="col-span-3 text-center text-gray-400 dark:text-gray-500">fixed</div>
+            <div className="col-span-4 text-right text-gray-800 dark:text-gray-200">{fmtC(fixedCosts)}</div>
           </div>
         )}
 
         {/* Total costs */}
-        <div className="grid grid-cols-12 gap-2 px-4 py-3 border-t-2 border-gray-300 bg-gray-50">
-          <div className="col-span-5 font-semibold text-gray-800">Total Transaction Costs</div>
-          <div className="col-span-3 text-center font-semibold text-gray-600">{totalPct.toFixed(1)}%{fixedCosts > 0 ? ` + $${fixedCosts.toLocaleString()}` : ''}</div>
-          <div className="col-span-4 text-right font-bold text-gray-900">{fmtC(totalCost)}</div>
+        <div className="grid grid-cols-12 gap-2 px-4 py-3 border-t-2 border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-950">
+          <div className="col-span-5 font-semibold text-gray-800 dark:text-gray-200">Total Transaction Costs</div>
+          <div className="col-span-3 text-center font-semibold text-gray-600 dark:text-gray-400">{totalPct.toFixed(1)}%{fixedCosts > 0 ? ` + $${fixedCosts.toLocaleString()}` : ''}</div>
+          <div className="col-span-4 text-right font-bold text-gray-900 dark:text-gray-100">{fmtC(totalCost)}</div>
         </div>
 
         {/* Net profit — non-JV */}
         {strategy !== 'joint_venture' && (
-          <div className={`grid grid-cols-12 gap-2 px-4 py-4 border-t border-gray-200 ${
-            netProfit == null ? 'bg-gray-50' :
-            netProfit > 0 ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'
+          <div className={`grid grid-cols-12 gap-2 px-4 py-4 border-t border-gray-200 dark:border-gray-700 ${
+            netProfit == null ? 'bg-gray-50 dark:bg-gray-950' :
+            netProfit > 0 ? 'bg-green-50 dark:bg-green-950 border-green-200 dark:border-green-800' : 'bg-red-50 dark:bg-red-950 border-red-200 dark:border-red-800'
           }`}>
-            <div className={`col-span-5 font-bold text-base ${netProfit == null ? 'text-gray-500' : netProfit > 0 ? 'text-green-800' : 'text-red-800'}`}>
+            <div className={`col-span-5 font-bold text-base ${netProfit == null ? 'text-gray-500 dark:text-gray-400' : netProfit > 0 ? 'text-green-800 dark:text-green-400' : 'text-red-800 dark:text-red-400'}`}>
               {strategy === 'wholesale' ? 'Your Profit (Assignment Fee)' : 'Net Profit'}
             </div>
             <div className="col-span-3 text-center">
               {netProfit != null && arv != null && (
-                <span className={`text-xs font-semibold px-1.5 py-0.5 rounded-full ${netProfit > 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                <span className={`text-xs font-semibold px-1.5 py-0.5 rounded-full ${netProfit > 0 ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'}`}>
                   {((netProfit / arv) * 100).toFixed(1)}% of ARV
                 </span>
               )}
             </div>
             <div className={`col-span-4 text-right font-bold text-lg tabular-nums ${
-              netProfit == null ? 'text-gray-400' : netProfit > 0 ? 'text-green-700' : 'text-red-700'
+              netProfit == null ? 'text-gray-400 dark:text-gray-500' : netProfit > 0 ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400'
             }`}>
               {netProfit != null ? `${netProfit >= 0 ? '+' : ''}$${Math.round(netProfit).toLocaleString()}` : '—'}
             </div>
@@ -912,7 +912,7 @@ function ExitStrategyCosts({
         {/* Joint Venture split rows */}
         {strategy === 'joint_venture' && (
           <>
-            <div className="grid grid-cols-12 gap-2 px-4 py-3 border-t border-gray-200 bg-purple-50">
+            <div className="grid grid-cols-12 gap-2 px-4 py-3 border-t border-gray-200 dark:border-gray-700 bg-purple-50 dark:bg-purple-950">
               <div className="col-span-5 text-purple-700 font-medium">Net Profit (before split)</div>
               <div className="col-span-3 text-center">
                 {netProfit != null && arv != null && (
@@ -923,26 +923,26 @@ function ExitStrategyCosts({
                 {netProfit != null ? `${netProfit >= 0 ? '+' : ''}$${Math.round(netProfit).toLocaleString()}` : '—'}
               </div>
             </div>
-            <div className="grid grid-cols-12 gap-2 px-4 py-3 border-t border-gray-100 bg-purple-50">
+            <div className="grid grid-cols-12 gap-2 px-4 py-3 border-t border-gray-100 dark:border-gray-800 bg-purple-50 dark:bg-purple-950">
               <div className="col-span-5 text-purple-600">JV Partner Share (50%)</div>
               <div className="col-span-3 text-center text-purple-400 text-xs">50%</div>
               <div className="col-span-4 text-right text-purple-700">{netProfit != null ? fmtC(netProfit / 2) : '—'}</div>
             </div>
-            <div className={`grid grid-cols-12 gap-2 px-4 py-4 border-t border-purple-200 ${
-              netProfit == null ? 'bg-gray-50' : netProfit / 2 > 0 ? 'bg-green-50' : 'bg-red-50'
+            <div className={`grid grid-cols-12 gap-2 px-4 py-4 border-t border-purple-200 dark:border-purple-800 ${
+              netProfit == null ? 'bg-gray-50 dark:bg-gray-950' : netProfit / 2 > 0 ? 'bg-green-50 dark:bg-green-950' : 'bg-red-50 dark:bg-red-950'
             }`}>
-              <div className={`col-span-5 font-bold text-base ${netProfit == null ? 'text-gray-500' : netProfit / 2 > 0 ? 'text-green-800' : 'text-red-800'}`}>
+              <div className={`col-span-5 font-bold text-base ${netProfit == null ? 'text-gray-500 dark:text-gray-400' : netProfit / 2 > 0 ? 'text-green-800 dark:text-green-400' : 'text-red-800 dark:text-red-400'}`}>
                 Your Share (50%)
               </div>
               <div className="col-span-3 text-center">
                 {netProfit != null && arv != null && (
-                  <span className={`text-xs font-semibold px-1.5 py-0.5 rounded-full ${netProfit / 2 > 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                  <span className={`text-xs font-semibold px-1.5 py-0.5 rounded-full ${netProfit / 2 > 0 ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'}`}>
                     {((netProfit / 2 / arv) * 100).toFixed(1)}% of ARV
                   </span>
                 )}
               </div>
               <div className={`col-span-4 text-right font-bold text-lg tabular-nums ${
-                netProfit == null ? 'text-gray-400' : netProfit / 2 > 0 ? 'text-green-700' : 'text-red-700'
+                netProfit == null ? 'text-gray-400 dark:text-gray-500' : netProfit / 2 > 0 ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400'
               }`}>
                 {netProfit != null ? `${netProfit / 2 >= 0 ? '+' : ''}$${Math.round(netProfit / 2).toLocaleString()}` : '—'}
               </div>
@@ -951,7 +951,7 @@ function ExitStrategyCosts({
         )}
       </div>
 
-      <p className="text-xs text-gray-400">
+      <p className="text-xs text-gray-400 dark:text-gray-500">
         💡 Typical investor costs: agent ~6%, closing 2–4%, holding 1–3%, financing 2–5% = <strong>10–12% of ARV</strong>. Wholesale avoids most of these. Edit any rate to recalculate live.
       </p>
     </div>

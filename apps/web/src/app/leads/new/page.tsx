@@ -75,12 +75,12 @@ export default function NewLeadPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
       {/* Header */}
-      <header className="bg-white shadow-sm">
+      <header className="bg-white dark:bg-gray-900 shadow-sm">
         <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center py-4">
-            <h1 className="text-2xl font-bold text-gray-900">Create New Lead</h1>
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Create New Lead</h1>
             <Link href="/leads" className="text-primary-600 hover:text-primary-700">
               &larr; Back to Leads
             </Link>
@@ -95,7 +95,7 @@ export default function NewLeadPage() {
             <h2 className="text-lg font-bold mb-4">Property Information</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Street Address *
                 </label>
                 <input
@@ -110,7 +110,7 @@ export default function NewLeadPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   City *
                 </label>
                 <input
@@ -118,12 +118,12 @@ export default function NewLeadPage() {
                   name="propertyCity"
                   value={formData.propertyCity}
                   onChange={handleChange}
-                  className="input bg-gray-50"
+                  className="input bg-gray-50 dark:bg-gray-950"
                   required
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   State *
                 </label>
                 <input
@@ -131,14 +131,14 @@ export default function NewLeadPage() {
                   name="propertyState"
                   value={formData.propertyState}
                   onChange={handleChange}
-                  className="input bg-gray-50"
+                  className="input bg-gray-50 dark:bg-gray-950"
                   maxLength={2}
                   placeholder="NC"
                   required
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   ZIP Code *
                 </label>
                 <input
@@ -146,13 +146,13 @@ export default function NewLeadPage() {
                   name="propertyZip"
                   value={formData.propertyZip}
                   onChange={handleChange}
-                  className="input bg-gray-50"
+                  className="input bg-gray-50 dark:bg-gray-950"
                   placeholder="28202"
                   required
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Property Type
                 </label>
                 <select
@@ -169,7 +169,7 @@ export default function NewLeadPage() {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Bedrooms
                 </label>
                 <input
@@ -182,7 +182,7 @@ export default function NewLeadPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Bathrooms
                 </label>
                 <input
@@ -196,7 +196,7 @@ export default function NewLeadPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Square Feet
                 </label>
                 <input
@@ -216,7 +216,7 @@ export default function NewLeadPage() {
             <h2 className="text-lg font-bold mb-4">Seller Information</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   First Name *
                 </label>
                 <input
@@ -229,7 +229,7 @@ export default function NewLeadPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Last Name *
                 </label>
                 <input
@@ -242,7 +242,7 @@ export default function NewLeadPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Phone *
                 </label>
                 <input
@@ -255,7 +255,7 @@ export default function NewLeadPage() {
                   required
                 />
                 {formData.sellerPhone && (
-                  <p className={`text-xs mt-1 ${normalizePhone(formData.sellerPhone) ? 'text-green-600' : 'text-red-500'}`}>
+                  <p className={`text-xs mt-1 ${normalizePhone(formData.sellerPhone) ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
                     {normalizePhone(formData.sellerPhone)
                       ? `Will be saved as ${normalizePhone(formData.sellerPhone)}`
                       : 'Enter a valid 10-digit US number'}
@@ -263,7 +263,7 @@ export default function NewLeadPage() {
                 )}
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Email
                 </label>
                 <input
@@ -282,7 +282,7 @@ export default function NewLeadPage() {
             <h2 className="text-lg font-bold mb-4">Motivation & Scoring</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Timeline (days)
                 </label>
                 <input
@@ -294,12 +294,12 @@ export default function NewLeadPage() {
                   placeholder="30"
                   min="0"
                 />
-                <p className="text-xs text-gray-500 mt-1">
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                   &lt;14 days = high priority
                 </p>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Asking Price
                 </label>
                 <input
@@ -313,7 +313,7 @@ export default function NewLeadPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Property Condition
                 </label>
                 <select
@@ -331,7 +331,7 @@ export default function NewLeadPage() {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Ownership Status
                 </label>
                 <select

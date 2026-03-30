@@ -150,12 +150,12 @@ export default function TeamPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
       <AppNav />
       <main className="max-w-3xl mx-auto px-6 py-8 space-y-8">
 
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Team</h1>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Team</h1>
 
           {/* Business name — editable by admins */}
           {editingOrgName ? (
@@ -182,7 +182,7 @@ export default function TeamPage() {
             </div>
           ) : (
             <div className="flex items-center gap-2 mt-0.5">
-              <p className="text-sm text-gray-500">{orgName || '—'}</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">{orgName || '—'}</p>
               {isAdmin && (
                 <button
                   onClick={() => { setOrgNameDraft(orgName); setEditingOrgName(true); }}
@@ -197,9 +197,9 @@ export default function TeamPage() {
         </div>
 
         {/* Team Members */}
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-            <h2 className="font-bold text-gray-900">Members</h2>
+        <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-800">
+            <h2 className="font-bold text-gray-900 dark:text-gray-100">Members</h2>
             {isAdmin && (
               <button
                 onClick={() => setShowInvite(v => !v)}
@@ -211,9 +211,9 @@ export default function TeamPage() {
           </div>
 
           {loading ? (
-            <div className="px-5 py-8 text-center text-sm text-gray-400 animate-pulse">Loading...</div>
+            <div className="px-5 py-8 text-center text-sm text-gray-400 dark:text-gray-500 animate-pulse">Loading...</div>
           ) : (
-            <div className="divide-y divide-gray-100">
+            <div className="divide-y divide-gray-100 dark:divide-gray-800">
               {members.map(m => {
                 const canEdit = isAdmin || m.id === currentUser?.id;
                 const isEditing = editingMemberId === m.id;
@@ -223,22 +223,22 @@ export default function TeamPage() {
                     <div className="flex items-center justify-between px-5 py-3">
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-medium text-sm text-gray-900">
+                          <span className="font-medium text-sm text-gray-900 dark:text-gray-100">
                             {m.firstName} {m.lastName}
                             {m.id === currentUser?.id && <span className="text-xs text-blue-500 ml-1">(you)</span>}
                           </span>
                           <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                            m.role === 'ADMIN' ? 'bg-purple-100 text-purple-700' :
-                            m.role === 'VIEWER' ? 'bg-gray-100 text-gray-500' :
-                            'bg-blue-100 text-blue-700'
+                            m.role === 'ADMIN' ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400' :
+                            m.role === 'VIEWER' ? 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400' :
+                            'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'
                           }`}>
                             {ROLE_LABELS[m.role] || m.role}
                           </span>
                           {m.title && (
-                            <span className="text-xs text-gray-400 italic">{m.title}</span>
+                            <span className="text-xs text-gray-400 dark:text-gray-500 italic">{m.title}</span>
                           )}
                         </div>
-                        <div className="flex items-center gap-3 text-xs text-gray-400 mt-0.5 flex-wrap">
+                        <div className="flex items-center gap-3 text-xs text-gray-400 dark:text-gray-500 mt-0.5 flex-wrap">
                           <span>{m.email}</span>
                           {m.phone && <span>📞 {formatPhoneDisplay(m.phone)}</span>}
                         </div>
@@ -247,7 +247,7 @@ export default function TeamPage() {
                         {isAdmin && m.id !== currentUser?.id && (
                           <button
                             onClick={() => handleResetPassword(m.id, `${m.firstName} ${m.lastName}`)}
-                            className="text-xs text-gray-400 hover:text-blue-600 transition-colors"
+                            className="text-xs text-gray-400 dark:text-gray-500 hover:text-blue-600 transition-colors"
                           >
                             Reset password
                           </button>
@@ -265,13 +265,13 @@ export default function TeamPage() {
 
                     {/* ── Inline edit form ── */}
                     {isEditing && (
-                      <div className="bg-gray-50 border-t border-gray-100 px-5 py-4 space-y-4">
+                      <div className="bg-gray-50 dark:bg-gray-950 border-t border-gray-100 dark:border-gray-800 px-5 py-4 space-y-4">
                         {memberError && (
-                          <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{memberError}</div>
+                          <div className="text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-lg px-3 py-2">{memberError}</div>
                         )}
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <div>
-                            <label className="block text-xs font-medium text-gray-600 mb-1">First Name</label>
+                            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">First Name</label>
                             <input
                               className="input w-full"
                               value={memberForm.firstName}
@@ -279,7 +279,7 @@ export default function TeamPage() {
                             />
                           </div>
                           <div>
-                            <label className="block text-xs font-medium text-gray-600 mb-1">Last Name</label>
+                            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Last Name</label>
                             <input
                               className="input w-full"
                               value={memberForm.lastName}
@@ -287,7 +287,7 @@ export default function TeamPage() {
                             />
                           </div>
                           <div>
-                            <label className="block text-xs font-medium text-gray-600 mb-1">Phone</label>
+                            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Phone</label>
                             <input
                               className="input w-full"
                               value={memberForm.phone}
@@ -296,7 +296,7 @@ export default function TeamPage() {
                             />
                           </div>
                           <div>
-                            <label className="block text-xs font-medium text-gray-600 mb-1">Title</label>
+                            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Title</label>
                             <input
                               className="input w-full"
                               value={memberForm.title}
@@ -306,7 +306,7 @@ export default function TeamPage() {
                           </div>
                           {isAdmin && (
                             <div>
-                              <label className="block text-xs font-medium text-gray-600 mb-1">Role</label>
+                              <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Role</label>
                               <select
                                 className="input w-full"
                                 value={memberForm.role}
@@ -345,28 +345,28 @@ export default function TeamPage() {
 
         {/* Invite / Add Member */}
         {isAdmin && showInvite && (
-          <div className="bg-white rounded-xl border border-blue-200 p-6">
-            <h2 className="font-bold text-gray-900 mb-4">Add Team Member</h2>
-            {inviteError && <div className="bg-red-50 text-red-700 text-sm px-4 py-2 rounded-lg mb-4 border border-red-200">{inviteError}</div>}
-            {inviteSuccess && <div className="bg-green-50 text-green-700 text-sm px-4 py-2 rounded-lg mb-4 border border-green-200">{inviteSuccess}</div>}
+          <div className="bg-white dark:bg-gray-900 rounded-xl border border-blue-200 dark:border-blue-800 p-6">
+            <h2 className="font-bold text-gray-900 dark:text-gray-100 mb-4">Add Team Member</h2>
+            {inviteError && <div className="bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-400 text-sm px-4 py-2 rounded-lg mb-4 border border-red-200 dark:border-red-800">{inviteError}</div>}
+            {inviteSuccess && <div className="bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-400 text-sm px-4 py-2 rounded-lg mb-4 border border-green-200 dark:border-green-800">{inviteSuccess}</div>}
             <form onSubmit={handleInvite} className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">First Name</label>
+                  <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">First Name</label>
                   <input className="input w-full" value={inviteForm.firstName} onChange={e => setInviteForm(f => ({...f, firstName: e.target.value}))} required />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Last Name</label>
+                  <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Last Name</label>
                   <input className="input w-full" value={inviteForm.lastName} onChange={e => setInviteForm(f => ({...f, lastName: e.target.value}))} />
                 </div>
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Email</label>
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Email</label>
                 <input type="email" className="input w-full" value={inviteForm.email} onChange={e => setInviteForm(f => ({...f, email: e.target.value}))} required />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Role</label>
+                  <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Role</label>
                   <select className="input w-full" value={inviteForm.role} onChange={e => setInviteForm(f => ({...f, role: e.target.value}))}>
                     <option value="AGENT">Agent — can view/edit leads</option>
                     <option value="ADMIN">Admin — full access</option>
@@ -374,7 +374,7 @@ export default function TeamPage() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Temporary Password</label>
+                  <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Temporary Password</label>
                   <input className="input w-full" value={inviteForm.tempPassword} onChange={e => setInviteForm(f => ({...f, tempPassword: e.target.value}))} placeholder="min 6 chars" required minLength={6} />
                 </div>
               </div>
@@ -387,28 +387,28 @@ export default function TeamPage() {
         )}
 
         {/* Change Your Own Password */}
-        <div className="bg-white rounded-xl border border-gray-200 p-6">
+        <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-6">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="font-bold text-gray-900">Change Password</h2>
+            <h2 className="font-bold text-gray-900 dark:text-gray-100">Change Password</h2>
             <button onClick={() => setShowPassword(v => !v)} className="text-xs text-blue-600 hover:underline">
               {showPassword ? 'Cancel' : 'Change'}
             </button>
           </div>
           {showPassword && (
             <form onSubmit={handleChangePassword} className="space-y-4">
-              {pwError && <div className="bg-red-50 text-red-700 text-sm px-4 py-2 rounded-lg border border-red-200">{pwError}</div>}
-              {pwSuccess && <div className="bg-green-50 text-green-700 text-sm px-4 py-2 rounded-lg border border-green-200">{pwSuccess}</div>}
+              {pwError && <div className="bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-400 text-sm px-4 py-2 rounded-lg border border-red-200 dark:border-red-800">{pwError}</div>}
+              {pwSuccess && <div className="bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-400 text-sm px-4 py-2 rounded-lg border border-green-200 dark:border-green-800">{pwSuccess}</div>}
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Current Password</label>
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Current Password</label>
                 <input type="password" className="input w-full" value={pwForm.currentPassword} onChange={e => setPwForm(f => ({...f, currentPassword: e.target.value}))} required />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">New Password</label>
+                  <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">New Password</label>
                   <input type="password" className="input w-full" value={pwForm.newPassword} onChange={e => setPwForm(f => ({...f, newPassword: e.target.value}))} required minLength={6} />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Confirm New Password</label>
+                  <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Confirm New Password</label>
                   <input type="password" className="input w-full" value={pwForm.confirm} onChange={e => setPwForm(f => ({...f, confirm: e.target.value}))} required />
                 </div>
               </div>
@@ -416,7 +416,7 @@ export default function TeamPage() {
             </form>
           )}
           {!showPassword && (
-            <p className="text-sm text-gray-500">Click "Change" to update your password.</p>
+            <p className="text-sm text-gray-500 dark:text-gray-400">Click "Change" to update your password.</p>
           )}
         </div>
 

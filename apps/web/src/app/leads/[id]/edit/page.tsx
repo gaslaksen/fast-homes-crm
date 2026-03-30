@@ -146,16 +146,16 @@ export default function EditLeadPage() {
   };
 
   if (loading) {
-    return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
+    return <div className="min-h-screen flex items-center justify-center dark:bg-gray-950 dark:text-gray-400">Loading...</div>;
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
       {/* Header */}
-      <header className="bg-white shadow-sm">
+      <header className="bg-white dark:bg-gray-900 shadow-sm">
         <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center py-4">
-            <h1 className="text-2xl font-bold text-gray-900">Edit Lead</h1>
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Edit Lead</h1>
             <Link href={`/leads/${leadId}`} className="text-primary-600 hover:text-primary-700">
               &larr; Back to Lead
             </Link>
@@ -170,7 +170,7 @@ export default function EditLeadPage() {
             <h2 className="text-lg font-bold mb-4">Lead Status</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Status</label>
                 <select name="status" value={formData.status} onChange={handleChange} className="input">
                   <option value="NEW">New</option>
                   <option value="ATTEMPTING_CONTACT">Attempting Contact</option>
@@ -186,7 +186,7 @@ export default function EditLeadPage() {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Source</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Source</label>
                 <select name="source" value={formData.source} onChange={handleChange} className="input">
                   <option value="MANUAL">Manual</option>
                   <option value="PROPERTY_LEADS">Property Leads</option>
@@ -201,9 +201,9 @@ export default function EditLeadPage() {
                   name="doNotContact"
                   checked={formData.doNotContact}
                   onChange={handleChange}
-                  className="h-4 w-4 text-primary-600 rounded border-gray-300"
+                  className="h-4 w-4 text-primary-600 rounded border-gray-300 dark:border-gray-600"
                 />
-                <label htmlFor="doNotContact" className="text-sm font-medium text-gray-700">
+                <label htmlFor="doNotContact" className="text-sm font-medium text-gray-700 dark:text-gray-300">
                   Do Not Contact
                 </label>
               </div>
@@ -215,7 +215,7 @@ export default function EditLeadPage() {
             <h2 className="text-lg font-bold mb-4">Property Information</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-1">Street Address *</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Street Address *</label>
                 <input
                   type="text"
                   name="propertyAddress"
@@ -227,7 +227,7 @@ export default function EditLeadPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">City *</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">City *</label>
                 <input
                   type="text"
                   name="propertyCity"
@@ -238,7 +238,7 @@ export default function EditLeadPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">State *</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">State *</label>
                 <input
                   type="text"
                   name="propertyState"
@@ -251,7 +251,7 @@ export default function EditLeadPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">ZIP Code *</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">ZIP Code *</label>
                 <input
                   type="text"
                   name="propertyZip"
@@ -263,7 +263,7 @@ export default function EditLeadPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Property Type</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Property Type</label>
                 <select name="propertyType" value={formData.propertyType} onChange={handleChange} className="input">
                   <option value="">--</option>
                   <option>Single Family</option>
@@ -274,28 +274,28 @@ export default function EditLeadPage() {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Bedrooms</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Bedrooms</label>
                 <input type="number" name="bedrooms" value={formData.bedrooms} onChange={handleChange} className="input" min="0" />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Bathrooms</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Bathrooms</label>
                 <input type="number" name="bathrooms" value={formData.bathrooms} onChange={handleChange} className="input" step="0.5" min="0" />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Square Feet <span className="text-xs text-gray-400">(from ATTOM)</span></label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Square Feet <span className="text-xs text-gray-400 dark:text-gray-500">(from ATTOM)</span></label>
                 <input type="number" name="sqft" value={formData.sqft} onChange={handleChange} className="input" min="0" />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Sq Ft Override
-                  <span className="ml-1 text-xs text-amber-600 font-normal">used for ARV if set</span>
+                  <span className="ml-1 text-xs text-amber-600 dark:text-amber-400 font-normal">used for ARV if set</span>
                 </label>
                 <input
                   type="number"
                   name="sqftOverride"
                   value={formData.sqftOverride}
                   onChange={handleChange}
-                  className="input border-amber-300 focus:ring-amber-400"
+                  className="input border-amber-300 dark:border-amber-800 focus:ring-amber-400"
                   min="0"
                   placeholder="e.g. 1868 (Zillow/agent reported)"
                 />
@@ -308,19 +308,19 @@ export default function EditLeadPage() {
             <h2 className="text-lg font-bold mb-4">Seller Information</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">First Name *</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">First Name *</label>
                 <input type="text" name="sellerFirstName" value={formData.sellerFirstName} onChange={handleChange} className="input" required />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Last Name *</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Last Name *</label>
                 <input type="text" name="sellerLastName" value={formData.sellerLastName} onChange={handleChange} className="input" required />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Phone *</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Phone *</label>
                 <input type="tel" name="sellerPhone" value={formData.sellerPhone} onChange={handleChange} className="input" required />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Email</label>
                 <input type="email" name="sellerEmail" value={formData.sellerEmail} onChange={handleChange} className="input" />
               </div>
             </div>
@@ -329,12 +329,12 @@ export default function EditLeadPage() {
           {/* Motivation & Scoring Inputs */}
           <div className="card">
             <h2 className="text-lg font-bold mb-4">Motivation & Scoring</h2>
-            <p className="text-sm text-gray-500 mb-4">
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
               Changing these fields will automatically rescore the lead.
             </p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Timeline (days)</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Timeline (days)</label>
                 <input
                   type="number"
                   name="timeline"
@@ -344,10 +344,10 @@ export default function EditLeadPage() {
                   placeholder="30"
                   min="0"
                 />
-                <p className="text-xs text-gray-500 mt-1">&lt;14 days = high priority</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">&lt;14 days = high priority</p>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Asking Price</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Asking Price</label>
                 <input
                   type="number"
                   name="askingPrice"
@@ -359,7 +359,7 @@ export default function EditLeadPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">ARV (After Repair Value)</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">ARV (After Repair Value)</label>
                 <input
                   type="number"
                   name="arv"
@@ -369,10 +369,10 @@ export default function EditLeadPage() {
                   placeholder="300000"
                   min="0"
                 />
-                <p className="text-xs text-gray-500 mt-1">Used to calculate money score</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Used to calculate money score</p>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Property Condition</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Property Condition</label>
                 <select name="conditionLevel" value={formData.conditionLevel} onChange={handleChange} className="input">
                   <option value="">--</option>
                   <option value="excellent">Excellent</option>
@@ -383,7 +383,7 @@ export default function EditLeadPage() {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Ownership Status</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Ownership Status</label>
                 <select name="ownershipStatus" value={formData.ownershipStatus} onChange={handleChange} className="input">
                   <option value="">--</option>
                   <option value="sole_owner">Sole Owner</option>
@@ -393,7 +393,7 @@ export default function EditLeadPage() {
                 </select>
               </div>
               <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-2">Distress Signals</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Distress Signals</label>
                 <div className="flex flex-wrap gap-3">
                   {DISTRESS_SIGNAL_OPTIONS.map((option) => (
                     <label key={option.value} className="flex items-center gap-2">
@@ -401,9 +401,9 @@ export default function EditLeadPage() {
                         type="checkbox"
                         checked={formData.distressSignals.includes(option.value)}
                         onChange={() => handleDistressSignalToggle(option.value)}
-                        className="h-4 w-4 text-primary-600 rounded border-gray-300"
+                        className="h-4 w-4 text-primary-600 rounded border-gray-300 dark:border-gray-600"
                       />
-                      <span className="text-sm text-gray-700">{option.label}</span>
+                      <span className="text-sm text-gray-700 dark:text-gray-300">{option.label}</span>
                     </label>
                   ))}
                 </div>
@@ -422,7 +422,7 @@ export default function EditLeadPage() {
               className="input"
               placeholder="tag1, tag2, tag3"
             />
-            <p className="text-xs text-gray-500 mt-1">Comma-separated</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Comma-separated</p>
           </div>
 
           {/* Actions */}

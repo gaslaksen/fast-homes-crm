@@ -42,13 +42,13 @@ const SCENARIO_OPTIONS = [
 
 function scenarioBadgeColor(scenario: string): string {
   const colors: Record<string, string> = {
-    initial_contact: 'bg-blue-100 text-blue-800',
-    motivation_discovery: 'bg-purple-100 text-purple-800',
-    objection_handling: 'bg-red-100 text-red-800',
-    follow_up: 'bg-yellow-100 text-yellow-800',
-    rbp_explanation: 'bg-green-100 text-green-800',
+    initial_contact: 'bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-400',
+    motivation_discovery: 'bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-400',
+    objection_handling: 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-400',
+    follow_up: 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-400',
+    rbp_explanation: 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-400',
   };
-  return colors[scenario] || 'bg-gray-100 text-gray-800';
+  return colors[scenario] || 'bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200';
 }
 
 export default function PromptsPage() {
@@ -227,7 +227,7 @@ export default function PromptsPage() {
     <div className="space-y-4 mt-4">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Name</label>
           <input
             type="text"
             value={formName}
@@ -237,7 +237,7 @@ export default function PromptsPage() {
           />
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Scenario</label>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Scenario</label>
           <select
             value={SCENARIO_OPTIONS.includes(formScenario) ? formScenario : 'custom'}
             onChange={(e) => setFormScenario(e.target.value)}
@@ -270,7 +270,7 @@ export default function PromptsPage() {
         </div>
         <div className="flex gap-4">
           <div className="flex-1">
-            <label className="block text-sm font-medium text-gray-700 mb-1">Priority</label>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Priority</label>
             <input
               type="number"
               min={0}
@@ -285,7 +285,7 @@ export default function PromptsPage() {
                 type="button"
                 onClick={() => setFormIsActive(!formIsActive)}
                 className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                  formIsActive ? 'bg-primary-600' : 'bg-gray-300'
+                  formIsActive ? 'bg-primary-600' : 'bg-gray-300 dark:bg-gray-600'
                 }`}
               >
                 <span
@@ -294,18 +294,18 @@ export default function PromptsPage() {
                   }`}
                 />
               </button>
-              <span className="text-sm text-gray-700">Active</span>
+              <span className="text-sm text-gray-700 dark:text-gray-300">Active</span>
             </label>
           </div>
         </div>
       </div>
 
       {/* Context Rules */}
-      <div className="border rounded-lg p-4 bg-gray-50">
-        <h4 className="text-sm font-semibold text-gray-700 mb-3">Context Rules</h4>
+      <div className="border dark:border-gray-700 rounded-lg p-4 bg-gray-50 dark:bg-gray-950">
+        <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Context Rules</h4>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Lead Statuses</label>
+            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Lead Statuses</label>
             <div className="flex flex-wrap gap-1">
               {LEAD_STATUSES.map((status) => (
                 <button
@@ -320,8 +320,8 @@ export default function PromptsPage() {
                   }
                   className={`text-xs px-2 py-1 rounded border ${
                     formLeadStatuses.includes(status)
-                      ? 'bg-primary-100 border-primary-300 text-primary-700'
-                      : 'bg-white border-gray-300 text-gray-600'
+                      ? 'bg-primary-100 dark:bg-primary-900/30 border-primary-300 dark:border-primary-800 text-primary-700 dark:text-primary-400'
+                      : 'bg-white dark:bg-gray-900 border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400'
                   }`}
                 >
                   {status.replace(/_/g, ' ')}
@@ -331,7 +331,7 @@ export default function PromptsPage() {
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">
+            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
               Required Fields (must be missing on lead)
             </label>
             <div className="flex flex-wrap gap-1">
@@ -348,8 +348,8 @@ export default function PromptsPage() {
                   }
                   className={`text-xs px-2 py-1 rounded border ${
                     formRequiresFields.includes(field)
-                      ? 'bg-purple-100 border-purple-300 text-purple-700'
-                      : 'bg-white border-gray-300 text-gray-600'
+                      ? 'bg-purple-100 dark:bg-purple-900/30 border-purple-300 dark:border-purple-800 text-purple-700 dark:text-purple-400'
+                      : 'bg-white dark:bg-gray-900 border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400'
                   }`}
                 >
                   {field}
@@ -360,7 +360,7 @@ export default function PromptsPage() {
 
           <div className="flex gap-4">
             <div className="flex-1">
-              <label className="block text-xs font-medium text-gray-600 mb-1">Min Messages</label>
+              <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Min Messages</label>
               <input
                 type="number"
                 min={0}
@@ -371,7 +371,7 @@ export default function PromptsPage() {
               />
             </div>
             <div className="flex-1">
-              <label className="block text-xs font-medium text-gray-600 mb-1">Max Messages</label>
+              <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Max Messages</label>
               <input
                 type="number"
                 min={0}
@@ -384,7 +384,7 @@ export default function PromptsPage() {
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">
+            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
               Objection Keywords (one per line)
             </label>
             <textarea
@@ -400,7 +400,7 @@ export default function PromptsPage() {
 
       {/* System Prompt */}
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">System Prompt</label>
+        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">System Prompt</label>
         <textarea
           value={formSystemPrompt}
           onChange={(e) => setFormSystemPrompt(e.target.value)}
@@ -412,7 +412,7 @@ export default function PromptsPage() {
 
       {/* Example Messages */}
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">
+        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
           Example Messages (JSON, optional)
         </label>
         <textarea
@@ -434,7 +434,7 @@ export default function PromptsPage() {
         </button>
         <button
           onClick={onCancel}
-          className="btn bg-white border border-gray-300 text-gray-700 hover:bg-gray-50"
+          className="btn bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
         >
           Cancel
         </button>
@@ -451,20 +451,20 @@ export default function PromptsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
       {/* Header */}
-      <header className="bg-white shadow-sm">
+      <header className="bg-white dark:bg-gray-900 shadow-sm">
         <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center py-4">
-            <h1 className="text-2xl font-bold text-gray-900">Fast Homes CRM</h1>
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Deal Core</h1>
             <nav className="flex gap-4">
-              <Link href="/dashboard" className="text-gray-600 hover:text-gray-900">
+              <Link href="/dashboard" className="text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100">
                 Dashboard
               </Link>
-              <Link href="/leads" className="text-gray-600 hover:text-gray-900">
+              <Link href="/leads" className="text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100">
                 Leads
               </Link>
-              <Link href="/settings" className="text-primary-600 font-medium">
+              <Link href="/settings" className="text-primary-600 dark:text-primary-400 font-medium">
                 Settings
               </Link>
               <button
@@ -472,7 +472,7 @@ export default function PromptsPage() {
                   localStorage.removeItem('auth_token');
                   router.push('/login');
                 }}
-                className="text-gray-600 hover:text-gray-900"
+                className="text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100"
               >
                 Logout
               </button>
@@ -484,11 +484,11 @@ export default function PromptsPage() {
       <main className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <Link href="/settings" className="text-sm text-primary-600 hover:text-primary-800">
+            <Link href="/settings" className="text-sm text-primary-600 dark:text-primary-400 hover:text-primary-800 dark:hover:text-primary-300">
               &larr; Back to Settings
             </Link>
-            <h2 className="text-xl font-bold text-gray-900 mt-1">AI Prompt Templates</h2>
-            <p className="text-sm text-gray-600 mt-1">
+            <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 mt-1">AI Prompt Templates</h2>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
               Configure how AI generates messages for different lead scenarios.
             </p>
           </div>
@@ -509,7 +509,7 @@ export default function PromptsPage() {
         {/* Create Form */}
         {creating && (
           <div className="card mb-6">
-            <h3 className="text-lg font-semibold text-gray-900">Create New Prompt</h3>
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Create New Prompt</h3>
             {renderForm(handleCreate, () => {
               setCreating(false);
               resetForm();
@@ -524,7 +524,7 @@ export default function PromptsPage() {
               <div className="flex items-start justify-between">
                 <div className="flex-1">
                   <div className="flex items-center gap-3">
-                    <h3 className="text-base font-semibold text-gray-900">{prompt.name}</h3>
+                    <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">{prompt.name}</h3>
                     <span
                       className={`text-xs px-2 py-0.5 rounded-full font-medium ${scenarioBadgeColor(
                         prompt.scenario,
@@ -532,19 +532,19 @@ export default function PromptsPage() {
                     >
                       {prompt.scenario.replace(/_/g, ' ')}
                     </span>
-                    <span className="text-xs text-gray-500">Priority: {prompt.priority}</span>
+                    <span className="text-xs text-gray-500 dark:text-gray-400">Priority: {prompt.priority}</span>
                     <span
                       className={`text-xs px-2 py-0.5 rounded-full ${
                         prompt.isActive
-                          ? 'bg-green-100 text-green-700'
-                          : 'bg-gray-100 text-gray-500'
+                          ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
+                          : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400'
                       }`}
                     >
                       {prompt.isActive ? 'Active' : 'Inactive'}
                     </span>
                   </div>
                   {editingId !== prompt.id && (
-                    <p className="text-sm text-gray-600 mt-2 line-clamp-2">
+                    <p className="text-sm text-gray-600 dark:text-gray-400 mt-2 line-clamp-2">
                       {prompt.systemPrompt.substring(0, 200)}
                       {prompt.systemPrompt.length > 200 ? '...' : ''}
                     </p>
@@ -557,7 +557,7 @@ export default function PromptsPage() {
                       type="button"
                       onClick={() => handleToggleActive(prompt)}
                       className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                        prompt.isActive ? 'bg-primary-600' : 'bg-gray-300'
+                        prompt.isActive ? 'bg-primary-600' : 'bg-gray-300 dark:bg-gray-600'
                       }`}
                     >
                       <span
@@ -569,7 +569,7 @@ export default function PromptsPage() {
                     <button
                       onClick={() => handleTest(prompt.id)}
                       disabled={testingId === prompt.id}
-                      className="text-xs px-3 py-1.5 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                      className="text-xs px-3 py-1.5 rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
                     >
                       {testingId === prompt.id ? 'Testing...' : 'Test'}
                     </button>
@@ -579,13 +579,13 @@ export default function PromptsPage() {
                         setCreating(false);
                         populateForm(prompt);
                       }}
-                      className="text-xs px-3 py-1.5 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                      className="text-xs px-3 py-1.5 rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
                     >
                       Edit
                     </button>
                     <button
                       onClick={() => handleDelete(prompt.id, prompt.name)}
-                      className="text-xs px-3 py-1.5 rounded border border-red-300 text-red-700 hover:bg-red-50"
+                      className="text-xs px-3 py-1.5 rounded border border-red-300 dark:border-red-800 text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950"
                     >
                       Delete
                     </button>
@@ -605,18 +605,18 @@ export default function PromptsPage() {
 
               {/* Test Result */}
               {testResult && testResult.promptName === prompt.name && (
-                <div className="mt-4 border-t pt-4">
-                  <h4 className="text-sm font-semibold text-gray-700 mb-2">Test Results</h4>
+                <div className="mt-4 border-t dark:border-gray-700 pt-4">
+                  <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Test Results</h4>
                   {testResult.error ? (
                     <p className="text-sm text-red-600">{testResult.error}</p>
                   ) : (
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                       {['direct', 'friendly', 'professional'].map((tone) => (
-                        <div key={tone} className="bg-gray-50 rounded p-3">
-                          <span className="text-xs font-semibold text-gray-500 uppercase">
+                        <div key={tone} className="bg-gray-50 dark:bg-gray-950 rounded p-3">
+                          <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">
                             {tone}
                           </span>
-                          <p className="text-sm text-gray-800 mt-1">
+                          <p className="text-sm text-gray-800 dark:text-gray-200 mt-1">
                             {testResult.drafts?.[tone] || 'No draft generated'}
                           </p>
                         </div>
@@ -629,7 +629,7 @@ export default function PromptsPage() {
           ))}
 
           {prompts.length === 0 && !creating && (
-            <div className="text-center py-12 text-gray-500">
+            <div className="text-center py-12 text-gray-500 dark:text-gray-400">
               <p className="text-lg">No prompt templates yet</p>
               <p className="text-sm mt-1">Create your first prompt template to get started.</p>
             </div>

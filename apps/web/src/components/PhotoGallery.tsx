@@ -159,7 +159,7 @@ export default function PhotoGallery({
         /* Empty state with drop zone */
         <div
           className={`border-2 border-dashed rounded-lg p-8 text-center transition cursor-pointer ${
-            dragOver ? 'border-primary-500 bg-primary-50' : 'border-gray-300 hover:border-primary-400'
+            dragOver ? 'border-primary-500 bg-primary-50' : 'border-gray-300 dark:border-gray-600 hover:border-primary-400'
           }`}
           onDrop={handleDrop}
           onDragOver={handleDragOver}
@@ -176,13 +176,13 @@ export default function PhotoGallery({
             </div>
           ) : (
             <>
-              <svg className="w-12 h-12 mx-auto mb-2 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <svg className="w-12 h-12 mx-auto mb-2 text-gray-400 dark:text-gray-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <path d="M12 16v-8m-4 4l4-4 4 4" strokeLinecap="round" strokeLinejoin="round" />
                 <path d="M20 16.7V19a2 2 0 01-2 2H6a2 2 0 01-2-2v-2.3" strokeLinecap="round" />
               </svg>
-              <p className="font-medium text-gray-700 mb-1">Drop photos here or click to upload</p>
-              <p className="text-sm text-gray-400">JPG, PNG, WebP up to 10MB each</p>
-              <p className="text-xs text-gray-300 mt-2">Click &quot;Fetch Photos&quot; to auto-search Street View + Google Images</p>
+              <p className="font-medium text-gray-700 dark:text-gray-300 mb-1">Drop photos here or click to upload</p>
+              <p className="text-sm text-gray-400 dark:text-gray-500">JPG, PNG, WebP up to 10MB each</p>
+              <p className="text-xs text-gray-300 dark:text-gray-600 mt-2">Click &quot;Fetch Photos&quot; to auto-search Street View + Google Images</p>
             </>
           )}
         </div>
@@ -191,7 +191,7 @@ export default function PhotoGallery({
           {/* Hero photo */}
           {primaryPhoto && (
             <div
-              className="relative rounded-lg overflow-hidden cursor-pointer mb-3 bg-gray-100"
+              className="relative rounded-lg overflow-hidden cursor-pointer mb-3 bg-gray-100 dark:bg-gray-800"
               style={{ maxHeight: '300px' }}
               onClick={() => setLightboxIndex(photos.indexOf(primaryPhoto))}
             >
@@ -257,7 +257,7 @@ export default function PhotoGallery({
           {/* Drop zone below existing photos */}
           <div
             className={`mt-3 border-2 border-dashed rounded-lg p-4 text-center transition cursor-pointer ${
-              dragOver ? 'border-primary-500 bg-primary-50' : 'border-gray-200 hover:border-gray-300'
+              dragOver ? 'border-primary-500 bg-primary-50' : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
             }`}
             onDrop={handleDrop}
             onDragOver={handleDragOver}
@@ -267,7 +267,7 @@ export default function PhotoGallery({
             {uploading ? (
               <p className="text-sm text-primary-600 font-medium">Uploading photos...</p>
             ) : (
-              <p className="text-sm text-gray-400">Drop photos here or click to add more</p>
+              <p className="text-sm text-gray-400 dark:text-gray-500">Drop photos here or click to add more</p>
             )}
           </div>
         </>

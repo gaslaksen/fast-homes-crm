@@ -22,22 +22,22 @@ export default function EditCampaignPage() {
   }, [id]);
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
       <AppNav />
       <div className="max-w-screen-xl mx-auto px-4 sm:px-6 py-8">
         <div className="mb-6">
           <Link
             href="/drip-campaigns"
-            className="text-sm text-gray-500 hover:text-gray-800 transition-colors"
+            className="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 transition-colors"
           >
             ← Back to Campaigns
           </Link>
-          <h1 className="text-xl font-bold text-gray-900 mt-2">
+          <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100 mt-2">
             Edit Campaign
           </h1>
         </div>
         {loading ? (
-          <div className="text-center py-16 text-gray-400">Loading...</div>
+          <div className="text-center py-16 text-gray-400 dark:text-gray-500">Loading...</div>
         ) : campaign ? (
           <CampaignBuilder
             initial={{
@@ -61,7 +61,7 @@ export default function EditCampaignPage() {
             }}
           />
         ) : (
-          <div className="text-center py-16 text-gray-400">Campaign not found.</div>
+          <div className="text-center py-16 text-gray-400 dark:text-gray-500">Campaign not found.</div>
         )}
       </div>
     </div>

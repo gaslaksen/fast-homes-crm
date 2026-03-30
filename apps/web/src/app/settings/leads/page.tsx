@@ -129,15 +129,15 @@ export default function LeadManagementPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-white shadow-sm">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
+      <header className="bg-white dark:bg-gray-900 shadow-sm">
         <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center py-4">
-            <h1 className="text-2xl font-bold text-gray-900">Fast Homes CRM</h1>
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Deal Core</h1>
             <nav className="flex gap-4">
-              <Link href="/dashboard" className="text-gray-600 hover:text-gray-900">Dashboard</Link>
-              <Link href="/leads" className="text-gray-600 hover:text-gray-900">Leads</Link>
-              <Link href="/settings" className="text-primary-600 font-medium">Settings</Link>
+              <Link href="/dashboard" className="text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100">Dashboard</Link>
+              <Link href="/leads" className="text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100">Leads</Link>
+              <Link href="/settings" className="text-primary-600 dark:text-primary-400 font-medium">Settings</Link>
             </nav>
           </div>
         </div>
@@ -145,10 +145,10 @@ export default function LeadManagementPage() {
 
       <main className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="flex items-center gap-3 mb-6">
-          <Link href="/settings" className="text-primary-600 hover:text-primary-800 text-sm">
+          <Link href="/settings" className="text-primary-600 dark:text-primary-400 hover:text-primary-800 dark:hover:text-primary-300 text-sm">
             &larr; Settings
           </Link>
-          <h2 className="text-xl font-bold text-gray-900">Lead Management</h2>
+          <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">Lead Management</h2>
         </div>
 
         {/* Lead Stats */}
@@ -159,11 +159,11 @@ export default function LeadManagementPage() {
             <div className="space-y-2">
               {Object.entries(statusLabels).map(([key, label]) => (
                 <div key={key} className="flex justify-between items-center text-sm">
-                  <span className="text-gray-700">{label}</span>
+                  <span className="text-gray-700 dark:text-gray-300">{label}</span>
                   <span className="font-medium">{stats?.byStatus?.[key] || 0}</span>
                 </div>
               ))}
-              <div className="border-t pt-2 flex justify-between items-center text-sm font-bold">
+              <div className="border-t dark:border-gray-700 pt-2 flex justify-between items-center text-sm font-bold">
                 <span>Total</span>
                 <span>{stats?.total || 0}</span>
               </div>
@@ -176,7 +176,7 @@ export default function LeadManagementPage() {
             <div className="space-y-2">
               {Object.entries(sourceLabels).map(([key, label]) => (
                 <div key={key} className="flex justify-between items-center text-sm">
-                  <span className="text-gray-700">{label}</span>
+                  <span className="text-gray-700 dark:text-gray-300">{label}</span>
                   <span className="font-medium">{stats?.bySource?.[key] || 0}</span>
                 </div>
               ))}
@@ -189,7 +189,7 @@ export default function LeadManagementPage() {
             <div className="space-y-2">
               {Object.entries(bandLabels).map(([key, label]) => (
                 <div key={key} className="flex justify-between items-center text-sm">
-                  <span className="text-gray-700">{label}</span>
+                  <span className="text-gray-700 dark:text-gray-300">{label}</span>
                   <span className="font-medium">{stats?.byBand?.[key] || 0}</span>
                 </div>
               ))}
@@ -200,14 +200,14 @@ export default function LeadManagementPage() {
         {/* Cleanup Actions */}
         <div className="card max-w-2xl">
           <h3 className="text-lg font-semibold mb-2">Cleanup Actions</h3>
-          <p className="text-sm text-gray-600 mb-6">
+          <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
             Permanently delete leads in bulk. These actions cannot be undone.
           </p>
 
           <div className="space-y-4">
             {/* Delete by Status */}
             <div>
-              <h4 className="text-sm font-medium text-gray-700 mb-2">Delete by Status</h4>
+              <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Delete by Status</h4>
               <div className="flex flex-wrap gap-2">
                 {Object.entries(statusLabels).map(([key, label]) => (
                   <button
@@ -224,7 +224,7 @@ export default function LeadManagementPage() {
 
             {/* Delete by Score Band */}
             <div>
-              <h4 className="text-sm font-medium text-gray-700 mb-2">Delete by Score Band</h4>
+              <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Delete by Score Band</h4>
               <div className="flex flex-wrap gap-2">
                 {Object.entries(bandLabels).map(([key, label]) => (
                   <button
@@ -240,7 +240,7 @@ export default function LeadManagementPage() {
             </div>
 
             {/* Delete Demo Leads */}
-            <div className="border-t pt-4">
+            <div className="border-t dark:border-gray-700 pt-4">
               <button
                 disabled={acting}
                 onClick={() =>
@@ -263,13 +263,13 @@ export default function LeadManagementPage() {
               >
                 {acting ? 'Deleting...' : 'Delete All Demo/Test Leads'}
               </button>
-              <p className="text-xs text-gray-500 mt-1">
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                 Finds leads where name or address contains &quot;demo&quot; or &quot;test&quot;.
               </p>
             </div>
 
             {/* Nuclear option */}
-            <div className="border-t pt-4">
+            <div className="border-t dark:border-gray-700 pt-4">
               <button
                 disabled={acting || !stats?.total}
                 onClick={async () => {

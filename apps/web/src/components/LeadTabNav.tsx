@@ -27,7 +27,7 @@ interface LeadTabNavProps {
 
 export default function LeadTabNav({ leadId, activeTab }: LeadTabNavProps) {
   return (
-    <div className="bg-white border-b border-gray-200">
+    <div className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
       <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8">
         <nav className="flex space-x-4 text-sm overflow-x-auto scrollbar-none">
           {TABS.map((tab) => {
@@ -45,7 +45,7 @@ export default function LeadTabNav({ leadId, activeTab }: LeadTabNavProps) {
                 className={`py-3 px-1 border-b-2 font-medium whitespace-nowrap ${
                   isActive
                     ? 'border-primary-500 text-primary-600'
-                    : 'border-transparent text-gray-400 hover:text-gray-600'
+                    : 'border-transparent text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400'
                 }`}
               >
                 {tab.label}

@@ -10,7 +10,7 @@ import LeadTabNav, { COMPS_TABS, DETAIL_TABS } from '@/components/LeadTabNav';
 import AnalysisTab from '@/components/AnalysisTab';
 import PropertyPhoto from '@/components/PropertyPhoto';
 
-const CompsMap = dynamic(() => import('@/components/CompsMap'), { ssr: false, loading: () => <div className="w-full h-64 bg-gray-100 rounded-lg animate-pulse" /> });
+const CompsMap = dynamic(() => import('@/components/CompsMap'), { ssr: false, loading: () => <div className="w-full h-64 bg-gray-100 dark:bg-gray-800 rounded-lg animate-pulse" /> });
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Lead {
@@ -630,16 +630,16 @@ export default function CompsAnalysisPage() {
   // ─── Render ───────────────────────────────────────────────────────────────
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-lg text-gray-500">Loading analysis...</div>
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950">
+        <div className="text-lg text-gray-500 dark:text-gray-400">Loading analysis...</div>
       </div>
     );
   }
 
   if (!lead) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-lg text-gray-500">Lead not found</div>
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950">
+        <div className="text-lg text-gray-500 dark:text-gray-400">Lead not found</div>
       </div>
     );
   }
@@ -676,10 +676,10 @@ export default function CompsAnalysisPage() {
   const compsWithSource = compsFromAttom + compsFromRentcast;
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
       <AppNav />
       {/* Lead Sub-header */}
-      <header className="bg-white border-b border-gray-200">
+      <header className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
         <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex justify-between items-center">
             <div className="flex items-center gap-4">
@@ -690,13 +690,13 @@ export default function CompsAnalysisPage() {
                 size="md"
               />
               <div>
-                <div className="flex items-center gap-1.5 mb-1 text-xs text-gray-400">
-                  <Link href="/leads" className="hover:text-gray-700">Leads</Link>
+                <div className="flex items-center gap-1.5 mb-1 text-xs text-gray-400 dark:text-gray-500">
+                  <Link href="/leads" className="hover:text-gray-700 dark:hover:text-gray-300">Leads</Link>
                   <span>/</span>
-                  <span className="text-gray-600 font-medium">{lead.propertyAddress}</span>
+                  <span className="text-gray-600 dark:text-gray-400 font-medium">{lead.propertyAddress}</span>
                 </div>
-                <h1 className="text-xl font-bold text-gray-900">{lead.propertyAddress}</h1>
-                <p className="text-gray-600 text-sm">{lead.propertyCity}, {lead.propertyState} {lead.propertyZip}</p>
+                <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">{lead.propertyAddress}</h1>
+                <p className="text-gray-600 dark:text-gray-400 text-sm">{lead.propertyCity}, {lead.propertyState} {lead.propertyZip}</p>
               </div>
             </div>
             <div className="flex items-center gap-5">
@@ -739,7 +739,7 @@ export default function CompsAnalysisPage() {
               <div className="card">
                 <div className="flex justify-between items-center mb-3">
                   <h2 className="text-lg font-bold">Property Locations</h2>
-                  <span className="text-xs text-gray-500">
+                  <span className="text-xs text-gray-500 dark:text-gray-400">
                     {allComps.filter(c => c.latitude && c.longitude).length} of {allComps.length} comps mapped
                   </span>
                 </div>
@@ -764,7 +764,7 @@ export default function CompsAnalysisPage() {
                 <h2 className="text-lg font-bold">Subject Property</h2>
                 <div className="flex items-center gap-2">
                   {attomData?.attomId && (
-                    <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 font-medium">
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 font-medium">
                       ✓ ATTOM Verified
                     </span>
                   )}
@@ -781,7 +781,7 @@ export default function CompsAnalysisPage() {
                         setAttomLoading(false);
                       }}
                       disabled={attomLoading}
-                      className="text-xs text-indigo-600 hover:text-indigo-800 font-medium"
+                      className="text-xs text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 font-medium"
                     >
                       {attomLoading ? '⏳' : '📡 Enrich with ATTOM'}
                     </button>
@@ -813,9 +813,9 @@ export default function CompsAnalysisPage() {
                   warnings.push(`Bath count mismatch: lead shows ${lead.bathrooms}, ATTOM records ${attomData.bathrooms}`);
                 if (warnings.length === 0) return null;
                 return (
-                  <div className="mt-3 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 space-y-1">
+                  <div className="mt-3 rounded-lg bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-800 px-3 py-2 space-y-1">
                     {warnings.map((w, i) => (
-                      <div key={i} className="text-xs text-amber-700 flex items-center gap-1.5">
+                      <div key={i} className="text-xs text-amber-700 dark:text-amber-400 flex items-center gap-1.5">
                         <span>⚠️</span> {w} — <span className="font-medium">verify before calculating ARV</span>
                       </div>
                     ))}
@@ -825,7 +825,7 @@ export default function CompsAnalysisPage() {
 
               {/* ATTOM building detail strip */}
               {attomData?.attomId && (attomData.yearBuilt || attomData.effectiveYearBuilt || attomData.stories || attomData.wallType || attomData.propertyQuality || attomData.subdivision) && (
-                <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500 border-t pt-3">
+                <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500 dark:text-gray-400 border-t dark:border-gray-700 pt-3">
                   {attomData.yearBuilt && <span>Built {attomData.yearBuilt}{attomData.effectiveYearBuilt && attomData.effectiveYearBuilt !== attomData.yearBuilt ? ` · Reno'd ${attomData.effectiveYearBuilt}` : ''}</span>}
                   {attomData.stories && <span>{attomData.stories} {attomData.stories === 1 ? 'story' : 'stories'}</span>}
                   {attomData.wallType && <span>{attomData.wallType}</span>}
@@ -843,28 +843,28 @@ export default function CompsAnalysisPage() {
                   <h2 className="text-lg font-bold">
                     Comparable Properties
                   </h2>
-                  <span className="text-sm text-gray-500">
+                  <span className="text-sm text-gray-500 dark:text-gray-400">
                     {selectedComps.length} selected of {allComps.length}
                   </span>
                   {compsFromAttom > 0 && (
-                    <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium">
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 font-medium">
                       {compsFromAttom} ATTOM verified
                     </span>
                   )}
                   {compsFromRentcast > 0 && (
-                    <span className="text-xs px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 font-medium">
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 font-medium">
                       {compsFromRentcast} RentCast
                     </span>
                   )}
                   {/* Select / Deselect All */}
                   {analysis && allComps.length > 0 && (
-                    <div className="flex rounded-lg overflow-hidden border border-gray-200 text-xs">
+                    <div className="flex rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 text-xs">
                       <button
                         onClick={async () => {
                           await compAnalysisAPI.selectAll(leadId, analysis.id, true);
                           await refreshAnalysis();
                         }}
-                        className="px-3 py-1.5 bg-white text-gray-600 hover:bg-gray-50 font-medium border-r border-gray-200"
+                        className="px-3 py-1.5 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 font-medium border-r border-gray-200 dark:border-gray-700"
                       >
                         Select All
                       </button>
@@ -873,7 +873,7 @@ export default function CompsAnalysisPage() {
                           await compAnalysisAPI.selectAll(leadId, analysis.id, false);
                           await refreshAnalysis();
                         }}
-                        className="px-3 py-1.5 bg-white text-gray-600 hover:bg-gray-50 font-medium"
+                        className="px-3 py-1.5 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 font-medium"
                       >
                         Deselect All
                       </button>
@@ -882,13 +882,13 @@ export default function CompsAnalysisPage() {
                 </div>
                 <div className="flex items-center gap-3">
                   {/* Source toggle */}
-                  <div className="flex rounded-lg overflow-hidden border border-gray-200 text-xs">
+                  <div className="flex rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 text-xs">
                     <button
                       onClick={() => setCompsSource('auto')}
                       className={`px-3 py-1.5 font-medium transition-colors ${
                         compsSource === 'auto'
                           ? 'bg-blue-600 text-white'
-                          : 'bg-white text-gray-600 hover:bg-gray-50'
+                          : 'bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
                       }`}
                     >
                       ATTOM
@@ -898,7 +898,7 @@ export default function CompsAnalysisPage() {
                       className={`px-3 py-1.5 font-medium transition-colors ${
                         compsSource === 'rentcast'
                           ? 'bg-purple-600 text-white'
-                          : 'bg-white text-gray-600 hover:bg-gray-50'
+                          : 'bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
                       }`}
                     >
                       RentCast
@@ -928,7 +928,7 @@ export default function CompsAnalysisPage() {
               {/* Sort controls */}
               {allComps.length > 0 && (
                 <div className="flex items-center gap-2 mb-4 text-xs">
-                  <span className="text-gray-500 font-medium">Sort by:</span>
+                  <span className="text-gray-500 dark:text-gray-400 font-medium">Sort by:</span>
                   {[
                     { key: 'distance', label: 'Distance' },
                     { key: 'soldPrice', label: 'Price' },
@@ -942,7 +942,7 @@ export default function CompsAnalysisPage() {
                       className={`px-2 py-1 rounded border transition-colors ${
                         sortField === s.key
                           ? 'bg-primary-100 border-primary-300 text-primary-700 font-medium'
-                          : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'
+                          : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
                       }`}
                     >
                       {s.label} {sortField === s.key && (sortDir === 'asc' ? '↑' : '↓')}
@@ -953,11 +953,11 @@ export default function CompsAnalysisPage() {
 
               {/* Add Comp Form */}
               {showAddComp && (
-                <div className="bg-gray-50 rounded-lg p-4 mb-6 border border-gray-200">
-                  <h3 className="text-sm font-semibold text-gray-700 mb-3">Add Comparable Property</h3>
+                <div className="bg-gray-50 dark:bg-gray-950 rounded-lg p-4 mb-6 border border-gray-200 dark:border-gray-700">
+                  <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Add Comparable Property</h3>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                     <div className="md:col-span-2">
-                      <label className="block text-xs font-medium text-gray-600 mb-1">Address *</label>
+                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Address *</label>
                       <input
                         type="text"
                         value={compForm.address}
@@ -967,7 +967,7 @@ export default function CompsAnalysisPage() {
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1">Sold Price *</label>
+                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Sold Price *</label>
                       <input
                         type="number"
                         value={compForm.soldPrice}
@@ -977,7 +977,7 @@ export default function CompsAnalysisPage() {
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1">Sold Date *</label>
+                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Sold Date *</label>
                       <input
                         type="date"
                         value={compForm.soldDate}
@@ -986,49 +986,49 @@ export default function CompsAnalysisPage() {
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1">Distance (mi)</label>
+                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Distance (mi)</label>
                       <input type="number" step="0.1" value={compForm.distance}
                         onChange={(e) => setCompForm({ ...compForm, distance: e.target.value })}
                         placeholder="0.5" className="input text-sm" />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1">Sq Ft</label>
+                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Sq Ft</label>
                       <input type="number" value={compForm.sqft}
                         onChange={(e) => setCompForm({ ...compForm, sqft: e.target.value })}
                         placeholder="1800" className="input text-sm" />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1">Beds</label>
+                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Beds</label>
                       <input type="number" value={compForm.bedrooms}
                         onChange={(e) => setCompForm({ ...compForm, bedrooms: e.target.value })}
                         placeholder="3" className="input text-sm" />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1">Baths</label>
+                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Baths</label>
                       <input type="number" step="0.5" value={compForm.bathrooms}
                         onChange={(e) => setCompForm({ ...compForm, bathrooms: e.target.value })}
                         placeholder="2" className="input text-sm" />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1">Year Built</label>
+                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Year Built</label>
                       <input type="number" value={compForm.yearBuilt}
                         onChange={(e) => setCompForm({ ...compForm, yearBuilt: e.target.value })}
                         placeholder="1990" className="input text-sm" />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1">Lot (acres)</label>
+                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Lot (acres)</label>
                       <input type="number" step="0.01" value={compForm.lotSize}
                         onChange={(e) => setCompForm({ ...compForm, lotSize: e.target.value })}
                         placeholder="0.25" className="input text-sm" />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1">DOM</label>
+                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">DOM</label>
                       <input type="number" value={compForm.daysOnMarket}
                         onChange={(e) => setCompForm({ ...compForm, daysOnMarket: e.target.value })}
                         placeholder="30" className="input text-sm" />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1">Type</label>
+                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Type</label>
                       <select value={compForm.propertyType}
                         onChange={(e) => setCompForm({ ...compForm, propertyType: e.target.value })}
                         className="input text-sm">
@@ -1043,21 +1043,21 @@ export default function CompsAnalysisPage() {
                     <label className="flex items-center gap-1.5 text-sm">
                       <input type="checkbox" checked={compForm.hasPool}
                         onChange={(e) => setCompForm({ ...compForm, hasPool: e.target.checked })}
-                        className="rounded border-gray-300" /> Pool
+                        className="rounded border-gray-300 dark:border-gray-600" /> Pool
                     </label>
                     <label className="flex items-center gap-1.5 text-sm">
                       <input type="checkbox" checked={compForm.hasGarage}
                         onChange={(e) => setCompForm({ ...compForm, hasGarage: e.target.checked })}
-                        className="rounded border-gray-300" /> Garage
+                        className="rounded border-gray-300 dark:border-gray-600" /> Garage
                     </label>
                     <label className="flex items-center gap-1.5 text-sm">
                       <input type="checkbox" checked={compForm.isRenovated}
                         onChange={(e) => setCompForm({ ...compForm, isRenovated: e.target.checked })}
-                        className="rounded border-gray-300" /> Renovated
+                        className="rounded border-gray-300 dark:border-gray-600" /> Renovated
                     </label>
                   </div>
                   <div className="mt-3">
-                    <label className="block text-xs font-medium text-gray-600 mb-1">Notes</label>
+                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Notes</label>
                     <input type="text" value={compForm.notes}
                       onChange={(e) => setCompForm({ ...compForm, notes: e.target.value })}
                       placeholder="e.g., Comp has pool but subject does not"
@@ -1071,20 +1071,20 @@ export default function CompsAnalysisPage() {
 
               {/* Comp Cards Grid */}
               {allComps.length === 0 ? (
-                <div className="text-center py-12 text-gray-500">
+                <div className="text-center py-12 text-gray-500 dark:text-gray-400">
                   <div className="text-5xl mb-3">&#127968;</div>
                   <p className="font-medium text-lg">No comparables yet</p>
                   <p className="text-sm mt-1 mb-4">
                     Click &quot;Find Comps&quot; to fetch deed-verified comparable sales from ATTOM (or switch to RentCast)
                   </p>
                   <div className="flex items-center justify-center gap-3 mb-3">
-                    <div className="flex rounded-lg overflow-hidden border border-gray-200 text-xs">
+                    <div className="flex rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 text-xs">
                       <button
                         onClick={() => setCompsSource('auto')}
                         className={`px-3 py-1.5 font-medium transition-colors ${
                           compsSource === 'auto'
                             ? 'bg-blue-600 text-white'
-                            : 'bg-white text-gray-600 hover:bg-gray-50'
+                            : 'bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
                         }`}
                       >
                         ATTOM
@@ -1094,7 +1094,7 @@ export default function CompsAnalysisPage() {
                         className={`px-3 py-1.5 font-medium transition-colors ${
                           compsSource === 'rentcast'
                             ? 'bg-purple-600 text-white'
-                            : 'bg-white text-gray-600 hover:bg-gray-50'
+                            : 'bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
                         }`}
                       >
                         RentCast
@@ -1155,36 +1155,36 @@ export default function CompsAnalysisPage() {
           <div className="space-y-6">
             {/* AI Summary */}
             {analysis?.aiSummary && (
-              <div className="card bg-blue-50 border border-blue-200">
+              <div className="card bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800">
                 <div className="flex items-start gap-3">
                   <div className="text-2xl">&#129302;</div>
                   <div className="flex-1">
                     <div className="flex items-center justify-between mb-1">
-                      <h3 className="text-sm font-semibold text-blue-900">AI Analysis Summary</h3>
+                      <h3 className="text-sm font-semibold text-blue-900 dark:text-blue-300">AI Analysis Summary</h3>
                       {analysis.confidenceScore > 0 && (
                         <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                          analysis.confidenceScore >= 80 ? 'bg-green-100 text-green-700' :
-                          analysis.confidenceScore >= 60 ? 'bg-yellow-100 text-yellow-700' :
-                          'bg-red-100 text-red-700'
+                          analysis.confidenceScore >= 80 ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' :
+                          analysis.confidenceScore >= 60 ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400' :
+                          'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'
                         }`}>
                           {analysis.confidenceScore}% confidence
                         </span>
                       )}
                     </div>
-                    <p className="text-sm text-blue-800">{analysis.aiSummary}</p>
+                    <p className="text-sm text-blue-800 dark:text-blue-400">{analysis.aiSummary}</p>
                   </div>
                 </div>
               </div>
             )}
 
             {/* AI Property Assessment */}
-            <div className="card border border-indigo-200">
+            <div className="card border border-indigo-200 dark:border-indigo-800">
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
                   <span className="text-xl">🧠</span>
-                  <h3 className="font-bold text-gray-900">AI Property Assessment</h3>
+                  <h3 className="font-bold text-gray-900 dark:text-gray-100">AI Property Assessment</h3>
                   {(analysis as any)?.aiAssessment && (
-                    <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 font-medium">Generated</span>
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 font-medium">Generated</span>
                   )}
                 </div>
                 <button
@@ -1204,7 +1204,7 @@ export default function CompsAnalysisPage() {
                 const raw = (analysis as any)?.aiAssessment;
                 if (!raw) {
                   return (
-                    <p className="text-sm text-gray-500 italic">
+                    <p className="text-sm text-gray-500 dark:text-gray-400 italic">
                       {allComps.length === 0
                         ? 'Fetch comps first, then generate a detailed wholesaler assessment.'
                         : 'Click Generate Assessment for a detailed analysis of ARV confidence, market conditions, red flags, and deal viability.'}
@@ -1244,23 +1244,23 @@ export default function CompsAnalysisPage() {
                     <div className="space-y-4">
                       {/* Wholesaler note */}
                       {parsed.wholesalerNote && (
-                        <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4">
-                          <div className="text-xs font-semibold text-indigo-700 uppercase tracking-wide mb-1">💡 Wholesaler Take</div>
+                        <div className="bg-indigo-50 dark:bg-indigo-950 border border-indigo-200 dark:border-indigo-800 rounded-xl p-4">
+                          <div className="text-xs font-semibold text-indigo-700 dark:text-indigo-400 uppercase tracking-wide mb-1">💡 Wholesaler Take</div>
                           <p className="text-sm text-indigo-900 leading-relaxed">{parsed.wholesalerNote}</p>
                         </div>
                       )}
                       {/* Method */}
                       {parsed.method && (
-                        <div className="bg-gray-50 border border-gray-200 rounded-xl p-3">
-                          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">📐 Valuation Method</div>
-                          <p className="text-sm text-gray-700">{parsed.method}</p>
+                        <div className="bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 rounded-xl p-3">
+                          <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">📐 Valuation Method</div>
+                          <p className="text-sm text-gray-700 dark:text-gray-300">{parsed.method}</p>
                         </div>
                       )}
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         {/* Key Factors */}
                         {parsed.keyFactors?.length > 0 && (
-                          <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
-                            <div className="text-xs font-semibold text-blue-700 uppercase tracking-wide mb-2">🔑 Key Factors</div>
+                          <div className="bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-xl p-4">
+                            <div className="text-xs font-semibold text-blue-700 dark:text-blue-400 uppercase tracking-wide mb-2">🔑 Key Factors</div>
                             <ul className="space-y-1.5">
                               {parsed.keyFactors.map((f: string, i: number) => (
                                 <li key={i} className="text-sm text-blue-900 flex gap-2">
@@ -1273,8 +1273,8 @@ export default function CompsAnalysisPage() {
                         )}
                         {/* Risks */}
                         {parsed.risks?.length > 0 && (
-                          <div className="bg-red-50 border border-red-200 rounded-xl p-4">
-                            <div className="text-xs font-semibold text-red-700 uppercase tracking-wide mb-2">⚠️ Risks</div>
+                          <div className="bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-xl p-4">
+                            <div className="text-xs font-semibold text-red-700 dark:text-red-400 uppercase tracking-wide mb-2">⚠️ Risks</div>
                             <ul className="space-y-1.5">
                               {parsed.risks.map((r: string, i: number) => (
                                 <li key={i} className="text-sm text-red-900 flex gap-2">
@@ -1292,7 +1292,7 @@ export default function CompsAnalysisPage() {
 
                 // Fallback: prose text render
                 return (
-                  <div className="prose prose-sm max-w-none text-gray-800 bg-indigo-50 rounded-lg p-4 text-sm leading-relaxed">
+                  <div className="prose prose-sm max-w-none text-gray-800 dark:text-gray-200 bg-indigo-50 dark:bg-indigo-950 rounded-lg p-4 text-sm leading-relaxed">
                     {raw.split('\n').map((line: string, i: number) => {
                       if (line.startsWith('**') && line.endsWith('**')) {
                         return <p key={i} className="font-bold text-indigo-900 mt-3 mb-1">{line.replace(/\*\*/g, '')}</p>;
@@ -1306,12 +1306,12 @@ export default function CompsAnalysisPage() {
 
             {/* Quick Stats if no full analysis calculated yet */}
             {!analysis?.arvEstimate && selectedComps.length > 0 && (
-              <div className="card bg-yellow-50 border border-yellow-200">
+              <div className="card bg-yellow-50 dark:bg-yellow-950 border border-yellow-200 dark:border-yellow-800">
                 <div className="flex items-center gap-3">
                   <div className="text-xl">&#9888;&#65039;</div>
                   <div>
-                    <p className="text-sm font-medium text-yellow-800">ARV not calculated yet</p>
-                    <p className="text-xs text-yellow-700 mt-0.5">
+                    <p className="text-sm font-medium text-yellow-800 dark:text-yellow-400">ARV not calculated yet</p>
+                    <p className="text-xs text-yellow-700 dark:text-yellow-400 mt-0.5">
                       Go to the Comps tab and click &quot;Calculate ARV&quot; to run adjustments and generate the ARV.
                       Quick estimate from {selectedComps.length} comps: <strong>${avgPrice.toLocaleString()}</strong> avg sale price
                       {avgPricePerSqft > 0 && <span> (${avgPricePerSqft}/sqft)</span>}
@@ -1327,7 +1327,7 @@ export default function CompsAnalysisPage() {
                 <div className="flex items-center justify-between mb-5">
                   <h2 className="text-lg font-bold">ARV Report</h2>
                   {analysis.arvMethod && (
-                    <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 capitalize">
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 capitalize">
                       {analysis.arvMethod === 'weighted' ? '✨ AI-weighted' : analysis.arvMethod} method
                     </span>
                   )}
@@ -1335,11 +1335,11 @@ export default function CompsAnalysisPage() {
 
                 {/* ── PRIMARY: AI Estimated ARV hero card ── */}
                 {analysis.arvEstimate && (
-                  <div className="bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-300 rounded-2xl p-6 mb-5">
+                  <div className="bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-300 dark:border-green-800 rounded-2xl p-6 mb-5">
                     <div className="flex items-end justify-between flex-wrap gap-4">
                       <div>
-                        <div className="text-xs font-semibold text-green-700 uppercase tracking-wide mb-1">AI Estimated ARV</div>
-                        <div className="text-5xl font-bold text-green-700">${analysis.arvEstimate.toLocaleString()}</div>
+                        <div className="text-xs font-semibold text-green-700 dark:text-green-400 uppercase tracking-wide mb-1">AI Estimated ARV</div>
+                        <div className="text-5xl font-bold text-green-700 dark:text-green-400">${analysis.arvEstimate.toLocaleString()}</div>
                         <div className="text-sm text-green-600 mt-2">
                           Weighted average of {selectedComps.length} AI-adjusted comp{selectedComps.length !== 1 ? 's' : ''}
                           {analysis.arvLow && analysis.arvHigh && (
@@ -1364,9 +1364,9 @@ export default function CompsAnalysisPage() {
                         />
                         {analysis.confidenceTier && (
                           <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${
-                            analysis.confidenceTier === 'High' ? 'bg-green-200 text-green-800' :
-                            analysis.confidenceTier === 'Medium' ? 'bg-yellow-100 text-yellow-800' :
-                            'bg-red-100 text-red-700'
+                            analysis.confidenceTier === 'High' ? 'bg-green-200 text-green-800 dark:text-green-400' :
+                            analysis.confidenceTier === 'Medium' ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-400' :
+                            'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'
                           }`}>
                             {analysis.confidenceTier} Confidence
                           </span>
@@ -1403,10 +1403,10 @@ export default function CompsAnalysisPage() {
                   }
 
                   return (
-                    <div className="bg-gradient-to-r from-purple-50 to-indigo-50 border border-purple-200 rounded-2xl p-5 mb-5">
+                    <div className="bg-gradient-to-r from-purple-50 to-indigo-50 border border-purple-200 dark:border-purple-800 rounded-2xl p-5 mb-5">
                       <h3 className="text-sm font-bold text-purple-900 uppercase tracking-wide mb-4">Valuation Breakdown</h3>
 
-                      <div className="border-t border-purple-200">
+                      <div className="border-t border-purple-200 dark:border-purple-800">
                         <div className="grid grid-cols-12 gap-2 py-2 text-xs font-semibold text-purple-600 uppercase tracking-wide border-b border-purple-100">
                           <div className="col-span-6">Method</div>
                           <div className="col-span-4 text-right">Value</div>
@@ -1420,7 +1420,7 @@ export default function CompsAnalysisPage() {
                             <div key={key}>
                               <div className="grid grid-cols-12 gap-2 py-2.5 border-b border-purple-50 items-center">
                                 <div className="col-span-6 text-sm text-purple-900 font-medium">{methodLabels[key]}</div>
-                                <div className="col-span-4 text-right text-sm font-semibold text-purple-800">
+                                <div className="col-span-4 text-right text-sm font-semibold text-purple-800 dark:text-purple-400">
                                   {entry ? `$${Math.round(entry.value).toLocaleString()}` : <span className="text-purple-400 font-normal">— Not calculated</span>}
                                 </div>
                                 <div className="col-span-2 text-right text-xs text-purple-500">
@@ -1430,9 +1430,9 @@ export default function CompsAnalysisPage() {
                               {key === 'comps' && entry && (
                                 <div className="pb-2 border-b border-purple-50 pl-4 text-xs text-purple-500 space-y-0.5">
                                   <div>
-                                    avg $/sqft: <span className="font-semibold text-purple-700">${analysis.pricePerSqft || '—'}</span>
-                                    {' · '}median: <span className="font-semibold text-purple-700">${(analysis as any).medianPricePerSqft || '—'}</span>
-                                    {' · '}sqft: <span className="font-semibold text-purple-700">
+                                    avg $/sqft: <span className="font-semibold text-purple-700 dark:text-purple-400">${analysis.pricePerSqft || '—'}</span>
+                                    {' · '}median: <span className="font-semibold text-purple-700 dark:text-purple-400">${(analysis as any).medianPricePerSqft || '—'}</span>
+                                    {' · '}sqft: <span className="font-semibold text-purple-700 dark:text-purple-400">
                                       {(lead as any)?.sqftOverride
                                         ? `${(lead as any).sqftOverride.toLocaleString()} (override)`
                                         : (lead?.sqft?.toLocaleString() || '—')}
@@ -1444,7 +1444,7 @@ export default function CompsAnalysisPage() {
                                 <div className="pb-2 border-b border-purple-50 pl-4 text-xs text-purple-500">
                                   ${(analysis.marketRent).toLocaleString()}/mo × 12 × GRM {analysis.grossRentMultiplier || 10}
                                   {(analysis as any).marketRentEstimated && (
-                                    <span className="ml-1.5 px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-medium">estimated</span>
+                                    <span className="ml-1.5 px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 font-medium">estimated</span>
                                   )}
                                 </div>
                               )}
@@ -1455,10 +1455,10 @@ export default function CompsAnalysisPage() {
 
                       {/* Triangulated total */}
                       {analysis.triangulatedArv && (
-                        <div className="mt-3 pt-3 border-t border-purple-200 flex items-center justify-between">
+                        <div className="mt-3 pt-3 border-t border-purple-200 dark:border-purple-800 flex items-center justify-between">
                           <div>
                             <div className="text-xs text-purple-500 uppercase tracking-wide mb-0.5">Weighted Total</div>
-                            <div className="text-xl font-bold text-purple-700">${analysis.triangulatedArv.toLocaleString()}</div>
+                            <div className="text-xl font-bold text-purple-700 dark:text-purple-400">${analysis.triangulatedArv.toLocaleString()}</div>
                           </div>
                           {analysis.riskAdjustedArv && analysis.riskAdjustedArv !== analysis.triangulatedArv && (
                             <div className="text-right text-xs text-purple-400">
@@ -1470,13 +1470,13 @@ export default function CompsAnalysisPage() {
                       )}
 
                       {analysis.methodDivergence != null && analysis.methodDivergence > 10 && (
-                        <div className="mt-3 flex items-center gap-2 text-amber-700 bg-amber-50 rounded-lg px-3 py-2 text-xs">
+                        <div className="mt-3 flex items-center gap-2 text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950 rounded-lg px-3 py-2 text-xs">
                           <span>⚠️</span>
                           <span>Methods diverge by {analysis.methodDivergence.toFixed(0)}% — review data before making an offer</span>
                         </div>
                       )}
                       {analysis.neighborhoodCeilingBreached && analysis.neighborhoodCeiling && (
-                        <div className="mt-2 flex items-center gap-2 text-red-700 bg-red-50 rounded-lg px-3 py-2 text-xs">
+                        <div className="mt-2 flex items-center gap-2 text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-950 rounded-lg px-3 py-2 text-xs">
                           <span>🚫</span>
                           <span>ARV exceeds neighborhood ceiling of ${analysis.neighborhoodCeiling.toLocaleString()}</span>
                         </div>
@@ -1487,31 +1487,31 @@ export default function CompsAnalysisPage() {
 
                 {/* ATTOM independent validation strip */}
                 {attomData?.attomAvm && (
-                  <div className="mb-5 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3">
+                  <div className="mb-5 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950 px-4 py-3">
                     <div className="flex items-center gap-2 mb-2">
-                      <span className="text-xs font-semibold text-indigo-700 uppercase tracking-wide">ATTOM Independent Valuation</span>
+                      <span className="text-xs font-semibold text-indigo-700 dark:text-indigo-400 uppercase tracking-wide">ATTOM Independent Valuation</span>
                       {attomData.attomAvmConfidence && (
-                        <span className="text-xs px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-600">{attomData.attomAvmConfidence}% confidence</span>
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600">{attomData.attomAvmConfidence}% confidence</span>
                       )}
                       {attomData.avmExcellentHigh && analysis?.arvEstimate && (() => {
                         const delta = Math.abs(attomData.avmExcellentHigh - analysis.arvEstimate) / analysis.arvEstimate;
-                        if (delta > 0.15) return <span className="text-xs px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-medium">⚠️ {Math.round(delta * 100)}% divergence from comps</span>;
-                        if (delta <= 0.05) return <span className="text-xs px-1.5 py-0.5 rounded bg-green-100 text-green-700 font-medium">✓ Confirms comps ARV</span>;
-                        return <span className="text-xs px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">{Math.round(delta * 100)}% difference</span>;
+                        if (delta > 0.15) return <span className="text-xs px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 font-medium">⚠️ {Math.round(delta * 100)}% divergence from comps</span>;
+                        if (delta <= 0.05) return <span className="text-xs px-1.5 py-0.5 rounded bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 font-medium">✓ Confirms comps ARV</span>;
+                        return <span className="text-xs px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400">{Math.round(delta * 100)}% difference</span>;
                       })()}
                     </div>
                     <div className="grid grid-cols-3 gap-3 text-center">
-                      <div className="bg-red-50 rounded-lg p-2 border border-red-200">
+                      <div className="bg-red-50 dark:bg-red-950 rounded-lg p-2 border border-red-200 dark:border-red-800">
                         <div className="text-xs text-red-600 font-medium mb-0.5">AS-IS / Distressed</div>
-                        <div className="text-base font-bold text-red-700">{attomData.avmPoorHigh ? `$${Math.round(attomData.avmPoorHigh).toLocaleString()}` : '—'}</div>
+                        <div className="text-base font-bold text-red-700 dark:text-red-400">{attomData.avmPoorHigh ? `$${Math.round(attomData.avmPoorHigh).toLocaleString()}` : '—'}</div>
                       </div>
-                      <div className="bg-yellow-50 rounded-lg p-2 border border-yellow-200">
-                        <div className="text-xs text-yellow-700 font-medium mb-0.5">Good Condition</div>
-                        <div className="text-base font-bold text-yellow-700">{attomData.avmGoodHigh ? `$${Math.round(attomData.avmGoodHigh).toLocaleString()}` : '—'}</div>
+                      <div className="bg-yellow-50 dark:bg-yellow-950 rounded-lg p-2 border border-yellow-200 dark:border-yellow-800">
+                        <div className="text-xs text-yellow-700 dark:text-yellow-400 font-medium mb-0.5">Good Condition</div>
+                        <div className="text-base font-bold text-yellow-700 dark:text-yellow-400">{attomData.avmGoodHigh ? `$${Math.round(attomData.avmGoodHigh).toLocaleString()}` : '—'}</div>
                       </div>
-                      <div className="bg-green-50 rounded-lg p-2 border border-green-300 ring-1 ring-green-400">
-                        <div className="text-xs text-green-700 font-medium mb-0.5">After Repair (ARV)</div>
-                        <div className="text-base font-bold text-green-700">{attomData.avmExcellentHigh ? `$${Math.round(attomData.avmExcellentHigh).toLocaleString()}` : '—'}</div>
+                      <div className="bg-green-50 dark:bg-green-950 rounded-lg p-2 border border-green-300 dark:border-green-800 ring-1 ring-green-400">
+                        <div className="text-xs text-green-700 dark:text-green-400 font-medium mb-0.5">After Repair (ARV)</div>
+                        <div className="text-base font-bold text-green-700 dark:text-green-400">{attomData.avmExcellentHigh ? `$${Math.round(attomData.avmExcellentHigh).toLocaleString()}` : '—'}</div>
                       </div>
                     </div>
                   </div>
@@ -1548,28 +1548,28 @@ export default function CompsAnalysisPage() {
                 {/* Valuation Method Breakdown */}
                 {(analysis.costApproachValue || analysis.incomeApproachValue) && (
                   <div className="mt-4">
-                    <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Valuation Methods</div>
+                    <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Valuation Methods</div>
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                       {analysis.arvEstimate && (
-                        <div className="bg-blue-50 rounded-xl p-3 text-center border border-blue-100">
+                        <div className="bg-blue-50 dark:bg-blue-950 rounded-xl p-3 text-center border border-blue-100">
                           <div className="text-xs text-blue-500 font-medium uppercase tracking-wide">Comps</div>
-                          <div className="text-lg font-bold text-blue-700 mt-1">${analysis.arvEstimate.toLocaleString()}</div>
+                          <div className="text-lg font-bold text-blue-700 dark:text-blue-400 mt-1">${analysis.arvEstimate.toLocaleString()}</div>
                           <div className="text-xs text-blue-400">Weight: 50%</div>
                         </div>
                       )}
                       {analysis.costApproachValue && (
-                        <div className="bg-purple-50 rounded-xl p-3 text-center border border-purple-100">
+                        <div className="bg-purple-50 dark:bg-purple-950 rounded-xl p-3 text-center border border-purple-100">
                           <div className="text-xs text-purple-500 font-medium uppercase tracking-wide">Cost Approach</div>
-                          <div className="text-lg font-bold text-purple-700 mt-1">${analysis.costApproachValue.toLocaleString()}</div>
+                          <div className="text-lg font-bold text-purple-700 dark:text-purple-400 mt-1">${analysis.costApproachValue.toLocaleString()}</div>
                           {analysis.costApproachLandValue && (
                             <div className="text-xs text-purple-400">Land: ${analysis.costApproachLandValue.toLocaleString()}</div>
                           )}
                         </div>
                       )}
                       {analysis.incomeApproachValue && (
-                        <div className="bg-green-50 rounded-xl p-3 text-center border border-green-100">
+                        <div className="bg-green-50 dark:bg-green-950 rounded-xl p-3 text-center border border-green-100">
                           <div className="text-xs text-green-500 font-medium uppercase tracking-wide">Income</div>
-                          <div className="text-lg font-bold text-green-700 mt-1">${analysis.incomeApproachValue.toLocaleString()}</div>
+                          <div className="text-lg font-bold text-green-700 dark:text-green-400 mt-1">${analysis.incomeApproachValue.toLocaleString()}</div>
                           {analysis.marketRent && (
                             <div className="text-xs text-green-400">${analysis.marketRent.toLocaleString()}/mo × {analysis.grossRentMultiplier} GRM</div>
                           )}
@@ -1587,28 +1587,28 @@ export default function CompsAnalysisPage() {
                 <div className="flex justify-between items-center mb-4">
                   <h2 className="text-lg font-bold">Adjustments</h2>
                   <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                    analysis.adjustmentsEnabled ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
+                    analysis.adjustmentsEnabled ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400'
                   }`}>
                     {analysis.adjustmentsEnabled ? 'Applied' : 'Not applied'}
                   </span>
                 </div>
                 <div className="space-y-3">
                   {selectedComps.map((comp) => (
-                    <div key={comp.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                    <div key={comp.id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-950 rounded-lg">
                       <div className="flex-1">
-                        <div className="text-sm font-medium text-gray-900">{comp.address}</div>
-                        <div className="text-xs text-gray-500 mt-0.5">
+                        <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{comp.address}</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                           {comp.adjustmentNotes?.split('\n').join(' | ') || 'No adjustments'}
                         </div>
                       </div>
                       <div className="flex items-center gap-4 text-right">
                         <div>
-                          <div className="text-xs text-gray-500">Original</div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400">Original</div>
                           <div className="text-sm font-medium">${comp.soldPrice.toLocaleString()}</div>
                         </div>
-                        <div className="text-lg text-gray-400">&rarr;</div>
+                        <div className="text-lg text-gray-400 dark:text-gray-500">&rarr;</div>
                         <div>
-                          <div className="text-xs text-gray-500">Adjusted</div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400">Adjusted</div>
                           <div className="text-sm font-bold">
                             ${(comp.adjustedPrice || comp.soldPrice).toLocaleString()}
                           </div>
@@ -1624,7 +1624,7 @@ export default function CompsAnalysisPage() {
                   {selectedComps.length > 0 && (
                     <div className="flex justify-end p-3 bg-primary-50 rounded-lg border border-primary-200">
                       <div className="text-sm">
-                        <span className="text-gray-600">Average Adjustment: </span>
+                        <span className="text-gray-600 dark:text-gray-400">Average Adjustment: </span>
                         <span className={`font-bold ${
                           (analysis.avgAdjustment || 0) >= 0 ? 'text-green-600' : 'text-red-600'
                         }`}>
@@ -1644,23 +1644,23 @@ export default function CompsAnalysisPage() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b text-left">
-                      <th className="pb-2 pr-3 font-medium text-gray-600">Address</th>
-                      <th className="pb-2 pr-3 font-medium text-gray-600">Source</th>
-                      <th className="pb-2 pr-3 font-medium text-gray-600">Sale Price</th>
-                      <th className="pb-2 pr-3 font-medium text-gray-600">Adj. Price</th>
-                      <th className="pb-2 pr-3 font-medium text-gray-600">Sale Date</th>
-                      <th className="pb-2 pr-3 font-medium text-gray-600">Sq Ft</th>
-                      <th className="pb-2 pr-3 font-medium text-gray-600">$/SqFt</th>
-                      <th className="pb-2 pr-3 font-medium text-gray-600">Beds</th>
-                      <th className="pb-2 pr-3 font-medium text-gray-600">Baths</th>
-                      <th className="pb-2 pr-3 font-medium text-gray-600">Year</th>
-                      <th className="pb-2 pr-3 font-medium text-gray-600">Dist</th>
-                      <th className="pb-2 font-medium text-gray-600">Corr</th>
+                      <th className="pb-2 pr-3 font-medium text-gray-600 dark:text-gray-400">Address</th>
+                      <th className="pb-2 pr-3 font-medium text-gray-600 dark:text-gray-400">Source</th>
+                      <th className="pb-2 pr-3 font-medium text-gray-600 dark:text-gray-400">Sale Price</th>
+                      <th className="pb-2 pr-3 font-medium text-gray-600 dark:text-gray-400">Adj. Price</th>
+                      <th className="pb-2 pr-3 font-medium text-gray-600 dark:text-gray-400">Sale Date</th>
+                      <th className="pb-2 pr-3 font-medium text-gray-600 dark:text-gray-400">Sq Ft</th>
+                      <th className="pb-2 pr-3 font-medium text-gray-600 dark:text-gray-400">$/SqFt</th>
+                      <th className="pb-2 pr-3 font-medium text-gray-600 dark:text-gray-400">Beds</th>
+                      <th className="pb-2 pr-3 font-medium text-gray-600 dark:text-gray-400">Baths</th>
+                      <th className="pb-2 pr-3 font-medium text-gray-600 dark:text-gray-400">Year</th>
+                      <th className="pb-2 pr-3 font-medium text-gray-600 dark:text-gray-400">Dist</th>
+                      <th className="pb-2 font-medium text-gray-600 dark:text-gray-400">Corr</th>
                     </tr>
                   </thead>
                   <tbody>
                     {selectedComps.map((comp) => (
-                      <tr key={comp.id} className="border-b border-gray-100">
+                      <tr key={comp.id} className="border-b border-gray-100 dark:border-gray-800">
                         <td className="py-2 pr-3 font-medium max-w-[200px] truncate">{comp.address}</td>
                         <td className="py-2 pr-3">
                           <SourceBadge source={comp.source} />
@@ -1708,7 +1708,7 @@ export default function CompsAnalysisPage() {
                 <select
                   value={dealType}
                   onChange={(e) => setDealType(e.target.value)}
-                  className="text-sm border border-gray-200 rounded-lg px-3 py-1.5"
+                  className="text-sm border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-1.5 dark:bg-gray-800 dark:text-gray-200"
                 >
                   <option value="wholesale">Wholesale</option>
                   <option value="novation">Novation</option>
@@ -1725,9 +1725,9 @@ export default function CompsAnalysisPage() {
                 {/* Inputs */}
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">After Repair Value (ARV)</label>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">After Repair Value (ARV)</label>
                     <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">$</span>
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 dark:text-gray-400">$</span>
                       <input
                         type="number"
                         value={dealArv || ''}
@@ -1754,9 +1754,9 @@ export default function CompsAnalysisPage() {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Estimated Repair Costs</label>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Estimated Repair Costs</label>
                     <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">$</span>
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 dark:text-gray-400">$</span>
                       <input
                         type="number"
                         value={repairCosts || ''}
@@ -1773,14 +1773,14 @@ export default function CompsAnalysisPage() {
                         <button
                           key={opt.rate}
                           onClick={() => setRepairCosts((lead?.sqft || 1500) * opt.rate)}
-                          className="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-gray-100"
+                          className="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:bg-gray-800 dark:hover:bg-gray-700"
                         >
                           {opt.label}
                         </button>
                       ))}
                     </div>
                     {(analysis?.repairCostLow != null || analysis?.repairCostHigh != null) && (
-                      <div className="text-xs text-gray-400 mt-1">
+                      <div className="text-xs text-gray-400 dark:text-gray-500 mt-1">
                         Range: ${(analysis?.repairCostLow || 0).toLocaleString()} – ${(analysis?.repairCostHigh || 0).toLocaleString()}
                       </div>
                     )}
@@ -1789,11 +1789,11 @@ export default function CompsAnalysisPage() {
                   {/* Assignment Fee — only for wholesale / joint_venture */}
                   {(dealType === 'wholesale' || dealType === 'joint_venture') && (
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                         {dealType === 'joint_venture' ? 'JV Assignment Fee' : 'Wholesale Assignment Fee'}
                       </label>
                       <div className="relative">
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">$</span>
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 dark:text-gray-400">$</span>
                         <input
                           type="number"
                           value={assignmentFee || ''}
@@ -1807,10 +1807,10 @@ export default function CompsAnalysisPage() {
                   {/* MAO % — only for wholesale / joint_venture */}
                   {(dealType === 'wholesale' || dealType === 'joint_venture') && (
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                         Maximum Allowable Offer %
                         {selectedComps.length > 0 && (
-                          <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-yellow-100 text-yellow-800 font-medium">
+                          <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-400 font-medium">
                             Suggested: {avgPricePerSqft > 100 ? '70' : '65'}%
                           </span>
                         )}
@@ -1823,7 +1823,7 @@ export default function CompsAnalysisPage() {
                             className={`px-3 py-1.5 rounded text-sm font-medium border transition-colors ${
                               maoPercent === pct
                                 ? 'bg-primary-600 text-white border-primary-600'
-                                : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                                : 'bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800'
                             }`}
                           >
                             {pct}%
@@ -1837,12 +1837,12 @@ export default function CompsAnalysisPage() {
                 {/* Results — right column */}
                 <div className="space-y-4">
                   {/* Initial Offer to Seller — always shown */}
-                  <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-                    <div className="text-xs text-gray-500 mb-1">Initial Offer to Seller</div>
-                    <div className="text-2xl font-bold text-gray-900">
+                  <div className="bg-gray-50 dark:bg-gray-950 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+                    <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">Initial Offer to Seller</div>
+                    <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">
                       {dealArv > 0 ? `$${Math.max(initialOffer, 0).toLocaleString()}` : '$—'}
                     </div>
-                    <div className="text-xs text-gray-500 mt-1">5% under max allowable offer</div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">5% under max allowable offer</div>
                   </div>
 
                   {/* MAO — only for wholesale / joint_venture */}
@@ -1860,9 +1860,9 @@ export default function CompsAnalysisPage() {
 
                   {/* Sale Price / Projected Profit card — changes by deal type */}
                   {(dealType === 'wholesale' || dealType === 'joint_venture') ? (
-                    <div className="bg-green-50 rounded-lg p-4 border border-green-200">
-                      <div className="text-xs text-green-700 mb-1">Your Sale Price to Buyer</div>
-                      <div className="text-2xl font-bold text-green-800">
+                    <div className="bg-green-50 dark:bg-green-950 rounded-lg p-4 border border-green-200 dark:border-green-800">
+                      <div className="text-xs text-green-700 dark:text-green-400 mb-1">Your Sale Price to Buyer</div>
+                      <div className="text-2xl font-bold text-green-800 dark:text-green-400">
                         {dealArv > 0 ? `$${Math.max(salePrice, 0).toLocaleString()}` : '$—'}
                       </div>
                       <div className="text-xs text-green-600 mt-1">
@@ -1870,9 +1870,9 @@ export default function CompsAnalysisPage() {
                       </div>
                     </div>
                   ) : (
-                    <div className="bg-green-50 rounded-lg p-4 border border-green-200">
-                      <div className="text-xs text-green-700 mb-1">Estimated Net Profit</div>
-                      <div className="text-2xl font-bold text-green-800">
+                    <div className="bg-green-50 dark:bg-green-950 rounded-lg p-4 border border-green-200 dark:border-green-800">
+                      <div className="text-xs text-green-700 dark:text-green-400 mb-1">Estimated Net Profit</div>
+                      <div className="text-2xl font-bold text-green-800 dark:text-green-400">
                         {dealArv > 0
                           ? `$${Math.max(Math.round(dealArv - repairCosts - dealArv * 0.10), 0).toLocaleString()}`
                           : '$—'}
@@ -1884,15 +1884,15 @@ export default function CompsAnalysisPage() {
                   )}
 
                   {dealArv > 0 && (dealType === 'wholesale' || dealType === 'joint_venture') && (
-                    <div className="bg-yellow-50 rounded-lg p-3 border border-yellow-200">
-                      <div className="text-xs text-yellow-800">
+                    <div className="bg-yellow-50 dark:bg-yellow-950 rounded-lg p-3 border border-yellow-200 dark:border-yellow-800">
+                      <div className="text-xs text-yellow-800 dark:text-yellow-400">
                         <strong>Spread:</strong> ${assignmentFee.toLocaleString()} assignment fee
                         {lead?.askingPrice && mao > 0 ? (
                           <span> | Asking is {((lead.askingPrice / dealArv) * 100).toFixed(0)}% of ARV
                             {lead.askingPrice <= mao ? (
-                              <span className="text-green-700 font-medium"> — Below MAO!</span>
+                              <span className="text-green-700 dark:text-green-400 font-medium"> — Below MAO!</span>
                             ) : (
-                              <span className="text-red-700 font-medium"> — Above MAO by ${(lead.askingPrice - mao).toLocaleString()}</span>
+                              <span className="text-red-700 dark:text-red-400 font-medium"> — Above MAO by ${(lead.askingPrice - mao).toLocaleString()}</span>
                             )}
                           </span>
                         ) : null}
@@ -1902,27 +1902,27 @@ export default function CompsAnalysisPage() {
 
                   {/* Negotiation Range */}
                   {(analysis?.negotiationRangeLow || analysis?.negotiationRangeHigh) && (
-                    <div className="pt-3 border-t border-gray-100">
+                    <div className="pt-3 border-t border-gray-100 dark:border-gray-800">
                       <div className="flex items-center justify-between text-sm">
-                        <span className="text-gray-600 font-medium">Negotiation Range</span>
-                        <span className="font-bold text-blue-700">
+                        <span className="text-gray-600 dark:text-gray-400 font-medium">Negotiation Range</span>
+                        <span className="font-bold text-blue-700 dark:text-blue-400">
                           ${(analysis.negotiationRangeLow || 0).toLocaleString()} – ${(analysis.negotiationRangeHigh || 0).toLocaleString()}
                         </span>
                       </div>
-                      <div className="text-xs text-gray-400 mt-0.5">90% to 102% of MAO — your offer window</div>
+                      <div className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">90% to 102% of MAO — your offer window</div>
                     </div>
                   )}
 
                   {/* Seller Motivation Tier */}
                   {analysis?.sellerMotivationTier && (
                     <div className="flex items-center justify-between text-sm">
-                      <span className="text-gray-600">Seller Motivation</span>
+                      <span className="text-gray-600 dark:text-gray-400">Seller Motivation</span>
                       <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
-                        analysis.sellerMotivationTier === 'foreclosure' ? 'bg-red-100 text-red-700' :
-                        analysis.sellerMotivationTier === 'severe_distress' ? 'bg-orange-100 text-orange-700' :
-                        analysis.sellerMotivationTier === 'distressed' ? 'bg-amber-100 text-amber-700' :
-                        analysis.sellerMotivationTier === 'minor_distress' ? 'bg-yellow-100 text-yellow-700' :
-                        'bg-gray-100 text-gray-600'
+                        analysis.sellerMotivationTier === 'foreclosure' ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400' :
+                        analysis.sellerMotivationTier === 'severe_distress' ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400' :
+                        analysis.sellerMotivationTier === 'distressed' ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400' :
+                        analysis.sellerMotivationTier === 'minor_distress' ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400' :
+                        'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'
                       }`}>
                         {analysis.sellerMotivationTier.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
                       </span>
@@ -1931,7 +1931,7 @@ export default function CompsAnalysisPage() {
                 </div>
 
                 {/* Save Deal Numbers — full width below both columns */}
-                <div className="md:col-span-2 flex items-center gap-3 pt-3 border-t border-gray-100">
+                <div className="md:col-span-2 flex items-center gap-3 pt-3 border-t border-gray-100 dark:border-gray-800">
                   <button
                     onClick={handleSaveDealNumbers}
                     disabled={savingDealNumbers}
@@ -1942,7 +1942,7 @@ export default function CompsAnalysisPage() {
                   {dealNumbersSaved ? (
                     <span className="text-sm text-green-600 font-medium">✓ Saved — reflected on overview &amp; disposition pages</span>
                   ) : (
-                    <span className="text-xs text-gray-400">Save to persist these numbers to the lead, overview, and disposition page</span>
+                    <span className="text-xs text-gray-400 dark:text-gray-500">Save to persist these numbers to the lead, overview, and disposition page</span>
                   )}
                 </div>
               </div>
@@ -1950,7 +1950,7 @@ export default function CompsAnalysisPage() {
           </div>
 
           {/* AI Insights (merged from lead detail) */}
-          <div className="mt-8 border-t border-gray-200 pt-6">
+          <div className="mt-8 border-t border-gray-200 dark:border-gray-700 pt-6">
             <h2 className="text-lg font-bold mb-4">AI Insights</h2>
             <AnalysisTab
               leadId={leadId}
@@ -1976,13 +1976,13 @@ export default function CompsAnalysisPage() {
         {activeSection === 'deal-intel' && (
           <div className="space-y-6">
           {/* Deal Intelligence */}
-          <div className="card border border-emerald-200">
+          <div className="card border border-emerald-200 dark:border-emerald-800">
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
                 
-                <h3 className="font-bold text-gray-900">Deal Intelligence</h3>
+                <h3 className="font-bold text-gray-900 dark:text-gray-100">Deal Intelligence</h3>
                 {(analysis as any)?.dealIntelligence && (
-                  <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium">Generated</span>
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 font-medium">Generated</span>
                 )}
               </div>
               <button
@@ -2002,7 +2002,7 @@ export default function CompsAnalysisPage() {
               const raw = (analysis as any)?.dealIntelligence;
               if (!raw) {
                 return (
-                  <p className="text-sm text-gray-500 italic">
+                  <p className="text-sm text-gray-500 dark:text-gray-400 italic">
                     {allComps.length === 0
                       ? "Fetch comps and run ARV calculation first."
                       : "Generate a full investor reasoning report: market velocity, $/sqft anchoring, exit scenarios, deal math, and a ready-to-use seller pitch."}
@@ -2016,41 +2016,41 @@ export default function CompsAnalysisPage() {
                 if (m) parsed = JSON.parse(m[0]);
               } catch {}
               if (!parsed) {
-                return <p className="text-sm text-gray-500 italic">Could not parse deal intelligence output.</p>;
+                return <p className="text-sm text-gray-500 dark:text-gray-400 italic">Could not parse deal intelligence output.</p>;
               }
               return (
                 <div className="space-y-5">
                   {parsed.bottomLine && (
-                    <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
-                      <div className="text-xs font-semibold text-emerald-700 uppercase tracking-wide mb-1">Bottom Line</div>
+                    <div className="bg-emerald-50 dark:bg-emerald-950 border border-emerald-200 dark:border-emerald-800 rounded-xl p-4">
+                      <div className="text-xs font-semibold text-emerald-700 dark:text-emerald-400 uppercase tracking-wide mb-1">Bottom Line</div>
                       <p className="text-sm text-emerald-900 leading-relaxed font-medium">{parsed.bottomLine}</p>
                     </div>
                   )}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     {parsed.marketVelocity && (
-                      <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+                      <div className="bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-xl p-4">
                         <div className="flex items-center gap-2 mb-2">
-                          <div className="text-xs font-semibold text-blue-700 uppercase tracking-wide">Market Velocity</div>
+                          <div className="text-xs font-semibold text-blue-700 dark:text-blue-400 uppercase tracking-wide">Market Velocity</div>
                           {parsed.marketVelocity.verdict && (
-                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${parsed.marketVelocity.verdict === "hot" ? "bg-red-100 text-red-700" : parsed.marketVelocity.verdict === "normal" ? "bg-green-100 text-green-700" : parsed.marketVelocity.verdict === "slow" ? "bg-yellow-100 text-yellow-700" : "bg-gray-100 text-gray-600"}`}>{parsed.marketVelocity.verdict}</span>
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${parsed.marketVelocity.verdict === "hot" ? "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400" : parsed.marketVelocity.verdict === "normal" ? "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400" : parsed.marketVelocity.verdict === "slow" ? "bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400" : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"}`}>{parsed.marketVelocity.verdict}</span>
                           )}
                         </div>
                         <p className="text-sm text-blue-900">{parsed.marketVelocity.summary}</p>
                       </div>
                     )}
                     {parsed.ppsfAnalysis && (
-                      <div className="bg-purple-50 border border-purple-200 rounded-xl p-4">
-                        <div className="text-xs font-semibold text-purple-700 uppercase tracking-wide mb-2">$/sqft Analysis</div>
+                      <div className="bg-purple-50 dark:bg-purple-950 border border-purple-200 dark:border-purple-800 rounded-xl p-4">
+                        <div className="text-xs font-semibold text-purple-700 dark:text-purple-400 uppercase tracking-wide mb-2">$/sqft Analysis</div>
                         <div className="flex gap-4 mb-2">
                           {parsed.ppsfAnalysis.avgPpsf && (
                             <div>
-                              <div className="text-lg font-bold text-purple-800">${parsed.ppsfAnalysis.avgPpsf}/sqft</div>
+                              <div className="text-lg font-bold text-purple-800 dark:text-purple-400">${parsed.ppsfAnalysis.avgPpsf}/sqft</div>
                               <div className="text-xs text-purple-600">Avg from comps</div>
                             </div>
                           )}
                           {parsed.ppsfAnalysis.anchoredValue && (
                             <div>
-                              <div className="text-lg font-bold text-purple-800">${parsed.ppsfAnalysis.anchoredValue.toLocaleString()}</div>
+                              <div className="text-lg font-bold text-purple-800 dark:text-purple-400">${parsed.ppsfAnalysis.anchoredValue.toLocaleString()}</div>
                               <div className="text-xs text-purple-600">Anchored value</div>
                             </div>
                           )}
@@ -2060,22 +2060,22 @@ export default function CompsAnalysisPage() {
                     )}
                   </div>
                   {parsed.lotValueAnalysis?.applicable && (
-                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+                    <div className="bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-800 rounded-xl p-4">
                       <div className="flex items-center gap-2 mb-2">
-                        <div className="text-xs font-semibold text-amber-700 uppercase tracking-wide">Lot Value</div>
+                        <div className="text-xs font-semibold text-amber-700 dark:text-amber-400 uppercase tracking-wide">Lot Value</div>
                         {parsed.lotValueAnalysis.estimatedLotValue && (
-                          <span className="text-sm font-bold text-amber-800">${parsed.lotValueAnalysis.estimatedLotValue.toLocaleString()}</span>
+                          <span className="text-sm font-bold text-amber-800 dark:text-amber-400">${parsed.lotValueAnalysis.estimatedLotValue.toLocaleString()}</span>
                         )}
                       </div>
                       <p className="text-sm text-amber-900">{parsed.lotValueAnalysis.summary}</p>
                     </div>
                   )}
                   {parsed.sellerEquity && (
-                    <div className={`border rounded-xl p-4 ${parsed.sellerEquity.cashOfferViable === false ? 'bg-red-50 border-red-200' : 'bg-teal-50 border-teal-200'}`}>
+                    <div className={`border rounded-xl p-4 ${parsed.sellerEquity.cashOfferViable === false ? 'bg-red-50 dark:bg-red-950 border-red-200 dark:border-red-800' : 'bg-teal-50 dark:bg-teal-950 border-teal-200 dark:border-teal-800'}`}>
                       <div className="flex items-center gap-2 mb-2">
-                        <div className={`text-xs font-semibold uppercase tracking-wide ${parsed.sellerEquity.cashOfferViable === false ? 'text-red-700' : 'text-teal-700'}`}>Seller Purchase History</div>
+                        <div className={`text-xs font-semibold uppercase tracking-wide ${parsed.sellerEquity.cashOfferViable === false ? 'text-red-700 dark:text-red-400' : 'text-teal-700 dark:text-teal-400'}`}>Seller Purchase History</div>
                         {parsed.sellerEquity.lastPurchasePrice && (
-                          <span className={`text-sm font-bold ${parsed.sellerEquity.cashOfferViable === false ? 'text-red-800' : 'text-teal-800'}`}>
+                          <span className={`text-sm font-bold ${parsed.sellerEquity.cashOfferViable === false ? 'text-red-800 dark:text-red-400' : 'text-teal-800 dark:text-teal-400'}`}>
                             Paid ${parsed.sellerEquity.lastPurchasePrice.toLocaleString()}
                             {parsed.sellerEquity.lastPurchaseDate && (
                               <span className="font-normal text-xs ml-1">({parsed.sellerEquity.lastPurchaseDate})</span>
@@ -2084,10 +2084,10 @@ export default function CompsAnalysisPage() {
                         )}
                         {parsed.sellerEquity.equityPosition && parsed.sellerEquity.equityPosition !== 'unknown' && (
                           <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                            parsed.sellerEquity.equityPosition === 'deep' ? 'bg-green-100 text-green-700' :
-                            parsed.sellerEquity.equityPosition === 'moderate' ? 'bg-yellow-100 text-yellow-700' :
-                            parsed.sellerEquity.equityPosition === 'thin' ? 'bg-orange-100 text-orange-700' :
-                            'bg-red-100 text-red-700'
+                            parsed.sellerEquity.equityPosition === 'deep' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' :
+                            parsed.sellerEquity.equityPosition === 'moderate' ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400' :
+                            parsed.sellerEquity.equityPosition === 'thin' ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400' :
+                            'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'
                           }`}>{parsed.sellerEquity.equityPosition} equity</span>
                         )}
                       </div>
@@ -2096,23 +2096,23 @@ export default function CompsAnalysisPage() {
                   )}
                   {parsed.exitScenarios?.length > 0 && (
                     <div>
-                      <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Exit Scenarios</div>
+                      <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">Exit Scenarios</div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                         {parsed.exitScenarios.map((scenario: any, i: number) => (
-                          <div key={i} className="bg-gray-50 border border-gray-200 rounded-xl p-4">
-                            <div className="font-semibold text-sm text-gray-800 mb-1">{scenario.name}</div>
-                            <div className="text-xl font-bold text-gray-900 mb-0.5">${scenario.estimatedSalePrice?.toLocaleString()}</div>
-                            <div className="text-xs text-gray-500 mb-2">${scenario.saleRange?.low?.toLocaleString()} – ${scenario.saleRange?.high?.toLocaleString()}</div>
+                          <div key={i} className="bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
+                            <div className="font-semibold text-sm text-gray-800 dark:text-gray-200 mb-1">{scenario.name}</div>
+                            <div className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-0.5">${scenario.estimatedSalePrice?.toLocaleString()}</div>
+                            <div className="text-xs text-gray-500 dark:text-gray-400 mb-2">${scenario.saleRange?.low?.toLocaleString()} – ${scenario.saleRange?.high?.toLocaleString()}</div>
                             {scenario.estimatedRepairCost ? (
                               <div className="text-xs text-orange-600 mb-1">Repairs: ${scenario.estimatedRepairCost.toLocaleString()}</div>
                             ) : null}
                             {scenario.timeToSell && (
-                              <div className="text-xs text-gray-500 mb-2">⏱ {scenario.timeToSell}</div>
+                              <div className="text-xs text-gray-500 dark:text-gray-400 mb-2">⏱ {scenario.timeToSell}</div>
                             )}
                             {scenario.netToSeller != null && (
                               <div className="text-xs text-green-600 mb-1">Net to seller: ${scenario.netToSeller.toLocaleString()}</div>
                             )}
-                            <p className="text-xs text-gray-600 leading-relaxed">{scenario.notes}</p>
+                            <p className="text-xs text-gray-600 dark:text-gray-400 leading-relaxed">{scenario.notes}</p>
                           </div>
                         ))}
                       </div>
@@ -2121,7 +2121,7 @@ export default function CompsAnalysisPage() {
                   {parsed.dealMath && (
                     <div className="bg-gray-900 text-white rounded-xl p-5">
                       <div className="flex items-center justify-between mb-4">
-                        <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Deal Math</div>
+                        <div className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide">Deal Math</div>
                         {parsed.dealMath.recommendedExitStrategy && (
                           <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-700 text-emerald-100 font-medium">Recommended: {parsed.dealMath.recommendedExitStrategy}</span>
                         )}
@@ -2129,25 +2129,25 @@ export default function CompsAnalysisPage() {
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
                         {parsed.dealMath.targetArv ? (
                           <div>
-                            <div className="text-xs text-gray-400 mb-0.5">Target ARV</div>
+                            <div className="text-xs text-gray-400 dark:text-gray-500 mb-0.5">Target ARV</div>
                             <div className="text-lg font-bold text-white">${parsed.dealMath.targetArv.toLocaleString()}</div>
                           </div>
                         ) : null}
                         {parsed.dealMath.maoAt70Percent ? (
                           <div>
-                            <div className="text-xs text-gray-400 mb-0.5">MAO @ 70%</div>
+                            <div className="text-xs text-gray-400 dark:text-gray-500 mb-0.5">MAO @ 70%</div>
                             <div className="text-lg font-bold text-yellow-400">${parsed.dealMath.maoAt70Percent.toLocaleString()}</div>
                           </div>
                         ) : null}
                         {parsed.dealMath.maoAt65Percent ? (
                           <div>
-                            <div className="text-xs text-gray-400 mb-0.5">MAO @ 65%</div>
+                            <div className="text-xs text-gray-400 dark:text-gray-500 mb-0.5">MAO @ 65%</div>
                             <div className="text-lg font-bold text-orange-400">${parsed.dealMath.maoAt65Percent.toLocaleString()}</div>
                           </div>
                         ) : null}
                         {parsed.dealMath.suggestedOfferRange ? (
                           <div>
-                            <div className="text-xs text-gray-400 mb-0.5">Offer Range</div>
+                            <div className="text-xs text-gray-400 dark:text-gray-500 mb-0.5">Offer Range</div>
                             <div className="text-lg font-bold text-emerald-400">${parsed.dealMath.suggestedOfferRange.low?.toLocaleString()} – ${parsed.dealMath.suggestedOfferRange.high?.toLocaleString()}</div>
                           </div>
                         ) : null}
@@ -2156,13 +2156,13 @@ export default function CompsAnalysisPage() {
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-4 pt-3 border-t border-gray-700">
                         {parsed.dealMath.netProceedsEstimate != null && (
                           <div>
-                            <div className="text-xs text-gray-400 mb-0.5">Net Proceeds Est</div>
+                            <div className="text-xs text-gray-400 dark:text-gray-500 mb-0.5">Net Proceeds Est</div>
                             <div className="text-lg font-bold text-blue-400">${parsed.dealMath.netProceedsEstimate.toLocaleString()}</div>
                           </div>
                         )}
                         {parsed.dealMath.profitAtAskingPrice != null && (
                           <div>
-                            <div className="text-xs text-gray-400 mb-0.5">Profit @ Asking</div>
+                            <div className="text-xs text-gray-400 dark:text-gray-500 mb-0.5">Profit @ Asking</div>
                             <div className={`text-lg font-bold ${parsed.dealMath.profitAtAskingPrice < 0 ? 'text-red-400' : parsed.dealMath.profitAtAskingPrice <= 20000 ? 'text-yellow-400' : 'text-green-400'}`}>
                               {parsed.dealMath.profitAtAskingPrice < 0 ? '-' : ''}${Math.abs(parsed.dealMath.profitAtAskingPrice).toLocaleString()}
                             </div>
@@ -2170,7 +2170,7 @@ export default function CompsAnalysisPage() {
                         )}
                         {parsed.dealMath.profitAtSuggestedOffer != null && (
                           <div>
-                            <div className="text-xs text-gray-400 mb-0.5">Profit @ Offer</div>
+                            <div className="text-xs text-gray-400 dark:text-gray-500 mb-0.5">Profit @ Offer</div>
                             <div className={`text-lg font-bold ${parsed.dealMath.profitAtSuggestedOffer < 0 ? 'text-red-400' : parsed.dealMath.profitAtSuggestedOffer <= 20000 ? 'text-yellow-400' : 'text-green-400'}`}>
                               {parsed.dealMath.profitAtSuggestedOffer < 0 ? '-' : ''}${Math.abs(parsed.dealMath.profitAtSuggestedOffer).toLocaleString()}
                             </div>
@@ -2183,7 +2183,7 @@ export default function CompsAnalysisPage() {
                         </div>
                       )}
                       {parsed.dealMath.novationListPrice != null && (
-                        <div className="text-xs text-gray-400 mb-3">
+                        <div className="text-xs text-gray-400 dark:text-gray-500 mb-3">
                           Novation list price: <span className="text-indigo-400 font-bold">${parsed.dealMath.novationListPrice.toLocaleString()}</span>
                         </div>
                       )}
@@ -2195,51 +2195,51 @@ export default function CompsAnalysisPage() {
                   {/* Offer Strategy */}
                   {parsed.offerStrategy && (
                     <div>
-                      <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Offer Strategy</div>
+                      <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">Offer Strategy</div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         {parsed.offerStrategy.primaryOffer && (
-                          <div className="bg-green-50 border border-green-200 rounded-xl p-5">
-                            <div className="text-xs font-semibold text-green-700 uppercase tracking-wide mb-2">Primary Offer</div>
-                            <div className="text-2xl font-bold text-green-800 mb-2">${parsed.offerStrategy.primaryOffer.amount?.toLocaleString()}</div>
+                          <div className="bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 rounded-xl p-5">
+                            <div className="text-xs font-semibold text-green-700 dark:text-green-400 uppercase tracking-wide mb-2">Primary Offer</div>
+                            <div className="text-2xl font-bold text-green-800 dark:text-green-400 mb-2">${parsed.offerStrategy.primaryOffer.amount?.toLocaleString()}</div>
                             <p className="text-sm text-green-900 mb-2">{parsed.offerStrategy.primaryOffer.rationale}</p>
                             {parsed.offerStrategy.primaryOffer.contractTerms && (
-                              <div className="text-xs text-green-700 bg-green-100 rounded px-2 py-1 inline-block">{parsed.offerStrategy.primaryOffer.contractTerms}</div>
+                              <div className="text-xs text-green-700 dark:text-green-400 bg-green-100 dark:bg-green-900/30 rounded px-2 py-1 inline-block">{parsed.offerStrategy.primaryOffer.contractTerms}</div>
                             )}
                           </div>
                         )}
                         {parsed.offerStrategy.fallbackOffer && (
-                          <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-5">
+                          <div className="bg-indigo-50 dark:bg-indigo-950 border border-indigo-200 dark:border-indigo-800 rounded-xl p-5">
                             <div className="flex items-center gap-2 mb-2">
-                              <div className="text-xs font-semibold text-indigo-700 uppercase tracking-wide">Fallback Offer</div>
+                              <div className="text-xs font-semibold text-indigo-700 dark:text-indigo-400 uppercase tracking-wide">Fallback Offer</div>
                               {parsed.offerStrategy.fallbackOffer.strategy && (
-                                <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-200 text-indigo-800 font-medium">{parsed.offerStrategy.fallbackOffer.strategy}</span>
+                                <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-200 text-indigo-800 dark:text-indigo-400 font-medium">{parsed.offerStrategy.fallbackOffer.strategy}</span>
                               )}
                             </div>
-                            <div className="text-2xl font-bold text-indigo-800 mb-2">${parsed.offerStrategy.fallbackOffer.amount?.toLocaleString()}</div>
+                            <div className="text-2xl font-bold text-indigo-800 dark:text-indigo-400 mb-2">${parsed.offerStrategy.fallbackOffer.amount?.toLocaleString()}</div>
                             <p className="text-sm text-indigo-900 mb-2">{parsed.offerStrategy.fallbackOffer.rationale}</p>
                             {parsed.offerStrategy.fallbackOffer.sellerBenefit && (
-                              <div className="text-xs text-indigo-700 bg-indigo-100 rounded px-2 py-1">{parsed.offerStrategy.fallbackOffer.sellerBenefit}</div>
+                              <div className="text-xs text-indigo-700 dark:text-indigo-400 bg-indigo-100 dark:bg-indigo-900/30 rounded px-2 py-1">{parsed.offerStrategy.fallbackOffer.sellerBenefit}</div>
                             )}
                           </div>
                         )}
                       </div>
                       {parsed.offerStrategy.walkAwayPrice != null && (
-                        <div className="mt-3 text-center text-sm text-gray-500">
+                        <div className="mt-3 text-center text-sm text-gray-500 dark:text-gray-400">
                           Walk-away price: <span className="font-bold text-red-600">${parsed.offerStrategy.walkAwayPrice.toLocaleString()}</span>
                         </div>
                       )}
                     </div>
                   )}
                   {parsed.riskFactors?.length > 0 && (
-                    <div className="bg-red-50 border border-red-200 rounded-xl p-4">
-                      <div className="text-xs font-semibold text-red-700 uppercase tracking-wide mb-3">Risk Factors</div>
+                    <div className="bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-xl p-4">
+                      <div className="text-xs font-semibold text-red-700 dark:text-red-400 uppercase tracking-wide mb-3">Risk Factors</div>
                       <div className="space-y-2">
                         {parsed.riskFactors.map((rf: any, i: number) => (
                           <div key={i} className="flex items-start gap-2">
-                            <span className={`text-xs px-1.5 py-0.5 rounded font-medium shrink-0 mt-0.5 ${rf.impact === "high" ? "bg-red-200 text-red-800" : rf.impact === "medium" ? "bg-yellow-200 text-yellow-800" : "bg-gray-200 text-gray-700"}`}>{rf.impact}</span>
+                            <span className={`text-xs px-1.5 py-0.5 rounded font-medium shrink-0 mt-0.5 ${rf.impact === "high" ? "bg-red-200 text-red-800 dark:text-red-400" : rf.impact === "medium" ? "bg-yellow-200 text-yellow-800 dark:text-yellow-400" : "bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300"}`}>{rf.impact}</span>
                             <div>
                               <span className="text-sm font-medium text-red-900">{rf.factor}: </span>
-                              <span className="text-sm text-red-800">{rf.detail}</span>
+                              <span className="text-sm text-red-800 dark:text-red-400">{rf.detail}</span>
                             </div>
                           </div>
                         ))}
@@ -2247,35 +2247,35 @@ export default function CompsAnalysisPage() {
                     </div>
                   )}
                   {parsed.sellerPitch && (
-                    <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-5">
-                      <div className="text-xs font-semibold text-indigo-700 uppercase tracking-wide mb-3">Seller Pitch</div>
+                    <div className="bg-indigo-50 dark:bg-indigo-950 border border-indigo-200 dark:border-indigo-800 rounded-xl p-5">
+                      <div className="text-xs font-semibold text-indigo-700 dark:text-indigo-400 uppercase tracking-wide mb-3">Seller Pitch</div>
                       {parsed.sellerPitch.framingStrategy && (
-                        <p className="text-sm text-indigo-800 mb-3 italic">{parsed.sellerPitch.framingStrategy}</p>
+                        <p className="text-sm text-indigo-800 dark:text-indigo-400 mb-3 italic">{parsed.sellerPitch.framingStrategy}</p>
                       )}
                       {parsed.sellerPitch.suggestedScript && (
-                        <div className="bg-white border border-indigo-200 rounded-lg p-3 mb-3">
+                        <div className="bg-white dark:bg-gray-900 border border-indigo-200 dark:border-indigo-800 rounded-lg p-3 mb-3">
                           <div className="text-xs font-medium text-indigo-600 mb-1">Suggested Script</div>
-                          <p className="text-sm text-gray-800 leading-relaxed">{parsed.sellerPitch.suggestedScript}</p>
+                          <p className="text-sm text-gray-800 dark:text-gray-200 leading-relaxed">{parsed.sellerPitch.suggestedScript}</p>
                         </div>
                       )}
                       {parsed.sellerPitch.novationPitch && (
-                        <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 mb-3">
+                        <div className="bg-purple-50 dark:bg-purple-950 border border-purple-200 dark:border-purple-800 rounded-lg p-3 mb-3">
                           <div className="text-xs font-medium text-purple-600 mb-1">Novation / Listing Pitch</div>
-                          <p className="text-sm text-gray-800 leading-relaxed">{parsed.sellerPitch.novationPitch}</p>
+                          <p className="text-sm text-gray-800 dark:text-gray-200 leading-relaxed">{parsed.sellerPitch.novationPitch}</p>
                         </div>
                       )}
                       {parsed.sellerPitch.objectionHandling && (
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           {parsed.sellerPitch.objectionHandling.priceObjection && (
-                            <div className="bg-white border border-indigo-200 rounded-lg p-3">
+                            <div className="bg-white dark:bg-gray-900 border border-indigo-200 dark:border-indigo-800 rounded-lg p-3">
                               <div className="text-xs font-medium text-indigo-600 mb-1">If they say the price is too low...</div>
-                              <p className="text-xs text-gray-700 leading-relaxed">{parsed.sellerPitch.objectionHandling.priceObjection}</p>
+                              <p className="text-xs text-gray-700 dark:text-gray-300 leading-relaxed">{parsed.sellerPitch.objectionHandling.priceObjection}</p>
                             </div>
                           )}
                           {parsed.sellerPitch.objectionHandling.listingObjection && (
-                            <div className="bg-white border border-indigo-200 rounded-lg p-3">
+                            <div className="bg-white dark:bg-gray-900 border border-indigo-200 dark:border-indigo-800 rounded-lg p-3">
                               <div className="text-xs font-medium text-indigo-600 mb-1">If they want to list with a realtor...</div>
-                              <p className="text-xs text-gray-700 leading-relaxed">{parsed.sellerPitch.objectionHandling.listingObjection}</p>
+                              <p className="text-xs text-gray-700 dark:text-gray-300 leading-relaxed">{parsed.sellerPitch.objectionHandling.listingObjection}</p>
                             </div>
                           )}
                         </div>
@@ -2294,12 +2294,12 @@ export default function CompsAnalysisPage() {
           <div className="space-y-6">
 
             {/* ── Photo Upload & AI Analysis ── */}
-            <div className="card border border-purple-200">
+            <div className="card border border-purple-200 dark:border-purple-800">
               <div className="flex items-center gap-2 mb-4">
                 <span className="text-xl">📸</span>
                 <h2 className="text-lg font-bold">Photo Analysis</h2>
                 {(analysis as any)?.photoAnalysis && (
-                  <span className="text-xs px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 font-medium">Analyzed</span>
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 font-medium">Analyzed</span>
                 )}
               </div>
 
@@ -2309,7 +2309,7 @@ export default function CompsAnalysisPage() {
                 onDragLeave={() => setIsDragging(false)}
                 onDrop={handleDrop}
                 className={`relative border-2 border-dashed rounded-xl p-6 text-center transition-all cursor-pointer mb-4 ${
-                  isDragging ? 'border-purple-500 bg-purple-100' : 'border-purple-300 bg-purple-50 hover:bg-purple-100'
+                  isDragging ? 'border-purple-500 bg-purple-100 dark:bg-purple-900/30' : 'border-purple-300 dark:border-purple-800 bg-purple-50 dark:bg-purple-950 hover:bg-purple-100 dark:bg-purple-900/30'
                 }`}
                 onClick={() => document.getElementById('photo-upload-input')?.click()}
               >
@@ -2326,8 +2326,8 @@ export default function CompsAnalysisPage() {
                 ) : (
                   <>
                     <div className="text-3xl mb-2">📷</div>
-                    <p className="text-sm font-medium text-purple-700">Drag & drop photos here, or click to select</p>
-                    <p className="text-xs text-gray-400 mt-1">
+                    <p className="text-sm font-medium text-purple-700 dark:text-purple-400">Drag & drop photos here, or click to select</p>
+                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
                       {selectedPhotos.length > 0
                         ? `${selectedPhotos.length}/30 photos added`
                         : 'Up to 30 photos — JPG, PNG, HEIC'}
@@ -2347,7 +2347,7 @@ export default function CompsAnalysisPage() {
                         className={`w-16 h-16 object-cover rounded-lg border-2 transition-all ${
                           t.status === 'done' ? 'border-green-400 opacity-90' :
                           t.status === 'uploading' ? 'border-purple-400 opacity-60' :
-                          'border-gray-300'
+                          'border-gray-300 dark:border-gray-600'
                         }`}
                       />
                       {t.status === 'uploading' && (
@@ -2356,14 +2356,14 @@ export default function CompsAnalysisPage() {
                         </div>
                       )}
                       {t.status === 'done' && (
-                        <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-green-500/20">
+                        <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-green-50 dark:bg-green-9500/20">
                           <span className="text-green-600 text-lg">✓</span>
                         </div>
                       )}
                       {t.status === 'ready' && (
                         <button
                           onClick={(e) => { e.stopPropagation(); removePhoto(i); }}
-                          className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full text-white text-xs items-center justify-center hidden group-hover:flex"
+                          className="absolute -top-1 -right-1 w-4 h-4 bg-red-50 dark:bg-red-9500 rounded-full text-white text-xs items-center justify-center hidden group-hover:flex"
                         >×</button>
                       )}
                     </div>
@@ -2422,8 +2422,8 @@ export default function CompsAnalysisPage() {
 
                 if (!parsed && !(analysis as any)?.photoAnalysis) {
                   return (
-                    <div className="flex items-center justify-center min-h-24 bg-gray-50 rounded-xl border-2 border-dashed border-gray-200">
-                      <p className="text-sm text-gray-400 text-center px-4">
+                    <div className="flex items-center justify-center min-h-24 bg-gray-50 dark:bg-gray-950 rounded-xl border-2 border-dashed border-gray-200 dark:border-gray-700">
+                      <p className="text-sm text-gray-400 dark:text-gray-500 text-center px-4">
                         Upload photos and click Analyze to get a visual condition report and repair estimate
                       </p>
                     </div>
@@ -2433,18 +2433,18 @@ export default function CompsAnalysisPage() {
                 if (!parsed) {
                   // Legacy text fallback
                   return (
-                    <div className="bg-purple-50 rounded-lg p-4 border border-purple-100 max-h-72 overflow-y-auto text-sm text-gray-700 whitespace-pre-wrap">
+                    <div className="bg-purple-50 dark:bg-purple-950 rounded-lg p-4 border border-purple-100 max-h-72 overflow-y-auto text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
                       {(analysis as any).photoAnalysis}
                     </div>
                   );
                 }
 
                 const conditionColor = (c: string) =>
-                  c === 'Good' ? 'bg-green-100 text-green-700' :
-                  c === 'Fair' ? 'bg-yellow-100 text-yellow-800' :
-                  c === 'Poor' ? 'bg-orange-100 text-orange-700' :
-                  c === 'Gut'  ? 'bg-red-100 text-red-700' :
-                  'bg-gray-100 text-gray-600';
+                  c === 'Good' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' :
+                  c === 'Fair' ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-400' :
+                  c === 'Poor' ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400' :
+                  c === 'Gut'  ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400' :
+                  'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400';
 
                 const urgencyIcon = (u: string) =>
                   u === 'critical' ? '🚨' : u === 'high' ? '⚠️' : u === 'medium' ? '🔶' : '✅';
@@ -2455,17 +2455,17 @@ export default function CompsAnalysisPage() {
                 return (
                   <div className="space-y-5">
                     {/* Overall summary bar */}
-                    <div className="flex items-center gap-4 bg-gray-50 rounded-xl p-4 border border-gray-200">
+                    <div className="flex items-center gap-4 bg-gray-50 dark:bg-gray-950 rounded-xl p-4 border border-gray-200 dark:border-gray-700">
                       <div className="flex-1">
-                        <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Overall Condition</div>
+                        <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">Overall Condition</div>
                         <span className={`inline-block text-sm font-bold px-3 py-1 rounded-full ${conditionColor(parsed.overallCondition || 'Fair')}`}>
                           {parsed.overallCondition || 'Fair'}
                         </span>
                       </div>
                       {(parsed.repairLow || parsed.repairHigh) ? (
                         <div className="text-right">
-                          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Photo Repair Estimate</div>
-                          <div className="text-xl font-bold text-purple-700">
+                          <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">Photo Repair Estimate</div>
+                          <div className="text-xl font-bold text-purple-700 dark:text-purple-400">
                             ${(parsed.repairLow || 0).toLocaleString()} – ${(parsed.repairHigh || 0).toLocaleString()}
                           </div>
                           <button
@@ -2480,7 +2480,7 @@ export default function CompsAnalysisPage() {
 
                     {/* Wholesaler notes */}
                     {parsed.wholesalerNotes && (
-                      <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-800">
+                      <div className="bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-xl p-4 text-sm text-blue-800 dark:text-blue-400">
                         <div className="font-semibold text-blue-900 mb-1">💡 Wholesaler Take</div>
                         {parsed.wholesalerNotes}
                       </div>
@@ -2488,11 +2488,11 @@ export default function CompsAnalysisPage() {
 
                     {/* Red flags */}
                     {parsed.redFlags?.length > 0 && (
-                      <div className="bg-red-50 border border-red-200 rounded-xl p-4">
-                        <div className="font-semibold text-red-800 mb-2">🚨 Red Flags</div>
+                      <div className="bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-xl p-4">
+                        <div className="font-semibold text-red-800 dark:text-red-400 mb-2">🚨 Red Flags</div>
                         <ul className="space-y-1">
                           {parsed.redFlags.map((flag: string, i: number) => (
-                            <li key={i} className="text-sm text-red-700 flex gap-2">
+                            <li key={i} className="text-sm text-red-700 dark:text-red-400 flex gap-2">
                               <span>•</span><span>{flag}</span>
                             </li>
                           ))}
@@ -2503,23 +2503,23 @@ export default function CompsAnalysisPage() {
                     {/* Rooms grid */}
                     {parsed.rooms?.length > 0 && (
                       <div>
-                        <div className="text-sm font-bold text-gray-700 mb-3">Room-by-Room</div>
+                        <div className="text-sm font-bold text-gray-700 dark:text-gray-300 mb-3">Room-by-Room</div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           {parsed.rooms.map((room: any, i: number) => (
                             <div key={i} className={`rounded-xl border p-3 ${
-                              room.condition === 'Gut' ? 'border-red-200 bg-red-50' :
-                              room.condition === 'Poor' ? 'border-orange-200 bg-orange-50' :
-                              room.condition === 'Fair' ? 'border-yellow-200 bg-yellow-50' :
-                              'border-green-200 bg-green-50'
+                              room.condition === 'Gut' ? 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950' :
+                              room.condition === 'Poor' ? 'border-orange-200 dark:border-orange-800 bg-orange-50 dark:bg-orange-950' :
+                              room.condition === 'Fair' ? 'border-yellow-200 dark:border-yellow-800 bg-yellow-50 dark:bg-yellow-950' :
+                              'border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950'
                             }`}>
                               <div className="flex items-center justify-between mb-2">
-                                <span className="font-semibold text-sm text-gray-800">{urgencyIcon(room.urgency)} {room.name}</span>
+                                <span className="font-semibold text-sm text-gray-800 dark:text-gray-200">{urgencyIcon(room.urgency)} {room.name}</span>
                                 <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${conditionColor(room.condition)}`}>
                                   {room.condition}
                                 </span>
                               </div>
                               {room.issues?.length > 0 && (
-                                <ul className="text-xs text-gray-600 space-y-0.5">
+                                <ul className="text-xs text-gray-600 dark:text-gray-400 space-y-0.5">
                                   {room.issues.map((issue: string, j: number) => (
                                     <li key={j} className="flex gap-1.5"><span className="text-orange-400 mt-0.5">•</span>{issue}</li>
                                   ))}
@@ -2534,20 +2534,20 @@ export default function CompsAnalysisPage() {
                     {/* Systems */}
                     {parsed.systems && (
                       <div>
-                        <div className="text-sm font-bold text-gray-700 mb-3">Systems</div>
+                        <div className="text-sm font-bold text-gray-700 dark:text-gray-300 mb-3">Systems</div>
                         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
                           {Object.entries(parsed.systems).map(([key, sys]: [string, any]) => (
                             <div key={key} className={`rounded-xl border p-3 text-center ${
-                              sys.condition === 'Poor' ? 'border-orange-200 bg-orange-50' :
-                              sys.condition === 'Good' ? 'border-green-200 bg-green-50' :
-                              'border-gray-200 bg-gray-50'
+                              sys.condition === 'Poor' ? 'border-orange-200 dark:border-orange-800 bg-orange-50 dark:bg-orange-950' :
+                              sys.condition === 'Good' ? 'border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950' :
+                              'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-950'
                             }`}>
                               <div className="text-2xl mb-1">{systemIcon(key)}</div>
-                              <div className="text-xs font-semibold text-gray-700 capitalize">{key}</div>
+                              <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 capitalize">{key}</div>
                               <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${conditionColor(sys.condition || 'Unknown')}`}>
                                 {sys.condition || 'Unknown'}
                               </span>
-                              {sys.notes && <div className="text-xs text-gray-500 mt-1 text-left leading-tight">{sys.notes}</div>}
+                              {sys.notes && <div className="text-xs text-gray-500 dark:text-gray-400 mt-1 text-left leading-tight">{sys.notes}</div>}
                             </div>
                           ))}
                         </div>
@@ -2557,10 +2557,10 @@ export default function CompsAnalysisPage() {
                     {/* Repair Items */}
                     {parsed.repairItems?.length > 0 && (
                       <div>
-                        <div className="text-sm font-bold text-gray-700 mb-3">Repair Breakdown</div>
-                        <div className="rounded-xl border border-gray-200 overflow-hidden">
+                        <div className="text-sm font-bold text-gray-700 dark:text-gray-300 mb-3">Repair Breakdown</div>
+                        <div className="rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
                           <table className="w-full text-sm">
-                            <thead className="bg-gray-50 text-xs text-gray-500 uppercase">
+                            <thead className="bg-gray-50 dark:bg-gray-950 text-xs text-gray-500 dark:text-gray-400 uppercase">
                               <tr>
                                 <th className="text-left px-4 py-2">Item</th>
                                 <th className="text-center px-3 py-2">Priority</th>
@@ -2569,26 +2569,26 @@ export default function CompsAnalysisPage() {
                             </thead>
                             <tbody>
                               {parsed.repairItems.map((item: any, i: number) => (
-                                <tr key={i} className="border-t border-gray-100 hover:bg-gray-50">
-                                  <td className="px-4 py-2 text-gray-800">{item.item}</td>
+                                <tr key={i} className="border-t border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
+                                  <td className="px-4 py-2 text-gray-800 dark:text-gray-200">{item.item}</td>
                                   <td className="px-3 py-2 text-center">
                                     <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
-                                      item.priority === 'critical' ? 'bg-red-100 text-red-700' :
-                                      item.priority === 'high' ? 'bg-orange-100 text-orange-700' :
-                                      item.priority === 'medium' ? 'bg-yellow-100 text-yellow-700' :
-                                      'bg-gray-100 text-gray-500'
+                                      item.priority === 'critical' ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400' :
+                                      item.priority === 'high' ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400' :
+                                      item.priority === 'medium' ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400' :
+                                      'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400'
                                     }`}>{item.priority}</span>
                                   </td>
-                                  <td className="px-4 py-2 text-right text-gray-700">
+                                  <td className="px-4 py-2 text-right text-gray-700 dark:text-gray-300">
                                     ${(item.estimateLow||0).toLocaleString()} – ${(item.estimateHigh||0).toLocaleString()}
                                   </td>
                                 </tr>
                               ))}
                             </tbody>
-                            <tfoot className="bg-gray-50 font-bold">
-                              <tr className="border-t border-gray-200">
-                                <td className="px-4 py-2 text-gray-800" colSpan={2}>Total Estimate</td>
-                                <td className="px-4 py-2 text-right text-purple-700">
+                            <tfoot className="bg-gray-50 dark:bg-gray-950 font-bold">
+                              <tr className="border-t border-gray-200 dark:border-gray-700">
+                                <td className="px-4 py-2 text-gray-800 dark:text-gray-200" colSpan={2}>Total Estimate</td>
+                                <td className="px-4 py-2 text-right text-purple-700 dark:text-purple-400">
                                   ${(parsed.repairLow||0).toLocaleString()} – ${(parsed.repairHigh||0).toLocaleString()}
                                 </td>
                               </tr>
@@ -2609,7 +2609,7 @@ export default function CompsAnalysisPage() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Finish Level</label>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Finish Level</label>
                     <select
                       value={repairLevel}
                       onChange={(e) => setRepairLevel(e.target.value)}
@@ -2622,7 +2622,7 @@ export default function CompsAnalysisPage() {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Quick Repair Options</label>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Quick Repair Options</label>
                     <div className="flex flex-wrap gap-2">
                       {REPAIR_ITEMS.map((item) => (
                         <button
@@ -2631,7 +2631,7 @@ export default function CompsAnalysisPage() {
                           className={`px-3 py-1.5 rounded text-sm border transition-colors ${
                             selectedRepairs.includes(item)
                               ? 'bg-primary-600 text-white border-primary-600'
-                              : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                              : 'bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800'
                           }`}
                         >
                           {item}
@@ -2641,7 +2641,7 @@ export default function CompsAnalysisPage() {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Describe Repairs Needed</label>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Describe Repairs Needed</label>
                     <textarea
                       value={repairDescription}
                       onChange={(e) => setRepairDescription(e.target.value)}
@@ -2663,45 +2663,45 @@ export default function CompsAnalysisPage() {
                 <div className="space-y-4">
                   {/* Cost card */}
                   <div className={`rounded-xl border-2 p-6 text-center transition-all ${
-                    repairCosts > 0 ? 'border-orange-300 bg-orange-50' : 'border-gray-200 bg-gray-50'
+                    repairCosts > 0 ? 'border-orange-300 dark:border-orange-800 bg-orange-50 dark:bg-orange-950' : 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-950'
                   }`}>
-                    <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Estimated Repair Costs</div>
-                    <div className={`text-4xl font-bold mb-1 ${repairCosts > 0 ? 'text-orange-700' : 'text-gray-400'}`}>
+                    <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">Estimated Repair Costs</div>
+                    <div className={`text-4xl font-bold mb-1 ${repairCosts > 0 ? 'text-orange-700 dark:text-orange-400' : 'text-gray-400 dark:text-gray-500'}`}>
                       ${repairCosts.toLocaleString()}
                     </div>
-                    <div className="text-sm text-gray-500">
+                    <div className="text-sm text-gray-500 dark:text-gray-400">
                       {repairLevel.charAt(0).toUpperCase() + repairLevel.slice(1)} grade
                       {lead?.sqft && repairCosts > 0 ? ` · $${Math.round(repairCosts / lead.sqft)}/sqft` : ''}
                     </div>
                     {repairCosts > 0 && (
-                      <div className="mt-3 text-xs text-orange-700 bg-orange-100 rounded-lg px-3 py-2">
+                      <div className="mt-3 text-xs text-orange-700 dark:text-orange-400 bg-orange-100 dark:bg-orange-900/30 rounded-lg px-3 py-2">
                         ✓ Applied to deal calculator · ARV needed to break even: ${dealArv > 0 ? Math.round((repairCosts + assignmentFee) / (maoPercent / 100)).toLocaleString() : '—'}
                       </div>
                     )}
                   </div>
 
                   {analysis?.repairNotes && (
-                    <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
-                      <div className="text-xs font-medium text-blue-800 mb-1">AI Breakdown</div>
-                      <div className="text-sm text-blue-700">{analysis.repairNotes}</div>
+                    <div className="bg-blue-50 dark:bg-blue-950 rounded-lg p-4 border border-blue-200 dark:border-blue-800">
+                      <div className="text-xs font-medium text-blue-800 dark:text-blue-400 mb-1">AI Breakdown</div>
+                      <div className="text-sm text-blue-700 dark:text-blue-400">{analysis.repairNotes}</div>
                     </div>
                   )}
 
                   <div>
-                    <div className="text-xs text-gray-500 mb-2 font-medium">Quick estimate by condition:</div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400 mb-2 font-medium">Quick estimate by condition:</div>
                     <div className="grid grid-cols-3 gap-2">
                       {[
-                        { label: 'Light', sublabel: '$20/sqft', rate: 20, color: 'border-green-300 hover:bg-green-50' },
-                        { label: 'Moderate', sublabel: '$30/sqft', rate: 30, color: 'border-yellow-300 hover:bg-yellow-50' },
-                        { label: 'Heavy', sublabel: '$45/sqft', rate: 45, color: 'border-red-300 hover:bg-red-50' },
+                        { label: 'Light', sublabel: '$20/sqft', rate: 20, color: 'border-green-300 dark:border-green-800 hover:bg-green-50 dark:bg-green-950' },
+                        { label: 'Moderate', sublabel: '$30/sqft', rate: 30, color: 'border-yellow-300 dark:border-yellow-800 hover:bg-yellow-50 dark:bg-yellow-950' },
+                        { label: 'Heavy', sublabel: '$45/sqft', rate: 45, color: 'border-red-300 dark:border-red-800 hover:bg-red-50 dark:bg-red-950' },
                       ].map((opt) => (
                         <button
                           key={opt.rate}
                           onClick={() => setRepairCosts((lead?.sqft || 1500) * opt.rate)}
-                          className={`text-xs px-2 py-2 rounded-lg border text-center transition-colors bg-white ${opt.color}`}
+                          className={`text-xs px-2 py-2 rounded-lg border text-center transition-colors bg-white dark:bg-gray-900 ${opt.color}`}
                         >
-                          <div className="font-semibold text-gray-700">{opt.label}</div>
-                          <div className="text-gray-400">{opt.sublabel}</div>
+                          <div className="font-semibold text-gray-700 dark:text-gray-300">{opt.label}</div>
+                          <div className="text-gray-400 dark:text-gray-500">{opt.sublabel}</div>
                         </button>
                       ))}
                     </div>
@@ -2719,8 +2719,8 @@ export default function CompsAnalysisPage() {
             {/* Header */}
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-lg font-bold text-gray-900">🏠 Property Intelligence</h2>
-                <p className="text-sm text-gray-500 mt-0.5">
+                <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">🏠 Property Intelligence</h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
                   Deep property data & valuation ranges from ATTOM — the industry standard for real estate data.
                 </p>
               </div>
@@ -2744,10 +2744,10 @@ export default function CompsAnalysisPage() {
             </div>
 
             {!attomData?.attomId ? (
-              <div className="card border-dashed border-2 border-gray-200 text-center py-12">
+              <div className="card border-dashed border-2 border-gray-200 dark:border-gray-700 text-center py-12">
                 <div className="text-4xl mb-3">🏘️</div>
-                <div className="text-gray-600 font-medium">No ATTOM data loaded yet</div>
-                <p className="text-sm text-gray-400 mt-1 mb-4">
+                <div className="text-gray-600 dark:text-gray-400 font-medium">No ATTOM data loaded yet</div>
+                <p className="text-sm text-gray-400 dark:text-gray-500 mt-1 mb-4">
                   Fetch to enrich this property with deep data: AVM, tax records, building details, condition-adjusted value ranges.
                 </p>
                 <button
@@ -2770,15 +2770,15 @@ export default function CompsAnalysisPage() {
             ) : (
               <>
                 {/* ── Condition-Adjusted AVM (investor's crown jewel) ── */}
-                <div className="card border border-indigo-200 bg-gradient-to-br from-indigo-50 to-white">
+                <div className="card border border-indigo-200 dark:border-indigo-800 bg-gradient-to-br from-indigo-50 to-white">
                   <div className="flex items-center gap-2 mb-4">
                     <span className="text-2xl">💎</span>
                     <div>
-                      <h3 className="font-bold text-gray-900">Condition-Adjusted Valuation</h3>
-                      <p className="text-xs text-gray-500">ATTOM AVM ranges based on property condition — critical for investor ARV</p>
+                      <h3 className="font-bold text-gray-900 dark:text-gray-100">Condition-Adjusted Valuation</h3>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">ATTOM AVM ranges based on property condition — critical for investor ARV</p>
                     </div>
                     {attomData.attomAvmConfidence && (
-                      <span className="ml-auto text-xs px-2 py-1 bg-indigo-100 text-indigo-700 rounded-full font-medium">
+                      <span className="ml-auto text-xs px-2 py-1 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 rounded-full font-medium">
                         {attomData.attomAvmConfidence}% confidence
                       </span>
                     )}
@@ -2786,9 +2786,9 @@ export default function CompsAnalysisPage() {
 
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     {/* Distressed / AS-IS */}
-                    <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-center">
+                    <div className="rounded-xl border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950 p-4 text-center">
                       <div className="text-xs font-semibold text-red-600 uppercase tracking-wide mb-1">😰 Distressed / AS-IS</div>
-                      <div className="text-2xl font-bold text-red-700">
+                      <div className="text-2xl font-bold text-red-700 dark:text-red-400">
                         {attomData.avmPoorHigh ? `$${Math.round(attomData.avmPoorHigh).toLocaleString()}` : '—'}
                       </div>
                       {attomData.avmPoorLow && attomData.avmPoorHigh && (
@@ -2796,13 +2796,13 @@ export default function CompsAnalysisPage() {
                           ${Math.round(attomData.avmPoorLow).toLocaleString()} – ${Math.round(attomData.avmPoorHigh).toLocaleString()}
                         </div>
                       )}
-                      <div className="text-xs text-gray-500 mt-2">Poor condition, needs major work</div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400 mt-2">Poor condition, needs major work</div>
                     </div>
 
                     {/* Good condition */}
-                    <div className="rounded-xl border border-yellow-200 bg-yellow-50 p-4 text-center">
-                      <div className="text-xs font-semibold text-yellow-700 uppercase tracking-wide mb-1">👍 Good Condition</div>
-                      <div className="text-2xl font-bold text-yellow-700">
+                    <div className="rounded-xl border border-yellow-200 dark:border-yellow-800 bg-yellow-50 dark:bg-yellow-950 p-4 text-center">
+                      <div className="text-xs font-semibold text-yellow-700 dark:text-yellow-400 uppercase tracking-wide mb-1">👍 Good Condition</div>
+                      <div className="text-2xl font-bold text-yellow-700 dark:text-yellow-400">
                         {attomData.avmGoodHigh ? `$${Math.round(attomData.avmGoodHigh).toLocaleString()}` : '—'}
                       </div>
                       {attomData.avmGoodLow && attomData.avmGoodHigh && (
@@ -2810,13 +2810,13 @@ export default function CompsAnalysisPage() {
                           ${Math.round(attomData.avmGoodLow).toLocaleString()} – ${Math.round(attomData.avmGoodHigh).toLocaleString()}
                         </div>
                       )}
-                      <div className="text-xs text-gray-500 mt-2">Average condition, minor repairs needed</div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400 mt-2">Average condition, minor repairs needed</div>
                     </div>
 
                     {/* After-Repair / Excellent = TRUE ARV */}
-                    <div className="rounded-xl border border-green-300 bg-green-50 p-4 text-center ring-2 ring-green-400">
-                      <div className="text-xs font-semibold text-green-700 uppercase tracking-wide mb-1">✨ After Repair (ARV)</div>
-                      <div className="text-3xl font-bold text-green-700">
+                    <div className="rounded-xl border border-green-300 dark:border-green-800 bg-green-50 dark:bg-green-950 p-4 text-center ring-2 ring-green-400">
+                      <div className="text-xs font-semibold text-green-700 dark:text-green-400 uppercase tracking-wide mb-1">✨ After Repair (ARV)</div>
+                      <div className="text-3xl font-bold text-green-700 dark:text-green-400">
                         {attomData.avmExcellentHigh ? `$${Math.round(attomData.avmExcellentHigh).toLocaleString()}` : '—'}
                       </div>
                       {attomData.avmExcellentLow && attomData.avmExcellentHigh && (
@@ -2824,22 +2824,22 @@ export default function CompsAnalysisPage() {
                           ${Math.round(attomData.avmExcellentLow).toLocaleString()} – ${Math.round(attomData.avmExcellentHigh).toLocaleString()}
                         </div>
                       )}
-                      <div className="text-xs text-gray-500 mt-2">Fully renovated / excellent condition</div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400 mt-2">Fully renovated / excellent condition</div>
                     </div>
                   </div>
 
                   {/* ATTOM AVM baseline */}
                   {attomData.attomAvm && (
-                    <div className="mt-4 flex items-center gap-4 text-sm text-gray-600 bg-white rounded-lg px-4 py-3 border border-gray-200">
+                    <div className="mt-4 flex items-center gap-4 text-sm text-gray-600 dark:text-gray-400 bg-white dark:bg-gray-900 rounded-lg px-4 py-3 border border-gray-200 dark:border-gray-700">
                       <span className="font-medium">ATTOM AVM Baseline:</span>
-                      <span className="font-bold text-gray-900">${Math.round(attomData.attomAvm).toLocaleString()}</span>
+                      <span className="font-bold text-gray-900 dark:text-gray-100">${Math.round(attomData.attomAvm).toLocaleString()}</span>
                       {attomData.attomAvmLow && attomData.attomAvmHigh && (
-                        <span className="text-gray-400 text-xs">
+                        <span className="text-gray-400 dark:text-gray-500 text-xs">
                           (range: ${Math.round(attomData.attomAvmLow).toLocaleString()} – ${Math.round(attomData.attomAvmHigh).toLocaleString()})
                         </span>
                       )}
                       {attomData.attomAvmConfidence && (
-                        <span className="ml-auto text-xs text-gray-400">Updated {attomData.attomEnrichedAt ? new Date(attomData.attomEnrichedAt).toLocaleDateString() : '—'}</span>
+                        <span className="ml-auto text-xs text-gray-400 dark:text-gray-500">Updated {attomData.attomEnrichedAt ? new Date(attomData.attomEnrichedAt).toLocaleDateString() : '—'}</span>
                       )}
                     </div>
                   )}
@@ -2850,7 +2850,7 @@ export default function CompsAnalysisPage() {
 
                   {/* Building Details */}
                   <div className="card">
-                    <h3 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                    <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
                       <span>🏗️</span> Building Details
                     </h3>
                     <div className="grid grid-cols-2 gap-3">
@@ -2868,9 +2868,9 @@ export default function CompsAnalysisPage() {
                         { label: 'Quality', value: attomData.propertyQuality || '—' },
                         { label: 'Subdivision', value: attomData.subdivision || '—' },
                       ].map(({ label, value }) => (
-                        <div key={label} className="bg-gray-50 rounded-lg p-3">
-                          <div className="text-xs text-gray-500 mb-0.5">{label}</div>
-                          <div className="text-sm font-semibold text-gray-900">{value}</div>
+                        <div key={label} className="bg-gray-50 dark:bg-gray-950 rounded-lg p-3">
+                          <div className="text-xs text-gray-500 dark:text-gray-400 mb-0.5">{label}</div>
+                          <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">{value}</div>
                         </div>
                       ))}
                     </div>
@@ -2879,7 +2879,7 @@ export default function CompsAnalysisPage() {
                   {/* Tax & Assessment */}
                   <div className="space-y-4">
                     <div className="card">
-                      <h3 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                      <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
                         <span>🏦</span> Tax & Assessment
                       </h3>
                       <div className="space-y-3">
@@ -2890,9 +2890,9 @@ export default function CompsAnalysisPage() {
                           { label: 'Last Sale Price', value: attomData.lastSalePrice ? `$${Math.round(attomData.lastSalePrice).toLocaleString()}` : '—' },
                           { label: 'Last Sale Date', value: attomData.lastSaleDate ? new Date(attomData.lastSaleDate).toLocaleDateString() : '—' },
                         ].map(({ label, value, highlight }) => (
-                          <div key={label} className={`flex justify-between items-center py-2 border-b border-gray-100 last:border-0 ${highlight ? 'text-gray-900 font-semibold' : ''}`}>
-                            <span className="text-sm text-gray-600">{label}</span>
-                            <span className={`text-sm ${highlight ? 'text-gray-900 font-bold' : 'text-gray-900'}`}>{value}</span>
+                          <div key={label} className={`flex justify-between items-center py-2 border-b border-gray-100 dark:border-gray-800 last:border-0 ${highlight ? 'text-gray-900 dark:text-gray-100 font-semibold' : ''}`}>
+                            <span className="text-sm text-gray-600 dark:text-gray-400">{label}</span>
+                            <span className={`text-sm ${highlight ? 'text-gray-900 dark:text-gray-100 font-bold' : 'text-gray-900 dark:text-gray-100'}`}>{value}</span>
                           </div>
                         ))}
                       </div>
@@ -2900,28 +2900,28 @@ export default function CompsAnalysisPage() {
 
                     {/* Quick investor math using ATTOM data */}
                     {attomData.avmExcellentHigh && attomData.avmPoorHigh && (
-                      <div className="card border border-purple-200 bg-purple-50">
+                      <div className="card border border-purple-200 dark:border-purple-800 bg-purple-50 dark:bg-purple-950">
                         <h3 className="font-semibold text-purple-900 mb-3 flex items-center gap-2">
                           <span>🎯</span> ATTOM Investor Snapshot
                         </h3>
                         <div className="space-y-2 text-sm">
                           <div className="flex justify-between">
-                            <span className="text-purple-700">ARV (after repair)</span>
-                            <span className="font-bold text-green-700">${Math.round(attomData.avmExcellentHigh).toLocaleString()}</span>
+                            <span className="text-purple-700 dark:text-purple-400">ARV (after repair)</span>
+                            <span className="font-bold text-green-700 dark:text-green-400">${Math.round(attomData.avmExcellentHigh).toLocaleString()}</span>
                           </div>
                           <div className="flex justify-between">
-                            <span className="text-purple-700">AS-IS value</span>
+                            <span className="text-purple-700 dark:text-purple-400">AS-IS value</span>
                             <span className="font-semibold text-red-600">${Math.round(attomData.avmPoorHigh).toLocaleString()}</span>
                           </div>
-                          <div className="flex justify-between border-t border-purple-200 pt-2 mt-2">
-                            <span className="text-purple-700 font-medium">Upside potential</span>
-                            <span className="font-bold text-purple-800">
+                          <div className="flex justify-between border-t border-purple-200 dark:border-purple-800 pt-2 mt-2">
+                            <span className="text-purple-700 dark:text-purple-400 font-medium">Upside potential</span>
+                            <span className="font-bold text-purple-800 dark:text-purple-400">
                               ${Math.round(attomData.avmExcellentHigh - attomData.avmPoorHigh).toLocaleString()}
                             </span>
                           </div>
                           <div className="flex justify-between">
-                            <span className="text-purple-700">70% MAO (of ARV)</span>
-                            <span className="font-semibold text-blue-700">
+                            <span className="text-purple-700 dark:text-purple-400">70% MAO (of ARV)</span>
+                            <span className="font-semibold text-blue-700 dark:text-blue-400">
                               ${Math.round(attomData.avmExcellentHigh * 0.7).toLocaleString()}
                             </span>
                           </div>
@@ -2937,7 +2937,7 @@ export default function CompsAnalysisPage() {
                   </div>
                 </div>
 
-                <p className="text-xs text-gray-400 text-center">
+                <p className="text-xs text-gray-400 dark:text-gray-500 text-center">
                   Property intelligence powered by ATTOM Data Solutions · Last updated: {attomData.attomEnrichedAt ? new Date(attomData.attomEnrichedAt).toLocaleString() : '—'}
                 </p>
               </>
@@ -2949,7 +2949,7 @@ export default function CompsAnalysisPage() {
 
       {/* Attribution */}
       {compsWithSource > 0 && (
-        <div className="text-center text-xs text-gray-400 pb-4">
+        <div className="text-center text-xs text-gray-400 dark:text-gray-500 pb-4">
           {compsFromAttom > 0 ? 'Deed-verified comparables powered by ATTOM' : 'Comparable data powered by RentCast'}
           {compsFromAttom > 0 && compsFromRentcast > 0 ? ' · Additional comps from RentCast' : ''}
         </div>
@@ -2963,33 +2963,33 @@ export default function CompsAnalysisPage() {
 function InfoItem({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <div className="text-xs font-medium text-gray-500">{label}</div>
-      <div className="text-sm font-medium text-gray-900 mt-0.5">{value}</div>
+      <div className="text-xs font-medium text-gray-500 dark:text-gray-400">{label}</div>
+      <div className="text-sm font-medium text-gray-900 dark:text-gray-100 mt-0.5">{value}</div>
     </div>
   );
 }
 
 function StatBox({ label, value }: { label: string; value: string }) {
   return (
-    <div className="bg-gray-50 rounded-lg p-3 text-center border border-gray-200">
-      <div className="text-xs text-gray-500 mb-1">{label}</div>
-      <div className="text-sm font-bold text-gray-800">{value}</div>
+    <div className="bg-gray-50 dark:bg-gray-950 rounded-lg p-3 text-center border border-gray-200 dark:border-gray-700">
+      <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">{label}</div>
+      <div className="text-sm font-bold text-gray-800 dark:text-gray-200">{value}</div>
     </div>
   );
 }
 
 function SourceBadge({ source }: { source?: string }) {
-  if (!source || source === 'manual') return <span className="text-xs text-gray-400">Manual</span>;
+  if (!source || source === 'manual') return <span className="text-xs text-gray-400 dark:text-gray-500">Manual</span>;
   if (source === 'attom') return (
-    <span className="text-xs px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 font-medium">ATTOM Verified</span>
+    <span className="text-xs px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 font-medium">ATTOM Verified</span>
   );
   if (source === 'rentcast') return (
-    <span className="text-xs px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 font-medium">RentCast</span>
+    <span className="text-xs px-1.5 py-0.5 rounded bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 font-medium">RentCast</span>
   );
   if (source === 'chatarv') return (
-    <span className="text-xs px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 font-medium">ChatARV</span>
+    <span className="text-xs px-1.5 py-0.5 rounded bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 font-medium">ChatARV</span>
   );
-  return <span className="text-xs text-gray-400">{source}</span>;
+  return <span className="text-xs text-gray-400 dark:text-gray-500">{source}</span>;
 }
 
 function CompCard({
@@ -3023,10 +3023,10 @@ function CompCard({
     <div
       className={`rounded-lg border-2 p-4 transition-all cursor-pointer ${
         isHovered
-          ? 'border-yellow-400 bg-yellow-50 shadow-md ring-2 ring-yellow-300'
+          ? 'border-yellow-400 bg-yellow-50 dark:bg-yellow-950 shadow-md ring-2 ring-yellow-300'
           : comp.selected
-          ? 'border-primary-400 bg-white shadow-sm'
-          : 'border-gray-200 bg-gray-50 opacity-60'
+          ? 'border-primary-400 bg-white dark:bg-gray-900 shadow-sm'
+          : 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-950 opacity-60'
       }`}
       onMouseEnter={onHoverEnter}
       onMouseLeave={onHoverLeave}
@@ -3039,15 +3039,15 @@ function CompCard({
               {compIndex}
             </span>
           )}
-          <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium">
+          <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 font-medium">
             {comp.distance.toFixed(1)} mi
           </span>
           <SourceBadge source={comp.source} />
           {comp.correlation && (
             <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-              comp.correlation >= 0.8 ? 'bg-green-100 text-green-700' :
-              comp.correlation >= 0.6 ? 'bg-yellow-100 text-yellow-700' :
-              'bg-gray-100 text-gray-600'
+              comp.correlation >= 0.8 ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' :
+              comp.correlation >= 0.6 ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400' :
+              'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'
             }`}>
               {(comp.correlation * 100).toFixed(0)}% match
             </span>
@@ -3057,31 +3057,31 @@ function CompCard({
           type="checkbox"
           checked={comp.selected}
           onChange={onToggle}
-          className="h-5 w-5 rounded border-gray-300 text-primary-600"
+          className="h-5 w-5 rounded border-gray-300 dark:border-gray-600 text-primary-600"
         />
       </div>
 
       {/* Price */}
       <div className="mb-2">
         <div className="flex items-baseline gap-2">
-          <span className="text-xl font-bold text-gray-900">${comp.soldPrice.toLocaleString()}</span>
+          <span className="text-xl font-bold text-gray-900 dark:text-gray-100">${comp.soldPrice.toLocaleString()}</span>
           {pricePerSqft && (
-            <span className="text-xs text-gray-500">${pricePerSqft}/sqft</span>
+            <span className="text-xs text-gray-500 dark:text-gray-400">${pricePerSqft}/sqft</span>
           )}
         </div>
         <div className="flex items-center gap-2 mt-0.5">
-          <span className="text-xs px-1.5 py-0.5 rounded bg-green-100 text-green-700 font-medium">
+          <span className="text-xs px-1.5 py-0.5 rounded bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 font-medium">
             Sold
           </span>
-          <span className="text-xs text-gray-500">
+          <span className="text-xs text-gray-500 dark:text-gray-400">
             {new Date(comp.soldDate).toLocaleDateString()} ({monthsAgo}mo ago)
           </span>
         </div>
         {comp.adjustedPrice && comp.adjustedPrice !== comp.soldPrice && (
-          <div className="mt-2 rounded-lg border border-dashed border-gray-200 bg-gray-50 p-2">
+          <div className="mt-2 rounded-lg border border-dashed border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-950 p-2">
             <div className="flex items-center justify-between mb-1">
-              <span className="text-xs text-gray-500">Adjusted Price</span>
-              <span className={`text-sm font-bold ${(comp.adjustmentAmount || 0) >= 0 ? 'text-green-700' : 'text-red-600'}`}>
+              <span className="text-xs text-gray-500 dark:text-gray-400">Adjusted Price</span>
+              <span className={`text-sm font-bold ${(comp.adjustmentAmount || 0) >= 0 ? 'text-green-700 dark:text-green-400' : 'text-red-600'}`}>
                 ${comp.adjustedPrice.toLocaleString()}
                 <span className="text-xs ml-1 font-normal">
                   ({(comp.adjustmentAmount || 0) >= 0 ? '+' : ''}{(comp.adjustmentAmount || 0).toLocaleString()})
@@ -3091,7 +3091,7 @@ function CompCard({
             {comp.adjustmentNotes && (
               <div className="space-y-0.5">
                 {comp.adjustmentNotes.split('\n').filter((l: string) => l.trim()).map((line: string, i: number) => (
-                  <div key={i} className={`text-xs flex gap-1 ${line.startsWith('AI:') ? 'text-purple-600 font-medium' : 'text-gray-500'}`}>
+                  <div key={i} className={`text-xs flex gap-1 ${line.startsWith('AI:') ? 'text-purple-600 font-medium' : 'text-gray-500 dark:text-gray-400'}`}>
                     <span className="shrink-0">{line.startsWith('AI:') ? '✨' : '•'}</span>
                     <span>{line}</span>
                   </div>
@@ -3103,26 +3103,26 @@ function CompCard({
       </div>
 
       {/* Address */}
-      <div className="text-sm font-medium text-gray-800 mb-2">{comp.address}</div>
+      <div className="text-sm font-medium text-gray-800 dark:text-gray-200 mb-2">{comp.address}</div>
 
       {/* Details Grid */}
       <div className="grid grid-cols-3 gap-2 mb-2">
-        <div className="text-center bg-gray-50 rounded p-1.5">
-          <div className="text-xs text-gray-500">Beds</div>
+        <div className="text-center bg-gray-50 dark:bg-gray-950 rounded p-1.5">
+          <div className="text-xs text-gray-500 dark:text-gray-400">Beds</div>
           <div className="text-sm font-semibold">{comp.bedrooms || '—'}</div>
         </div>
-        <div className="text-center bg-gray-50 rounded p-1.5">
-          <div className="text-xs text-gray-500">Baths</div>
+        <div className="text-center bg-gray-50 dark:bg-gray-950 rounded p-1.5">
+          <div className="text-xs text-gray-500 dark:text-gray-400">Baths</div>
           <div className="text-sm font-semibold">{comp.bathrooms || '—'}</div>
         </div>
-        <div className="text-center bg-gray-50 rounded p-1.5">
-          <div className="text-xs text-gray-500">Sq Ft</div>
+        <div className="text-center bg-gray-50 dark:bg-gray-950 rounded p-1.5">
+          <div className="text-xs text-gray-500 dark:text-gray-400">Sq Ft</div>
           <div className="text-sm font-semibold">{comp.sqft?.toLocaleString() || '—'}</div>
         </div>
       </div>
 
       {/* Extra Details */}
-      <div className="text-xs text-gray-600 space-y-0.5">
+      <div className="text-xs text-gray-600 dark:text-gray-400 space-y-0.5">
         {comp.yearBuilt && <span>Built {comp.yearBuilt}</span>}
         {comp.lotSize ? <span> | {comp.lotSize} acres</span> : null}
         {comp.daysOnMarket ? <span> | {comp.daysOnMarket} DOM</span> : null}
@@ -3132,20 +3132,20 @@ function CompCard({
       {(comp.hasPool || comp.hasGarage || comp.isRenovated) && (
         <div className="flex items-center gap-1.5 mt-2 flex-wrap">
           {comp.hasPool && (
-            <span className="text-xs px-2 py-0.5 rounded-full bg-cyan-100 text-cyan-700 font-medium">Pool</span>
+            <span className="text-xs px-2 py-0.5 rounded-full bg-cyan-100 dark:bg-cyan-900/30 text-cyan-700 dark:text-cyan-400 font-medium">Pool</span>
           )}
           {comp.hasGarage && (
-            <span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 font-medium">Garage</span>
+            <span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 font-medium">Garage</span>
           )}
           {comp.isRenovated && (
-            <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700 font-medium">Renovated</span>
+            <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 font-medium">Renovated</span>
           )}
         </div>
       )}
 
       {/* Comparison notes */}
       {(comp.notes || sizeDiff !== null) && (
-        <div className="mt-2 text-xs text-gray-500 italic border-t pt-2">
+        <div className="mt-2 text-xs text-gray-500 dark:text-gray-400 italic border-t pt-2">
           {sizeDiff !== null && sizeDiff !== 0 && (
             <div>{Math.abs(sizeDiff)}% {sizeDiff > 0 ? 'larger' : 'smaller'} than subject</div>
           )}
@@ -3157,7 +3157,7 @@ function CompCard({
       <div className="mt-2 flex justify-end">
         <button
           onClick={onDelete}
-          className="text-xs text-red-500 hover:text-red-700"
+          className="text-xs text-red-500 hover:text-red-700 dark:text-red-400"
         >
           Remove
         </button>
@@ -3191,7 +3191,7 @@ function DonutStat({
           {value}
         </text>
       </svg>
-      <div className="text-xs text-gray-500 text-center leading-tight mt-0.5">{label}</div>
+      <div className="text-xs text-gray-500 dark:text-gray-400 text-center leading-tight mt-0.5">{label}</div>
     </div>
   );
 }

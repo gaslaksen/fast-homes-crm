@@ -24,7 +24,7 @@ function KpiCard({
   alert?: boolean;
 }) {
   const colorMap = {
-    gray:   'text-gray-900',
+    gray:   'text-gray-900 dark:text-gray-100',
     green:  'text-green-600',
     red:    'text-red-600',
     blue:   'text-blue-600',
@@ -32,10 +32,10 @@ function KpiCard({
     purple: 'text-purple-600',
   };
   const content = (
-    <div className={`bg-white rounded-xl border ${alert ? 'border-red-300 bg-red-50' : 'border-gray-200'} p-5 flex flex-col gap-1 h-full`}>
-      <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide">{label}</div>
+    <div className={`bg-white dark:bg-gray-900 rounded-xl border ${alert ? 'border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-950' : 'border-gray-200 dark:border-gray-700'} p-5 flex flex-col gap-1 h-full`}>
+      <div className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide">{label}</div>
       <div className={`text-3xl font-bold leading-none mt-1 ${colorMap[color]}`}>{value}</div>
-      {sub && <div className="text-xs text-gray-500 mt-1">{sub}</div>}
+      {sub && <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">{sub}</div>}
     </div>
   );
   return href ? <Link href={href} className="block hover:scale-[1.01] transition-transform">{content}</Link> : <div>{content}</div>;
@@ -43,14 +43,14 @@ function KpiCard({
 
 function ScoreBadge({ band }: { band: string }) {
   const map: Record<string, string> = {
-    STRIKE_ZONE: 'bg-red-100 text-red-700',
-    HOT:         'bg-orange-100 text-orange-700',
-    WARM:        'bg-yellow-100 text-yellow-700',
-    COOL:        'bg-blue-100 text-blue-700',
-    COLD:        'bg-gray-100 text-gray-500',
+    STRIKE_ZONE: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400',
+    HOT:         'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400',
+    WARM:        'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400',
+    COOL:        'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400',
+    COLD:        'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400',
   };
   return (
-    <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${map[band] || 'bg-gray-100 text-gray-500'}`}>
+    <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${map[band] || 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400'}`}>
       {band.replace('_', ' ')}
     </span>
   );
@@ -66,17 +66,17 @@ function LeadRow({ lead, showLastTouched = false }: { lead: any; showLastTouched
   return (
     <Link
       href={`/leads/${lead.id}`}
-      className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors rounded-lg group overflow-hidden"
+      className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors rounded-lg group overflow-hidden"
     >
       <PropertyPhoto src={lead.primaryPhoto} scoreBand={lead.scoreBand} address={lead.propertyAddress} size="sm" />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-0.5">
           <ScoreBadge band={lead.scoreBand} />
-          <span className="font-semibold text-sm text-gray-900 truncate">
+          <span className="font-semibold text-sm text-gray-900 dark:text-gray-100 truncate">
             {lead.propertyAddress}, {lead.propertyCity}
           </span>
         </div>
-        <div className="text-xs text-gray-500">
+        <div className="text-xs text-gray-500 dark:text-gray-400">
           {lead.sellerFirstName} {lead.sellerLastName}
           {showLastTouched && hoursStale !== null && (
             <span className="text-amber-600 ml-2">· no contact {hoursStale}h</span>
@@ -85,17 +85,17 @@ function LeadRow({ lead, showLastTouched = false }: { lead: any; showLastTouched
       </div>
       <div className="text-right flex-shrink-0 space-y-0.5">
         {lead.arv ? (
-          <div className="text-xs font-semibold text-gray-700">ARV ${(lead.arv / 1000).toFixed(0)}k</div>
+          <div className="text-xs font-semibold text-gray-700 dark:text-gray-300">ARV ${(lead.arv / 1000).toFixed(0)}k</div>
         ) : null}
         {spread !== null ? (
           <div className={`text-xs font-bold ${spread >= 0 ? 'text-green-600' : 'text-red-500'}`}>
             {spread >= 0 ? '+' : ''}${(spread / 1000).toFixed(0)}k spread
           </div>
         ) : lead.askingPrice ? (
-          <div className="text-xs text-gray-400">ask ${(lead.askingPrice / 1000).toFixed(0)}k</div>
+          <div className="text-xs text-gray-400 dark:text-gray-500">ask ${(lead.askingPrice / 1000).toFixed(0)}k</div>
         ) : null}
       </div>
-      <div className="text-xl font-bold text-gray-300 group-hover:text-blue-400 transition-colors ml-1">›</div>
+      <div className="text-xl font-bold text-gray-300 dark:text-gray-600 group-hover:text-blue-400 transition-colors ml-1">›</div>
     </Link>
   );
 }
@@ -128,8 +128,8 @@ export default function DashboardPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-gray-400 text-sm animate-pulse">Loading dashboard...</div>
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center">
+        <div className="text-gray-400 dark:text-gray-500 text-sm animate-pulse">Loading dashboard...</div>
       </div>
     );
   }
@@ -139,7 +139,7 @@ export default function DashboardPage() {
   const warm = stats?.leadsByBand?.WARM || 0;
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
       <AppNav />
 
       <main className="max-w-screen-2xl mx-auto px-6 py-8 pb-16 md:pb-8 space-y-8">
@@ -147,8 +147,8 @@ export default function DashboardPage() {
         {/* Greeting + date */}
         <div className="flex items-baseline justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">{(() => { const h = today.getHours(); return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'; })()}, Geoff</h1>
-            <p className="text-sm text-gray-400 mt-0.5">{format(today, 'EEEE, MMMM d, yyyy')}</p>
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{(() => { const h = today.getHours(); return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'; })()}, Geoff</h1>
+            <p className="text-sm text-gray-400 dark:text-gray-500 mt-0.5">{format(today, 'EEEE, MMMM d, yyyy')}</p>
           </div>
           <Link href="/leads/new" className="btn btn-primary btn-sm">+ New Lead</Link>
         </div>
@@ -222,20 +222,20 @@ export default function DashboardPage() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
           {/* Hot Leads */}
-          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-              <h2 className="font-bold text-gray-900">🔥 Hot Leads</h2>
+          <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-800">
+              <h2 className="font-bold text-gray-900 dark:text-gray-100">🔥 Hot Leads</h2>
               <Link href="/leads?scoreBand=HOT,STRIKE_ZONE" className="text-xs text-blue-600 hover:underline font-medium">
                 View all →
               </Link>
             </div>
             {hotLeads.length === 0 ? (
-              <div className="px-5 py-10 text-center text-sm text-gray-400">
+              <div className="px-5 py-10 text-center text-sm text-gray-400 dark:text-gray-500">
                 No hot leads yet.<br/>
                 <Link href="/leads" className="text-blue-500 hover:underline mt-1 inline-block">View all leads</Link>
               </div>
             ) : (
-              <div className="divide-y divide-gray-50 py-1">
+              <div className="divide-y divide-gray-50 dark:divide-gray-800 py-1">
                 {hotLeads.map((lead) => <LeadRow key={lead.id} lead={lead} />)}
               </div>
             )}
@@ -245,41 +245,41 @@ export default function DashboardPage() {
           <div className="space-y-6">
 
             {/* Needs Follow-Up */}
-            <div className="bg-white rounded-xl border border-amber-200 overflow-hidden">
-              <div className="flex items-center justify-between px-5 py-4 border-b border-amber-100 bg-amber-50">
-                <h2 className="font-bold text-amber-900">⏰ Follow-Up Needed</h2>
+            <div className="bg-white dark:bg-gray-900 rounded-xl border border-amber-200 dark:border-amber-800 overflow-hidden">
+              <div className="flex items-center justify-between px-5 py-4 border-b border-amber-100 dark:border-amber-800 bg-amber-50 dark:bg-amber-950">
+                <h2 className="font-bold text-amber-900 dark:text-amber-400">⏰ Follow-Up Needed</h2>
                 <span className="text-xs text-amber-600 font-medium">Hot/Warm · stale 3d+</span>
               </div>
               {staleLeads.length === 0 ? (
-                <div className="px-5 py-8 text-center text-sm text-gray-400">All caught up! ✅</div>
+                <div className="px-5 py-8 text-center text-sm text-gray-400 dark:text-gray-500">All caught up! ✅</div>
               ) : (
-                <div className="divide-y divide-gray-50 py-1">
+                <div className="divide-y divide-gray-50 dark:divide-gray-800 py-1">
                   {staleLeads.map((lead) => <LeadRow key={lead.id} lead={lead} showLastTouched />)}
                 </div>
               )}
             </div>
 
             {/* New Leads */}
-            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-              <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-                <h2 className="font-bold text-gray-900">🆕 New Leads</h2>
+            <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+              <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-800">
+                <h2 className="font-bold text-gray-900 dark:text-gray-100">🆕 New Leads</h2>
                 <Link href="/leads?sort=created" className="text-xs text-blue-600 hover:underline font-medium">
                   View all →
                 </Link>
               </div>
               {newLeads.length === 0 ? (
-                <div className="px-5 py-8 text-center text-sm text-gray-400">No leads yet.</div>
+                <div className="px-5 py-8 text-center text-sm text-gray-400 dark:text-gray-500">No leads yet.</div>
               ) : (
-                <div className="divide-y divide-gray-50">
+                <div className="divide-y divide-gray-50 dark:divide-gray-800">
                   {newLeads.map((lead) => {
                     const statusColors: Record<string, string> = {
-                      NEW: 'bg-blue-100 text-blue-700',
-                      ATTEMPTING_CONTACT: 'bg-yellow-100 text-yellow-700',
-                      QUALIFYING: 'bg-purple-100 text-purple-700',
-                      OFFER_SENT: 'bg-orange-100 text-orange-700',
-                      UNDER_CONTRACT: 'bg-teal-100 text-teal-700',
-                      CLOSED_WON: 'bg-green-100 text-green-700',
-                      DEAD: 'bg-gray-100 text-gray-400',
+                      NEW: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400',
+                      ATTEMPTING_CONTACT: 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400',
+                      QUALIFYING: 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400',
+                      OFFER_SENT: 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400',
+                      UNDER_CONTRACT: 'bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-400',
+                      CLOSED_WON: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400',
+                      DEAD: 'bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500',
                     };
                     const statusLabel: Record<string, string> = {
                       NEW: 'New', ATTEMPTING_CONTACT: 'Contacting', QUALIFYING: 'Qualifying',
@@ -290,24 +290,24 @@ export default function DashboardPage() {
                       <Link
                         key={lead.id}
                         href={`/leads/${lead.id}`}
-                        className="flex items-center justify-between px-5 py-3 hover:bg-gray-50 transition-colors"
+                        className="flex items-center justify-between px-5 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
                       >
                         <div className="min-w-0 flex-1">
                           {(lead.sellerFirstName || lead.sellerLastName) && (
-                            <div className="text-xs font-semibold text-gray-700 truncate">
+                            <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 truncate">
                               {[lead.sellerFirstName, lead.sellerLastName].filter(Boolean).join(' ')}
                             </div>
                           )}
-                          <div className="text-sm font-medium text-gray-900 truncate">{lead.propertyAddress}</div>
-                          <div className="text-xs text-gray-400 mt-0.5">
+                          <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{lead.propertyAddress}</div>
+                          <div className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
                             {lead.propertyCity}, {lead.propertyState}
                           </div>
                         </div>
                         <div className="flex items-center gap-2 flex-shrink-0 ml-3">
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${statusColors[lead.status] || 'bg-gray-100 text-gray-500'}`}>
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${statusColors[lead.status] || 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400'}`}>
                             {statusLabel[lead.status] || lead.status.replace(/_/g, ' ')}
                           </span>
-                          <span className="text-xs text-gray-300">
+                          <span className="text-xs text-gray-300 dark:text-gray-600">
                             {formatDistanceToNow(new Date(lead.createdAt), { addSuffix: true })}
                           </span>
                         </div>
@@ -319,25 +319,25 @@ export default function DashboardPage() {
             </div>
 
             {/* Upcoming Tasks */}
-            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-              <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-                <h2 className="font-bold text-gray-900">📋 Tasks</h2>
-                <span className="text-xs text-gray-400">{tasks.length} pending</span>
+            <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+              <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-800">
+                <h2 className="font-bold text-gray-900 dark:text-gray-100">📋 Tasks</h2>
+                <span className="text-xs text-gray-400 dark:text-gray-500">{tasks.length} pending</span>
               </div>
               {tasks.length === 0 ? (
-                <div className="px-5 py-8 text-center text-sm text-gray-400">No upcoming tasks.</div>
+                <div className="px-5 py-8 text-center text-sm text-gray-400 dark:text-gray-500">No upcoming tasks.</div>
               ) : (
-                <div className="divide-y divide-gray-100">
+                <div className="divide-y divide-gray-100 dark:divide-gray-800">
                   {tasks.slice(0, 5).map((task) => (
-                    <Link key={task.id} href={`/leads/${task.lead.id}`} className="flex items-start justify-between px-5 py-3 hover:bg-gray-50 transition-colors">
+                    <Link key={task.id} href={`/leads/${task.lead.id}`} className="flex items-start justify-between px-5 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
                       <div>
-                        <div className="text-sm font-medium text-gray-900">{task.title}</div>
-                        <div className="text-xs text-gray-500 mt-0.5">
+                        <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{task.title}</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                           {task.lead.propertyAddress} · {task.lead.sellerFirstName} {task.lead.sellerLastName}
                         </div>
                       </div>
                       {task.dueDate && (
-                        <div className={`text-xs font-medium flex-shrink-0 ml-4 mt-0.5 ${new Date(task.dueDate) < new Date() ? 'text-red-500' : 'text-gray-400'}`}>
+                        <div className={`text-xs font-medium flex-shrink-0 ml-4 mt-0.5 ${new Date(task.dueDate) < new Date() ? 'text-red-500' : 'text-gray-400 dark:text-gray-500'}`}>
                           {format(new Date(task.dueDate), 'MMM d')}
                         </div>
                       )}
@@ -351,27 +351,27 @@ export default function DashboardPage() {
         </div>
 
         {/* Pipeline Stage Breakdown */}
-        <div className="bg-white rounded-xl border border-gray-200 p-6">
-          <h2 className="font-bold text-gray-900 mb-4">Pipeline Breakdown</h2>
+        <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-6">
+          <h2 className="font-bold text-gray-900 dark:text-gray-100 mb-4">Pipeline Breakdown</h2>
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
             {[
-              { label: 'Attempting Contact', key: 'ATTEMPTING_CONTACT', color: 'bg-gray-200' },
-              { label: 'In Qualification',   key: 'IN_QUALIFICATION',   color: 'bg-blue-200' },
-              { label: 'In Negotiation',     key: 'IN_NEGOTIATION',     color: 'bg-yellow-200' },
-              { label: 'Under Contract',     key: 'UNDER_CONTRACT',     color: 'bg-purple-200' },
-              { label: 'Closed Won',         key: 'CLOSED_WON',         color: 'bg-green-200' },
+              { label: 'Attempting Contact', key: 'ATTEMPTING_CONTACT', color: 'bg-gray-200 dark:bg-gray-700' },
+              { label: 'In Qualification',   key: 'IN_QUALIFICATION',   color: 'bg-blue-200 dark:bg-blue-800' },
+              { label: 'In Negotiation',     key: 'IN_NEGOTIATION',     color: 'bg-yellow-200 dark:bg-yellow-800' },
+              { label: 'Under Contract',     key: 'UNDER_CONTRACT',     color: 'bg-purple-200 dark:bg-purple-800' },
+              { label: 'Closed Won',         key: 'CLOSED_WON',         color: 'bg-green-200 dark:bg-green-800' },
             ].map(({ label, key, color }) => {
               const count = stats?.leadsByStatus?.[key] || 0;
               const total = Object.values(stats?.leadsByStatus || {}).reduce((a: number, b) => a + (b as number), 0) as number;
               const pct = total > 0 ? Math.round((count / total) * 100) : 0;
               return (
                 <Link key={key} href={`/leads?status=${key}`} className="group">
-                  <div className="text-2xl font-bold text-gray-900">{count}</div>
-                  <div className="text-xs text-gray-500 mb-2">{label}</div>
-                  <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                  <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">{count}</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400 mb-2">{label}</div>
+                  <div className="h-1.5 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
                     <div className={`h-full ${color} rounded-full transition-all`} style={{ width: `${pct}%` }} />
                   </div>
-                  <div className="text-xs text-gray-400 mt-1">{pct}%</div>
+                  <div className="text-xs text-gray-400 dark:text-gray-500 mt-1">{pct}%</div>
                 </Link>
               );
             })}
@@ -380,14 +380,14 @@ export default function DashboardPage() {
 
         {/* Lead Source Breakdown */}
         {stats?.leadsBySource && Object.keys(stats.leadsBySource).length > 0 && (
-          <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <h2 className="font-bold text-gray-900 mb-4">Lead Sources</h2>
+          <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-6">
+            <h2 className="font-bold text-gray-900 dark:text-gray-100 mb-4">Lead Sources</h2>
             <div className="flex flex-wrap gap-4">
               {Object.entries(stats.leadsBySource).map(([source, count]) => (
                 <div key={source} className="flex items-center gap-2">
                   <div className="w-2 h-2 rounded-full bg-blue-400" />
-                  <span className="text-sm font-medium text-gray-700">{source.replace(/_/g, ' ')}</span>
-                  <span className="text-sm text-gray-400">{count as number}</span>
+                  <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{source.replace(/_/g, ' ')}</span>
+                  <span className="text-sm text-gray-400 dark:text-gray-500">{count as number}</span>
                 </div>
               ))}
             </div>

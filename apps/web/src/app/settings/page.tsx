@@ -78,10 +78,10 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
       <AppNav />
       <main className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <h2 className="text-xl font-bold text-gray-900 mb-6">Settings</h2>
+        <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-6">Settings</h2>
 
         {/* AI Prompts Link */}
         <Link
@@ -89,8 +89,8 @@ export default function SettingsPage() {
           className="card max-w-2xl mb-6 flex items-center justify-between hover:shadow-md transition-shadow"
         >
           <div>
-            <h3 className="text-lg font-semibold text-gray-900">AI Prompt Templates</h3>
-            <p className="text-sm text-gray-600 mt-1">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">AI Prompt Templates</h3>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
               Manage the prompts that control how AI generates messages for different scenarios.
             </p>
           </div>
@@ -103,8 +103,8 @@ export default function SettingsPage() {
           className="card max-w-2xl mb-6 flex items-center justify-between hover:shadow-md transition-shadow"
         >
           <div>
-            <h3 className="text-lg font-semibold text-gray-900">Lead Management</h3>
-            <p className="text-sm text-gray-600 mt-1">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Lead Management</h3>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
               Bulk delete leads, view stats by status/source/band, and clean up demo data.
             </p>
           </div>
@@ -113,17 +113,17 @@ export default function SettingsPage() {
 
         {/* Drip Sequence Card */}
         <div className="card max-w-2xl">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Drip Sequence</h3>
-          <p className="text-sm text-gray-600 mb-6">
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Drip Sequence</h3>
+          <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
             Configure timing and retry behavior for automated CAMP question sequences.
           </p>
 
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 Initial Delay (seconds)
               </label>
-              <p className="text-xs text-gray-500 mb-1">
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">
                 How long to wait after a new lead arrives before sending the first message.
               </p>
               <input
@@ -136,10 +136,10 @@ export default function SettingsPage() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 Next Question Delay (seconds)
               </label>
-              <p className="text-xs text-gray-500 mb-1">
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">
                 How long to wait after a seller replies before asking the next question.
               </p>
               <input
@@ -152,10 +152,10 @@ export default function SettingsPage() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 Retry Delay (hours)
               </label>
-              <p className="text-xs text-gray-500 mb-1">
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">
                 How long to wait with no reply before retrying the same question.
               </p>
               <input
@@ -169,10 +169,10 @@ export default function SettingsPage() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 Max Retries
               </label>
-              <p className="text-xs text-gray-500 mb-1">
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">
                 Maximum number of retry attempts before giving up on a non-responsive seller.
               </p>
               <input
@@ -204,8 +204,8 @@ export default function SettingsPage() {
 
         {/* AI Outreach Card */}
         <div className="card max-w-2xl mt-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-1">AI Outreach</h3>
-          <p className="text-sm text-gray-600 mb-5">
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-1">AI Outreach</h3>
+          <p className="text-sm text-gray-600 dark:text-gray-400 mb-5">
             Control whether AI automatically contacts new leads. Turn both off to receive leads without any outreach firing.
             <span className="block mt-1 text-amber-600 font-medium">
               ⚠️ Keep both OFF until you&apos;re ready — only test numbers will receive messages while TEST_MODE is active.
@@ -213,15 +213,15 @@ export default function SettingsPage() {
           </p>
 
           {/* AI SMS Toggle */}
-          <div className="flex items-start justify-between py-4 border-b border-gray-100">
+          <div className="flex items-start justify-between py-4 border-b border-gray-100 dark:border-gray-800">
             <div className="flex-1 mr-6">
               <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-gray-900">AI Text Messages (SMS)</span>
-                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${aiSmsEnabled ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                <span className="text-sm font-medium text-gray-900 dark:text-gray-100">AI Text Messages (SMS)</span>
+                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${aiSmsEnabled ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400'}`}>
                   {aiSmsEnabled ? 'ON' : 'OFF'}
                 </span>
               </div>
-              <p className="text-xs text-gray-500 mt-1">
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                 When a new lead arrives, AI sends the first text and handles the CAMP qualification conversation via SmrtPhone.
               </p>
             </div>
@@ -241,7 +241,7 @@ export default function SettingsPage() {
                 }
               }}
               className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${
-                aiSmsEnabled ? 'bg-green-500' : 'bg-gray-300'
+                aiSmsEnabled ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'
               } ${togglingAiSms ? 'opacity-50' : ''}`}
             >
               <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${aiSmsEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
@@ -249,15 +249,15 @@ export default function SettingsPage() {
           </div>
 
           {/* AI Call Toggle */}
-          <div className="flex items-start justify-between py-4 border-b border-gray-100">
+          <div className="flex items-start justify-between py-4 border-b border-gray-100 dark:border-gray-800">
             <div className="flex-1 mr-6">
               <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-gray-900">AI Phone Calls (Vapi)</span>
-                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${aiCallEnabled ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                <span className="text-sm font-medium text-gray-900 dark:text-gray-100">AI Phone Calls (Vapi)</span>
+                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${aiCallEnabled ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400'}`}>
                   {aiCallEnabled ? 'ON' : 'OFF'}
                 </span>
               </div>
-              <p className="text-xs text-gray-500 mt-1">
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                 After the call delay below, &ldquo;Alex&rdquo; calls the seller to gather CAMP details. Call results sync back to the lead record automatically.
               </p>
             </div>
@@ -277,7 +277,7 @@ export default function SettingsPage() {
                 }
               }}
               className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${
-                aiCallEnabled ? 'bg-green-500' : 'bg-gray-300'
+                aiCallEnabled ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'
               } ${togglingAiCall ? 'opacity-50' : ''}`}
             >
               <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${aiCallEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
@@ -286,10 +286,10 @@ export default function SettingsPage() {
 
           {/* Call Delay */}
           <div className="pt-4">
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
               Call Delay (seconds)
             </label>
-            <p className="text-xs text-gray-500 mb-2">
+            <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
               How long after a new lead arrives before the AI call fires. Default is 120s (2 minutes) — gives the seller time to see your text first.
             </p>
             <div className="flex items-center gap-3">
@@ -300,7 +300,7 @@ export default function SettingsPage() {
                 onChange={(e) => setCallDelaySec(Number(e.target.value))}
                 className="input w-32"
               />
-              <span className="text-sm text-gray-500">seconds ({Math.round(callDelaySec / 60 * 10) / 10} min)</span>
+              <span className="text-sm text-gray-500 dark:text-gray-400">seconds ({Math.round(callDelaySec / 60 * 10) / 10} min)</span>
             </div>
             <div className="mt-3">
               <button onClick={handleSave} disabled={saving} className="btn btn-secondary text-sm">
@@ -312,8 +312,8 @@ export default function SettingsPage() {
 
         {/* Demo Mode Card */}
         <div className="card max-w-2xl mt-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Demo Mode</h3>
-          <p className="text-sm text-gray-600 mb-4">
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Demo Mode</h3>
+          <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
             Demo mode overrides all delays to ~2 seconds so you can test the full drip sequence without waiting.
             Messages still simulate when Twilio isn&apos;t configured.
           </p>
@@ -335,7 +335,7 @@ export default function SettingsPage() {
                 }
               }}
               className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                demoMode ? 'bg-primary-600' : 'bg-gray-300'
+                demoMode ? 'bg-primary-600' : 'bg-gray-300 dark:bg-gray-600'
               } ${togglingDemo ? 'opacity-50' : ''}`}
             >
               <span
@@ -344,7 +344,7 @@ export default function SettingsPage() {
                 }`}
               />
             </button>
-            <span className="text-sm font-medium text-gray-700">
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
               {togglingDemo ? 'Updating...' : 'Enable Demo Mode'}
             </span>
           </div>

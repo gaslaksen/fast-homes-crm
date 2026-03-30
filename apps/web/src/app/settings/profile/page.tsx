@@ -81,10 +81,10 @@ function ProfilePageInner() {
 
   if (!profile) {
     return (
-      <div className="min-h-screen bg-gray-50">
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
         <AppNav />
         <div className="flex items-center justify-center py-20">
-          <div className="text-gray-400 text-sm animate-pulse">Loading profile...</div>
+          <div className="text-gray-400 dark:text-gray-500 text-sm animate-pulse">Loading profile...</div>
         </div>
       </div>
     );
@@ -94,14 +94,14 @@ function ProfilePageInner() {
   const fullName = `${firstName} ${lastName}`.trim();
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
       <AppNav />
       <main className="max-w-xl mx-auto px-6 py-10 space-y-8">
-        <h1 className="text-2xl font-bold text-gray-900">Profile</h1>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Profile</h1>
 
         {/* Avatar section */}
-        <div className="bg-white rounded-xl border border-gray-200 p-6">
-          <h2 className="font-semibold text-gray-900 mb-4">Profile Photo</h2>
+        <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-6">
+          <h2 className="font-semibold text-gray-900 dark:text-gray-100 mb-4">Profile Photo</h2>
           <div className="flex items-center gap-5">
             <Avatar
               name={fullName || 'User'}
@@ -125,7 +125,7 @@ function ProfilePageInner() {
               {profile.avatarUrl && (
                 <button
                   onClick={handleRemovePhoto}
-                  className="block text-sm text-gray-400 hover:text-red-500"
+                  className="block text-sm text-gray-400 dark:text-gray-500 hover:text-red-500"
                 >
                   Remove photo
                 </button>
@@ -135,35 +135,35 @@ function ProfilePageInner() {
         </div>
 
         {/* Name form */}
-        <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
-          <h2 className="font-semibold text-gray-900">Details</h2>
+        <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-6 space-y-4">
+          <h2 className="font-semibold text-gray-900 dark:text-gray-100">Details</h2>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">First name</label>
+              <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">First name</label>
               <input
                 type="text"
                 value={firstName}
                 onChange={e => setFirstName(e.target.value)}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:text-gray-100"
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Last name</label>
+              <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Last name</label>
               <input
                 type="text"
                 value={lastName}
                 onChange={e => setLastName(e.target.value)}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:text-gray-100"
               />
             </div>
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Email</label>
+            <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Email</label>
             <input
               type="email"
               value={profile.email}
               disabled
-              className="w-full border border-gray-100 rounded-lg px-3 py-2 text-sm text-gray-400 bg-gray-50"
+              className="w-full border border-gray-100 dark:border-gray-800 rounded-lg px-3 py-2 text-sm text-gray-400 dark:text-gray-500 bg-gray-50 dark:bg-gray-950"
             />
           </div>
           <div className="flex items-center gap-3 pt-2">
@@ -179,25 +179,25 @@ function ProfilePageInner() {
         </div>
 
         {/* Gmail Integration */}
-        <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
-          <h2 className="font-semibold text-gray-900">Gmail Integration</h2>
+        <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-6 space-y-4">
+          <h2 className="font-semibold text-gray-900 dark:text-gray-100">Gmail Integration</h2>
           {gmailParam === 'connected' && (
-            <div className="px-3 py-2 rounded-lg bg-green-50 border border-green-200 text-sm text-green-700">
+            <div className="px-3 py-2 rounded-lg bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 text-sm text-green-700 dark:text-green-400">
               Gmail connected successfully!
             </div>
           )}
           {gmailParam === 'error' && (
-            <div className="px-3 py-2 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700">
+            <div className="px-3 py-2 rounded-lg bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 text-sm text-red-700 dark:text-red-400">
               Failed to connect Gmail. Please try again.
             </div>
           )}
           {gmailStatus?.connected ? (
             <div className="space-y-3">
               <div className="flex items-center gap-2">
-                <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-green-100 text-green-800 text-xs font-medium">
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-400 text-xs font-medium">
                   Connected
                 </span>
-                <span className="text-sm text-gray-700">{gmailStatus.email}</span>
+                <span className="text-sm text-gray-700 dark:text-gray-300">{gmailStatus.email}</span>
               </div>
               <div className="flex items-center gap-2">
                 <button
@@ -231,7 +231,7 @@ function ProfilePageInner() {
                     }
                   }}
                   disabled={disconnecting}
-                  className="px-3 py-1.5 border border-gray-200 text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                  className="px-3 py-1.5 border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 text-sm font-medium rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 transition-colors"
                 >
                   {disconnecting ? 'Disconnecting...' : 'Disconnect'}
                 </button>
@@ -239,7 +239,7 @@ function ProfilePageInner() {
             </div>
           ) : (
             <div className="space-y-3">
-              <p className="text-sm text-gray-500">
+              <p className="text-sm text-gray-500 dark:text-gray-400">
                 Connect your Gmail account to send and receive emails directly from the CRM.
               </p>
               <button
@@ -261,7 +261,7 @@ function ProfilePageInner() {
 
 export default function ProfilePage() {
   return (
-    <Suspense fallback={<div className="min-h-screen bg-gray-50 flex items-center justify-center"><div className="text-gray-400 text-sm animate-pulse">Loading profile...</div></div>}>
+    <Suspense fallback={<div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center"><div className="text-gray-400 dark:text-gray-500 text-sm animate-pulse">Loading profile...</div></div>}>
       <ProfilePageInner />
     </Suspense>
   );

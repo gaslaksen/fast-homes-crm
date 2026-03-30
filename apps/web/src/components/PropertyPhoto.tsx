@@ -5,10 +5,10 @@ import { useState } from 'react';
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
 const BAND_COLORS: Record<string, { bg: string; icon: string }> = {
-  STRIKE_ZONE: { bg: 'bg-red-100', icon: 'text-red-400' },
-  HOT: { bg: 'bg-orange-100', icon: 'text-orange-400' },
-  WORKABLE: { bg: 'bg-yellow-100', icon: 'text-yellow-400' },
-  DEAD_COLD: { bg: 'bg-gray-100', icon: 'text-gray-400' },
+  STRIKE_ZONE: { bg: 'bg-red-100 dark:bg-red-900/30', icon: 'text-red-400' },
+  HOT: { bg: 'bg-orange-100 dark:bg-orange-900/30', icon: 'text-orange-400' },
+  WORKABLE: { bg: 'bg-yellow-100 dark:bg-yellow-900/30', icon: 'text-yellow-400' },
+  DEAD_COLD: { bg: 'bg-gray-100 dark:bg-gray-800', icon: 'text-gray-400 dark:text-gray-500' },
 };
 
 const SIZES = {

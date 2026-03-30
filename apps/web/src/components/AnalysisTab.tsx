@@ -54,7 +54,7 @@ export default function AnalysisTab({
         <div className="card text-center py-12">
           <div className="text-4xl mb-4">🤖</div>
           <h3 className="text-xl font-bold mb-2">AI Lead Analysis</h3>
-          <p className="text-gray-600 mb-6 max-w-md mx-auto">
+          <p className="text-gray-600 dark:text-gray-400 mb-6 max-w-md mx-auto">
             Get an AI-powered assessment of this deal including data gaps, deal quality rating, recommended actions, and red flags.
           </p>
           <button
@@ -71,7 +71,7 @@ export default function AnalysisTab({
         <div className="card text-center py-12">
           <div className="text-4xl mb-4 animate-pulse">🤖</div>
           <h3 className="text-lg font-bold mb-2">Analyzing Lead...</h3>
-          <p className="text-gray-500 text-sm">Claude is reviewing property data, CAMP scores, comps, and activity history...</p>
+          <p className="text-gray-500 dark:text-gray-400 text-sm">Claude is reviewing property data, CAMP scores, comps, and activity history...</p>
         </div>
       )}
 
@@ -81,7 +81,7 @@ export default function AnalysisTab({
           {/* Top Row: Deal Rating + Worthiness */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="card text-center">
-              <h3 className="text-sm font-medium text-gray-500 mb-2">Deal Rating</h3>
+              <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">Deal Rating</h3>
               <div className={`text-5xl font-bold mb-1 ${
                 aiAnalysis.dealRating >= 7 ? 'text-green-600' :
                 aiAnalysis.dealRating >= 4 ? 'text-yellow-600' :
@@ -89,11 +89,11 @@ export default function AnalysisTab({
               }`}>
                 {aiAnalysis.dealRating}/10
               </div>
-              <p className="text-xs text-gray-500 mt-2">{aiAnalysis.dealRatingExplanation}</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">{aiAnalysis.dealRatingExplanation}</p>
             </div>
 
             <div className="card text-center">
-              <h3 className="text-sm font-medium text-gray-500 mb-2">Deal Worthiness</h3>
+              <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">Deal Worthiness</h3>
               <div className={`text-3xl font-bold mb-1 ${
                 aiAnalysis.dealWorthiness === 'YES' ? 'text-green-600' :
                 aiAnalysis.dealWorthiness === 'NEED_MORE_DATA' ? 'text-yellow-600' :
@@ -101,21 +101,21 @@ export default function AnalysisTab({
               }`}>
                 {aiAnalysis.dealWorthiness === 'NEED_MORE_DATA' ? 'NEED DATA' : aiAnalysis.dealWorthiness}
               </div>
-              <p className="text-xs text-gray-500 mt-2">{aiAnalysis.worthinessReason}</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">{aiAnalysis.worthinessReason}</p>
             </div>
 
             <div className="card text-center">
-              <h3 className="text-sm font-medium text-gray-500 mb-2">Confidence</h3>
+              <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">Confidence</h3>
               <div className="text-5xl font-bold text-primary-600 mb-1">
                 {aiAnalysis.confidenceLevel}%
               </div>
               <div className="mt-2">
-                <span className="text-xs text-gray-500">Profit Potential: </span>
+                <span className="text-xs text-gray-500 dark:text-gray-400">Profit Potential: </span>
                 <span className={`text-xs font-bold ${
                   aiAnalysis.estimatedProfitPotential === 'HIGH' ? 'text-green-600' :
                   aiAnalysis.estimatedProfitPotential === 'MEDIUM' ? 'text-yellow-600' :
                   aiAnalysis.estimatedProfitPotential === 'LOW' ? 'text-red-600' :
-                  'text-gray-500'
+                  'text-gray-500 dark:text-gray-400'
                 }`}>
                   {aiAnalysis.estimatedProfitPotential}
                 </span>
@@ -143,10 +143,10 @@ export default function AnalysisTab({
                 <ol className="space-y-2">
                   {aiAnalysis.dataGaps.map((gap: string, i: number) => (
                     <li key={i} className="flex items-start gap-2">
-                      <span className="flex-shrink-0 w-5 h-5 rounded-full bg-red-100 text-red-600 text-xs font-bold flex items-center justify-center mt-0.5">
+                      <span className="flex-shrink-0 w-5 h-5 rounded-full bg-red-100 dark:bg-red-900/30 text-red-600 text-xs font-bold flex items-center justify-center mt-0.5">
                         {i + 1}
                       </span>
-                      <span className="text-sm text-gray-700">{gap}</span>
+                      <span className="text-sm text-gray-700 dark:text-gray-300">{gap}</span>
                     </li>
                   ))}
                 </ol>
@@ -163,7 +163,7 @@ export default function AnalysisTab({
                     <span className="flex-shrink-0 w-5 h-5 rounded-full bg-primary-100 text-primary-600 text-xs font-bold flex items-center justify-center mt-0.5">
                       {i + 1}
                     </span>
-                    <span className="text-sm text-gray-700">{action}</span>
+                    <span className="text-sm text-gray-700 dark:text-gray-300">{action}</span>
                   </li>
                 ))}
               </ol>
@@ -172,13 +172,13 @@ export default function AnalysisTab({
 
           {/* Red Flags */}
           {aiAnalysis.redFlags?.length > 0 && (
-            <div className="card border-2 border-red-200 bg-red-50">
-              <h3 className="text-lg font-bold text-red-800 mb-3">Red Flags</h3>
+            <div className="card border-2 border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950">
+              <h3 className="text-lg font-bold text-red-800 dark:text-red-400 mb-3">Red Flags</h3>
               <ul className="space-y-2">
                 {aiAnalysis.redFlags.map((flag: string, i: number) => (
                   <li key={i} className="flex items-start gap-2">
                     <span className="text-red-500 mt-0.5">&#x26A0;</span>
-                    <span className="text-sm text-red-700">{flag}</span>
+                    <span className="text-sm text-red-700 dark:text-red-400">{flag}</span>
                   </li>
                 ))}
               </ul>
