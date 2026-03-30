@@ -147,7 +147,7 @@ function StatusBadge({ status }: { status: string }) {
     <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
       closed ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' :
       dead   ? 'bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500'   :
-               'bg-primary-50 dark:bg-primary-950 text-primary-600 dark:text-primary-400'
+               'bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 border border-primary-200 dark:border-primary-800'
     }`}>
       {STATUS_LABELS[status] || status.replace(/_/g, ' ')}
     </span>
