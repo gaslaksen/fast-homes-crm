@@ -555,8 +555,10 @@ export class AttomService {
     if (!lead.lotSize   && e.lotSizeFromAttom) update.lotSize   = e.lotSizeFromAttom;
     if (!lead.latitude  && e.latitude)  update.latitude  = e.latitude;
     if (!lead.longitude && e.longitude) update.longitude = e.longitude;
-    if (!lead.lastSaleDate  && e.lastSaleDateFromAttom)  update.lastSaleDate  = new Date(e.lastSaleDateFromAttom);
-    if (!lead.lastSalePrice && e.lastSalePriceFromAttom) update.lastSalePrice = e.lastSalePriceFromAttom;
+    // Always update last sale from ATTOM — the lead may have been imported with
+    // stale data, and ATTOM's expandedprofile reflects the most recent recording.
+    if (e.lastSaleDateFromAttom)  update.lastSaleDate  = new Date(e.lastSaleDateFromAttom);
+    if (e.lastSalePriceFromAttom) update.lastSalePrice = e.lastSalePriceFromAttom;
     if (lead.ownerOccupied === null || lead.ownerOccupied === undefined) {
       if (e.ownerOccupied !== undefined) update.ownerOccupied = e.ownerOccupied;
     }

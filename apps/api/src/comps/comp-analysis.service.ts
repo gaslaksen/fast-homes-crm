@@ -2107,14 +2107,26 @@ Use Midwest/rural Ohio pricing. Be specific about what you see — don't general
     const ppsfAnchoredValue = avgPpsf && sqft ? Math.round(avgPpsf * sqft) : null;
 
     // ── Seller purchase history ─────────────────────────────────────────────
-    const saleHistory = lead.attomSaleHistory as any[] | null;
-    const lastPurchaseDate = lead.lastSaleDate
-      ? new Date(lead.lastSaleDate)
-      : saleHistory?.[0]?.saleTransDate
-        ? new Date(saleHistory[0].saleTransDate)
+    // attomSaleHistory (from /saleshistory/detail) is the authoritative source
+    // — it's always refreshed on enrichment. lead.lastSaleDate/lastSalePrice
+    // may be stale (set once on import and never updated).
+    // Sort sale history newest-first so [0] is the most recent sale.
+    const rawSaleHistory = lead.attomSaleHistory as any[] | null;
+    const saleHistory = rawSaleHistory
+      ? [...rawSaleHistory].sort((a, b) => {
+          const da = a.saleTransDate ? new Date(a.saleTransDate).getTime() : 0;
+          const db = b.saleTransDate ? new Date(b.saleTransDate).getTime() : 0;
+          return db - da; // newest first
+        })
+      : null;
+    const mostRecentSale = saleHistory?.[0];
+    const lastPurchaseDate = mostRecentSale?.saleTransDate
+      ? new Date(mostRecentSale.saleTransDate)
+      : lead.lastSaleDate
+        ? new Date(lead.lastSaleDate)
         : null;
-    const lastPurchasePrice = lead.lastSalePrice
-      ?? saleHistory?.[0]?.saleAmt
+    const lastPurchasePrice = mostRecentSale?.saleAmt
+      ?? lead.lastSalePrice
       ?? null;
     const yearsSinceLastPurchase = lastPurchaseDate
       ? Math.round((now - lastPurchaseDate.getTime()) / (365.25 * 24 * 60 * 60 * 1000) * 10) / 10
