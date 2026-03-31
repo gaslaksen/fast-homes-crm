@@ -159,10 +159,10 @@ You will be asked to summarize key findings. Be ready to report:
         ...(customerName ? { name: customerName } : {}),
       },
       assistant: {
-        name: 'Alex - Fast Homes Acquisitions',
+        name: 'Alex - Deal Core Acquisitions',
         server: {
           url: this.config.get<string>('VAPI_WEBHOOK_URL') ||
-            'https://fast-homesapi-production.up.railway.app/calls/vapi-webhook',
+            'https://api.mydealcore.com/calls/vapi-webhook',
         },
         model: {
           provider: 'openai',
