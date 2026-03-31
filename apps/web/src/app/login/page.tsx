@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { authAPI } from '@/lib/api';
 import Logo from '@/components/Logo';
 
@@ -70,6 +71,12 @@ export default function LoginPage() {
                 placeholder="••••••••"
                 required
               />
+            </div>
+
+            <div className="flex justify-end">
+              <Link href="/forgot-password" className="text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300">
+                Forgot password?
+              </Link>
             </div>
 
             <button

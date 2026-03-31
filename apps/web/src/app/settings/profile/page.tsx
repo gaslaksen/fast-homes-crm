@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { settingsAPI, gmailAPI } from '@/lib/api';
+import { settingsAPI, gmailAPI, authAPI } from '@/lib/api';
 import AppNav from '@/components/AppNav';
 import Avatar from '@/components/Avatar';
 
@@ -16,6 +16,12 @@ function ProfilePageInner() {
   const [gmailStatus, setGmailStatus] = useState<{ connected: boolean; email?: string } | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordSaving, setPasswordSaving] = useState(false);
+  const [passwordSaved, setPasswordSaved] = useState(false);
+  const [passwordError, setPasswordError] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
   const searchParams = useSearchParams();
 
@@ -44,6 +50,32 @@ function ProfilePageInner() {
       alert('Failed to save profile');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleChangePassword = async () => {
+    setPasswordError('');
+    setPasswordSaved(false);
+    if (newPassword.length < 6) {
+      setPasswordError('New password must be at least 6 characters.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordError('Passwords do not match.');
+      return;
+    }
+    setPasswordSaving(true);
+    try {
+      await authAPI.changePassword({ currentPassword, newPassword });
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setPasswordSaved(true);
+      setTimeout(() => setPasswordSaved(false), 3000);
+    } catch (err: any) {
+      setPasswordError(err.response?.data?.message || 'Failed to change password');
+    } finally {
+      setPasswordSaving(false);
     }
   };
 
@@ -175,6 +207,56 @@ function ProfilePageInner() {
               {saving ? 'Saving...' : 'Save changes'}
             </button>
             {saved && <span className="text-sm text-green-600 font-medium">Saved</span>}
+          </div>
+        </div>
+
+        {/* Change Password */}
+        <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-6 space-y-4">
+          <h2 className="font-semibold text-gray-900 dark:text-gray-100">Change Password</h2>
+          {passwordError && (
+            <div className="bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm px-4 py-3 rounded-lg">
+              {passwordError}
+            </div>
+          )}
+          <div>
+            <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Current password</label>
+            <input
+              type="password"
+              value={currentPassword}
+              onChange={e => setCurrentPassword(e.target.value)}
+              className="w-full border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:text-gray-100"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">New password</label>
+              <input
+                type="password"
+                value={newPassword}
+                onChange={e => setNewPassword(e.target.value)}
+                className="w-full border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:text-gray-100"
+                placeholder="At least 6 characters"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Confirm password</label>
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={e => setConfirmPassword(e.target.value)}
+                className="w-full border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:text-gray-100"
+              />
+            </div>
+          </div>
+          <div className="flex items-center gap-3 pt-2">
+            <button
+              onClick={handleChangePassword}
+              disabled={passwordSaving || !currentPassword || !newPassword || !confirmPassword}
+              className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+            >
+              {passwordSaving ? 'Updating...' : 'Update password'}
+            </button>
+            {passwordSaved && <span className="text-sm text-green-600 font-medium">Password updated</span>}
           </div>
         </div>
 

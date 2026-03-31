@@ -42,6 +42,10 @@ export const authAPI = {
   getTeam: () => api.get('/auth/team'),
   invite: (data: { email: string; firstName: string; lastName: string; role?: string; tempPassword: string }) =>
     api.post('/auth/invite', data),
+  forgotPassword: (email: string) =>
+    api.post('/auth/forgot-password', { email }),
+  resetPasswordWithToken: (token: string, newPassword: string) =>
+    api.post('/auth/reset-password', { token, newPassword }),
   changePassword: (data: { currentPassword: string; newPassword: string }) =>
     api.patch('/auth/password', data),
   resetPassword: (userId: string, newPassword: string) =>

@@ -29,6 +29,23 @@ export class AuthController {
     }
   }
 
+  @Post('forgot-password')
+  async forgotPassword(@Body() body: { email: string }) {
+    return this.authService.forgotPassword(body.email);
+  }
+
+  @Post('reset-password')
+  async resetPasswordWithToken(@Body() body: { token: string; newPassword: string }) {
+    if (!body.newPassword || body.newPassword.length < 6) {
+      throw new UnauthorizedException('Password must be at least 6 characters');
+    }
+    try {
+      return await this.authService.resetPasswordWithToken(body.token, body.newPassword);
+    } catch (err: any) {
+      throw new UnauthorizedException(err.message);
+    }
+  }
+
   @Post('register')
   async register(@Body() body: {
     email: string; password: string; firstName: string; lastName: string; organizationId?: string;
