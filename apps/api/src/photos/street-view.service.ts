@@ -94,14 +94,23 @@ export class StreetViewService {
 
     // Update lead photos — dedupe any existing streetview entry
     const currentPhotos = (lead.photos as any[]) || [];
+    const oldSvPhoto = currentPhotos.find((p: any) => p.source === 'streetview');
     const withoutOldSv = currentPhotos.filter((p: any) => p.source !== 'streetview');
     const updatedPhotos = [...withoutOldSv, photo];
+
+    // Update primaryPhoto if it's unset, was the old streetview URL, or is a
+    // broken Google API URL that the browser can't load
+    const oldPrimary = lead.primaryPhoto;
+    const shouldUpdatePrimary =
+      !oldPrimary ||
+      (oldSvPhoto && oldPrimary === oldSvPhoto.url) ||
+      (oldPrimary.includes('maps.googleapis.com/maps/api/streetview'));
 
     await this.prisma.lead.update({
       where: { id: leadId },
       data: {
         photos: updatedPhotos,
-        primaryPhoto: lead.primaryPhoto || photo.url,
+        primaryPhoto: shouldUpdatePrimary ? photo.url : oldPrimary,
       },
     });
 
