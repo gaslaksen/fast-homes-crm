@@ -1246,7 +1246,7 @@ export default function CompsAnalysisPage() {
                       {parsed.wholesalerNote && (
                         <div className="bg-indigo-50 dark:bg-indigo-950 border border-indigo-200 dark:border-indigo-800 rounded-xl p-4">
                           <div className="text-xs font-semibold text-indigo-700 dark:text-indigo-400 uppercase tracking-wide mb-1">💡 Wholesaler Take</div>
-                          <p className="text-sm text-indigo-900 leading-relaxed">{parsed.wholesalerNote}</p>
+                          <p className="text-sm text-indigo-900 dark:text-indigo-200 leading-relaxed">{parsed.wholesalerNote}</p>
                         </div>
                       )}
                       {/* Method */}
@@ -1263,7 +1263,7 @@ export default function CompsAnalysisPage() {
                             <div className="text-xs font-semibold text-blue-700 dark:text-blue-400 uppercase tracking-wide mb-2">🔑 Key Factors</div>
                             <ul className="space-y-1.5">
                               {parsed.keyFactors.map((f: string, i: number) => (
-                                <li key={i} className="text-sm text-blue-900 flex gap-2">
+                                <li key={i} className="text-sm text-blue-900 dark:text-blue-200 flex gap-2">
                                   <span className="text-blue-400 shrink-0 mt-0.5">•</span>
                                   <span>{f}</span>
                                 </li>
@@ -1277,7 +1277,7 @@ export default function CompsAnalysisPage() {
                             <div className="text-xs font-semibold text-red-700 dark:text-red-400 uppercase tracking-wide mb-2">⚠️ Risks</div>
                             <ul className="space-y-1.5">
                               {parsed.risks.map((r: string, i: number) => (
-                                <li key={i} className="text-sm text-red-900 flex gap-2">
+                                <li key={i} className="text-sm text-red-900 dark:text-red-200 flex gap-2">
                                   <span className="text-red-400 shrink-0 mt-0.5">•</span>
                                   <span>{r}</span>
                                 </li>
@@ -1295,7 +1295,7 @@ export default function CompsAnalysisPage() {
                   <div className="prose prose-sm max-w-none text-gray-800 dark:text-gray-200 bg-indigo-50 dark:bg-indigo-950 rounded-lg p-4 text-sm leading-relaxed">
                     {raw.split('\n').map((line: string, i: number) => {
                       if (line.startsWith('**') && line.endsWith('**')) {
-                        return <p key={i} className="font-bold text-indigo-900 mt-3 mb-1">{line.replace(/\*\*/g, '')}</p>;
+                        return <p key={i} className="font-bold text-indigo-900 dark:text-indigo-200 mt-3 mb-1">{line.replace(/\*\*/g, '')}</p>;
                       }
                       return <p key={i} className={line === '' ? 'mb-2' : 'mb-0.5'}>{line}</p>;
                     })}
@@ -1335,21 +1335,21 @@ export default function CompsAnalysisPage() {
 
                 {/* ── PRIMARY: AI Estimated ARV hero card ── */}
                 {analysis.arvEstimate && (
-                  <div className="bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-300 dark:border-green-800 rounded-2xl p-6 mb-5">
+                  <div className="bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-950 dark:to-emerald-950 border-2 border-green-300 dark:border-green-800 rounded-2xl p-6 mb-5">
                     <div className="flex items-end justify-between flex-wrap gap-4">
                       <div>
                         <div className="text-xs font-semibold text-green-700 dark:text-green-400 uppercase tracking-wide mb-1">AI Estimated ARV</div>
                         <div className="text-5xl font-bold text-green-700 dark:text-green-400">${analysis.arvEstimate.toLocaleString()}</div>
-                        <div className="text-sm text-green-600 mt-2">
+                        <div className="text-sm text-green-600 dark:text-green-400 mt-2">
                           Weighted average of {selectedComps.length} AI-adjusted comp{selectedComps.length !== 1 ? 's' : ''}
                           {analysis.arvLow && analysis.arvHigh && (
-                            <span className="ml-2 text-green-500">
+                            <span className="ml-2 text-green-500 dark:text-green-400">
                               Range: ${analysis.arvLow.toLocaleString()} – ${analysis.arvHigh.toLocaleString()}
                             </span>
                           )}
                         </div>
                         {analysis.avgAdjustment ? (
-                          <div className={`text-xs mt-1 ${(analysis.avgAdjustment || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          <div className={`text-xs mt-1 ${(analysis.avgAdjustment || 0) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
                             {(analysis.avgAdjustment || 0) >= 0 ? '+' : ''}${(analysis.avgAdjustment || 0).toLocaleString()} avg AI adjustment per comp
                           </div>
                         ) : null}
@@ -1364,7 +1364,7 @@ export default function CompsAnalysisPage() {
                         />
                         {analysis.confidenceTier && (
                           <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${
-                            analysis.confidenceTier === 'High' ? 'bg-green-200 text-green-800 dark:text-green-400' :
+                            analysis.confidenceTier === 'High' ? 'bg-green-200 dark:bg-green-900/30 text-green-800 dark:text-green-400' :
                             analysis.confidenceTier === 'Medium' ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-400' :
                             'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'
                           }`}>
@@ -1403,11 +1403,11 @@ export default function CompsAnalysisPage() {
                   }
 
                   return (
-                    <div className="bg-gradient-to-r from-purple-50 to-indigo-50 border border-purple-200 dark:border-purple-800 rounded-2xl p-5 mb-5">
-                      <h3 className="text-sm font-bold text-purple-900 uppercase tracking-wide mb-4">Valuation Breakdown</h3>
+                    <div className="bg-gradient-to-r from-purple-50 to-indigo-50 dark:from-purple-950 dark:to-indigo-950 border border-purple-200 dark:border-purple-800 rounded-2xl p-5 mb-5">
+                      <h3 className="text-sm font-bold text-purple-900 dark:text-purple-200 uppercase tracking-wide mb-4">Valuation Breakdown</h3>
 
                       <div className="border-t border-purple-200 dark:border-purple-800">
-                        <div className="grid grid-cols-12 gap-2 py-2 text-xs font-semibold text-purple-600 uppercase tracking-wide border-b border-purple-100">
+                        <div className="grid grid-cols-12 gap-2 py-2 text-xs font-semibold text-purple-600 dark:text-purple-400 uppercase tracking-wide border-b border-purple-100 dark:border-purple-800">
                           <div className="col-span-6">Method</div>
                           <div className="col-span-4 text-right">Value</div>
                           <div className="col-span-2 text-right">Weight</div>
@@ -1418,17 +1418,17 @@ export default function CompsAnalysisPage() {
                           const weight = renormalized[key];
                           return (
                             <div key={key}>
-                              <div className="grid grid-cols-12 gap-2 py-2.5 border-b border-purple-50 items-center">
-                                <div className="col-span-6 text-sm text-purple-900 font-medium">{methodLabels[key]}</div>
+                              <div className="grid grid-cols-12 gap-2 py-2.5 border-b border-purple-50 dark:border-purple-900 items-center">
+                                <div className="col-span-6 text-sm text-purple-900 dark:text-purple-200 font-medium">{methodLabels[key]}</div>
                                 <div className="col-span-4 text-right text-sm font-semibold text-purple-800 dark:text-purple-400">
                                   {entry ? `$${Math.round(entry.value).toLocaleString()}` : <span className="text-purple-400 font-normal">— Not calculated</span>}
                                 </div>
-                                <div className="col-span-2 text-right text-xs text-purple-500">
+                                <div className="col-span-2 text-right text-xs text-purple-500 dark:text-purple-400">
                                   {entry ? `${Math.round(weight * 100)}%` : ''}
                                 </div>
                               </div>
                               {key === 'comps' && entry && (
-                                <div className="pb-2 border-b border-purple-50 pl-4 text-xs text-purple-500 space-y-0.5">
+                                <div className="pb-2 border-b border-purple-50 dark:border-purple-900 pl-4 text-xs text-purple-500 dark:text-purple-400 space-y-0.5">
                                   <div>
                                     avg $/sqft: <span className="font-semibold text-purple-700 dark:text-purple-400">${analysis.pricePerSqft || '—'}</span>
                                     {' · '}median: <span className="font-semibold text-purple-700 dark:text-purple-400">${(analysis as any).medianPricePerSqft || '—'}</span>
@@ -1441,7 +1441,7 @@ export default function CompsAnalysisPage() {
                                 </div>
                               )}
                               {key === 'income' && entry && analysis.marketRent && (
-                                <div className="pb-2 border-b border-purple-50 pl-4 text-xs text-purple-500">
+                                <div className="pb-2 border-b border-purple-50 dark:border-purple-900 pl-4 text-xs text-purple-500 dark:text-purple-400">
                                   ${(analysis.marketRent).toLocaleString()}/mo × 12 × GRM {analysis.grossRentMultiplier || 10}
                                   {(analysis as any).marketRentEstimated && (
                                     <span className="ml-1.5 px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 font-medium">estimated</span>
@@ -1457,13 +1457,13 @@ export default function CompsAnalysisPage() {
                       {analysis.triangulatedArv && (
                         <div className="mt-3 pt-3 border-t border-purple-200 dark:border-purple-800 flex items-center justify-between">
                           <div>
-                            <div className="text-xs text-purple-500 uppercase tracking-wide mb-0.5">Weighted Total</div>
+                            <div className="text-xs text-purple-500 dark:text-purple-400 uppercase tracking-wide mb-0.5">Weighted Total</div>
                             <div className="text-xl font-bold text-purple-700 dark:text-purple-400">${analysis.triangulatedArv.toLocaleString()}</div>
                           </div>
                           {analysis.riskAdjustedArv && analysis.riskAdjustedArv !== analysis.triangulatedArv && (
                             <div className="text-right text-xs text-purple-400">
                               <div>After risk adj</div>
-                              <div className="font-semibold text-green-600">${analysis.riskAdjustedArv.toLocaleString()}</div>
+                              <div className="font-semibold text-green-600 dark:text-green-400">${analysis.riskAdjustedArv.toLocaleString()}</div>
                             </div>
                           )}
                         </div>
@@ -1491,7 +1491,7 @@ export default function CompsAnalysisPage() {
                     <div className="flex items-center gap-2 mb-2">
                       <span className="text-xs font-semibold text-indigo-700 dark:text-indigo-400 uppercase tracking-wide">ATTOM Independent Valuation</span>
                       {attomData.attomAvmConfidence && (
-                        <span className="text-xs px-1.5 py-0.5 rounded bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600">{attomData.attomAvmConfidence}% confidence</span>
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400">{attomData.attomAvmConfidence}% confidence</span>
                       )}
                       {attomData.avmExcellentHigh && analysis?.arvEstimate && (() => {
                         const delta = Math.abs(attomData.avmExcellentHigh - analysis.arvEstimate) / analysis.arvEstimate;
@@ -1502,7 +1502,7 @@ export default function CompsAnalysisPage() {
                     </div>
                     <div className="grid grid-cols-3 gap-3 text-center">
                       <div className="bg-red-50 dark:bg-red-950 rounded-lg p-2 border border-red-200 dark:border-red-800">
-                        <div className="text-xs text-red-600 font-medium mb-0.5">AS-IS / Distressed</div>
+                        <div className="text-xs text-red-600 dark:text-red-400 font-medium mb-0.5">AS-IS / Distressed</div>
                         <div className="text-base font-bold text-red-700 dark:text-red-400">{attomData.avmPoorHigh ? `$${Math.round(attomData.avmPoorHigh).toLocaleString()}` : '—'}</div>
                       </div>
                       <div className="bg-yellow-50 dark:bg-yellow-950 rounded-lg p-2 border border-yellow-200 dark:border-yellow-800">
@@ -1551,15 +1551,15 @@ export default function CompsAnalysisPage() {
                     <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Valuation Methods</div>
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                       {analysis.arvEstimate && (
-                        <div className="bg-blue-50 dark:bg-blue-950 rounded-xl p-3 text-center border border-blue-100">
-                          <div className="text-xs text-blue-500 font-medium uppercase tracking-wide">Comps</div>
+                        <div className="bg-blue-50 dark:bg-blue-950 rounded-xl p-3 text-center border border-blue-100 dark:border-blue-800">
+                          <div className="text-xs text-blue-500 dark:text-blue-400 font-medium uppercase tracking-wide">Comps</div>
                           <div className="text-lg font-bold text-blue-700 dark:text-blue-400 mt-1">${analysis.arvEstimate.toLocaleString()}</div>
                           <div className="text-xs text-blue-400">Weight: 50%</div>
                         </div>
                       )}
                       {analysis.costApproachValue && (
-                        <div className="bg-purple-50 dark:bg-purple-950 rounded-xl p-3 text-center border border-purple-100">
-                          <div className="text-xs text-purple-500 font-medium uppercase tracking-wide">Cost Approach</div>
+                        <div className="bg-purple-50 dark:bg-purple-950 rounded-xl p-3 text-center border border-purple-100 dark:border-purple-800">
+                          <div className="text-xs text-purple-500 dark:text-purple-400 font-medium uppercase tracking-wide">Cost Approach</div>
                           <div className="text-lg font-bold text-purple-700 dark:text-purple-400 mt-1">${analysis.costApproachValue.toLocaleString()}</div>
                           {analysis.costApproachLandValue && (
                             <div className="text-xs text-purple-400">Land: ${analysis.costApproachLandValue.toLocaleString()}</div>
@@ -1567,8 +1567,8 @@ export default function CompsAnalysisPage() {
                         </div>
                       )}
                       {analysis.incomeApproachValue && (
-                        <div className="bg-green-50 dark:bg-green-950 rounded-xl p-3 text-center border border-green-100">
-                          <div className="text-xs text-green-500 font-medium uppercase tracking-wide">Income</div>
+                        <div className="bg-green-50 dark:bg-green-950 rounded-xl p-3 text-center border border-green-100 dark:border-green-800">
+                          <div className="text-xs text-green-500 dark:text-green-400 font-medium uppercase tracking-wide">Income</div>
                           <div className="text-lg font-bold text-green-700 dark:text-green-400 mt-1">${analysis.incomeApproachValue.toLocaleString()}</div>
                           {analysis.marketRent && (
                             <div className="text-xs text-green-400">${analysis.marketRent.toLocaleString()}/mo × {analysis.grossRentMultiplier} GRM</div>
