@@ -1,26 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import * as nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 
 @Injectable()
 export class MailerService {
-  private transporter: nodemailer.Transporter | null = null;
-
   constructor(private config: ConfigService) {}
 
-  private getTransporter(): nodemailer.Transporter {
-    if (!this.transporter) {
-      this.transporter = nodemailer.createTransport({
-        host: this.config.get('SMTP_HOST'),
-        port: Number(this.config.get('SMTP_PORT') || 587),
-        secure: Number(this.config.get('SMTP_PORT') || 587) === 465,
-        auth: {
-          user: this.config.get('SMTP_USER'),
-          pass: this.config.get('SMTP_PASS'),
-        },
-      });
-    }
-    return this.transporter;
+  private get resend() {
+    return new Resend(this.config.get('RESEND_API_KEY'));
   }
 
   async sendPasswordResetEmail(email: string, token: string, firstName: string) {
@@ -28,7 +15,7 @@ export class MailerService {
     const resetUrl = `${frontendUrl}/reset-password?token=${token}`;
     const from = this.config.get('SMTP_FROM') || 'noreply@mydealcore.com';
 
-    await this.getTransporter().sendMail({
+    await this.resend.emails.send({
       from,
       to: email,
       subject: 'Reset your Deal Core password',
