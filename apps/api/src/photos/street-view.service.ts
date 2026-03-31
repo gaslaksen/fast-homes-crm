@@ -2,11 +2,13 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import axios from 'axios';
+import sharp from 'sharp';
 import { randomUUID } from 'crypto';
 
 /**
- * Fetches Google Street View photos and stores the direct Google URL —
- * no local file download, no disk dependency, survives redeployments.
+ * Fetches Google Street View photos, downloads the image server-side,
+ * and stores as base64 data URIs — no API key exposed to the client,
+ * no referrer restrictions, survives redeployments.
  */
 @Injectable()
 export class StreetViewService {
@@ -54,15 +56,38 @@ export class StreetViewService {
       return null;
     }
 
-    // Store the direct Google URL — no download, no disk, survives redeployments
+    // Download the image server-side (avoids API key exposure + referrer issues)
     const encodedAddress = encodeURIComponent(address);
-    const photoUrl = `https://maps.googleapis.com/maps/api/streetview?size=800x600&location=${encodedAddress}&key=${this.apiKey}`;
-    const thumbUrl = `https://maps.googleapis.com/maps/api/streetview?size=200x150&location=${encodedAddress}&key=${this.apiKey}`;
+    const imageUrl = `https://maps.googleapis.com/maps/api/streetview?size=800x600&location=${encodedAddress}&key=${this.apiKey}`;
+
+    let imageBuffer: Buffer;
+    try {
+      const imageRes = await axios.get(imageUrl, {
+        responseType: 'arraybuffer',
+        timeout: 15000,
+      });
+      imageBuffer = Buffer.from(imageRes.data);
+      console.log(`📸 Street View image downloaded: ${Math.round(imageBuffer.length / 1024)}KB`);
+    } catch (err) {
+      console.log(`❌ Street View image download failed: ${err.message}`);
+      return null;
+    }
+
+    // Convert to optimized base64 data URIs
+    const mainBuffer = await sharp(imageBuffer)
+      .resize(800, null, { withoutEnlargement: true })
+      .jpeg({ quality: 80 })
+      .toBuffer();
+
+    const thumbBuffer = await sharp(imageBuffer)
+      .resize(400, null, { withoutEnlargement: true })
+      .jpeg({ quality: 70 })
+      .toBuffer();
 
     const photo = {
       id: randomUUID(),
-      url: photoUrl,
-      thumbnailUrl: thumbUrl,
+      url: `data:image/jpeg;base64,${mainBuffer.toString('base64')}`,
+      thumbnailUrl: `data:image/jpeg;base64,${thumbBuffer.toString('base64')}`,
       source: 'streetview',
       uploadedAt: new Date().toISOString(),
     };
@@ -90,12 +115,12 @@ export class StreetViewService {
       },
     });
 
-    console.log(`✅ Street View URL saved for lead ${leadId}`);
+    console.log(`✅ Street View photo saved for lead ${leadId} (${Math.round(mainBuffer.length / 1024)}KB)`);
     return photo;
   }
 
   /**
-   * Get a Street View URL for direct display
+   * Get a Street View URL for direct display (server-side use only)
    */
   getStreetViewUrl(address: string): string | null {
     if (!this.apiKey) return null;
