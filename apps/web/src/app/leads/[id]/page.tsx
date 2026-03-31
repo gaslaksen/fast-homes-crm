@@ -1390,14 +1390,14 @@ export default function LeadDetailPage() {
                       key={msg.id}
                       className={`p-3 rounded-lg ${
                         msg.direction === 'OUTBOUND'
-                          ? 'bg-primary-50 ml-12'
+                          ? 'bg-primary-50 dark:bg-primary-900 ml-12'
                           : 'bg-gray-100 dark:bg-gray-800 mr-12'
                       }`}
                     >
                       <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">
                         {msg.direction} • {format(new Date(msg.createdAt), 'MMM d, h:mm a')}
                       </div>
-                      <div className="text-sm">{msg.body}</div>
+                      <div className="text-sm text-gray-900 dark:text-gray-100">{msg.body}</div>
                     </div>
                   ))}
                 </div>
@@ -1573,14 +1573,14 @@ export default function LeadDetailPage() {
                             key={email.id}
                             className={`p-3 rounded-lg cursor-pointer transition-colors ${
                               email.direction === 'outbound'
-                                ? 'bg-primary-50 dark:bg-primary-950 ml-8 hover:bg-primary-100 dark:hover:bg-primary-900/30'
+                                ? 'bg-primary-50 dark:bg-primary-900 ml-8 hover:bg-primary-100 dark:hover:bg-primary-800'
                                 : 'bg-gray-100 dark:bg-gray-800 mr-8 hover:bg-gray-200 dark:hover:bg-gray-700'
                             }`}
                             onClick={() => setExpandedEmailId(expandedEmailId === email.id ? null : email.id)}
                           >
                             <div className="flex justify-between items-start mb-1">
                               <div className="text-xs text-gray-500 dark:text-gray-400">
-                                <span className={`font-medium ${email.direction === 'outbound' ? 'text-primary-700' : 'text-gray-700 dark:text-gray-300'}`}>
+                                <span className={`font-medium ${email.direction === 'outbound' ? 'text-primary-700 dark:text-primary-300' : 'text-gray-700 dark:text-gray-300'}`}>
                                   {email.direction === 'outbound' ? 'Sent' : 'Received'}
                                 </span>
                                 {' · '}
@@ -1590,7 +1590,7 @@ export default function LeadDetailPage() {
                                 {format(new Date(email.sentAt), 'MMM d, h:mm a')}
                               </span>
                             </div>
-                            <div className="text-sm font-medium text-gray-800 mb-1">{email.subject}</div>
+                            <div className="text-sm font-medium text-gray-800 dark:text-gray-100 mb-1">{email.subject}</div>
                             {expandedEmailId === email.id ? (
                               <div className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
                                 {email.bodyText}
@@ -1622,34 +1622,34 @@ export default function LeadDetailPage() {
                     onClick={() => setSelectedDraft(messageDrafts.direct)}
                     className={`w-full text-left p-3 rounded border ${
                       selectedDraft === messageDrafts.direct
-                        ? 'border-primary-500 bg-primary-50'
+                        ? 'border-primary-500 bg-primary-50 dark:bg-primary-900'
                         : 'border-gray-200 dark:border-gray-700'
                     }`}
                   >
-                    <div className="text-xs font-medium text-gray-500 mb-1">Direct</div>
-                    <div className="text-sm">{messageDrafts.direct}</div>
+                    <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Direct</div>
+                    <div className="text-sm text-gray-900 dark:text-gray-100">{messageDrafts.direct}</div>
                   </button>
                   <button
                     onClick={() => setSelectedDraft(messageDrafts.friendly)}
                     className={`w-full text-left p-3 rounded border ${
                       selectedDraft === messageDrafts.friendly
-                        ? 'border-primary-500 bg-primary-50'
+                        ? 'border-primary-500 bg-primary-50 dark:bg-primary-900'
                         : 'border-gray-200 dark:border-gray-700'
                     }`}
                   >
-                    <div className="text-xs font-medium text-gray-500 mb-1">Friendly</div>
-                    <div className="text-sm">{messageDrafts.friendly}</div>
+                    <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Friendly</div>
+                    <div className="text-sm text-gray-900 dark:text-gray-100">{messageDrafts.friendly}</div>
                   </button>
                   <button
                     onClick={() => setSelectedDraft(messageDrafts.professional)}
                     className={`w-full text-left p-3 rounded border ${
                       selectedDraft === messageDrafts.professional
-                        ? 'border-primary-500 bg-primary-50'
+                        ? 'border-primary-500 bg-primary-50 dark:bg-primary-900'
                         : 'border-gray-200 dark:border-gray-700'
                     }`}
                   >
-                    <div className="text-xs font-medium text-gray-500 mb-1">Professional</div>
-                    <div className="text-sm">{messageDrafts.professional}</div>
+                    <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Professional</div>
+                    <div className="text-sm text-gray-900 dark:text-gray-100">{messageDrafts.professional}</div>
                   </button>
                 </div>
                 <textarea
