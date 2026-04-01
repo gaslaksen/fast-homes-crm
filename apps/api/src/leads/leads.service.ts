@@ -1262,4 +1262,46 @@ export class LeadsService {
     await this.prisma.offer.delete({ where: { id: offerId, leadId } });
     return { deleted: true };
   }
+
+  /**
+   * Centralized touch recording — called by all outbound channels (SMS, email, calls).
+   * Updates lastTouchedAt, increments touchCount, optionally advances pipeline stage,
+   * and logs an Activity record.
+   */
+  async recordTouch(
+    leadId: string,
+    type: string,
+    opts?: {
+      userId?: string;
+      description?: string;
+      metadata?: Record<string, any>;
+    },
+  ): Promise<void> {
+    const lead = await this.prisma.lead.findUnique({
+      where: { id: leadId },
+      select: { status: true },
+    });
+    if (!lead) return;
+
+    await this.prisma.lead.update({
+      where: { id: leadId },
+      data: {
+        lastTouchedAt: new Date(),
+        touchCount: { increment: 1 },
+        ...(lead.status === 'NEW'
+          ? { status: 'ATTEMPTING_CONTACT', stageChangedAt: new Date(), daysInStage: 0 }
+          : {}),
+      },
+    });
+
+    await this.prisma.activity.create({
+      data: {
+        leadId,
+        userId: opts?.userId,
+        type,
+        description: opts?.description || type,
+        metadata: opts?.metadata ?? {},
+      },
+    });
+  }
 }

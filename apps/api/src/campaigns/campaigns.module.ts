@@ -2,6 +2,7 @@ import { Module, forwardRef } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { PrismaModule } from '../prisma/prisma.module';
 import { MessagesModule } from '../messages/messages.module';
+import { LeadsModule } from '../leads/leads.module';
 import { CampaignsService } from './campaigns.service';
 import { CampaignEnrollmentService } from './campaign-enrollment.service';
 import { CampaignExecutionService } from './campaign-execution.service';
@@ -13,6 +14,7 @@ import { CampaignsController } from './campaigns.controller';
     ScheduleModule.forRoot(),
     PrismaModule,
     forwardRef(() => MessagesModule),
+    forwardRef(() => LeadsModule),
   ],
   controllers: [CampaignsController],
   providers: [
