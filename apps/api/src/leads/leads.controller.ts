@@ -100,6 +100,11 @@ export class LeadsController {
     return this.leadsService.bulkUpdateStatus(body.ids, body.status);
   }
 
+  @Post('bulk-source')
+  async bulkUpdateSource(@Body() body: { ids: string[]; source: LeadSource }) {
+    return this.leadsService.bulkUpdateSource(body.ids, body.source);
+  }
+
   @Post('export-csv')
   async exportCsv(@Body() body: any, @Res() res: Response) {
     const csv = await this.leadsService.exportCsv(body);

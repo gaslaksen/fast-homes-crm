@@ -821,6 +821,17 @@ export class LeadsService {
   }
 
   /**
+   * Bulk update lead source
+   */
+  async bulkUpdateSource(ids: string[], source: LeadSource): Promise<{ updated: number }> {
+    const result = await this.prisma.lead.updateMany({
+      where: { id: { in: ids } },
+      data: { source },
+    });
+    return { updated: result.count };
+  }
+
+  /**
    * Export leads as CSV string
    */
   async exportCsv(filters: {

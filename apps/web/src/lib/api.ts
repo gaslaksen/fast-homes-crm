@@ -80,6 +80,8 @@ export const leadsAPI = {
   bulkDelete: (ids: string[]) => api.post('/leads/bulk-delete', { ids }),
   bulkUpdateStatus: (ids: string[], status: string) =>
     api.post('/leads/bulk-status', { ids, status }),
+  bulkUpdateSource: (ids: string[], source: string) =>
+    api.post('/leads/bulk-source', { ids, source }),
   exportCsv: (filters: any) =>
     api.post('/leads/export-csv', filters, { responseType: 'blob' }),
   exportLeads: (filters: any, fields?: string[], format?: 'csv' | 'xlsx') =>
