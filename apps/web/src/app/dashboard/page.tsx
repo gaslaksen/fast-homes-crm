@@ -1,9 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { dashboardAPI } from '@/lib/api';
+import { dashboardAPI, authAPI } from '@/lib/api';
 import { formatDistanceToNow, format } from 'date-fns';
 import PropertyPhoto from '@/components/PropertyPhoto';
 import AppNav from '@/components/AppNav';
@@ -101,12 +100,12 @@ function LeadRow({ lead, showLastTouched = false }: { lead: any; showLastTouched
 }
 
 export default function DashboardPage() {
-  const router = useRouter();
   const [stats, setStats] = useState<any>(null);
   const [hotLeads, setHotLeads] = useState<any[]>([]);
   const [staleLeads, setStaleLeads] = useState<any[]>([]);
   const [newLeads, setNewLeads] = useState<any[]>([]);
   const [tasks, setTasks] = useState<any[]>([]);
+  const [currentUser, setCurrentUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const today = new Date();
 
@@ -117,12 +116,14 @@ export default function DashboardPage() {
       dashboardAPI.staleLeads(5),
       dashboardAPI.tasks(),
       dashboardAPI.newLeads(10),
-    ]).then(([s, h, stale, t, nl]) => {
+      authAPI.getMe(),
+    ]).then(([s, h, stale, t, nl, me]) => {
       if (s.status === 'fulfilled') setStats(s.value.data);
       if (h.status === 'fulfilled') setHotLeads(h.value.data);
       if (stale.status === 'fulfilled') setStaleLeads(stale.value.data);
       if (t.status === 'fulfilled') setTasks(t.value.data);
       if (nl.status === 'fulfilled') setNewLeads(nl.value.data);
+      if (me.status === 'fulfilled') setCurrentUser(me.value.data);
     }).finally(() => setLoading(false));
   }, []);
 
@@ -145,12 +146,9 @@ export default function DashboardPage() {
       <main className="max-w-screen-2xl mx-auto px-6 py-8 pb-16 md:pb-8 space-y-8">
 
         {/* Greeting + date */}
-        <div className="flex items-baseline justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{(() => { const h = today.getHours(); return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'; })()}, Geoff</h1>
-            <p className="text-sm text-gray-400 dark:text-gray-500 mt-0.5">{format(today, 'EEEE, MMMM d, yyyy')}</p>
-          </div>
-          <Link href="/leads/new" className="btn btn-primary btn-sm">+ New Lead</Link>
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{(() => { const h = today.getHours(); return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'; })()}{currentUser?.firstName ? `, ${currentUser.firstName}` : ''}</h1>
+          <p className="text-sm text-gray-400 dark:text-gray-500 mt-0.5">{format(today, 'EEEE, MMMM d, yyyy')}</p>
         </div>
 
         {/* KPI Row */}
@@ -198,6 +196,34 @@ export default function DashboardPage() {
             color="green"
             href="/leads?status=CLOSED_WON"
           />
+        </div>
+
+        {/* Pipeline Stage Breakdown */}
+        <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-6">
+          <h2 className="font-bold text-gray-900 dark:text-gray-100 mb-4">Pipeline Breakdown</h2>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+            {[
+              { label: 'Attempting Contact', key: 'ATTEMPTING_CONTACT', color: 'bg-gray-200 dark:bg-gray-700' },
+              { label: 'In Qualification',   key: 'IN_QUALIFICATION',   color: 'bg-blue-200 dark:bg-blue-800' },
+              { label: 'In Negotiation',     key: 'IN_NEGOTIATION',     color: 'bg-yellow-200 dark:bg-yellow-800' },
+              { label: 'Under Contract',     key: 'UNDER_CONTRACT',     color: 'bg-purple-200 dark:bg-purple-800' },
+              { label: 'Closed Won',         key: 'CLOSED_WON',         color: 'bg-green-200 dark:bg-green-800' },
+            ].map(({ label, key, color }) => {
+              const count = stats?.leadsByStatus?.[key] || 0;
+              const total = Object.values(stats?.leadsByStatus || {}).reduce((a: number, b) => a + (b as number), 0) as number;
+              const pct = total > 0 ? Math.round((count / total) * 100) : 0;
+              return (
+                <Link key={key} href={`/leads?status=${key}`} className="group">
+                  <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">{count}</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400 mb-2">{label}</div>
+                  <div className="h-1.5 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
+                    <div className={`h-full ${color} rounded-full transition-all`} style={{ width: `${pct}%` }} />
+                  </div>
+                  <div className="text-xs text-gray-400 dark:text-gray-500 mt-1">{pct}%</div>
+                </Link>
+              );
+            })}
+          </div>
         </div>
 
         {/* Main 2-col grid */}
@@ -334,34 +360,6 @@ export default function DashboardPage() {
               )}
             </div>
 
-          </div>
-        </div>
-
-        {/* Pipeline Stage Breakdown */}
-        <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-6">
-          <h2 className="font-bold text-gray-900 dark:text-gray-100 mb-4">Pipeline Breakdown</h2>
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-            {[
-              { label: 'Attempting Contact', key: 'ATTEMPTING_CONTACT', color: 'bg-gray-200 dark:bg-gray-700' },
-              { label: 'In Qualification',   key: 'IN_QUALIFICATION',   color: 'bg-blue-200 dark:bg-blue-800' },
-              { label: 'In Negotiation',     key: 'IN_NEGOTIATION',     color: 'bg-yellow-200 dark:bg-yellow-800' },
-              { label: 'Under Contract',     key: 'UNDER_CONTRACT',     color: 'bg-purple-200 dark:bg-purple-800' },
-              { label: 'Closed Won',         key: 'CLOSED_WON',         color: 'bg-green-200 dark:bg-green-800' },
-            ].map(({ label, key, color }) => {
-              const count = stats?.leadsByStatus?.[key] || 0;
-              const total = Object.values(stats?.leadsByStatus || {}).reduce((a: number, b) => a + (b as number), 0) as number;
-              const pct = total > 0 ? Math.round((count / total) * 100) : 0;
-              return (
-                <Link key={key} href={`/leads?status=${key}`} className="group">
-                  <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">{count}</div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400 mb-2">{label}</div>
-                  <div className="h-1.5 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
-                    <div className={`h-full ${color} rounded-full transition-all`} style={{ width: `${pct}%` }} />
-                  </div>
-                  <div className="text-xs text-gray-400 dark:text-gray-500 mt-1">{pct}%</div>
-                </Link>
-              );
-            })}
           </div>
         </div>
 
