@@ -1,6 +1,7 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
+import { LeadsService } from '../leads/leads.service';
 import { google, Auth } from 'googleapis';
 
 @Injectable()
@@ -10,6 +11,8 @@ export class GmailService {
   constructor(
     private prisma: PrismaService,
     private config: ConfigService,
+    @Inject(forwardRef(() => LeadsService))
+    private leadsService: LeadsService,
   ) {}
 
   private get clientId() {
@@ -192,6 +195,16 @@ export class GmailService {
     });
 
     this.logger.log(`Email sent to ${data.to} (gmailMsgId: ${sent.data.id})`);
+
+    // Record as a touch on the lead (activity log + pipeline tracking)
+    if (data.leadId) {
+      await this.leadsService.recordTouch(data.leadId, 'EMAIL_SENT', {
+        userId,
+        description: `Email sent to ${data.to}`,
+        metadata: { subject: data.subject, emailId: email.id },
+      });
+    }
+
     return email;
   }
 

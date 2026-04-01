@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ScoringService } from '../scoring/scoring.service';
 import { DripService } from '../drip/drip.service';
 import { CampaignEnrollmentService } from '../campaigns/campaign-enrollment.service';
+import { LeadsService } from '../leads/leads.service';
 import { SmsProvider, createSmsProvider } from './sms.provider';
 import { formatPhoneNumber, isOptOutMessage } from '@fast-homes/shared';
 
@@ -99,6 +100,8 @@ export class MessagesService {
     private dripService: DripService,
     @Inject(forwardRef(() => CampaignEnrollmentService))
     private campaignEnrollmentService: CampaignEnrollmentService,
+    @Inject(forwardRef(() => LeadsService))
+    private leadsService: LeadsService,
   ) {
     this.twilioNumber = this.config.get<string>('SMRTPHONE_PHONE_NUMBER') || this.config.get<string>('TWILIO_PHONE_NUMBER') || '';
     this.smsProvider = createSmsProvider(this.config);
@@ -198,27 +201,11 @@ export class MessagesService {
 
       this.logger.log(`Message sent via ${this.smsProvider.constructor.name}: ${sent.sid}`);
 
-      // Log activity
-      await this.prisma.activity.create({
-        data: {
-          leadId,
-          userId,
-          type: 'MESSAGE_SENT',
-          description: userId ? `Message sent to ${to}` : `Auto-response sent to ${to}`,
-          metadata: { body: body.substring(0, 100), automated: !userId },
-        },
-      });
-
-      // Pipeline tracking: update touch count and advance stage
-      await this.prisma.lead.update({
-        where: { id: leadId },
-        data: {
-          lastTouchedAt: new Date(),
-          touchCount: { increment: 1 },
-          ...(lead.status === 'NEW'
-            ? { status: 'ATTEMPTING_CONTACT', stageChangedAt: new Date(), daysInStage: 0 }
-            : {}),
-        },
+      // Record touch (activity log + pipeline tracking)
+      await this.leadsService.recordTouch(leadId, 'MESSAGE_SENT', {
+        userId,
+        description: userId ? `Message sent to ${to}` : `Auto-response sent to ${to}`,
+        metadata: { body: body.substring(0, 100), automated: !userId },
       });
 
       // If an agent manually sent a message, pause AI and cancel any active drip

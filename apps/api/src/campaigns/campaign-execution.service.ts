@@ -9,6 +9,7 @@ import { Cron } from '@nestjs/schedule';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { MessagesService } from '../messages/messages.service';
+import { LeadsService } from '../leads/leads.service';
 import { Resend } from 'resend';
 
 interface LeadForTemplate {
@@ -164,6 +165,8 @@ export class CampaignExecutionService implements OnModuleInit {
     private config: ConfigService,
     @Inject(forwardRef(() => MessagesService))
     private messagesService: MessagesService,
+    @Inject(forwardRef(() => LeadsService))
+    private leadsService: LeadsService,
   ) {
     const apiKey = this.config.get<string>('RESEND_API_KEY');
     if (apiKey) {
@@ -367,6 +370,18 @@ export class CampaignExecutionService implements OnModuleInit {
         where: { id: log.id },
         data: { externalId },
       });
+    }
+
+    // Record email campaign sends as touches (SMS touches are already recorded via messagesService)
+    if (sendSuccess && currentStep.channel === 'EMAIL') {
+      try {
+        await this.leadsService.recordTouch(lead.id, 'CAMPAIGN_EMAIL_SENT', {
+          description: `Campaign "${campaign.name}" email sent to ${lead.sellerEmail}`,
+          metadata: { campaignId: campaign.id, stepOrder: currentStep.stepOrder, externalId },
+        });
+      } catch (err) {
+        this.logger.warn(`Failed to record touch for campaign email: ${err.message}`);
+      }
     }
 
     // Advance to next step

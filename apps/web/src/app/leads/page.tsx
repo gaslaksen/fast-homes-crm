@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState, useMemo, Suspense, useCallback } from 'react';
+import { useEffect, useState, useMemo, useRef, Suspense, useCallback } from 'react';
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter, usePathname } from 'next/navigation';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 import { leadsAPI, authAPI, pipelineAPI } from '@/lib/api';
 import PropertyPhoto from '@/components/PropertyPhoto';
@@ -273,29 +273,38 @@ function MobileLeadCard({ lead, spread: s }: { lead: any; spread: number | null 
 
 function LeadsPageInner() {
   const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
 
+  // Initialize filter/sort state from URL params so back-navigation restores the view
   const [allLeads,      setAllLeads]      = useState<any[]>([]);
   const [loading,       setLoading]       = useState(true);
-  const [search,        setSearch]        = useState('');
-  const [bandFilter,    setBandFilter]    = useState('');
-  const [statusFilter,  setStatusFilter]  = useState('');
-  const [sourceFilter,  setSourceFilter]  = useState('');
-  const [dateFilter,    setDateFilter]    = useState('');
-  const [staleFilter,   setStaleFilter]   = useState('');
-  const [arvFilter,     setArvFilter]     = useState('');
-  const [dealFilter,    setDealFilter]    = useState('');
-  const [stateFilter,   setStateFilter]   = useState('');
-  const [assigneeFilter,setAssigneeFilter]= useState('');
-  const [tierFilter,    setTierFilter]    = useState<number>(0); // 0 = all
-  const [showInactive,  setShowInactive]  = useState(false);     // default: hide dead/closed
+  const [search,        setSearch]        = useState(searchParams.get('q') || '');
+  const [bandFilter,    setBandFilter]    = useState(searchParams.get('band') || '');
+  const [statusFilter,  setStatusFilter]  = useState(searchParams.get('status') || '');
+  const [sourceFilter,  setSourceFilter]  = useState(searchParams.get('source') || '');
+  const [dateFilter,    setDateFilter]    = useState(searchParams.get('date') || '');
+  const [staleFilter,   setStaleFilter]   = useState(searchParams.get('stale') || '');
+  const [arvFilter,     setArvFilter]     = useState(searchParams.get('arv') || '');
+  const [dealFilter,    setDealFilter]    = useState(searchParams.get('deal') || '');
+  const [stateFilter,   setStateFilter]   = useState(searchParams.get('state') || '');
+  const [assigneeFilter,setAssigneeFilter]= useState(searchParams.get('assignee') || '');
+  const [tierFilter,    setTierFilter]    = useState<number>(Number(searchParams.get('tier')) || 0); // 0 = all
+  const [showInactive,  setShowInactive]  = useState(searchParams.get('inactive') === 'true');     // default: hide dead/closed
   const [teamMembers,   setTeamMembers]   = useState<any[]>([]);
-  const [sortKey,       setSortKey]       = useState<SortKey>('tier');
-  const [sortDir,       setSortDir]       = useState<SortDir>('asc');
-  const [viewMode,      setViewMode]      = useState<ViewMode>('table');
+  const [sortKey,       setSortKey]       = useState<SortKey>((searchParams.get('sort') as SortKey) || 'tier');
+  const [sortDir,       setSortDir]       = useState<SortDir>((searchParams.get('dir') as SortDir) || 'asc');
+  const [viewMode,      setViewMode]      = useState<ViewMode>((searchParams.get('view') as ViewMode) || 'table');
 
   const [selectedIds,   setSelectedIds]   = useState<Set<string>>(new Set());
   const [bulkStatus,    setBulkStatus]    = useState('');
-  const [showFilters,   setShowFilters]   = useState(false);
+  const [showFilters,   setShowFilters]   = useState(() => {
+    // Auto-show filters panel if any filter param is present in URL
+    return !!(searchParams.get('band') || searchParams.get('status') || searchParams.get('source') ||
+      searchParams.get('date') || searchParams.get('stale') || searchParams.get('arv') ||
+      searchParams.get('deal') || searchParams.get('state') || searchParams.get('assignee') ||
+      searchParams.get('tier') || searchParams.get('inactive'));
+  });
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportFormat, setExportFormat] = useState<'csv' | 'xlsx'>('csv');
   const [exportFields, setExportFields] = useState<Set<string>>(new Set([
@@ -305,14 +314,46 @@ function LeadsPageInner() {
   ]));
   const [exporting, setExporting] = useState(false);
 
-  // URL param initial filters
+  // Sync filter/sort state to URL params so browser back-navigation restores the view
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const isInitialMount = useRef(true);
   useEffect(() => {
-    const band   = searchParams.get('band');
-    const status = searchParams.get('status');
-    if (band)   setBandFilter(band);
-    if (status) setStatusFilter(status);
-    if (band || status) setShowFilters(true);
-  }, [searchParams]);
+    // Skip the initial mount to avoid replacing the URL we just read from
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
+
+    const syncUrl = () => {
+      const params = new URLSearchParams();
+      if (search)                   params.set('q', search);
+      if (bandFilter)               params.set('band', bandFilter);
+      if (statusFilter)             params.set('status', statusFilter);
+      if (sourceFilter)             params.set('source', sourceFilter);
+      if (dateFilter)               params.set('date', dateFilter);
+      if (staleFilter)              params.set('stale', staleFilter);
+      if (arvFilter)                params.set('arv', arvFilter);
+      if (dealFilter)               params.set('deal', dealFilter);
+      if (stateFilter)              params.set('state', stateFilter);
+      if (assigneeFilter)           params.set('assignee', assigneeFilter);
+      if (tierFilter)               params.set('tier', String(tierFilter));
+      if (showInactive)             params.set('inactive', 'true');
+      if (sortKey !== 'tier')       params.set('sort', sortKey);
+      if (sortDir !== 'asc')        params.set('dir', sortDir);
+      if (viewMode !== 'table')     params.set('view', viewMode);
+
+      const qs = params.toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    };
+
+    // Debounce when the search text changes (keystrokes), sync immediately for everything else
+    clearTimeout(searchDebounceRef.current);
+    searchDebounceRef.current = setTimeout(syncUrl, 300);
+
+    return () => clearTimeout(searchDebounceRef.current);
+  }, [search, bandFilter, statusFilter, sourceFilter, dateFilter, staleFilter, arvFilter,
+      dealFilter, stateFilter, assigneeFilter, tierFilter, showInactive, sortKey, sortDir,
+      viewMode, pathname, router]);
 
   // Load all leads once; filter/sort client-side for instant feedback
   useEffect(() => {
