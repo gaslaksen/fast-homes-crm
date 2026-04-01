@@ -31,7 +31,7 @@ export class DashboardService {
       this.prisma.lead.groupBy({
         by: ['scoreBand'],
         _count: true,
-        where: { status: { notIn: ['CLOSED_WON', 'CLOSED_LOST'] } },
+        where: { status: { notIn: ['CLOSED_WON', 'CLOSED_LOST', 'DEAD'] } },
       }),
       this.prisma.contract.findMany({ include: { lead: true } }),
       this.prisma.contract.findMany({ where: { outcome: 'WON' }, include: { lead: true } }),
@@ -39,12 +39,12 @@ export class DashboardService {
       this.prisma.lead.findMany({
         where: {
           arv: { not: null, gt: 0 },
-          status: { notIn: ['CLOSED_WON', 'CLOSED_LOST'] },
+          status: { notIn: ['CLOSED_WON', 'CLOSED_LOST', 'DEAD'] },
         },
         select: { arv: true, askingPrice: true },
       }),
-      // New leads this week
-      this.prisma.lead.count({ where: { createdAt: { gte: sevenDaysAgo } } }),
+      // New leads this week (active only — excludes dead/closed)
+      this.prisma.lead.count({ where: { createdAt: { gte: sevenDaysAgo }, status: { notIn: ['CLOSED_WON', 'CLOSED_LOST', 'DEAD'] } } }),
       // Stale: active, not touched in 3+ days, not closed
       this.prisma.lead.count({
         where: {

@@ -358,7 +358,7 @@ function LeadsPageInner() {
 
   // Load all leads once; filter/sort client-side for instant feedback
   useEffect(() => {
-    leadsAPI.list({})
+    leadsAPI.list({ limit: 2000 })
       .then(r => setAllLeads(r.data.leads || []))
       .catch(console.error)
       .finally(() => setLoading(false));
