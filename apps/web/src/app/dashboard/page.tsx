@@ -200,61 +200,28 @@ export default function DashboardPage() {
           />
         </div>
 
-        {/* Pipeline value banner */}
-        {stats?.pipelineArvTotal > 0 && (
-          <div className="bg-blue-600 text-white rounded-xl px-6 py-4 flex items-center justify-between">
-            <div>
-              <div className="text-xs font-semibold uppercase tracking-wide text-blue-200">Total Pipeline ARV</div>
-              <div className="text-3xl font-bold">${stats.pipelineArvTotal.toLocaleString()}</div>
-            </div>
-            <div className="text-right">
-              <div className="text-xs text-blue-200 uppercase tracking-wide">Pencils at Mod. Repairs</div>
-              <div className="text-2xl font-bold">{stats.potentialAssignmentFees} deal{stats.potentialAssignmentFees !== 1 ? 's' : ''}</div>
-            </div>
-            <div className="hidden md:block text-right">
-              <div className="text-xs text-blue-200 uppercase tracking-wide">Conversion Rate</div>
-              <div className="text-2xl font-bold">{stats.conversionRate}%</div>
-            </div>
-          </div>
-        )}
-
         {/* Main 2-col grid */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
-          {/* Hot Leads */}
-          <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-800">
-              <h2 className="font-bold text-gray-900 dark:text-gray-100">🔥 Hot Leads</h2>
-              <Link href="/leads?scoreBand=HOT,STRIKE_ZONE" className="text-xs text-blue-600 hover:underline font-medium">
-                View all →
-              </Link>
-            </div>
-            {hotLeads.length === 0 ? (
-              <div className="px-5 py-10 text-center text-sm text-gray-400 dark:text-gray-500">
-                No hot leads yet.<br/>
-                <Link href="/leads" className="text-blue-500 hover:underline mt-1 inline-block">View all leads</Link>
-              </div>
-            ) : (
-              <div className="divide-y divide-gray-50 dark:divide-gray-800 py-1">
-                {hotLeads.map((lead) => <LeadRow key={lead.id} lead={lead} />)}
-              </div>
-            )}
-          </div>
-
-          {/* Right column: Needs Follow-up + Tasks */}
+          {/* Left column: Hot Leads + New Leads */}
           <div className="space-y-6">
 
-            {/* Needs Follow-Up */}
-            <div className="bg-white dark:bg-gray-900 rounded-xl border border-amber-200 dark:border-amber-800 overflow-hidden">
-              <div className="flex items-center justify-between px-5 py-4 border-b border-amber-100 dark:border-amber-800 bg-amber-50 dark:bg-amber-950">
-                <h2 className="font-bold text-amber-900 dark:text-amber-400">⏰ Follow-Up Needed</h2>
-                <span className="text-xs text-amber-600 font-medium">Hot/Warm · stale 3d+</span>
+            {/* Hot Leads */}
+            <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+              <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-800">
+                <h2 className="font-bold text-gray-900 dark:text-gray-100">🔥 Hot Leads</h2>
+                <Link href="/leads?scoreBand=HOT,STRIKE_ZONE" className="text-xs text-blue-600 hover:underline font-medium">
+                  View all →
+                </Link>
               </div>
-              {staleLeads.length === 0 ? (
-                <div className="px-5 py-8 text-center text-sm text-gray-400 dark:text-gray-500">All caught up! ✅</div>
+              {hotLeads.length === 0 ? (
+                <div className="px-5 py-10 text-center text-sm text-gray-400 dark:text-gray-500">
+                  No hot leads yet.<br/>
+                  <Link href="/leads" className="text-blue-500 hover:underline mt-1 inline-block">View all leads</Link>
+                </div>
               ) : (
                 <div className="divide-y divide-gray-50 dark:divide-gray-800 py-1">
-                  {staleLeads.map((lead) => <LeadRow key={lead.id} lead={lead} showLastTouched />)}
+                  {hotLeads.map((lead) => <LeadRow key={lead.id} lead={lead} />)}
                 </div>
               )}
             </div>
@@ -314,6 +281,26 @@ export default function DashboardPage() {
                       </Link>
                     );
                   })}
+                </div>
+              )}
+            </div>
+
+          </div>
+
+          {/* Right column: Follow-Up Needed + Tasks */}
+          <div className="space-y-6">
+
+            {/* Needs Follow-Up */}
+            <div className="bg-white dark:bg-gray-900 rounded-xl border border-amber-200 dark:border-amber-800 overflow-hidden">
+              <div className="flex items-center justify-between px-5 py-4 border-b border-amber-100 dark:border-amber-800 bg-amber-50 dark:bg-amber-950">
+                <h2 className="font-bold text-amber-900 dark:text-amber-400">⏰ Follow-Up Needed</h2>
+                <span className="text-xs text-amber-600 font-medium">Hot/Warm · stale 3d+</span>
+              </div>
+              {staleLeads.length === 0 ? (
+                <div className="px-5 py-8 text-center text-sm text-gray-400 dark:text-gray-500">All caught up! ✅</div>
+              ) : (
+                <div className="divide-y divide-gray-50 dark:divide-gray-800 py-1">
+                  {staleLeads.map((lead) => <LeadRow key={lead.id} lead={lead} showLastTouched />)}
                 </div>
               )}
             </div>
