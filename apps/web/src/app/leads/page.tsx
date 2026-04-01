@@ -295,6 +295,7 @@ function LeadsPageInner() {
 
   const [selectedIds,   setSelectedIds]   = useState<Set<string>>(new Set());
   const [bulkStatus,    setBulkStatus]    = useState('');
+  const [bulkSource,    setBulkSource]    = useState('');
   const [showFilters,   setShowFilters]   = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportFormat, setExportFormat] = useState<'csv' | 'xlsx'>('csv');
@@ -445,6 +446,13 @@ function LeadsPageInner() {
     await leadsAPI.bulkUpdateStatus(Array.from(selectedIds), bulkStatus);
     setAllLeads(p => p.map(l => selectedIds.has(l.id) ? { ...l, status: bulkStatus } : l));
     setBulkStatus(''); setSelectedIds(new Set());
+  };
+
+  const handleBulkSource = async () => {
+    if (!bulkSource) return;
+    await leadsAPI.bulkUpdateSource(Array.from(selectedIds), bulkSource);
+    setAllLeads(p => p.map(l => selectedIds.has(l.id) ? { ...l, source: bulkSource } : l));
+    setBulkSource(''); setSelectedIds(new Set());
   };
 
   const handleExport = async () => {
@@ -759,6 +767,21 @@ function LeadsPageInner() {
               </select>
               {bulkStatus && (
                 <button onClick={handleBulkStatus} className="text-xs px-3 py-1 bg-primary-600 text-white rounded-lg font-medium">
+                  Apply
+                </button>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <select
+                value={bulkSource}
+                onChange={e => setBulkSource(e.target.value)}
+                className="text-xs border border-gray-200 dark:border-gray-700 rounded-md px-2 py-1 dark:bg-gray-800 dark:text-gray-200"
+              >
+                <option value="">Change source...</option>
+                {Object.entries(SOURCE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              </select>
+              {bulkSource && (
+                <button onClick={handleBulkSource} className="text-xs px-3 py-1 bg-primary-600 text-white rounded-lg font-medium">
                   Apply
                 </button>
               )}
