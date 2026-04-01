@@ -25,7 +25,7 @@ export class DashboardService {
       needsFollowUp,
       underContract,
     ] = await Promise.all([
-      this.prisma.lead.count({ where: { status: { notIn: ['CLOSED_WON', 'CLOSED_LOST'] } } }),
+      this.prisma.lead.count({ where: { status: { notIn: ['CLOSED_WON', 'CLOSED_LOST', 'DEAD'] } } }),
       this.prisma.lead.groupBy({ by: ['source'], _count: true }),
       this.prisma.lead.groupBy({ by: ['status'], _count: true }),
       this.prisma.lead.groupBy({
@@ -175,7 +175,7 @@ export class DashboardService {
     return this.prisma.lead.findMany({
       where: {
         scoreBand: { in: ['HOT', 'STRIKE_ZONE'] },
-        status: { notIn: ['CLOSED_WON', 'CLOSED_LOST'] },
+        status: { notIn: ['CLOSED_WON', 'CLOSED_LOST', 'DEAD'] },
       },
       orderBy: [{ totalScore: 'desc' }, { lastTouchedAt: 'asc' }],
       take: limit,
