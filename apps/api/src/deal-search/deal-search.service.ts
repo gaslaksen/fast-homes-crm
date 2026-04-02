@@ -73,13 +73,8 @@ export class DealSearchService {
       // Optionally fetch foreclosure events if distress filters are active
       let foreclosureMap = new Map<string, any>();
       if (filters.preForeclosure || filters.foreclosure || filters.taxLien || filters.bankruptcy) {
-        const now = new Date();
-        const sixMonthsAgo = new Date(now);
-        sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
-
+        // Note: ATTOM allevents/detail does not support date params for area-based queries
         const fcResult = await this.attomService.getForeclosureEvents(geoIdV4, {
-          starteventdate: sixMonthsAgo.toISOString().slice(0, 10),
-          endeventdate: now.toISOString().slice(0, 10),
           pagesize: 200,
         });
 
@@ -282,21 +277,43 @@ export class DealSearchService {
   // ─── Private helpers ─────────────────────────────────────────────────────
 
   private buildGeoId(filters: DealSearchFilters): string | null {
-    // Priority: zip > county > city > state
+    // Priority: zip > city > county > state
+    // ATTOM property/snapshot only reliably supports zip-level geoIds (ZI)
+    // and city/county via their specific FIPS-based geoIds.
+    // State-level queries are too broad and return "Invalid GeoID Value".
+
     if (filters.zip) {
-      // ATTOM geoIdV4 format for zip: ZI + 5-digit zip
-      return `ZI${filters.zip.replace(/\s/g, '').padStart(5, '0')}`;
+      // Support comma-separated or space-separated multiple zips — use the first one
+      const firstZip = filters.zip.split(/[,\s]+/).filter(Boolean)[0];
+      if (firstZip) return `ZI${firstZip.replace(/\D/g, '').padStart(5, '0')}`;
     }
-    if (filters.county && filters.state) {
-      // Would need a FIPS lookup table; for now require zip
-      this.logger.warn('Deal search: county-based search requires FIPS lookup (not yet implemented). Use zip code.');
+
+    // City + State → ATTOM city-level geoId (CS + 5-digit state FIPS + city FIPS)
+    // This requires a lookup table we don't have, so log a helpful message
+    if (filters.city && filters.state) {
+      this.logger.warn(
+        `Deal search: city-level geoId lookup not yet implemented for "${filters.city}, ${filters.state}". ` +
+        `Please search by zip code instead.`,
+      );
       return null;
     }
-    if (filters.state) {
-      // ATTOM geoIdV4 for state: ST + 2-digit FIPS code
-      const fips = STATE_FIPS[filters.state.toUpperCase()];
-      if (fips) return `ST${fips}`;
+
+    if (filters.county && filters.state) {
+      this.logger.warn(
+        `Deal search: county-level geoId (FIPS) lookup not yet implemented for "${filters.county}, ${filters.state}". ` +
+        `Please search by zip code instead.`,
+      );
+      return null;
     }
+
+    if (filters.state) {
+      this.logger.warn(
+        `Deal search: state-level searches are not supported by ATTOM property/snapshot. ` +
+        `Please narrow your search to a zip code.`,
+      );
+      return null;
+    }
+
     return null;
   }
 
@@ -469,9 +486,9 @@ export class DealSearchService {
       if (filters.lastSalePriceMin && (r.lastSalePrice ?? 0) < filters.lastSalePriceMin) return false;
       if (filters.lastSalePriceMax && (r.lastSalePrice ?? Infinity) > filters.lastSalePriceMax) return false;
 
-      // Equity filter
-      if (filters.equityPercentMin != null && (r.equityPercent ?? 0) < filters.equityPercentMin) return false;
-      if (filters.equityPercentMax != null && (r.equityPercent ?? 100) > filters.equityPercentMax) return false;
+      // Equity filter — only apply to properties that have equity data (don't discard unknowns)
+      if (filters.equityPercentMin != null && r.equityPercent != null && r.equityPercent < filters.equityPercentMin) return false;
+      if (filters.equityPercentMax != null && r.equityPercent != null && r.equityPercent > filters.equityPercentMax) return false;
 
       // Lot size
       if (filters.lotSizeMin && (r.lotSize ?? 0) < filters.lotSizeMin) return false;

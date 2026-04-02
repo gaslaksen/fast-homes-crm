@@ -48,7 +48,6 @@ interface DealSearchFilters {
 
 const DEFAULT_FILTERS: DealSearchFilters = {
   propertyType: ['SFR'],
-  equityPercentMin: 30,
 };
 
 function countActiveFilters(filters: DealSearchFilters): number {
@@ -91,8 +90,8 @@ export default function DealSearchPage() {
 
   // Search
   const handleSearch = useCallback(async (p = 1) => {
-    if (!filters.zip && !filters.state) {
-      setError('Please enter a zip code or select a state to search.');
+    if (!filters.zip) {
+      setError('Please enter a zip code to search. City/county/state searches coming soon.');
       return;
     }
 

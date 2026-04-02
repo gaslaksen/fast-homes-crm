@@ -340,7 +340,7 @@ export default function FilterPanel({
       <div className="space-y-2 pt-2">
         <button
           onClick={onSearch}
-          disabled={loading || (!filters.zip && !filters.state)}
+          disabled={loading || !filters.zip}
           className="btn btn-primary w-full"
         >
           {loading ? 'Searching...' : 'Search Properties'}

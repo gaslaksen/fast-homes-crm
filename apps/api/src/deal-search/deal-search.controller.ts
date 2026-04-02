@@ -57,6 +57,13 @@ export class DealSearchController {
       throw new BadRequestException('Filters are required');
     }
 
+    if (!body.filters.zip) {
+      throw new BadRequestException(
+        'A zip code is required to search. ATTOM property data is queried by zip code. ' +
+        'City, county, and state-level searches are coming soon.',
+      );
+    }
+
     return this.dealSearchService.search(
       body.filters,
       organizationId,
