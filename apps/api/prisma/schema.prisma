@@ -16,8 +16,9 @@ model Organization {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users User[]
-  leads Lead[]
+  users         User[]
+  leads         Lead[]
+  orgGmailToken OrgGmailToken?
 
   @@map("organizations")
 }
@@ -491,6 +492,21 @@ model CallLog {
   updatedAt    DateTime @updatedAt
 
   @@map("call_logs")
+}
+
+model OrgGmailToken {
+  id             String       @id @default(cuid())
+  organizationId String       @unique
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  accessToken    String
+  refreshToken   String
+  expiresAt      DateTime
+  email          String       // e.g. deals@quickcashhomebuyers.com
+  connectedBy    String       // userId of admin who connected it
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@map("org_gmail_tokens")
 }
 
 model GmailToken {

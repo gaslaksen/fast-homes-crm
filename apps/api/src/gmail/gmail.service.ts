@@ -422,4 +422,318 @@ export class GmailService {
       orderBy: { sentAt: 'asc' },
     });
   }
+
+  // ─── Org-level Gmail (shared inbox) ──────────────────────────────────────────
+
+  /**
+   * Generate OAuth URL to connect org-level Gmail (e.g. deals@)
+   * State encodes both orgId and userId so the callback knows who connected it.
+   */
+  getOrgAuthUrl(orgId: string, userId: string): string {
+    const oauth2Client = this.createOAuth2Client();
+    const state = Buffer.from(`org:${orgId}:${userId}`).toString('base64');
+    return oauth2Client.generateAuthUrl({
+      access_type: 'offline',
+      prompt: 'consent',
+      scope: this.scopes,
+      state,
+    });
+  }
+
+  /**
+   * Exchange auth code for tokens and save to OrgGmailToken
+   */
+  async handleOrgCallback(code: string, orgId: string, userId: string): Promise<void> {
+    const oauth2Client = this.createOAuth2Client();
+    const { tokens } = await oauth2Client.getToken(code);
+
+    if (!tokens.access_token || !tokens.refresh_token) {
+      throw new Error('Failed to get tokens from Google');
+    }
+
+    // Get the Gmail address
+    oauth2Client.setCredentials(tokens);
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+    const profile = await gmail.users.getProfile({ userId: 'me' });
+    const email = profile.data.emailAddress || '';
+
+    const expiresAt = new Date(tokens.expiry_date || Date.now() + 3600 * 1000);
+
+    await this.prisma.orgGmailToken.upsert({
+      where: { organizationId: orgId },
+      create: {
+        organizationId: orgId,
+        accessToken: tokens.access_token,
+        refreshToken: tokens.refresh_token,
+        expiresAt,
+        email,
+        connectedBy: userId,
+      },
+      update: {
+        accessToken: tokens.access_token,
+        refreshToken: tokens.refresh_token,
+        expiresAt,
+        email,
+        connectedBy: userId,
+      },
+    });
+
+    this.logger.log(`Org Gmail connected for org ${orgId}: ${email} (by user ${userId})`);
+  }
+
+  /**
+   * Get an authenticated OAuth2 client for the org Gmail (auto-refreshes)
+   */
+  async getOrgClient(orgId: string): Promise<Auth.OAuth2Client> {
+    const token = await this.prisma.orgGmailToken.findUnique({ where: { organizationId: orgId } });
+    if (!token) throw new Error('Org Gmail not connected');
+
+    const oauth2Client = this.createOAuth2Client();
+    oauth2Client.setCredentials({
+      access_token: token.accessToken,
+      refresh_token: token.refreshToken,
+      expiry_date: token.expiresAt.getTime(),
+    });
+
+    // Auto-refresh if expired or expiring within 60s
+    if (token.expiresAt.getTime() < Date.now() + 60_000) {
+      const { credentials } = await oauth2Client.refreshAccessToken();
+      await this.prisma.orgGmailToken.update({
+        where: { organizationId: orgId },
+        data: {
+          accessToken: credentials.access_token!,
+          expiresAt: new Date(credentials.expiry_date || Date.now() + 3600 * 1000),
+        },
+      });
+      oauth2Client.setCredentials(credentials);
+    }
+
+    return oauth2Client;
+  }
+
+  /**
+   * Send an email via the org Gmail and save Email record
+   */
+  async sendOrgEmail(
+    orgId: string,
+    data: { to: string; subject: string; bodyHtml?: string; bodyText: string; leadId?: string },
+  ) {
+    const oauth2Client = await this.getOrgClient(orgId);
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+    const token = await this.prisma.orgGmailToken.findUnique({ where: { organizationId: orgId } });
+    const fromAddress = token!.email;
+
+    // Build RFC 2822 message
+    const boundary = '____boundary____';
+    const messageParts = [
+      `From: ${fromAddress}`,
+      `To: ${data.to}`,
+      `Subject: ${data.subject}`,
+      `MIME-Version: 1.0`,
+      `Content-Type: multipart/alternative; boundary="${boundary}"`,
+      '',
+      `--${boundary}`,
+      'Content-Type: text/plain; charset="UTF-8"',
+      '',
+      data.bodyText,
+    ];
+
+    if (data.bodyHtml) {
+      messageParts.push(
+        `--${boundary}`,
+        'Content-Type: text/html; charset="UTF-8"',
+        '',
+        data.bodyHtml,
+      );
+    }
+
+    messageParts.push(`--${boundary}--`);
+
+    const raw = Buffer.from(messageParts.join('\r\n'))
+      .toString('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+
+    const sent = await gmail.users.messages.send({
+      userId: 'me',
+      requestBody: { raw },
+    });
+
+    // Save to DB
+    const email = await this.prisma.email.create({
+      data: {
+        orgId,
+        leadId: data.leadId || null,
+        gmailMsgId: sent.data.id || null,
+        threadId: sent.data.threadId || null,
+        direction: 'outbound',
+        fromAddress,
+        toAddress: data.to,
+        subject: data.subject,
+        bodyHtml: data.bodyHtml || null,
+        bodyText: data.bodyText,
+        sentAt: new Date(),
+      },
+    });
+
+    this.logger.log(`Org email sent to ${data.to} from ${fromAddress} (gmailMsgId: ${sent.data.id})`);
+
+    // Record as a touch on the lead
+    if (data.leadId) {
+      await this.leadsService.recordTouch(data.leadId, 'EMAIL_SENT', {
+        description: `Email sent to ${data.to} from ${fromAddress}`,
+        metadata: { subject: data.subject, emailId: email.id, orgGmail: true },
+      });
+    }
+
+    return email;
+  }
+
+  /**
+   * Get org Gmail connection status
+   */
+  async getOrgGmailStatus(orgId: string): Promise<{ connected: boolean; email?: string; connectedBy?: string }> {
+    const token = await this.prisma.orgGmailToken.findUnique({
+      where: { organizationId: orgId },
+      select: { email: true, connectedBy: true },
+    });
+    return token
+      ? { connected: true, email: token.email, connectedBy: token.connectedBy }
+      : { connected: false };
+  }
+
+  /**
+   * Disconnect org Gmail
+   */
+  async disconnectOrgGmail(orgId: string): Promise<void> {
+    const token = await this.prisma.orgGmailToken.findUnique({ where: { organizationId: orgId } });
+    if (!token) return;
+
+    try {
+      const oauth2Client = this.createOAuth2Client();
+      oauth2Client.setCredentials({ access_token: token.accessToken });
+      await oauth2Client.revokeToken(token.accessToken);
+    } catch {
+      // Revocation may fail if token is already expired — that's fine
+    }
+
+    await this.prisma.orgGmailToken.delete({ where: { organizationId: orgId } });
+    this.logger.log(`Org Gmail disconnected for org ${orgId}`);
+  }
+
+  /**
+   * Sync inbound emails from the org Gmail inbox
+   */
+  async syncOrgInbound(orgId: string): Promise<number> {
+    const oauth2Client = await this.getOrgClient(orgId);
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+    const token = await this.prisma.orgGmailToken.findUnique({ where: { organizationId: orgId } });
+    const myEmail = token!.email;
+
+    // Fetch last 50 messages in INBOX
+    const list = await gmail.users.messages.list({
+      userId: 'me',
+      maxResults: 50,
+      labelIds: ['INBOX'],
+    });
+
+    const messageIds = list.data.messages || [];
+    if (messageIds.length === 0) return 0;
+
+    // Skip already-imported messages
+    const existing = await this.prisma.email.findMany({
+      where: { gmailMsgId: { in: messageIds.map((m) => m.id!).filter(Boolean) } },
+      select: { gmailMsgId: true },
+    });
+    const existingSet = new Set(existing.map((e) => e.gmailMsgId));
+
+    let imported = 0;
+
+    // Lead email matching
+    const leads = await this.prisma.lead.findMany({
+      where: { sellerEmail: { not: null } },
+      select: { id: true, sellerEmail: true },
+    });
+    const emailToLeadId = new Map<string, string>();
+    for (const lead of leads) {
+      if (lead.sellerEmail) emailToLeadId.set(lead.sellerEmail.toLowerCase(), lead.id);
+    }
+
+    for (const msgRef of messageIds) {
+      if (!msgRef.id || existingSet.has(msgRef.id)) continue;
+
+      try {
+        const msg = await gmail.users.messages.get({
+          userId: 'me',
+          id: msgRef.id,
+          format: 'full',
+        });
+
+        const headers = msg.data.payload?.headers || [];
+        const getHeader = (name: string) =>
+          headers.find((h) => h.name?.toLowerCase() === name.toLowerCase())?.value || '';
+
+        const from = getHeader('From');
+        const to = getHeader('To');
+        const subject = getHeader('Subject');
+        const dateStr = getHeader('Date');
+
+        const extractEmail = (str: string) => {
+          const match = str.match(/<([^>]+)>/);
+          return (match ? match[1] : str).toLowerCase().trim();
+        };
+
+        const fromEmail = extractEmail(from);
+        const toEmail = extractEmail(to);
+        const isOutbound = fromEmail === myEmail.toLowerCase();
+        const direction = isOutbound ? 'outbound' : 'inbound';
+        const counterpartyEmail = isOutbound ? toEmail : fromEmail;
+        const leadId = emailToLeadId.get(counterpartyEmail) || null;
+
+        let bodyText = '';
+        let bodyHtml: string | null = null;
+
+        const extractBody = (payload: any): void => {
+          if (payload.mimeType === 'text/plain' && payload.body?.data) {
+            bodyText = Buffer.from(payload.body.data, 'base64').toString('utf-8');
+          }
+          if (payload.mimeType === 'text/html' && payload.body?.data) {
+            bodyHtml = Buffer.from(payload.body.data, 'base64').toString('utf-8');
+          }
+          if (payload.parts) {
+            for (const part of payload.parts) extractBody(part);
+          }
+        };
+
+        if (msg.data.payload) extractBody(msg.data.payload);
+        if (!bodyText && bodyHtml) bodyText = bodyHtml.replace(/<[^>]+>/g, '');
+        if (!bodyText) bodyText = '(empty)';
+
+        await this.prisma.email.create({
+          data: {
+            orgId,
+            leadId,
+            gmailMsgId: msgRef.id,
+            threadId: msg.data.threadId || null,
+            direction,
+            fromAddress: fromEmail,
+            toAddress: toEmail,
+            subject: subject || '(no subject)',
+            bodyHtml,
+            bodyText,
+            sentAt: dateStr ? new Date(dateStr) : new Date(),
+          },
+        });
+
+        imported++;
+      } catch (err: any) {
+        this.logger.warn(`Failed to import org message ${msgRef.id}: ${err.message}`);
+      }
+    }
+
+    this.logger.log(`Synced ${imported} emails for org ${orgId} (${myEmail})`);
+    return imported;
+  }
 }

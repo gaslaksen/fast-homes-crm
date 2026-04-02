@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import AppNav from '@/components/AppNav';
-import { authAPI } from '@/lib/api';
+import { authAPI, gmailAPI } from '@/lib/api';
 import { formatPhoneDisplay } from '@/lib/format';
 
 const ROLE_LABELS: Record<string, string> = {
@@ -16,6 +17,14 @@ function getUser() {
 }
 
 export default function TeamPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-gray-50 dark:bg-gray-950"><AppNav /><div className="max-w-3xl mx-auto px-6 py-8 text-sm text-gray-400 animate-pulse">Loading...</div></div>}>
+      <TeamPageInner />
+    </Suspense>
+  );
+}
+
+function TeamPageInner() {
   const [members, setMembers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState<any>({});
@@ -44,6 +53,15 @@ export default function TeamPage() {
   const [pwError, setPwError] = useState('');
   const [pwSuccess, setPwSuccess] = useState('');
 
+  // Org Gmail
+  const [orgGmail, setOrgGmail] = useState<{ connected: boolean; email?: string; connectedBy?: string }>({ connected: false });
+  const [orgGmailLoading, setOrgGmailLoading] = useState(true);
+  const [orgGmailSyncing, setOrgGmailSyncing] = useState(false);
+  const [orgGmailDisconnecting, setOrgGmailDisconnecting] = useState(false);
+  const [orgGmailMsg, setOrgGmailMsg] = useState('');
+
+  const searchParams = useSearchParams();
+
   useEffect(() => {
     const user = getUser();
     setCurrentUser(user);
@@ -54,7 +72,18 @@ export default function TeamPage() {
       .then(r => setMembers(r.data))
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, []);
+
+    // Load org Gmail status
+    gmailAPI.orgStatus()
+      .then(r => setOrgGmail(r.data))
+      .catch(() => {})
+      .finally(() => setOrgGmailLoading(false));
+
+    // Check for callback result
+    const orgGmailParam = searchParams.get('orgGmail');
+    if (orgGmailParam === 'connected') setOrgGmailMsg('Org Gmail connected successfully!');
+    else if (orgGmailParam === 'error') setOrgGmailMsg('Failed to connect org Gmail. Please try again.');
+  }, [searchParams]);
 
   const handleSaveOrgName = async () => {
     if (!orgNameDraft.trim()) return;
@@ -385,6 +414,96 @@ export default function TeamPage() {
             </form>
           </div>
         )}
+
+        {/* Org Gmail (Shared Inbox) */}
+        <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-6">
+          <h2 className="font-bold text-gray-900 dark:text-gray-100 mb-1">Shared Email (Gmail)</h2>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
+            Connect a shared Gmail address (e.g. deals@) for campaign emails. All team members can send from this address.
+          </p>
+
+          {orgGmailMsg && (
+            <div className={`text-sm px-4 py-2 rounded-lg mb-4 border ${
+              orgGmailMsg.includes('success')
+                ? 'bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-400 border-green-200 dark:border-green-800'
+                : 'bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-400 border-red-200 dark:border-red-800'
+            }`}>
+              {orgGmailMsg}
+            </div>
+          )}
+
+          {orgGmailLoading ? (
+            <div className="text-sm text-gray-400 dark:text-gray-500 animate-pulse">Loading...</div>
+          ) : orgGmail.connected ? (
+            <div className="space-y-3">
+              <div className="flex items-center gap-3">
+                <span className="inline-flex items-center gap-1.5 text-sm font-medium text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-950 px-3 py-1.5 rounded-full border border-green-200 dark:border-green-800">
+                  <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                  Connected
+                </span>
+                <span className="text-sm text-gray-700 dark:text-gray-300 font-mono">{orgGmail.email}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={async () => {
+                    setOrgGmailSyncing(true);
+                    try {
+                      const r = await gmailAPI.orgSync();
+                      setOrgGmailMsg(`Synced ${r.data.imported} emails, re-matched ${r.data.rematched}.`);
+                    } catch {
+                      setOrgGmailMsg('Failed to sync inbox.');
+                    } finally {
+                      setOrgGmailSyncing(false);
+                    }
+                  }}
+                  disabled={orgGmailSyncing || !isAdmin}
+                  className="btn btn-secondary btn-sm"
+                >
+                  {orgGmailSyncing ? 'Syncing...' : 'Sync Inbox'}
+                </button>
+                {isAdmin && (
+                  <button
+                    onClick={async () => {
+                      if (!confirm('Disconnect the shared Gmail? Campaign emails will stop sending until reconnected.')) return;
+                      setOrgGmailDisconnecting(true);
+                      try {
+                        await gmailAPI.orgDisconnect();
+                        setOrgGmail({ connected: false });
+                        setOrgGmailMsg('Org Gmail disconnected.');
+                      } catch {
+                        setOrgGmailMsg('Failed to disconnect.');
+                      } finally {
+                        setOrgGmailDisconnecting(false);
+                      }
+                    }}
+                    disabled={orgGmailDisconnecting}
+                    className="btn btn-sm text-red-600 dark:text-red-400 border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-950"
+                  >
+                    {orgGmailDisconnecting ? 'Disconnecting...' : 'Disconnect'}
+                  </button>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div>
+              {isAdmin ? (
+                <button
+                  onClick={() => {
+                    const token = localStorage.getItem('auth_token');
+                    window.location.href = `${gmailAPI.getOrgAuthUrl()}?token=${token}`;
+                  }}
+                  className="btn btn-primary"
+                >
+                  Connect Org Gmail
+                </button>
+              ) : (
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  No shared Gmail connected. Ask an admin to connect one.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
 
         {/* Change Your Own Password */}
         <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-6">

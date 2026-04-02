@@ -275,6 +275,7 @@ export const photosAPI = {
 
 // Gmail API
 export const gmailAPI = {
+  // Per-user Gmail
   status: () => api.get('/gmail/status'),
   send: (data: { leadId?: string; to: string; subject: string; bodyHtml?: string; bodyText: string }) =>
     api.post('/gmail/send', data),
@@ -282,6 +283,13 @@ export const gmailAPI = {
   emails: (leadId: string) => api.get(`/gmail/emails/${leadId}`),
   disconnect: () => api.delete('/gmail/disconnect'),
   getAuthUrl: () => `${API_URL}/auth/gmail`,
+  // Org-level shared Gmail
+  orgStatus: () => api.get('/gmail/org-status'),
+  orgSend: (data: { leadId?: string; to: string; subject: string; bodyHtml?: string; bodyText: string }) =>
+    api.post('/gmail/org-send', data),
+  orgSync: () => api.post('/gmail/org-sync'),
+  orgDisconnect: () => api.delete('/gmail/org-disconnect'),
+  getOrgAuthUrl: () => `${API_URL}/auth/org-gmail`,
 };
 
 export const boldSignAPI = {

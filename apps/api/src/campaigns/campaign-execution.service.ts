@@ -10,7 +10,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { MessagesService } from '../messages/messages.service';
 import { LeadsService } from '../leads/leads.service';
-import { Resend } from 'resend';
+import { GmailService } from '../gmail/gmail.service';
 
 interface LeadForTemplate {
   sellerFirstName?: string | null;
@@ -157,8 +157,6 @@ const DEFAULT_CAMPAIGNS = [
 @Injectable()
 export class CampaignExecutionService implements OnModuleInit {
   private readonly logger = new Logger(CampaignExecutionService.name);
-  private resend: Resend | null = null;
-  private resendFrom: string;
 
   constructor(
     private prisma: PrismaService,
@@ -167,18 +165,9 @@ export class CampaignExecutionService implements OnModuleInit {
     private messagesService: MessagesService,
     @Inject(forwardRef(() => LeadsService))
     private leadsService: LeadsService,
-  ) {
-    const apiKey = this.config.get<string>('RESEND_API_KEY');
-    if (apiKey) {
-      this.resend = new Resend(apiKey);
-      this.logger.log('📧 Resend email provider configured');
-    } else {
-      this.logger.warn('⚠️  RESEND_API_KEY not set — email campaign steps will be skipped');
-    }
-    this.resendFrom =
-      this.config.get<string>('RESEND_FROM_EMAIL') ||
-      'Fast Homes <noreply@fasthomes.com>';
-  }
+    @Inject(forwardRef(() => GmailService))
+    private gmailService: GmailService,
+  ) {}
 
   async onModuleInit() {
     await this.seedDefaultCampaigns();
@@ -335,23 +324,45 @@ export class CampaignExecutionService implements OnModuleInit {
           sendSuccess = true;
           break;
         } else if (currentStep.channel === 'EMAIL') {
-          if (!this.resend) {
-            this.logger.warn(`Skipping email step — RESEND_API_KEY not configured`);
-            sendSuccess = true; // Skip, don't fail
-            break;
-          }
           if (!lead.sellerEmail) {
             this.logger.warn(`Lead ${lead.id} has no email — skipping email step`);
             sendSuccess = true;
             break;
           }
-          const result = await this.resend.emails.send({
-            from: this.resendFrom,
+          // Use org Gmail for all campaign emails
+          const orgId = lead.organizationId;
+          if (!orgId) {
+            this.logger.warn(`Lead ${lead.id} has no organizationId — skipping email step`);
+            sendSuccess = true;
+            break;
+          }
+          const orgGmailStatus = await this.gmailService.getOrgGmailStatus(orgId);
+          if (!orgGmailStatus.connected) {
+            this.logger.warn(`Org ${orgId} has no Gmail connected — skipping email step`);
+            sendSuccess = true;
+            break;
+          }
+          // Daily rate limit guard (Gmail Workspace ~2000/day)
+          const startOfToday = new Date();
+          startOfToday.setHours(0, 0, 0, 0);
+          const todaySendCount = await this.prisma.email.count({
+            where: {
+              fromAddress: orgGmailStatus.email!,
+              direction: 'outbound',
+              sentAt: { gte: startOfToday },
+            },
+          });
+          if (todaySendCount >= 1800) {
+            this.logger.warn(`Org Gmail daily limit reached (${todaySendCount} sent today) — deferring email step`);
+            break; // Will retry on next cron run
+          }
+          const email = await this.gmailService.sendOrgEmail(orgId, {
             to: lead.sellerEmail,
             subject: renderedSubject || 'Following up on your property',
-            text: renderedBody,
+            bodyText: renderedBody,
+            leadId: lead.id,
           });
-          externalId = (result.data as any)?.id;
+          externalId = email.gmailMsgId || email.id;
           sendSuccess = true;
           break;
         }
