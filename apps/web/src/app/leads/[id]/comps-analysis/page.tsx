@@ -91,6 +91,7 @@ interface Analysis {
   medianPricePerSqft?: number;
   comparableSalesValue?: number;
   adjustmentsEnabled: boolean;
+  adjustmentConfig?: Record<string, any>;
   repairCosts?: number;
   repairFinishLevel?: string;
   repairNotes?: string;
@@ -1586,11 +1587,37 @@ export default function CompsAnalysisPage() {
               <div className="card">
                 <div className="flex justify-between items-center mb-4">
                   <h2 className="text-lg font-bold">Adjustments</h2>
-                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                    analysis.adjustmentsEnabled ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400'
-                  }`}>
-                    {analysis.adjustmentsEnabled ? 'Applied' : 'Not applied'}
-                  </span>
+                  <div className="flex items-center gap-3">
+                    {/* Exclude distressed comps toggle */}
+                    {allComps.some(c => (c.features as any)?.isDistressedSale) && (
+                      <label className="flex items-center gap-1.5 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={(analysis.adjustmentConfig as any)?.excludeDistressedComps || false}
+                          onChange={async (e) => {
+                            const exclude = e.target.checked;
+                            try {
+                              const currentConfig = (analysis.adjustmentConfig || {}) as Record<string, any>;
+                              await compAnalysisAPI.update(leadId, analysis.id, {
+                                adjustmentConfig: { ...currentConfig, excludeDistressedComps: exclude },
+                              });
+                              await compAnalysisAPI.calculateArv(leadId, analysis.id, 'weighted');
+                              await refreshAnalysis();
+                            } catch (err) {
+                              console.error('Failed to toggle distress exclusion:', err);
+                            }
+                          }}
+                          className="h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-red-600"
+                        />
+                        <span className="text-xs text-red-600 dark:text-red-400 font-medium">Exclude distressed</span>
+                      </label>
+                    )}
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                      analysis.adjustmentsEnabled ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400'
+                    }`}>
+                      {analysis.adjustmentsEnabled ? 'Applied' : 'Not applied'}
+                    </span>
+                  </div>
                 </div>
                 <div className="space-y-3">
                   {selectedComps.map((comp) => (
@@ -1646,6 +1673,7 @@ export default function CompsAnalysisPage() {
                     <tr className="border-b text-left">
                       <th className="pb-2 pr-3 font-medium text-gray-600 dark:text-gray-400">Address</th>
                       <th className="pb-2 pr-3 font-medium text-gray-600 dark:text-gray-400">Source</th>
+                      <th className="pb-2 pr-3 font-medium text-gray-600 dark:text-gray-400">Sale Type</th>
                       <th className="pb-2 pr-3 font-medium text-gray-600 dark:text-gray-400">Sale Price</th>
                       <th className="pb-2 pr-3 font-medium text-gray-600 dark:text-gray-400">Adj. Price</th>
                       <th className="pb-2 pr-3 font-medium text-gray-600 dark:text-gray-400">Sale Date</th>
@@ -1664,6 +1692,15 @@ export default function CompsAnalysisPage() {
                         <td className="py-2 pr-3 font-medium max-w-[200px] truncate">{comp.address}</td>
                         <td className="py-2 pr-3">
                           <SourceBadge source={comp.source} />
+                        </td>
+                        <td className="py-2 pr-3">
+                          {(comp.features as any)?.isDistressedSale ? (
+                            <span className="text-xs px-1.5 py-0.5 rounded bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 font-medium">
+                              {(comp.features as any)?.saleTransType || 'Distressed'}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-gray-500">Arms-length</span>
+                          )}
                         </td>
                         <td className="py-2 pr-3">${comp.soldPrice.toLocaleString()}</td>
                         <td className="py-2 pr-3 font-medium">${(comp.adjustedPrice || comp.soldPrice).toLocaleString()}</td>
@@ -3043,6 +3080,11 @@ function CompCard({
             {comp.distance.toFixed(1)} mi
           </span>
           <SourceBadge source={comp.source} />
+          {(comp.features as any)?.isDistressedSale && (
+            <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 font-medium">
+              {(comp.features as any)?.saleTransType || 'Distressed'}
+            </span>
+          )}
           {comp.correlation && (
             <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
               comp.correlation >= 0.8 ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' :
@@ -3077,6 +3119,20 @@ function CompCard({
             {new Date(comp.soldDate).toLocaleDateString()} ({monthsAgo}mo ago)
           </span>
         </div>
+        {(comp.features as any)?.avmValue && (() => {
+          const avmVal = (comp.features as any).avmValue;
+          const ratio = (comp.features as any).soldPriceToAvmRatio;
+          return (
+            <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+              AVM: ${avmVal.toLocaleString()}
+              {ratio && (
+                <span className={ratio < 0.9 ? ' text-red-500 dark:text-red-400' : ratio > 1.1 ? ' text-green-600 dark:text-green-400' : ''}>
+                  {' '}({(ratio * 100).toFixed(0)}% of AVM)
+                </span>
+              )}
+            </div>
+          );
+        })()}
         {comp.adjustedPrice && comp.adjustedPrice !== comp.soldPrice && (
           <div className="mt-2 rounded-lg border border-dashed border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-950 p-2">
             <div className="flex items-center justify-between mb-1">
@@ -3126,6 +3182,8 @@ function CompCard({
         {comp.yearBuilt && <span>Built {comp.yearBuilt}</span>}
         {comp.lotSize ? <span> | {comp.lotSize} acres</span> : null}
         {comp.daysOnMarket ? <span> | {comp.daysOnMarket} DOM</span> : null}
+        {(comp.features as any)?.condition ? <span> | Cond: {(comp.features as any).condition}</span> : null}
+        {(comp.features as any)?.quality ? <span> | Qlty: {(comp.features as any).quality}</span> : null}
       </div>
 
       {/* Feature Badges */}

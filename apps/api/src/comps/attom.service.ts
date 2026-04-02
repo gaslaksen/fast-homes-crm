@@ -669,6 +669,8 @@ export class AttomService {
       longitude?: number;
       notes: string;
       similarityScore: number;
+      // Enriched fields from ATTOM response
+      features: Record<string, any>;
     }> = [];
     // Map comp address → raw AttomProperty for enrichment lookups
     const compSourceProps = new Map<string, AttomProperty>();
@@ -719,6 +721,58 @@ export class AttomService {
 
           const saleDate = (amountBlock.salerecdate ?? amountBlock.saleRecDate) || prop.sale?.saleTransDate;
 
+          // ── Enriched data extraction (leveraging deal search knowledge) ──
+          const isDistressedSale = /foreclosure|reo|bank.owned|short.sale|auction|sheriff|tax.deed|tax.sale/i.test(transType);
+          const sellerName = prop.sale?.sellerName || '';
+          const isBankSeller = /bank|fannie|freddie|hud|va |fha |dept of|secretary of|wells fargo|chase|citi|nationstar/i.test(sellerName);
+
+          // AVM data per comp
+          const avmAmount = prop.avm?.amount;
+          const avmValue = avmAmount?.value || null;
+          const avmHigh = avmAmount?.high || null;
+          const avmLow = avmAmount?.low || null;
+          const avmConfidence = avmAmount?.scr || null;
+          const avmPoorHigh = prop.avm?.condition?.avmpoorhigh || null;
+          const avmExcellentHigh = prop.avm?.condition?.avmexcellenthigh || null;
+          const soldPriceToAvmRatio = avmValue && saleAmt ? Math.round((saleAmt / avmValue) * 100) / 100 : null;
+
+          // Assessment data per comp
+          const assessed = prop.assessment?.assessed;
+          const assdImpr = assessed?.assdImprValue ?? 0;
+          const assdLand = assessed?.assdLandValue ?? 0;
+          const assessedValue = assessed?.assdTtlValue || ((assdImpr + assdLand) > 0 ? assdImpr + assdLand : null);
+          const taxAmount = prop.assessment?.tax?.taxAmt || null;
+
+          // Condition & quality
+          const condition = prop.building?.construction?.condition || null;
+          const quality = prop.building?.summary?.quality || null;
+
+          const features: Record<string, any> = {};
+          // Sale type & distress
+          if (transType) features.saleTransType = transType;
+          if (isDistressedSale || isBankSeller) features.isDistressedSale = true;
+          if (isBankSeller && !isDistressedSale) features.distressReason = 'bank_seller';
+          if (sellerName) features.sellerName = sellerName;
+          // AVM
+          if (avmValue) features.avmValue = avmValue;
+          if (avmHigh) features.avmHigh = avmHigh;
+          if (avmLow) features.avmLow = avmLow;
+          if (avmConfidence) features.avmConfidence = avmConfidence;
+          if (avmPoorHigh) features.avmPoorHigh = avmPoorHigh;
+          if (avmExcellentHigh) features.avmExcellentHigh = avmExcellentHigh;
+          if (soldPriceToAvmRatio) features.soldPriceToAvmRatio = soldPriceToAvmRatio;
+          // Assessment
+          if (assessedValue) features.assessedValue = assessedValue;
+          if (taxAmount) features.taxAmount = taxAmount;
+          // Condition
+          if (condition) features.condition = condition;
+          if (quality) features.quality = quality;
+
+          const distressLabel = (isDistressedSale || isBankSeller)
+            ? ` | DISTRESSED: ${transType || 'Bank-owned'}`
+            : '';
+          const avmLabel = avmValue ? ` | AVM: $${avmValue.toLocaleString()}` : '';
+
           const comp = {
             address: addr,
             soldPrice: saleAmt,
@@ -732,8 +786,9 @@ export class AttomService {
             hasGarage: !!prop.building?.parking?.garagetype,
             latitude: prop.location?.latitude ? parseFloat(prop.location.latitude) : undefined,
             longitude: prop.location?.longitude ? parseFloat(prop.location.longitude) : undefined,
-            notes: `ATTOM verified sale | ${transType || 'Resale'} | Deed: ${prop.sale?.amount?.saleRecDate || 'N/A'}`,
+            notes: `ATTOM verified sale | ${transType || 'Resale'}${distressLabel}${avmLabel} | Deed: ${prop.sale?.amount?.saleRecDate || 'N/A'}`,
             similarityScore: 0,
+            features,
           };
 
           // Calculate similarity if lead data is available
@@ -773,6 +828,19 @@ export class AttomService {
       where: { leadId, source: 'attom', analysisId: null },
     });
 
+    // Debug: log enrichment field presence from first comp
+    if (validComps.length > 0) {
+      const sample = validComps[0].features;
+      const fieldPresence = {
+        hasAvm: !!sample.avmValue,
+        hasAssessment: !!sample.assessedValue,
+        hasCondition: !!sample.condition,
+        hasSaleType: !!sample.saleTransType,
+        distressedCount: validComps.filter(c => c.features.isDistressedSale).length,
+      };
+      this.logger.log(`ATTOM comp enrichment field presence: ${JSON.stringify(fieldPresence)}`);
+    }
+
     // Save comps
     for (const comp of validComps) {
       await this.prisma.comp.create({
@@ -795,6 +863,7 @@ export class AttomService {
           notes: comp.notes,
           selected: comp.distance <= 1.0,
           similarityScore: comp.similarityScore,
+          features: Object.keys(comp.features).length > 0 ? comp.features : undefined,
         },
       });
     }

@@ -517,6 +517,15 @@ export class CompAnalysisService {
         notes.push(`Time: +$${timeAdj.toLocaleString()} (${monthsAgo.toFixed(0)} mo ago @ ${(adj.annualAppreciationRate * 100).toFixed(1)}%/yr appreciation)`);
       }
 
+      // ── 11. Distressed sale normalization — adjust below-market sales upward ──
+      const compFeatures = (comp.features || {}) as Record<string, any>;
+      if (compFeatures.isDistressedSale) {
+        const distressAdj = Math.round(comp.soldPrice * 0.15);
+        adjustment += distressAdj;
+        const saleType = compFeatures.saleTransType || compFeatures.distressReason || 'Distressed';
+        notes.push(`Distressed Sale (${saleType}): +$${distressAdj.toLocaleString()} (normalizing to market value)`);
+      }
+
       const adjustedPrice = Math.round(comp.soldPrice + adjustment);
 
       const updated = await this.prisma.comp.update({
@@ -553,8 +562,20 @@ export class CompAnalysisService {
     });
     if (!analysis) throw new Error('Analysis not found');
 
-    const comps = analysis.comps;
+    let comps = analysis.comps;
     if (comps.length === 0) return null;
+
+    // Optionally exclude distressed sales from ARV calculation
+    const adjConfig = (analysis.adjustmentConfig || {}) as Record<string, any>;
+    if (adjConfig.excludeDistressedComps) {
+      const nonDistressed = comps.filter(c => !(c.features as any)?.isDistressedSale);
+      if (nonDistressed.length > 0) {
+        this.logger.log(`ARV calc: excluding ${comps.length - nonDistressed.length} distressed comps`);
+        comps = nonDistressed;
+      } else {
+        this.logger.warn(`ARV calc: all comps are distressed — using all for calculation`);
+      }
+    }
 
     const useAdjusted = analysis.adjustmentsEnabled;
     const prices = comps.map((c) => (useAdjusted && c.adjustedPrice ? c.adjustedPrice : c.soldPrice) as number);
@@ -773,6 +794,12 @@ export class CompAnalysisService {
     const withData = comps.filter(c => c.sqft && c.bedrooms && c.bathrooms).length;
     score += Math.round((withData / Math.max(comps.length, 1)) * 10);
 
+    // ── 7. Distressed comp penalty — high proportion of distressed sales = noisier data ──
+    const distressedCount = comps.filter(c => (c.features as any)?.isDistressedSale).length;
+    const distressPct = comps.length > 0 ? distressedCount / comps.length : 0;
+    if (distressPct > 0.5) score -= 10;
+    else if (distressPct > 0.25) score -= 5;
+
     return Math.min(Math.round(score), 100);
   }
 
@@ -849,9 +876,10 @@ NOTE: Use ATTOM's condition-adjusted ranges as a strong independent signal. If c
       } catch {}
     }
 
-    // Build comp summaries
+    // Build comp summaries (enriched with ATTOM features from deal search knowledge)
     const compSummaries = comps.map((c, i) => {
       const monthsAgo = Math.round((Date.now() - new Date(c.soldDate).getTime()) / (30 * 24 * 60 * 60 * 1000));
+      const f = (c.features || {}) as Record<string, any>;
       return [
         `COMP ${i + 1}: ${c.address}`,
         `  Sold: $${c.soldPrice.toLocaleString()} (${monthsAgo} months ago, ${c.distance.toFixed(2)} mi away)`,
@@ -861,6 +889,13 @@ NOTE: Use ATTOM's condition-adjusted ranges as a strong independent signal. If c
         c.isRenovated ? '  Status: Renovated' : null,
         c.hasPool ? '  Has Pool' : null,
         c.hasGarage ? '  Has Garage' : null,
+        // Enriched ATTOM data
+        f.isDistressedSale ? `  ** DISTRESSED SALE (${f.saleTransType || f.distressReason || 'Bank-owned'}) **` : null,
+        f.sellerName ? `  Seller: ${f.sellerName}` : null,
+        f.avmValue ? `  AVM: $${f.avmValue.toLocaleString()} (sold at ${f.soldPriceToAvmRatio ? (f.soldPriceToAvmRatio * 100).toFixed(0) + '% of AVM' : 'N/A'})` : null,
+        f.assessedValue ? `  Tax Assessed: $${f.assessedValue.toLocaleString()}` : null,
+        f.condition ? `  ATTOM Condition: ${f.condition}` : null,
+        f.quality ? `  ATTOM Quality: ${f.quality}` : null,
         c.adjustmentAmount != null ? `  Rule-based adjustment: ${c.adjustmentAmount >= 0 ? '+' : ''}$${c.adjustmentAmount.toLocaleString()} → Adjusted: $${(c.adjustedPrice || c.soldPrice).toLocaleString()}` : null,
         c.adjustmentNotes ? `  Breakdown: ${c.adjustmentNotes.replace(/\n/g, ' | ')}` : null,
       ].filter(Boolean).join('\n');
