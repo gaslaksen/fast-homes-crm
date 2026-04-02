@@ -90,7 +90,8 @@ export class DealSearchService {
       // Log sample foreclosure event structure for debugging
       if (fcResult.property.length > 0) {
         const sampleFc = fcResult.property[0];
-        this.logger.log(`Deal search foreclosure sample: ${JSON.stringify(sampleFc, null, 0).slice(0, 500)}`);
+        this.logger.log(`Deal search foreclosure sample keys: ${JSON.stringify(Object.keys(sampleFc))}`);
+        this.logger.log(`Deal search foreclosure sample FULL: ${JSON.stringify(sampleFc, null, 0).slice(0, 2000)}`);
       }
 
       // Merge foreclosure data into properties
@@ -548,18 +549,48 @@ export class DealSearchService {
       if (filters.stories && r.stories !== filters.stories) return false;
       if (filters.hasGarage && !r.hasGarage) return false;
 
-      // Distress filters (any of these checked = must have the flag)
-      if (filters.absenteeOwner && !r.isAbsenteeOwner) return false;
-      if (filters.preForeclosure && !r.distressFlags.includes('Pre-Foreclosure')) return false;
-      if (filters.foreclosure && !r.distressFlags.includes('Foreclosure')) return false;
-      if (filters.taxLien && !r.distressFlags.includes('Tax Lien')) return false;
-      if (filters.bankruptcy && !r.distressFlags.includes('Bankruptcy')) return false;
-      if (filters.highEquity && !r.distressFlags.includes('High Equity')) return false;
-      if (filters.freeClear && (r.equityPercent ?? 0) < 95) return false;
+      // Distress filters — OR logic: property must match ANY checked distress filter
+      const distressChecked = [
+        filters.absenteeOwner,
+        filters.preForeclosure,
+        filters.foreclosure,
+        filters.taxLien,
+        filters.bankruptcy,
+        filters.vacant,
+        filters.highEquity,
+        filters.freeClear,
+        filters.probate,
+      ].some(Boolean);
 
-      // Owner filters
-      if (filters.corporateOwned && r.ownerType !== 'Corporate') return false;
-      if (filters.outOfStateOwner && r.isOwnerOccupied) return false; // Rough proxy
+      if (distressChecked) {
+        let matchesAny = false;
+        // Foreclosure-related filters: Pre-Foreclosure, Foreclosure, Tax Lien, Bankruptcy
+        // all match if the property has ANY kind of foreclosure event data
+        const hasAnyForeclosureEvent = r.distressFlags.length > 0 && r.distressFlags.some(
+          (f) => ['Foreclosure', 'Pre-Foreclosure', 'Tax Lien', 'Bankruptcy', 'Foreclosure Event'].includes(f),
+        );
+        if (filters.preForeclosure && hasAnyForeclosureEvent) matchesAny = true;
+        if (filters.foreclosure && hasAnyForeclosureEvent) matchesAny = true;
+        if (filters.taxLien && hasAnyForeclosureEvent) matchesAny = true;
+        if (filters.bankruptcy && hasAnyForeclosureEvent) matchesAny = true;
+
+        // These require specific data that property/snapshot provides
+        if (filters.absenteeOwner && r.isAbsenteeOwner) matchesAny = true;
+        if (filters.highEquity && r.equityPercent != null && r.equityPercent > 50) matchesAny = true;
+        if (filters.freeClear && r.equityPercent != null && r.equityPercent >= 95) matchesAny = true;
+
+        // Note: vacant, probate, corporateOwned, outOfStateOwner not available from snapshot
+        // They will be supported when we add assessment/snapshot enrichment
+        if (filters.corporateOwned && r.ownerType === 'Corporate') matchesAny = true;
+
+        if (!matchesAny) return false;
+      }
+
+      // Owner filters (standalone, not part of distress OR group)
+      // Only apply if no distress filters are active (otherwise handled above)
+      if (!distressChecked) {
+        if (filters.corporateOwned && r.ownerType !== 'Corporate') return false;
+      }
 
       return true;
     });
