@@ -70,7 +70,32 @@ export class DealSearchService {
       rawProperties = snapshotResult.property;
       totalFromAttom = snapshotResult.total;
 
-      // Cache raw property snapshot (without foreclosure data — that's fetched separately below)
+      // Also fetch assessment data to get AVM, tax info, absentee status for all properties
+      const assessResult = await this.attomService.getAssessmentSnapshot(geoIdV4, { pagesize: 200 });
+      if (assessResult.property.length > 0) {
+        const assessMap = new Map<string, any>();
+        for (const ap of assessResult.property) {
+          const aid = String(ap?.identifier?.attomId || ap?.identifier?.Id || '');
+          if (aid) assessMap.set(aid, ap);
+        }
+        let assessEnriched = 0;
+        for (const prop of rawProperties) {
+          const aid = String(prop?.identifier?.attomId || prop?.identifier?.Id || '');
+          const ad = assessMap.get(aid);
+          if (ad) {
+            if (ad.avm && !prop.avm) prop.avm = ad.avm;
+            if (ad.assessment && !prop.assessment) prop.assessment = ad.assessment;
+            if (ad.sale && !prop.sale) prop.sale = ad.sale;
+            if (ad.summary?.absenteeInd && !prop.summary?.absenteeInd) {
+              prop.summary = { ...prop.summary, absenteeInd: ad.summary.absenteeInd };
+            }
+            assessEnriched++;
+          }
+        }
+        this.logger.log(`Deal search: enriched ${assessEnriched}/${rawProperties.length} properties from assessment/snapshot`);
+      }
+
+      // Cache enriched property data
       await this.cacheResponse(cacheKey, 'property/snapshot', geoIdV4, attomParams, rawProperties, totalFromAttom);
     }
 
@@ -94,16 +119,26 @@ export class DealSearchService {
         this.logger.log(`Deal search foreclosure sample FULL: ${JSON.stringify(sampleFc, null, 0).slice(0, 2000)}`);
       }
 
-      // Merge foreclosure data into properties
+      // Merge foreclosure data + enrich with AVM/sale/assessment from allevents
+      let enrichedCount = 0;
       if (foreclosureMap.size > 0) {
         for (const prop of rawProperties) {
           const attomId = String(prop?.identifier?.attomId || prop?.identifier?.Id || '');
           const fcData = foreclosureMap.get(attomId);
           if (fcData) {
             prop._foreclosureData = fcData;
+            // The allevents response has rich data the snapshot lacks — copy it over
+            if (fcData.avm && !prop.avm) prop.avm = fcData.avm;
+            if (fcData.sale && !prop.sale) prop.sale = fcData.sale;
+            if (fcData.assessment && !prop.assessment) prop.assessment = fcData.assessment;
+            if (fcData.summary?.absenteeInd && !prop.summary?.absenteeInd) {
+              prop.summary = { ...prop.summary, absenteeInd: fcData.summary.absenteeInd };
+            }
+            enrichedCount++;
           }
         }
       }
+      this.logger.log(`Deal search: enriched ${enrichedCount} properties with allevents AVM/sale/assessment data`);
     }
 
     // Log a sample property to diagnose which fields ATTOM snapshot returns
