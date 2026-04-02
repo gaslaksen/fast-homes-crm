@@ -1529,7 +1529,7 @@ export default function LeadDetailPage() {
                               if (!emailTo.trim() || !emailSubject.trim() || !emailBody.trim()) return;
                               setSendingEmail(true);
                               try {
-                                await gmailAPI.send({
+                                await gmailAPI.orgSend({
                                   leadId,
                                   to: emailTo,
                                   subject: emailSubject,
