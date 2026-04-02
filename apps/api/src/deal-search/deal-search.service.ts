@@ -99,8 +99,15 @@ export class DealSearchService {
       await this.cacheResponse(cacheKey, 'property/snapshot', geoIdV4, attomParams, rawProperties, totalFromAttom);
     }
 
-    // Fetch foreclosure events if distress filters are active (runs on BOTH cached and fresh data)
-    if (filters.preForeclosure || filters.foreclosure || filters.taxLien || filters.bankruptcy) {
+    // Fetch allevents data when ANY distress/financial filter is active (runs on BOTH cached and fresh data)
+    // The allevents endpoint is the only area-based source for AVM, sale, assessment, and absenteeInd
+    const needsAllevents =
+      filters.preForeclosure || filters.foreclosure || filters.taxLien || filters.bankruptcy ||
+      filters.absenteeOwner || filters.highEquity || filters.freeClear ||
+      filters.avmMin || filters.avmMax || filters.equityPercentMin || filters.equityPercentMax ||
+      filters.assessedValueMin || filters.assessedValueMax;
+
+    if (needsAllevents) {
       const fcResult = await this.attomService.getForeclosureEvents(geoIdV4, {
         pagesize: 200,
       });
