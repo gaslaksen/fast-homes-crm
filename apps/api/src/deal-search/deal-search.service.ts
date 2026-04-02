@@ -87,6 +87,12 @@ export class DealSearchService {
       }
       this.logger.log(`Deal search: ${foreclosureMap.size} foreclosure events for ${geoIdV4}`);
 
+      // Log sample foreclosure event structure for debugging
+      if (fcResult.property.length > 0) {
+        const sampleFc = fcResult.property[0];
+        this.logger.log(`Deal search foreclosure sample: ${JSON.stringify(sampleFc, null, 0).slice(0, 500)}`);
+      }
+
       // Merge foreclosure data into properties
       if (foreclosureMap.size > 0) {
         for (const prop of rawProperties) {
@@ -431,18 +437,36 @@ export class DealSearchService {
     if (isAbsenteeOwner) distressFlags.push('Absentee Owner');
 
     if (prop._foreclosureData) {
-      const fcType = prop._foreclosureData?.type?.toLowerCase() || '';
-      if (fcType.includes('pre') || fcType.includes('nod') || fcType.includes('lis')) {
+      // ATTOM allevents data can be nested in various ways — search all string values
+      // for foreclosure-related keywords to determine the event type
+      const fcJson = JSON.stringify(prop._foreclosureData).toLowerCase();
+      let fcMatched = false;
+
+      if (fcJson.includes('pre-foreclosure') || fcJson.includes('preforeclosure') ||
+          fcJson.includes('notice of default') || fcJson.includes('nod') ||
+          fcJson.includes('lis pendens') || fcJson.includes('lispendens')) {
         distressFlags.push('Pre-Foreclosure');
+        fcMatched = true;
       }
-      if (fcType.includes('auction') || fcType.includes('nts') || fcType.includes('notice of sale')) {
+      if (fcJson.includes('foreclosure') && !fcJson.includes('pre-foreclosure') && !fcJson.includes('preforeclosure') ||
+          fcJson.includes('notice of sale') || fcJson.includes('nts') ||
+          fcJson.includes('auction') || fcJson.includes('reo') ||
+          fcJson.includes('notice of trustee')) {
         distressFlags.push('Foreclosure');
+        fcMatched = true;
       }
-      if (fcType.includes('bankruptcy')) {
+      if (fcJson.includes('bankruptcy')) {
         distressFlags.push('Bankruptcy');
+        fcMatched = true;
       }
-      if (fcType.includes('lien') || fcType.includes('tax')) {
+      if (fcJson.includes('tax lien') || fcJson.includes('taxlien') ||
+          fcJson.includes('tax deed') || fcJson.includes('tax sale')) {
         distressFlags.push('Tax Lien');
+        fcMatched = true;
+      }
+      // If we have foreclosure data but couldn't categorize it, still flag it
+      if (!fcMatched) {
+        distressFlags.push('Foreclosure');
       }
     }
 
@@ -485,7 +509,7 @@ export class DealSearchService {
       isOwnerOccupied: !isAbsenteeOwner,
       ownerType: isCorporate ? 'Corporate' : 'Individual',
       distressFlags,
-      foreclosureStatus: prop._foreclosureData?.type || null,
+      foreclosureStatus: prop._foreclosureData ? (distressFlags.find(f => f.includes('Foreclosure') || f.includes('Pre-Foreclosure')) || 'Foreclosure Event') : null,
       avmPoorHigh: prop.avm?.condition?.avmpoorhigh ?? null,
       avmExcellentHigh: prop.avm?.condition?.avmexcellenthigh ?? null,
     };
