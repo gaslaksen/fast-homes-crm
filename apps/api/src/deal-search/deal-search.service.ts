@@ -99,13 +99,40 @@ export class DealSearchService {
       }
     }
 
+    // Log a sample property to diagnose which fields ATTOM snapshot returns
+    if (rawProperties.length > 0) {
+      const sample = rawProperties[0];
+      this.logger.log(
+        `Deal search sample property keys: ${JSON.stringify({
+          hasAvm: !!sample.avm,
+          avmValue: sample.avm?.amount?.value ?? 'MISSING',
+          hasAssessment: !!sample.assessment,
+          assessedValue: sample.assessment?.assessed?.assdTtlValue ?? 'MISSING',
+          hasSale: !!sample.sale,
+          saleAmt: sample.sale?.amount?.saleAmt ?? sample.sale?.amount?.saleamt ?? 'MISSING',
+          absenteeInd: sample.summary?.absenteeInd ?? 'MISSING',
+          propertyType: sample.summary?.propertyType ?? sample.summary?.proptype ?? 'MISSING',
+          hasForeclosureData: !!sample._foreclosureData,
+          topLevelKeys: Object.keys(sample).join(','),
+        })}`,
+      );
+    }
+
     // Normalize ATTOM data to DealSearchResult[]
     let results = rawProperties
       .map((prop) => this.normalizeProperty(prop))
       .filter((r): r is DealSearchResult => r !== null);
 
+    // Log normalization & filter stats for debugging
+    const preFilterCount = results.length;
+
     // Apply server-side filters that ATTOM doesn't support natively
     results = this.applyClientFilters(results, filters);
+
+    this.logger.log(
+      `Deal search: ${rawProperties.length} raw → ${preFilterCount} normalized → ${results.length} after filters ` +
+      `(filters: ${JSON.stringify(filters)})`,
+    );
 
     // Sort by equity percent descending (most equity first)
     results.sort((a, b) => (b.equityPercent ?? 0) - (a.equityPercent ?? 0));
