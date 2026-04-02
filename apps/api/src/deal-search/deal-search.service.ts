@@ -156,7 +156,10 @@ export class DealSearchService {
           hasAvm: !!sample.avm,
           avmValue: sample.avm?.amount?.value ?? 'MISSING',
           hasAssessment: !!sample.assessment,
-          assessedValue: sample.assessment?.assessed?.assdTtlValue ?? 'MISSING',
+          assessedImpr: sample.assessment?.assessed?.assdimprvalue ?? 'MISSING',
+          assessedLand: sample.assessment?.assessed?.assdlandvalue ?? 'MISSING',
+          assessedTotal: ((sample.assessment?.assessed?.assdimprvalue ?? 0) + (sample.assessment?.assessed?.assdlandvalue ?? 0)) || 'MISSING',
+          taxAmt: sample.assessment?.tax?.taxamt ?? sample.assessment?.tax?.taxAmt ?? 'MISSING',
           hasSale: !!sample.sale,
           saleAmt: sample.sale?.amount?.saleAmt ?? sample.sale?.amount?.saleamt ?? 'MISSING',
           absenteeInd: sample.summary?.absenteeInd ?? 'MISSING',
@@ -457,9 +460,13 @@ export class DealSearchService {
     const rooms = building?.rooms;
     const size = building?.size;
 
-    const estimatedValue = avm?.value || null;
+    const estimatedValue = avm?.amount ? (avm.amount.value || null) : (avm?.value || null);
     const lastSalePrice = sale?.amount?.saleAmt || sale?.amount?.saleamt || null;
-    const assessedValue = assessment?.assessed?.assdTtlValue || null;
+    // ATTOM doesn't provide assdTtlValue — compute from improvement + land
+    const assdImpr = assessment?.assessed?.assdimprvalue ?? assessment?.assessed?.assdImprValue ?? 0;
+    const assdLand = assessment?.assessed?.assdlandvalue ?? assessment?.assessed?.assdLandValue ?? 0;
+    const assessedValue = (assdImpr + assdLand) > 0 ? (assdImpr + assdLand) : null;
+    const annualTaxAmount = assessment?.tax?.taxamt ?? assessment?.tax?.taxAmt ?? null;
 
     // Equity calculation
     let estimatedEquity: number | null = null;
@@ -537,14 +544,14 @@ export class DealSearchService {
       stories: building?.summary?.levels ?? null,
       hasGarage: !!building?.parking?.garagetype,
       estimatedValue,
-      estimatedValueLow: avm?.low || null,
-      estimatedValueHigh: avm?.high || null,
+      estimatedValueLow: avm?.amount?.low || avm?.low || null,
+      estimatedValueHigh: avm?.amount?.high || avm?.high || null,
       assessedValue,
       lastSaleDate: sale?.saleTransDate || sale?.amount?.salerecdate || null,
       lastSalePrice,
       estimatedEquity,
       equityPercent,
-      annualTaxAmount: assessment?.tax?.taxAmt ?? null,
+      annualTaxAmount,
       mortgageBalance: null, // ATTOM doesn't provide this in snapshot
       ownerName,
       ownerMailingAddress: null, // Would need separate owner lookup
