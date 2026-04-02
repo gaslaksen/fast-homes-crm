@@ -1027,10 +1027,10 @@ export class AttomService {
       maxUniversalSize?: number;
       minyearbuilt?: number;
       maxyearbuilt?: number;
-      minbeds?: number;
-      maxbeds?: number;
-      minbaths?: number;
-      maxbaths?: number;
+      minBeds?: number;
+      maxBeds?: number;
+      minBathsTotal?: number;
+      maxBathsTotal?: number;
       page?: number;
       pagesize?: number;
     },
@@ -1134,8 +1134,8 @@ export class AttomService {
   async getForeclosureEvents(
     geoIdV4: string,
     params?: {
-      startdate?: string;
-      enddate?: string;
+      starteventdate?: string;
+      endeventdate?: string;
       page?: number;
       pagesize?: number;
     },

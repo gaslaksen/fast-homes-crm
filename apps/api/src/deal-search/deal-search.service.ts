@@ -42,10 +42,10 @@ export class DealSearchService {
     if (filters.yearBuiltMax) attomParams.maxyearbuilt = filters.yearBuiltMax;
     if (filters.sqftMin) attomParams.minUniversalSize = filters.sqftMin;
     if (filters.sqftMax) attomParams.maxUniversalSize = filters.sqftMax;
-    if (filters.bedsMin) attomParams.minbeds = filters.bedsMin;
-    if (filters.bedsMax) attomParams.maxbeds = filters.bedsMax;
-    if (filters.bathsMin) attomParams.minbaths = filters.bathsMin;
-    if (filters.bathsMax) attomParams.maxbaths = filters.bathsMax;
+    if (filters.bedsMin) attomParams.minBeds = filters.bedsMin;
+    if (filters.bedsMax) attomParams.maxBeds = filters.bedsMax;
+    if (filters.bathsMin) attomParams.minBathsTotal = filters.bathsMin;
+    if (filters.bathsMax) attomParams.maxBathsTotal = filters.bathsMax;
 
     // Check cache
     const cacheKey = this.buildCacheKey('property/snapshot', geoIdV4, attomParams);
@@ -78,8 +78,8 @@ export class DealSearchService {
         sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
 
         const fcResult = await this.attomService.getForeclosureEvents(geoIdV4, {
-          startdate: sixMonthsAgo.toISOString().slice(0, 10),
-          enddate: now.toISOString().slice(0, 10),
+          starteventdate: sixMonthsAgo.toISOString().slice(0, 10),
+          endeventdate: now.toISOString().slice(0, 10),
           pagesize: 200,
         });
 
