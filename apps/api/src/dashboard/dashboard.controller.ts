@@ -1,14 +1,24 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Controller, Get, Query, Headers } from '@nestjs/common';
 import { DashboardService } from './dashboard.service';
+import * as jwt from 'jsonwebtoken';
 
 @Controller('dashboard')
 export class DashboardController {
   constructor(private dashboardService: DashboardService) {}
 
-  @Get('stats')
-  async getStats() {
+  private decodeOrg(authHeader?: string): string | undefined {
     try {
-      return await this.dashboardService.getStats();
+      const token = authHeader?.replace('Bearer ', '');
+      if (!token) return undefined;
+      const decoded = jwt.decode(token) as any;
+      return decoded?.organizationId || undefined;
+    } catch { return undefined; }
+  }
+
+  @Get('stats')
+  async getStats(@Headers('authorization') authHeader?: string) {
+    try {
+      return await this.dashboardService.getStats(this.decodeOrg(authHeader));
     } catch (e) {
       console.error('[dashboard/stats] ERROR:', e?.message, e?.stack);
       throw e;
@@ -16,29 +26,54 @@ export class DashboardController {
   }
 
   @Get('activity')
-  async getActivity(@Query('limit') limit?: string) {
+  async getActivity(
+    @Headers('authorization') authHeader?: string,
+    @Query('limit') limit?: string,
+  ) {
     return this.dashboardService.getRecentActivity(
       limit ? parseInt(limit) : undefined,
+      this.decodeOrg(authHeader),
     );
   }
 
   @Get('tasks')
-  async getTasks(@Query('userId') userId?: string) {
-    return this.dashboardService.getUpcomingTasks(userId);
+  async getTasks(
+    @Headers('authorization') authHeader?: string,
+    @Query('userId') userId?: string,
+  ) {
+    return this.dashboardService.getUpcomingTasks(userId, this.decodeOrg(authHeader));
   }
 
   @Get('hot-leads')
-  async getHotLeads(@Query('limit') limit?: string) {
-    return this.dashboardService.getHotLeads(limit ? parseInt(limit) : undefined);
+  async getHotLeads(
+    @Headers('authorization') authHeader?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.dashboardService.getHotLeads(
+      limit ? parseInt(limit) : undefined,
+      this.decodeOrg(authHeader),
+    );
   }
 
   @Get('new-leads')
-  async getNewLeads(@Query('limit') limit?: string) {
-    return this.dashboardService.getNewLeads(limit ? parseInt(limit) : undefined);
+  async getNewLeads(
+    @Headers('authorization') authHeader?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.dashboardService.getNewLeads(
+      limit ? parseInt(limit) : undefined,
+      this.decodeOrg(authHeader),
+    );
   }
 
   @Get('stale-leads')
-  async getStaleLeads(@Query('limit') limit?: string) {
-    return this.dashboardService.getStaleLeads(limit ? parseInt(limit) : undefined);
+  async getStaleLeads(
+    @Headers('authorization') authHeader?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.dashboardService.getStaleLeads(
+      limit ? parseInt(limit) : undefined,
+      this.decodeOrg(authHeader),
+    );
   }
 }

@@ -201,19 +201,22 @@ export default function DashboardPage() {
         {/* Pipeline Stage Breakdown */}
         <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-6">
           <h2 className="font-bold text-gray-900 dark:text-gray-100 mb-4">Pipeline Breakdown</h2>
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+          <div className="grid grid-cols-3 md:grid-cols-6 gap-4">
             {[
-              { label: 'Attempting Contact', key: 'ATTEMPTING_CONTACT', color: 'bg-gray-200 dark:bg-gray-700' },
-              { label: 'In Qualification',   key: 'IN_QUALIFICATION',   color: 'bg-blue-200 dark:bg-blue-800' },
-              { label: 'In Negotiation',     key: 'IN_NEGOTIATION',     color: 'bg-yellow-200 dark:bg-yellow-800' },
-              { label: 'Under Contract',     key: 'UNDER_CONTRACT',     color: 'bg-purple-200 dark:bg-purple-800' },
-              { label: 'Closed Won',         key: 'CLOSED_WON',         color: 'bg-green-200 dark:bg-green-800' },
-            ].map(({ label, key, color }) => {
-              const count = stats?.leadsByStatus?.[key] || 0;
-              const total = Object.values(stats?.leadsByStatus || {}).reduce((a: number, b) => a + (b as number), 0) as number;
-              const pct = total > 0 ? Math.round((count / total) * 100) : 0;
+              { label: 'Attempting Contact', keys: ['ATTEMPTING_CONTACT'],        color: 'bg-gray-200 dark:bg-gray-700' },
+              { label: 'Qualifying',         keys: ['QUALIFYING', 'QUALIFIED'],   color: 'bg-blue-200 dark:bg-blue-800' },
+              { label: 'Offer Made',         keys: ['OFFER_SENT'],                color: 'bg-orange-200 dark:bg-orange-800' },
+              { label: 'Negotiating',        keys: ['NEGOTIATING'],               color: 'bg-yellow-200 dark:bg-yellow-800' },
+              { label: 'Under Contract',     keys: ['UNDER_CONTRACT', 'CLOSING'], color: 'bg-purple-200 dark:bg-purple-800' },
+              { label: 'Closed Won',         keys: ['CLOSED_WON'],                color: 'bg-green-200 dark:bg-green-800' },
+            ].map(({ label, keys, color }) => {
+              const count = keys.reduce((sum, k) => sum + (stats?.leadsByStatus?.[k] || 0), 0);
+              const activeTotal = Object.entries(stats?.leadsByStatus || {})
+                .filter(([k]) => !['DEAD', 'CLOSED_LOST', 'NURTURE'].includes(k))
+                .reduce((a, [, b]) => a + (b as number), 0);
+              const pct = activeTotal > 0 ? Math.round((count / activeTotal) * 100) : 0;
               return (
-                <Link key={key} href={`/leads?status=${key}`} className="group">
+                <Link key={keys[0]} href={`/leads?status=${keys[0]}`} className="group">
                   <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">{count}</div>
                   <div className="text-xs text-gray-500 dark:text-gray-400 mb-2">{label}</div>
                   <div className="h-1.5 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
