@@ -419,7 +419,7 @@ export class GmailService {
   async getEmailsForLead(leadId: string) {
     return this.prisma.email.findMany({
       where: { leadId },
-      orderBy: { sentAt: 'asc' },
+      orderBy: { sentAt: 'desc' },
     });
   }
 
