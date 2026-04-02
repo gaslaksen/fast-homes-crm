@@ -70,20 +70,22 @@ export class DealSearchService {
       rawProperties = snapshotResult.property;
       totalFromAttom = snapshotResult.total;
 
-      // Optionally fetch foreclosure events if distress filters are active
-      let foreclosureMap = new Map<string, any>();
-      if (filters.preForeclosure || filters.foreclosure || filters.taxLien || filters.bankruptcy) {
-        // Note: ATTOM allevents/detail does not support date params for area-based queries
-        const fcResult = await this.attomService.getForeclosureEvents(geoIdV4, {
-          pagesize: 200,
-        });
+      // Cache raw property snapshot (without foreclosure data — that's fetched separately below)
+      await this.cacheResponse(cacheKey, 'property/snapshot', geoIdV4, attomParams, rawProperties, totalFromAttom);
+    }
 
-        for (const prop of fcResult.property) {
-          const attomId = String(prop?.identifier?.attomId || prop?.identifier?.Id || '');
-          if (attomId) foreclosureMap.set(attomId, prop);
-        }
-        this.logger.log(`Deal search: ${foreclosureMap.size} foreclosure events for ${geoIdV4}`);
+    // Fetch foreclosure events if distress filters are active (runs on BOTH cached and fresh data)
+    if (filters.preForeclosure || filters.foreclosure || filters.taxLien || filters.bankruptcy) {
+      const fcResult = await this.attomService.getForeclosureEvents(geoIdV4, {
+        pagesize: 200,
+      });
+
+      const foreclosureMap = new Map<string, any>();
+      for (const prop of fcResult.property) {
+        const attomId = String(prop?.identifier?.attomId || prop?.identifier?.Id || '');
+        if (attomId) foreclosureMap.set(attomId, prop);
       }
+      this.logger.log(`Deal search: ${foreclosureMap.size} foreclosure events for ${geoIdV4}`);
 
       // Merge foreclosure data into properties
       if (foreclosureMap.size > 0) {
@@ -95,9 +97,6 @@ export class DealSearchService {
           }
         }
       }
-
-      // Cache the merged result
-      await this.cacheResponse(cacheKey, 'property/snapshot', geoIdV4, attomParams, rawProperties, totalFromAttom);
     }
 
     // Normalize ATTOM data to DealSearchResult[]
@@ -435,7 +434,7 @@ export class DealSearchService {
       county: prop.area?.countrysecsubd || '',
       latitude: prop.location?.latitude ? parseFloat(prop.location.latitude) : null,
       longitude: prop.location?.longitude ? parseFloat(prop.location.longitude) : null,
-      propertyType: prop.summary?.propertyType || prop.summary?.proptype || 'Unknown',
+      propertyType: this.mapPropertyType(prop.summary?.propertyType || prop.summary?.proptype || 'Unknown'),
       bedrooms: rooms?.beds ?? null,
       bathrooms: rooms?.bathstotal ?? null,
       sqft: size?.livingsize || size?.universalsize || null,
@@ -513,6 +512,21 @@ export class DealSearchService {
 
       return true;
     });
+  }
+
+  // ─── Map ATTOM verbose property types to short codes ─────────────────────
+
+  private mapPropertyType(raw: string): string {
+    if (!raw) return 'Unknown';
+    const t = raw.toLowerCase();
+    if (t.includes('single family') || t === 'sfr' || t === 'sf') return 'SFR';
+    if (t.includes('condo')) return 'Condo';
+    if (t.includes('townhouse') || t.includes('town house')) return 'Townhouse';
+    if (t.includes('multi') || t.includes('duplex') || t.includes('triplex') || t.includes('quadruplex') || t.includes('apartment')) return 'Multi-Family';
+    if (t.includes('vacant land') || t.includes('land') || t.includes('lot')) return 'Land';
+    if (t.includes('commercial') || t.includes('office') || t.includes('retail')) return 'Commercial';
+    if (t.includes('mobile') || t.includes('manufactured')) return 'Mobile Home';
+    return raw; // Return original if no match
   }
 }
 
