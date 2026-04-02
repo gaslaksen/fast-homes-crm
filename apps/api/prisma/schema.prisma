@@ -19,6 +19,7 @@ model Organization {
   users         User[]
   leads         Lead[]
   orgGmailToken OrgGmailToken?
+  savedSearches SavedSearch[]
 
   @@map("organizations")
 }
@@ -45,6 +46,7 @@ model User {
   tasks         Task[]
   activities    Activity[]
   gmailToken    GmailToken?
+  savedSearches SavedSearch[]
 
   @@map("users")
 }
@@ -641,4 +643,38 @@ model CampaignMessageLog {
   createdAt    DateTime           @default(now())
 
   @@map("campaign_message_logs")
+}
+
+// ─── Deal Search ─────────────────────────────────────────────────────────────
+
+model DealSearchCache {
+  id           String   @id @default(cuid())
+  cacheKey     String   @unique              // SHA-256 hash of endpoint + geoIdV4 + params
+  endpoint     String                        // ATTOM endpoint name
+  geoIdV4      String                        // Area identifier (e.g. "ZI08902")
+  params       Json                          // Full query params sent to ATTOM
+  responseData Json                          // Raw ATTOM response
+  resultCount  Int      @default(0)
+  fetchedAt    DateTime @default(now())
+  expiresAt    DateTime                      // fetchedAt + 48h (set in service code)
+
+  @@index([cacheKey])
+  @@index([expiresAt])
+  @@map("deal_search_cache")
+}
+
+model SavedSearch {
+  id             String        @id @default(cuid())
+  userId         String
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organizationId String
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  filters        Json                        // Serialized filter state
+  resultCount    Int?
+  lastRunAt      DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@map("saved_searches")
 }

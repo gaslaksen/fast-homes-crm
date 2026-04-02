@@ -12,6 +12,7 @@ const NAV_ITEMS = [
   { label: 'Dashboard', href: '/dashboard' },
   { label: 'Leads',     href: '/leads' },
   { label: 'Drip Campaigns', href: '/drip-campaigns' },
+  { label: 'Deal Search', href: '/deal-search' },
   { label: 'Team',      href: '/settings/team' },
   { label: 'Settings',  href: '/settings' },
 ];
@@ -20,7 +21,7 @@ const BOTTOM_NAV_ITEMS = [
   { label: 'Dashboard', href: '/dashboard', icon: '📊' },
   { label: 'Leads',     href: '/leads',     icon: '🏠' },
   { label: 'Campaigns', href: '/drip-campaigns', icon: '🔁' },
-  { label: 'Team',      href: '/settings/team', icon: '👥' },
+  { label: 'Search',    href: '/deal-search', icon: '🔍' },
   { label: 'Settings',  href: '/settings',  icon: '⚙️' },
 ];
 

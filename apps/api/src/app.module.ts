@@ -17,6 +17,7 @@ import { CallsModule } from './calls/calls.module';
 import { GmailModule } from './gmail/gmail.module';
 import { BoldSignModule } from './boldsign/boldsign.module';
 import { CampaignsModule } from './campaigns/campaigns.module';
+import { DealSearchModule } from './deal-search/deal-search.module';
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { CampaignsModule } from './campaigns/campaigns.module';
     GmailModule,
     BoldSignModule,
     CampaignsModule,
+    DealSearchModule,
   ],
 })
 export class AppModule {}

@@ -8,7 +8,7 @@ const ATTOM_BASE = 'https://api.gateway.attomdata.com/propertyapi/v1.0.0';
 
 // ─── ATTOM Response Types ────────────────────────────────────────────────────
 
-interface AttomProperty {
+export interface AttomProperty {
   identifier: { Id: number; fips?: string; apn?: string; attomId: number };
   lot?: { lotnum?: string; lotsize1?: number; lotsize2?: number; pooltype?: string; poolind?: string };
   area?: {
@@ -1015,6 +1015,153 @@ export class AttomService {
     score += 10;
 
     return maxScore > 0 ? Math.round((score / maxScore) * 100) : 0;
+  }
+
+  // ─── Area-based property snapshot (for Deal Search) ───────────────────────
+
+  async getPropertySnapshot(
+    geoIdV4: string,
+    params?: {
+      propertytype?: string;
+      minUniversalSize?: number;
+      maxUniversalSize?: number;
+      minyearbuilt?: number;
+      maxyearbuilt?: number;
+      minbeds?: number;
+      maxbeds?: number;
+      minbaths?: number;
+      maxbaths?: number;
+      page?: number;
+      pagesize?: number;
+    },
+  ): Promise<{ property: AttomProperty[]; total: number }> {
+    if (!this.apiKey) return { property: [], total: 0 };
+
+    this.logger.log(`ATTOM property/snapshot for geoIdV4=${geoIdV4}`);
+
+    try {
+      const response = await axios.get(
+        `${ATTOM_BASE}/property/snapshot`,
+        {
+          params: { geoid: geoIdV4, ...params, pagesize: params?.pagesize || 50 },
+          headers: { apikey: this.apiKey, Accept: 'application/json' },
+          timeout: 30000,
+        },
+      );
+
+      const properties = response.data?.property || [];
+      const total = response.data?.status?.total || properties.length;
+      this.logger.log(`ATTOM property/snapshot returned ${properties.length} properties (total=${total})`);
+      return { property: properties, total };
+    } catch (error) {
+      this.handleError(error, 'getPropertySnapshot');
+      return { property: [], total: 0 };
+    }
+  }
+
+  // ─── Area-based sale snapshot (for Deal Search) ──────────────────────────
+
+  async getSaleSnapshot(
+    geoIdV4: string,
+    params?: {
+      startsalesearchdate?: string;
+      endsalesearchdate?: string;
+      minsaleamt?: number;
+      maxsaleamt?: number;
+      page?: number;
+      pagesize?: number;
+    },
+  ): Promise<{ property: any[]; total: number }> {
+    if (!this.apiKey) return { property: [], total: 0 };
+
+    this.logger.log(`ATTOM sale/snapshot for geoIdV4=${geoIdV4}`);
+
+    try {
+      const response = await axios.get(
+        `${ATTOM_BASE}/sale/snapshot`,
+        {
+          params: { geoid: geoIdV4, ...params, pagesize: params?.pagesize || 50 },
+          headers: { apikey: this.apiKey, Accept: 'application/json' },
+          timeout: 30000,
+        },
+      );
+
+      const properties = response.data?.property || [];
+      const total = response.data?.status?.total || properties.length;
+      this.logger.log(`ATTOM sale/snapshot returned ${properties.length} properties (total=${total})`);
+      return { property: properties, total };
+    } catch (error) {
+      this.handleError(error, 'getSaleSnapshot');
+      return { property: [], total: 0 };
+    }
+  }
+
+  // ─── Area-based assessment snapshot (for Deal Search) ────────────────────
+
+  async getAssessmentSnapshot(
+    geoIdV4: string,
+    params?: {
+      page?: number;
+      pagesize?: number;
+    },
+  ): Promise<{ property: any[]; total: number }> {
+    if (!this.apiKey) return { property: [], total: 0 };
+
+    this.logger.log(`ATTOM assessment/snapshot for geoIdV4=${geoIdV4}`);
+
+    try {
+      const response = await axios.get(
+        `${ATTOM_BASE}/assessment/snapshot`,
+        {
+          params: { geoid: geoIdV4, ...params, pagesize: params?.pagesize || 50 },
+          headers: { apikey: this.apiKey, Accept: 'application/json' },
+          timeout: 30000,
+        },
+      );
+
+      const properties = response.data?.property || [];
+      const total = response.data?.status?.total || properties.length;
+      this.logger.log(`ATTOM assessment/snapshot returned ${properties.length} properties (total=${total})`);
+      return { property: properties, total };
+    } catch (error) {
+      this.handleError(error, 'getAssessmentSnapshot');
+      return { property: [], total: 0 };
+    }
+  }
+
+  // ─── Foreclosure / pre-foreclosure events (for Deal Search) ──────────────
+
+  async getForeclosureEvents(
+    geoIdV4: string,
+    params?: {
+      startdate?: string;
+      enddate?: string;
+      page?: number;
+      pagesize?: number;
+    },
+  ): Promise<{ property: any[]; total: number }> {
+    if (!this.apiKey) return { property: [], total: 0 };
+
+    this.logger.log(`ATTOM allevents/detail for geoIdV4=${geoIdV4}`);
+
+    try {
+      const response = await axios.get(
+        `${ATTOM_BASE}/allevents/detail`,
+        {
+          params: { geoid: geoIdV4, ...params, pagesize: params?.pagesize || 50 },
+          headers: { apikey: this.apiKey, Accept: 'application/json' },
+          timeout: 30000,
+        },
+      );
+
+      const properties = response.data?.property || [];
+      const total = response.data?.status?.total || properties.length;
+      this.logger.log(`ATTOM allevents/detail returned ${properties.length} events (total=${total})`);
+      return { property: properties, total };
+    } catch (error) {
+      this.handleError(error, 'getForeclosureEvents');
+      return { property: [], total: 0 };
+    }
   }
 
   // ─── Error handler ────────────────────────────────────────────────────────

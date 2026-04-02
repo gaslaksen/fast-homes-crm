@@ -327,6 +327,26 @@ export const campaignAPI = {
     api.post('/campaigns/ai/generate-sequence', data),
 };
 
+// Deal Search API
+export const dealSearchAPI = {
+  search: (filters: any, page?: number, pageSize?: number) =>
+    api.post('/deal-search/search', { filters, page, pageSize }),
+  getProperty: (attomId: string, address: { street: string; city: string; state: string; zip: string }) =>
+    api.get(`/deal-search/property/${attomId}`, { params: address }),
+  addToPipeline: (data: any) =>
+    api.post('/deal-search/add-to-pipeline', data),
+  saveSearch: (name: string, filters: any) =>
+    api.post('/deal-search/saved-searches', { name, filters }),
+  listSavedSearches: () =>
+    api.get('/deal-search/saved-searches'),
+  deleteSavedSearch: (id: string) =>
+    api.delete(`/deal-search/saved-searches/${id}`),
+  exportCsv: (filters: any) =>
+    api.post('/deal-search/export-csv', { filters }, { responseType: 'blob' }),
+  skipTrace: (attomId: string) =>
+    api.post('/deal-search/skip-trace', { attomId }),
+};
+
 export const dispoAPI = {
   getSummary: (leadId: string) => api.get(`/leads/${leadId}/dispo`),
   updateDealNumbers: (leadId: string, data: { arv?: number | null; repairCosts?: number | null; askingPrice?: number | null; assignmentFee?: number | null; maoPercent?: number | null }) =>

@@ -97,6 +97,7 @@ const SOURCE_LABELS: Record<string, string> = {
   PROPERTY_LEADS: 'PPL',
   GOOGLE_ADS: 'PPC',
   MANUAL: 'Manual',
+  DEAL_SEARCH: 'Deal Search',
   OTHER: 'Other',
 };
 
