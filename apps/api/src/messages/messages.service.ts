@@ -439,7 +439,7 @@ What you know: ${knownSummary || 'gathered all key details'}.
 Your message must:
 1. Thank ${lead.sellerFirstName} sincerely for their time and for sharing
 2. Tell them someone from the team will review the information and reach out soon to discuss next steps
-3. Keep it warm and brief — under 160 characters if possible
+3. Keep it warm and brief — under 300 characters
 4. Do NOT ask anything. Do NOT request more info. End the conversation professionally.
 5. Do NOT repeat back their price or timeline in a way that implies agreement or commitment.`;
     } else {
@@ -457,7 +457,7 @@ Read the seller's last message carefully. React to it naturally — address anyt
 ${isActiveListing ? 'Remember: this property IS already listed for sale. Do not ask if they want to sell — ask about their experience with the listing or why they are exploring a cash offer.' : ''}
 ${nextQuestion}
 IMPORTANT: If the seller seems confused, annoyed, or asked you something specific, answer THEM first — then gently ask the next question. Don't just bulldoze through CAMP if the conversation isn't flowing naturally.
-Keep it human, warm, and under 160 characters. Ask only ONE question.`.trim();
+Keep it human, warm, and under 300 characters. Ask only ONE question.`.trim();
     }
 
     const knownData = {
@@ -484,16 +484,7 @@ Keep it human, warm, and under 160 characters. Ask only ONE question.`.trim();
         lead.messages,
       );
 
-      // Sentiment-based tone selection
-      let selectedTone: 'direct' | 'friendly' | 'professional' = 'friendly';
-      if (lastInboundMessage) {
-        const sentiment = await this.scoringService.detectSentiment(lastInboundMessage);
-        if (sentiment === 'positive' || sentiment === 'neutral') selectedTone = 'friendly';
-        else if (sentiment === 'hesitant') selectedTone = 'professional';
-        else if (sentiment === 'negative') selectedTone = 'professional';
-        this.logger.log(`🎭 Sentiment: ${sentiment} → tone: ${selectedTone}`);
-      }
-      const messageBody = drafts[selectedTone];
+      const messageBody = drafts.message;
 
       // If all CAMP is complete, create follow-up task and shut off auto-respond
       if (campComplete) {
@@ -528,7 +519,7 @@ Keep it human, warm, and under 160 characters. Ask only ONE question.`.trim();
       // Refresh CAMP flags
       await this.scoringService.refreshCampFlags(leadId);
 
-      this.logger.log(`Auto-response sent for lead ${leadId} (next CAMP: ${nextField?.label || 'complete'}, tone: ${selectedTone})`);
+      this.logger.log(`Auto-response sent for lead ${leadId} (next CAMP: ${nextField?.label || 'complete'})`);
       return messageBody;
     } catch (error) {
       this.logger.error(`Auto-response failed for lead ${leadId}: ${error.message}`);
@@ -621,9 +612,9 @@ Keep it human, warm, and under 160 characters. Ask only ONE question.`.trim();
       `FORBIDDEN: Never use vague phrases like "wrap things up", "wrapping things up", "close things out", or "finalize things".`,
       `DO NOT include "Reply STOP to opt out" or any opt-out language — this is automatically appended by SmrtPhone. DO NOT mention the company name "Quick Cash Home Buyers" — this is also automatically prepended by SmrtPhone. Including either will cause them to appear twice.`,
       `NEVER use the words "cash offer" or mention buying houses or any specific deal type. We need to learn about their situation first before suggesting any solution.`,
-      `The message MUST follow this exact format: (1) greet the seller by first name, (2) say "we just received your request for ${lead.propertyAddress}", (3) ask "Are you looking to sell soon, or just exploring options right now?", (4) follow up with "If so, is there a price range you have in mind?"`,
-      `Example: "Hey ${lead.sellerFirstName}, we just received your request for ${lead.propertyAddress}. Are you looking to sell soon, or just exploring options right now? If so, is there a price range you have in mind?"`,
-      `Stay very close to this format. Keep it warm and conversational. Sound like a real person texting, not a template.`,
+      `The message should follow this vibe: (1) greet the seller by first name, (2) reference their request for ${lead.propertyAddress}, (3) ask if they're looking to sell soon or just exploring, (4) ask if they have a ballpark number in mind.`,
+      `Example: "hey ${lead.sellerFirstName}, got your request for ${lead.propertyAddress}. you looking to sell soon or just seeing whats out there? do you have a ballpark number in mind"`,
+      `Stay close to this vibe. Text like a real person — no periods at end, casual language, contractions, short sentences.`,
     ].filter(Boolean).join(' ');
     // ──────────────────────────────────────────────────────────────────────────
 
@@ -641,7 +632,7 @@ Keep it human, warm, and under 160 characters. Ask only ONE question.`.trim();
         lead.messages,
       );
 
-      const messageBody = drafts.friendly;
+      const messageBody = drafts.message;
       await this.sendMessage(leadId, messageBody);
       await this.incrementAutoResponseCount(leadId);
 

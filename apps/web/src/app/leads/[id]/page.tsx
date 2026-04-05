@@ -125,7 +125,7 @@ export default function LeadDetailPage() {
     try {
       const response = await messagesAPI.draft(leadId);
       setMessageDrafts(response.data);
-      setSelectedDraft(response.data.friendly);
+      setSelectedDraft(response.data.message);
     } catch (error) {
       console.error('Failed to draft message:', error);
       alert('Failed to generate drafts');
@@ -1621,41 +1621,10 @@ export default function LeadDetailPage() {
 
             {messageDrafts && (
               <div className="card">
-                <h3 className="text-lg font-bold mb-4">Message Drafts</h3>
-                <div className="space-y-3">
-                  <button
-                    onClick={() => setSelectedDraft(messageDrafts.direct)}
-                    className={`w-full text-left p-3 rounded border ${
-                      selectedDraft === messageDrafts.direct
-                        ? 'border-primary-500 bg-primary-50 dark:bg-primary-900'
-                        : 'border-gray-200 dark:border-gray-700'
-                    }`}
-                  >
-                    <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Direct</div>
-                    <div className="text-sm text-gray-900 dark:text-gray-100">{messageDrafts.direct}</div>
-                  </button>
-                  <button
-                    onClick={() => setSelectedDraft(messageDrafts.friendly)}
-                    className={`w-full text-left p-3 rounded border ${
-                      selectedDraft === messageDrafts.friendly
-                        ? 'border-primary-500 bg-primary-50 dark:bg-primary-900'
-                        : 'border-gray-200 dark:border-gray-700'
-                    }`}
-                  >
-                    <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Friendly</div>
-                    <div className="text-sm text-gray-900 dark:text-gray-100">{messageDrafts.friendly}</div>
-                  </button>
-                  <button
-                    onClick={() => setSelectedDraft(messageDrafts.professional)}
-                    className={`w-full text-left p-3 rounded border ${
-                      selectedDraft === messageDrafts.professional
-                        ? 'border-primary-500 bg-primary-50 dark:bg-primary-900'
-                        : 'border-gray-200 dark:border-gray-700'
-                    }`}
-                  >
-                    <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Professional</div>
-                    <div className="text-sm text-gray-900 dark:text-gray-100">{messageDrafts.professional}</div>
-                  </button>
+                <h3 className="text-lg font-bold mb-4">AI Draft</h3>
+                <div className="p-3 rounded border border-primary-500 bg-primary-50 dark:bg-primary-900">
+                  <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">AI Message</div>
+                  <div className="text-sm text-gray-900 dark:text-gray-100">{messageDrafts.message}</div>
                 </div>
                 <textarea
                   value={selectedDraft}

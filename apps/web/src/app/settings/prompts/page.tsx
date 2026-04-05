@@ -610,17 +610,13 @@ export default function PromptsPage() {
                   {testResult.error ? (
                     <p className="text-sm text-red-600">{testResult.error}</p>
                   ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                      {['direct', 'friendly', 'professional'].map((tone) => (
-                        <div key={tone} className="bg-gray-50 dark:bg-gray-950 rounded p-3">
-                          <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">
-                            {tone}
-                          </span>
-                          <p className="text-sm text-gray-800 dark:text-gray-200 mt-1">
-                            {testResult.drafts?.[tone] || 'No draft generated'}
-                          </p>
-                        </div>
-                      ))}
+                    <div className="bg-gray-50 dark:bg-gray-950 rounded p-3">
+                      <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">
+                        AI Message
+                      </span>
+                      <p className="text-sm text-gray-800 dark:text-gray-200 mt-1">
+                        {testResult.drafts?.message || 'No draft generated'}
+                      </p>
                     </div>
                   )}
                 </div>

@@ -338,7 +338,7 @@ export class DripService implements OnModuleInit, OnModuleDestroy {
           lead.messages,
         );
 
-        messageBody = drafts.friendly;
+        messageBody = drafts.message;
       } catch (err) {
         this.logger.warn(`AI generation failed, using fallback: ${err.message}`);
         messageBody = FALLBACK_MESSAGES[nextStep.key]

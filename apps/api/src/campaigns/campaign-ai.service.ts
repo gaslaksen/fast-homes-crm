@@ -63,7 +63,7 @@ ${dto.stepNumber ? `Step ${dto.stepNumber} of ${dto.numSteps || '?'}` : ''}
 
 Available merge fields: {{firstName}}, {{lastName}}, {{propertyAddress}}, {{city}}, {{state}}, {{offerAmount}}, {{arvEstimate}}, {{companyName}}, {{senderName}}
 
-${isSms ? 'IMPORTANT: The body must be under 160 characters. Keep it very short and punchy. End with "Reply STOP to opt out."' : 'Write a full email with greeting and professional sign-off.'}
+${isSms ? 'IMPORTANT: The body must be under 300 characters. Keep it short and casual like a real text. End with "Reply STOP to opt out."' : 'Write a full email with greeting and professional sign-off.'}
 
 Respond with JSON only:
 {
@@ -105,7 +105,7 @@ ${dto.body}
 
 Instructions: ${dto.instructions}
 
-${isSms ? 'Keep it under 160 characters.' : 'Keep the full email format with greeting and sign-off.'}
+${isSms ? 'Keep it under 300 characters. Text like a real person, casual and short.' : 'Keep the full email format with greeting and sign-off.'}
 
 Respond with JSON only:
 {
@@ -139,7 +139,7 @@ Respond with JSON only:
     const ai = this.requireAI();
 
     const channelInstructions: Record<string, string> = {
-      ALL_SMS: 'All steps should be SMS text messages (under 160 characters each).',
+      ALL_SMS: 'All steps should be SMS text messages (under 300 characters each). Text casually like a real person.',
       ALL_EMAIL: 'All steps should be emails with subjects and full body.',
       MIXED: 'Mix SMS and email steps strategically. Start with SMS for quick engagement, use email for deeper messages.',
     };
@@ -160,7 +160,7 @@ Available merge fields: {{firstName}}, {{lastName}}, {{propertyAddress}}, {{city
 Rules:
 - First step should have delayDays: 0 (send immediately upon enrollment)
 - Subsequent steps should have increasing delays (3-14 days apart typically)
-- SMS bodies must be under 160 characters and end with "Reply STOP to opt out."
+- SMS bodies must be under 300 characters, casual like a real text, and end with "Reply STOP to opt out."
 - Email bodies should have a greeting and professional sign-off
 - Each step should build on the previous one's narrative
 

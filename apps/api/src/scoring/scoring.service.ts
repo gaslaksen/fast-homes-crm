@@ -494,7 +494,7 @@ Return ONLY valid JSON, no other text.`;
     },
     lead?: { status: string; askingPrice?: number | null; timeline?: number | null; conditionLevel?: string | null; ownershipStatus?: string | null },
     messages?: { direction: string; body: string }[],
-  ): Promise<{ direct: string; friendly: string; professional: string }> {
+  ): Promise<{ message: string }> {
     if (!this.anthropic) {
       // Fallback templates if no AI
       return this.getDefaultMessageDrafts(context);
@@ -535,14 +535,14 @@ Return ONLY valid JSON, no other text.`;
         fewShotMessages = selected.exampleMessages || [];
       } else {
         // Fallback: safe follow-up prompt that will NEVER introduce itself
-        systemMessage = `You are a real estate acquisitions specialist for "${context.businessName || 'Quick Cash Home Buyers'}" continuing a conversation with a seller.
-Continue the natural flow of conversation. Show you listened to what they've already said.
-Be empathetic. Ask ONE question at a time. Keep under 160 characters. Sound human.
+        systemMessage = `You're a local property investor texting a seller from your phone. You buy houses from people who want a quick, simple sale. Text like a real person — short sentences, no fancy words, no corporate speak.
+Continue the natural flow of conversation. Show you were listening to what they already said.
+Ask ONE question at a time. Keep it under 300 characters. Sound like a real text message.
 NEVER introduce yourself or the company — you are already in a conversation.
 Always respond with valid JSON only.`;
       }
     } else {
-      systemMessage = 'You write compliant, human-sounding text messages for real estate. Always respond with valid JSON only.';
+      systemMessage = 'You write casual, human-sounding text messages for real estate. Text like a real person, not a chatbot. Always respond with valid JSON only.';
     }
 
     // Build known data block for the prompt
@@ -591,8 +591,8 @@ Always respond with valid JSON only.`;
       : '';
 
     const acknowledgmentBlock = context.lastInboundMessage
-      ? `\nCRITICAL: Your response MUST first briefly acknowledge what the seller just said, then naturally transition to asking about the next topic. Do NOT re-introduce yourself. Do NOT ask about information already provided above. Do NOT agree to, validate, or commit to any price, timeline, or terms — never say things like "$250k works", "that price sounds good", "7 days works for us", or anything that implies you are accepting their terms. NEVER use em dashes (—) in your message.
-VARIETY: Do NOT start with "Thank you" or "Thanks for sharing" if you used a similar phrase recently. Use varied, natural acknowledgments — e.g. "Got it!", "Appreciate that!", "Makes sense.", "Good to know.", "Perfect.", "Understood." — pick one that fits the context and hasn't been used in the last 2-3 messages.${recentOutboundNote}\n`
+      ? `\nCRITICAL: Your response MUST first briefly acknowledge what the seller just said, then naturally transition to asking about the next topic. Do NOT re-introduce yourself. Do NOT ask about information already provided above. Do NOT agree to, validate, or commit to any price, timeline, or terms — never say things like "$250k works", "that price sounds good", "7 days works for us", or anything that implies you are accepting their terms.
+VARIETY: Use varied, natural acknowledgments — e.g. "gotcha", "nice", "ok cool", "ah ok", "for sure", "makes sense", "got it", "appreciate that", "good to know", "perfect" — pick one that fits the context and hasn't been used in the last 2-3 messages. NEVER default to "Thank you" or "Thanks for sharing".${recentOutboundNote}\n`
       : '';
 
     const prompt = `Seller: ${context.sellerName}
@@ -603,28 +603,24 @@ ${history}
 
 Goal: ${purpose}
 ${acknowledgmentBlock}
-Generate 3 different message drafts:
-1. "Direct" - straight to the point, businesslike
-2. "Friendly" - warm and conversational
-3. "Professional" - polite and formal
+Generate ONE text message. Write it like you're texting from your phone — casual, short, real.
 
 Rules:
-- Keep each under 160 characters
+- Keep it under 300 characters, 1-3 short sentences
 - Ask only 1 question per message
-- Be respectful and compliant
-- Sound human, not spammy
+- Sound like a real person texting, not a chatbot
+- Don't end with a period
+- Use contractions (don't, won't, that's)
+- No colons, semicolons, or em dashes
+- Sentence fragments are fine
 - Do NOT ask about information already known (listed above)
-- Do NOT agree to, validate, or commit to any price, timeline, or terms the seller mentioned (e.g. never say "$250k works", "that price works for us", "7 days works", or anything implying agreement)
-- You are ONLY gathering information — all offers and decisions are made by the team, not in this message
-- When acknowledging what the seller said, confirm receipt with a VARIED, natural phrase — rotate through options like "Got it!", "Makes sense.", "Appreciate that!", "Good to know.", "Perfect, thanks.", "Understood." — do NOT default to "Thank you" or "Thanks for sharing" every time, especially if it was used recently
-- NEVER use em dashes (—) in any message; use a comma, period, or rephrase instead
-- Read the full conversation history and make sure your reply flows naturally from what was said — do not re-ask something the seller already answered
+- Do NOT agree to, validate, or commit to any price, timeline, or terms the seller mentioned
+- You are ONLY gathering information — all offers and decisions come from the team
+- Read the conversation history and make sure your reply flows naturally — don't re-ask what was already answered
 
 Return ONLY a JSON object:
 {
-  "direct": "message text",
-  "friendly": "message text",
-  "professional": "message text"
+  "message": "your text message here"
 }`;
 
     try {
@@ -678,7 +674,7 @@ Return ONLY a JSON object:
     };
     justExtracted?: Record<string, any>;
     lastInboundMessage?: string;
-  }): { direct: string; friendly: string; professional: string } {
+  }): { message: string } {
     const name = context.sellerName;
     const hasConversation = context.conversationHistory && context.conversationHistory.length > 0;
     const known = context.knownData;
@@ -689,9 +685,7 @@ Return ONLY a JSON object:
       // Note: SmrtPhone automatically prepends the company name and appends opt-out text.
       // Do NOT include either in the message body.
       return {
-        direct: `Hi ${name}, got your cash offer request for ${context.propertyAddress}. How soon are you looking to sell?`,
-        friendly: `Hey ${name}! Thanks for reaching out about ${context.propertyAddress}. How soon are you hoping to sell?`,
-        professional: `Hello ${name}, following up on your cash offer inquiry for ${context.propertyAddress}. What is your ideal timeline for selling?`,
+        message: `hey ${name}, got your request for ${context.propertyAddress}. you looking to sell soon or just seeing whats out there? do you have a ballpark number in mind`,
       };
     }
 
@@ -701,64 +695,40 @@ Return ONLY a JSON object:
       if (extracted.askingPrice != null && extracted._askingPriceHigh != null) {
         const lo = Number(extracted.askingPrice).toLocaleString();
         const hi = Number(extracted._askingPriceHigh).toLocaleString();
-        ack = `Got it, somewhere in the $${lo}–$${hi} range. `;
+        ack = `gotcha somewhere in the $${lo}-$${hi} range. `;
       } else if (extracted.askingPrice != null) {
-        ack = `Got it, around $${Number(extracted.askingPrice).toLocaleString()}. `;
+        ack = `gotcha around $${Number(extracted.askingPrice).toLocaleString()}. `;
       } else if (extracted._askingPriceRaw) {
-        ack = `Got it, noted the ${extracted._askingPriceRaw}. `;
+        ack = `gotcha noted the ${extracted._askingPriceRaw}. `;
       } else if (extracted.timeline != null) {
-        ack = `${extracted.timeline} days — thanks for letting me know. `;
+        ack = `ok cool thanks for letting me know. `;
       } else if (extracted.conditionLevel != null) {
-        ack = `Thanks for the details on the condition. `;
+        ack = `got it appreciate the details on the condition. `;
       } else if (extracted.ownershipStatus != null) {
-        ack = `Good to know about the ownership. `;
+        ack = `good to know on the ownership. `;
       }
     }
 
     // Determine next missing CAMP field: Priority → Money → Challenge → Authority
     if (known) {
       if (known.timeline == null) {
-        return {
-          direct: `${ack}How soon are you looking to sell?`,
-          friendly: `${ack}Do you have a rough timeline in mind for selling? No pressure, just want to get a feel.`,
-          professional: `${ack}May I ask what your ideal timeline would be for completing a sale?`,
-        };
+        return { message: `${ack}do you have a rough timeline in mind? like are you trying to move on this quick or is there no rush` };
       }
       if (known.askingPrice == null) {
-        return {
-          direct: `${ack}Do you have a ballpark price in mind?`,
-          friendly: `${ack}Just curious — do you have a price range you're hoping for?`,
-          professional: `${ack}What price range would you be comfortable with for the property?`,
-        };
+        return { message: `${ack}do you have a rough number in mind for the place` };
       }
       if (known.conditionLevel == null) {
-        return {
-          direct: `${ack}How's the condition of the property?`,
-          friendly: `${ack}How would you describe the condition? Any repairs needed or is it move-in ready?`,
-          professional: `${ack}Could you share a bit about the current condition of the property?`,
-        };
+        return { message: `${ack}hows the place holding up? anything major going on with it` };
       }
       if (known.ownershipStatus == null) {
-        return {
-          direct: `${ack}Are you the sole owner?`,
-          friendly: `${ack}Last question — are you the sole owner, or are there other decision-makers involved?`,
-          professional: `${ack}May I ask about the ownership situation? Are you the sole decision-maker?`,
-        };
+        return { message: `${ack}one more thing, are you the only one on the deed or is someone else involved too` };
       }
 
       // All CAMP complete
-      return {
-        direct: `${ack}Thanks for all the info, ${name}. I'll put together some numbers and get back to you shortly.`,
-        friendly: `${ack}Really appreciate you sharing all that, ${name}! Let me review everything and I'll get back to you with next steps soon.`,
-        professional: `${ack}Thank you for the information, ${name}. I will review the details and follow up with you shortly regarding next steps.`,
-      };
+      return { message: `${ack}awesome really appreciate all that ${name}. our team is gonna review everything and get back to you soon with next steps` };
     }
 
     // Generic follow-up when we have conversation but no knownData tracking
-    return {
-      direct: `Got it, ${name}. What else can you tell me about the property?`,
-      friendly: `Appreciate that, ${name}! Is there anything else about your situation I should know?`,
-      professional: `Understood, ${name}. Could you share any additional details about the property?`,
-    };
+    return { message: `got it ${name}, is there anything else about the place or your situation I should know about` };
   }
 }

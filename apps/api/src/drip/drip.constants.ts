@@ -6,28 +6,28 @@ export const CAMP_STEPS = [
     field: 'timeline',
     label: 'Priority (Timeline)',
     purpose:
-      'Ask when they need to sell — are they in a rush, or just exploring options? Be conversational.',
+      'Ask when they need to sell — are they trying to move quick or is there no rush? Keep it casual like a real text',
   },
   {
     key: 'hasAskingPrice',
     field: 'askingPrice',
     label: 'Money (Asking Price)',
     purpose:
-      'Ask what price range they have in mind for the property. No pressure, just getting a ballpark.',
+      'Ask if they have a rough number in mind for the place. No pressure, just getting a ballpark',
   },
   {
     key: 'hasCondition',
     field: 'conditionLevel',
     label: 'Challenge (Condition)',
     purpose:
-      'Ask about the property condition — does it need work, or is it move-in ready? Keep it casual.',
+      'Ask how the place is holding up — anything major going on or is it in good shape? Keep it casual',
   },
   {
     key: 'hasOwnership',
     field: 'ownershipStatus',
     label: 'Authority (Ownership)',
     purpose:
-      'Ask whether they are the sole owner or if others are involved in the decision. Be respectful.',
+      'Ask if they are the only one on the deed or if someone else is involved too. Be respectful about it',
   },
 ] as const;
 
@@ -38,11 +38,11 @@ export const DEFAULT_MAX_RETRIES = 2;
 
 export const FALLBACK_MESSAGES: Record<string, string> = {
   hasTimeline:
-    'Hi {name}, this is {businessName} reaching out about {address}. Quick question — do you have a timeline in mind for selling? Reply STOP to opt out.',
+    'hey {name}, got your request for {address}. you looking to sell soon or just seeing whats out there?',
   hasAskingPrice:
-    'Thanks for the info! Do you have a ballpark price in mind for the property?',
+    'gotcha thanks for that. do you have a rough number in mind for the place',
   hasCondition:
-    'Got it! How would you describe the condition of the property? Any major repairs needed?',
+    'nice ok so hows the place holding up? anything major going on with it',
   hasOwnership:
-    'Thanks! Last question — are you the sole owner of the property, or are there other decision-makers involved?',
+    'appreciate all that. one more thing are you the only one on the deed or is someone else involved too',
 };
