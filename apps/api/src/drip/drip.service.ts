@@ -151,7 +151,7 @@ export class DripService implements OnModuleInit, OnModuleDestroy {
    * Start a drip sequence for a newly created lead.
    * Pre-populates answered flags from any data already on the lead.
    */
-  async startSequence(leadId: string) {
+  async startSequence(leadId: string, options?: { skipInitialSend?: boolean }) {
     const lead = await this.prisma.lead.findUnique({ where: { id: leadId } });
     if (!lead) throw new Error(`Lead ${leadId} not found`);
     if (lead.doNotContact) return null;
@@ -200,18 +200,36 @@ export class DripService implements OnModuleInit, OnModuleDestroy {
       return seq;
     }
 
-    // Schedule the first message
-    await this.scheduleJob(
-      'send-drip',
-      { leadId, sequenceId: seq.id },
-      seq.initialDelayMs,
-      `drip-send-${seq.id}`,
-      isDemo,
-    );
-
-    this.logger.log(
-      `Drip sequence started for lead ${leadId} (delay: ${seq.initialDelayMs}ms, demo: ${isDemo})`,
-    );
+    if (options?.skipInitialSend) {
+      // Initial outreach already sent — just schedule the no-reply timeout
+      await this.prisma.dripSequence.update({
+        where: { id: seq.id },
+        data: { lastMessageAt: new Date(), currentStep: 0 },
+      });
+      const timeoutDelay = isDemo ? DEMO_DELAY : settings.retryDelayMs;
+      await this.scheduleJob(
+        'drip-timeout',
+        { leadId, sequenceId: seq.id },
+        timeoutDelay,
+        `drip-timeout-${seq.id}`,
+        isDemo,
+      );
+      this.logger.log(
+        `Drip sequence started for lead ${leadId} (skipInitialSend, timeout in ${timeoutDelay}ms, demo: ${isDemo})`,
+      );
+    } else {
+      // Normal flow — schedule the first message
+      await this.scheduleJob(
+        'send-drip',
+        { leadId, sequenceId: seq.id },
+        seq.initialDelayMs,
+        `drip-send-${seq.id}`,
+        isDemo,
+      );
+      this.logger.log(
+        `Drip sequence started for lead ${leadId} (delay: ${seq.initialDelayMs}ms, demo: ${isDemo})`,
+      );
+    }
     return seq;
   }
 

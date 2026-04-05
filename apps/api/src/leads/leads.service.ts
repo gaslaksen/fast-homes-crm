@@ -2,6 +2,7 @@ import { Injectable, Inject, forwardRef, Logger, Optional } from '@nestjs/common
 import { PrismaService } from '../prisma/prisma.service';
 import { ScoringService } from '../scoring/scoring.service';
 import { MessagesService } from '../messages/messages.service';
+import { DripService } from '../drip/drip.service';
 import { PhotosService } from '../photos/photos.service';
 import { RentCastService } from '../comps/rentcast.service';
 import { CompsService } from '../comps/comps.service';
@@ -41,6 +42,8 @@ export class LeadsService {
     private scoringService: ScoringService,
     @Inject(forwardRef(() => MessagesService))
     private messagesService: MessagesService,
+    @Inject(forwardRef(() => DripService))
+    private dripService: DripService,
     @Optional() private photosService: PhotosService,
     private rentCastService: RentCastService,
     private compsService: CompsService,
@@ -183,6 +186,13 @@ export class LeadsService {
     const fire = async () => {
       try {
         await this.messagesService.sendInitialOutreach(leadId);
+        // Ensure drip sequence exists for follow-ups (safe even if triggerAiOutreach already started one —
+        // startSequence returns existing if duplicate). skipInitialSend avoids a duplicate first message.
+        try {
+          await this.dripService.startSequence(leadId, { skipInitialSend: true });
+        } catch (err) {
+          this.logger.error(`Drip start after initial outreach failed for lead ${leadId}: ${err.message}`);
+        }
       } catch (error) {
         this.logger.error(`Initial outreach failed for lead ${leadId}: ${error.message}`);
       }
