@@ -358,6 +358,11 @@ export default function LeadDetailPage() {
                       💀 Dead
                     </span>
                   )}
+                  {leadEnrollments.some((e: any) => e.status === 'ACTIVE') && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 text-xs font-semibold">
+                      In Campaign
+                    </span>
+                  )}
                 </div>
                 <p className="text-gray-600 dark:text-gray-400 text-sm">{lead.propertyCity}, {lead.propertyState} {lead.propertyZip}</p>
                 <div className="flex items-center gap-2 mt-1.5">

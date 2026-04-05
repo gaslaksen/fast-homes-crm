@@ -77,6 +77,36 @@ export class CampaignEnrollmentService {
     });
   }
 
+  /**
+   * Remove all active/paused enrollments for a lead (e.g., when lead marked DEAD).
+   */
+  async removeAllActive(leadId: string) {
+    const result = await this.prisma.campaignEnrollment.updateMany({
+      where: { leadId, status: { in: ['ACTIVE', 'PAUSED'] } },
+      data: { status: 'REMOVED' },
+    });
+    if (result.count > 0) {
+      this.logger.log(`🗑️ Removed ${result.count} campaign enrollment(s) for lead ${leadId}`);
+    }
+  }
+
+  /**
+   * Auto-enroll a lead in all active default campaigns.
+   */
+  async autoEnrollInDefaults(leadId: string) {
+    const campaigns = await this.prisma.campaign.findMany({
+      where: { isDefault: true, isActive: true },
+    });
+    for (const campaign of campaigns) {
+      try {
+        await this.enrollLead(leadId, campaign.id);
+        this.logger.log(`📢 Auto-enrolled lead ${leadId} in campaign "${campaign.name}"`);
+      } catch (err) {
+        this.logger.warn(`Could not auto-enroll lead ${leadId} in campaign ${campaign.id}: ${err.message}`);
+      }
+    }
+  }
+
   async handleReply(leadId: string) {
     const activeEnrollments = await this.prisma.campaignEnrollment.findMany({
       where: { leadId, status: 'ACTIVE' },

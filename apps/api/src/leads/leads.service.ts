@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ScoringService } from '../scoring/scoring.service';
 import { MessagesService } from '../messages/messages.service';
 import { DripService } from '../drip/drip.service';
+import { CampaignEnrollmentService } from '../campaigns/campaign-enrollment.service';
 import { PhotosService } from '../photos/photos.service';
 import { RentCastService } from '../comps/rentcast.service';
 import { CompsService } from '../comps/comps.service';
@@ -44,6 +45,8 @@ export class LeadsService {
     private messagesService: MessagesService,
     @Inject(forwardRef(() => DripService))
     private dripService: DripService,
+    @Inject(forwardRef(() => CampaignEnrollmentService))
+    private campaignEnrollmentService: CampaignEnrollmentService,
     @Optional() private photosService: PhotosService,
     private rentCastService: RentCastService,
     private compsService: CompsService,
@@ -186,12 +189,12 @@ export class LeadsService {
     const fire = async () => {
       try {
         await this.messagesService.sendInitialOutreach(leadId);
-        // Ensure drip sequence exists for follow-ups (safe even if triggerAiOutreach already started one —
-        // startSequence returns existing if duplicate). skipInitialSend avoids a duplicate first message.
+        // Auto-enroll in active default campaigns for follow-ups
+        // (campaigns handle drip sequences — no AI drip needed)
         try {
-          await this.dripService.startSequence(leadId, { skipInitialSend: true });
+          await this.campaignEnrollmentService.autoEnrollInDefaults(leadId);
         } catch (err) {
-          this.logger.error(`Drip start after initial outreach failed for lead ${leadId}: ${err.message}`);
+          this.logger.error(`Campaign auto-enroll failed for lead ${leadId}: ${err.message}`);
         }
       } catch (error) {
         this.logger.error(`Initial outreach failed for lead ${leadId}: ${error.message}`);
@@ -543,6 +546,20 @@ export class LeadsService {
           metadata: { oldStatus: lead.status, newStatus: data.status },
         },
       });
+
+      // Remove from campaigns and cancel drip when lead is dead/won/opted out
+      if (['DEAD', 'CLOSED_WON', 'OPTED_OUT'].includes(data.status)) {
+        try {
+          await this.campaignEnrollmentService.removeAllActive(id);
+        } catch (err) {
+          this.logger.error(`Failed to remove campaign enrollments for lead ${id}: ${err.message}`);
+        }
+        try {
+          await this.dripService.cancelByLeadId(id, `Lead status changed to ${data.status}`);
+        } catch (err) {
+          // Drip may not exist — that's fine
+        }
+      }
     }
 
     // Track field updates

@@ -215,9 +215,28 @@ export class CampaignExecutionService implements OnModuleInit {
     }
 
     for (const enrollment of enrollments) {
+      // Optimistic lock: atomically claim this enrollment to prevent
+      // duplicate sends when Railway runs multiple instances during deploy
+      const claimed = await this.prisma.campaignEnrollment.updateMany({
+        where: {
+          id: enrollment.id,
+          nextSendAt: enrollment.nextSendAt, // only if unchanged since our query
+        },
+        data: { nextSendAt: null }, // clear to prevent re-processing
+      });
+      if (claimed.count === 0) {
+        this.logger.log(`Enrollment ${enrollment.id} already claimed by another instance — skipping`);
+        continue;
+      }
+
       try {
         await this.executeStep(enrollment);
       } catch (err) {
+        // Restore nextSendAt on failure so it retries on next cron run
+        await this.prisma.campaignEnrollment.update({
+          where: { id: enrollment.id },
+          data: { nextSendAt: enrollment.nextSendAt },
+        }).catch(() => {}); // swallow restore failure
         this.logger.error(`Failed to execute step for enrollment ${enrollment.id}: ${err.message}`);
       }
     }
@@ -236,9 +255,10 @@ export class CampaignExecutionService implements OnModuleInit {
 
       const staleLeads = await this.prisma.lead.findMany({
         where: {
-          updatedAt: { lte: cutoff },
+          lastTouchedAt: { lte: cutoff },
           doNotContact: false,
-          status: { notIn: ['CLOSED_WON', 'DEAD', 'OPTED_OUT'] },
+          status: 'ATTEMPTING_CONTACT',
+          messages: { none: { direction: 'INBOUND' } }, // Only leads with no replies
         },
       });
 
@@ -383,17 +403,9 @@ export class CampaignExecutionService implements OnModuleInit {
       });
     }
 
-    // Record email campaign sends as touches (SMS touches are already recorded via messagesService)
-    if (sendSuccess && currentStep.channel === 'EMAIL') {
-      try {
-        await this.leadsService.recordTouch(lead.id, 'CAMPAIGN_EMAIL_SENT', {
-          description: `Campaign "${campaign.name}" email sent to ${lead.sellerEmail}`,
-          metadata: { campaignId: campaign.id, stepOrder: currentStep.stepOrder, externalId },
-        });
-      } catch (err) {
-        this.logger.warn(`Failed to record touch for campaign email: ${err.message}`);
-      }
-    }
+    // Note: Email touches are already recorded by gmailService.sendOrgEmail() via recordTouch('EMAIL_SENT').
+    // SMS touches are already recorded by messagesService.sendMessage() via recordTouch('MESSAGE_SENT').
+    // No additional recordTouch needed here — adding one would create duplicate activity entries.
 
     // Advance to next step
     const nextStep = steps.find((s: any) => s.stepOrder === currentStep.stepOrder + 1);
@@ -443,7 +455,7 @@ export class CampaignExecutionService implements OnModuleInit {
       .replace(/\{\{[^}]+\}\}/g, ''); // clear any remaining merge fields
   }
 
-  calculateNextSendAt(step: any): Date {
+  calculateNextSendAt(step: any, timezone = 'America/Chicago'): Date {
     const next = new Date();
     next.setDate(next.getDate() + (step.delayDays ?? 0));
     next.setHours(next.getHours() + (step.delayHours ?? 0));
@@ -452,16 +464,24 @@ export class CampaignExecutionService implements OnModuleInit {
       const [startH, startM] = step.sendWindowStart.split(':').map(Number);
       const [endH, endM] = step.sendWindowEnd.split(':').map(Number);
 
+      // Compare in the user's local timezone, not UTC
+      const localTimeStr = next.toLocaleString('en-US', { timeZone: timezone });
+      const localNow = new Date(localTimeStr);
+      const localMinutes = localNow.getHours() * 60 + localNow.getMinutes();
       const startMinutes = startH * 60 + startM;
       const endMinutes = endH * 60 + endM;
-      const nowMinutes = next.getHours() * 60 + next.getMinutes();
 
-      if (nowMinutes < startMinutes || nowMinutes > endMinutes) {
-        // Push to next occurrence of sendWindowStart
-        if (nowMinutes > endMinutes) {
+      if (localMinutes < startMinutes || localMinutes > endMinutes) {
+        // Calculate UTC offset: difference between UTC hours and local hours
+        const offsetMs = next.getTime() - localNow.getTime();
+
+        if (localMinutes > endMinutes) {
           next.setDate(next.getDate() + 1);
         }
-        next.setHours(startH, startM, 0, 0);
+        // Set local time then shift back to UTC
+        const localTarget = new Date(next);
+        localTarget.setHours(startH, startM, 0, 0);
+        return new Date(localTarget.getTime() + offsetMs);
       }
     }
 

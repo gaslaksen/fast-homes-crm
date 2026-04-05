@@ -194,18 +194,12 @@ export class WebhooksController {
   }
 
   /**
-   * Shared helper: fire AI SMS drip + schedule AI call for a newly created lead.
-   * Both actions respect their respective global toggles from DripSettings.
+   * Shared helper: schedule AI call for a newly created lead.
+   * AI SMS drip is no longer started here — campaigns handle follow-up
+   * sequences via auto-enrollment in scheduleInitialOutreach().
    */
   private async triggerAiOutreach(leadId: string, source: string) {
-    // 1. AI SMS drip (checks aiSmsEnabled internally)
-    try {
-      await this.dripService.startSequence(leadId);
-    } catch (err) {
-      console.error(`⚠️  [${source}] Failed to start drip sequence:`, err.message);
-    }
-
-    // 2. AI outbound call (reads callDelayMs from settings, checks aiCallEnabled at fire time)
+    // AI outbound call (reads callDelayMs from settings, checks aiCallEnabled at fire time)
     try {
       const settings = await this.dripService['prisma'].dripSettings.findUnique({
         where: { id: 'default' },

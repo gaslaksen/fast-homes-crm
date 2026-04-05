@@ -16,6 +16,26 @@ const STATUS_COLORS: Record<string, string> = {
   REMOVED: 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400',
 };
 
+const LEAD_STAGE_COLORS: Record<string, string> = {
+  NEW: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400',
+  ATTEMPTING_CONTACT: 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400',
+  QUALIFYING: 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400',
+  QUALIFIED: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400',
+  OFFER_SENT: 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400',
+  NEGOTIATING: 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400',
+  UNDER_CONTRACT: 'bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-400',
+  CLOSING: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400',
+  CLOSED_WON: 'bg-green-200 dark:bg-green-900/50 text-green-800 dark:text-green-300',
+  CLOSED_LOST: 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400',
+  NURTURE: 'bg-sky-100 dark:bg-sky-900/30 text-sky-700 dark:text-sky-400',
+  DEAD: 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400',
+};
+
+function formatLeadStatus(status?: string): string {
+  if (!status) return '—';
+  return status.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()).replace(/\bDead\b/, 'Dead');
+}
+
 export default function CampaignDetailPage() {
   const params = useParams();
   const id = params.id as string;
@@ -294,6 +314,7 @@ export default function CampaignDetailPage() {
                   <tr className="text-xs text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-950 border-b border-gray-100 dark:border-gray-800">
                     <th className="text-left px-5 py-3 font-medium">Lead</th>
                     <th className="text-left px-4 py-3 font-medium">Address</th>
+                    <th className="text-left px-4 py-3 font-medium">Stage</th>
                     <th className="text-left px-4 py-3 font-medium">Step</th>
                     <th className="text-left px-4 py-3 font-medium">Status</th>
                     <th className="text-left px-4 py-3 font-medium">Last Contact</th>
@@ -314,6 +335,15 @@ export default function CampaignDetailPage() {
                       </td>
                       <td className="px-4 py-3 text-gray-500 dark:text-gray-400 truncate max-w-[200px]">
                         {enrollment.lead?.propertyAddress}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span
+                          className={`inline-block text-xs px-2 py-0.5 rounded-full font-medium ${
+                            LEAD_STAGE_COLORS[enrollment.lead?.status] || 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'
+                          }`}
+                        >
+                          {formatLeadStatus(enrollment.lead?.status)}
+                        </span>
                       </td>
                       <td className="px-4 py-3 text-gray-700 dark:text-gray-300">
                         Step {enrollment.currentStepOrder} / {campaign.steps?.length || '?'}
