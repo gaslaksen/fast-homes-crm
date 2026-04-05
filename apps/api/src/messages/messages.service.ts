@@ -514,9 +514,9 @@ Keep it human, warm, and under 160 characters. Ask only ONE question.`.trim();
         // Turn off auto-respond so no more AI messages fire after the closing
         await this.prisma.lead.update({
           where: { id: leadId },
-          data: { autoRespond: false, status: 'CAMP_COMPLETE' },
+          data: { autoRespond: false, status: 'QUALIFIED' },
         }).catch(() => {
-          // status might not accept CAMP_COMPLETE — just turn off auto-respond
+          // fallback: just turn off auto-respond
           this.prisma.lead.update({ where: { id: leadId }, data: { autoRespond: false } });
         });
         this.logger.log(`🔕 Auto-respond disabled for lead ${leadId} — CAMP complete, closing message sent`);
