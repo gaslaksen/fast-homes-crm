@@ -9,6 +9,7 @@ import AppNav from '@/components/AppNav';
 import LeadTabNav, { COMPS_TABS, DETAIL_TABS } from '@/components/LeadTabNav';
 import AnalysisTab from '@/components/AnalysisTab';
 import PropertyPhoto from '@/components/PropertyPhoto';
+import ShareDealModal from '@/components/ShareDealModal';
 
 const CompsMap = dynamic(() => import('@/components/CompsMap'), { ssr: false, loading: () => <div className="w-full h-64 bg-gray-100 dark:bg-gray-800 rounded-lg animate-pulse" /> });
 
@@ -199,6 +200,7 @@ export default function CompsAnalysisPage() {
   const [aiAdjusting, setAiAdjusting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savingDealNumbers, setSavingDealNumbers] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
   const [dealNumbersSaved, setDealNumbersSaved] = useState(false);
   const [generatingAi, setGeneratingAi] = useState(false);
   const [generatingAssessment, setGeneratingAssessment] = useState(false);
@@ -1976,6 +1978,12 @@ export default function CompsAnalysisPage() {
                   >
                     {savingDealNumbers ? 'Saving...' : 'Save Deal Numbers'}
                   </button>
+                  <button
+                    onClick={() => setShowShareModal(true)}
+                    className="btn btn-sm border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950"
+                  >
+                    Share with Partners
+                  </button>
                   {dealNumbersSaved ? (
                     <span className="text-sm text-green-600 font-medium">✓ Saved — reflected on overview &amp; disposition pages</span>
                   ) : (
@@ -2991,6 +2999,13 @@ export default function CompsAnalysisPage() {
           {compsFromAttom > 0 && compsFromRentcast > 0 ? ' · Additional comps from RentCast' : ''}
         </div>
       )}
+
+      <ShareDealModal
+        leadId={leadId}
+        propertyAddress={lead ? `${lead.propertyAddress}, ${lead.propertyCity}` : ''}
+        isOpen={showShareModal}
+        onClose={() => setShowShareModal(false)}
+      />
     </div>
   );
 }

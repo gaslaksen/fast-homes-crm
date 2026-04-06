@@ -347,6 +347,23 @@ export const dealSearchAPI = {
     api.post('/deal-search/skip-trace', { attomId }),
 };
 
+// Partners & Deal Sharing API
+export const partnersAPI = {
+  list: (params?: { search?: string; type?: string; page?: number; limit?: number }) =>
+    api.get('/partners', { params }),
+  get: (id: string) => api.get(`/partners/${id}`),
+  create: (data: { name: string; email: string; company?: string; phone?: string; type?: string; tags?: string[]; notes?: string }) =>
+    api.post('/partners', data),
+  update: (id: string, data: { name?: string; email?: string; company?: string; phone?: string; type?: string; tags?: string[]; notes?: string }) =>
+    api.patch(`/partners/${id}`, data),
+  delete: (id: string) => api.delete(`/partners/${id}`),
+  shareDeal: (data: { leadId: string; partnerIds: string[]; channel?: string; personalNote?: string; emailSubject?: string }) =>
+    api.post('/partners/share-deal', data),
+  getLeadShares: (leadId: string) => api.get(`/leads/${leadId}/shares`),
+  getPartnerShares: (partnerId: string) => api.get(`/partners/${partnerId}/shares`),
+  resend: (shareId: string) => api.post(`/partners/shares/${shareId}/resend`),
+};
+
 export const dispoAPI = {
   getSummary: (leadId: string) => api.get(`/leads/${leadId}/dispo`),
   updateDealNumbers: (leadId: string, data: { arv?: number | null; repairCosts?: number | null; askingPrice?: number | null; assignmentFee?: number | null; maoPercent?: number | null }) =>

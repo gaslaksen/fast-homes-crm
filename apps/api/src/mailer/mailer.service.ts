@@ -10,6 +10,17 @@ export class MailerService {
     return new Resend(this.config.get('RESEND_API_KEY'));
   }
 
+  async sendDealPackage(to: string, subject: string, html: string, replyTo?: string) {
+    const from = this.config.get('SMTP_FROM') || 'Deal Core <noreply@mydealcore.com>';
+    await this.resend.emails.send({
+      from,
+      to,
+      subject,
+      html,
+      ...(replyTo ? { reply_to: replyTo } : {}),
+    });
+  }
+
   async sendPasswordResetEmail(email: string, token: string, firstName: string) {
     const frontendUrl = this.config.get('FRONTEND_URL') || 'http://localhost:3000';
     const resetUrl = `${frontendUrl}/reset-password?token=${token}`;

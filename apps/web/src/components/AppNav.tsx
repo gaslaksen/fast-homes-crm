@@ -13,6 +13,7 @@ const NAV_ITEMS = [
   { label: 'Leads',     href: '/leads' },
   { label: 'Drip Campaigns', href: '/drip-campaigns' },
   { label: 'Deal Search', href: '/deal-search' },
+  { label: 'Partners',  href: '/settings/partners' },
   { label: 'Team',      href: '/settings/team' },
   { label: 'Settings',  href: '/settings' },
 ];

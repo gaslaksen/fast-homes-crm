@@ -3,7 +3,9 @@
 import { useEffect, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { leadsAPI, messagesAPI, compsAPI, settingsAPI, photosAPI, callsAPI, authAPI, tasksAPI, gmailAPI, campaignAPI } from '@/lib/api';
+import { leadsAPI, messagesAPI, compsAPI, settingsAPI, photosAPI, callsAPI, authAPI, tasksAPI, gmailAPI, campaignAPI, partnersAPI } from '@/lib/api';
+import ShareDealModal from '@/components/ShareDealModal';
+import ShareHistory from '@/components/ShareHistory';
 import PropertyPhoto from '@/components/PropertyPhoto';
 import DispoTab from '@/components/DispoTab';
 import PhotoGallery from '@/components/PhotoGallery';
@@ -93,6 +95,7 @@ export default function LeadDetailPage() {
   const [availableCampaigns, setAvailableCampaigns] = useState<any[]>([]);
   const [selectedCampaignId, setSelectedCampaignId] = useState('');
   const [enrollingInCampaign, setEnrollingInCampaign] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
 
   useEffect(() => {
     loadLead();
@@ -1172,9 +1175,29 @@ export default function LeadDetailPage() {
                   </div>
                 )}
               </div>
+
+              {/* Share Deal */}
+              <div className="card">
+                <h3 className="text-lg font-bold mb-3">Deal Sharing</h3>
+                <button
+                  onClick={() => setShowShareModal(true)}
+                  className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg border-2 border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950 text-sm font-medium transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" /></svg>
+                  Share with Partners
+                </button>
+                <ShareHistory leadId={leadId} />
+              </div>
             </div>
           </div>
         )}
+
+        <ShareDealModal
+          leadId={leadId}
+          propertyAddress={lead ? `${lead.propertyAddress}, ${lead.propertyCity}` : ''}
+          isOpen={showShareModal}
+          onClose={() => setShowShareModal(false)}
+        />
 
         {/* Disposition Tab */}
         {activeTab === 'disposition' && (

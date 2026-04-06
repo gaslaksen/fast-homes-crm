@@ -188,6 +188,7 @@ model Lead {
   dripSequence      DripSequence?
   callLogs          CallLog[]
   campaignEnrollments CampaignEnrollment[]
+  dealShares          DealShare[]
 
   @@map("leads")
 }
@@ -643,6 +644,66 @@ model CampaignMessageLog {
   createdAt    DateTime           @default(now())
 
   @@map("campaign_message_logs")
+}
+
+// ─── Partners & Deal Sharing ─────────────────────────────────────────────────
+
+model Partner {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  email          String
+  company        String?
+  phone          String?
+  type           String   @default("buyer")  // buyer | jv_partner | hedge_fund | fix_and_flip | other
+  tags           Json     @default("[]")
+  notes          String?  @db.Text
+  isActive       Boolean  @default(true)
+  lastSharedAt   DateTime?
+  shareCount     Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  dealShares DealShare[]
+
+  @@unique([organizationId, email])
+  @@map("partners")
+}
+
+model DealShare {
+  id             String   @id @default(cuid())
+  organizationId String
+  leadId         String
+  lead           Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  partnerId      String
+  partner        Partner  @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  sharedByUserId String
+  channel        String   @default("resend")  // resend | gmail | org-gmail
+
+  viewToken      String   @unique
+  expiresAt      DateTime
+
+  status         String   @default("sent")  // sent | opened | expired | error
+  openedAt       DateTime?
+  openCount      Int      @default(0)
+  lastOpenedAt   DateTime?
+
+  // Snapshot of deal numbers at time of share
+  snapshotArv           Float?
+  snapshotRepairCosts   Float?
+  snapshotMao           Float?
+  snapshotAskingPrice   Float?
+  snapshotAssignmentFee Float?
+  snapshotDealType      String?
+
+  emailSubject   String?
+  personalNote   String?  @db.Text
+  createdAt      DateTime @default(now())
+
+  @@index([leadId])
+  @@index([partnerId])
+  @@index([viewToken])
+  @@map("deal_shares")
 }
 
 // ─── Deal Search ─────────────────────────────────────────────────────────────
