@@ -60,7 +60,7 @@ export class CompsService {
       const fullAddress = `${address.street}, ${address.city}, ${address.state} ${address.zip}`;
 
       try {
-        const payload = await this.rentCastService.analyzeProperty(fullAddress, address.zip);
+        const payload = await this.rentCastService.analyzeProperty(fullAddress, address.zip, leadId);
 
         // Persist scored comps to DB
         await this.prisma.comp.deleteMany({

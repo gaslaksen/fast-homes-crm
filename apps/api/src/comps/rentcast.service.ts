@@ -1313,39 +1313,52 @@ export class RentCastService {
    * Calls all RentCast endpoints and assembles the complete DealcoreAnalysisPayload.
    *
    * Flow:
-   * 1. Get subject property record
+   * 1. Get subject property record (falls back to lead DB data if RentCast has no record)
    * 2. In parallel: sold comps, AVM sanity check, rent estimate, active listings, market stats
    * 3. Score comps, calculate ARV, build payload
    */
   async analyzeProperty(
     address: string,
     zipCode?: string,
+    leadId?: string,
   ): Promise<DealcoreAnalysisPayload> {
     this.logger.log(`=== analyzeProperty pipeline starting for: ${address} ===`);
 
-    // Step 1: Get subject property profile
+    // Step 1: Get subject property profile — gracefully handle missing data
     const subjectProperty = await this.getPropertyDetails(address);
-    if (!subjectProperty) {
-      throw new Error(`RentCast: could not find property record for "${address}"`);
+
+    // If RentCast has no property record, try to pull subject data from the lead in DB
+    let leadFallbackData: Record<string, any> | null = null;
+    if (!subjectProperty && leadId) {
+      this.logger.warn(`RentCast has no property record for "${address}" — using lead DB data as fallback`);
+      leadFallbackData = await this.prisma.lead.findUnique({
+        where: { id: leadId },
+        select: {
+          propertyType: true, bedrooms: true, bathrooms: true, sqft: true,
+          yearBuilt: true, lotSize: true, latitude: true, longitude: true,
+          lastSaleDate: true, lastSalePrice: true, propertyZip: true,
+        },
+      });
     }
 
-    const zip = zipCode || subjectProperty.zipCode;
+    const zip = zipCode || subjectProperty?.zipCode || leadFallbackData?.propertyZip;
     if (!zip) {
       throw new Error(`No zip code available for property analysis: ${address}`);
     }
 
     const subjectData = {
-      propertyType: subjectProperty.propertyType,
-      bedrooms: subjectProperty.bedrooms,
-      bathrooms: subjectProperty.bathrooms,
-      squareFootage: subjectProperty.squareFootage,
-      latitude: subjectProperty.latitude,
-      longitude: subjectProperty.longitude,
+      propertyType: subjectProperty?.propertyType || leadFallbackData?.propertyType || null,
+      bedrooms: subjectProperty?.bedrooms ?? leadFallbackData?.bedrooms ?? null,
+      bathrooms: subjectProperty?.bathrooms ?? leadFallbackData?.bathrooms ?? null,
+      squareFootage: subjectProperty?.squareFootage ?? leadFallbackData?.sqft ?? null,
+      latitude: subjectProperty?.latitude ?? leadFallbackData?.latitude ?? null,
+      longitude: subjectProperty?.longitude ?? leadFallbackData?.longitude ?? null,
     };
 
     this.logger.log(
-      `Subject: ${subjectProperty.bedrooms ?? '?'}bd/${subjectProperty.bathrooms ?? '?'}ba, ` +
-      `${subjectProperty.squareFootage ?? '?'}sqft, ${subjectProperty.propertyType ?? '?'}, zip=${zip}`,
+      `Subject: ${subjectData.bedrooms ?? '?'}bd/${subjectData.bathrooms ?? '?'}ba, ` +
+      `${subjectData.squareFootage ?? '?'}sqft, ${subjectData.propertyType ?? '?'}, zip=${zip}` +
+      `${!subjectProperty ? ' (from lead DB fallback)' : ''}`,
     );
 
     // Step 2: Fire all remaining calls in parallel
@@ -1446,34 +1459,36 @@ export class RentCastService {
       marketTrends = this.buildMarketTrends(marketStats, zip, subjectData.propertyType, subjectData.bedrooms);
     }
 
-    // Step 6: Assemble subject
+    // Step 6: Assemble subject (from RentCast property record or lead DB fallback)
+    const sp = subjectProperty; // may be null
+    const fb = leadFallbackData; // may be null
     const subjectPayload: DealcoreAnalysisPayload['subject'] = {
-      address: subjectProperty.formattedAddress || address,
-      propertyType: subjectProperty.propertyType ?? null,
-      bedrooms: subjectProperty.bedrooms ?? null,
-      bathrooms: subjectProperty.bathrooms ?? null,
-      squareFootage: subjectProperty.squareFootage ?? null,
-      lotSize: subjectProperty.lotSize ?? null,
-      yearBuilt: subjectProperty.yearBuilt ?? null,
-      features: subjectProperty.features ?? null,
-      taxAssessments: subjectProperty.taxAssessments ?? null,
-      propertyTaxes: (subjectProperty as any).propertyTaxes ?? null,
-      lastSaleDate: subjectProperty.lastSaleDate ?? null,
-      lastSalePrice: subjectProperty.lastSalePrice ?? null,
-      saleHistory: (subjectProperty as any).history ?? null,
-      owner: (subjectProperty as any).owner
+      address: sp?.formattedAddress || address,
+      propertyType: sp?.propertyType ?? fb?.propertyType ?? null,
+      bedrooms: sp?.bedrooms ?? fb?.bedrooms ?? null,
+      bathrooms: sp?.bathrooms ?? fb?.bathrooms ?? null,
+      squareFootage: sp?.squareFootage ?? fb?.sqft ?? null,
+      lotSize: sp?.lotSize ?? fb?.lotSize ?? null,
+      yearBuilt: sp?.yearBuilt ?? fb?.yearBuilt ?? null,
+      features: sp?.features ?? null,
+      taxAssessments: sp?.taxAssessments ?? null,
+      propertyTaxes: (sp as any)?.propertyTaxes ?? null,
+      lastSaleDate: sp?.lastSaleDate ?? fb?.lastSaleDate?.toISOString?.() ?? null,
+      lastSalePrice: sp?.lastSalePrice ?? fb?.lastSalePrice ?? null,
+      saleHistory: (sp as any)?.history ?? null,
+      owner: (sp as any)?.owner
         ? {
-            names: (subjectProperty as any).owner.names || [subjectProperty.ownerName].filter(Boolean),
-            type: (subjectProperty as any).owner.type ?? null,
-            mailingAddress: (subjectProperty as any).owner.mailingAddress ?? null,
+            names: (sp as any).owner.names || [sp?.ownerName].filter(Boolean),
+            type: (sp as any).owner.type ?? null,
+            mailingAddress: (sp as any).owner.mailingAddress ?? null,
           }
-        : subjectProperty.ownerName
-          ? { names: [subjectProperty.ownerName], type: null, mailingAddress: null }
+        : sp?.ownerName
+          ? { names: [sp.ownerName], type: null, mailingAddress: null }
           : null,
-      ownerOccupied: subjectProperty.ownerOccupied ?? null,
-      hoa: subjectProperty.hoa ?? null,
-      latitude: subjectProperty.latitude ?? null,
-      longitude: subjectProperty.longitude ?? null,
+      ownerOccupied: sp?.ownerOccupied ?? null,
+      hoa: sp?.hoa ?? null,
+      latitude: sp?.latitude ?? fb?.latitude ?? null,
+      longitude: sp?.longitude ?? fb?.longitude ?? null,
     };
 
     // Step 7: Assemble final payload
