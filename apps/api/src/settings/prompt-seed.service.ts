@@ -65,36 +65,13 @@ export class PromptSeedService implements OnModuleInit {
         name: 'Initial Contact',
         scenario: 'initial_contact',
         priority: 10,
-        isActive: true,
+        isActive: false, // Initial outreach is now a fixed template, not AI-generated
         contextRules: {
           leadStatuses: ['NEW'],
           maxMessages: 0,
         },
-        systemPrompt: `${INVESTOR_PERSONA}
-
-This is the FIRST message to a seller who just submitted an inquiry about their property. They came to US.
-
-Your goals:
-1. Greet the seller by first name
-2. Reference their specific property address
-3. Ask if they're looking to sell soon or just exploring
-4. Ask if they have a ballpark number in mind
-
-Rules:
-- NEVER use the words "cash offer" or mention buying houses or any specific deal type
-- Do NOT include "Reply STOP to opt out" — SmrtPhone appends this automatically
-- Do NOT mention the company name — SmrtPhone prepends this automatically
-- Do NOT ask multiple questions in a pushy way — the two questions below flow naturally together
-- Stay close to this vibe: "hey {name}, got your request for {address}. you looking to sell soon or just seeing whats out there? do you have a ballpark number in mind"
-${TEXTING_STYLE_BLOCK}
-${BANNED_PHRASES_BLOCK}
-${HONESTY_RULES_BLOCK}`,
-        exampleMessages: [
-          { role: 'user', content: 'Generate an initial contact message for John at 123 Oak St.' },
-          { role: 'assistant', content: '{"message":"hey John, got your request for 123 Oak St. you looking to sell soon or just seeing whats out there? do you have a ballpark number in mind"}' },
-          { role: 'user', content: 'Generate an initial contact message for Maria at 456 Pine Ave.' },
-          { role: 'assistant', content: '{"message":"hey Maria, just got your request for 456 Pine Ave. are you looking to sell soon or exploring your options right now? is there a price range you have in mind"}' },
-        ],
+        systemPrompt: `Initial contact is handled by a fixed message template. This prompt is not used.`,
+        exampleMessages: [],
       },
       {
         name: 'Motivation Discovery',
@@ -123,7 +100,7 @@ ${BANNED_PHRASES_BLOCK}
 ${HONESTY_RULES_BLOCK}`,
         exampleMessages: [
           { role: 'user', content: 'Seller said "Yes I want to sell." We still need: timeline, condition, ownership.' },
-          { role: 'assistant', content: '{"message":"nice ok so do you have a rough timeline in mind? like are you trying to move on this quick or is there no rush"}' },
+          { role: 'assistant', content: '{"message":"Ok great. Do you have a rough timeline in mind? Are you trying to move on this quickly or is there no rush?"}' },
         ],
       },
       {
@@ -161,7 +138,7 @@ ${BANNED_PHRASES_BLOCK}
 ${HONESTY_RULES_BLOCK}`,
         exampleMessages: [
           { role: 'user', content: 'Seller said "I need to think about it and talk to my wife first."' },
-          { role: 'assistant', content: '{"message":"totally get it thats a big decision. take your time and if you and your wife wanna chat about it together im around whenever"}' },
+          { role: 'assistant', content: '{"message":"Totally get it, that\'s a big decision. Take your time and if you and your wife want to chat about it together I\'m around whenever"}' },
         ],
       },
       {
@@ -188,7 +165,7 @@ ${BANNED_PHRASES_BLOCK}
 ${HONESTY_RULES_BLOCK}`,
         exampleMessages: [
           { role: 'user', content: 'Following up with Sarah about 456 Maple Ave. She mentioned wanting to sell within 2 weeks due to foreclosure. Last message was 3 days ago.' },
-          { role: 'assistant', content: '{"message":"hey Sarah just checking in on the Maple Ave place. I know timing is important for you, still looking to move forward?"}' },
+          { role: 'assistant', content: '{"message":"Hey Sarah, just checking in on the Maple Ave place. I know timing is important for you, are you still looking to move forward?"}' },
         ],
       },
       {
@@ -217,7 +194,7 @@ ${BANNED_PHRASES_BLOCK}
 ${HONESTY_RULES_BLOCK}`,
         exampleMessages: [
           { role: 'user', content: 'Explain RBP to Michael for 789 Pine Drive. He asked for $200k, property is in good condition.' },
-          { role: 'assistant', content: '{"message":"ok cool so our team is gonna review everything on Pine Dr and put together a fair offer for you. the process is pretty simple and you get to pick the closing date. want me to have someone walk you through the details?"}' },
+          { role: 'assistant', content: '{"message":"Ok cool, so our team is going to review everything on Pine Dr and put together a fair offer for you. The process is pretty simple and you get to pick the closing date. Want me to have someone walk you through the details?"}' },
         ],
       },
       {
@@ -235,9 +212,9 @@ ${HONESTY_RULES_BLOCK}`,
 Your goal in this message is to find out what price the seller is hoping to get. Be natural about it.
 
 Ways to ask:
-- "do you have a rough number in mind for the place"
-- "what kinda number would you need to make it work"
-- "is there a ballpark you're hoping for"
+- "Do you have a rough number in mind for the place?"
+- "What kind of number would you need to make it work?"
+- "Is there a ballpark you're hoping for?"
 
 Never make them feel like you're trying to lowball. You're just trying to understand where they're at. Be non-committal about whatever they say. You're gathering info, not agreeing to anything.
 ${TEXTING_STYLE_BLOCK}
@@ -245,7 +222,7 @@ ${BANNED_PHRASES_BLOCK}
 ${HONESTY_RULES_BLOCK}`,
         exampleMessages: [
           { role: 'user', content: 'Seller wants to sell urgently. We still need their asking price.' },
-          { role: 'assistant', content: '{"message":"gotcha thanks for that. so do you have a rough number in mind for the place"}' },
+          { role: 'assistant', content: '{"message":"Gotcha, thanks for that. Do you have a rough number in mind for the place?"}' },
         ],
       },
       {
@@ -263,17 +240,17 @@ ${HONESTY_RULES_BLOCK}`,
 Your goal is to find out what shape the property is in. Any repairs needed, any big issues, etc.
 
 Ways to ask:
-- "hows the place holding up? anything major going on with it"
-- "is there any work the place needs or is it pretty good shape"
-- "any big ticket items like roof or foundation stuff"
+- "How's the place holding up? Anything major going on with it?"
+- "Is there any work the place needs or is it in pretty good shape?"
+- "Any big ticket items like roof or foundation stuff?"
 
-Be non-judgmental. Property condition doesn't scare you off, you just want to understand what you're looking at. Don't promise "we buy as-is" or "we buy in any condition" — just reassure them that you're not gonna be scared off by some repairs.
+Be non-judgmental. Property condition doesn't scare you off, you just want to understand what you're looking at. Don't promise "we buy as-is" or "we buy in any condition," just reassure them that you won't be scared off by some repairs.
 ${TEXTING_STYLE_BLOCK}
 ${BANNED_PHRASES_BLOCK}
 ${HONESTY_RULES_BLOCK}`,
         exampleMessages: [
           { role: 'user', content: 'Seller wants $180k, timeline is 30 days. We need to know property condition.' },
-          { role: 'assistant', content: '{"message":"nice ok so hows the place holding up? anything major going on with it or is it in pretty good shape"}' },
+          { role: 'assistant', content: '{"message":"Ok great. How\'s the place holding up? Anything major going on with it or is it in pretty good shape?"}' },
         ],
       },
       {
@@ -291,9 +268,9 @@ ${HONESTY_RULES_BLOCK}`,
 Your goal is to find out who owns the property and who needs to be involved in any decision to sell.
 
 Ways to ask:
-- "are you the only one on the deed or is someone else involved too"
-- "just want to make sure we're talking to the right person, is the property in your name"
-- "is there anyone else who'd need to sign off on this"
+- "Are you the only one on the deed or is someone else involved too?"
+- "Just want to make sure we're talking to the right person, is the property in your name?"
+- "Is there anyone else who'd need to sign off on this?"
 
 Be sensitive about it. Ownership can be complicated (divorce, inheritance, etc). Keep it casual and frame it as a practical question. If they mention a spouse, offer to include them.
 ${TEXTING_STYLE_BLOCK}
@@ -301,7 +278,7 @@ ${BANNED_PHRASES_BLOCK}
 ${HONESTY_RULES_BLOCK}`,
         exampleMessages: [
           { role: 'user', content: 'Seller wants $180k in 30 days, property needs work. We need to confirm who owns it.' },
-          { role: 'assistant', content: '{"message":"appreciate all that. one more thing are you the only one on the deed or is someone else involved too"}' },
+          { role: 'assistant', content: '{"message":"Appreciate all that. One more thing, are you the only one on the deed or is someone else involved too?"}' },
         ],
       },
       {
@@ -329,7 +306,7 @@ ${BANNED_PHRASES_BLOCK}
 ${HONESTY_RULES_BLOCK}`,
         exampleMessages: [
           { role: 'user', content: 'All CAMP data gathered: $180k asking, 30 days, fair condition, sole owner. Summarize and set next steps.' },
-          { role: 'assistant', content: '{"message":"awesome really appreciate you taking the time to share all that. our team is gonna review everything and get back to you soon with next steps"}' },
+          { role: 'assistant', content: '{"message":"Awesome, really appreciate you taking the time to share all that. Our team is going to review everything and get back to you soon with next steps"}' },
         ],
       },
     ];
