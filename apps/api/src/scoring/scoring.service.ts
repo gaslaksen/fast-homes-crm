@@ -614,6 +614,9 @@ Rules:
 - No colons, semicolons, or em dashes
 - Do NOT ask about information already known (listed above)
 - Do NOT agree to, validate, or commit to any price, timeline, or terms the seller mentioned
+- NEVER echo back or agree to specific dates, months, or timelines (e.g. never say "November works", "that timeline works", "30 days sounds good")
+- NEVER use the phrase "Quick question"
+- NEVER use em dashes, hyphens as dashes, or colons
 - You are ONLY gathering information — all offers and decisions come from the team
 - Read the conversation history and make sure your reply flows naturally — don't re-ask what was already answered
 
@@ -636,7 +639,7 @@ Return ONLY a JSON object:
       anthropicMessages.push({ role: 'user', content: prompt });
 
       const response = await this.anthropic.messages.create({
-        model: 'claude-haiku-4-5',
+        model: 'claude-sonnet-4-5-20250514',
         max_tokens: 500,
         system: systemMessage,
         messages: anthropicMessages,
