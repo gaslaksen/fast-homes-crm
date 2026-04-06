@@ -189,13 +189,10 @@ export class LeadsService {
     const fire = async () => {
       try {
         await this.messagesService.sendInitialOutreach(leadId);
-        // Auto-enroll in active default campaigns for follow-ups
-        // (campaigns handle drip sequences — no AI drip needed)
-        try {
-          await this.campaignEnrollmentService.autoEnrollInDefaults(leadId);
-        } catch (err) {
-          this.logger.error(`Campaign auto-enroll failed for lead ${leadId}: ${err.message}`);
-        }
+        // Campaign auto-enrollment now happens on first inbound reply
+        // (in handleInboundMessage) — NOT on lead creation. Enrolling here
+        // caused 3+ campaign messages to fire immediately alongside the
+        // initial outreach, spamming the seller.
       } catch (error) {
         this.logger.error(`Initial outreach failed for lead ${leadId}: ${error.message}`);
       }

@@ -172,6 +172,24 @@ export class MessagesService {
       throw new Error('Lead is marked as Do Not Contact');
     }
 
+    // Throttle: skip if an outbound message was sent to this lead in the last 5 minutes.
+    // Prevents race conditions (campaigns + initial outreach + drip) from spamming the seller.
+    // Manual agent sends (userId present) bypass the throttle.
+    if (!userId) {
+      const recentOutbound = await this.prisma.message.findFirst({
+        where: {
+          leadId,
+          direction: 'OUTBOUND',
+          createdAt: { gte: new Date(Date.now() - 5 * 60 * 1000) },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (recentOutbound) {
+        this.logger.warn(`⚡ Throttled: automated outbound to lead ${leadId} skipped — last sent ${recentOutbound.createdAt.toISOString()}`);
+        return null;
+      }
+    }
+
     const to = formatPhoneNumber(lead.sellerPhone);
     const from = this.twilioNumber;
 
@@ -758,6 +776,19 @@ Keep it human, warm, and under 300 characters. Ask only ONE question.`.trim();
       await this.campaignEnrollmentService.handleReply(lead.id);
     } catch (error) {
       // Campaign enrollment may not exist — that's fine
+    }
+
+    // Auto-enroll in default campaigns on FIRST inbound reply (not on lead creation).
+    // This ensures campaigns are for re-engagement after initial contact, not immediate spam.
+    const priorInbound = lead.messages.filter((m) => m.direction === 'INBOUND');
+    if (priorInbound.length === 0) {
+      // This is the first reply — enroll in default campaigns (will fire after 24h+ delay)
+      try {
+        await this.campaignEnrollmentService.autoEnrollInDefaults(lead.id);
+        this.logger.log(`📢 First reply from lead ${lead.id} — auto-enrolled in default campaigns`);
+      } catch (err) {
+        this.logger.warn(`Campaign auto-enroll failed for lead ${lead.id}: ${err.message}`);
+      }
     }
 
     // Extract signals from message using AI
