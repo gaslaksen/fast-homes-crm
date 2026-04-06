@@ -6,6 +6,12 @@ import axios, { AxiosError } from 'axios';
 
 const ATTOM_BASE = 'https://api.gateway.attomdata.com/propertyapi/v1.0.0';
 
+// Convert lot size: if value > 100 it's almost certainly sqft, convert to acres
+function normalizeLotSize(raw: number | undefined): number | undefined {
+  if (!raw) return undefined;
+  return raw > 100 ? parseFloat((raw / 43560).toFixed(4)) : raw;
+}
+
 // ─── ATTOM Response Types ────────────────────────────────────────────────────
 
 export interface AttomProperty {
@@ -552,7 +558,7 @@ export class AttomService {
     if (!lead.bathrooms && e.bathsFromAttom)  update.bathrooms = e.bathsFromAttom;
     if (!lead.sqft      && e.sqftFromAttom)   update.sqft      = e.sqftFromAttom;
     if (!lead.yearBuilt && e.yearBuiltFromAttom) update.yearBuilt = e.yearBuiltFromAttom;
-    if (!lead.lotSize   && e.lotSizeFromAttom) update.lotSize   = e.lotSizeFromAttom;
+    if (!lead.lotSize   && e.lotSizeFromAttom) update.lotSize   = normalizeLotSize(e.lotSizeFromAttom);
     if (!lead.latitude  && e.latitude)  update.latitude  = e.latitude;
     if (!lead.longitude && e.longitude) update.longitude = e.longitude;
     // Always update last sale from ATTOM — the lead may have been imported with

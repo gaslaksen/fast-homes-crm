@@ -676,7 +676,7 @@ export default function LeadDetailPage() {
                     <dt className="text-sm font-medium text-gray-500 dark:text-gray-400">Lot Size</dt>
                     <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">
                       {lead.lotSize
-                        ? lead.lotSize < 10 ? `${lead.lotSize.toFixed(2)} acres` : `${(lead.lotSize / 43560).toFixed(2)} acres`
+                        ? lead.lotSize > 100 ? `${(lead.lotSize / 43560).toFixed(2)} acres` : `${lead.lotSize.toFixed(2)} acres`
                         : 'Unknown'}
                     </dd>
                   </div>
