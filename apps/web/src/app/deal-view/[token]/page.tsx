@@ -72,9 +72,62 @@ export default function DealViewPage() {
     );
   }
 
-  const { lead, analysis, comps, orgName, senderName, senderEmail } = data;
+  const { lead, analysis, comps, orgName, senderName, senderEmail, partnerType } = data;
   const di = analysis?.dealIntelligence;
   const pa = analysis?.photoAnalysis;
+  const isJV = partnerType === 'jv_partner';
+  const isFlip = partnerType === 'fix_and_flip';
+  const isFund = partnerType === 'hedge_fund';
+  const isWholesale = !isJV && !isFlip && !isFund;
+
+  // Dynamic deal numbers based on partner type
+  const arv = analysis?.arvEstimate;
+  const repairs = analysis?.repairCosts || 0;
+  const mao = analysis?.mao;
+  const netProceeds = arv ? Math.round(arv * 0.92) : 0;
+  const projectedProfit = netProceeds && mao ? Math.round(netProceeds - mao - repairs) : 0;
+  const halfProfit = projectedProfit > 0 ? Math.round(projectedProfit / 2) : 0;
+
+  // Dynamic "Why This Deal" pitch from current numbers
+  const dynamicPitch = (() => {
+    if (!analysis) return null;
+    const beds = lead.bedrooms;
+    const baths = lead.bathrooms;
+    const sqft = lead.sqft;
+    const propDesc = [beds ? `${beds}-bed` : '', baths ? `${baths}-bath` : '', sqft ? `${sqft.toLocaleString()} sqft` : ''].filter(Boolean).join(', ');
+    if (isJV) {
+      let text = propDesc ? `${propDesc} property` : 'Property';
+      if (arv) text += ` with an ARV of ${fmt(arv)}`;
+      if (repairs > 0) text += ` and estimated repairs of ${fmt(repairs)}`;
+      text += '.';
+      if (projectedProfit > 0) text += ` Projected net profit of ${fmt(projectedProfit)} on a 50/50 JV split means ${fmt(halfProfit)} each.`;
+      if (mao) text += ` Target acquisition at ${fmt(mao)} (${analysis.maoPercent || 70}% of ARV).`;
+      return text;
+    }
+    if (isFlip) {
+      let text = propDesc ? `${propDesc} flip opportunity` : 'Flip opportunity';
+      if (arv) text += ` with ${fmt(arv)} ARV`;
+      text += '.';
+      if (repairs > 0) text += ` Estimated rehab of ${fmt(repairs)}.`;
+      if (projectedProfit > 0) text += ` Net profit potential of ${fmt(projectedProfit)} after acquisition at ${fmt(mao)} and all costs.`;
+      return text;
+    }
+    if (isFund) {
+      let text = propDesc ? `${propDesc} asset` : 'Asset';
+      if (arv) text += ` valued at ${fmt(arv)} ARV`;
+      if (analysis.pricePerSqft) text += ` ($${Math.round(analysis.pricePerSqft)}/sqft)`;
+      text += '.';
+      if (analysis.confidenceTier) text += ` ${analysis.confidenceTier} confidence valuation.`;
+      if (repairs > 0) text += ` ${fmt(repairs)} in estimated repairs.`;
+      return text;
+    }
+    // Wholesale default
+    let text = propDesc ? `${propDesc} wholesale deal` : 'Wholesale deal';
+    if (arv) text += ` with ${fmt(arv)} ARV`;
+    text += '.';
+    if (mao) text += ` MAO at ${fmt(mao)} (${analysis.maoPercent || 70}% of ARV).`;
+    return text;
+  })();
   const photos: string[] = [];
   if (lead.primaryPhoto) photos.push(lead.primaryPhoto);
   if (Array.isArray(lead.photos)) {
@@ -155,10 +208,12 @@ export default function DealViewPage() {
           </div>
         )}
 
-        {/* ── Deal Numbers ───────────────────────────────────────────── */}
+        {/* ── Deal Numbers (partner-type-specific) ────────────────────── */}
         {analysis && (
           <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <h2 className="text-lg font-bold text-gray-900 mb-4">Deal Numbers</h2>
+            <h2 className="text-lg font-bold text-gray-900 mb-4">
+              {isJV ? 'Joint Venture Numbers' : isFlip ? 'Flip Numbers' : isFund ? 'Asset Valuation' : 'Deal Numbers'}
+            </h2>
             <div className="grid grid-cols-3 gap-6 mb-4">
               <div className="text-center">
                 <p className="text-xs text-gray-400 uppercase font-semibold">After Repair Value</p>
@@ -175,24 +230,52 @@ export default function DealViewPage() {
                 )}
               </div>
               <div className="text-center">
-                <p className="text-xs text-gray-400 uppercase font-semibold">Max Allowable Offer</p>
-                <p className="text-3xl font-bold text-blue-600 mt-1">{fmt(analysis.mao)}</p>
-                <p className="text-xs text-gray-400 mt-1">@ {analysis.maoPercent}% of ARV</p>
+                {isJV ? (
+                  <>
+                    <p className="text-xs text-gray-400 uppercase font-semibold">Projected Profit</p>
+                    <p className={`text-3xl font-bold mt-1 ${projectedProfit > 0 ? 'text-purple-600' : 'text-red-600'}`}>{fmt(projectedProfit)}</p>
+                    {halfProfit > 0 && <p className="text-xs text-gray-400 mt-1">{fmt(halfProfit)} each (50/50)</p>}
+                  </>
+                ) : isFlip ? (
+                  <>
+                    <p className="text-xs text-gray-400 uppercase font-semibold">Net Profit</p>
+                    <p className={`text-3xl font-bold mt-1 ${projectedProfit > 0 ? 'text-green-600' : 'text-red-600'}`}>{fmt(projectedProfit)}</p>
+                    <p className="text-xs text-gray-400 mt-1">Buy @ {fmt(mao)}</p>
+                  </>
+                ) : isFund ? (
+                  <>
+                    <p className="text-xs text-gray-400 uppercase font-semibold">Confidence</p>
+                    <p className={`text-3xl font-bold mt-1 ${
+                      analysis.confidenceTier === 'High' ? 'text-green-600' :
+                      analysis.confidenceTier === 'Medium' ? 'text-yellow-600' : 'text-red-600'
+                    }`}>{analysis.confidenceTier || 'N/A'}</p>
+                    <p className="text-xs text-gray-400 mt-1">Score: {analysis.confidenceScore || 0}/100</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-xs text-gray-400 uppercase font-semibold">Max Allowable Offer</p>
+                    <p className="text-3xl font-bold text-blue-600 mt-1">{fmt(analysis.mao)}</p>
+                    <p className="text-xs text-gray-400 mt-1">@ {analysis.maoPercent}% of ARV</p>
+                  </>
+                )}
               </div>
             </div>
             <div className="flex items-center justify-between border-t border-gray-100 pt-4 text-sm text-gray-600">
-              <span>Deal Type: <strong className="text-gray-900">{DEAL_TYPE_LABELS[analysis.dealType] || analysis.dealType}</strong></span>
+              <span>Deal Type: <strong className="text-gray-900">
+                {isJV ? 'Joint Venture' : isFlip ? 'Fix & Flip' : isFund ? 'Investment' : (DEAL_TYPE_LABELS[analysis.dealType] || analysis.dealType)}
+              </strong></span>
               {analysis.pricePerSqft && <span>$/Sqft: <strong className="text-gray-900">${Math.round(analysis.pricePerSqft)}</strong></span>}
-              {analysis.confidenceTier && <span>Confidence: <strong className="text-gray-900">{analysis.confidenceTier}</strong></span>}
+              {isJV && <span>Acquisition: <strong className="text-gray-900">{fmt(mao)}</strong> @ {analysis.maoPercent || 70}%</span>}
+              {isWholesale && <span>Assignment Fee: <strong className="text-gray-900">{fmt(analysis.assignmentFee)}</strong></span>}
             </div>
           </div>
         )}
 
-        {/* ── Why This Deal (AI Bottom Line) ─────────────────────────── */}
-        {di?.bottomLine && (
+        {/* ── Why This Deal (dynamic from current numbers) ────────────── */}
+        {dynamicPitch && (
           <div className="bg-amber-50 border border-amber-200 rounded-xl p-6">
             <h2 className="text-sm font-bold text-amber-800 uppercase tracking-wide mb-2">Why This Deal</h2>
-            <p className="text-base text-gray-900 leading-relaxed">{di.bottomLine}</p>
+            <p className="text-base text-gray-900 leading-relaxed">{dynamicPitch}</p>
           </div>
         )}
 

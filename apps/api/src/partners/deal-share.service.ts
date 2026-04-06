@@ -191,7 +191,7 @@ export class DealShareService {
             longitude: true,
           },
         },
-        partner: { select: { name: true } },
+        partner: { select: { name: true, type: true } },
       },
     });
 
@@ -224,6 +224,7 @@ export class DealShareService {
       orgName: await this.getOrgName(share.organizationId),
       sharedAt: share.createdAt,
       partnerName: share.partner.name,
+      partnerType: share.partner.type,
       senderName: sender ? `${sender.firstName} ${sender.lastName}` : null,
       senderEmail: sender?.email || null,
     };

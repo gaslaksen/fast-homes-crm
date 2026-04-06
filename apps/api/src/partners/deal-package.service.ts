@@ -242,12 +242,13 @@ export class DealPackageService {
       : '';
 
     // ── "Why This Deal" section ─────────────────────────────────────────────
-    const bottomLine = di?.bottomLine;
-    const whyThisDeal = bottomLine
+    // Generate dynamic "Why This Deal" pitch from CURRENT numbers + partner type
+    const pitchText = this.generateDealPitch(partnerType, analysis, lead);
+    const whyThisDeal = pitchText
       ? `<tr><td style="padding:24px 32px 0 32px;">
           <div style="background:#fefce8;border-left:4px solid #ca8a04;padding:16px 20px;border-radius:0 8px 8px 0;">
             <p style="margin:0 0 4px 0;font-size:12px;color:#92400e;font-weight:700;text-transform:uppercase;">Why This Deal</p>
-            <p style="margin:0;font-size:14px;color:#1c1917;line-height:1.6;">${bottomLine}</p>
+            <p style="margin:0;font-size:14px;color:#1c1917;line-height:1.6;">${pitchText}</p>
           </div>
         </td></tr>`
       : '';
@@ -449,6 +450,100 @@ export class DealPackageService {
   }
 
   // ── Partner-type framing logic ────────────────────────────────────────────
+
+  // ── Dynamic deal pitch from CURRENT numbers (not stale AI) ─────────────
+
+  generateDealPitch(partnerType: string, analysis: any, lead: any): string {
+    if (!analysis) return '';
+
+    const fmt = (n: number | null | undefined) =>
+      n != null ? `$${Math.round(n).toLocaleString('en-US')}` : '';
+
+    const arv = analysis.arvEstimate;
+    const repairs = analysis.repairCosts || 0;
+    const mao = analysis.mao;
+    const sqft = lead?.sqft;
+    const beds = lead?.bedrooms;
+    const baths = lead?.bathrooms;
+
+    // Net proceeds after 6% commission + 2% closing
+    const netProceeds = arv ? Math.round(arv * 0.92) : 0;
+    const projectedProfit = netProceeds && mao ? Math.round(netProceeds - mao - repairs) : 0;
+    const halfProfit = projectedProfit ? Math.round(projectedProfit / 2) : 0;
+    const ppsf = analysis.pricePerSqft ? Math.round(analysis.pricePerSqft) : null;
+
+    const propDesc = [
+      beds ? `${beds}-bed` : '',
+      baths ? `${baths}-bath` : '',
+      sqft ? `${sqft.toLocaleString()} sqft` : '',
+    ].filter(Boolean).join(', ');
+
+    switch (partnerType) {
+      case 'jv_partner': {
+        const parts: string[] = [];
+        if (propDesc) parts.push(`${propDesc} property`);
+        if (arv) parts.push(`with an ARV of ${fmt(arv)}`);
+        if (repairs > 0) parts.push(`and estimated repairs of ${fmt(repairs)}`);
+        const intro = parts.length ? parts.join(' ') + '.' : '';
+
+        let profitLine = '';
+        if (projectedProfit > 0) {
+          profitLine = ` Projected net profit of ${fmt(projectedProfit)} on a 50/50 JV split means ${fmt(halfProfit)} each.`;
+        }
+
+        const buyLine = mao ? ` Target acquisition at ${fmt(mao)} (${analysis.maoPercent || 70}% of ARV).` : '';
+        const condition = analysis.conditionTier || analysis.photoAnalysis?.overallCondition;
+        const condLine = condition ? ` Property is in ${condition.toLowerCase()} condition.` : '';
+
+        return `${intro}${profitLine}${buyLine}${condLine}`.trim();
+      }
+
+      case 'hedge_fund': {
+        const parts: string[] = [];
+        if (propDesc) parts.push(`${propDesc} asset`);
+        if (arv) parts.push(`valued at ${fmt(arv)} ARV`);
+        if (ppsf) parts.push(`($${ppsf}/sqft)`);
+        const intro = parts.length ? parts.join(' ') + '.' : '';
+
+        const conf = analysis.confidenceTier;
+        const confLine = conf ? ` ${conf} confidence valuation backed by ${analysis.confidenceScore || 0}/100 comp pool score.` : '';
+        const repLine = repairs > 0 ? ` ${fmt(repairs)} in estimated repairs.` : '';
+
+        return `${intro}${confLine}${repLine}`.trim();
+      }
+
+      case 'fix_and_flip': {
+        const parts: string[] = [];
+        if (propDesc) parts.push(`${propDesc} flip opportunity`);
+        if (arv) parts.push(`with ${fmt(arv)} ARV`);
+        const intro = parts.length ? parts.join(' ') + '.' : '';
+
+        const repLine = repairs > 0 ? ` Estimated rehab of ${fmt(repairs)}${analysis.repairFinishLevel ? ` (${analysis.repairFinishLevel.replace(/_/g, ' ')})` : ''}.` : '';
+
+        let profitLine = '';
+        if (projectedProfit > 0) {
+          profitLine = ` Net profit potential of ${fmt(projectedProfit)} after acquisition at ${fmt(mao)} and all costs.`;
+        }
+
+        const condition = analysis.conditionTier || analysis.photoAnalysis?.overallCondition;
+        const condLine = condition ? ` Current condition: ${condition.toLowerCase()}.` : '';
+
+        return `${intro}${repLine}${profitLine}${condLine}`.trim();
+      }
+
+      default: { // buyer / wholesale
+        const parts: string[] = [];
+        if (propDesc) parts.push(`${propDesc} wholesale deal`);
+        if (arv) parts.push(`with ${fmt(arv)} ARV`);
+        const intro = parts.length ? parts.join(' ') + '.' : '';
+
+        const maoLine = mao ? ` MAO at ${fmt(mao)} (${analysis.maoPercent || 70}% of ARV less ${fmt(repairs)} repairs and ${fmt(analysis.assignmentFee)} assignment fee).` : '';
+        const spreadLine = mao && analysis.assignmentFee ? ` Sale price to buyer: ${fmt(mao + analysis.assignmentFee)}.` : '';
+
+        return `${intro}${maoLine}${spreadLine}`.trim();
+      }
+    }
+  }
 
   private getPartnerFraming(partnerType: string, analysis: any, di: any, pa: any) {
     const fmt = (n: number | null | undefined) =>
