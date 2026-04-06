@@ -88,7 +88,7 @@ export class DealShareService {
         viewUrl,
         senderName,
         orgName,
-      });
+      }, partner.type);
 
       // Send email via selected channel
       try {
@@ -212,11 +212,20 @@ export class DealShareService {
 
     // Build fresh deal package for the view
     const pkg = await this.dealPackage.buildDealPackage(share.leadId);
+
+    // Get sender info for contact CTA
+    const sender = await this.prisma.user.findUnique({
+      where: { id: share.sharedByUserId },
+      select: { firstName: true, lastName: true, email: true },
+    });
+
     return {
       ...pkg,
       orgName: await this.getOrgName(share.organizationId),
       sharedAt: share.createdAt,
       partnerName: share.partner.name,
+      senderName: sender ? `${sender.firstName} ${sender.lastName}` : null,
+      senderEmail: sender?.email || null,
     };
   }
 
@@ -268,7 +277,7 @@ export class DealShareService {
       viewUrl,
       senderName: sender ? `${sender.firstName} ${sender.lastName}` : undefined,
       orgName: sender?.organization?.name,
-    });
+    }, share.partner.type);
 
     const subject = share.emailSubject || `Deal Opportunity: ${pkg.lead.propertyAddress}`;
 

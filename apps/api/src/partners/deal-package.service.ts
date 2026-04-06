@@ -26,6 +26,7 @@ export interface DealPackage {
     arvHigh: number | null;
     arvMethod: string;
     confidenceTier: string | null;
+    confidenceScore: number;
     repairCosts: number | null;
     repairFinishLevel: string | null;
     dealType: string;
@@ -35,6 +36,16 @@ export interface DealPackage {
     negotiationRangeLow: number | null;
     negotiationRangeHigh: number | null;
     aiSummary: string | null;
+    triangulatedArv: number | null;
+    riskAdjustedArv: number | null;
+    pricePerSqft: number | null;
+    // Rich data
+    dealIntelligence: any | null;
+    photoAnalysis: any | null;
+    aiAssessment: any | null;
+    repairItems: any | null;
+    repairNotes: string | null;
+    conditionTier: string | null;
   } | null;
   comps: Array<{
     address: string;
@@ -47,6 +58,11 @@ export interface DealPackage {
     distance: number;
     photoUrl: string | null;
   }>;
+}
+
+function safeParse(val: string | null | undefined): any {
+  if (!val) return null;
+  try { return JSON.parse(val); } catch { return null; }
 }
 
 @Injectable()
@@ -83,7 +99,7 @@ export class DealPackageService {
     });
     if (!lead) throw new NotFoundException('Lead not found');
 
-    // Get latest comp analysis
+    // Get latest comp analysis with ALL rich data fields
     const analysis = await this.prisma.compAnalysis.findFirst({
       where: { leadId },
       orderBy: { updatedAt: 'desc' },
@@ -105,7 +121,7 @@ export class DealPackageService {
             photoUrl: true,
           },
           orderBy: { distance: 'asc' },
-          take: 5,
+          take: 8,
         })
       : [];
 
@@ -145,6 +161,7 @@ export class DealPackageService {
             arvHigh: analysis.arvHigh,
             arvMethod: analysis.arvMethod,
             confidenceTier: analysis.confidenceTier,
+            confidenceScore: analysis.confidenceScore,
             repairCosts: analysis.repairCosts,
             repairFinishLevel: analysis.repairFinishLevel,
             dealType: analysis.dealType,
@@ -154,6 +171,15 @@ export class DealPackageService {
             negotiationRangeLow: analysis.negotiationRangeLow,
             negotiationRangeHigh: analysis.negotiationRangeHigh,
             aiSummary: analysis.aiSummary,
+            triangulatedArv: analysis.triangulatedArv,
+            riskAdjustedArv: analysis.riskAdjustedArv,
+            pricePerSqft: analysis.pricePerSqft,
+            dealIntelligence: safeParse(analysis.dealIntelligence),
+            photoAnalysis: safeParse(analysis.photoAnalysis),
+            aiAssessment: safeParse(analysis.aiAssessment),
+            repairItems: analysis.repairItems as any,
+            repairNotes: analysis.repairNotes,
+            conditionTier: analysis.conditionTier,
           }
         : null,
       comps: comps.map((c) => ({
@@ -170,9 +196,12 @@ export class DealPackageService {
     };
   }
 
+  // ── Partner-type-specific email rendering ─────────────────────────────────
+
   renderEmailHtml(
     pkg: DealPackage,
     options: { personalNote?: string; viewUrl: string; senderName?: string; orgName?: string },
+    partnerType: string = 'buyer',
   ): string {
     const { lead, analysis, comps } = pkg;
     const { personalNote, viewUrl, senderName, orgName } = options;
@@ -182,31 +211,26 @@ export class DealPackageService {
     const fmtNum = (n: number | null | undefined) =>
       n != null ? n.toLocaleString('en-US') : 'N/A';
 
+    const di = analysis?.dealIntelligence;
+    const pa = analysis?.photoAnalysis;
+
+    // ── Partner-type framing ────────────────────────────────────────────────
+    const framing = this.getPartnerFraming(partnerType, analysis, di, pa);
+
     const photoUrl = lead.primaryPhoto || '';
     const photoSection = photoUrl
       ? `<tr><td style="padding:0"><img src="${photoUrl}" alt="Property" style="width:100%;max-height:300px;object-fit:cover;border-radius:8px 8px 0 0;" /></td></tr>`
       : '';
 
-    const dealTypeLabel: Record<string, string> = {
-      wholesale: 'Wholesale',
-      novation: 'Novation',
-      retail: 'Retail Flip',
-      'subject-to': 'Subject-To',
-      'joint venture': 'Joint Venture',
-    };
-
-    const compRows = comps
-      .map(
-        (c) => `
+    // ── Comp rows with bed/bath ─────────────────────────────────────────────
+    const compRows = comps.slice(0, 5).map((c) => `
       <tr>
         <td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;font-size:13px;color:#374151;">${c.address}</td>
         <td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;font-size:13px;color:#374151;text-align:right;">${fmt(c.soldPrice)}</td>
-        <td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;font-size:13px;color:#374151;text-align:right;">${c.soldDate}</td>
-        <td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;font-size:13px;color:#374151;text-align:right;">${fmtNum(c.sqft)} sqft</td>
+        <td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;font-size:13px;color:#374151;text-align:center;">${c.bedrooms ?? '-'}/${c.bathrooms ?? '-'}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;font-size:13px;color:#374151;text-align:right;">${fmtNum(c.sqft)}</td>
         <td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;font-size:13px;color:#374151;text-align:right;">${c.distance.toFixed(1)} mi</td>
-      </tr>`,
-      )
-      .join('');
+      </tr>`).join('');
 
     const personalNoteSection = personalNote
       ? `<tr><td style="padding:24px 32px 0 32px;">
@@ -214,6 +238,85 @@ export class DealPackageService {
             <p style="margin:0 0 4px 0;font-size:12px;color:#6b7280;font-weight:600;text-transform:uppercase;">Note from ${senderName || 'the team'}</p>
             <p style="margin:0;font-size:14px;color:#1f2937;line-height:1.5;">${personalNote}</p>
           </div>
+        </td></tr>`
+      : '';
+
+    // ── "Why This Deal" section ─────────────────────────────────────────────
+    const bottomLine = di?.bottomLine;
+    const whyThisDeal = bottomLine
+      ? `<tr><td style="padding:24px 32px 0 32px;">
+          <div style="background:#fefce8;border-left:4px solid #ca8a04;padding:16px 20px;border-radius:0 8px 8px 0;">
+            <p style="margin:0 0 4px 0;font-size:12px;color:#92400e;font-weight:700;text-transform:uppercase;">Why This Deal</p>
+            <p style="margin:0;font-size:14px;color:#1c1917;line-height:1.6;">${bottomLine}</p>
+          </div>
+        </td></tr>`
+      : '';
+
+    // ── Market & condition badges ───────────────────────────────────────────
+    const velocity = di?.marketVelocity?.verdict;
+    const avgPpsf = di?.ppsfAnalysis?.avgPpsf || analysis?.pricePerSqft;
+    const condition = pa?.overallCondition || analysis?.conditionTier;
+
+    const velocityColors: Record<string, string> = { hot: '#059669', normal: '#2563eb', slow: '#dc2626' };
+    const conditionColors: Record<string, string> = { Good: '#059669', Fair: '#ca8a04', Poor: '#dc2626', Gut: '#7c2d12' };
+
+    let badgesHtml = '';
+    const badges: string[] = [];
+    if (velocity && velocity !== 'unknown') {
+      badges.push(`<span style="display:inline-block;padding:4px 10px;border-radius:12px;font-size:11px;font-weight:700;color:#fff;background:${velocityColors[velocity] || '#6b7280'};text-transform:uppercase;">${velocity} Market</span>`);
+    }
+    if (condition) {
+      badges.push(`<span style="display:inline-block;padding:4px 10px;border-radius:12px;font-size:11px;font-weight:700;color:#fff;background:${conditionColors[condition] || '#6b7280'};text-transform:uppercase;">${condition} Condition</span>`);
+    }
+    if (avgPpsf) {
+      badges.push(`<span style="display:inline-block;padding:4px 10px;border-radius:12px;font-size:11px;font-weight:600;color:#374151;background:#f3f4f6;">$${Math.round(avgPpsf)}/sqft</span>`);
+    }
+    if (badges.length > 0) {
+      badgesHtml = `<tr><td style="padding:16px 32px 0 32px;">${badges.join(' &nbsp;')}</td></tr>`;
+    }
+
+    // ── Exit scenarios (for JV and fix_and_flip) ────────────────────────────
+    let exitScenariosHtml = '';
+    if ((partnerType === 'jv_partner' || partnerType === 'fix_and_flip') && di?.exitScenarios?.length) {
+      const scenarios = di.exitScenarios.slice(0, 3);
+      const scenarioCells = scenarios.map((s: any) => `
+        <td style="padding:12px;width:${Math.floor(100/scenarios.length)}%;vertical-align:top;border-right:1px solid #e2e8f0;">
+          <p style="margin:0;font-size:11px;color:#64748b;font-weight:600;text-transform:uppercase;">${s.name}</p>
+          <p style="margin:4px 0 0 0;font-size:18px;color:#059669;font-weight:700;">${fmt(s.estimatedSalePrice)}</p>
+          ${s.estimatedRepairCost ? `<p style="margin:2px 0 0 0;font-size:12px;color:#6b7280;">Repairs: ${fmt(s.estimatedRepairCost)}</p>` : ''}
+          <p style="margin:2px 0 0 0;font-size:12px;color:#6b7280;">${s.timeToSell || ''}</p>
+        </td>`).join('');
+      exitScenariosHtml = `<tr><td style="padding:20px 32px 0 32px;">
+        <p style="margin:0 0 8px 0;font-size:13px;color:#6b7280;font-weight:600;text-transform:uppercase;">Exit Scenarios</p>
+        <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background:#f8fafc;border-radius:8px;overflow:hidden;">
+          <tr>${scenarioCells}</tr>
+        </table>
+      </td></tr>`;
+    }
+
+    // ── Risk factors (for hedge_fund) ───────────────────────────────────────
+    let riskHtml = '';
+    if (partnerType === 'hedge_fund' && di?.riskFactors?.length) {
+      const impactColors: Record<string, string> = { high: '#dc2626', medium: '#ca8a04', low: '#059669' };
+      const riskItems = di.riskFactors.slice(0, 3).map((r: any) => `
+        <tr>
+          <td style="padding:6px 0;font-size:13px;color:#374151;">
+            <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${impactColors[r.impact] || '#6b7280'};margin-right:8px;"></span>
+            <strong>${r.factor}</strong> — ${r.detail}
+          </td>
+        </tr>`).join('');
+      riskHtml = `<tr><td style="padding:20px 32px 0 32px;">
+        <p style="margin:0 0 8px 0;font-size:13px;color:#6b7280;font-weight:600;text-transform:uppercase;">Risk Assessment</p>
+        <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">${riskItems}</table>
+      </td></tr>`;
+    }
+
+    // ── AI market analysis ──────────────────────────────────────────────────
+    const marketSummary = analysis?.aiSummary;
+    const marketHtml = marketSummary
+      ? `<tr><td style="padding:20px 32px 0 32px;">
+          <p style="margin:0 0 8px 0;font-size:13px;color:#6b7280;font-weight:600;text-transform:uppercase;">Market Analysis</p>
+          <p style="margin:0;font-size:14px;color:#374151;line-height:1.6;">${marketSummary}</p>
         </td></tr>`
       : '';
 
@@ -229,7 +332,7 @@ export class DealPackageService {
   <!-- Header -->
   <tr><td style="background:#111827;padding:20px 32px;">
     <p style="margin:0;font-size:18px;font-weight:700;color:#ffffff;">${orgName || 'Deal Core'}</p>
-    <p style="margin:4px 0 0 0;font-size:13px;color:#9ca3af;">Investment Opportunity</p>
+    <p style="margin:4px 0 0 0;font-size:13px;color:${framing.accentColor};">${framing.headline}</p>
   </td></tr>
 
   <!-- Photo -->
@@ -240,6 +343,9 @@ export class DealPackageService {
     <h1 style="margin:0;font-size:22px;color:#111827;font-weight:700;">${lead.propertyAddress}</h1>
     <p style="margin:4px 0 0 0;font-size:15px;color:#6b7280;">${lead.propertyCity}, ${lead.propertyState} ${lead.propertyZip}</p>
   </td></tr>
+
+  <!-- Badges -->
+  ${badgesHtml}
 
   <!-- Property Details Grid -->
   <tr><td style="padding:20px 32px 0 32px;">
@@ -276,41 +382,35 @@ export class DealPackageService {
   </td></tr>
 
   ${analysis ? `
-  <!-- Deal Numbers -->
+  <!-- Deal Numbers (partner-type-specific) -->
   <tr><td style="padding:24px 32px 0 32px;">
     <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background:#f8fafc;border-radius:8px;overflow:hidden;">
       <tr>
-        <td style="padding:16px;text-align:center;width:33%;border-right:1px solid #e2e8f0;">
-          <p style="margin:0;font-size:11px;color:#64748b;text-transform:uppercase;font-weight:600;">ARV</p>
-          <p style="margin:4px 0 0 0;font-size:22px;color:#059669;font-weight:700;">${fmt(analysis.arvEstimate)}</p>
-        </td>
-        <td style="padding:16px;text-align:center;width:33%;border-right:1px solid #e2e8f0;">
-          <p style="margin:0;font-size:11px;color:#64748b;text-transform:uppercase;font-weight:600;">Est. Repairs</p>
-          <p style="margin:4px 0 0 0;font-size:22px;color:#dc2626;font-weight:700;">${fmt(analysis.repairCosts)}</p>
-        </td>
-        <td style="padding:16px;text-align:center;width:34%;">
-          <p style="margin:0;font-size:11px;color:#64748b;text-transform:uppercase;font-weight:600;">MAO</p>
-          <p style="margin:4px 0 0 0;font-size:22px;color:#2563eb;font-weight:700;">${fmt(analysis.mao)}</p>
-        </td>
+        ${framing.numberCells.map((cell: any, i: number) => `
+        <td style="padding:16px;text-align:center;width:${Math.floor(100/framing.numberCells.length)}%;${i < framing.numberCells.length - 1 ? 'border-right:1px solid #e2e8f0;' : ''}">
+          <p style="margin:0;font-size:11px;color:#64748b;text-transform:uppercase;font-weight:600;">${cell.label}</p>
+          <p style="margin:4px 0 0 0;font-size:22px;color:${cell.color};font-weight:700;">${cell.value}</p>
+          ${cell.sub ? `<p style="margin:2px 0 0 0;font-size:11px;color:#94a3b8;">${cell.sub}</p>` : ''}
+        </td>`).join('')}
       </tr>
     </table>
-    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-top:12px;">
-      <tr>
-        <td style="font-size:13px;color:#6b7280;">Deal Type: <strong style="color:#111827;">${dealTypeLabel[analysis.dealType] || analysis.dealType}</strong></td>
-        <td style="font-size:13px;color:#6b7280;text-align:right;">Assignment Fee: <strong style="color:#111827;">${fmt(analysis.assignmentFee)}</strong></td>
-      </tr>
-    </table>
+    ${framing.metaLine ? `<p style="margin:8px 0 0 0;font-size:13px;color:#6b7280;">${framing.metaLine}</p>` : ''}
   </td></tr>
-
-  ${analysis.aiSummary ? `
-  <!-- AI Summary -->
-  <tr><td style="padding:20px 32px 0 32px;">
-    <p style="margin:0 0 8px 0;font-size:13px;color:#6b7280;font-weight:600;text-transform:uppercase;">Market Analysis</p>
-    <p style="margin:0;font-size:14px;color:#374151;line-height:1.6;">${analysis.aiSummary.length > 500 ? analysis.aiSummary.substring(0, 500) + '...' : analysis.aiSummary}</p>
-  </td></tr>` : ''}
   ` : ''}
 
+  <!-- Why This Deal -->
+  ${whyThisDeal}
+
   ${personalNoteSection}
+
+  <!-- Exit Scenarios -->
+  ${exitScenariosHtml}
+
+  <!-- Risk Assessment -->
+  ${riskHtml}
+
+  <!-- Market Analysis -->
+  ${marketHtml}
 
   ${comps.length > 0 ? `
   <!-- Comparable Sales -->
@@ -320,8 +420,8 @@ export class DealPackageService {
       <tr style="background:#f9fafb;">
         <th style="padding:8px 12px;font-size:12px;color:#6b7280;text-align:left;font-weight:600;">Address</th>
         <th style="padding:8px 12px;font-size:12px;color:#6b7280;text-align:right;font-weight:600;">Price</th>
-        <th style="padding:8px 12px;font-size:12px;color:#6b7280;text-align:right;font-weight:600;">Sold</th>
-        <th style="padding:8px 12px;font-size:12px;color:#6b7280;text-align:right;font-weight:600;">Size</th>
+        <th style="padding:8px 12px;font-size:12px;color:#6b7280;text-align:center;font-weight:600;">Bd/Ba</th>
+        <th style="padding:8px 12px;font-size:12px;color:#6b7280;text-align:right;font-weight:600;">Sqft</th>
         <th style="padding:8px 12px;font-size:12px;color:#6b7280;text-align:right;font-weight:600;">Dist</th>
       </tr>
       ${compRows}
@@ -331,7 +431,7 @@ export class DealPackageService {
   <!-- CTA -->
   <tr><td style="padding:32px;text-align:center;">
     <a href="${viewUrl}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;padding:14px 32px;border-radius:8px;">
-      View Full Deal Details
+      View Full Analysis
     </a>
   </td></tr>
 
@@ -346,5 +446,78 @@ export class DealPackageService {
 </table>
 </body>
 </html>`;
+  }
+
+  // ── Partner-type framing logic ────────────────────────────────────────────
+
+  private getPartnerFraming(partnerType: string, analysis: any, di: any, pa: any) {
+    const fmt = (n: number | null | undefined) =>
+      n != null ? `$${Math.round(n).toLocaleString('en-US')}` : 'N/A';
+
+    const arv = analysis?.arvEstimate;
+    const repairs = analysis?.repairCosts;
+    const mao = analysis?.mao;
+    const fee = analysis?.assignmentFee;
+    const confidence = analysis?.confidenceTier;
+    const ppsf = di?.ppsfAnalysis?.avgPpsf || analysis?.pricePerSqft;
+
+    // Calculate projected profit for JV/flip types
+    const netProceeds = arv ? Math.round(arv * 0.92) : null; // After 6% commission + 2% closing
+    const projectedProfit = netProceeds && repairs && mao ? Math.round(netProceeds - mao - repairs) : null;
+
+    // Exit scenario data
+    const bestExit = di?.exitScenarios?.find((s: any) => s.name === 'Full ARV');
+    const flipTimeline = bestExit?.timeToSell || '4-6 months';
+
+    switch (partnerType) {
+      case 'jv_partner':
+        return {
+          headline: 'Joint Venture Opportunity',
+          accentColor: '#a78bfa', // purple
+          numberCells: [
+            { label: 'ARV', value: fmt(arv), color: '#059669', sub: analysis?.arvLow && analysis?.arvHigh ? `${fmt(analysis.arvLow)} - ${fmt(analysis.arvHigh)}` : '' },
+            { label: 'Est. Repairs', value: fmt(repairs), color: '#dc2626', sub: analysis?.repairFinishLevel?.replace(/_/g, ' ') || '' },
+            { label: 'Projected Profit', value: fmt(projectedProfit), color: '#7c3aed', sub: flipTimeline },
+          ],
+          metaLine: `ARV @ ${analysis?.maoPercent || 70}% &mdash; Built for equity partnership`,
+        };
+
+      case 'hedge_fund':
+        return {
+          headline: 'Investment Opportunity',
+          accentColor: '#60a5fa', // blue
+          numberCells: [
+            { label: 'ARV', value: fmt(arv), color: '#059669', sub: analysis?.arvLow && analysis?.arvHigh ? `${fmt(analysis.arvLow)} - ${fmt(analysis.arvHigh)}` : '' },
+            { label: '$/Sqft', value: ppsf ? `$${Math.round(ppsf)}` : 'N/A', color: '#2563eb', sub: 'Comp average' },
+            { label: 'Confidence', value: confidence || 'N/A', color: confidence === 'High' ? '#059669' : confidence === 'Medium' ? '#ca8a04' : '#dc2626', sub: `Score: ${analysis?.confidenceScore || 0}/100` },
+          ],
+          metaLine: `Est. Repairs: ${fmt(repairs)} &mdash; Risk-adjusted data available in full analysis`,
+        };
+
+      case 'fix_and_flip':
+        return {
+          headline: 'Flip Opportunity',
+          accentColor: '#f97316', // orange
+          numberCells: [
+            { label: 'ARV', value: fmt(arv), color: '#059669', sub: '' },
+            { label: 'Rehab Cost', value: fmt(repairs), color: '#dc2626', sub: analysis?.repairFinishLevel?.replace(/_/g, ' ') || '' },
+            { label: 'Net Profit', value: fmt(projectedProfit), color: projectedProfit && projectedProfit > 0 ? '#059669' : '#dc2626', sub: `Buy @ ${fmt(mao)}` },
+          ],
+          metaLine: flipTimeline ? `Estimated timeline: ${flipTimeline}` : '',
+        };
+
+      case 'buyer':
+      default:
+        return {
+          headline: 'Wholesale Opportunity',
+          accentColor: '#34d399', // green
+          numberCells: [
+            { label: 'ARV', value: fmt(arv), color: '#059669', sub: '' },
+            { label: 'Est. Repairs', value: fmt(repairs), color: '#dc2626', sub: '' },
+            { label: 'MAO', value: fmt(mao), color: '#2563eb', sub: `@ ${analysis?.maoPercent || 70}%` },
+          ],
+          metaLine: `Assignment Fee: ${fmt(fee)} &mdash; Sale Price to Buyer: ${fmt(mao && fee ? mao + fee : null)}`,
+        };
+    }
   }
 }

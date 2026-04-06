@@ -182,7 +182,17 @@ export default function ShareDealModal({ leadId, propertyAddress, isOpen, onClos
                           className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                         />
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{p.name}</p>
+                          <div className="flex items-center gap-2">
+                            <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{p.name}</p>
+                            <span className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase ${
+                              p.type === 'jv_partner' ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300' :
+                              p.type === 'hedge_fund' ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' :
+                              p.type === 'fix_and_flip' ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300' :
+                              'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
+                            }`}>
+                              {p.type === 'jv_partner' ? 'JV' : p.type === 'hedge_fund' ? 'Fund' : p.type === 'fix_and_flip' ? 'Flip' : p.type === 'other' ? 'Other' : 'Buyer'}
+                            </span>
+                          </div>
                           <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{p.email}{p.company ? ` - ${p.company}` : ''}</p>
                         </div>
                       </label>
