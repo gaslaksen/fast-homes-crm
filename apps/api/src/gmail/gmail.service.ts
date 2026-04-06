@@ -133,17 +133,22 @@ export class GmailService {
 
     const token = await this.prisma.gmailToken.findUnique({ where: { userId } });
 
-    // Resolve orgId from DB if not in JWT
+    // Resolve orgId and user name from DB
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { firstName: true, lastName: true, organizationId: true },
+    });
     if (!orgId) {
-      const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { organizationId: true } });
       orgId = user?.organizationId ?? 'unknown';
     }
     const fromAddress = token!.email;
+    const displayName = user ? `${user.firstName} ${user.lastName}` : '';
+    const fromHeader = displayName ? `${displayName} <${fromAddress}>` : fromAddress;
 
     // Build RFC 2822 message
     const boundary = '____boundary____';
     const messageParts = [
-      `From: ${fromAddress}`,
+      `From: ${fromHeader}`,
       `To: ${data.to}`,
       `Subject: ${data.subject}`,
       `MIME-Version: 1.0`,
@@ -524,10 +529,15 @@ export class GmailService {
     const token = await this.prisma.orgGmailToken.findUnique({ where: { organizationId: orgId } });
     const fromAddress = token!.email;
 
+    // Use org name as display name so recipients see "Quick Cash Home Buyers" instead of "deals"
+    const org = await this.prisma.organization.findUnique({ where: { id: orgId }, select: { name: true } });
+    const displayName = org?.name || '';
+    const fromHeader = displayName ? `${displayName} <${fromAddress}>` : fromAddress;
+
     // Build RFC 2822 message
     const boundary = '____boundary____';
     const messageParts = [
-      `From: ${fromAddress}`,
+      `From: ${fromHeader}`,
       `To: ${data.to}`,
       `Subject: ${data.subject}`,
       `MIME-Version: 1.0`,
