@@ -2,6 +2,17 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import axios, { AxiosError } from 'axios';
+import {
+  RentCastRentEstimate,
+  RentCastSaleListing,
+  RentCastMarketStatistics,
+  ScoredComp,
+  AVMSanityCheck,
+  MarketStrength,
+  RentalAnalysis,
+  MarketTrends,
+  DealcoreAnalysisPayload,
+} from './rentcast.types';
 
 const RENTCAST_BASE_URL = 'https://api.rentcast.io/v1';
 const CACHE_TTL_HOURS = 24;
@@ -85,6 +96,10 @@ interface RentCastError {
 export class RentCastService {
   private readonly logger = new Logger(RentCastService.name);
   private readonly apiKey: string | undefined;
+
+  // 7-day in-memory cache for market statistics by zip code
+  private marketStatsCache = new Map<string, { data: RentCastMarketStatistics; fetchedAt: number }>();
+  private readonly MARKET_STATS_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
   constructor(
     private prisma: PrismaService,
@@ -771,5 +786,717 @@ export class RentCastService {
     } else {
       this.logger.error(`RentCast ${method} failed:`, error);
     }
+  }
+
+  // ─── NEW: Full Property Analysis Pipeline ─────────────────────────────────
+
+  /**
+   * Score a comp against the subject property using 5-dimension weighted scoring.
+   * Sqft (30%), Bedrooms (20%), Bathrooms (15%), Proximity (20%), Recency (15%)
+   */
+  private scoreComp(
+    comp: RentCastProperty,
+    subject: { squareFootage?: number | null; bedrooms?: number | null; bathrooms?: number | null; latitude?: number | null; longitude?: number | null },
+    compDistance: number,
+    maxRadius: number,
+    daysSinceSale: number,
+    saleDateRange: number,
+  ): { sqftScore: number; bedroomScore: number; bathroomScore: number; proximityScore: number; recencyScore: number; totalScore: number } {
+    // Sqft similarity (30 points)
+    let sqftScore = 0;
+    if (subject.squareFootage && comp.squareFootage && subject.squareFootage > 0) {
+      sqftScore = Math.max(0, (1 - Math.abs(comp.squareFootage - subject.squareFootage) / subject.squareFootage) * 30);
+    }
+
+    // Bedroom match (20 points)
+    let bedroomScore = 0;
+    if (subject.bedrooms != null && comp.bedrooms != null) {
+      const diff = Math.abs(subject.bedrooms - comp.bedrooms);
+      if (diff === 0) bedroomScore = 20;
+      else if (diff === 1) bedroomScore = 12;
+    }
+
+    // Bathroom match (15 points)
+    let bathroomScore = 0;
+    if (subject.bathrooms != null && comp.bathrooms != null) {
+      const diff = Math.abs(subject.bathrooms - comp.bathrooms);
+      if (diff === 0) bathroomScore = 15;
+      else if (diff <= 1) bathroomScore = 8;
+    }
+
+    // Proximity (20 points)
+    const proximityScore = maxRadius > 0
+      ? Math.max(0, (1 - compDistance / maxRadius) * 20)
+      : 0;
+
+    // Recency (15 points)
+    const recencyScore = saleDateRange > 0
+      ? Math.max(0, (1 - daysSinceSale / saleDateRange) * 15)
+      : 0;
+
+    const totalScore = Math.round((sqftScore + bedroomScore + bathroomScore + proximityScore + recencyScore) * 100) / 100;
+
+    return {
+      sqftScore: Math.round(sqftScore * 100) / 100,
+      bedroomScore,
+      bathroomScore,
+      proximityScore: Math.round(proximityScore * 100) / 100,
+      recencyScore: Math.round(recencyScore * 100) / 100,
+      totalScore,
+    };
+  }
+
+  /**
+   * Get sold comps using /properties endpoint with saleDateRange.
+   * Returns deed-confirmed sales from public records (NOT listing-based AVM comps).
+   * Implements 3-tier fallback widening if insufficient comps are found.
+   */
+  async getSoldComps(
+    address: string,
+    subject: {
+      propertyType?: string | null;
+      bedrooms?: number | null;
+      bathrooms?: number | null;
+      squareFootage?: number | null;
+      latitude?: number | null;
+      longitude?: number | null;
+    },
+    options?: { radius?: number; saleDateRange?: number; limit?: number },
+  ): Promise<{
+    comps: ScoredComp[];
+    calculatedARV: number;
+    arvPerSqft: number | null;
+    arvConfidence: number;
+    compCount: number;
+    methodology: 'sold-comp-analysis' | 'avm-fallback';
+    searchRadius: number;
+    searchDateRange: number;
+  }> {
+    if (!this.apiKey) {
+      return { comps: [], calculatedARV: 0, arvPerSqft: null, arvConfidence: 0, compCount: 0, methodology: 'avm-fallback', searchRadius: 0, searchDateRange: 0 };
+    }
+
+    const minComps = 5;
+    const propType = this.mapPropertyType(subject.propertyType);
+
+    // 3-tier widening: narrow → medium → wide
+    const tiers = [
+      {
+        radius: options?.radius || 3,
+        saleDateRange: options?.saleDateRange || 180,
+        bedrooms: subject.bedrooms != null ? `${Math.max(1, subject.bedrooms - 1)}:${subject.bedrooms + 1}` : undefined,
+        bathrooms: subject.bathrooms != null ? `${Math.max(1, subject.bathrooms - 1)}:${subject.bathrooms + 1}` : undefined,
+        squareFootage: subject.squareFootage
+          ? `${Math.round(subject.squareFootage * 0.8)}:${Math.round(subject.squareFootage * 1.2)}`
+          : undefined,
+      },
+      {
+        radius: 5,
+        saleDateRange: 270,
+        bedrooms: subject.bedrooms != null ? `${Math.max(1, subject.bedrooms - 1)}:${subject.bedrooms + 1}` : undefined,
+        bathrooms: undefined, // relax bath filter
+        squareFootage: subject.squareFootage
+          ? `${Math.round(subject.squareFootage * 0.7)}:${Math.round(subject.squareFootage * 1.3)}`
+          : undefined,
+      },
+      {
+        radius: 5,
+        saleDateRange: 365,
+        bedrooms: undefined, // drop all attribute filters
+        bathrooms: undefined,
+        squareFootage: undefined,
+      },
+    ];
+
+    let rawComps: RentCastProperty[] = [];
+    let usedRadius = tiers[0].radius;
+    let usedDateRange = tiers[0].saleDateRange;
+
+    for (const tier of tiers) {
+      const params: Record<string, any> = {
+        address,
+        radius: tier.radius,
+        saleDateRange: tier.saleDateRange,
+        limit: options?.limit || 25,
+      };
+      if (propType) params.propertyType = propType;
+      if (tier.bedrooms) params.bedrooms = tier.bedrooms;
+      if (tier.bathrooms) params.bathrooms = tier.bathrooms;
+      if (tier.squareFootage) params.squareFootage = tier.squareFootage;
+
+      this.logger.log(`getSoldComps tier: radius=${tier.radius}mi, dateRange=${tier.saleDateRange}d, beds=${tier.bedrooms || 'any'}, baths=${tier.bathrooms || 'any'}, sqft=${tier.squareFootage || 'any'}`);
+
+      try {
+        const response = await axios.get<RentCastProperty[]>(`${RENTCAST_BASE_URL}/properties`, {
+          params,
+          headers: { 'X-Api-Key': this.apiKey },
+          timeout: 20000,
+        });
+
+        const results = response.data || [];
+        usedRadius = tier.radius;
+        usedDateRange = tier.saleDateRange;
+
+        // Filter to only properties with actual sale data
+        const soldResults = results.filter(p =>
+          p.lastSaleDate && p.lastSalePrice && p.lastSalePrice > 0,
+        );
+
+        this.logger.log(`getSoldComps: ${results.length} returned, ${soldResults.length} with confirmed sale data`);
+
+        if (soldResults.length >= minComps) {
+          rawComps = soldResults;
+          break;
+        }
+
+        // Keep what we have and try next tier if not enough
+        if (soldResults.length > rawComps.length) {
+          rawComps = soldResults;
+        }
+      } catch (error) {
+        this.handleApiError(error, 'getSoldComps');
+        if (error instanceof AxiosError && (error.response?.status === 401 || error.response?.status === 429)) {
+          break; // Don't retry on auth/rate limit
+        }
+      }
+    }
+
+    if (rawComps.length === 0) {
+      this.logger.warn('getSoldComps: no sold comps found after all tiers');
+      return { comps: [], calculatedARV: 0, arvPerSqft: null, arvConfidence: 0, compCount: 0, methodology: 'avm-fallback', searchRadius: usedRadius, searchDateRange: usedDateRange };
+    }
+
+    // Exclude the subject property itself
+    const subjectAddr = address.toLowerCase().trim();
+    const filteredComps = rawComps.filter(c => {
+      const compAddr = (c.formattedAddress || c.addressLine1 || '').toLowerCase().trim();
+      return compAddr !== subjectAddr;
+    });
+
+    // Score each comp
+    const now = new Date();
+    const scored: ScoredComp[] = filteredComps.map(c => {
+      // Calculate distance
+      let dist = 0;
+      if (subject.latitude && subject.longitude && c.latitude && c.longitude) {
+        dist = this.haversineDistance(subject.latitude, subject.longitude, c.latitude, c.longitude);
+      }
+
+      const saleDate = new Date(c.lastSaleDate!);
+      const daysSinceSale = Math.max(0, Math.floor((now.getTime() - saleDate.getTime()) / (1000 * 60 * 60 * 24)));
+
+      const scores = this.scoreComp(c, subject, dist, usedRadius, daysSinceSale, usedDateRange);
+
+      return {
+        address: c.formattedAddress || c.addressLine1 || 'Unknown',
+        latitude: c.latitude || null,
+        longitude: c.longitude || null,
+        lastSaleDate: c.lastSaleDate!,
+        lastSalePrice: c.lastSalePrice!,
+        bedrooms: c.bedrooms ?? null,
+        bathrooms: c.bathrooms ?? null,
+        squareFootage: c.squareFootage ?? null,
+        lotSize: c.lotSize ?? null,
+        yearBuilt: c.yearBuilt ?? null,
+        propertyType: c.propertyType ?? null,
+        distanceMiles: Math.round(dist * 100) / 100,
+        daysSinceSale,
+        hasPool: c.features?.pool || false,
+        hasGarage: c.features?.garage || false,
+        ...scores,
+      };
+    });
+
+    // Sort by score descending, take top 8
+    scored.sort((a, b) => b.totalScore - a.totalScore);
+    const topComps = scored.slice(0, 8);
+
+    // Calculate weighted average ARV
+    const totalWeight = topComps.reduce((sum, c) => sum + c.totalScore, 0);
+    const calculatedARV = totalWeight > 0
+      ? Math.round(topComps.reduce((sum, c) => sum + c.lastSalePrice * c.totalScore, 0) / totalWeight)
+      : Math.round(topComps.reduce((sum, c) => sum + c.lastSalePrice, 0) / topComps.length);
+
+    // ARV per sqft
+    const compsWithSqft = topComps.filter(c => c.squareFootage && c.squareFootage > 0);
+    const arvPerSqft = compsWithSqft.length > 0
+      ? Math.round(compsWithSqft.reduce((sum, c) => sum + c.lastSalePrice / c.squareFootage!, 0) / compsWithSqft.length)
+      : null;
+
+    // Confidence: based on comp count, score spread, and distance
+    const avgScore = topComps.reduce((s, c) => s + c.totalScore, 0) / topComps.length;
+    const avgDist = topComps.reduce((s, c) => s + c.distanceMiles, 0) / topComps.length;
+    let confidence = Math.min(100, Math.round(
+      Math.min(topComps.length * 8, 30) +           // comp count (max 30)
+      Math.min(avgScore, 40) +                       // avg quality (max 40)
+      (avgDist <= 1 ? 20 : avgDist <= 3 ? 15 : 10) + // proximity (max 20)
+      (topComps.length >= 5 ? 10 : 5),               // data sufficiency (max 10)
+    ));
+
+    this.logger.log(
+      `getSoldComps ARV: $${calculatedARV.toLocaleString()} from ${topComps.length} comps ` +
+      `(${arvPerSqft ? `$${arvPerSqft}/sqft` : 'n/a $/sqft'}), confidence=${confidence}`,
+    );
+
+    return {
+      comps: topComps,
+      calculatedARV,
+      arvPerSqft,
+      arvConfidence: confidence,
+      compCount: topComps.length,
+      methodology: 'sold-comp-analysis',
+      searchRadius: usedRadius,
+      searchDateRange: usedDateRange,
+    };
+  }
+
+  /**
+   * Get rent estimate from RentCast /avm/rent/long-term endpoint.
+   */
+  async getRentEstimate(
+    address: string,
+    options?: { compCount?: number; maxRadius?: number; daysOld?: number },
+  ): Promise<RentalAnalysis | null> {
+    if (!this.apiKey) return null;
+
+    this.logger.log(`Fetching rent estimate for: ${address}`);
+
+    try {
+      const response = await axios.get<RentCastRentEstimate>(`${RENTCAST_BASE_URL}/avm/rent/long-term`, {
+        params: {
+          address,
+          compCount: options?.compCount || 15,
+          maxRadius: options?.maxRadius || 5,
+          daysOld: options?.daysOld || 270,
+          lookupSubjectAttributes: true,
+        },
+        headers: { 'X-Api-Key': this.apiKey },
+        timeout: 15000,
+      });
+
+      const data = response.data;
+      if (!data?.rent) {
+        this.logger.warn('RentCast rent estimate returned no data');
+        return null;
+      }
+
+      this.logger.log(`Rent estimate: $${data.rent}/mo (range: $${data.rentRangeLow}-$${data.rentRangeHigh})`);
+
+      return {
+        rentEstimate: data.rent,
+        rentRangeLow: data.rentRangeLow,
+        rentRangeHigh: data.rentRangeHigh,
+        rentalComps: (data.comparables || []).map(c => ({
+          address: c.formattedAddress || c.addressLine1 || 'Unknown',
+          rent: c.price || 0,
+          bedrooms: c.bedrooms ?? null,
+          bathrooms: c.bathrooms ?? null,
+          squareFootage: c.squareFootage ?? null,
+          distance: c.distance ?? null,
+          correlation: c.correlation ?? null,
+          status: c.status ?? null,
+        })),
+      };
+    } catch (error) {
+      this.handleApiError(error, 'getRentEstimate');
+      return null;
+    }
+  }
+
+  /**
+   * Get active sale listings for a zip code from /listings/sale.
+   * Aggregates results into a MarketStrength analysis.
+   */
+  async getActiveSaleListings(
+    zipCode: string,
+    propertyType?: string,
+    limit?: number,
+  ): Promise<MarketStrength | null> {
+    if (!this.apiKey) return null;
+
+    this.logger.log(`Fetching active sale listings for zip: ${zipCode}`);
+
+    try {
+      const params: Record<string, any> = {
+        zipCode,
+        status: 'Active',
+        limit: limit || 500,
+      };
+      if (propertyType) params.propertyType = this.mapPropertyType(propertyType);
+
+      const response = await axios.get<RentCastSaleListing[]>(`${RENTCAST_BASE_URL}/listings/sale`, {
+        params,
+        headers: { 'X-Api-Key': this.apiKey },
+        timeout: 20000,
+      });
+
+      const listings = response.data || [];
+      if (listings.length === 0) {
+        this.logger.log(`No active listings found in zip ${zipCode}`);
+        return {
+          activeInventory: 0,
+          medianAskingPrice: 0,
+          avgDaysOnMarket: 0,
+          foreclosureShare: 0,
+          marketHeat: 'hot',
+          activeListings: [],
+        };
+      }
+
+      // Calculate median asking price
+      const prices = listings.map(l => l.price || 0).filter(p => p > 0).sort((a, b) => a - b);
+      const medianAskingPrice = prices.length > 0
+        ? prices[Math.floor(prices.length / 2)]
+        : 0;
+
+      // Average days on market
+      const doms = listings.map(l => l.daysOnMarket || 0).filter(d => d > 0);
+      const avgDaysOnMarket = doms.length > 0
+        ? Math.round(doms.reduce((s, d) => s + d, 0) / doms.length)
+        : 0;
+
+      // Foreclosure share
+      const foreclosureCount = listings.filter(l =>
+        l.listingType?.toLowerCase().includes('foreclosure') ||
+        l.listingType?.toLowerCase().includes('reo') ||
+        l.listingType?.toLowerCase().includes('short sale'),
+      ).length;
+      const foreclosureShare = listings.length > 0
+        ? Math.round((foreclosureCount / listings.length) * 100) / 100
+        : 0;
+
+      // Market heat
+      let marketHeat: 'hot' | 'balanced' | 'soft';
+      if (listings.length < 10) marketHeat = 'hot';
+      else if (listings.length <= 25) marketHeat = 'balanced';
+      else marketHeat = 'soft';
+
+      this.logger.log(
+        `Active listings: ${listings.length} in zip ${zipCode}, median $${medianAskingPrice.toLocaleString()}, ` +
+        `avg DOM=${avgDaysOnMarket}, heat=${marketHeat}`,
+      );
+
+      return {
+        activeInventory: listings.length,
+        medianAskingPrice,
+        avgDaysOnMarket,
+        foreclosureShare,
+        marketHeat,
+        activeListings: listings.slice(0, 20).map(l => ({
+          address: l.formattedAddress || l.addressLine1 || 'Unknown',
+          price: l.price || 0,
+          daysOnMarket: l.daysOnMarket || 0,
+          listingType: l.listingType || 'Standard',
+          listingAgent: l.listingAgent?.name
+            ? { name: l.listingAgent.name, phone: l.listingAgent.phone || '' }
+            : null,
+        })),
+      };
+    } catch (error) {
+      this.handleApiError(error, 'getActiveSaleListings');
+      return null;
+    }
+  }
+
+  /**
+   * Get market statistics for a zip code from /statistics.
+   * Cached in-memory with 7-day TTL.
+   */
+  async getMarketStatistics(zipCode: string): Promise<RentCastMarketStatistics | null> {
+    if (!this.apiKey) return null;
+
+    // Check cache
+    const cached = this.marketStatsCache.get(zipCode);
+    if (cached && (Date.now() - cached.fetchedAt) < this.MARKET_STATS_TTL_MS) {
+      this.logger.log(`Using cached market stats for zip ${zipCode} (${Math.round((Date.now() - cached.fetchedAt) / (1000 * 60 * 60))}h old)`);
+      return cached.data;
+    }
+
+    this.logger.log(`Fetching market statistics for zip: ${zipCode}`);
+
+    try {
+      const response = await axios.get<RentCastMarketStatistics>(`${RENTCAST_BASE_URL}/statistics`, {
+        params: { zipCode, dataType: 'All' },
+        headers: { 'X-Api-Key': this.apiKey },
+        timeout: 15000,
+      });
+
+      const data = response.data;
+      if (!data) {
+        this.logger.warn(`No market statistics returned for zip ${zipCode}`);
+        return null;
+      }
+
+      // Cache result
+      this.marketStatsCache.set(zipCode, { data, fetchedAt: Date.now() });
+      this.logger.log(`Market stats cached for zip ${zipCode}: median price $${data.saleData?.medianPrice?.toLocaleString() || '?'}`);
+
+      return data;
+    } catch (error) {
+      this.handleApiError(error, 'getMarketStatistics');
+      return null;
+    }
+  }
+
+  /**
+   * Build MarketTrends from raw market statistics, filtered to the subject's
+   * property type and bedroom count.
+   */
+  private buildMarketTrends(
+    stats: RentCastMarketStatistics,
+    zipCode: string,
+    propertyType?: string | null,
+    bedrooms?: number | null,
+  ): MarketTrends {
+    const sale = stats.saleData;
+    const rental = stats.rentalData;
+
+    // Find property-type-specific data
+    const propTypeData = sale?.dataByPropertyType?.find(
+      d => d.propertyType?.toLowerCase() === (propertyType || '').toLowerCase(),
+    );
+    const bedroomData = sale?.dataByBedrooms?.find(
+      d => d.bedrooms === bedrooms,
+    );
+    const rentalBedroomData = rental?.dataByBedrooms?.find(
+      d => d.bedrooms === bedrooms,
+    );
+
+    // Build price history from history records
+    const priceHistory: Array<{ date: string; medianPrice: number }> = [];
+    const rentHistory: Array<{ date: string; medianRent: number }> = [];
+
+    if (sale?.history) {
+      for (const [key, value] of Object.entries(sale.history)) {
+        if (value.medianPrice) {
+          priceHistory.push({ date: value.date || key, medianPrice: value.medianPrice });
+        }
+      }
+    }
+    if (rental?.history) {
+      for (const [key, value] of Object.entries(rental.history)) {
+        if (value.medianRent) {
+          rentHistory.push({ date: value.date || key, medianRent: value.medianRent });
+        }
+      }
+    }
+
+    // Sort by date
+    priceHistory.sort((a, b) => a.date.localeCompare(b.date));
+    rentHistory.sort((a, b) => a.date.localeCompare(b.date));
+
+    return {
+      zipCode,
+      saleData: {
+        medianPrice: sale?.medianPrice ?? null,
+        medianPricePerSqft: sale?.medianPricePerSquareFoot ?? null,
+        avgDaysOnMarket: sale?.averageDaysOnMarket ?? null,
+        totalListings: sale?.totalListings ?? null,
+        propertyTypeMedianPrice: propTypeData?.medianPrice ?? null,
+        propertyTypeMedianPPSF: propTypeData?.medianPricePerSquareFoot ?? null,
+        bedroomMedianPrice: bedroomData?.medianPrice ?? null,
+        bedroomMedianPPSF: bedroomData?.medianPricePerSquareFoot ?? null,
+      },
+      rentalData: {
+        medianRent: rental?.medianRent ?? null,
+        avgDaysOnMarket: rental?.averageDaysOnMarket ?? null,
+        totalListings: rental?.totalListings ?? null,
+        bedroomMedianRent: rentalBedroomData?.medianRent ?? null,
+      },
+      priceHistory,
+      rentHistory,
+    };
+  }
+
+  /**
+   * ORCHESTRATOR: Full property analysis pipeline.
+   * Calls all RentCast endpoints and assembles the complete DealcoreAnalysisPayload.
+   *
+   * Flow:
+   * 1. Get subject property record
+   * 2. In parallel: sold comps, AVM sanity check, rent estimate, active listings, market stats
+   * 3. Score comps, calculate ARV, build payload
+   */
+  async analyzeProperty(
+    address: string,
+    zipCode?: string,
+  ): Promise<DealcoreAnalysisPayload> {
+    this.logger.log(`=== analyzeProperty pipeline starting for: ${address} ===`);
+
+    // Step 1: Get subject property profile
+    const subjectProperty = await this.getPropertyDetails(address);
+    if (!subjectProperty) {
+      throw new Error(`RentCast: could not find property record for "${address}"`);
+    }
+
+    const zip = zipCode || subjectProperty.zipCode;
+    if (!zip) {
+      throw new Error(`No zip code available for property analysis: ${address}`);
+    }
+
+    const subjectData = {
+      propertyType: subjectProperty.propertyType,
+      bedrooms: subjectProperty.bedrooms,
+      bathrooms: subjectProperty.bathrooms,
+      squareFootage: subjectProperty.squareFootage,
+      latitude: subjectProperty.latitude,
+      longitude: subjectProperty.longitude,
+    };
+
+    this.logger.log(
+      `Subject: ${subjectProperty.bedrooms ?? '?'}bd/${subjectProperty.bathrooms ?? '?'}ba, ` +
+      `${subjectProperty.squareFootage ?? '?'}sqft, ${subjectProperty.propertyType ?? '?'}, zip=${zip}`,
+    );
+
+    // Step 2: Fire all remaining calls in parallel
+    const [soldCompsResult, avmResult, rentResult, listingsResult, statsResult] = await Promise.allSettled([
+      this.getSoldComps(address, subjectData),
+      this.getValueWithComps(address, {
+        propertyType: this.mapPropertyType(subjectData.propertyType),
+        bedrooms: subjectData.bedrooms || undefined,
+        bathrooms: subjectData.bathrooms || undefined,
+        squareFootage: subjectData.squareFootage || undefined,
+      }),
+      this.getRentEstimate(address),
+      this.getActiveSaleListings(zip, subjectData.propertyType || undefined),
+      this.getMarketStatistics(zip),
+    ]);
+
+    // Extract results (null on failure)
+    const soldComps = soldCompsResult.status === 'fulfilled' ? soldCompsResult.value : null;
+    const avmData = avmResult.status === 'fulfilled' ? avmResult.value : null;
+    const rental = rentResult.status === 'fulfilled' ? rentResult.value : null;
+    const marketStrength = listingsResult.status === 'fulfilled' ? listingsResult.value : null;
+    const marketStats = statsResult.status === 'fulfilled' ? statsResult.value : null;
+
+    // Log any failures
+    if (soldCompsResult.status === 'rejected') this.logger.warn(`getSoldComps failed: ${soldCompsResult.reason}`);
+    if (avmResult.status === 'rejected') this.logger.warn(`getValueWithComps failed: ${avmResult.reason}`);
+    if (rentResult.status === 'rejected') this.logger.warn(`getRentEstimate failed: ${rentResult.reason}`);
+    if (listingsResult.status === 'rejected') this.logger.warn(`getActiveSaleListings failed: ${listingsResult.reason}`);
+    if (statsResult.status === 'rejected') this.logger.warn(`getMarketStatistics failed: ${statsResult.reason}`);
+
+    // Step 3: Determine ARV
+    let arv: number;
+    let methodology: 'sold-comp-analysis' | 'avm-fallback';
+    let compAnalysisData: DealcoreAnalysisPayload['compAnalysis'];
+
+    if (soldComps && soldComps.compCount > 0 && soldComps.calculatedARV > 0) {
+      arv = soldComps.calculatedARV;
+      methodology = soldComps.methodology;
+      compAnalysisData = {
+        soldComps: soldComps.comps,
+        calculatedARV: soldComps.calculatedARV,
+        arvPerSqft: soldComps.arvPerSqft,
+        arvConfidence: soldComps.arvConfidence,
+        compCount: soldComps.compCount,
+        methodology,
+      };
+    } else if (avmData?.price) {
+      // Fallback to AVM
+      arv = avmData.price;
+      methodology = 'avm-fallback';
+      compAnalysisData = {
+        soldComps: [],
+        calculatedARV: avmData.price,
+        arvPerSqft: subjectData.squareFootage ? Math.round(avmData.price / subjectData.squareFootage) : null,
+        arvConfidence: 50,
+        compCount: 0,
+        methodology: 'avm-fallback',
+      };
+      this.logger.warn(`Using AVM fallback for ARV: $${arv.toLocaleString()}`);
+    } else {
+      throw new Error('RentCast: could not determine ARV — no sold comps and no AVM data');
+    }
+
+    // Step 4: AVM sanity check
+    let avmCheck: AVMSanityCheck | null = null;
+    if (avmData?.price && methodology === 'sold-comp-analysis') {
+      const divergence = Math.abs(arv - avmData.price) / avmData.price;
+      const divergencePercent = Math.round(divergence * 100);
+      let recommendation: string;
+      let needsReview: boolean;
+
+      if (divergence <= 0.10) {
+        recommendation = 'High confidence — ARV and AVM aligned';
+        needsReview = false;
+      } else if (divergence <= 0.15) {
+        recommendation = 'Moderate — review comp selection';
+        needsReview = false;
+      } else {
+        recommendation = 'Flag for manual review — significant divergence between comp ARV and AVM';
+        needsReview = true;
+      }
+
+      avmCheck = {
+        avmEstimate: avmData.price,
+        avmRangeLow: avmData.priceRangeLow || Math.round(avmData.price * 0.85),
+        avmRangeHigh: avmData.priceRangeHigh || Math.round(avmData.price * 1.15),
+        divergencePercent,
+        needsReview,
+        recommendation,
+      };
+
+      this.logger.log(`AVM sanity check: divergence=${divergencePercent}% — ${recommendation}`);
+    }
+
+    // Step 5: Build market trends from statistics
+    let marketTrends: MarketTrends | null = null;
+    if (marketStats) {
+      marketTrends = this.buildMarketTrends(marketStats, zip, subjectData.propertyType, subjectData.bedrooms);
+    }
+
+    // Step 6: Assemble subject
+    const subjectPayload: DealcoreAnalysisPayload['subject'] = {
+      address: subjectProperty.formattedAddress || address,
+      propertyType: subjectProperty.propertyType ?? null,
+      bedrooms: subjectProperty.bedrooms ?? null,
+      bathrooms: subjectProperty.bathrooms ?? null,
+      squareFootage: subjectProperty.squareFootage ?? null,
+      lotSize: subjectProperty.lotSize ?? null,
+      yearBuilt: subjectProperty.yearBuilt ?? null,
+      features: subjectProperty.features ?? null,
+      taxAssessments: subjectProperty.taxAssessments ?? null,
+      propertyTaxes: (subjectProperty as any).propertyTaxes ?? null,
+      lastSaleDate: subjectProperty.lastSaleDate ?? null,
+      lastSalePrice: subjectProperty.lastSalePrice ?? null,
+      saleHistory: (subjectProperty as any).history ?? null,
+      owner: (subjectProperty as any).owner
+        ? {
+            names: (subjectProperty as any).owner.names || [subjectProperty.ownerName].filter(Boolean),
+            type: (subjectProperty as any).owner.type ?? null,
+            mailingAddress: (subjectProperty as any).owner.mailingAddress ?? null,
+          }
+        : subjectProperty.ownerName
+          ? { names: [subjectProperty.ownerName], type: null, mailingAddress: null }
+          : null,
+      ownerOccupied: subjectProperty.ownerOccupied ?? null,
+      hoa: subjectProperty.hoa ?? null,
+      latitude: subjectProperty.latitude ?? null,
+      longitude: subjectProperty.longitude ?? null,
+    };
+
+    // Step 7: Assemble final payload
+    const payload: DealcoreAnalysisPayload = {
+      provider: 'rentcast',
+      subject: subjectPayload,
+      compAnalysis: compAnalysisData,
+      avmCheck,
+      rental,
+      marketStrength,
+      marketTrends,
+      deal: {
+        arv,
+        maoAt70: Math.round(arv * 0.70),
+        methodology,
+      },
+    };
+
+    this.logger.log(
+      `=== analyzeProperty complete: ARV=$${arv.toLocaleString()}, MAO@70%=$${payload.deal.maoAt70.toLocaleString()}, ` +
+      `${compAnalysisData.compCount} comps, method=${methodology} ===`,
+    );
+
+    return payload;
   }
 }

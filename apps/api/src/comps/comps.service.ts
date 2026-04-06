@@ -53,6 +53,86 @@ export class CompsService {
   }> {
     const preferSource = options?.preferSource || 'auto';
 
+    // ── Provider toggle: if PROPERTY_DATA_PROVIDER=rentcast, use the full RentCast analysis pipeline ──
+    const provider = this.config.get<string>('PROPERTY_DATA_PROVIDER') || 'auto';
+    if (provider === 'rentcast' && this.rentCastService.isConfigured) {
+      this.logger.log(`Using RentCast full analysis pipeline for lead ${leadId} (PROPERTY_DATA_PROVIDER=rentcast)`);
+      const fullAddress = `${address.street}, ${address.city}, ${address.state} ${address.zip}`;
+
+      try {
+        const payload = await this.rentCastService.analyzeProperty(fullAddress, address.zip);
+
+        // Persist scored comps to DB
+        await this.prisma.comp.deleteMany({
+          where: { leadId, source: { in: ['rentcast', 'rentcast-v2'] }, analysisId: null },
+        });
+
+        for (const comp of payload.compAnalysis.soldComps) {
+          await this.prisma.comp.create({
+            data: {
+              leadId,
+              address: comp.address,
+              soldPrice: comp.lastSalePrice,
+              soldDate: new Date(comp.lastSaleDate),
+              distance: comp.distanceMiles,
+              bedrooms: comp.bedrooms,
+              bathrooms: comp.bathrooms,
+              sqft: comp.squareFootage,
+              lotSize: comp.lotSize,
+              yearBuilt: comp.yearBuilt,
+              propertyType: comp.propertyType,
+              latitude: comp.latitude,
+              longitude: comp.longitude,
+              hasPool: comp.hasPool,
+              hasGarage: comp.hasGarage,
+              similarityScore: Math.round(comp.totalScore),
+              selected: true,
+              source: 'rentcast-v2',
+              notes: `Scores: sqft=${comp.sqftScore} bed=${comp.bedroomScore} bath=${comp.bathroomScore} prox=${comp.proximityScore} rec=${comp.recencyScore}`,
+            },
+          });
+        }
+
+        // Update lead with ARV and subject coordinates
+        const leadUpdate: Record<string, any> = {
+          arv: payload.deal.arv,
+          arvConfidence: payload.compAnalysis.arvConfidence,
+          lastCompsDate: new Date(),
+        };
+        if (payload.subject.latitude) leadUpdate.latitude = payload.subject.latitude;
+        if (payload.subject.longitude) leadUpdate.longitude = payload.subject.longitude;
+
+        await this.prisma.lead.update({
+          where: { id: leadId },
+          data: leadUpdate,
+        });
+
+        this.logger.log(
+          `RentCast pipeline complete: ARV=$${payload.deal.arv.toLocaleString()}, ` +
+          `${payload.compAnalysis.compCount} comps, method=${payload.compAnalysis.methodology}`,
+        );
+
+        // Still run ATTOM enrichment for property details (40+ fields) if configured
+        if (this.attomService.isConfigured) {
+          this.attomService.enrichLead(leadId, address, { forceRefresh: options?.forceRefresh })
+            .catch(err => this.logger.warn(`ATTOM enrichment failed (non-fatal): ${err.message}`));
+        }
+
+        return {
+          arv: payload.deal.arv,
+          arvLow: Math.round(payload.deal.arv * 0.95),
+          arvHigh: Math.round(payload.deal.arv * 1.05),
+          confidence: payload.compAnalysis.arvConfidence,
+          compsCount: payload.compAnalysis.compCount,
+          source: `rentcast-v2 (${payload.compAnalysis.methodology})`,
+          attom: null,
+        };
+      } catch (err) {
+        this.logger.error(`RentCast analyzeProperty failed, falling back to standard pipeline: ${err.message}`);
+        // Fall through to existing pipeline
+      }
+    }
+
     // Run ATTOM enrichment in parallel (non-blocking — fills in property details)
     const attomPromise = this.attomService.isConfigured
       ? this.attomService.enrichLead(leadId, address, { forceRefresh: options?.forceRefresh })
