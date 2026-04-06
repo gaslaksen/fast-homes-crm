@@ -30,6 +30,14 @@ export class CampaignEnrollmentService {
       nextSendAt = new Date();
       nextSendAt.setDate(nextSendAt.getDate() + (firstStep.delayDays ?? 0));
       nextSendAt.setHours(nextSendAt.getHours() + (firstStep.delayHours ?? 0));
+
+      // Enforce minimum 24h delay so campaign step 1 never fires the same
+      // day as initial outreach — even if delayDays/delayHours are both 0.
+      const minDelay = new Date();
+      minDelay.setHours(minDelay.getHours() + 24);
+      if (nextSendAt < minDelay) {
+        nextSendAt = minDelay;
+      }
     }
 
     if (existing) {
