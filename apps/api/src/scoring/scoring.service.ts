@@ -592,7 +592,7 @@ Always respond with valid JSON only.`;
 
     const acknowledgmentBlock = context.lastInboundMessage
       ? `\nCRITICAL: Your response MUST first briefly acknowledge what the seller just said, then naturally transition to asking about the next topic. Do NOT re-introduce yourself. Do NOT ask about information already provided above. Do NOT agree to, validate, or commit to any price, timeline, or terms — never say things like "$250k works", "that price sounds good", "7 days works for us", or anything that implies you are accepting their terms.
-VARIETY: Use varied, natural acknowledgments — e.g. "gotcha", "nice", "ok cool", "ah ok", "for sure", "makes sense", "got it", "appreciate that", "good to know", "perfect" — pick one that fits the context and hasn't been used in the last 2-3 messages. NEVER default to "Thank you" or "Thanks for sharing".${recentOutboundNote}\n`
+VARIETY: Use varied, natural acknowledgments — e.g. "Got it", "Ok cool", "Makes sense", "Appreciate that", "Good to know", "Perfect", "Ok great", "Gotcha", "Sounds good" — pick one that fits the context and hasn't been used in the last 2-3 messages. NEVER default to "Thank you" or "Thanks for sharing". Use normal capitalization.${recentOutboundNote}\n`
       : '';
 
     const prompt = `Seller: ${context.sellerName}
@@ -603,16 +603,15 @@ ${history}
 
 Goal: ${purpose}
 ${acknowledgmentBlock}
-Generate ONE text message. Write it like you're texting from your phone — casual, short, real.
+Generate ONE text message. Be conversational and warm but use normal grammar and capitalization.
 
 Rules:
-- Keep it under 300 characters, 1-3 short sentences
+- Keep it under 300 characters, 1-3 sentences
 - Ask only 1 question per message
-- Sound like a real person texting, not a chatbot
-- Don't end with a period
-- Use contractions (don't, won't, that's)
+- Sound like a friendly, down-to-earth person, not a chatbot
+- Use normal capitalization and grammar
+- Use contractions naturally (don't, won't, that's, we'll)
 - No colons, semicolons, or em dashes
-- Sentence fragments are fine
 - Do NOT ask about information already known (listed above)
 - Do NOT agree to, validate, or commit to any price, timeline, or terms the seller mentioned
 - You are ONLY gathering information — all offers and decisions come from the team
@@ -680,12 +679,10 @@ Return ONLY a JSON object:
     const known = context.knownData;
     const extracted = context.justExtracted;
 
-    // If there's no conversation yet, send intro
+    // If there's no conversation yet, send fixed intro
     if (!hasConversation) {
-      // Note: SmrtPhone automatically prepends the company name and appends opt-out text.
-      // Do NOT include either in the message body.
       return {
-        message: `hey ${name}, got your request for ${context.propertyAddress}. you looking to sell soon or just seeing whats out there? do you have a ballpark number in mind`,
+        message: `Hi ${name}, this is Ian. We just received your information about you looking to sell your house. How much are you asking for it? What are your timelines to sell?`,
       };
     }
 
@@ -695,40 +692,40 @@ Return ONLY a JSON object:
       if (extracted.askingPrice != null && extracted._askingPriceHigh != null) {
         const lo = Number(extracted.askingPrice).toLocaleString();
         const hi = Number(extracted._askingPriceHigh).toLocaleString();
-        ack = `gotcha somewhere in the $${lo}-$${hi} range. `;
+        ack = `Got it, somewhere in the $${lo}-$${hi} range. `;
       } else if (extracted.askingPrice != null) {
-        ack = `gotcha around $${Number(extracted.askingPrice).toLocaleString()}. `;
+        ack = `Got it, around $${Number(extracted.askingPrice).toLocaleString()}. `;
       } else if (extracted._askingPriceRaw) {
-        ack = `gotcha noted the ${extracted._askingPriceRaw}. `;
+        ack = `Got it, noted the ${extracted._askingPriceRaw}. `;
       } else if (extracted.timeline != null) {
-        ack = `ok cool thanks for letting me know. `;
+        ack = `Ok cool, thanks for letting me know. `;
       } else if (extracted.conditionLevel != null) {
-        ack = `got it appreciate the details on the condition. `;
+        ack = `Got it, appreciate the details on the condition. `;
       } else if (extracted.ownershipStatus != null) {
-        ack = `good to know on the ownership. `;
+        ack = `Good to know on the ownership. `;
       }
     }
 
     // Determine next missing CAMP field: Priority → Money → Challenge → Authority
     if (known) {
       if (known.timeline == null) {
-        return { message: `${ack}do you have a rough timeline in mind? like are you trying to move on this quick or is there no rush` };
+        return { message: `${ack}Do you have a rough timeline in mind? Are you trying to move on this quickly or is there no rush?` };
       }
       if (known.askingPrice == null) {
-        return { message: `${ack}do you have a rough number in mind for the place` };
+        return { message: `${ack}Do you have a rough number in mind for the place?` };
       }
       if (known.conditionLevel == null) {
-        return { message: `${ack}hows the place holding up? anything major going on with it` };
+        return { message: `${ack}How's the place holding up? Anything major going on with it?` };
       }
       if (known.ownershipStatus == null) {
-        return { message: `${ack}one more thing, are you the only one on the deed or is someone else involved too` };
+        return { message: `${ack}One more thing, are you the only one on the deed or is someone else involved too?` };
       }
 
       // All CAMP complete
-      return { message: `${ack}awesome really appreciate all that ${name}. our team is gonna review everything and get back to you soon with next steps` };
+      return { message: `${ack}Awesome, really appreciate all that ${name}. Our team is going to review everything and get back to you soon with next steps` };
     }
 
     // Generic follow-up when we have conversation but no knownData tracking
-    return { message: `got it ${name}, is there anything else about the place or your situation I should know about` };
+    return { message: `Got it ${name}, is there anything else about the place or your situation I should know about?` };
   }
 }

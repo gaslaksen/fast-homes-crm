@@ -564,12 +564,9 @@ Keep it human, warm, and under 300 characters. Ask only ONE question.`.trim();
       where: { id: leadId },
       include: {
         messages: { orderBy: { createdAt: 'asc' }, take: 5 },
-        organization: true,
       },
     });
     if (!lead) return null;
-
-    const businessName = (lead as any).organization?.name || 'Quick Cash Home Buyers';
 
     // Don't send if any real messages exist (ignore SIMULATED sids from old broken attempts)
     const realMessages = lead.messages.filter(
@@ -580,77 +577,10 @@ Keep it human, warm, and under 300 characters. Ask only ONE question.`.trim();
       return null;
     }
 
-    // ── Build property context for a smarter opening message ──────────────────
-    const propertyContextParts: string[] = [];
-
-    // Beds/baths/sqft from any enrichment source
-    const beds = (lead as any).bedrooms;
-    const baths = (lead as any).bathrooms;
-    const sqft = (lead as any).sqft;
-    const yearBuilt = (lead as any).yearBuilt;
-    const propertyType = (lead as any).propertyType;
-    if (beds || baths) {
-      const bdStr = beds ? `${beds}bd` : '';
-      const baStr = baths ? `${baths}ba` : '';
-      propertyContextParts.push([bdStr, baStr].filter(Boolean).join('/'));
-    }
-    if (sqft) propertyContextParts.push(`${sqft.toLocaleString()} sqft`);
-    if (yearBuilt) propertyContextParts.push(`built ${yearBuilt}`);
-    if (propertyType && propertyType !== 'Auto') propertyContextParts.push(propertyType);
-
-    // AVM / ARV awareness
-    const attomAvm = (lead as any).attomAvm;
-    const arv = (lead as any).arv || (lead as any).avmExcellentHigh;
-
-    // MLS listing check disabled — automated check was unreliable.
-    const sourceMetadata = (lead as any).sourceMetadata as Record<string, any> | null;
-    const isActiveListing = false; // disabled
-
-    // Build the purpose string with all available context
-    const propertyDescription = propertyContextParts.length > 0
-      ? `The property is a ${propertyContextParts.join(', ')}.`
-      : '';
-    const arvHint = arv
-      ? ` We've pulled some data and the estimated value is around $${Math.round(arv / 1000) * 1000 >= 1000 ? `${Math.round(arv / 1000)}k` : arv.toLocaleString()}.`
-      : attomAvm
-      ? ` Public records show an estimated value around $${Math.round(attomAvm / 1000) * 1000 >= 1000 ? `${Math.round(attomAvm / 1000)}k` : attomAvm.toLocaleString()}.`
-      : '';
-    const listingHint = isActiveListing
-      ? ` We also see the property is currently listed on the market — we work alongside traditional listings and can offer a no-commission cash offer alternative.`
-      : '';
-
-    // Build a one-liner about the property we can drop into the message naturally.
-    const propertySnippet = propertyContextParts.length > 0
-      ? `(${propertyContextParts.join(', ')})`
-      : '';
-
-    const purpose = [
-      `First outreach to a seller who just submitted an inquiry about their property at ${lead.propertyAddress} ${propertySnippet}.`,
-      `They contacted US — they filled out a form or clicked an ad about their property. Do NOT say you "found" or "saw" their property as if cold-contacting them. You are following up on THEIR request.`,
-      `FORBIDDEN: Never use vague phrases like "wrap things up", "wrapping things up", "close things out", or "finalize things".`,
-      `DO NOT include "Reply STOP to opt out" or any opt-out language — this is automatically appended by SmrtPhone. DO NOT mention the company name "Quick Cash Home Buyers" — this is also automatically prepended by SmrtPhone. Including either will cause them to appear twice.`,
-      `NEVER use the words "cash offer" or mention buying houses or any specific deal type. We need to learn about their situation first before suggesting any solution.`,
-      `The message should follow this vibe: (1) greet the seller by first name, (2) reference their request for ${lead.propertyAddress}, (3) ask if they're looking to sell soon or just exploring, (4) ask if they have a ballpark number in mind.`,
-      `Example: "hey ${lead.sellerFirstName}, got your request for ${lead.propertyAddress}. you looking to sell soon or just seeing whats out there? do you have a ballpark number in mind"`,
-      `Stay close to this vibe. Text like a real person — no periods at end, casual language, contractions, short sentences.`,
-    ].filter(Boolean).join(' ');
-    // ──────────────────────────────────────────────────────────────────────────
+    // Fixed initial message — no AI. Asks for price and timeline upfront.
+    const messageBody = `Hi ${lead.sellerFirstName}, this is Ian. We just received your information about you looking to sell your house. How much are you asking for it? What are your timelines to sell?`;
 
     try {
-      const drafts = await this.scoringService.generateMessageDrafts(
-        {
-          sellerName: lead.sellerFirstName,
-          propertyAddress: lead.propertyAddress,
-          businessName,
-          conversationHistory: [],
-          purpose,
-        },
-        undefined,
-        lead,
-        lead.messages,
-      );
-
-      const messageBody = drafts.message;
       await this.sendMessage(leadId, messageBody);
       await this.incrementAutoResponseCount(leadId);
 
