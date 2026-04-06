@@ -63,6 +63,16 @@ export class CampaignsService {
       });
 
       if (steps !== undefined) {
+        // Delete message logs referencing old steps first (FK constraint)
+        const oldStepIds = await tx.campaignStep.findMany({
+          where: { campaignId: id },
+          select: { id: true },
+        });
+        if (oldStepIds.length > 0) {
+          await tx.campaignMessageLog.deleteMany({
+            where: { stepId: { in: oldStepIds.map((s) => s.id) } },
+          });
+        }
         // Replace all steps
         await tx.campaignStep.deleteMany({ where: { campaignId: id } });
         if (steps.length > 0) {
