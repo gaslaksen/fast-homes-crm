@@ -231,6 +231,27 @@ export interface AttomEnrichmentResult {
   // Additional property details
   apn?:         string;
   ownerName?:   string;
+  // Mortgage data
+  mortgageData?: AttomMortgageData;
+}
+
+export interface AttomMortgageLoan {
+  amount?: number;
+  lenderLastName?: string;
+  companyCode?: string;
+  date?: string;
+  dueDate?: string;
+  interestRate?: number;
+  interestRateType?: string;   // FIX, ARM, etc.
+  loanTypeCode?: string;       // CNV, FHA, VA, etc.
+  term?: number;
+  termType?: string;           // MOS, YRS
+}
+
+export interface AttomMortgageData {
+  firstConcurrent?: AttomMortgageLoan;
+  secondConcurrent?: AttomMortgageLoan;
+  title?: { companyName?: string };
 }
 
 // ─── Service ─────────────────────────────────────────────────────────────────
@@ -402,15 +423,28 @@ export class AttomService {
     }
 
     // ── Fetch all endpoints in parallel ──
-    const [profileResult, avmResult, historyResult] = await Promise.allSettled([
+    const [profileResult, avmResult, historyResult, mortgageResult, mortgageOwnerResult] = await Promise.allSettled([
       this.getExpandedProfile(address),
       this.getAVM(address),
       this.getSaleHistory(address),
+      this.getMortgageDetail(address),
+      this.getMortgageOwnerDetail(address),
     ]);
 
     const profile    = profileResult.status === 'fulfilled' ? profileResult.value : null;
     const avmData    = avmResult.status    === 'fulfilled' ? avmResult.value    : null;
     const saleHistory = historyResult.status === 'fulfilled' ? historyResult.value : [];
+    const mortgageData = mortgageResult.status === 'fulfilled' ? mortgageResult.value : null;
+    const mortgageOwnerData = mortgageOwnerResult.status === 'fulfilled' ? mortgageOwnerResult.value : null;
+
+    // Merge mortgage data: prefer richer dataset, fill gaps from owner endpoint
+    const mergedMortgage: AttomMortgageData | undefined = mortgageData || mortgageOwnerData
+      ? {
+          firstConcurrent: mortgageData?.firstConcurrent || mortgageOwnerData?.firstConcurrent,
+          secondConcurrent: mortgageData?.secondConcurrent || mortgageOwnerData?.secondConcurrent,
+          title: mortgageData?.title || mortgageOwnerData?.title,
+        }
+      : undefined;
 
     if (!profile && !avmData) {
       this.logger.warn(`ATTOM enrichment: no data from either endpoint for lead ${leadId}`);
@@ -497,6 +531,8 @@ export class AttomService {
       // Additional details
       apn:         prop.identifier?.apn,
       ownerName:   (profile || avmData)?.assessment?.owner?.owner1?.fullName,
+      // Mortgage data (merged from both endpoints)
+      mortgageData: mergedMortgage,
     };
 
     // ── Persist to Lead: fill missing fields + ATTOM-specific columns ──
@@ -538,6 +574,8 @@ export class AttomService {
       annualTaxAmount:  e.annualTaxAmount   ?? null,
       // Sale history
       attomSaleHistory: e.saleHistory ?? undefined,
+      // Mortgage data
+      attomMortgageData: e.mortgageData ?? undefined,
       // Building details (always save from ATTOM)
       propertyCondition: e.condition        ?? null,
       propertyQuality:   e.quality          ?? null,
@@ -618,6 +656,7 @@ export class AttomService {
       basementSqft: lead.basementSqft,
       effectiveYearBuilt: lead.effectiveYearBuilt,
       subdivision: lead.subdivision,
+      mortgageData: lead.attomMortgageData ?? undefined,
     };
   }
 
@@ -1240,6 +1279,80 @@ export class AttomService {
   }
 
   // ─── Error handler ────────────────────────────────────────────────────────
+
+  // ─── Get mortgage details ─────────────────────────────────────────────────
+
+  async getMortgageDetail(
+    address: { street: string; city: string; state: string; zip: string },
+  ): Promise<AttomMortgageData | null> {
+    if (!this.apiKey) return null;
+    const params = this.buildAddressParams(address);
+    this.logger.log(`ATTOM detailmortgage for: ${params.address1}, ${params.address2}`);
+    try {
+      const response = await axios.get<{ property: any[] }>(
+        `${ATTOM_BASE}/property/detailmortgage`,
+        { params, headers: { apikey: this.apiKey, Accept: 'application/json' }, timeout: 15000 },
+      );
+      const mortgage = response.data?.property?.[0]?.mortgage;
+      if (!mortgage) {
+        this.logger.warn(`ATTOM detailmortgage: no mortgage data for ${params.address1}`);
+        return null;
+      }
+      return this.parseMortgageResponse(mortgage);
+    } catch (error) {
+      this.handleError(error, 'getMortgageDetail');
+      return null;
+    }
+  }
+
+  async getMortgageOwnerDetail(
+    address: { street: string; city: string; state: string; zip: string },
+  ): Promise<AttomMortgageData | null> {
+    if (!this.apiKey) return null;
+    const params = this.buildAddressParams(address);
+    this.logger.log(`ATTOM detailmortgageowner for: ${params.address1}, ${params.address2}`);
+    try {
+      const response = await axios.get<{ property: any[] }>(
+        `${ATTOM_BASE}/property/detailmortgageowner`,
+        { params, headers: { apikey: this.apiKey, Accept: 'application/json' }, timeout: 15000 },
+      );
+      const mortgage = response.data?.property?.[0]?.mortgage;
+      if (!mortgage) {
+        this.logger.warn(`ATTOM detailmortgageowner: no mortgage data for ${params.address1}`);
+        return null;
+      }
+      return this.parseMortgageResponse(mortgage);
+    } catch (error) {
+      this.handleError(error, 'getMortgageOwnerDetail');
+      return null;
+    }
+  }
+
+  private parseMortgageResponse(mortgage: any): AttomMortgageData {
+    const parseLoan = (loan: any): AttomMortgageLoan | undefined => {
+      if (!loan || !loan.amount) return undefined;
+      return {
+        amount: loan.amount,
+        lenderLastName: loan.lenderLastName || loan.lenderlastname,
+        companyCode: loan.companyCode || loan.companycode,
+        date: loan.date,
+        dueDate: loan.dueDate || loan.duedate,
+        interestRate: loan.interestRate || loan.interestrate,
+        interestRateType: loan.interestRateType || loan.interestratetype,
+        loanTypeCode: loan.loanTypeCode || loan.loantypecode,
+        term: loan.term,
+        termType: loan.termType || loan.termtype,
+      };
+    };
+
+    return {
+      firstConcurrent: parseLoan(mortgage.firstConcurrent || mortgage.firstconcurrent),
+      secondConcurrent: parseLoan(mortgage.secondConcurrent || mortgage.secondconcurrent),
+      title: mortgage.title?.companyName || mortgage.title?.companyname
+        ? { companyName: mortgage.title.companyName || mortgage.title.companyname }
+        : undefined,
+    };
+  }
 
   private handleError(error: unknown, method: string) {
     if (error instanceof AxiosError) {

@@ -773,10 +773,11 @@ export default function LeadDetailPage() {
 
                 {/* ── Tax & Assessment ── */}
                 {((lead as any).annualTaxAmount || (lead as any).taxAssessedValue || (lead as any).marketAssessedValue) && (
-                  <div className="border-t border-gray-100 dark:border-gray-800 pt-4 mb-4">
-                    <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-1.5">
+                  <details open className="border-t border-gray-100 dark:border-gray-800 pt-4 mb-4 group">
+                    <summary className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-1.5 cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+                      <svg className="w-3.5 h-3.5 text-gray-400 transition-transform group-open:rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
                       🏦 Tax & Assessment
-                    </h3>
+                    </summary>
                     <dl className="grid grid-cols-2 gap-4">
                       {(lead as any).annualTaxAmount && (
                         <div>
@@ -819,7 +820,7 @@ export default function LeadDetailPage() {
                         </div>
                       )}
                     </dl>
-                  </div>
+                  </details>
                 )}
 
                 {/* ── Sale History ── */}
@@ -828,13 +829,14 @@ export default function LeadDetailPage() {
                   const hasAnySale = lead.lastSaleDate || lead.lastSalePrice || saleHistory.length > 0;
                   if (!hasAnySale) return null;
                   return (
-                    <div className="border-t border-gray-100 dark:border-gray-800 pt-4 mb-4">
-                      <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-1.5">
+                    <details open className="border-t border-gray-100 dark:border-gray-800 pt-4 mb-4 group">
+                      <summary className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-1.5 cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+                        <svg className="w-3.5 h-3.5 text-gray-400 transition-transform group-open:rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
                         🏷️ Sale History
                         {saleHistory.length > 0 && (
                           <span className="text-xs text-gray-400 dark:text-gray-500 font-normal">via ATTOM</span>
                         )}
-                      </h3>
+                      </summary>
 
                       {saleHistory.length > 0 ? (
                         <div className="space-y-2">
@@ -909,16 +911,119 @@ export default function LeadDetailPage() {
                           )}
                         </dl>
                       )}
-                    </div>
+                    </details>
                   );
                 })()}
 
-                {/* ── Mortgage note ── */}
-                <div className="border-t border-gray-100 dark:border-gray-800 pt-3">
-                  <p className="text-xs text-gray-400 dark:text-gray-500 italic">
-                    💡 Mortgage & lien data requires a higher ATTOM tier — verify via county recorder or title search.
-                  </p>
-                </div>
+                {/* ── Mortgage Information ── */}
+                {(() => {
+                  const mortgage = (lead as any).attomMortgageData;
+                  if (!mortgage || (!mortgage.firstConcurrent && !mortgage.secondConcurrent)) return null;
+                  const formatLoanType = (code: string | undefined) => {
+                    if (!code) return null;
+                    const map: Record<string, string> = { CNV: 'Conventional', FHA: 'FHA', VA: 'VA', USDA: 'USDA', HEL: 'Home Equity', RVS: 'Reverse' };
+                    return map[code.toUpperCase()] || code;
+                  };
+                  const formatRateType = (type: string | undefined) => {
+                    if (!type) return '';
+                    return type.toUpperCase() === 'FIX' ? 'Fixed' : type.toUpperCase() === 'ARM' ? 'ARM' : type;
+                  };
+                  const totalOriginalDebt = (mortgage.firstConcurrent?.amount || 0) + (mortgage.secondConcurrent?.amount || 0);
+                  const renderLoan = (loan: any, label: string) => {
+                    if (!loan) return null;
+                    return (
+                      <div className="bg-gray-50 dark:bg-gray-950 rounded-lg px-3 py-2.5 border border-gray-100 dark:border-gray-800">
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className="text-xs font-medium text-gray-500 dark:text-gray-400">{label}</span>
+                          {loan.loanTypeCode && (
+                            <span className="text-xs px-1.5 py-0.5 rounded bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 font-medium">
+                              {formatLoanType(loan.loanTypeCode)}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-sm font-bold text-gray-900 dark:text-gray-100 mb-1">
+                          ${Math.round(loan.amount).toLocaleString()}
+                        </div>
+                        <dl className="grid grid-cols-2 gap-x-4 gap-y-1">
+                          {loan.lenderLastName && (
+                            <div>
+                              <dt className="text-xs text-gray-400 dark:text-gray-500">Lender</dt>
+                              <dd className="text-xs text-gray-700 dark:text-gray-300 capitalize">{loan.lenderLastName.toLowerCase()}</dd>
+                            </div>
+                          )}
+                          {loan.interestRate && (
+                            <div>
+                              <dt className="text-xs text-gray-400 dark:text-gray-500">Rate</dt>
+                              <dd className="text-xs text-gray-700 dark:text-gray-300">
+                                {loan.interestRate}% {formatRateType(loan.interestRateType)}
+                              </dd>
+                            </div>
+                          )}
+                          {loan.date && (
+                            <div>
+                              <dt className="text-xs text-gray-400 dark:text-gray-500">Originated</dt>
+                              <dd className="text-xs text-gray-700 dark:text-gray-300">
+                                {new Date(loan.date).toLocaleDateString('en-US', { year: 'numeric', month: 'short' })}
+                              </dd>
+                            </div>
+                          )}
+                          {loan.dueDate && (
+                            <div>
+                              <dt className="text-xs text-gray-400 dark:text-gray-500">Maturity</dt>
+                              <dd className="text-xs text-gray-700 dark:text-gray-300">
+                                {new Date(loan.dueDate).toLocaleDateString('en-US', { year: 'numeric', month: 'short' })}
+                              </dd>
+                            </div>
+                          )}
+                          {loan.term && (
+                            <div>
+                              <dt className="text-xs text-gray-400 dark:text-gray-500">Term</dt>
+                              <dd className="text-xs text-gray-700 dark:text-gray-300">
+                                {loan.termType?.toUpperCase() === 'MOS' ? `${Math.round(loan.term / 12)}yr` : `${loan.term}yr`}
+                              </dd>
+                            </div>
+                          )}
+                        </dl>
+                      </div>
+                    );
+                  };
+                  return (
+                    <details open className="border-t border-gray-100 dark:border-gray-800 pt-4 mb-4 group">
+                      <summary className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-1.5 cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+                        <svg className="w-3.5 h-3.5 text-gray-400 transition-transform group-open:rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
+                        🏠 Mortgage Information
+                        <span className="text-xs text-gray-400 dark:text-gray-500 font-normal">via ATTOM</span>
+                      </summary>
+                      <div className="space-y-2">
+                        {renderLoan(mortgage.firstConcurrent, '1st Mortgage')}
+                        {renderLoan(mortgage.secondConcurrent, '2nd Mortgage')}
+                        {mortgage.title?.companyName && (
+                          <div className="text-xs text-gray-500 dark:text-gray-400">
+                            Title: <span className="capitalize">{mortgage.title.companyName.toLowerCase()}</span>
+                          </div>
+                        )}
+                        {/* Equity insight: compare original debt to ARV */}
+                        {lead.arv && totalOriginalDebt > 0 && (
+                          <div className={`mt-1 rounded-lg px-3 py-2 text-xs flex items-center gap-2 ${
+                            totalOriginalDebt < lead.arv * 0.6 ? 'bg-green-50 dark:bg-green-950 text-green-800 dark:text-green-400 border border-green-200 dark:border-green-800'
+                            : totalOriginalDebt < lead.arv * 0.8 ? 'bg-yellow-50 dark:bg-yellow-950 text-yellow-800 dark:text-yellow-400 border border-yellow-200 dark:border-yellow-800'
+                            : 'bg-red-50 dark:bg-red-950 text-red-800 dark:text-red-400 border border-red-200 dark:border-red-800'
+                          }`}>
+                            <span>{totalOriginalDebt < lead.arv * 0.6 ? '💚' : totalOriginalDebt < lead.arv * 0.8 ? '⚠️' : '🔴'}</span>
+                            <span>
+                              Original debt ${Math.round(totalOriginalDebt).toLocaleString()} = {((totalOriginalDebt / lead.arv) * 100).toFixed(0)}% of ARV
+                              {totalOriginalDebt < lead.arv * 0.6
+                                ? ' — likely significant equity'
+                                : totalOriginalDebt < lead.arv * 0.8
+                                ? ' — moderate equity potential'
+                                : ' — thin equity (verify payoff)'}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </details>
+                  );
+                })()}
               </div>
             </div>
 

@@ -100,6 +100,7 @@ model Lead {
   attomId              String?   // ATTOM property ID for lookups
   attomEnrichedAt      DateTime? // when ATTOM data was last fetched
   attomSaleHistory     Json?     // Array of prior sales from ATTOM /saleshistory/detail
+  attomMortgageData    Json?     // Mortgage data from ATTOM /property/detailmortgage + detailmortgageowner
   attomAvm             Float?    // ATTOM AVM estimate
   attomAvmLow          Float?
   attomAvmHigh         Float?
