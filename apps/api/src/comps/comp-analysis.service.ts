@@ -120,14 +120,36 @@ export class CompAnalysisService {
       where.source = sourceFilter;
       this.logger.log(`importExistingComps: filtering to source='${sourceFilter}' for lead ${leadId}`);
     } else {
-      // No explicit filter: prefer ATTOM — if ATTOM comps exist, exclude RentCast entirely.
-      // RentCast is a fallback only; mixing sources inflates comp count and distorts ARV.
-      const attomCount = await this.prisma.comp.count({
-        where: { leadId, source: 'attom', analysisId: null },
-      });
-      if (attomCount > 0) {
-        where.source = 'attom';
-        this.logger.log(`importExistingComps: ATTOM comps available (${attomCount}) — excluding RentCast for lead ${leadId}`);
+      // No explicit filter: prefer the configured provider's comps. Don't mix sources.
+      const provider = this.config.get<string>('PROPERTY_DATA_PROVIDER') || 'auto';
+
+      if (provider === 'rentcast') {
+        // RentCast is primary — prefer RentCast comps if available
+        const rentcastCount = await this.prisma.comp.count({
+          where: { leadId, source: 'rentcast', analysisId: null },
+        });
+        if (rentcastCount > 0) {
+          where.source = 'rentcast';
+          this.logger.log(`importExistingComps: RentCast comps available (${rentcastCount}) — using as primary for lead ${leadId}`);
+        } else {
+          // Fall back to ATTOM if no RentCast comps
+          const attomCount = await this.prisma.comp.count({
+            where: { leadId, source: 'attom', analysisId: null },
+          });
+          if (attomCount > 0) {
+            where.source = 'attom';
+            this.logger.log(`importExistingComps: no RentCast comps, using ATTOM (${attomCount}) for lead ${leadId}`);
+          }
+        }
+      } else {
+        // Auto/ATTOM mode: prefer ATTOM — if ATTOM comps exist, exclude RentCast entirely.
+        const attomCount = await this.prisma.comp.count({
+          where: { leadId, source: 'attom', analysisId: null },
+        });
+        if (attomCount > 0) {
+          where.source = 'attom';
+          this.logger.log(`importExistingComps: ATTOM comps available (${attomCount}) — excluding RentCast for lead ${leadId}`);
+        }
       }
     }
     const existingComps = await this.prisma.comp.findMany({

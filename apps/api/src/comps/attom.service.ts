@@ -609,13 +609,14 @@ export class AttomService {
 
     // Use ATTOM's "excellent condition" AVM as the initial ARV estimate.
     // avmExcellentHigh = after-repair value at excellent condition = true ARV.
-    // Only set it if arv hasn't been set by a manual comps analysis yet
-    // (i.e. no lastCompsDate from a comp analysis run, or arv is currently 0/null).
+    // Only set it if arv hasn't been set by a manual comps analysis or RentCast pipeline yet.
+    // Re-read lead to get the latest arv (may have been set by RentCast pipeline running in parallel).
+    const provider = this.config.get<string>('PROPERTY_DATA_PROVIDER') || 'auto';
     const currentLead = await this.prisma.lead.findUnique({
       where: { id: leadId },
       select: { arv: true, lastCompsDate: true },
     });
-    if (e.avmExcellentHigh && (!currentLead?.arv || !currentLead?.lastCompsDate)) {
+    if (e.avmExcellentHigh && (!currentLead?.arv || !currentLead?.lastCompsDate) && provider !== 'rentcast') {
       update.arv = Math.round(e.avmExcellentHigh);
       update.arvConfidence = e.attomAvmConfidence ?? 70;
       update.lastCompsDate = new Date();
@@ -623,10 +624,11 @@ export class AttomService {
 
     await this.prisma.lead.update({ where: { id: leadId }, data: update });
 
+    const arvSkipped = provider === 'rentcast' ? ' (ARV skipped — RentCast is primary provider)' : '';
     this.logger.log(
       `ATTOM enrichment saved for lead ${leadId}: ` +
       `AVM=$${e.attomAvm?.toLocaleString() ?? '?'}, ` +
-      `ARV(excellent)=$${e.avmExcellentHigh?.toLocaleString() ?? '?'} ${e.avmExcellentHigh ? '→ saved as lead.arv' : '(not available)'}, ` +
+      `ARV(excellent)=$${e.avmExcellentHigh?.toLocaleString() ?? '?'} ${e.avmExcellentHigh && !arvSkipped ? '→ saved as lead.arv' : `(not setting lead.arv${arvSkipped})`}, ` +
       `AS-IS=$${e.avmPoorHigh?.toLocaleString() ?? '?'}`,
     );
   }

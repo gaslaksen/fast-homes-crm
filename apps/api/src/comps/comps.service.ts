@@ -64,7 +64,7 @@ export class CompsService {
 
         // Persist scored comps to DB
         await this.prisma.comp.deleteMany({
-          where: { leadId, source: { in: ['rentcast', 'rentcast-v2'] }, analysisId: null },
+          where: { leadId, source: { in: ['rentcast', 'rentcast'] }, analysisId: null },
         });
 
         for (const comp of payload.compAnalysis.soldComps) {
@@ -87,7 +87,7 @@ export class CompsService {
               hasGarage: comp.hasGarage,
               similarityScore: Math.round(comp.totalScore),
               selected: true,
-              source: 'rentcast-v2',
+              source: 'rentcast',
               notes: `Scores: sqft=${comp.sqftScore} bed=${comp.bedroomScore} bath=${comp.bathroomScore} prox=${comp.proximityScore} rec=${comp.recencyScore}`,
             },
           });
@@ -124,7 +124,7 @@ export class CompsService {
           arvHigh: Math.round(payload.deal.arv * 1.05),
           confidence: payload.compAnalysis.arvConfidence,
           compsCount: payload.compAnalysis.compCount,
-          source: `rentcast-v2 (${payload.compAnalysis.methodology})`,
+          source: `rentcast (${payload.compAnalysis.methodology})`,
           attom: null,
         };
       } catch (err) {
