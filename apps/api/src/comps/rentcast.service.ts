@@ -966,12 +966,49 @@ export class RentCastService {
       return { comps: [], calculatedARV: 0, arvPerSqft: null, arvConfidence: 0, compCount: 0, methodology: 'avm-fallback', searchRadius: usedRadius, searchDateRange: usedDateRange };
     }
 
-    // Exclude the subject property itself
+    // Filter out the subject property and non-residential properties
     const subjectAddr = address.toLowerCase().trim();
+    const nonResidentialTypes = new Set([
+      'commercial', 'industrial', 'office', 'retail', 'mixed use', 'mixed-use',
+      'warehouse', 'hotel', 'motel', 'parking', 'agricultural', 'farm', 'ranch',
+    ]);
+    // Zoning codes that indicate commercial/non-residential use
+    const commercialZoningPrefixes = ['c-', 'c1', 'c2', 'c3', 'cb', 'cd', 'ci', 'co', 'cr', 'cs',
+      'b-', 'b1', 'b2', 'b3', 'bd', 'bg', 'i-', 'i1', 'i2', 'i3', 'id', 'ig', 'il', 'ih', 'ip',
+      'm-', 'm1', 'm2', 'm3', 'mu'];
+
     const filteredComps = rawComps.filter(c => {
       const compAddr = (c.formattedAddress || c.addressLine1 || '').toLowerCase().trim();
-      return compAddr !== subjectAddr;
+
+      // Skip subject property
+      if (compAddr === subjectAddr) return false;
+
+      // Skip non-residential property types
+      const propType = (c.propertyType || '').toLowerCase();
+      if (propType && nonResidentialTypes.has(propType)) {
+        this.logger.debug(`Skipping non-residential comp: ${compAddr} (type: ${c.propertyType})`);
+        return false;
+      }
+
+      // Skip properties with 0 bedrooms and 0 bathrooms (likely commercial)
+      if (c.bedrooms === 0 && c.bathrooms === 0) {
+        this.logger.debug(`Skipping likely commercial comp (0 bed/0 bath): ${compAddr}`);
+        return false;
+      }
+
+      // Skip properties with commercial zoning
+      const zoning = (c.zoning || '').toLowerCase().trim();
+      if (zoning && commercialZoningPrefixes.some(prefix => zoning.startsWith(prefix))) {
+        this.logger.debug(`Skipping commercial-zoned comp: ${compAddr} (zoning: ${c.zoning})`);
+        return false;
+      }
+
+      return true;
     });
+
+    if (filteredComps.length < rawComps.length) {
+      this.logger.log(`getSoldComps: filtered ${rawComps.length} → ${filteredComps.length} (removed subject/non-residential)`);
+    }
 
     // Score each comp
     const now = new Date();
