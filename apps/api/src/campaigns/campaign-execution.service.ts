@@ -7,10 +7,22 @@ import {
 } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { ConfigService } from '@nestjs/config';
+import * as os from 'os';
 import { PrismaService } from '../prisma/prisma.service';
 import { MessagesService } from '../messages/messages.service';
 import { LeadsService } from '../leads/leads.service';
 import { GmailService } from '../gmail/gmail.service';
+
+// Instance tag for distinguishing Railway replicas in logs.
+const INSTANCE_TAG = `${os.hostname()}/${process.pid}`;
+
+// Max times we retry the same step before giving up and pausing the enrollment.
+const MAX_STEP_ATTEMPTS = 5;
+
+type StepOutcome =
+  | { kind: 'SENT'; externalId?: string }
+  | { kind: 'RETRY'; reason: string }
+  | { kind: 'SKIPPED'; reason: string };
 
 interface LeadForTemplate {
   sellerFirstName?: string | null;
@@ -107,28 +119,44 @@ export class CampaignExecutionService implements OnModuleInit {
 
     for (const enrollment of enrollments) {
       // Optimistic lock: atomically claim this enrollment to prevent
-      // duplicate sends when Railway runs multiple instances during deploy
+      // duplicate sends when Railway runs multiple instances during deploy.
+      // The claim sets nextSendAt to null; executeStep is responsible for
+      // restoring it on RETRY outcomes or advancing it on SENT/SKIPPED.
       const claimed = await this.prisma.campaignEnrollment.updateMany({
         where: {
           id: enrollment.id,
           nextSendAt: enrollment.nextSendAt, // only if unchanged since our query
         },
-        data: { nextSendAt: null }, // clear to prevent re-processing
+        data: { nextSendAt: null },
       });
       if (claimed.count === 0) {
-        this.logger.log(`Enrollment ${enrollment.id} already claimed by another instance — skipping`);
+        // Benign: another Railway replica already picked this up. Kept at
+        // debug level so it doesn't flood prod logs.
+        this.logger.debug(
+          `[${INSTANCE_TAG}] Enrollment ${enrollment.id} already claimed by another instance — skipping`,
+        );
         continue;
       }
 
       try {
         await this.executeStep(enrollment);
       } catch (err) {
-        // Restore nextSendAt on failure so it retries on next cron run
-        await this.prisma.campaignEnrollment.update({
-          where: { id: enrollment.id },
-          data: { nextSendAt: enrollment.nextSendAt },
-        }).catch(() => {}); // swallow restore failure
-        this.logger.error(`Failed to execute step for enrollment ${enrollment.id}: ${err.message}`);
+        // Restore nextSendAt on unexpected failure so it retries next cron run.
+        try {
+          await this.prisma.campaignEnrollment.update({
+            where: { id: enrollment.id },
+            data: { nextSendAt: enrollment.nextSendAt },
+          });
+        } catch (restoreErr) {
+          this.logger.error(
+            `Failed to restore nextSendAt for enrollment ${enrollment.id}: ${restoreErr.message}`,
+            restoreErr.stack,
+          );
+        }
+        this.logger.error(
+          `Failed to execute step for enrollment ${enrollment.id}: ${err.message}`,
+          err.stack,
+        );
       }
     }
   }
@@ -167,90 +195,88 @@ export class CampaignExecutionService implements OnModuleInit {
       ? this.renderTemplate(currentStep.subject, lead, org)
       : undefined;
 
-    // Create log entry
-    const log = await this.prisma.campaignMessageLog.create({
-      data: {
-        enrollmentId: enrollment.id,
-        stepId: currentStep.id,
-        channel: currentStep.channel,
-        messageBody: renderedBody,
-        status: 'SENT',
-      },
-    });
+    // Run the channel-specific send. This returns a StepOutcome and does NOT
+    // touch the enrollment or log rows — that's the caller's responsibility
+    // so outcomes and side effects stay in one place.
+    const outcome = await this.dispatch(
+      enrollment,
+      lead,
+      currentStep,
+      renderedBody,
+      renderedSubject,
+    );
 
-    let sendSuccess = false;
-    let externalId: string | undefined;
+    if (outcome.kind === 'RETRY') {
+      // Transient failure: count prior FAILED attempts for this step; pause
+      // the enrollment if we've already retried too many times, otherwise
+      // restore nextSendAt so the next cron run picks it up again.
+      const priorFailures = await this.prisma.campaignMessageLog.count({
+        where: {
+          enrollmentId: enrollment.id,
+          stepId: currentStep.id,
+          status: 'FAILED',
+        },
+      });
 
-    // Send with retry
-    const delays = [0, 1000, 5000, 15000];
-    for (let attempt = 0; attempt < 3; attempt++) {
-      if (attempt > 0) {
-        await new Promise((r) => setTimeout(r, delays[attempt]));
+      await this.prisma.campaignMessageLog.create({
+        data: {
+          enrollmentId: enrollment.id,
+          stepId: currentStep.id,
+          channel: currentStep.channel,
+          messageBody: renderedBody,
+          status: 'FAILED',
+        },
+      });
+
+      if (priorFailures + 1 >= MAX_STEP_ATTEMPTS) {
+        this.logger.error(
+          `Enrollment ${enrollment.id} step ${currentStep.stepOrder} failed ${priorFailures + 1} times — pausing enrollment. Last reason: ${outcome.reason}`,
+        );
+        await this.prisma.campaignEnrollment.update({
+          where: { id: enrollment.id },
+          data: { status: 'PAUSED', nextSendAt: null },
+        });
+        return;
       }
-      try {
-        if (currentStep.channel === 'TEXT') {
-          await this.messagesService.sendMessage(lead.id, renderedBody);
-          sendSuccess = true;
-          break;
-        } else if (currentStep.channel === 'EMAIL') {
-          if (!lead.sellerEmail) {
-            this.logger.warn(`Lead ${lead.id} has no email — skipping email step`);
-            sendSuccess = true;
-            break;
-          }
-          // Use org Gmail for all campaign emails
-          const orgId = lead.organizationId;
-          if (!orgId) {
-            this.logger.warn(`Lead ${lead.id} has no organizationId — skipping email step`);
-            sendSuccess = true;
-            break;
-          }
-          const orgGmailStatus = await this.gmailService.getOrgGmailStatus(orgId);
-          if (!orgGmailStatus.connected) {
-            this.logger.warn(`Org ${orgId} has no Gmail connected — skipping email step`);
-            sendSuccess = true;
-            break;
-          }
-          // Daily rate limit guard (Gmail Workspace ~2000/day)
-          const startOfToday = new Date();
-          startOfToday.setHours(0, 0, 0, 0);
-          const todaySendCount = await this.prisma.email.count({
-            where: {
-              fromAddress: orgGmailStatus.email!,
-              direction: 'outbound',
-              sentAt: { gte: startOfToday },
-            },
-          });
-          if (todaySendCount >= 1800) {
-            this.logger.warn(`Org Gmail daily limit reached (${todaySendCount} sent today) — deferring email step`);
-            break; // Will retry on next cron run
-          }
-          const unsubUrl = this.gmailService.buildUnsubscribeUrl(lead.id);
-          const email = await this.gmailService.sendOrgEmail(orgId, {
-            to: lead.sellerEmail,
-            subject: renderedSubject || 'Following up on your property',
-            bodyText: renderedBody,
-            leadId: lead.id,
-            listUnsubscribeUrl: unsubUrl,
-          });
-          externalId = email.gmailMsgId || email.id;
-          sendSuccess = true;
-          break;
-        }
-      } catch (err) {
-        this.logger.warn(`Send attempt ${attempt + 1} failed for enrollment ${enrollment.id}: ${err.message}`);
-      }
+
+      // Restore so the next cron run retries the same step.
+      await this.prisma.campaignEnrollment.update({
+        where: { id: enrollment.id },
+        data: { nextSendAt: enrollment.nextSendAt },
+      });
+      this.logger.warn(
+        `Enrollment ${enrollment.id} step ${currentStep.stepOrder} will retry (attempt ${priorFailures + 2}/${MAX_STEP_ATTEMPTS}): ${outcome.reason}`,
+      );
+      return;
     }
 
-    if (!sendSuccess) {
-      await this.prisma.campaignMessageLog.update({
-        where: { id: log.id },
-        data: { status: 'FAILED' },
+    if (outcome.kind === 'SKIPPED') {
+      // Permanent skip (missing contact field, org not connected, etc.).
+      // Record a SKIPPED log row so the UI can show why nothing went out,
+      // then advance the enrollment so it doesn't hang forever.
+      await this.prisma.campaignMessageLog.create({
+        data: {
+          enrollmentId: enrollment.id,
+          stepId: currentStep.id,
+          channel: currentStep.channel,
+          messageBody: renderedBody,
+          status: 'SKIPPED',
+        },
       });
-    } else if (externalId) {
-      await this.prisma.campaignMessageLog.update({
-        where: { id: log.id },
-        data: { externalId },
+      this.logger.warn(
+        `Enrollment ${enrollment.id} step ${currentStep.stepOrder} skipped: ${outcome.reason}`,
+      );
+    } else {
+      // SENT — record the log row with external ID if we have one.
+      await this.prisma.campaignMessageLog.create({
+        data: {
+          enrollmentId: enrollment.id,
+          stepId: currentStep.id,
+          channel: currentStep.channel,
+          messageBody: renderedBody,
+          status: 'SENT',
+          externalId: outcome.externalId,
+        },
       });
     }
 
@@ -258,16 +284,30 @@ export class CampaignExecutionService implements OnModuleInit {
     // SMS touches are already recorded by messagesService.sendMessage() via recordTouch('MESSAGE_SENT').
     // No additional recordTouch needed here — adding one would create duplicate activity entries.
 
-    // Advance to next step
+    // Advance to next step (only reached for SENT or SKIPPED).
     const nextStep = steps.find((s: any) => s.stepOrder === currentStep.stepOrder + 1);
     if (nextStep) {
-      const nextSendAt = this.calculateNextSendAt(nextStep);
+      // Step delays are cumulative from enrollment start, not from the
+      // previous send. enrolledAt is the anchor.
+      let nextSendAt = this.calculateNextSendAt(nextStep, enrollment.enrolledAt);
+
+      // Catch-up safeguard: if a lead is backlogged (cumulative date is in
+      // the past — common right after this fix is deployed, or whenever an
+      // enrollment was paused and resumed), enforce a minimum 1-hour gap
+      // from the send we just made so backlogged steps don't all fire on
+      // the next cron tick. Fresh on-schedule enrollments are unaffected
+      // because their cumulative date is always in the future.
+      const minNext = new Date(Date.now() + 60 * 60 * 1000);
+      if (nextSendAt < minNext) {
+        nextSendAt = minNext;
+      }
+
       await this.prisma.campaignEnrollment.update({
         where: { id: enrollment.id },
         data: {
           currentStepOrder: currentStep.stepOrder,
           nextSendAt,
-          lastContactAt: new Date(),
+          lastContactAt: outcome.kind === 'SENT' ? new Date() : enrollment.lastContactAt,
         },
       });
     } else {
@@ -279,10 +319,125 @@ export class CampaignExecutionService implements OnModuleInit {
           status: 'COMPLETED',
           completedAt: new Date(),
           nextSendAt: null,
-          lastContactAt: new Date(),
+          lastContactAt: outcome.kind === 'SENT' ? new Date() : enrollment.lastContactAt,
         },
       });
     }
+  }
+
+  /**
+   * Channel dispatch. Returns a StepOutcome describing what happened:
+   *   - SENT:    message actually left the building; advance the step.
+   *   - RETRY:   transient failure (network, rate limit, provider 5xx); caller
+   *              should leave the enrollment on this step and try again.
+   *   - SKIPPED: lead/org permanently can't receive on this channel; caller
+   *              should advance past the step without claiming success.
+   *
+   * All side effects on enrollment/log rows are handled by the caller.
+   */
+  private async dispatch(
+    enrollment: any,
+    lead: any,
+    currentStep: any,
+    renderedBody: string,
+    renderedSubject: string | undefined,
+  ): Promise<StepOutcome> {
+    if (currentStep.channel === 'TEXT') {
+      if (!lead.sellerPhone) {
+        return { kind: 'SKIPPED', reason: `lead ${lead.id} has no sellerPhone` };
+      }
+      if (lead.doNotContact) {
+        return { kind: 'SKIPPED', reason: `lead ${lead.id} marked doNotContact` };
+      }
+      return this.sendWithRetry(enrollment, currentStep, async () => {
+        // sendMessage returns null when throttled (recent outbound to the
+        // same lead within 5 min). Treat that as a retryable failure so the
+        // step doesn't silently advance.
+        const result = await this.messagesService.sendMessage(lead.id, renderedBody);
+        if (result === null) {
+          throw new Error('throttled — another outbound was sent <5 min ago');
+        }
+        return undefined;
+      });
+    }
+
+    if (currentStep.channel === 'EMAIL') {
+      if (!lead.sellerEmail) {
+        return { kind: 'SKIPPED', reason: `lead ${lead.id} has no sellerEmail` };
+      }
+      const orgId = lead.organizationId;
+      if (!orgId) {
+        return { kind: 'SKIPPED', reason: `lead ${lead.id} has no organizationId` };
+      }
+      const orgGmailStatus = await this.gmailService.getOrgGmailStatus(orgId);
+      if (!orgGmailStatus.connected) {
+        return { kind: 'SKIPPED', reason: `org ${orgId} has no Gmail connected` };
+      }
+
+      // Daily rate limit guard (Gmail Workspace ~2000/day). This is transient
+      // — we want to retry tomorrow, not advance past the step.
+      const startOfToday = new Date();
+      startOfToday.setHours(0, 0, 0, 0);
+      const todaySendCount = await this.prisma.email.count({
+        where: {
+          fromAddress: orgGmailStatus.email!,
+          direction: 'outbound',
+          sentAt: { gte: startOfToday },
+        },
+      });
+      if (todaySendCount >= 1800) {
+        return {
+          kind: 'RETRY',
+          reason: `org Gmail daily limit reached (${todaySendCount} sent today)`,
+        };
+      }
+
+      const unsubUrl = this.gmailService.buildUnsubscribeUrl(lead.id);
+      return this.sendWithRetry(enrollment, currentStep, async () => {
+        const email = await this.gmailService.sendOrgEmail(orgId, {
+          to: lead.sellerEmail,
+          subject: renderedSubject || 'Following up on your property',
+          bodyText: renderedBody,
+          leadId: lead.id,
+          listUnsubscribeUrl: unsubUrl,
+        });
+        return email.gmailMsgId || email.id;
+      });
+    }
+
+    return { kind: 'SKIPPED', reason: `unknown channel ${currentStep.channel}` };
+  }
+
+  /**
+   * Try the given send function up to 3 times with backoff. Returns SENT on
+   * success or RETRY with the last error message if all attempts throw.
+   */
+  private async sendWithRetry(
+    enrollment: any,
+    currentStep: any,
+    doSend: () => Promise<string | undefined>,
+  ): Promise<StepOutcome> {
+    const delays = [0, 1000, 5000];
+    let lastErr: any;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) {
+        await new Promise((r) => setTimeout(r, delays[attempt]));
+      }
+      try {
+        const externalId = await doSend();
+        return { kind: 'SENT', externalId };
+      } catch (err) {
+        lastErr = err;
+        this.logger.warn(
+          `Send attempt ${attempt + 1} failed [${currentStep.channel}] enrollment=${enrollment.id}: ${err?.message ?? err}`,
+          err?.stack,
+        );
+      }
+    }
+    return {
+      kind: 'RETRY',
+      reason: `all 3 send attempts failed: ${lastErr?.message ?? lastErr}`,
+    };
   }
 
   renderTemplate(
@@ -314,8 +469,22 @@ export class CampaignExecutionService implements OnModuleInit {
       .replace(/\{\{[^}]+\}\}/g, ''); // clear any remaining merge fields
   }
 
-  calculateNextSendAt(step: any, timezone = 'America/Chicago'): Date {
-    const next = new Date();
+  /**
+   * Compute when a step should fire. delayDays/delayHours are interpreted as
+   * CUMULATIVE offsets from `enrollmentStart`, not from the previous send —
+   * so a campaign with steps [0d, 1d, 2d, 3d] fires on day 0, day 1, day 2,
+   * day 3 from enrollment, not day 0, 1, 3, 6.
+   *
+   * If `enrollmentStart` is omitted (legacy callers), falls back to "now"
+   * which preserves the old behavior.
+   */
+  calculateNextSendAt(
+    step: any,
+    enrollmentStart?: Date,
+    timezone = 'America/Chicago',
+  ): Date {
+    const base = enrollmentStart ? new Date(enrollmentStart.getTime()) : new Date();
+    const next = new Date(base.getTime());
     next.setDate(next.getDate() + (step.delayDays ?? 0));
     next.setHours(next.getHours() + (step.delayHours ?? 0));
 

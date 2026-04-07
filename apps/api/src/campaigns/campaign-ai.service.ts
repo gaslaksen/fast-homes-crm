@@ -158,8 +158,9 @@ ${dto.campaignContext ? `Context: ${dto.campaignContext}` : ''}
 Available merge fields: {{firstName}}, {{lastName}}, {{propertyAddress}}, {{city}}, {{state}}, {{offerAmount}}, {{companyName}}, {{senderName}}
 
 Rules:
+- delayDays is CUMULATIVE from enrollment start, not the gap from the previous step. Step 1 with delayDays:0 fires on enrollment, step 2 with delayDays:1 fires on day 1 from enrollment, step 5 with delayDays:14 fires on day 14 from enrollment.
 - First step should have delayDays: 0 (send immediately upon enrollment)
-- Subsequent steps should have increasing delays (3-14 days apart typically)
+- Subsequent steps should have monotonically increasing delayDays values measured from enrollment day (e.g. 0, 1, 3, 7, 14, 21 — NOT 0, 1, 2, 4, 7 if you mean "gap of N days from previous").
 - SMS bodies must be under 300 characters, casual like a real text, and end with "Reply STOP to opt out."
 - Email bodies should have a greeting and professional sign-off
 - Each step should build on the previous one's narrative

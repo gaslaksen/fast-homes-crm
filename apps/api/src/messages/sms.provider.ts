@@ -195,6 +195,26 @@ export function createSmsProvider(config: ConfigService): SmsProvider {
     return new TwilioSmsProvider(twilioSid, twilioToken);
   }
 
-  logger.warn('⚠️  No SMS provider configured — messages will be simulated');
+  // No real provider configured. In production this is a misconfiguration:
+  // campaign and drip messages would silently go to the void (the user has
+  // already hit this once — see CampaignExecutionService logs from 04/07/2026
+  // showing SimulatedSmsProvider sending a real campaign step). Crash early
+  // so the deploy fails visibly instead of pretending to send.
+  const nodeEnv = config.get<string>('NODE_ENV') || process.env.NODE_ENV;
+  const allowSimulated = (config.get<string>('ALLOW_SIMULATED_SMS') || '').toLowerCase() === 'true';
+
+  if (nodeEnv === 'production' && !allowSimulated) {
+    const msg =
+      '❌ No SMS provider configured (SMRTPHONE_API_KEY / TWILIO_* env vars missing) ' +
+      'and NODE_ENV=production. Refusing to start — set SMRTPHONE_API_KEY, or set ' +
+      'ALLOW_SIMULATED_SMS=true to explicitly opt in to the simulator.';
+    logger.error(msg);
+    throw new Error(msg);
+  }
+
+  logger.warn(
+    '⚠️  ⚠️  ⚠️  No SMS provider configured — falling back to SIMULATED. ' +
+      'Real SMS will NOT be delivered. Set SMRTPHONE_API_KEY in your env to fix this.',
+  );
   return new SimulatedSmsProvider();
 }

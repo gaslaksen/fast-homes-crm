@@ -567,6 +567,7 @@ enum DripMessageStatus {
   DELIVERED
   BOUNCED
   FAILED
+  SKIPPED
   OPENED
   CLICKED
   REPLIED
@@ -595,6 +596,9 @@ model CampaignStep {
   campaign        Campaign        @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   stepOrder       Int
   channel         CampaignChannel
+  // delayDays/delayHours are CUMULATIVE offsets from CampaignEnrollment.enrolledAt,
+  // not gaps from the previous step. A campaign with delays [0, 1, 2, 3] fires on
+  // day 0, 1, 2, 3 from enrollment. See CampaignExecutionService.calculateNextSendAt.
   delayDays       Int             @default(0)
   delayHours      Int             @default(0)
   sendWindowStart String?
