@@ -63,32 +63,50 @@ export class CampaignsService {
       });
 
       if (steps !== undefined) {
-        // Delete message logs referencing old steps first (FK constraint)
-        const oldStepIds = await tx.campaignStep.findMany({
+        // Merge-by-stepOrder: update existing rows in place so their IDs
+        // (and CampaignMessageLog history) survive the edit. Only create new
+        // rows for orders we haven't seen, and only delete rows whose order
+        // is no longer in the incoming set.
+        const existing = await tx.campaignStep.findMany({
           where: { campaignId: id },
-          select: { id: true },
         });
-        if (oldStepIds.length > 0) {
-          await tx.campaignMessageLog.deleteMany({
-            where: { stepId: { in: oldStepIds.map((s) => s.id) } },
-          });
+        const existingByOrder = new Map(existing.map((s) => [s.stepOrder, s]));
+        const incomingOrders = new Set(steps.map((s) => s.stepOrder));
+
+        for (const s of steps) {
+          const prev = existingByOrder.get(s.stepOrder);
+          const data = {
+            channel: s.channel,
+            delayDays: s.delayDays ?? 0,
+            delayHours: s.delayHours ?? 0,
+            sendWindowStart: s.sendWindowStart,
+            sendWindowEnd: s.sendWindowEnd,
+            subject: s.subject,
+            body: s.body,
+            isActive: s.isActive ?? true,
+          };
+          if (prev) {
+            await tx.campaignStep.update({
+              where: { id: prev.id },
+              data,
+            });
+          } else {
+            await tx.campaignStep.create({
+              data: { campaignId: id, stepOrder: s.stepOrder, ...data },
+            });
+          }
         }
-        // Replace all steps
-        await tx.campaignStep.deleteMany({ where: { campaignId: id } });
-        if (steps.length > 0) {
-          await tx.campaignStep.createMany({
-            data: steps.map((s) => ({
-              campaignId: id,
-              stepOrder: s.stepOrder,
-              channel: s.channel,
-              delayDays: s.delayDays ?? 0,
-              delayHours: s.delayHours ?? 0,
-              sendWindowStart: s.sendWindowStart,
-              sendWindowEnd: s.sendWindowEnd,
-              subject: s.subject,
-              body: s.body,
-              isActive: s.isActive ?? true,
-            })),
+
+        // Remove steps that are no longer present. Clean up their message
+        // logs first to satisfy the FK constraint.
+        const removed = existing.filter((s) => !incomingOrders.has(s.stepOrder));
+        if (removed.length > 0) {
+          const removedIds = removed.map((s) => s.id);
+          await tx.campaignMessageLog.deleteMany({
+            where: { stepId: { in: removedIds } },
+          });
+          await tx.campaignStep.deleteMany({
+            where: { id: { in: removedIds } },
           });
         }
       }

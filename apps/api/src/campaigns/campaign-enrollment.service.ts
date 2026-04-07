@@ -150,7 +150,9 @@ export class CampaignEnrollmentService {
     return this.prisma.campaignEnrollment.findMany({
       where: {
         campaignId,
-        ...(status ? { status: status as any } : {}),
+        ...(status
+          ? { status: status as any }
+          : { status: { not: 'REMOVED' } }),
       },
       include: {
         lead: {
