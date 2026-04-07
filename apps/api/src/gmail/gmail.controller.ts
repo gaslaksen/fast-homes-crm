@@ -191,13 +191,15 @@ export class GmailController {
   }
 
   /**
-   * GET /gmail/org-status — org Gmail connection status (any team member)
+   * GET /gmail/org-status — org Gmail connection status (any team member).
+   * Uses verifyOrgGmail so a revoked / broken refresh token surfaces in the
+   * UI instead of falsely showing "Connected" because a row exists.
    */
   @Get('gmail/org-status')
   async getOrgStatus(@Headers('authorization') authHeader: string) {
     const decoded = this.getUser(authHeader);
     const orgId = await this.resolveOrgId(decoded);
-    return this.gmailService.getOrgGmailStatus(orgId);
+    return this.gmailService.verifyOrgGmail(orgId);
   }
 
   /**

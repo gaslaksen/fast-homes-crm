@@ -53,8 +53,17 @@ function TeamPageInner() {
   const [pwError, setPwError] = useState('');
   const [pwSuccess, setPwSuccess] = useState('');
 
-  // Org Gmail
-  const [orgGmail, setOrgGmail] = useState<{ connected: boolean; email?: string; connectedBy?: string }>({ connected: false });
+  // Org Gmail. `healthy` reflects whether the refresh token actually works
+  // (the API now exercises it on /gmail/org-status). `connected` only means
+  // a token row exists; a row can exist with healthy=false if Google has
+  // revoked or otherwise broken the refresh token.
+  const [orgGmail, setOrgGmail] = useState<{
+    connected: boolean;
+    healthy?: boolean;
+    email?: string;
+    connectedBy?: string;
+    error?: string;
+  }>({ connected: false });
   const [orgGmailLoading, setOrgGmailLoading] = useState(true);
   const [orgGmailSyncing, setOrgGmailSyncing] = useState(false);
   const [orgGmailDisconnecting, setOrgGmailDisconnecting] = useState(false);
@@ -436,13 +445,25 @@ function TeamPageInner() {
             <div className="text-sm text-gray-400 dark:text-gray-500 animate-pulse">Loading...</div>
           ) : orgGmail.connected ? (
             <div className="space-y-3">
-              <div className="flex items-center gap-3">
-                <span className="inline-flex items-center gap-1.5 text-sm font-medium text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-950 px-3 py-1.5 rounded-full border border-green-200 dark:border-green-800">
-                  <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-                  Connected
-                </span>
+              <div className="flex items-center gap-3 flex-wrap">
+                {orgGmail.healthy === false ? (
+                  <span className="inline-flex items-center gap-1.5 text-sm font-medium text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-950 px-3 py-1.5 rounded-full border border-red-200 dark:border-red-800">
+                    <span className="w-2 h-2 rounded-full bg-red-500" />
+                    Token broken — reconnect
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 text-sm font-medium text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-950 px-3 py-1.5 rounded-full border border-green-200 dark:border-green-800">
+                    <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                    Connected
+                  </span>
+                )}
                 <span className="text-sm text-gray-700 dark:text-gray-300 font-mono">{orgGmail.email}</span>
               </div>
+              {orgGmail.healthy === false && orgGmail.error && (
+                <div className="text-xs text-red-600 dark:text-red-400">
+                  Last error from Google: <span className="font-mono">{orgGmail.error}</span>
+                </div>
+              )}
               <div className="flex items-center gap-2">
                 <button
                   onClick={async () => {
