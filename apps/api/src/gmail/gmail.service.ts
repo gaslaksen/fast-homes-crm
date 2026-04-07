@@ -534,7 +534,9 @@ export class GmailService {
     return this.prisma.$transaction(
       async (tx) => {
         // Acquire the advisory lock for the duration of this transaction.
-        await tx.$queryRaw`SELECT pg_advisory_xact_lock(${lockKey})`;
+        // pg_advisory_xact_lock returns void so we must use $executeRaw —
+        // $queryRaw tries to deserialize the row and blows up on void.
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`;
 
         // Re-read under the lock — another replica may have refreshed
         // while we were waiting on the lock.
