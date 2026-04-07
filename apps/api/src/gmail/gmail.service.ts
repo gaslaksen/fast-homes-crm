@@ -488,33 +488,116 @@ export class GmailService {
   }
 
   /**
-   * Get an authenticated OAuth2 client for the org Gmail (auto-refreshes)
+   * Stable bigint key derived from orgId for use with pg_advisory_xact_lock.
+   * Postgres advisory locks take a single bigint, so we hash the orgId and
+   * fold the SHA-256 down to a signed 64-bit value.
+   */
+  private orgGmailRefreshLockKey(orgId: string): bigint {
+    const hash = crypto
+      .createHash('sha256')
+      .update(`org-gmail-refresh:${orgId}`)
+      .digest();
+    return hash.readBigInt64BE(0);
+  }
+
+  /**
+   * Get an authenticated OAuth2 client for the org Gmail (auto-refreshes).
+   *
+   * Refresh-path is serialized across Railway replicas via a Postgres
+   * advisory lock so that two replicas don't concurrently call Google's
+   * refresh endpoint with the same refresh_token — concurrent refreshes
+   * have been observed to return `invalid_request` even though the token
+   * itself is valid.
    */
   async getOrgClient(orgId: string): Promise<Auth.OAuth2Client> {
-    const token = await this.prisma.orgGmailToken.findUnique({ where: { organizationId: orgId } });
+    // Fast path: read the row, and if the access token still has > 60s of
+    // life left, hand it back without touching Google or the lock.
+    let token = await this.prisma.orgGmailToken.findUnique({ where: { organizationId: orgId } });
     if (!token) throw new Error('Org Gmail not connected');
 
-    const oauth2Client = this.createOAuth2Client();
-    oauth2Client.setCredentials({
-      access_token: token.accessToken,
-      refresh_token: token.refreshToken,
-      expiry_date: token.expiresAt.getTime(),
-    });
-
-    // Auto-refresh if expired or expiring within 60s
-    if (token.expiresAt.getTime() < Date.now() + 60_000) {
-      const { credentials } = await oauth2Client.refreshAccessToken();
-      await this.prisma.orgGmailToken.update({
-        where: { organizationId: orgId },
-        data: {
-          accessToken: credentials.access_token!,
-          expiresAt: new Date(credentials.expiry_date || Date.now() + 3600 * 1000),
-        },
+    if (token.expiresAt.getTime() >= Date.now() + 60_000) {
+      const oauth2Client = this.createOAuth2Client();
+      oauth2Client.setCredentials({
+        access_token: token.accessToken,
+        refresh_token: token.refreshToken,
+        expiry_date: token.expiresAt.getTime(),
       });
-      oauth2Client.setCredentials(credentials);
+      return oauth2Client;
     }
 
-    return oauth2Client;
+    // Slow path: token expired or near-expired. Refresh under an advisory
+    // lock so only one replica at a time talks to Google's OAuth endpoint
+    // for this org. Other replicas block until we release, then re-read
+    // the token row and use whatever we just wrote.
+    const lockKey = this.orgGmailRefreshLockKey(orgId);
+
+    return this.prisma.$transaction(
+      async (tx) => {
+        // Acquire the advisory lock for the duration of this transaction.
+        await tx.$queryRaw`SELECT pg_advisory_xact_lock(${lockKey})`;
+
+        // Re-read under the lock — another replica may have refreshed
+        // while we were waiting on the lock.
+        token = await tx.orgGmailToken.findUnique({ where: { organizationId: orgId } });
+        if (!token) throw new Error('Org Gmail not connected');
+
+        const oauth2Client = this.createOAuth2Client();
+        oauth2Client.setCredentials({
+          access_token: token.accessToken,
+          refresh_token: token.refreshToken,
+          expiry_date: token.expiresAt.getTime(),
+        });
+
+        // If a peer replica refreshed while we waited, the cached token is
+        // already fresh — return without calling Google again.
+        if (token.expiresAt.getTime() >= Date.now() + 60_000) {
+          return oauth2Client;
+        }
+
+        // We're the chosen replica. Perform the refresh.
+        let credentials;
+        try {
+          const result = await oauth2Client.refreshAccessToken();
+          credentials = result.credentials;
+        } catch (err: any) {
+          // Capture Google's full response body so the next failure tells
+          // us exactly why instead of just "invalid_request".
+          const detail =
+            err?.response?.data ??
+            err?.response?.body ??
+            err?.message ??
+            String(err);
+          this.logger.error(
+            `Org Gmail refresh failed for org ${orgId}: ${
+              typeof detail === 'string' ? detail : JSON.stringify(detail)
+            }`,
+            err?.stack,
+          );
+          throw err;
+        }
+
+        // Persist the new tokens. If Google rotated the refresh_token (some
+        // OAuth client configurations do this), save the new one too —
+        // otherwise the next refresh would use the now-invalid old one.
+        await tx.orgGmailToken.update({
+          where: { organizationId: orgId },
+          data: {
+            accessToken: credentials.access_token!,
+            refreshToken: credentials.refresh_token || token.refreshToken,
+            expiresAt: new Date(credentials.expiry_date || Date.now() + 3600 * 1000),
+          },
+        });
+
+        oauth2Client.setCredentials(credentials);
+        return oauth2Client;
+      },
+      {
+        // Google OAuth refresh + DB writes typically complete in < 2s but
+        // give some headroom for transient slowness.
+        timeout: 30_000,
+        maxWait: 10_000,
+      },
+    );
   }
 
   /**
@@ -740,6 +823,12 @@ ${unsubHtml}
   /**
    * Get org Gmail connection status
    */
+  /**
+   * Lightweight check used by internal callers (e.g. campaign dispatch) to
+   * decide whether the org has EVER connected Gmail. Just looks for a row;
+   * does not talk to Google. A `connected: true` here does not guarantee
+   * the token still works — use `verifyOrgGmail` for that.
+   */
   async getOrgGmailStatus(orgId: string): Promise<{ connected: boolean; email?: string; connectedBy?: string }> {
     const token = await this.prisma.orgGmailToken.findUnique({
       where: { organizationId: orgId },
@@ -748,6 +837,37 @@ ${unsubHtml}
     return token
       ? { connected: true, email: token.email, connectedBy: token.connectedBy }
       : { connected: false };
+  }
+
+  /**
+   * Real health check used by the UI: actually attempts to obtain a working
+   * OAuth client (refreshing if needed) so a revoked or otherwise broken
+   * refresh token surfaces as `healthy: false` instead of the row-presence
+   * lie that the old endpoint returned. Adds a few hundred ms of latency
+   * vs the cheap status check, which is fine for a settings page but not
+   * for the campaign cron path.
+   */
+  async verifyOrgGmail(orgId: string): Promise<{
+    connected: boolean;
+    healthy: boolean;
+    email?: string;
+    connectedBy?: string;
+    error?: string;
+  }> {
+    const status = await this.getOrgGmailStatus(orgId);
+    if (!status.connected) {
+      return { ...status, healthy: false };
+    }
+    try {
+      await this.getOrgClient(orgId);
+      return { ...status, healthy: true };
+    } catch (err: any) {
+      return {
+        ...status,
+        healthy: false,
+        error: err?.message || 'Token verification failed',
+      };
+    }
   }
 
   /**
