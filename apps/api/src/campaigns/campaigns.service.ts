@@ -212,10 +212,14 @@ export class CampaignsService {
       stats[s.status] = s._count;
     }
 
-    // Per-step send counts
+    // Per-step send counts. Only SENT rows — FAILED retries and SKIPPED
+    // rows should not inflate the "N sent" label in the funnel.
     const stepStats = await this.prisma.campaignMessageLog.groupBy({
       by: ['stepId'],
-      where: { enrollment: { campaignId: id } },
+      where: {
+        enrollment: { campaignId: id },
+        status: 'SENT',
+      },
       _count: true,
     });
     const stepSentMap: Record<string, number> = {};
