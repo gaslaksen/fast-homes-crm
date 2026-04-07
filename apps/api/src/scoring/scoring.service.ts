@@ -639,7 +639,7 @@ Return ONLY a JSON object:
       anthropicMessages.push({ role: 'user', content: prompt });
 
       const response = await this.anthropic.messages.create({
-        model: 'claude-sonnet-4-5-20250514',
+        model: 'claude-sonnet-4-5',
         max_tokens: 500,
         system: systemMessage,
         messages: anthropicMessages,
