@@ -158,17 +158,24 @@ export class CampaignsService {
       where: organizationId ? { organizationId } : undefined,
       include: {
         steps: { orderBy: { stepOrder: 'asc' } },
-        _count: { select: { enrollments: true } },
+        // Exclude REMOVED enrollments — they're soft-deleted history that
+        // shouldn't inflate the "Enrolled" stat in the UI.
+        _count: {
+          select: {
+            enrollments: { where: { status: { not: 'REMOVED' } } },
+          },
+        },
       },
       orderBy: { createdAt: 'desc' },
     });
 
-    // Attach per-status enrollment counts
+    // Attach per-status enrollment counts (REMOVED excluded so the buckets
+    // sum to the same total the dashboard's "Enrolled" stat shows).
     return Promise.all(
       campaigns.map(async (c) => {
         const enrollmentStats = await this.prisma.campaignEnrollment.groupBy({
           by: ['status'],
-          where: { campaignId: c.id },
+          where: { campaignId: c.id, status: { not: 'REMOVED' } },
           _count: true,
         });
         const stats: Record<string, number> = {};
@@ -185,14 +192,19 @@ export class CampaignsService {
       where: { id },
       include: {
         steps: { orderBy: { stepOrder: 'asc' } },
-        _count: { select: { enrollments: true } },
+        // Exclude REMOVED — see comment in getCampaigns above.
+        _count: {
+          select: {
+            enrollments: { where: { status: { not: 'REMOVED' } } },
+          },
+        },
       },
     });
     if (!campaign) throw new NotFoundException('Campaign not found');
 
     const enrollmentStats = await this.prisma.campaignEnrollment.groupBy({
       by: ['status'],
-      where: { campaignId: id },
+      where: { campaignId: id, status: { not: 'REMOVED' } },
       _count: true,
     });
     const stats: Record<string, number> = {};
