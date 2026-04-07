@@ -153,9 +153,18 @@ export class CampaignExecutionService implements OnModuleInit {
       return;
     }
 
-    const renderedBody = this.renderTemplate(currentStep.body, lead);
+    // Load org once so merge fields resolve to the real company name
+    // instead of the hardcoded "Fast Homes" default.
+    const org = lead.organizationId
+      ? await this.prisma.organization.findUnique({
+          where: { id: lead.organizationId },
+          select: { name: true },
+        })
+      : null;
+
+    const renderedBody = this.renderTemplate(currentStep.body, lead, org);
     const renderedSubject = currentStep.subject
-      ? this.renderTemplate(currentStep.subject, lead)
+      ? this.renderTemplate(currentStep.subject, lead, org)
       : undefined;
 
     // Create log entry
@@ -216,11 +225,13 @@ export class CampaignExecutionService implements OnModuleInit {
             this.logger.warn(`Org Gmail daily limit reached (${todaySendCount} sent today) — deferring email step`);
             break; // Will retry on next cron run
           }
+          const unsubUrl = this.gmailService.buildUnsubscribeUrl(lead.id);
           const email = await this.gmailService.sendOrgEmail(orgId, {
             to: lead.sellerEmail,
             subject: renderedSubject || 'Following up on your property',
             bodyText: renderedBody,
             leadId: lead.id,
+            listUnsubscribeUrl: unsubUrl,
           });
           externalId = email.gmailMsgId || email.id;
           sendSuccess = true;
@@ -274,13 +285,21 @@ export class CampaignExecutionService implements OnModuleInit {
     }
   }
 
-  renderTemplate(body: string, lead: LeadForTemplate): string {
+  renderTemplate(
+    body: string,
+    lead: LeadForTemplate,
+    org?: { name: string } | null,
+  ): string {
     const offerAmount = lead.askingPrice
       ? `$${Math.round(lead.askingPrice).toLocaleString()}`
       : '';
     const arvEstimate = lead.arv
       ? `$${Math.round(lead.arv).toLocaleString()}`
       : '';
+    const companyName =
+      org?.name?.trim() ||
+      this.config.get<string>('EMAIL_FROM_NAME') ||
+      'Quick Cash Home Buyers';
 
     return body
       .replace(/\{\{firstName\}\}/g, lead.sellerFirstName || '')
@@ -290,8 +309,8 @@ export class CampaignExecutionService implements OnModuleInit {
       .replace(/\{\{state\}\}/g, lead.propertyState || '')
       .replace(/\{\{offerAmount\}\}/g, offerAmount)
       .replace(/\{\{arvEstimate\}\}/g, arvEstimate)
-      .replace(/\{\{companyName\}\}/g, 'Fast Homes')
-      .replace(/\{\{senderName\}\}/g, 'Fast Homes Team')
+      .replace(/\{\{companyName\}\}/g, companyName)
+      .replace(/\{\{senderName\}\}/g, companyName)
       .replace(/\{\{[^}]+\}\}/g, ''); // clear any remaining merge fields
   }
 

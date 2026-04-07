@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { LeadsService } from '../leads/leads.service';
 import { google, Auth } from 'googleapis';
+import * as crypto from 'crypto';
 
 @Injectable()
 export class GmailService {
@@ -517,11 +518,120 @@ export class GmailService {
   }
 
   /**
+   * Build a stateless, HMAC-signed unsubscribe URL for a lead. Reused by
+   * campaign sends and by any future transactional email that should honor
+   * opt-outs. Verified by EmailUnsubscribeController.
+   */
+  buildUnsubscribeUrl(leadId: string): string {
+    const token = `${leadId}.${this.signUnsubscribe(leadId)}`;
+    const apiBase =
+      this.config.get<string>('API_URL') || 'https://api.mydealcore.com';
+    return `${apiBase.replace(/\/$/, '')}/email/unsubscribe?token=${encodeURIComponent(token)}`;
+  }
+
+  /**
+   * Verify an unsubscribe token and return the leadId if valid.
+   * Returns null if the token is malformed or the signature doesn't match.
+   */
+  verifyUnsubscribeToken(token: string): string | null {
+    if (!token || typeof token !== 'string') return null;
+    const idx = token.lastIndexOf('.');
+    if (idx <= 0) return null;
+    const leadId = token.slice(0, idx);
+    const sig = token.slice(idx + 1);
+    const expected = this.signUnsubscribe(leadId);
+    // Constant-time compare
+    const a = Buffer.from(sig);
+    const b = Buffer.from(expected);
+    if (a.length !== b.length) return null;
+    if (!crypto.timingSafeEqual(a, b)) return null;
+    return leadId;
+  }
+
+  private signUnsubscribe(leadId: string): string {
+    const secret = this.config.get<string>('JWT_SECRET') || 'dev-secret-key';
+    return crypto
+      .createHmac('sha256', secret)
+      .update(leadId)
+      .digest('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+  }
+
+  /**
+   * Wrap a plain-text campaign body into a branded multipart pair
+   * (plain text + inline-styled HTML) with a hardcoded Quick Cash Home Buyers
+   * signature and an unsubscribe footer. Every send with a lead gets this so
+   * Gmail sees a proper HTML alternative and a visible unsubscribe link.
+   */
+  private wrapEmailBody(bodyText: string, unsubscribeUrl?: string): {
+    bodyText: string;
+    bodyHtml: string;
+  } {
+    const companyName = 'Quick Cash Home Buyers';
+    const phone = '(704) 471-3920';
+    const website = 'www.quickcashhomebuyers.com';
+    const websiteHref = 'https://www.quickcashhomebuyers.com';
+
+    // Plain-text version: original body + signature + unsubscribe line
+    const textSignature = `\n\n—\n${companyName}\n${phone}\n${website}`;
+    const textUnsub = unsubscribeUrl
+      ? `\n\nNot interested? Unsubscribe: ${unsubscribeUrl}`
+      : '';
+    const finalText = `${bodyText}${textSignature}${textUnsub}`;
+
+    // HTML version: convert paragraphs, escape, wrap in inline-styled table
+    const escape = (s: string) =>
+      s
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+    const paragraphs = bodyText
+      .split(/\n{2,}/)
+      .map((p) => `<p style="margin:0 0 14px 0;">${escape(p).replace(/\n/g, '<br>')}</p>`)
+      .join('\n');
+
+    const unsubHtml = unsubscribeUrl
+      ? `<p style="margin:16px 0 0 0;font-size:12px;color:#888;">
+  If these messages aren't useful, you can
+  <a href="${escape(unsubscribeUrl)}" style="color:#888;text-decoration:underline;">unsubscribe here</a>
+  and we won't contact you again.
+</p>`
+      : '';
+
+    const bodyHtml = `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f5f5f5;">
+<div style="max-width:600px;margin:0 auto;padding:24px 20px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:15px;line-height:1.55;color:#222;background:#ffffff;">
+${paragraphs}
+<div style="margin-top:24px;padding-top:16px;border-top:1px solid #e5e5e5;font-size:14px;color:#555;">
+  <div style="font-weight:600;color:#222;">${companyName}</div>
+  <div><a href="tel:+17044713920" style="color:#555;text-decoration:none;">${phone}</a></div>
+  <div><a href="${websiteHref}" style="color:#555;text-decoration:none;">${website}</a></div>
+</div>
+${unsubHtml}
+</div>
+</body>
+</html>`;
+
+    return { bodyText: finalText, bodyHtml };
+  }
+
+  /**
    * Send an email via the org Gmail and save Email record
    */
   async sendOrgEmail(
     orgId: string,
-    data: { to: string; subject: string; bodyHtml?: string; bodyText: string; leadId?: string },
+    data: {
+      to: string;
+      subject: string;
+      bodyHtml?: string;
+      bodyText: string;
+      leadId?: string;
+      listUnsubscribeUrl?: string;
+    },
   ) {
     const oauth2Client = await this.getOrgClient(orgId);
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
@@ -529,36 +639,62 @@ export class GmailService {
     const token = await this.prisma.orgGmailToken.findUnique({ where: { organizationId: orgId } });
     const fromAddress = token!.email;
 
-    // Use org name as display name so recipients see "Quick Cash Home Buyers" instead of "deals"
-    const org = await this.prisma.organization.findUnique({ where: { id: orgId }, select: { name: true } });
-    const displayName = org?.name || '';
-    const fromHeader = displayName ? `${displayName} <${fromAddress}>` : fromAddress;
+    // Resolve display name: org.name → EMAIL_FROM_NAME env → bare address
+    const org = await this.prisma.organization.findUnique({
+      where: { id: orgId },
+      select: { name: true },
+    });
+    const displayName =
+      org?.name?.trim() ||
+      this.config.get<string>('EMAIL_FROM_NAME') ||
+      '';
+    const fromHeader = displayName
+      ? `"${displayName.replace(/"/g, '\\"')}" <${fromAddress}>`
+      : fromAddress;
+
+    // Wrap body with branded HTML + signature + unsub footer unless caller
+    // explicitly supplied their own HTML (e.g., a future rich-text editor).
+    let finalBodyText = data.bodyText;
+    let finalBodyHtml = data.bodyHtml;
+    if (!finalBodyHtml) {
+      const wrapped = this.wrapEmailBody(data.bodyText, data.listUnsubscribeUrl);
+      finalBodyText = wrapped.bodyText;
+      finalBodyHtml = wrapped.bodyHtml;
+    }
 
     // Build RFC 2822 message
     const boundary = '____boundary____';
-    const messageParts = [
+    const headers: string[] = [
       `From: ${fromHeader}`,
       `To: ${data.to}`,
       `Subject: ${data.subject}`,
+    ];
+    if (data.listUnsubscribeUrl) {
+      headers.push(
+        `List-Unsubscribe: <mailto:unsubscribe@quickcashhomebuyers.com>, <${data.listUnsubscribeUrl}>`,
+        `List-Unsubscribe-Post: List-Unsubscribe=One-Click`,
+      );
+    }
+    headers.push(
       `MIME-Version: 1.0`,
       `Content-Type: multipart/alternative; boundary="${boundary}"`,
+    );
+
+    const messageParts = [
+      ...headers,
       '',
       `--${boundary}`,
       'Content-Type: text/plain; charset="UTF-8"',
+      'Content-Transfer-Encoding: 7bit',
       '',
-      data.bodyText,
+      finalBodyText,
+      `--${boundary}`,
+      'Content-Type: text/html; charset="UTF-8"',
+      'Content-Transfer-Encoding: 7bit',
+      '',
+      finalBodyHtml,
+      `--${boundary}--`,
     ];
-
-    if (data.bodyHtml) {
-      messageParts.push(
-        `--${boundary}`,
-        'Content-Type: text/html; charset="UTF-8"',
-        '',
-        data.bodyHtml,
-      );
-    }
-
-    messageParts.push(`--${boundary}--`);
 
     const raw = Buffer.from(messageParts.join('\r\n'))
       .toString('base64')
@@ -582,8 +718,8 @@ export class GmailService {
         fromAddress,
         toAddress: data.to,
         subject: data.subject,
-        bodyHtml: data.bodyHtml || null,
-        bodyText: data.bodyText,
+        bodyHtml: finalBodyHtml || null,
+        bodyText: finalBodyText,
         sentAt: new Date(),
       },
     });
