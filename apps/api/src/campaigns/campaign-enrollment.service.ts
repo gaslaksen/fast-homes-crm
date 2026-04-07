@@ -1,4 +1,9 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -15,6 +20,40 @@ export class CampaignEnrollmentService {
     });
     if (!campaign) throw new NotFoundException('Campaign not found');
 
+    // Verify the lead can actually receive messages on every channel this
+    // campaign uses. Without this, a lead missing a phone or email can be
+    // enrolled and then silently skipped at send time, leaving the user
+    // thinking the message went out.
+    const lead = await this.prisma.lead.findUnique({
+      where: { id: leadId },
+      select: {
+        id: true,
+        sellerEmail: true,
+        sellerPhone: true,
+        doNotContact: true,
+      },
+    });
+    if (!lead) throw new NotFoundException('Lead not found');
+
+    const channels = new Set<string>(
+      (campaign.steps ?? []).map((s: any) => s.channel),
+    );
+    if (channels.has('EMAIL') && !lead.sellerEmail) {
+      throw new BadRequestException(
+        'Lead has no email address — cannot enroll in an email campaign',
+      );
+    }
+    if (channels.has('TEXT') && !lead.sellerPhone) {
+      throw new BadRequestException(
+        'Lead has no phone number — cannot enroll in an SMS campaign',
+      );
+    }
+    if (channels.has('TEXT') && lead.doNotContact) {
+      throw new BadRequestException(
+        'Lead is marked Do Not Contact — cannot enroll in an SMS campaign',
+      );
+    }
+
     // Check if already enrolled (upsert with unique constraint)
     const existing = await this.prisma.campaignEnrollment.findUnique({
       where: { campaignId_leadId: { campaignId, leadId } },
@@ -23,31 +62,36 @@ export class CampaignEnrollmentService {
       return existing;
     }
 
-    // Calculate first nextSendAt
+    // Calculate first nextSendAt. delayDays/delayHours are cumulative offsets
+    // from enrollment start (enrolledAt), the same convention used by every
+    // subsequent step in CampaignExecutionService.calculateNextSendAt — so a
+    // campaign with delays [0d, 1d, 2d, 3d] fires on day 0, 1, 2, 3 from
+    // enrollment, not day 0, 1, 3, 6.
+    //
+    // For a brand new enrollment, enrolledAt === now, so step 1 with
+    // delayDays=0 fires on the next cron tick. Same-lead double-send with
+    // initial outreach is prevented by the 5-minute outbound throttle in
+    // MessagesService.sendMessage.
     const firstStep = campaign.steps[0];
+    const enrolledAt = new Date();
     let nextSendAt: Date | null = null;
     if (firstStep) {
-      nextSendAt = new Date();
+      nextSendAt = new Date(enrolledAt.getTime());
       nextSendAt.setDate(nextSendAt.getDate() + (firstStep.delayDays ?? 0));
       nextSendAt.setHours(nextSendAt.getHours() + (firstStep.delayHours ?? 0));
-
-      // Enforce minimum 24h delay so campaign step 1 never fires the same
-      // day as initial outreach — even if delayDays/delayHours are both 0.
-      const minDelay = new Date();
-      minDelay.setHours(minDelay.getHours() + 24);
-      if (nextSendAt < minDelay) {
-        nextSendAt = minDelay;
-      }
     }
 
     if (existing) {
-      // Re-enroll (was REMOVED)
+      // Re-enroll (was REMOVED). Reset enrolledAt to now so cumulative-from-
+      // enrollment delays anchor on the re-enrollment date, not the original
+      // (which would make every step fire immediately on the next cron tick).
       return this.prisma.campaignEnrollment.update({
         where: { id: existing.id },
         data: {
           status: 'ACTIVE',
           currentStepOrder: 0,
           nextSendAt,
+          enrolledAt,
           completedAt: null,
         },
       });
@@ -59,6 +103,7 @@ export class CampaignEnrollmentService {
         leadId,
         currentStepOrder: 0,
         status: 'ACTIVE',
+        enrolledAt,
         nextSendAt,
       },
     });
