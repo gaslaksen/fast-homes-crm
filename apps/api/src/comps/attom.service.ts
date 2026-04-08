@@ -609,14 +609,14 @@ export class AttomService {
 
     // Use ATTOM's "excellent condition" AVM as the initial ARV estimate.
     // avmExcellentHigh = after-repair value at excellent condition = true ARV.
-    // Only set it if arv hasn't been set by a manual comps analysis or RentCast pipeline yet.
-    // Re-read lead to get the latest arv (may have been set by RentCast pipeline running in parallel).
-    const provider = this.config.get<string>('PROPERTY_DATA_PROVIDER') || 'auto';
+    // Only set it if arv hasn't been set yet AND the lead isn't using RentCast as its provider
+    // (so ATTOM enrichment running in parallel doesn't clobber a RentCast ARV).
     const currentLead = await this.prisma.lead.findUnique({
       where: { id: leadId },
-      select: { arv: true, lastCompsDate: true },
+      select: { arv: true, lastCompsDate: true, compsProvider: true },
     });
-    if (e.avmExcellentHigh && (!currentLead?.arv || !currentLead?.lastCompsDate) && provider !== 'rentcast') {
+    const isRentCastLead = currentLead?.compsProvider === 'rentcast';
+    if (e.avmExcellentHigh && (!currentLead?.arv || !currentLead?.lastCompsDate) && !isRentCastLead) {
       update.arv = Math.round(e.avmExcellentHigh);
       update.arvConfidence = e.attomAvmConfidence ?? 70;
       update.lastCompsDate = new Date();
@@ -624,7 +624,7 @@ export class AttomService {
 
     await this.prisma.lead.update({ where: { id: leadId }, data: update });
 
-    const arvSkipped = provider === 'rentcast' ? ' (ARV skipped — RentCast is primary provider)' : '';
+    const arvSkipped = isRentCastLead ? ' (ARV skipped — lead is using RentCast as provider)' : '';
     this.logger.log(
       `ATTOM enrichment saved for lead ${leadId}: ` +
       `AVM=$${e.attomAvm?.toLocaleString() ?? '?'}, ` +

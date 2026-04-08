@@ -28,12 +28,19 @@ export class CompsController {
         propertyCity: true,
         propertyState: true,
         propertyZip: true,
+        compsProvider: true,
       },
     });
 
     if (!lead) {
       throw new Error('Lead not found');
     }
+
+    // Provider priority: explicit ?source= → lead.compsProvider → 'attom' default
+    const preferSource =
+      (source as 'attom' | 'rentcast' | 'auto') ||
+      (lead.compsProvider as 'attom' | 'rentcast' | 'auto' | null) ||
+      'attom';
 
     const result = await this.compsService.fetchComps(
       leadId,
@@ -45,7 +52,7 @@ export class CompsController {
       },
       {
         forceRefresh: forceRefresh === 'true',
-        preferSource: (source as 'attom' | 'rentcast' | 'auto') || 'auto',
+        preferSource,
       },
     );
 
