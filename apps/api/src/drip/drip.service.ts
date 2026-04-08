@@ -32,9 +32,11 @@ export class DripService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   private getRedisConnection() {
+    const password = this.config.get<string>('REDIS_PASSWORD', '');
     return {
       host: this.config.get<string>('REDIS_HOST', 'localhost'),
       port: this.config.get<number>('REDIS_PORT', 6379),
+      ...(password ? { password } : {}),
       maxRetriesPerRequest: null,
     };
   }

@@ -21,9 +21,11 @@ export class DripProcessor implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
+    const password = this.config.get<string>('REDIS_PASSWORD', '');
     const connection = {
       host: redisHost,
       port: this.config.get<number>('REDIS_PORT', 6379),
+      ...(password ? { password } : {}),
       maxRetriesPerRequest: null,
     };
 
