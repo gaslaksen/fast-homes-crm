@@ -120,11 +120,15 @@ export class CompAnalysisService {
       where.source = sourceFilter;
       this.logger.log(`importExistingComps: filtering to source='${sourceFilter}' for lead ${leadId}`);
     } else {
-      // No explicit filter: prefer the configured provider's comps. Don't mix sources.
-      const provider = this.config.get<string>('PROPERTY_DATA_PROVIDER') || 'auto';
+      // No explicit filter: prefer the lead's chosen provider. Don't mix sources.
+      const lead = await this.prisma.lead.findUnique({
+        where: { id: leadId },
+        select: { compsProvider: true },
+      });
+      const provider = lead?.compsProvider || 'attom';
 
       if (provider === 'rentcast') {
-        // RentCast is primary — prefer RentCast comps if available
+        // RentCast is chosen — use RentCast comps if available, else ATTOM as best-effort
         const rentcastCount = await this.prisma.comp.count({
           where: { leadId, source: 'rentcast', analysisId: null },
         });
@@ -132,7 +136,6 @@ export class CompAnalysisService {
           where.source = 'rentcast';
           this.logger.log(`importExistingComps: RentCast comps available (${rentcastCount}) — using as primary for lead ${leadId}`);
         } else {
-          // Fall back to ATTOM if no RentCast comps
           const attomCount = await this.prisma.comp.count({
             where: { leadId, source: 'attom', analysisId: null },
           });
@@ -142,13 +145,22 @@ export class CompAnalysisService {
           }
         }
       } else {
-        // Auto/ATTOM mode: prefer ATTOM — if ATTOM comps exist, exclude RentCast entirely.
+        // ATTOM (or auto): prefer ATTOM — if ATTOM comps exist, exclude RentCast entirely.
         const attomCount = await this.prisma.comp.count({
           where: { leadId, source: 'attom', analysisId: null },
         });
         if (attomCount > 0) {
           where.source = 'attom';
           this.logger.log(`importExistingComps: ATTOM comps available (${attomCount}) — excluding RentCast for lead ${leadId}`);
+        } else if (provider === 'auto') {
+          // Auto mode only: fall back to RentCast if ATTOM has nothing
+          const rentcastCount = await this.prisma.comp.count({
+            where: { leadId, source: 'rentcast', analysisId: null },
+          });
+          if (rentcastCount > 0) {
+            where.source = 'rentcast';
+            this.logger.log(`importExistingComps: auto mode — no ATTOM comps, using RentCast (${rentcastCount}) for lead ${leadId}`);
+          }
         }
       }
     }

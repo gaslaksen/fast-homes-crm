@@ -163,7 +163,7 @@ export default function CompsAnalysisPage() {
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [loading, setLoading] = useState(true);
   const [fetchingComps, setFetchingComps] = useState(false);
-  const [compsSource, setCompsSource] = useState<'auto' | 'rentcast'>('auto');
+  const [compsSource, setCompsSource] = useState<'attom' | 'rentcast'>('attom');
   const [sortField, setSortField] = useState<string>('distance');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [hoveredCompId, setHoveredCompId] = useState<string | null>(null);
@@ -222,6 +222,11 @@ export default function CompsAnalysisPage() {
     try {
       const leadRes = await leadsAPI.get(leadId);
       setLead(leadRes.data);
+      // Initialize provider toggle from lead's last-used provider
+      const savedProvider = (leadRes.data as any).compsProvider;
+      if (savedProvider === 'rentcast' || savedProvider === 'attom') {
+        setCompsSource(savedProvider);
+      }
       if (leadRes.data?.aiAnalysis) { try { setAiAnalysis(JSON.parse(leadRes.data.aiAnalysis)); } catch {} }
 
       // Load ATTOM data (non-blocking)
@@ -277,7 +282,7 @@ export default function CompsAnalysisPage() {
     setDealArv((lead as any)?.arv || res.data.arvEstimate || dealArv);
   }, [analysis, leadId, dealArv, lead]);
 
-  // ─── Find Comps (ATTOM primary, RentCast fallback) ──────────────────────────
+  // ─── Find Comps (provider chosen by compsSource toggle) ─────────────────────
   const handleFindComps = async (forceRefresh = false) => {
     setFetchingComps(true);
     try {
@@ -290,7 +295,7 @@ export default function CompsAnalysisPage() {
       // Create new analysis — on force refresh, only import comps from the selected source
       const res = await compAnalysisAPI.create(leadId, {
         importExistingComps: true,
-        sourceFilter: forceRefresh ? (compsSource === 'rentcast' ? 'rentcast' : 'attom') : undefined,
+        sourceFilter: forceRefresh ? compsSource : undefined,
       });
       const full = await compAnalysisAPI.get(leadId, res.data.id);
       setAnalysis(full.data);
@@ -298,6 +303,13 @@ export default function CompsAnalysisPage() {
       const savedLeadArv = (leadRes.data as any).arv;
       setDealArv(savedLeadArv || full.data.arvEstimate || result.data.arv || 0);
       router.replace(`/leads/${leadId}/comps-analysis?tab=comps`, { scroll: false });
+
+      // If the chosen provider returned 0 comps, tell the user clearly — no silent fallback.
+      if ((result.data?.compsCount ?? 0) === 0) {
+        const providerLabel = compsSource === 'attom' ? 'ATTOM' : 'RentCast';
+        const other = compsSource === 'attom' ? 'RentCast' : 'ATTOM';
+        alert(`${providerLabel} found 0 comps for this property. Try switching to ${other} and refreshing.`);
+      }
     } catch (error: any) {
       console.error('Failed to fetch comps:', error);
       alert(error.response?.data?.message || 'Failed to fetch comps');
@@ -887,9 +899,9 @@ export default function CompsAnalysisPage() {
                   {/* Source toggle */}
                   <div className="flex rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 text-xs">
                     <button
-                      onClick={() => setCompsSource('auto')}
+                      onClick={() => setCompsSource('attom')}
                       className={`px-3 py-1.5 font-medium transition-colors ${
-                        compsSource === 'auto'
+                        compsSource === 'attom'
                           ? 'bg-blue-600 text-white'
                           : 'bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
                       }`}
@@ -1083,9 +1095,9 @@ export default function CompsAnalysisPage() {
                   <div className="flex items-center justify-center gap-3 mb-3">
                     <div className="flex rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 text-xs">
                       <button
-                        onClick={() => setCompsSource('auto')}
+                        onClick={() => setCompsSource('attom')}
                         className={`px-3 py-1.5 font-medium transition-colors ${
-                          compsSource === 'auto'
+                          compsSource === 'attom'
                             ? 'bg-blue-600 text-white'
                             : 'bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
                         }`}

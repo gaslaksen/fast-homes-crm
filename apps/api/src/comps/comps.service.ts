@@ -33,10 +33,12 @@ export class CompsService {
   ) {}
 
   /**
-   * Fetch comps and ARV for a property.
-   * Runs ATTOM enrichment in parallel.
-   * Priority: 1) ATTOM /sale/detail (deed-verified), 2) RentCast, 3) ChatARV, 4) Placeholder
-   * Use preferSource to override: 'rentcast' skips ATTOM comps, 'auto' tries ATTOM first.
+   * Fetch comps and ARV for a property. Provider selection is per-request via preferSource:
+   *   - 'rentcast' → run RentCast full analysis pipeline; NO fallback.
+   *   - 'attom'    → run ATTOM /sale/detail comp search; NO fallback (returns 0 if nothing found).
+   *   - 'auto'     → try ATTOM first, fall back to RentCast → ChatARV → placeholder.
+   * ATTOM enrichment (property-level details) runs in parallel on all paths.
+   * Persists the chosen provider on lead.compsProvider.
    */
   async fetchComps(
     leadId: string,
@@ -53,154 +55,212 @@ export class CompsService {
   }> {
     const preferSource = options?.preferSource || 'auto';
 
-    // ── Provider toggle: if PROPERTY_DATA_PROVIDER=rentcast, use the full RentCast analysis pipeline ──
-    const provider = this.config.get<string>('PROPERTY_DATA_PROVIDER') || 'auto';
-    if (provider === 'rentcast' && this.rentCastService.isConfigured) {
-      this.logger.log(`Using RentCast full analysis pipeline for lead ${leadId} (PROPERTY_DATA_PROVIDER=rentcast)`);
-      const fullAddress = `${address.street}, ${address.city}, ${address.state} ${address.zip}`;
+    // Persist the user's provider choice on the lead so the UI toggle sticks across visits.
+    await this.prisma.lead.update({
+      where: { id: leadId },
+      data: { compsProvider: preferSource },
+    }).catch(err => this.logger.warn(`Failed to persist compsProvider for lead ${leadId}: ${err.message}`));
 
-      try {
-        const payload = await this.rentCastService.analyzeProperty(fullAddress, address.zip, leadId);
-
-        // Persist scored comps to DB
-        await this.prisma.comp.deleteMany({
-          where: { leadId, source: { in: ['rentcast', 'rentcast'] }, analysisId: null },
-        });
-
-        for (const comp of payload.compAnalysis.soldComps) {
-          await this.prisma.comp.create({
-            data: {
-              leadId,
-              address: comp.address,
-              soldPrice: comp.lastSalePrice,
-              soldDate: new Date(comp.lastSaleDate),
-              distance: comp.distanceMiles,
-              bedrooms: comp.bedrooms,
-              bathrooms: comp.bathrooms,
-              sqft: comp.squareFootage,
-              lotSize: comp.lotSize,
-              yearBuilt: comp.yearBuilt,
-              propertyType: comp.propertyType,
-              latitude: comp.latitude,
-              longitude: comp.longitude,
-              hasPool: comp.hasPool,
-              hasGarage: comp.hasGarage,
-              similarityScore: Math.round(comp.totalScore),
-              selected: true,
-              source: 'rentcast',
-              notes: `Scores: sqft=${comp.sqftScore} bed=${comp.bedroomScore} bath=${comp.bathroomScore} prox=${comp.proximityScore} rec=${comp.recencyScore}`,
-            },
-          });
-        }
-
-        // Update lead with ARV and subject coordinates
-        const leadUpdate: Record<string, any> = {
-          arv: payload.deal.arv,
-          arvConfidence: payload.compAnalysis.arvConfidence,
-          lastCompsDate: new Date(),
-        };
-        if (payload.subject.latitude) leadUpdate.latitude = payload.subject.latitude;
-        if (payload.subject.longitude) leadUpdate.longitude = payload.subject.longitude;
-
-        await this.prisma.lead.update({
-          where: { id: leadId },
-          data: leadUpdate,
-        });
-
-        this.logger.log(
-          `RentCast pipeline complete: ARV=$${payload.deal.arv.toLocaleString()}, ` +
-          `${payload.compAnalysis.compCount} comps, method=${payload.compAnalysis.methodology}`,
-        );
-
-        // Still run ATTOM enrichment for property details (40+ fields) if configured
-        if (this.attomService.isConfigured) {
-          this.attomService.enrichLead(leadId, address, { forceRefresh: options?.forceRefresh })
-            .catch(err => this.logger.warn(`ATTOM enrichment failed (non-fatal): ${err.message}`));
-        }
-
-        return {
-          arv: payload.deal.arv,
-          arvLow: Math.round(payload.deal.arv * 0.95),
-          arvHigh: Math.round(payload.deal.arv * 1.05),
-          confidence: payload.compAnalysis.arvConfidence,
-          compsCount: payload.compAnalysis.compCount,
-          source: `rentcast (${payload.compAnalysis.methodology})`,
-          attom: null,
-        };
-      } catch (err) {
-        this.logger.error(`RentCast analyzeProperty failed, falling back to standard pipeline: ${err.message}`);
-        // Fall through to existing pipeline
+    // ── Explicit RentCast ───────────────────────────────────────────────────
+    if (preferSource === 'rentcast') {
+      if (!this.rentCastService.isConfigured) {
+        this.logger.error(`RentCast requested but not configured for lead ${leadId}`);
+        return { arv: 0, confidence: 0, compsCount: 0, source: 'rentcast (not configured)', attom: null };
       }
+      // Fire ATTOM enrichment in parallel for property details (non-blocking)
+      if (this.attomService.isConfigured) {
+        this.attomService.enrichLead(leadId, address, { forceRefresh: options?.forceRefresh })
+          .catch(err => this.logger.warn(`ATTOM enrichment failed (non-fatal): ${err.message}`));
+      }
+      return await this.runRentCastPipeline(leadId, address, options);
     }
 
-    // Run ATTOM enrichment in parallel (non-blocking — fills in property details)
+    // ── ATTOM and Auto share the enrichment + lat/lon lookup ────────────────
     const attomPromise = this.attomService.isConfigured
       ? this.attomService.enrichLead(leadId, address, { forceRefresh: options?.forceRefresh })
           .catch(err => { this.logger.warn(`ATTOM enrichment failed (non-fatal): ${err.message}`); return null; })
       : Promise.resolve(null);
 
-    let compsResult: {
-      arv: number; arvLow?: number; arvHigh?: number; confidence: number; compsCount: number; source: string;
-    };
-
-    // 1) Try ATTOM comp search (deed-verified sales) — unless user wants RentCast
-    if (this.attomService.isConfigured && preferSource !== 'rentcast') {
-      // Wait for the ATTOM enrichment to finish — it saves lat/lon that the comp search needs.
-      // This is critical for new leads where lat/lon isn't set yet at the time fetchComps runs.
+    // ── Explicit ATTOM — no fallback ────────────────────────────────────────
+    if (preferSource === 'attom') {
+      if (!this.attomService.isConfigured) {
+        this.logger.error(`ATTOM requested but not configured for lead ${leadId}`);
+        return { arv: 0, confidence: 0, compsCount: 0, source: 'attom (not configured)', attom: null };
+      }
       const attomEnrichment = await attomPromise;
+      const result = await this.tryAttomComps(leadId, address, attomEnrichment, options);
 
-      // Re-fetch the lead so we have the lat/lon that enrichment just saved
-      const lead = await this.prisma.lead.findUnique({
-        where: { id: leadId },
-        select: { latitude: true, longitude: true, propertyType: true, sqft: true, bedrooms: true },
-      });
-
-      // Use coordinates from DB (written by enrichment) or fall back to what enrichment returned
-      const latitude  = lead?.latitude  ?? attomEnrichment?.latitude;
-      const longitude = lead?.longitude ?? attomEnrichment?.longitude;
-
-      if (latitude && longitude) {
-        try {
-          this.logger.log(`Fetching comps via ATTOM /sale/detail for lead ${leadId} (${latitude}, ${longitude})`);
-          const result = await this.attomService.fetchCompsFromAttom(
-            leadId,
-            address,
-            { latitude, longitude },
-            {
-              forceRefresh: options?.forceRefresh,
-              propertyType: lead?.propertyType || undefined,
-              sqft: lead?.sqft || undefined,
-              bedrooms: lead?.bedrooms || undefined,
-            },
-          );
-
-          if (result && result.compsCount >= 1) {
-            this.logger.log(`ATTOM comps: ${result.compsCount} deed-verified sales found`);
-            // Clear any stale RentCast comps — ATTOM is the preferred source
-            const deleted = await this.prisma.comp.deleteMany({
-              where: { leadId, source: 'rentcast', analysisId: null },
-            });
-            if (deleted.count > 0) {
-              this.logger.log(`Cleared ${deleted.count} stale RentCast comps for lead ${leadId} (ATTOM succeeded)`);
-            }
-            return { ...result, arv: result.arv!, attom: attomEnrichment };
-          }
-          this.logger.warn(`ATTOM returned 0 comps — falling back to RentCast`);
-        } catch (err) {
-          this.logger.warn(`ATTOM comp fetch failed (non-fatal): ${err.message} — falling back to RentCast`);
+      if (result && result.compsCount >= 1) {
+        this.logger.log(`ATTOM comps: ${result.compsCount} deed-verified sales found`);
+        // Clear any stale RentCast comps — ATTOM is the chosen source
+        const deleted = await this.prisma.comp.deleteMany({
+          where: { leadId, source: 'rentcast', analysisId: null },
+        });
+        if (deleted.count > 0) {
+          this.logger.log(`Cleared ${deleted.count} stale RentCast comps for lead ${leadId} (ATTOM chosen)`);
         }
-      } else {
-        this.logger.warn(`No lat/lon available for lead ${leadId} (even after ATTOM enrichment) — falling back to RentCast`);
+        return { ...result, arv: result.arv!, attom: attomEnrichment };
       }
 
-      // ATTOM enrichment already awaited above — no need to await again at the end
+      // Empty or failed — respect the user's explicit choice, do NOT fall back.
+      this.logger.warn(`ATTOM returned 0 comps for lead ${leadId} — user explicitly chose ATTOM, NOT falling back`);
+      // Remove any stale RentCast comps so the analysis shows empty, not mixed.
+      await this.prisma.comp.deleteMany({
+        where: { leadId, source: 'rentcast', analysisId: null },
+      });
+      return {
+        arv: 0,
+        confidence: 0,
+        compsCount: 0,
+        source: 'attom (no comps found)',
+        attom: attomEnrichment,
+      };
+    }
+
+    // ── Auto: ATTOM first, then RentCast → ChatARV → placeholder ────────────
+    if (this.attomService.isConfigured) {
+      const attomEnrichment = await attomPromise;
+      const result = await this.tryAttomComps(leadId, address, attomEnrichment, options);
+
+      if (result && result.compsCount >= 1) {
+        this.logger.log(`ATTOM comps: ${result.compsCount} deed-verified sales found`);
+        const deleted = await this.prisma.comp.deleteMany({
+          where: { leadId, source: 'rentcast', analysisId: null },
+        });
+        if (deleted.count > 0) {
+          this.logger.log(`Cleared ${deleted.count} stale RentCast comps for lead ${leadId} (ATTOM succeeded)`);
+        }
+        return { ...result, arv: result.arv!, attom: attomEnrichment };
+      }
+      this.logger.warn(`ATTOM returned 0 comps — falling back to RentCast (auto mode)`);
       return { ...(await this.fetchRentCastOrFallback(leadId, address, options)), attom: attomEnrichment };
     }
 
-    // 2) RentCast path (ATTOM not configured, or user explicitly prefers RentCast)
-    // Await enrichment so lead data is complete before returning
+    // ATTOM not configured → RentCast or fallback chain
     const attom = await attomPromise;
     return { ...(await this.fetchRentCastOrFallback(leadId, address, options)), attom };
+  }
+
+  /**
+   * Run the full RentCast analyzeProperty pipeline, persist comps, update lead ARV.
+   */
+  private async runRentCastPipeline(
+    leadId: string,
+    address: { street: string; city: string; state: string; zip: string },
+    options?: { forceRefresh?: boolean },
+  ): Promise<{
+    arv: number; arvLow?: number; arvHigh?: number; confidence: number; compsCount: number; source: string; attom: null;
+  }> {
+    this.logger.log(`Using RentCast full analysis pipeline for lead ${leadId}`);
+    const fullAddress = `${address.street}, ${address.city}, ${address.state} ${address.zip}`;
+
+    try {
+      const payload = await this.rentCastService.analyzeProperty(fullAddress, address.zip, leadId);
+
+      // Persist scored comps to DB
+      await this.prisma.comp.deleteMany({
+        where: { leadId, source: 'rentcast', analysisId: null },
+      });
+      // Also clear any stale ATTOM comps — RentCast is the chosen source
+      await this.prisma.comp.deleteMany({
+        where: { leadId, source: 'attom', analysisId: null },
+      });
+
+      for (const comp of payload.compAnalysis.soldComps) {
+        await this.prisma.comp.create({
+          data: {
+            leadId,
+            address: comp.address,
+            soldPrice: comp.lastSalePrice,
+            soldDate: new Date(comp.lastSaleDate),
+            distance: comp.distanceMiles,
+            bedrooms: comp.bedrooms,
+            bathrooms: comp.bathrooms,
+            sqft: comp.squareFootage,
+            lotSize: comp.lotSize,
+            yearBuilt: comp.yearBuilt,
+            propertyType: comp.propertyType,
+            latitude: comp.latitude,
+            longitude: comp.longitude,
+            hasPool: comp.hasPool,
+            hasGarage: comp.hasGarage,
+            similarityScore: Math.round(comp.totalScore),
+            selected: true,
+            source: 'rentcast',
+            notes: `Scores: sqft=${comp.sqftScore} bed=${comp.bedroomScore} bath=${comp.bathroomScore} prox=${comp.proximityScore} rec=${comp.recencyScore}`,
+          },
+        });
+      }
+
+      const leadUpdate: Record<string, any> = {
+        arv: payload.deal.arv,
+        arvConfidence: payload.compAnalysis.arvConfidence,
+        lastCompsDate: new Date(),
+      };
+      if (payload.subject.latitude) leadUpdate.latitude = payload.subject.latitude;
+      if (payload.subject.longitude) leadUpdate.longitude = payload.subject.longitude;
+
+      await this.prisma.lead.update({ where: { id: leadId }, data: leadUpdate });
+
+      this.logger.log(
+        `RentCast pipeline complete: ARV=$${payload.deal.arv.toLocaleString()}, ` +
+        `${payload.compAnalysis.compCount} comps, method=${payload.compAnalysis.methodology}`,
+      );
+
+      return {
+        arv: payload.deal.arv,
+        arvLow: Math.round(payload.deal.arv * 0.95),
+        arvHigh: Math.round(payload.deal.arv * 1.05),
+        confidence: payload.compAnalysis.arvConfidence,
+        compsCount: payload.compAnalysis.compCount,
+        source: `rentcast (${payload.compAnalysis.methodology})`,
+        attom: null,
+      };
+    } catch (err) {
+      this.logger.error(`RentCast analyzeProperty failed for lead ${leadId}: ${err.message}`);
+      return { arv: 0, confidence: 0, compsCount: 0, source: 'rentcast (error)', attom: null };
+    }
+  }
+
+  /**
+   * Attempt an ATTOM /sale/detail comp search. Returns null on failure or missing lat/lon.
+   */
+  private async tryAttomComps(
+    leadId: string,
+    address: { street: string; city: string; state: string; zip: string },
+    attomEnrichment: AttomEnrichmentResult | null,
+    options?: { forceRefresh?: boolean },
+  ): Promise<{ arv?: number; arvLow?: number; arvHigh?: number; confidence: number; compsCount: number; source: string } | null> {
+    const lead = await this.prisma.lead.findUnique({
+      where: { id: leadId },
+      select: { latitude: true, longitude: true, propertyType: true, sqft: true, bedrooms: true },
+    });
+
+    const latitude  = lead?.latitude  ?? attomEnrichment?.latitude;
+    const longitude = lead?.longitude ?? attomEnrichment?.longitude;
+
+    if (!latitude || !longitude) {
+      this.logger.warn(`No lat/lon available for lead ${leadId} (even after ATTOM enrichment)`);
+      return null;
+    }
+
+    try {
+      this.logger.log(`Fetching comps via ATTOM /sale/detail for lead ${leadId} (${latitude}, ${longitude})`);
+      return await this.attomService.fetchCompsFromAttom(
+        leadId,
+        address,
+        { latitude, longitude },
+        {
+          forceRefresh: options?.forceRefresh,
+          propertyType: lead?.propertyType || undefined,
+          sqft: lead?.sqft || undefined,
+          bedrooms: lead?.bedrooms || undefined,
+        },
+      );
+    } catch (err) {
+      this.logger.warn(`ATTOM comp fetch failed for lead ${leadId}: ${err.message}`);
+      return null;
+    }
   }
 
   /**
