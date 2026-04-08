@@ -1,0 +1,5 @@
+-- AlterTable
+ALTER TABLE "comp_analyses" ADD COLUMN     "aiArvEstimate" DOUBLE PRECISION,
+ADD COLUMN     "aiArvHigh" DOUBLE PRECISION,
+ADD COLUMN     "aiArvLow" DOUBLE PRECISION,
+ADD COLUMN     "aiConfidence" DOUBLE PRECISION;

@@ -36,7 +36,8 @@ export interface DealPackage {
     negotiationRangeLow: number | null;
     negotiationRangeHigh: number | null;
     aiSummary: string | null;
-    triangulatedArv: number | null;
+    comparableSalesValue: number | null;
+    aiArvEstimate: number | null;
     riskAdjustedArv: number | null;
     pricePerSqft: number | null;
     // Rich data
@@ -171,7 +172,8 @@ export class DealPackageService {
             negotiationRangeLow: analysis.negotiationRangeLow,
             negotiationRangeHigh: analysis.negotiationRangeHigh,
             aiSummary: analysis.aiSummary,
-            triangulatedArv: analysis.triangulatedArv,
+            comparableSalesValue: analysis.comparableSalesValue,
+            aiArvEstimate: (analysis as any).aiArvEstimate ?? null,
             riskAdjustedArv: analysis.riskAdjustedArv,
             pricePerSqft: analysis.pricePerSqft,
             dealIntelligence: safeParse(analysis.dealIntelligence),

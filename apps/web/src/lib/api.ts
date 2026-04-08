@@ -160,8 +160,8 @@ export const compAnalysisAPI = {
     api.post(`/leads/${leadId}/comp-analysis/${analysisId}/comps/select-all`, { selected, source }),
   calculateAdjustments: (leadId: string, analysisId: string, config?: any) =>
     api.post(`/leads/${leadId}/comp-analysis/${analysisId}/calculate-adjustments`, { config }),
-  calculateArv: (leadId: string, analysisId: string, method?: string, preserveAiArv?: boolean) =>
-    api.post(`/leads/${leadId}/comp-analysis/${analysisId}/calculate-arv`, { method, preserveAiArv }),
+  calculateArv: (leadId: string, analysisId: string, method?: string) =>
+    api.post(`/leads/${leadId}/comp-analysis/${analysisId}/calculate-arv`, { method }),
   aiAdjustComps: (leadId: string, analysisId: string) =>
     api.post(`/leads/${leadId}/comp-analysis/${analysisId}/ai-adjust-comps`),
   aiSummary: (leadId: string, analysisId: string) =>

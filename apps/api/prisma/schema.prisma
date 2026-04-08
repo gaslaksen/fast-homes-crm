@@ -276,6 +276,11 @@ model CompAnalysis {
   pricePerSqft      Float?
   medianPricePerSqft Float?
   comparableSalesValue Float?
+  // AI-adjusted ARV (input #2 to the blended ARV — input #1 is comparableSalesValue)
+  aiArvEstimate     Float?
+  aiArvLow          Float?
+  aiArvHigh         Float?
+  aiConfidence      Float?   // 0-100, matches confidenceScore scale
   adjustmentsEnabled Boolean @default(true)
   adjustmentConfig  Json?
   repairCosts       Float?
