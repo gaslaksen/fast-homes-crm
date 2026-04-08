@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import * as os from 'os';
 
 // ---------------------------------------------------------------------------
 // Safety Guard — blocks SMS sends when TEST_MODE is enabled
@@ -175,6 +176,24 @@ export class SimulatedSmsProvider implements SmsProvider {
 export function createSmsProvider(config: ConfigService): SmsProvider {
   const logger = new Logger('SmsProviderFactory');
 
+  const logBootIdentity = (providerName: string) => {
+    const dbHost = (() => {
+      try {
+        return new URL(config.get<string>('DATABASE_URL') || '').host;
+      } catch {
+        return 'unknown';
+      }
+    })();
+    logger.log(
+      `🪪 SMS provider boot: provider=${providerName} ` +
+        `host=${os.hostname()} pid=${process.pid} ` +
+        `nodeEnv=${config.get<string>('NODE_ENV') ?? 'unset'} ` +
+        `railwayService=${process.env.RAILWAY_SERVICE_NAME ?? 'n/a'} ` +
+        `railwayEnv=${process.env.RAILWAY_ENVIRONMENT ?? 'n/a'} ` +
+        `dbHost=${dbHost}`,
+    );
+  };
+
   const smrtphoneKey = config.get<string>('SMRTPHONE_API_KEY');
   const smrtphoneNumber = config.get<string>('SMRTPHONE_PHONE_NUMBER') || config.get<string>('TWILIO_PHONE_NUMBER') || '';
 
@@ -184,6 +203,7 @@ export function createSmsProvider(config: ConfigService): SmsProvider {
     if (testMode.toLowerCase() === 'true') {
       logger.warn('🔒 SMRTPHONE_TEST_MODE=true — SMS sends restricted to SMRTPHONE_ALLOWED_NUMBERS');
     }
+    logBootIdentity('SmrtphoneSmsProvider');
     return new SmrtphoneSmsProvider(smrtphoneKey, smrtphoneNumber, config);
   }
 
@@ -192,29 +212,33 @@ export function createSmsProvider(config: ConfigService): SmsProvider {
 
   if (twilioSid && twilioToken) {
     logger.log('📞 Using Twilio SMS provider');
+    logBootIdentity('TwilioSmsProvider');
     return new TwilioSmsProvider(twilioSid, twilioToken);
   }
 
-  // No real provider configured. In production this is a misconfiguration:
-  // campaign and drip messages would silently go to the void (the user has
-  // already hit this once — see CampaignExecutionService logs from 04/07/2026
-  // showing SimulatedSmsProvider sending a real campaign step). Crash early
-  // so the deploy fails visibly instead of pretending to send.
-  const nodeEnv = config.get<string>('NODE_ENV') || process.env.NODE_ENV;
+  // No real provider configured. This is the misconfig that caused the
+  // 04/07/2026 incident: an orphan Railway service (`fast-homes-crm`) deployed
+  // from the same repo with only DATABASE_URL set fell through to the
+  // simulator, then raced the real `@fast-homes/api` service for campaign
+  // enrollments and won most of them — so real SMS was never delivered.
+  // The earlier `NODE_ENV === 'production'` gate didn't catch it because the
+  // orphan had NODE_ENV unset. Now we always crash unless ALLOW_SIMULATED_SMS
+  // is explicitly set, regardless of NODE_ENV.
   const allowSimulated = (config.get<string>('ALLOW_SIMULATED_SMS') || '').toLowerCase() === 'true';
 
-  if (nodeEnv === 'production' && !allowSimulated) {
+  if (!allowSimulated) {
     const msg =
-      '❌ No SMS provider configured (SMRTPHONE_API_KEY / TWILIO_* env vars missing) ' +
-      'and NODE_ENV=production. Refusing to start — set SMRTPHONE_API_KEY, or set ' +
-      'ALLOW_SIMULATED_SMS=true to explicitly opt in to the simulator.';
+      '❌ No SMS provider configured (SMRTPHONE_API_KEY / TWILIO_* env vars missing). ' +
+      'Refusing to start. Set SMRTPHONE_API_KEY, or set ALLOW_SIMULATED_SMS=true ' +
+      'to explicitly opt in to the simulator (dev only).';
     logger.error(msg);
     throw new Error(msg);
   }
 
   logger.warn(
-    '⚠️  ⚠️  ⚠️  No SMS provider configured — falling back to SIMULATED. ' +
-      'Real SMS will NOT be delivered. Set SMRTPHONE_API_KEY in your env to fix this.',
+    '⚠️  ALLOW_SIMULATED_SMS=true — using SimulatedSmsProvider. ' +
+      'Real SMS will NOT be delivered.',
   );
+  logBootIdentity('SimulatedSmsProvider');
   return new SimulatedSmsProvider();
 }
