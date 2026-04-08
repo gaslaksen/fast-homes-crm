@@ -92,9 +92,9 @@ export class CompAnalysisController {
   @Post(':analysisId/calculate-arv')
   async calculateArv(
     @Param('analysisId') analysisId: string,
-    @Body() body: { method?: string; preserveAiArv?: boolean },
+    @Body() body: { method?: string },
   ) {
-    return this.compAnalysisService.calculateArv(analysisId, body.method, body.preserveAiArv);
+    return this.compAnalysisService.calculateArv(analysisId, body.method);
   }
 
   @Post(':analysisId/ai-summary')
@@ -161,23 +161,6 @@ export class CompAnalysisController {
   @Post(':analysisId/cost-approach')
   async calculateCostApproach(@Param('analysisId') analysisId: string) {
     return this.compAnalysisService.calculateCostApproach(analysisId);
-  }
-
-  @Post(':analysisId/income-approach')
-  async calculateIncomeApproach(
-    @Param('analysisId') analysisId: string,
-    @Body() body: { marketRent?: number; grmOverride?: number },
-  ) {
-    return this.compAnalysisService.calculateIncomeApproach(
-      analysisId,
-      body.marketRent,
-      body.grmOverride,
-    );
-  }
-
-  @Post(':analysisId/triangulate')
-  async triangulateArv(@Param('analysisId') analysisId: string) {
-    return this.compAnalysisService.triangulateArv(analysisId);
   }
 
   @Post(':analysisId/deal-intelligence')

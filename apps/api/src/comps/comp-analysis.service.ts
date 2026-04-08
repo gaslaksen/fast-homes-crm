@@ -586,7 +586,7 @@ export class CompAnalysisService {
   }
 
 
-  async calculateArv(analysisId: string, method: string = 'weighted', preserveAiArv: boolean = false) {
+  async calculateArv(analysisId: string, method: string = 'weighted') {
     const analysis = await this.prisma.compAnalysis.findUnique({
       where: { id: analysisId },
       include: {
@@ -704,16 +704,16 @@ export class CompAnalysisService {
       avgDist <= 3.0 && avgMonthsAgo <= 12 ? 'Medium' :
       'Low';
 
-    // When called after AI adjustment, preserve the AI's arvEstimate/arvLow/arvHigh
-    // (the weighted-average algo produces different values from what the AI recommended)
-    const arvUpdateFields = preserveAiArv
-      ? {}
-      : { arvEstimate: arv, arvLow, arvHigh, arvMethod: method };
-
+    // Persist the comp-weighted number as comparableSalesValue (the stable comps-side input to the blend).
+    // Also write it to arvEstimate/arvLow/arvHigh as the default final value — this will be overwritten
+    // with a blended value below if an AI-adjusted ARV already exists on this analysis.
     await this.prisma.compAnalysis.update({
       where: { id: analysisId },
       data: {
-        ...arvUpdateFields,
+        arvEstimate: arv,
+        arvLow,
+        arvHigh,
+        arvMethod: method,
         pricePerSqft,
         medianPricePerSqft: medianPpsf,
         comparableSalesValue,
@@ -724,36 +724,37 @@ export class CompAnalysisService {
 
     this.logger.log(`ARV calculated: $${arv.toLocaleString()} (${method}) range $${arvLow.toLocaleString()}–$${arvHigh.toLocaleString()} confidence=${confidence}`);
 
-    // Auto-calculate cost approach (uses sqft + yearBuilt + taxAssessed — always available)
+    // If the AI has already run on this analysis, re-blend the comps number with the stored AI number
+    // so the final arvEstimate reflects both signals.
+    const existing = await this.prisma.compAnalysis.findUnique({
+      where: { id: analysisId },
+      select: { aiArvEstimate: true, aiArvLow: true, aiArvHigh: true, aiConfidence: true },
+    });
+    if (existing?.aiArvEstimate != null && existing?.aiConfidence != null) {
+      const blended = this.blendArv(
+        arv, confidence, arvLow, arvHigh,
+        existing.aiArvEstimate, existing.aiConfidence, existing.aiArvLow ?? existing.aiArvEstimate, existing.aiArvHigh ?? existing.aiArvEstimate,
+      );
+      await this.prisma.compAnalysis.update({
+        where: { id: analysisId },
+        data: {
+          arvEstimate: blended.arv,
+          arvLow: blended.low,
+          arvHigh: blended.high,
+          confidenceScore: Math.round(blended.confidence),
+        },
+      });
+      this.logger.log(
+        `Blended ARV: $${blended.arv.toLocaleString()} from comps=$${arv.toLocaleString()} (conf=${confidence}) + ai=$${existing.aiArvEstimate.toLocaleString()} (conf=${existing.aiConfidence})`,
+      );
+    }
+
+    // Auto-calculate cost approach as a display-only sanity reference (not used in ARV math)
     await this.calculateCostApproach(analysisId).catch((err) => {
       this.logger.warn(`Cost approach auto-calc failed: ${err.message}`);
     });
 
-    // Auto-estimate income approach using sqft-based market rent when no override exists
-    const currentAnalysis = await this.prisma.compAnalysis.findUnique({
-      where: { id: analysisId },
-      select: { marketRent: true, lead: { select: { sqft: true, sqftOverride: true, propertyState: true } } },
-    });
-    if (!currentAnalysis?.marketRent) {
-      // Estimate market rent: $1.00–$1.25/sqft/month is a reasonable national baseline
-      // Use sqftOverride if set, otherwise ATTOM sqft
-      const rentSqft = (currentAnalysis?.lead as any)?.sqftOverride || (currentAnalysis?.lead as any)?.sqft;
-      if (rentSqft) {
-        const estimatedRent = Math.round(rentSqft * 1.1); // $1.10/sqft/month midpoint
-        await this.calculateIncomeApproach(analysisId, estimatedRent, 10, true).catch((err) => {
-          this.logger.warn(`Income approach auto-calc failed: ${err.message}`);
-        });
-        this.logger.log(`Income approach auto-estimated: $${estimatedRent}/mo (${rentSqft} sqft × $1.10/sqft) — flagged as estimate`);
-      }
-    }
-
-    // Auto-triangulate when ARV is recalculated
-    const triangulation = await this.triangulateArv(analysisId).catch((err) => {
-      this.logger.warn(`Triangulation after ARV calc failed: ${err.message}`);
-      return null;
-    });
-
-    // Auto-assess risk flags after triangulation
+    // Auto-assess risk flags after ARV is set
     try {
       await this.assessRiskFlags(analysisId);
     } catch (e) {
@@ -768,7 +769,44 @@ export class CompAnalysisService {
       this.logger.warn(`ARV auto-save to lead failed (non-fatal): ${(e as Error).message}`);
     }
 
-    return { arv, arvLow, arvHigh, pricePerSqft, medianPricePerSqft: medianPpsf, comparableSalesValue, confidence, method, triangulation };
+    return { arv, arvLow, arvHigh, pricePerSqft, medianPricePerSqft: medianPpsf, comparableSalesValue, confidence, method };
+  }
+
+  /**
+   * Confidence-weighted blend of two ARV estimates. The final ARV is a weighted average
+   * where each estimate contributes in proportion to its confidence. Returns the higher
+   * of the two input confidences so the blend is at least as confident as its strongest input.
+   * Falls back to a 50/50 blend if both confidences are zero.
+   */
+  private blendArv(
+    compArv: number,
+    compConf: number,
+    compLow: number,
+    compHigh: number,
+    aiArv: number,
+    aiConf: number,
+    aiLow: number,
+    aiHigh: number,
+  ): { arv: number; low: number; high: number; confidence: number } {
+    const totalConf = compConf + aiConf;
+    let arv: number;
+    let low: number;
+    let high: number;
+    if (totalConf <= 0) {
+      arv = (compArv + aiArv) / 2;
+      low = (compLow + aiLow) / 2;
+      high = (compHigh + aiHigh) / 2;
+    } else {
+      arv = (compArv * compConf + aiArv * aiConf) / totalConf;
+      low = (compLow * compConf + aiLow * aiConf) / totalConf;
+      high = (compHigh * compConf + aiHigh * aiConf) / totalConf;
+    }
+    return {
+      arv: Math.round(arv),
+      low: Math.round(low),
+      high: Math.round(high),
+      confidence: Math.max(compConf, aiConf),
+    };
   }
 
   private calculateConfidence(comps: any[], lead: any, arvLow?: number, arvHigh?: number, arv?: number): number {
@@ -1009,15 +1047,21 @@ Respond ONLY with valid JSON:
       updatedComps.push({ ...updated, quality: aiComp.quality, weight: aiComp.weight });
     }
 
-    // Save AI ARV recommendation to analysis
+    // Save AI ARV recommendation to the dedicated ai* columns (separate from comparableSalesValue)
     const rec = parsed.arvRecommendation;
+    // Normalize AI confidence to 0..100 scale (API returns 0..1 like 0.78)
+    const aiConfidence = rec.confidence > 1 ? Math.round(rec.confidence) : Math.round(rec.confidence * 100);
+    const aiArv = Math.round(rec.point);
+    const aiLow = Math.round(rec.low);
+    const aiHigh = Math.round(rec.high);
+
     await this.prisma.compAnalysis.update({
       where: { id: analysisId },
       data: {
-        arvEstimate: Math.round(rec.point),
-        arvLow: Math.round(rec.low),
-        arvHigh: Math.round(rec.high),
-        confidenceScore: Math.round(rec.confidence),
+        aiArvEstimate: aiArv,
+        aiArvLow: aiLow,
+        aiArvHigh: aiHigh,
+        aiConfidence,
         adjustmentsEnabled: true,
         aiAssessment: (analysis as any).aiAssessment
           ? (analysis as any).aiAssessment
@@ -1025,7 +1069,64 @@ Respond ONLY with valid JSON:
       },
     });
 
-    this.logger.log(`AI adjustment complete: ARV=$${rec.point.toLocaleString()} range $${rec.low.toLocaleString()}–$${rec.high.toLocaleString()} confidence=${rec.confidence}`);
+    this.logger.log(`AI adjustment complete: ARV=$${aiArv.toLocaleString()} range $${aiLow.toLocaleString()}–$${aiHigh.toLocaleString()} confidence=${aiConfidence}`);
+
+    // Blend AI ARV with the stored comparable-sales value to produce the final arvEstimate.
+    // Read the current comps-side numbers (calculateArv writes these before AI runs).
+    const current = await this.prisma.compAnalysis.findUnique({
+      where: { id: analysisId },
+      select: {
+        comparableSalesValue: true,
+        confidenceScore: true,
+        arvLow: true,
+        arvHigh: true,
+      },
+    });
+
+    if (current?.comparableSalesValue != null && current.comparableSalesValue > 0) {
+      const compArv = current.comparableSalesValue;
+      const compConf = current.confidenceScore ?? 0;
+      const compLow = current.arvLow ?? compArv;
+      const compHigh = current.arvHigh ?? compArv;
+
+      const blended = this.blendArv(
+        compArv, compConf, compLow, compHigh,
+        aiArv, aiConfidence, aiLow, aiHigh,
+      );
+
+      await this.prisma.compAnalysis.update({
+        where: { id: analysisId },
+        data: {
+          arvEstimate: blended.arv,
+          arvLow: blended.low,
+          arvHigh: blended.high,
+          confidenceScore: Math.round(blended.confidence),
+        },
+      });
+
+      this.logger.log(
+        `Blended ARV: $${blended.arv.toLocaleString()} from comps=$${compArv.toLocaleString()} (conf=${compConf}) + ai=$${aiArv.toLocaleString()} (conf=${aiConfidence})`,
+      );
+    } else {
+      // No comps-side value available — use AI ARV as the final estimate.
+      await this.prisma.compAnalysis.update({
+        where: { id: analysisId },
+        data: {
+          arvEstimate: aiArv,
+          arvLow: aiLow,
+          arvHigh: aiHigh,
+          confidenceScore: aiConfidence,
+        },
+      });
+    }
+
+    // Auto-save blended ARV to lead so Overview tab stays in sync
+    try {
+      await this.saveToLead(analysisId);
+    } catch (e) {
+      this.logger.warn(`ARV auto-save to lead failed (non-fatal): ${(e as Error).message}`);
+    }
+
     return { comps: updatedComps, arvRecommendation: rec };
   }
 
@@ -1560,9 +1661,8 @@ Use Midwest/rural Ohio pricing. Be specific about what you see — don't general
     });
     if (!analysis) throw new Error('Analysis not found');
 
-    // Use arvEstimate (AI weighted comp price) as the primary ARV;
-    // fall back to triangulated
-    const finalArv = analysis.arvEstimate ?? analysis.triangulatedArv;
+    // arvEstimate is the final blended ARV (comps + AI, or just comps when AI hasn't run)
+    const finalArv = analysis.arvEstimate;
     await this.prisma.lead.update({
       where: { id: analysis.leadId },
       data: {
@@ -1673,218 +1773,6 @@ Use Midwest/rural Ohio pricing. Be specific about what you see — don't general
   /**
    * Income Approach: Market rent × 12 × GRM
    */
-  async calculateIncomeApproach(
-    analysisId: string,
-    marketRentOverride?: number,
-    grmOverride?: number,
-    isEstimated = false,
-  ) {
-    const analysis = await this.prisma.compAnalysis.findUnique({
-      where: { id: analysisId },
-      include: {
-        lead: {
-          select: {
-            propertyCity: true, propertyState: true, propertyAddress: true,
-            propertyZip: true,
-          },
-        },
-      },
-    });
-    if (!analysis) throw new Error('Analysis not found');
-
-    const marketRent = marketRentOverride ?? null;
-    if (!marketRent) {
-      this.logger.warn(
-        `Income approach skipped for analysis ${analysisId}: no market rent available. ` +
-        `Provide marketRent override.`,
-      );
-      return {
-        incomeApproachValue: null,
-        note: 'No market rent data available. Provide a marketRent override to use income approach.',
-      };
-    }
-
-    // GRM: default 10, allow override
-    const grm = grmOverride ?? 10;
-
-    const incomeApproachValue = Math.round(marketRent * 12 * grm);
-
-    await this.prisma.compAnalysis.update({
-      where: { id: analysisId },
-      data: {
-        incomeApproachValue,
-        marketRent,
-        grossRentMultiplier: grm,
-        marketRentEstimated: isEstimated,
-      },
-    });
-
-    this.logger.log(
-      `Income approach for ${analysisId}: $${incomeApproachValue.toLocaleString()} ` +
-      `(rent=$${marketRent.toLocaleString()}/mo × 12 × GRM ${grm}${isEstimated ? ' [estimated]' : ''})`,
-    );
-
-    return {
-      incomeApproachValue,
-      marketRent,
-      grossRentMultiplier: grm,
-      annualRent: marketRent * 12,
-      isEstimated,
-    };
-  }
-
-  /**
-   * Triangulated ARV: Weighted average of all available valuation methods
-   * with divergence detection, neighborhood ceiling, and confidence tier.
-   */
-  async triangulateArv(analysisId: string) {
-    const analysis = await this.prisma.compAnalysis.findUnique({
-      where: { id: analysisId },
-      include: {
-        comps: { where: { selected: true }, orderBy: { soldPrice: 'desc' } },
-        lead: {
-          select: {
-            avmExcellentHigh: true, avmExcellentLow: true,
-          },
-        },
-      },
-    });
-    if (!analysis) throw new Error('Analysis not found');
-
-    const lead = analysis.lead as any;
-
-    // Collect available method values — three core methods only (ATTOM excluded from triangulation)
-    const methods: Record<string, number> = {};
-    if (analysis.comparableSalesValue) methods.comps = analysis.comparableSalesValue;
-    else if (analysis.arvEstimate) methods.comps = analysis.arvEstimate;
-    if (analysis.costApproachValue) methods.cost = analysis.costApproachValue;
-    if (analysis.incomeApproachValue) methods.income = analysis.incomeApproachValue;
-
-    const methodKeys = Object.keys(methods);
-    if (methodKeys.length === 0) {
-      this.logger.warn(`Triangulation skipped for ${analysisId}: no method values available`);
-      return null;
-    }
-
-    // Base weights: comps 50%, cost 25%, income 15% — renormalized to available methods
-    const baseWeights: Record<string, number> = {
-      comps: 0.50,
-      cost: 0.25,
-      income: 0.15,
-    };
-
-    const totalBaseWeight = methodKeys.reduce((s, k) => s + (baseWeights[k] || 0), 0);
-    const weights: Record<string, number> = {};
-    for (const k of methodKeys) {
-      weights[k] = (baseWeights[k] || 0) / totalBaseWeight;
-    }
-
-    // Weighted average
-    let triangulatedArv = 0;
-    for (const k of methodKeys) {
-      triangulatedArv += methods[k] * weights[k];
-    }
-    triangulatedArv = Math.round(triangulatedArv);
-
-    // Divergence check
-    const values = Object.values(methods);
-    const maxVal = Math.max(...values);
-    const minVal = Math.min(...values);
-    const methodDivergence = triangulatedArv > 0
-      ? Math.round(((maxVal - minVal) / triangulatedArv) * 10000) / 100
-      : 0;
-
-    if (methodDivergence > 20) {
-      this.logger.warn(
-        `HIGH DIVERGENCE (${methodDivergence}%) for ${analysisId}: ` +
-        `${JSON.stringify(methods)} → triangulated $${triangulatedArv.toLocaleString()}`,
-      );
-    } else if (methodDivergence > 10) {
-      this.logger.log(
-        `Moderate divergence (${methodDivergence}%) for ${analysisId}: ${JSON.stringify(methods)}`,
-      );
-    }
-
-    // Neighborhood ceiling: top 3 comp sold prices
-    let neighborhoodCeiling: number | null = null;
-    let neighborhoodCeilingBreached = false;
-    const selectedComps = analysis.comps;
-    if (selectedComps.length > 0) {
-      const topPrices = selectedComps
-        .map((c) => c.soldPrice as number)
-        .filter(Boolean)
-        .sort((a, b) => b - a)
-        .slice(0, 3);
-      if (topPrices.length > 0) {
-        neighborhoodCeiling = Math.round(
-          topPrices.reduce((s, p) => s + p, 0) / topPrices.length,
-        );
-        neighborhoodCeilingBreached = triangulatedArv > neighborhoodCeiling * 1.05;
-      }
-    }
-
-    // Confidence tier from existing confidenceScore
-    const score = analysis.confidenceScore;
-    let confidenceTier: string;
-    if (selectedComps.length === 0) {
-      confidenceTier = 'Low';
-    } else if (score >= 70) {
-      confidenceTier = 'High';
-    } else if (score >= 40) {
-      confidenceTier = 'Medium';
-    } else {
-      confidenceTier = 'Low';
-    }
-
-    // Range spread based on confidence
-    const spreadPct = confidenceTier === 'High' ? 0.05
-      : confidenceTier === 'Medium' ? 0.10
-      : 0.15;
-    const triangulatedArvLow = Math.round(triangulatedArv * (1 - spreadPct));
-    const triangulatedArvHigh = Math.round(triangulatedArv * (1 + spreadPct));
-
-    // Build method breakdown for storage
-    const methodsUsed = methodKeys.map((k) => ({
-      method: k,
-      value: methods[k],
-      weight: Math.round(weights[k] * 1000) / 1000,
-    }));
-
-    await this.prisma.compAnalysis.update({
-      where: { id: analysisId },
-      data: {
-        triangulatedArv,
-        triangulatedArvLow,
-        triangulatedArvHigh,
-        methodsUsed,
-        methodDivergence,
-        neighborhoodCeiling,
-        neighborhoodCeilingBreached,
-        confidenceTier,
-      },
-    });
-
-    this.logger.log(
-      `Triangulated ARV for ${analysisId}: $${triangulatedArv.toLocaleString()} ` +
-      `[${triangulatedArvLow.toLocaleString()}–${triangulatedArvHigh.toLocaleString()}] ` +
-      `methods=${methodKeys.join('+')} divergence=${methodDivergence}% ` +
-      `ceiling=${neighborhoodCeiling ? '$' + neighborhoodCeiling.toLocaleString() : 'N/A'}` +
-      `${neighborhoodCeilingBreached ? ' ⚠ BREACHED' : ''} tier=${confidenceTier}`,
-    );
-
-    return {
-      triangulatedArv,
-      triangulatedArvLow,
-      triangulatedArvHigh,
-      methods: methodsUsed,
-      methodDivergence,
-      neighborhoodCeiling,
-      neighborhoodCeilingBreached,
-      confidenceTier,
-      confidenceScore: score,
-    };
-  }
-
   // ══════════════════════════════════════════════════════════════════════════════
   // PHASE 2: RISK FLAGS, CONDITION TIERS, SELLER MOTIVATION
   // ══════════════════════════════════════════════════════════════════════════════
@@ -1990,7 +1878,7 @@ Use Midwest/rural Ohio pricing. Be specific about what you see — don't general
     }
 
     // 3e. Risk-Adjusted ARV
-    const base = analysis.triangulatedArv ?? analysis.arvEstimate ?? 0;
+    const base = analysis.arvEstimate ?? 0;
     const afterFunctional = base - functionalObsolescenceAdj;
     const afterBuyerPool = afterFunctional * (1 - buyerPoolReduction);
     const afterLand = afterBuyerPool * (1 - landUtilityReduction);
@@ -2215,7 +2103,8 @@ Use Midwest/rural Ohio pricing. Be specific about what you see — don't general
       arvEstimate: analysis.arvEstimate,
       arvLow: analysis.arvLow,
       arvHigh: analysis.arvHigh,
-      triangulatedArv: (analysis as any).triangulatedArv,
+      comparableSalesValue: (analysis as any).comparableSalesValue,
+      aiArvEstimate: (analysis as any).aiArvEstimate,
       riskAdjustedArv: (analysis as any).riskAdjustedArv,
       confidenceScore: analysis.confidenceScore,
       confidenceTier: (analysis as any).confidenceTier,
@@ -2251,9 +2140,10 @@ ${saleHistory && saleHistory.length > 1 ? `- Prior Sales:\n${saleHistory.slice(1
 ${lastPurchasePrice && lead.askingPrice ? `- Seller's Basis vs Asking: Paid $${lastPurchasePrice.toLocaleString()}, asking $${lead.askingPrice.toLocaleString()} (${lead.askingPrice >= lastPurchasePrice ? '+' : ''}${Math.round((lead.askingPrice - lastPurchasePrice) / lastPurchasePrice * 100)}% from purchase)` : ''}
 
 PRIOR ANALYSIS RESULTS:
-- System ARV: ${analysisContext.arvEstimate ? '$' + Math.round(analysisContext.arvEstimate).toLocaleString() : 'Not calculated'}
+- Blended ARV (final): ${analysisContext.arvEstimate ? '$' + Math.round(analysisContext.arvEstimate).toLocaleString() : 'Not calculated'}
 - ARV Range: ${analysisContext.arvLow ? '$' + Math.round(analysisContext.arvLow).toLocaleString() : '?'} – ${analysisContext.arvHigh ? '$' + Math.round(analysisContext.arvHigh).toLocaleString() : '?'}
-- Triangulated ARV: ${analysisContext.triangulatedArv ? '$' + Math.round(analysisContext.triangulatedArv).toLocaleString() : 'N/A'}
+- Comparable Sales Value: ${analysisContext.comparableSalesValue ? '$' + Math.round(analysisContext.comparableSalesValue).toLocaleString() : 'N/A'}
+- Prior AI ARV: ${analysisContext.aiArvEstimate ? '$' + Math.round(analysisContext.aiArvEstimate).toLocaleString() : 'N/A'}
 - Risk-Adjusted ARV: ${analysisContext.riskAdjustedArv ? '$' + Math.round(analysisContext.riskAdjustedArv).toLocaleString() : 'N/A'}
 - Confidence: ${analysisContext.confidenceScore}/100 (${analysisContext.confidenceTier || 'Unknown'})
 - Risk Flags: ${analysisContext.riskFlags?.length ? (analysisContext.riskFlags as string[]).join(', ') : 'None'}
