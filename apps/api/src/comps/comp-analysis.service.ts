@@ -96,10 +96,22 @@ export class CompAnalysisService {
     });
 
     // Import specific selected comps or all existing comps
+    let importedCount = 0;
     if (params.selectedCompIds && params.selectedCompIds.length > 0) {
-      await this.importSelectedComps(analysis.id, leadId, params.selectedCompIds);
+      importedCount = await this.importSelectedComps(analysis.id, leadId, params.selectedCompIds);
     } else if (params.importExistingComps !== false) {
-      await this.importExistingComps(analysis.id, leadId, params.sourceFilter);
+      importedCount = await this.importExistingComps(analysis.id, leadId, params.sourceFilter);
+    }
+
+    // Run calculateArv so comparableSalesValue / pricePerSqft / arvEstimate are populated.
+    // Without this, a new analysis has null comps-side numbers and any downstream AI blend
+    // falls back to AI-only, collapsing the Valuation Breakdown to a single redundant row.
+    if (importedCount > 0) {
+      try {
+        await this.calculateArv(analysis.id, 'weighted');
+      } catch (err) {
+        this.logger.warn(`calculateArv on new analysis ${analysis.id} failed (non-fatal): ${(err as Error).message}`);
+      }
     }
 
     return analysis;

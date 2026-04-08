@@ -1344,10 +1344,18 @@ export default function CompsAnalysisPage() {
                   <div className="bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-950 dark:to-emerald-950 border-2 border-green-300 dark:border-green-800 rounded-2xl p-6 mb-5">
                     <div className="flex items-end justify-between flex-wrap gap-4">
                       <div>
-                        <div className="text-xs font-semibold text-green-700 dark:text-green-400 uppercase tracking-wide mb-1">AI Estimated ARV</div>
+                        <div className="text-xs font-semibold text-green-700 dark:text-green-400 uppercase tracking-wide mb-1">
+                          {(analysis as any).aiArvEstimate && analysis.comparableSalesValue
+                            ? 'Blended ARV'
+                            : (analysis as any).aiArvEstimate
+                              ? 'AI Estimated ARV'
+                              : 'Comparable Sales ARV'}
+                        </div>
                         <div className="text-5xl font-bold text-green-700 dark:text-green-400">${analysis.arvEstimate.toLocaleString()}</div>
                         <div className="text-sm text-green-600 dark:text-green-400 mt-2">
-                          Weighted average of {selectedComps.length} AI-adjusted comp{selectedComps.length !== 1 ? 's' : ''}
+                          {(analysis as any).aiArvEstimate && analysis.comparableSalesValue
+                            ? `Confidence-weighted blend of comps + AI across ${selectedComps.length} comp${selectedComps.length !== 1 ? 's' : ''}`
+                            : `Weighted average of ${selectedComps.length} ${(analysis as any).aiArvEstimate ? 'AI-adjusted ' : ''}comp${selectedComps.length !== 1 ? 's' : ''}`}
                           {analysis.arvLow && analysis.arvHigh && (
                             <span className="ml-2 text-green-500 dark:text-green-400">
                               Range: ${analysis.arvLow.toLocaleString()} – ${analysis.arvHigh.toLocaleString()}
@@ -1432,13 +1440,14 @@ export default function CompsAnalysisPage() {
                       )}
                     </div>
 
-                    {/* Blended final ARV */}
-                    {analysis.arvEstimate && (
+                    {/* Blended final ARV — only render when BOTH inputs exist (i.e. the blend
+                        actually combined two numbers). When only one input exists, the single
+                        row above already carries the full story and a Total here would just
+                        duplicate it. The hero card above the Breakdown always shows the final. */}
+                    {analysis.arvEstimate && analysis.comparableSalesValue && (analysis as any).aiArvEstimate && (
                       <div className="mt-3 pt-3 border-t border-purple-200 dark:border-purple-800 flex items-center justify-between">
                         <div>
-                          <div className="text-xs text-purple-500 dark:text-purple-400 uppercase tracking-wide mb-0.5">
-                            {(analysis as any).aiArvEstimate ? 'Blended ARV' : 'ARV'}
-                          </div>
+                          <div className="text-xs text-purple-500 dark:text-purple-400 uppercase tracking-wide mb-0.5">Blended ARV</div>
                           <div className="text-xl font-bold text-purple-700 dark:text-purple-400">${Math.round(analysis.arvEstimate).toLocaleString()}</div>
                           {(analysis.arvLow || analysis.arvHigh) && (
                             <div className="text-xs text-purple-500 dark:text-purple-400 mt-0.5">
