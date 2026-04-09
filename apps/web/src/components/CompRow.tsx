@@ -102,7 +102,7 @@ const CompRow = forwardRef<HTMLDivElement, CompRowProps>(function CompRow(
             ${comp.soldPrice >= 1000 ? `${Math.round(comp.soldPrice / 1000)}K` : comp.soldPrice.toLocaleString()}
           </div>
           {pricePerSqft && (
-            <div className="text-[10px] text-gray-500 dark:text-gray-400">${pricePerSqft}/sqft</div>
+            <div className="text-[10px] text-gray-500 dark:text-gray-400">${pricePerSqft}/sq ft</div>
           )}
         </div>
 
@@ -132,7 +132,7 @@ const CompRow = forwardRef<HTMLDivElement, CompRowProps>(function CompRow(
         {/* Details */}
         <div className="hidden md:flex items-center gap-3 text-xs text-gray-600 dark:text-gray-400 shrink-0">
           <span>{comp.bedrooms || '?'}/{comp.bathrooms || '?'}</span>
-          <span>{comp.sqft?.toLocaleString() || '—'}</span>
+          <span>{comp.sqft?.toLocaleString() || '—'} sq/ft</span>
           <span>{comp.distance.toFixed(1)}mi</span>
           <span>{monthsAgo}mo</span>
         </div>
@@ -172,7 +172,7 @@ const CompRow = forwardRef<HTMLDivElement, CompRowProps>(function CompRow(
           {/* Mobile-only details */}
           <div className="md:hidden flex items-center gap-3 text-xs text-gray-600 dark:text-gray-400">
             <span>{comp.bedrooms || '?'}bd / {comp.bathrooms || '?'}ba</span>
-            <span>{comp.sqft?.toLocaleString() || '—'} sqft</span>
+            <span>{comp.sqft?.toLocaleString() || '—'} sq/ft</span>
             <span>{comp.distance.toFixed(1)} mi</span>
             <span>{monthsAgo}mo ago</span>
           </div>
@@ -189,7 +189,7 @@ const CompRow = forwardRef<HTMLDivElement, CompRowProps>(function CompRow(
               ${comp.soldPrice.toLocaleString()}
             </span>
             {pricePerSqft && (
-              <span className="text-xs text-gray-500 dark:text-gray-400">${pricePerSqft}/sqft</span>
+              <span className="text-xs text-gray-500 dark:text-gray-400">${pricePerSqft}/sq ft</span>
             )}
           </div>
 
