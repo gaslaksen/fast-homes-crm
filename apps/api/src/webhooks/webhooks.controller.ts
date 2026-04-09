@@ -56,27 +56,69 @@ export class WebhooksController {
     }
 
     try {
-      // Map PropertyLeads fields to our schema
-      // normalizeLeadAddressAsync handles full address strings and looks up city/state from zip
-      const addr = await normalizeLeadAddressAsync(body);
+      // PropertyLeads sends Title_Case keys (e.g. Property_Address, First_Name)
+      // Normalize to snake_case so the address parser and field lookups work
+      const norm: Record<string, any> = {};
+      for (const [key, val] of Object.entries(body)) {
+        norm[key.toLowerCase()] = val;
+      }
+
+      // Feed normalized keys into address parser
+      const addrPayload = {
+        property_address: norm.property_address,
+        city: norm.city,
+        state: norm.state,
+        zip: norm.zip,
+      };
+      const addr = await normalizeLeadAddressAsync(addrPayload);
       console.log('📍 Parsed address:', addr);
+
+      // Parse asking price — PropertyLeads may send "Not Applicable"
+      const rawAskingPrice = norm.asking_price;
+      const askingPrice = rawAskingPrice && !isNaN(parseFloat(rawAskingPrice))
+        ? parseFloat(rawAskingPrice)
+        : undefined;
+
+      // Build notes from PropertyLeads-specific text fields
+      const noteParts: string[] = [];
+      if (norm.reason_for_selling && norm.reason_for_selling !== 'Not Applicable')
+        noteParts.push(`Reason for selling: ${norm.reason_for_selling}`);
+      if (norm.how_long_owned_property && norm.how_long_owned_property !== 'Not Applicable')
+        noteParts.push(`Owned: ${norm.how_long_owned_property}`);
+      if (norm.anyone_living_in_house && norm.anyone_living_in_house !== 'Not Applicable')
+        noteParts.push(`Occupancy: ${norm.anyone_living_in_house}`);
+      if (norm.repairs_maintenance_needed && norm.repairs_maintenance_needed !== 'Not Applicable')
+        noteParts.push(`Repairs: ${norm.repairs_maintenance_needed}`);
+      if (norm.comments && norm.comments !== 'Not Applicable')
+        noteParts.push(`Comments: ${norm.comments}`);
+      if (norm.feedback && norm.feedback !== 'feedback')
+        noteParts.push(`Feedback: ${norm.feedback}`);
+
       const leadData = {
         source: LeadSource.PROPERTY_LEADS,
         propertyAddress: addr.propertyAddress,
         propertyCity: addr.propertyCity,
         propertyState: addr.propertyState,
         propertyZip: addr.propertyZip,
-        sellerFirstName: body.first_name || body.firstName,
-        sellerLastName: body.last_name || body.lastName,
-        sellerPhone: formatPhoneNumber(body.phone || body.phoneNumber),
-        sellerEmail: body.email,
-        propertyType: body.property_type || body.propertyType,
-        bedrooms: body.bedrooms ? parseInt(body.bedrooms) : undefined,
-        bathrooms: body.bathrooms ? parseFloat(body.bathrooms) : undefined,
-        sqft: body.sqft || body.squareFeet ? parseInt(body.sqft || body.squareFeet) : undefined,
-        timeline: body.timeline_days ? parseInt(body.timeline_days) : undefined,
-        askingPrice: body.asking_price ? parseFloat(body.asking_price) : undefined,
-        sourceMetadata: body,
+        sellerFirstName: norm.first_name || body.firstName,
+        sellerLastName: norm.last_name || body.lastName,
+        sellerPhone: formatPhoneNumber(norm.primary_phone || norm.phone),
+        sellerEmail: norm.email,
+        askingPrice,
+        conditionLevel: norm.repairs_maintenance_needed !== 'Not Applicable'
+          ? norm.repairs_maintenance_needed : undefined,
+        sellerMotivation: norm.reason_for_selling !== 'Not Applicable'
+          ? norm.reason_for_selling : undefined,
+        ownershipStatus: norm.how_long_owned_property !== 'Not Applicable'
+          ? norm.how_long_owned_property : undefined,
+        sourceMetadata: {
+          ...body,
+          _notes: noteParts.join(' | '),
+          _leadId: norm['lead id'],
+          _leadCost: norm.lead_cost,
+          _county: norm.county,
+          _dateCreated: norm['date created'],
+        },
       };
 
       const lead = await this.leadsService.createLead(leadData);
