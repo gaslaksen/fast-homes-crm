@@ -756,11 +756,11 @@ export default function CompsAnalysisPage() {
       {activeSection === 'comps' && (
         <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex flex-col lg:flex-row lg:h-[calc(100vh-12rem)]">
           {/* ── LEFT PANE: Map + Subject Property ── */}
-          <div className="lg:w-[45%] xl:w-[42%] flex flex-col border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
+          <div className="lg:w-[45%] xl:w-[42%] flex flex-col border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 lg:overflow-y-auto rounded-l-lg">
             {/* Map */}
             {(allComps.some(c => c.latitude && c.longitude) || (lead?.latitude && lead?.longitude)) ? (
-              <div className="flex-1 min-h-[250px] h-64 lg:h-auto relative">
-                <div className="absolute inset-0 lg:relative lg:h-full">
+              <div className="h-64 lg:h-[500px] shrink-0 relative">
+                <div className="absolute inset-0">
                   <CompsMap
                     lead={lead!}
                     comps={allComps}
@@ -794,7 +794,7 @@ export default function CompsAnalysisPage() {
                 </div>
               </div>
             ) : (
-              <div className="flex-1 min-h-[250px] flex items-center justify-center bg-gray-100 dark:bg-gray-800 text-gray-400">
+              <div className="h-64 lg:h-[500px] shrink-0 flex items-center justify-center bg-gray-100 dark:bg-gray-800 text-gray-400 rounded-tl-lg">
                 No coordinates available
               </div>
             )}
