@@ -179,7 +179,7 @@ You will be asked to summarize key findings. Be ready to report:
         ...(customerName ? { name: customerName } : {}),
       },
       assistant: {
-        name: 'Alex - Quick Cash Home Buyers Acquisitions',
+        name: 'Alex - Quick Cash Home Buyers',
         server: {
           url: this.config.get<string>('VAPI_WEBHOOK_URL') ||
             'https://api.mydealcore.com/calls/vapi-webhook',
