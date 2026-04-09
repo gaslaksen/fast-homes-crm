@@ -210,30 +210,25 @@ export default function CompsMap({
     }
   }, [hoveredCompId]);
 
+  // ── Invalidate map size when container resizes (e.g. split-pane layout) ────
+  useEffect(() => {
+    if (!mapRef.current) return;
+    const observer = new ResizeObserver(() => {
+      mapInstanceRef.current?.invalidateSize();
+    });
+    observer.observe(mapRef.current);
+    return () => observer.disconnect();
+  }, []);
+
   return (
-    <>
+    <div className="w-full h-full relative">
       <link
         rel="stylesheet"
         href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
         integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
         crossOrigin=""
       />
-      <div ref={mapRef} className="w-full h-96 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-800 z-0" />
-      <div className="mt-3 flex flex-wrap gap-5 text-sm items-center">
-        <div className="flex items-center gap-2">
-          <div className="w-4 h-4 bg-red-600 rounded-full border-2 border-white shadow" />
-          <span className="text-gray-600 dark:text-gray-400">Subject Property</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-4 h-4 bg-blue-600 rounded-full border-2 border-white shadow" />
-          <span className="text-gray-600 dark:text-gray-400">Selected</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-4 h-4 bg-gray-400 dark:bg-gray-500 rounded-full border-2 border-white shadow" />
-          <span className="text-gray-600 dark:text-gray-400">Unselected</span>
-        </div>
-        <span className="text-xs text-gray-400 dark:text-gray-500 italic">Hover to highlight · click marker to select/deselect</span>
-      </div>
-    </>
+      <div ref={mapRef} className="w-full h-full min-h-[250px] rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-800 z-0" />
+    </div>
   );
 }

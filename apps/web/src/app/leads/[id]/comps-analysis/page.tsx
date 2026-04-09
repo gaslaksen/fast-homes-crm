@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
@@ -10,6 +10,9 @@ import LeadTabNav, { COMPS_TABS, DETAIL_TABS } from '@/components/LeadTabNav';
 import AnalysisTab from '@/components/AnalysisTab';
 import PropertyPhoto from '@/components/PropertyPhoto';
 import ShareDealModal from '@/components/ShareDealModal';
+import CompRow from '@/components/CompRow';
+import SubjectPropertyCard from '@/components/SubjectPropertyCard';
+import CompsToolbar from '@/components/CompsToolbar';
 
 const CompsMap = dynamic(() => import('@/components/CompsMap'), { ssr: false, loading: () => <div className="w-full h-64 bg-gray-100 dark:bg-gray-800 rounded-lg animate-pulse" /> });
 
@@ -162,6 +165,8 @@ export default function CompsAnalysisPage() {
   const [sortField, setSortField] = useState<string>('distance');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [hoveredCompId, setHoveredCompId] = useState<string | null>(null);
+  const compListRef = useRef<HTMLDivElement>(null);
+  const compRowRefs = useRef<Record<string, HTMLElement | null>>({});
 
   // Stable comp-id → display number map (must be here, before early returns, to satisfy Rules of Hooks)
   const compIndexMap = useMemo(
@@ -633,6 +638,18 @@ export default function CompsAnalysisPage() {
     }
   };
 
+  // Auto-scroll comp list to hovered comp (triggered from map hover)
+  useEffect(() => {
+    if (!hoveredCompId) return;
+    const row = compRowRefs.current[hoveredCompId];
+    const container = compListRef.current;
+    if (!row || !container) return;
+    const containerRect = container.getBoundingClientRect();
+    const rowRect = row.getBoundingClientRect();
+    if (rowRect.top >= containerRect.top && rowRect.bottom <= containerRect.bottom) return;
+    row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, [hoveredCompId]);
+
   // ─── Render ───────────────────────────────────────────────────────────────
   if (loading) {
     return (
@@ -735,378 +752,128 @@ export default function CompsAnalysisPage() {
       {/* Unified Tab Nav */}
       <LeadTabNav leadId={leadId} activeTab={activeSection} />
 
-      <main className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-
-        {/* ═══════════════ COMPS SECTION ═══════════════ */}
-        {activeSection === 'comps' && (
-          <div className="space-y-6">
+      {/* ═══════════════ COMPS SECTION (split-pane) ═══════════════ */}
+      {activeSection === 'comps' && (
+        <div className="flex flex-col lg:flex-row lg:h-[calc(100vh-12rem)]">
+          {/* ── LEFT PANE: Map + Subject Property ── */}
+          <div className="lg:w-[45%] xl:w-[42%] flex flex-col border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
             {/* Map */}
-            {allComps.some(c => c.latitude && c.longitude) || (lead?.latitude && lead?.longitude) ? (
-              <div className="card">
-                <div className="flex justify-between items-center mb-3">
-                  <h2 className="text-lg font-bold">Property Locations</h2>
-                  <span className="text-xs text-gray-500 dark:text-gray-400">
-                    {allComps.filter(c => c.latitude && c.longitude).length} of {allComps.length} comps mapped
+            {(allComps.some(c => c.latitude && c.longitude) || (lead?.latitude && lead?.longitude)) ? (
+              <div className="flex-1 min-h-[250px] h-64 lg:h-auto relative">
+                <div className="absolute inset-0 lg:relative lg:h-full">
+                  <CompsMap
+                    lead={lead!}
+                    comps={allComps}
+                    compIndexMap={compIndexMap}
+                    hoveredCompId={hoveredCompId}
+                    onHoverComp={setHoveredCompId}
+                    onToggleComp={async (compId) => {
+                      if (!analysis) return;
+                      await compAnalysisAPI.toggleComp(leadId, analysis.id, compId);
+                      await refreshAnalysis();
+                    }}
+                  />
+                </div>
+                {/* Map legend overlay */}
+                <div className="absolute bottom-2 left-2 right-2 flex flex-wrap gap-3 text-[10px] items-center bg-white/90 dark:bg-gray-900/90 rounded-lg px-2 py-1.5 backdrop-blur-sm z-[400]">
+                  <div className="flex items-center gap-1">
+                    <div className="w-3 h-3 bg-red-600 rounded-full border border-white shadow" />
+                    <span className="text-gray-600 dark:text-gray-400">Subject</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <div className="w-3 h-3 bg-blue-600 rounded-full border border-white shadow" />
+                    <span className="text-gray-600 dark:text-gray-400">Selected</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <div className="w-3 h-3 bg-gray-400 rounded-full border border-white shadow" />
+                    <span className="text-gray-600 dark:text-gray-400">Unselected</span>
+                  </div>
+                  <span className="text-gray-400 dark:text-gray-500 italic ml-auto">
+                    {allComps.filter(c => c.latitude && c.longitude).length}/{allComps.length} mapped
                   </span>
                 </div>
-                <CompsMap
-                  lead={lead!}
-                  comps={allComps}
-                  compIndexMap={compIndexMap}
-                  hoveredCompId={hoveredCompId}
-                  onHoverComp={setHoveredCompId}
-                  onToggleComp={async (compId) => {
-                    if (!analysis) return;
-                    await compAnalysisAPI.toggleComp(leadId, analysis.id, compId);
-                    await refreshAnalysis();
+              </div>
+            ) : (
+              <div className="flex-1 min-h-[250px] flex items-center justify-center bg-gray-100 dark:bg-gray-800 text-gray-400">
+                No coordinates available
+              </div>
+            )}
+
+            {/* Subject Property (compact on desktop, full on mobile) */}
+            <div className="border-t border-gray-200 dark:border-gray-700">
+              <div className="hidden lg:block">
+                <SubjectPropertyCard
+                  lead={lead}
+                  attomData={attomData}
+                  attomLoading={attomLoading}
+                  onAttomEnrich={async () => {
+                    setAttomLoading(true);
+                    try {
+                      const r = await compsAPI.attomEnrich(leadId);
+                      setAttomData(r.data);
+                      const lr = await leadsAPI.get(leadId);
+                      setLead(lr.data);
+                    } catch {}
+                    setAttomLoading(false);
+                  }}
+                  compact
+                />
+              </div>
+              <div className="lg:hidden">
+                <SubjectPropertyCard
+                  lead={lead}
+                  attomData={attomData}
+                  attomLoading={attomLoading}
+                  onAttomEnrich={async () => {
+                    setAttomLoading(true);
+                    try {
+                      const r = await compsAPI.attomEnrich(leadId);
+                      setAttomData(r.data);
+                      const lr = await leadsAPI.get(leadId);
+                      setLead(lr.data);
+                    } catch {}
+                    setAttomLoading(false);
                   }}
                 />
               </div>
-            ) : null}
+            </div>
+          </div>
 
-            {/* Subject Property Summary */}
-            <div className="card">
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="text-lg font-bold">Subject Property</h2>
-                <div className="flex items-center gap-2">
-                  {attomData?.attomId && (
-                    <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 font-medium">
-                      ✓ ATTOM Verified
-                    </span>
-                  )}
-                  {!attomData?.attomId && (
-                    <button
-                      onClick={async () => {
-                        setAttomLoading(true);
-                        try {
-                          const r = await compsAPI.attomEnrich(leadId);
-                          setAttomData(r.data);
-                          const lr = await leadsAPI.get(leadId);
-                          setLead(lr.data);
-                        } catch {}
-                        setAttomLoading(false);
-                      }}
-                      disabled={attomLoading}
-                      className="text-xs text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 font-medium"
-                    >
-                      {attomLoading ? '⏳' : '📡 Enrich with ATTOM'}
-                    </button>
-                  )}
-                </div>
-              </div>
-              <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
-                <InfoItem label="Address" value={lead.propertyAddress} />
-                <InfoItem label="Location" value={`${lead.propertyCity}, ${lead.propertyState} ${lead.propertyZip}`} />
-                <InfoItem label="Beds / Baths" value={`${lead.bedrooms || '?'} bd / ${lead.bathrooms || '?'} ba`} />
-                <InfoItem
-                  label="Sq Ft"
-                  value={(lead as any).sqftOverride
-                    ? `${(lead as any).sqftOverride.toLocaleString()} (override)`
-                    : lead.sqft?.toLocaleString() || '—'}
-                />
-                <InfoItem label="Asking Price" value={lead.askingPrice ? `$${lead.askingPrice.toLocaleString()}` : '—'} />
-                <InfoItem label="Condition" value={(attomData?.propertyCondition && attomData.propertyCondition !== lead.conditionLevel) ? `${lead.conditionLevel || '—'} (ATTOM: ${attomData.propertyCondition})` : (lead.conditionLevel || '—')} />
-              </div>
-
-              {/* ATTOM discrepancy warnings */}
-              {attomData?.attomId && (() => {
-                const warnings: string[] = [];
-                if (attomData.sqft && lead.sqft && Math.abs(attomData.sqft - lead.sqft) / lead.sqft > 0.1)
-                  warnings.push(`Sqft mismatch: lead shows ${lead.sqft.toLocaleString()}, ATTOM records ${attomData.sqft.toLocaleString()}`);
-                if (attomData.bedrooms && lead.bedrooms && attomData.bedrooms !== lead.bedrooms)
-                  warnings.push(`Bed count mismatch: lead shows ${lead.bedrooms}, ATTOM records ${attomData.bedrooms}`);
-                if (attomData.bathrooms && lead.bathrooms && Math.abs(attomData.bathrooms - lead.bathrooms) >= 1)
-                  warnings.push(`Bath count mismatch: lead shows ${lead.bathrooms}, ATTOM records ${attomData.bathrooms}`);
-                if (warnings.length === 0) return null;
-                return (
-                  <div className="mt-3 rounded-lg bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-800 px-3 py-2 space-y-1">
-                    {warnings.map((w, i) => (
-                      <div key={i} className="text-xs text-amber-700 dark:text-amber-400 flex items-center gap-1.5">
-                        <span>⚠️</span> {w} — <span className="font-medium">verify before calculating ARV</span>
-                      </div>
-                    ))}
-                  </div>
-                );
-              })()}
-
-              {/* ATTOM building detail strip */}
-              {attomData?.attomId && (attomData.yearBuilt || attomData.effectiveYearBuilt || attomData.stories || attomData.wallType || attomData.propertyQuality || attomData.subdivision) && (
-                <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500 dark:text-gray-400 border-t dark:border-gray-700 pt-3">
-                  {attomData.yearBuilt && <span>Built {attomData.yearBuilt}{attomData.effectiveYearBuilt && attomData.effectiveYearBuilt !== attomData.yearBuilt ? ` · Reno'd ${attomData.effectiveYearBuilt}` : ''}</span>}
-                  {attomData.stories && <span>{attomData.stories} {attomData.stories === 1 ? 'story' : 'stories'}</span>}
-                  {attomData.wallType && <span>{attomData.wallType}</span>}
-                  {attomData.propertyQuality && <span>Quality: {attomData.propertyQuality}</span>}
-                  {attomData.subdivision && <span>Subdivision: {attomData.subdivision}</span>}
-                  {attomData.annualTaxAmount && <span>Taxes: ${Math.round(attomData.annualTaxAmount).toLocaleString()}/yr</span>}
-                </div>
-              )}
+          {/* ── RIGHT PANE: Toolbar + Comp List ── */}
+          <div className="lg:w-[55%] xl:w-[58%] flex flex-col lg:overflow-y-auto" ref={compListRef}>
+            {/* Sticky toolbar */}
+            <div className="sticky top-0 z-10">
+              <CompsToolbar
+                allCompsCount={allComps.length}
+                selectedCompsCount={selectedComps.length}
+                compsFromAttom={compsFromAttom}
+                compsFromRentcast={compsFromRentcast}
+                compsSource={compsSource}
+                sortField={sortField}
+                sortDir={sortDir}
+                fetchingComps={fetchingComps}
+                hasAnalysis={!!analysis}
+                onSetCompsSource={setCompsSource}
+                onSort={handleSort}
+                onSelectAll={async (selected) => {
+                  if (!analysis) return;
+                  await compAnalysisAPI.selectAll(leadId, analysis.id, selected);
+                  await refreshAnalysis();
+                }}
+                onRefreshComps={() => handleFindComps(true)}
+                onAddManual={() => setShowAddComp(true)}
+              />
             </div>
 
-            {/* Toolbar */}
-            <div className="card">
-              <div className="flex justify-between items-center mb-4">
-                <div className="flex items-center gap-4">
-                  <h2 className="text-lg font-bold">
-                    Comparable Properties
-                  </h2>
-                  <span className="text-sm text-gray-500 dark:text-gray-400">
-                    {selectedComps.length} selected of {allComps.length}
-                  </span>
-                  {compsFromAttom > 0 && (
-                    <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 font-medium">
-                      {compsFromAttom} ATTOM verified
-                    </span>
-                  )}
-                  {compsFromRentcast > 0 && (
-                    <span className="text-xs px-2 py-0.5 rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 font-medium">
-                      {compsFromRentcast} RentCast
-                    </span>
-                  )}
-                  {/* Select / Deselect All */}
-                  {analysis && allComps.length > 0 && (
-                    <div className="flex rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 text-xs">
-                      <button
-                        onClick={async () => {
-                          await compAnalysisAPI.selectAll(leadId, analysis.id, true);
-                          await refreshAnalysis();
-                        }}
-                        className="px-3 py-1.5 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 font-medium border-r border-gray-200 dark:border-gray-700"
-                      >
-                        Select All
-                      </button>
-                      <button
-                        onClick={async () => {
-                          await compAnalysisAPI.selectAll(leadId, analysis.id, false);
-                          await refreshAnalysis();
-                        }}
-                        className="px-3 py-1.5 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 font-medium"
-                      >
-                        Deselect All
-                      </button>
-                    </div>
-                  )}
-                </div>
-                <div className="flex items-center gap-3">
-                  {/* Source toggle */}
-                  <div className="flex rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 text-xs">
-                    <button
-                      onClick={() => setCompsSource('attom')}
-                      className={`px-3 py-1.5 font-medium transition-colors ${
-                        compsSource === 'attom'
-                          ? 'bg-blue-600 text-white'
-                          : 'bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
-                      }`}
-                    >
-                      ATTOM
-                    </button>
-                    <button
-                      onClick={() => setCompsSource('rentcast')}
-                      className={`px-3 py-1.5 font-medium transition-colors ${
-                        compsSource === 'rentcast'
-                          ? 'bg-purple-600 text-white'
-                          : 'bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
-                      }`}
-                    >
-                      RentCast
-                    </button>
-                  </div>
-                  <button
-                    onClick={() => handleFindComps(true)}
-                    disabled={fetchingComps}
-                    className="btn btn-primary btn-sm"
-                  >
-                    {fetchingComps ? (
-                      <span className="flex items-center gap-2">
-                        <span className="animate-spin inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full" />
-                        Fetching from {compsSource === 'rentcast' ? 'RentCast' : 'ATTOM'}...
-                      </span>
-                    ) : 'Refresh Comps'}
-                  </button>
-                  <button
-                    onClick={() => setShowAddComp(!showAddComp)}
-                    className="btn btn-secondary btn-sm"
-                  >
-                    {showAddComp ? 'Hide Form' : '+ Add Manual'}
-                  </button>
-                </div>
-              </div>
-
-              {/* Sort controls */}
-              {allComps.length > 0 && (
-                <div className="flex items-center gap-2 mb-4 text-xs">
-                  <span className="text-gray-500 dark:text-gray-400 font-medium">Sort by:</span>
-                  {[
-                    { key: 'distance', label: 'Distance' },
-                    { key: 'soldPrice', label: 'Price' },
-                    { key: 'sqft', label: 'Sq Ft' },
-                    { key: 'soldDate', label: 'Sale Date' },
-                    { key: 'correlation', label: 'Correlation' },
-                  ].map((s) => (
-                    <button
-                      key={s.key}
-                      onClick={() => handleSort(s.key)}
-                      className={`px-2 py-1 rounded border transition-colors ${
-                        sortField === s.key
-                          ? 'bg-primary-100 border-primary-300 text-primary-700 font-medium'
-                          : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
-                      }`}
-                    >
-                      {s.label} {sortField === s.key && (sortDir === 'asc' ? '↑' : '↓')}
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              {/* Add Comp Form */}
-              {showAddComp && (
-                <div className="bg-gray-50 dark:bg-gray-950 rounded-lg p-4 mb-6 border border-gray-200 dark:border-gray-700">
-                  <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Add Comparable Property</h3>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                    <div className="md:col-span-2">
-                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Address *</label>
-                      <input
-                        type="text"
-                        value={compForm.address}
-                        onChange={(e) => setCompForm({ ...compForm, address: e.target.value })}
-                        placeholder="123 Main St, City, ST"
-                        className="input text-sm"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Sold Price *</label>
-                      <input
-                        type="number"
-                        value={compForm.soldPrice}
-                        onChange={(e) => setCompForm({ ...compForm, soldPrice: e.target.value })}
-                        placeholder="350000"
-                        className="input text-sm"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Sold Date *</label>
-                      <input
-                        type="date"
-                        value={compForm.soldDate}
-                        onChange={(e) => setCompForm({ ...compForm, soldDate: e.target.value })}
-                        className="input text-sm"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Distance (mi)</label>
-                      <input type="number" step="0.1" value={compForm.distance}
-                        onChange={(e) => setCompForm({ ...compForm, distance: e.target.value })}
-                        placeholder="0.5" className="input text-sm" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Sq Ft</label>
-                      <input type="number" value={compForm.sqft}
-                        onChange={(e) => setCompForm({ ...compForm, sqft: e.target.value })}
-                        placeholder="1800" className="input text-sm" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Beds</label>
-                      <input type="number" value={compForm.bedrooms}
-                        onChange={(e) => setCompForm({ ...compForm, bedrooms: e.target.value })}
-                        placeholder="3" className="input text-sm" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Baths</label>
-                      <input type="number" step="0.5" value={compForm.bathrooms}
-                        onChange={(e) => setCompForm({ ...compForm, bathrooms: e.target.value })}
-                        placeholder="2" className="input text-sm" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Year Built</label>
-                      <input type="number" value={compForm.yearBuilt}
-                        onChange={(e) => setCompForm({ ...compForm, yearBuilt: e.target.value })}
-                        placeholder="1990" className="input text-sm" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Lot (acres)</label>
-                      <input type="number" step="0.01" value={compForm.lotSize}
-                        onChange={(e) => setCompForm({ ...compForm, lotSize: e.target.value })}
-                        placeholder="0.25" className="input text-sm" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">DOM</label>
-                      <input type="number" value={compForm.daysOnMarket}
-                        onChange={(e) => setCompForm({ ...compForm, daysOnMarket: e.target.value })}
-                        placeholder="30" className="input text-sm" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Type</label>
-                      <select value={compForm.propertyType}
-                        onChange={(e) => setCompForm({ ...compForm, propertyType: e.target.value })}
-                        className="input text-sm">
-                        <option value="">—</option>
-                        <option value="Single Family">Single Family</option>
-                        <option value="Townhouse">Townhouse</option>
-                        <option value="Condo">Condo</option>
-                      </select>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-4 mt-3">
-                    <label className="flex items-center gap-1.5 text-sm">
-                      <input type="checkbox" checked={compForm.hasPool}
-                        onChange={(e) => setCompForm({ ...compForm, hasPool: e.target.checked })}
-                        className="rounded border-gray-300 dark:border-gray-600" /> Pool
-                    </label>
-                    <label className="flex items-center gap-1.5 text-sm">
-                      <input type="checkbox" checked={compForm.hasGarage}
-                        onChange={(e) => setCompForm({ ...compForm, hasGarage: e.target.checked })}
-                        className="rounded border-gray-300 dark:border-gray-600" /> Garage
-                    </label>
-                    <label className="flex items-center gap-1.5 text-sm">
-                      <input type="checkbox" checked={compForm.isRenovated}
-                        onChange={(e) => setCompForm({ ...compForm, isRenovated: e.target.checked })}
-                        className="rounded border-gray-300 dark:border-gray-600" /> Renovated
-                    </label>
-                  </div>
-                  <div className="mt-3">
-                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Notes</label>
-                    <input type="text" value={compForm.notes}
-                      onChange={(e) => setCompForm({ ...compForm, notes: e.target.value })}
-                      placeholder="e.g., Comp has pool but subject does not"
-                      className="input text-sm w-full" />
-                  </div>
-                  <button onClick={handleAddComp} className="btn btn-primary btn-sm mt-3">
-                    Add Comparable
-                  </button>
-                </div>
-              )}
-
-              {/* Comp Cards Grid */}
+            {/* Comp rows */}
+            <div className="flex-1 p-3 space-y-1.5">
               {allComps.length === 0 ? (
                 <div className="text-center py-12 text-gray-500 dark:text-gray-400">
                   <div className="text-5xl mb-3">&#127968;</div>
                   <p className="font-medium text-lg">No comparables yet</p>
                   <p className="text-sm mt-1 mb-4">
-                    Click &quot;Find Comps&quot; to fetch deed-verified comparable sales from ATTOM (or switch to RentCast)
+                    Click &quot;Refresh&quot; to fetch deed-verified comparable sales
                   </p>
-                  <div className="flex items-center justify-center gap-3 mb-3">
-                    <div className="flex rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 text-xs">
-                      <button
-                        onClick={() => setCompsSource('attom')}
-                        className={`px-3 py-1.5 font-medium transition-colors ${
-                          compsSource === 'attom'
-                            ? 'bg-blue-600 text-white'
-                            : 'bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
-                        }`}
-                      >
-                        ATTOM
-                      </button>
-                      <button
-                        onClick={() => setCompsSource('rentcast')}
-                        className={`px-3 py-1.5 font-medium transition-colors ${
-                          compsSource === 'rentcast'
-                            ? 'bg-purple-600 text-white'
-                            : 'bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
-                        }`}
-                      >
-                        RentCast
-                      </button>
-                    </div>
-                  </div>
                   <button
                     onClick={() => handleFindComps(false)}
                     disabled={fetchingComps}
@@ -1116,26 +883,25 @@ export default function CompsAnalysisPage() {
                   </button>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                  {sortedComps.map((comp) => (
-                    <CompCard
-                      key={comp.id}
-                      comp={comp}
-                      lead={lead}
-                      compIndex={compIndexMap.get(comp.id)}
-                      isHovered={hoveredCompId === comp.id}
-                      onHoverEnter={() => setHoveredCompId(comp.id)}
-                      onHoverLeave={() => setHoveredCompId(null)}
-                      onToggle={() => handleToggleComp(comp.id)}
-                      onDelete={() => handleDeleteComp(comp.id)}
-                    />
-                  ))}
-                </div>
+                sortedComps.map((comp) => (
+                  <CompRow
+                    key={comp.id}
+                    ref={(el) => { compRowRefs.current[comp.id] = el; }}
+                    comp={comp}
+                    lead={lead}
+                    compIndex={compIndexMap.get(comp.id)}
+                    isHovered={hoveredCompId === comp.id}
+                    onHoverEnter={() => setHoveredCompId(comp.id)}
+                    onHoverLeave={() => setHoveredCompId(null)}
+                    onToggle={() => handleToggleComp(comp.id)}
+                    onDelete={() => handleDeleteComp(comp.id)}
+                  />
+                ))
               )}
 
-              {/* Calculate Button */}
+              {/* Calculate ARV button */}
               {allComps.length >= 1 && (
-                <div className="mt-6 flex items-center gap-3">
+                <div className="pt-3 pb-2 flex items-center gap-3">
                   <button
                     onClick={handleAiAdjustComps}
                     disabled={aiAdjusting || selectedComps.length === 0}
@@ -1147,14 +913,134 @@ export default function CompsAnalysisPage() {
                         Calculating ARV...
                       </>
                     ) : (
-                      <>✨ AI Adjust &amp; Calculate ARV</>
+                      <>AI Adjust &amp; Calculate ARV</>
                     )}
                   </button>
                 </div>
               )}
             </div>
           </div>
-        )}
+        </div>
+      )}
+
+      {/* Add Comp Modal */}
+      {showAddComp && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowAddComp(false)}>
+          <div className="bg-white dark:bg-gray-900 rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">Add Comparable Property</h3>
+              <button onClick={() => setShowAddComp(false)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="md:col-span-2">
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Address *</label>
+                <input type="text" value={compForm.address}
+                  onChange={(e) => setCompForm({ ...compForm, address: e.target.value })}
+                  placeholder="123 Main St, City, ST" className="input text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Sold Price *</label>
+                <input type="number" value={compForm.soldPrice}
+                  onChange={(e) => setCompForm({ ...compForm, soldPrice: e.target.value })}
+                  placeholder="350000" className="input text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Sold Date *</label>
+                <input type="date" value={compForm.soldDate}
+                  onChange={(e) => setCompForm({ ...compForm, soldDate: e.target.value })}
+                  className="input text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Distance (mi)</label>
+                <input type="number" step="0.1" value={compForm.distance}
+                  onChange={(e) => setCompForm({ ...compForm, distance: e.target.value })}
+                  placeholder="0.5" className="input text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Sq Ft</label>
+                <input type="number" value={compForm.sqft}
+                  onChange={(e) => setCompForm({ ...compForm, sqft: e.target.value })}
+                  placeholder="1800" className="input text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Beds</label>
+                <input type="number" value={compForm.bedrooms}
+                  onChange={(e) => setCompForm({ ...compForm, bedrooms: e.target.value })}
+                  placeholder="3" className="input text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Baths</label>
+                <input type="number" step="0.5" value={compForm.bathrooms}
+                  onChange={(e) => setCompForm({ ...compForm, bathrooms: e.target.value })}
+                  placeholder="2" className="input text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Year Built</label>
+                <input type="number" value={compForm.yearBuilt}
+                  onChange={(e) => setCompForm({ ...compForm, yearBuilt: e.target.value })}
+                  placeholder="1990" className="input text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Lot (acres)</label>
+                <input type="number" step="0.01" value={compForm.lotSize}
+                  onChange={(e) => setCompForm({ ...compForm, lotSize: e.target.value })}
+                  placeholder="0.25" className="input text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">DOM</label>
+                <input type="number" value={compForm.daysOnMarket}
+                  onChange={(e) => setCompForm({ ...compForm, daysOnMarket: e.target.value })}
+                  placeholder="30" className="input text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Type</label>
+                <select value={compForm.propertyType}
+                  onChange={(e) => setCompForm({ ...compForm, propertyType: e.target.value })}
+                  className="input text-sm">
+                  <option value="">-</option>
+                  <option value="Single Family">Single Family</option>
+                  <option value="Townhouse">Townhouse</option>
+                  <option value="Condo">Condo</option>
+                </select>
+              </div>
+            </div>
+            <div className="flex items-center gap-4 mt-3">
+              <label className="flex items-center gap-1.5 text-sm">
+                <input type="checkbox" checked={compForm.hasPool}
+                  onChange={(e) => setCompForm({ ...compForm, hasPool: e.target.checked })}
+                  className="rounded border-gray-300 dark:border-gray-600" /> Pool
+              </label>
+              <label className="flex items-center gap-1.5 text-sm">
+                <input type="checkbox" checked={compForm.hasGarage}
+                  onChange={(e) => setCompForm({ ...compForm, hasGarage: e.target.checked })}
+                  className="rounded border-gray-300 dark:border-gray-600" /> Garage
+              </label>
+              <label className="flex items-center gap-1.5 text-sm">
+                <input type="checkbox" checked={compForm.isRenovated}
+                  onChange={(e) => setCompForm({ ...compForm, isRenovated: e.target.checked })}
+                  className="rounded border-gray-300 dark:border-gray-600" /> Renovated
+              </label>
+            </div>
+            <div className="mt-3">
+              <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Notes</label>
+              <input type="text" value={compForm.notes}
+                onChange={(e) => setCompForm({ ...compForm, notes: e.target.value })}
+                placeholder="e.g., Comp has pool but subject does not"
+                className="input text-sm w-full" />
+            </div>
+            <div className="flex justify-end gap-3 mt-4">
+              <button onClick={() => setShowAddComp(false)} className="btn btn-secondary">Cancel</button>
+              <button onClick={() => { handleAddComp(); setShowAddComp(false); }} className="btn btn-primary">Add Comparable</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <main className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
 
         {/* ═══════════════ ARV SECTION ═══════════════ */}
         {activeSection === 'arv' && (
