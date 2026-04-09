@@ -358,114 +358,44 @@ Return ONLY valid JSON, no other text.`;
   /**
    * Select the best matching AI prompt template for the given lead and messages.
    *
-   * Selection order:
-   * 1. If no messages yet → initial_contact
-   * 2. Check for objections in recent inbound messages → objection_handling
-   * 3. CAMP discovery order: Priority → Money → Challenge → Authority
-   * 4. If all CAMP complete → closing
-   * 5. Fallback to generic prompt-table scan
+   * Selection logic (simplified):
+   * 1. If no messages yet → initial_contact (fixed template)
+   * 2. All other conversations → conversational prompt (AI decides flow)
+   *
+   * The rigid CAMP field ordering has been removed. The conversational prompt
+   * gives the AI full context and lets it decide what to explore next based
+   * on the natural flow of conversation.
    */
   async selectPrompt(
     lead: { status: string; askingPrice?: number | null; timeline?: number | null; conditionLevel?: string | null; ownershipStatus?: string | null },
     messages: { direction: string; body: string }[],
   ): Promise<{ systemPrompt: string; exampleMessages?: any[]; scenario?: string } | null> {
-    const prompts = await this.prisma.aiPrompt.findMany({
-      where: { isActive: true },
-      orderBy: { priority: 'desc' },
-    });
-
-    const promptMap = new Map<string, typeof prompts[0]>();
-    for (const p of prompts) {
-      promptMap.set(p.scenario, p);
-    }
-
-    const messageCount = messages.length;
     const outboundCount = messages.filter((m) => m.direction === 'OUTBOUND').length;
     const inboundCount = messages.filter((m) => m.direction === 'INBOUND').length;
 
-    // 1. No outbound messages yet AND no inbound → initial_contact
-    //    If there are inbound messages, the seller already engaged — skip intro
-    //    and go straight to CAMP discovery.
+    // 1. No messages at all → initial_contact (fixed template handled elsewhere)
     if (outboundCount === 0 && inboundCount === 0) {
-      const p = promptMap.get('initial_contact');
+      const prompts = await this.prisma.aiPrompt.findMany({
+        where: { isActive: true, scenario: 'initial_contact' },
+      });
+      const p = prompts[0];
       if (p) return { systemPrompt: p.systemPrompt, exampleMessages: p.exampleMessages as any[], scenario: p.scenario };
     }
 
-    // 2. Check for objections in the last inbound message
-    const inboundMessages = messages.filter((m) => m.direction === 'INBOUND');
-    if (inboundMessages.length > 0) {
-      const objectionPrompt = promptMap.get('objection_handling');
-      if (objectionPrompt) {
-        const rules = objectionPrompt.contextRules as any;
-        if (rules?.objectionKeywords?.length > 0) {
-          const lastInbound = inboundMessages[inboundMessages.length - 1].body.toLowerCase();
-          const hasObjection = rules.objectionKeywords.some(
-            (keyword: string) => lastInbound.includes(keyword.toLowerCase()),
-          );
-          if (hasObjection) {
-            return { systemPrompt: objectionPrompt.systemPrompt, exampleMessages: objectionPrompt.exampleMessages as any[], scenario: objectionPrompt.scenario };
-          }
-        }
-      }
+    // 2. All active conversations use the single conversational prompt.
+    //    The AI receives CAMP progress as context and decides what to do next.
+    const conversationalPrompt = await this.prisma.aiPrompt.findUnique({
+      where: { scenario: 'conversational' },
+    });
+    if (conversationalPrompt) {
+      return {
+        systemPrompt: conversationalPrompt.systemPrompt,
+        exampleMessages: conversationalPrompt.exampleMessages as any[],
+        scenario: 'conversational',
+      };
     }
 
-    // 3. CAMP discovery order: Priority → Money → Challenge → Authority
-    const campOrder: { field: string; scenario: string; fallback: string }[] = [
-      { field: 'timeline', scenario: 'price_discovery', fallback: 'motivation_discovery' },
-      { field: 'askingPrice', scenario: 'price_discovery', fallback: 'motivation_discovery' },
-      { field: 'conditionLevel', scenario: 'property_condition', fallback: 'motivation_discovery' },
-      { field: 'ownershipStatus', scenario: 'authority_discovery', fallback: 'motivation_discovery' },
-    ];
-
-    // Priority first
-    if (lead.timeline == null) {
-      const p = promptMap.get('motivation_discovery') || promptMap.get('follow_up');
-      if (p) return { systemPrompt: p.systemPrompt, exampleMessages: p.exampleMessages as any[], scenario: p.scenario };
-    }
-
-    // Money
-    if (lead.askingPrice == null) {
-      const p = promptMap.get('price_discovery') || promptMap.get('motivation_discovery');
-      if (p) return { systemPrompt: p.systemPrompt, exampleMessages: p.exampleMessages as any[], scenario: p.scenario };
-    }
-
-    // Challenge
-    if (lead.conditionLevel == null) {
-      const p = promptMap.get('property_condition') || promptMap.get('motivation_discovery');
-      if (p) return { systemPrompt: p.systemPrompt, exampleMessages: p.exampleMessages as any[], scenario: p.scenario };
-    }
-
-    // Authority
-    if (lead.ownershipStatus == null) {
-      const p = promptMap.get('authority_discovery') || promptMap.get('motivation_discovery');
-      if (p) return { systemPrompt: p.systemPrompt, exampleMessages: p.exampleMessages as any[], scenario: p.scenario };
-    }
-
-    // 4. All CAMP complete → closing
-    if (lead.timeline != null && lead.askingPrice != null && lead.conditionLevel != null && lead.ownershipStatus != null) {
-      const p = promptMap.get('closing') || promptMap.get('rbp_explanation');
-      if (p) return { systemPrompt: p.systemPrompt, exampleMessages: p.exampleMessages as any[], scenario: p.scenario };
-    }
-
-    // 5. Fallback — scan all prompts with contextRules matching
-    //    NEVER return initial_contact if the seller has already messaged us.
-    for (const prompt of prompts) {
-      if (prompt.scenario === 'initial_contact' && inboundCount > 0) continue;
-
-      const rules = prompt.contextRules as any;
-      if (!rules) continue;
-
-      let matches = true;
-
-      if (rules.leadStatuses?.length > 0 && !rules.leadStatuses.includes(lead.status)) matches = false;
-      if (matches && rules.minMessages != null && messageCount < rules.minMessages) matches = false;
-      if (matches && rules.maxMessages != null && messageCount > rules.maxMessages) matches = false;
-
-      if (matches) {
-        return { systemPrompt: prompt.systemPrompt, exampleMessages: prompt.exampleMessages as any[], scenario: prompt.scenario };
-      }
-    }
-
+    // Fallback if conversational prompt not yet seeded
     return null;
   }
 
@@ -500,16 +430,16 @@ Return ONLY valid JSON, no other text.`;
       return this.getDefaultMessageDrafts(context);
     }
 
-    // Cap conversation history to last 10 messages to control context size
+    // Cap conversation history to last 20 messages for richer context
     const fullHistory = context.conversationHistory ?? [];
-    const trimmedHistory = fullHistory.length > 10 ? fullHistory.slice(-10) : fullHistory;
-    const historyPrefix = fullHistory.length > 10
-      ? `[Earlier conversation: ${fullHistory.length - 10} messages not shown]\n`
+    const trimmedHistory = fullHistory.length > 20 ? fullHistory.slice(-20) : fullHistory;
+    const historyPrefix = fullHistory.length > 20
+      ? `[Earlier conversation: ${fullHistory.length - 20} messages not shown]\n`
       : '';
     const history = fullHistory.length > 0
       ? historyPrefix + trimmedHistory.join('\n')
       : 'No previous messages';
-    const purpose = context.purpose || 'follow up and move the conversation forward';
+    const purpose = context.purpose || 'Continue the conversation naturally. Respond to what the seller said, and if appropriate, explore any missing CAMP info in a conversational way.';
 
     // Determine which system prompt to use
     let systemMessage: string;
@@ -534,10 +464,11 @@ Return ONLY valid JSON, no other text.`;
         systemMessage = selected.systemPrompt;
         fewShotMessages = selected.exampleMessages || [];
       } else {
-        // Fallback: safe follow-up prompt that will NEVER introduce itself
-        systemMessage = `You're a local property investor texting a seller from your phone. You buy houses from people who want a quick, simple sale. Text like a real person — short sentences, no fancy words, no corporate speak.
-Continue the natural flow of conversation. Show you were listening to what they already said.
-Ask ONE question at a time. Keep it under 300 characters. Sound like a real text message.
+        // Fallback: safe conversational prompt that will NEVER introduce itself
+        systemMessage = `You're a local property investor named Ian, texting a seller from your phone. You buy houses from people who want a quick, simple sale. Text like a real person — warm, honest, conversational.
+Continue the natural flow of conversation. Respond to what the seller said. Show you're actually listening.
+If it flows naturally, explore any missing info about the property (condition, price, timeline, ownership) but don't force it.
+Keep it under 600 characters. Sound like a real text message from a friendly person.
 NEVER introduce yourself or the company — you are already in a conversation.
 Always respond with valid JSON only.`;
       }
@@ -606,9 +537,9 @@ ${acknowledgmentBlock}
 Generate ONE text message. Be conversational and warm but use normal grammar and capitalization.
 
 Rules:
-- Keep it under 300 characters, 1-3 sentences
-- Ask only 1 question per message
-- Sound like a friendly, down-to-earth person, not a chatbot
+- Under 600 characters. Match length to the situation. Short when appropriate, longer for thoughtful responses.
+- Ask at most 1 question per message (it's ok to not ask a question if the situation calls for it)
+- Sound like a friendly, down-to-earth person texting, not a chatbot
 - Use normal capitalization and grammar
 - Use contractions naturally (don't, won't, that's, we'll)
 - No colons, semicolons, or em dashes
@@ -617,8 +548,10 @@ Rules:
 - NEVER echo back or agree to specific dates, months, or timelines (e.g. never say "November works", "that timeline works", "30 days sounds good")
 - NEVER use the phrase "Quick question"
 - NEVER use em dashes, hyphens as dashes, or colons
-- You are ONLY gathering information — all offers and decisions come from the team
-- Read the conversation history and make sure your reply flows naturally — don't re-ask what was already answered
+- You are ONLY gathering information. All offers and decisions come from the team
+- Read the conversation history and make sure your reply flows naturally
+- If the seller shares something personal or emotional, acknowledge it genuinely before moving to business
+- If the seller asked you a question, answer it
 
 Return ONLY a JSON object:
 {

@@ -8,7 +8,7 @@ import { LeadsService } from '../leads/leads.service';
 import { SmsProvider, createSmsProvider } from './sms.provider';
 import { formatPhoneNumber, isOptOutMessage } from '@fast-homes/shared';
 
-const MAX_AUTO_RESPONSES_PER_DAY = 5;
+const MAX_AUTO_RESPONSES_PER_DAY = 10;
 const AUTO_RESPONSE_DELAY_MS = 180_000;       // 3 minutes — wait for seller to finish typing
 const DEMO_AUTO_RESPONSE_DELAY_MS = 2_000;    // 2 seconds in demo mode
 
@@ -367,48 +367,19 @@ export class MessagesService {
       ? `The seller just told you ${justExtractedDescriptions.join(' and ')}. Simply confirm you received their answer (e.g. "Got it", "Thanks for sharing that") — do NOT agree to, commit to, or validate their price or timeline. You are gathering information only, not making any offer or promise.`
       : '';
 
-    // ── Determine what CAMP data we still need ────────────────────────────────
-    const campFieldLabels: { field: string; label: string; question: string; keywords: string[] }[] = [
-      { field: 'timeline', label: 'TIMELINE', question: 'how soon they want to sell',
-        keywords: ['timeline', 'how soon', 'when are you', 'when do you', 'timeframe', 'time frame', 'sell by', 'hoping to sell', 'looking to sell'] },
-      { field: 'askingPrice', label: 'ASKING PRICE', question: 'what price they are hoping to get',
-        keywords: ['price', 'asking', 'hoping to get', 'ballpark', 'how much', 'what are you looking'] },
-      { field: 'conditionLevel', label: 'PROPERTY CONDITION', question: 'the condition of the property',
-        keywords: ['condition', 'shape', 'repairs', 'roof', 'foundation', 'hvac', 'updates', 'renovated', 'fixer'] },
-      { field: 'ownershipStatus', label: 'OWNERSHIP', question: 'who owns the property and who can make decisions',
-        keywords: ['owner', 'ownership', 'decision', 'others involved', 'sole owner', 'co-own', 'title'] },
+    // ── Determine CAMP progress ────────────────────────────────────────────────
+    // Instead of rigid ordering, we just tell the AI what's known and unknown
+    // and let it decide what to explore next based on conversation flow.
+    const campFields = [
+      { field: 'timeline', label: 'Timeline/Priority', known: lead.timeline != null },
+      { field: 'askingPrice', label: 'Asking Price', known: lead.askingPrice != null },
+      { field: 'conditionLevel', label: 'Property Condition', known: lead.conditionLevel != null },
+      { field: 'ownershipStatus', label: 'Ownership/Authority', known: lead.ownershipStatus != null },
     ];
 
-    // Helper: has a CAMP topic been asked in outbound messages AND has the seller
-    // replied at least once since then? If so, treat as "addressed" even if
-    // extraction couldn't parse a clean value.
-    const hasBeenAddressedInConversation = (keywords: string[]): boolean => {
-      const msgs = lead.messages;
-      let lastAskedIdx = -1;
-      for (let i = msgs.length - 1; i >= 0; i--) {
-        if (msgs[i].direction === 'OUTBOUND') {
-          const body = msgs[i].body.toLowerCase();
-          if (keywords.some(k => body.includes(k))) {
-            lastAskedIdx = i;
-            break;
-          }
-        }
-      }
-      if (lastAskedIdx === -1) return false;
-      return msgs.slice(lastAskedIdx + 1).some(m => m.direction === 'INBOUND');
-    };
-
-    let nextField: typeof campFieldLabels[0] | null = null;
-    for (const cf of campFieldLabels) {
-      const hasValue = (lead as any)[cf.field] != null;
-      const addressed = hasValue || hasBeenAddressedInConversation(cf.keywords);
-      if (!addressed) {
-        nextField = cf;
-        break;
-      }
-    }
-
-    const campComplete = !nextField;
+    const campComplete = campFields.every(f => f.known);
+    const missingFields = campFields.filter(f => !f.known).map(f => f.label);
+    const knownFields = campFields.filter(f => f.known).map(f => f.label);
 
     // ── Build rich property context so the AI can respond intelligently ────────
     // Things the AI should know about the property that enrich the conversation
@@ -440,7 +411,7 @@ export class MessagesService {
       ? `\nProperty context (for your reference):\n${propertyContextLines.map(l => `  - ${l}`).join('\n')}\n`
       : '';
 
-    // ── Build the purpose string — contextual, not formulaic ──────────────────
+    // ── Build the purpose string — conversational, AI decides the approach ─────
     let purpose: string;
 
     if (campComplete) {
@@ -457,25 +428,21 @@ What you know: ${knownSummary || 'gathered all key details'}.
 Your message must:
 1. Thank ${lead.sellerFirstName} sincerely for their time and for sharing
 2. Tell them someone from the team will review the information and reach out soon to discuss next steps
-3. Keep it warm and brief — under 300 characters
+3. Keep it warm and genuine
 4. Do NOT ask anything. Do NOT request more info. End the conversation professionally.
 5. Do NOT repeat back their price or timeline in a way that implies agreement or commitment.`;
     } else {
-      // CAMP not yet complete — ask the next question, but do it conversationally.
-      // The key instruction: react naturally to WHAT THE SELLER JUST SAID, then
-      // weave in the next CAMP question only if it flows naturally. If the seller
-      // seems confused, frustrated, or has asked a direct question, address THAT
-      // first before pivoting to data gathering.
-      const nextQuestion = nextField
-        ? `The next piece of information we need is: ${nextField.label} — ${nextField.question}.`
-        : '';
-
+      // CAMP not yet complete — let the AI decide what to explore next
       purpose = `${propertyContext}${justExtractedSummary ? justExtractedSummary + ' ' : ''}
-Read the seller's last message carefully. React to it naturally — address anything they asked or said before asking your own question.
-${isActiveListing ? 'Remember: this property IS already listed for sale. Do not ask if they want to sell — ask about their experience with the listing or why they are exploring a cash offer.' : ''}
-${nextQuestion}
-IMPORTANT: If the seller seems confused, annoyed, or asked you something specific, answer THEM first — then gently ask the next question. Don't just bulldoze through CAMP if the conversation isn't flowing naturally.
-Keep it human, warm, and under 300 characters. Ask only ONE question.`.trim();
+CAMP PROGRESS:
+- Already gathered: ${knownFields.length > 0 ? knownFields.join(', ') : 'Nothing yet'}
+- Still need: ${missingFields.join(', ')}
+
+Read the seller's last message carefully. Respond naturally to what they said.
+${isActiveListing ? 'This property IS already listed for sale. Do not ask if they want to sell. Ask about their experience with the listing or why they are exploring a cash offer.' : ''}
+If the conversation naturally opens up a chance to learn about one of the missing topics, take it. But do NOT force it. It's fine to just respond to what the seller said without asking a CAMP question if the moment isn't right.
+If the seller seems frustrated, confused, sharing something personal, or asked you a direct question, address THAT first. Building rapport is more important than checking boxes.
+You decide the right approach based on the conversation flow.`.trim();
     }
 
     const knownData = {
@@ -537,7 +504,7 @@ Keep it human, warm, and under 300 characters. Ask only ONE question.`.trim();
       // Refresh CAMP flags
       await this.scoringService.refreshCampFlags(leadId);
 
-      this.logger.log(`Auto-response sent for lead ${leadId} (next CAMP: ${nextField?.label || 'complete'})`);
+      this.logger.log(`Auto-response sent for lead ${leadId} (CAMP: ${campComplete ? 'complete' : `missing ${missingFields.join(', ')}`})`);
       return messageBody;
     } catch (error) {
       this.logger.error(`Auto-response failed for lead ${leadId}: ${error.message}`);

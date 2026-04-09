@@ -5,6 +5,7 @@ import {
   TEXTING_STYLE_BLOCK,
   BANNED_PHRASES_BLOCK,
   HONESTY_RULES_BLOCK,
+  CONVERSATIONAL_SYSTEM_PROMPT,
 } from '../scoring/prompt-constants';
 
 /**
@@ -61,6 +62,18 @@ export class PromptSeedService implements OnModuleInit {
 
   private getDefaultPrompts() {
     return [
+      {
+        name: 'Conversational (Primary)',
+        scenario: 'conversational',
+        priority: 20,
+        isActive: true,
+        contextRules: {
+          leadStatuses: ['NEW', 'ATTEMPTING_CONTACT', 'QUALIFIED'],
+          minMessages: 1,
+        },
+        systemPrompt: CONVERSATIONAL_SYSTEM_PROMPT,
+        exampleMessages: [],
+      },
       {
         name: 'Initial Contact',
         scenario: 'initial_contact',

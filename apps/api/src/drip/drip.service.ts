@@ -333,7 +333,9 @@ export class DripService implements OnModuleInit, OnModuleDestroy {
             conversationHistory: lead.messages.map(
               (m) => `${m.direction}: ${m.body}`,
             ),
-            purpose: `${nextStep.purpose}${isFirstMessage ? ` This is the FIRST message to this seller — introduce yourself as ${dripBusinessName} and include "Reply STOP to opt out" at the end.` : ' Do NOT introduce yourself — you are already in a conversation with this seller.'}`,
+            purpose: isFirstMessage
+              ? `This is the FIRST message to this seller — introduce yourself as ${dripBusinessName} and include "Reply STOP to opt out" at the end. Ask about the property and what they're looking for.`
+              : `Continue the conversation naturally. The seller hasn't replied yet, so this is a follow-up. Keep it light, reference the property, and give them an easy reason to respond. Do NOT introduce yourself — you are already in a conversation.`,
           },
           undefined,
           lead,
