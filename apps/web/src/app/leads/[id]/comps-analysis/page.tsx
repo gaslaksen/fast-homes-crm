@@ -754,7 +754,7 @@ export default function CompsAnalysisPage() {
 
       {/* ═══════════════ COMPS SECTION (split-pane) ═══════════════ */}
       {activeSection === 'comps' && (
-        <div className="flex flex-col lg:flex-row lg:h-[calc(100vh-12rem)]">
+        <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex flex-col lg:flex-row lg:h-[calc(100vh-12rem)]">
           {/* ── LEFT PANE: Map + Subject Property ── */}
           <div className="lg:w-[45%] xl:w-[42%] flex flex-col border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
             {/* Map */}
