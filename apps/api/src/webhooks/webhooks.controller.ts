@@ -144,8 +144,27 @@ export class WebhooksController {
    * Can also be used for Zapier integration
    */
   @Post('google-ads')
-  async handleGoogleAds(@Body() body: any) {
-    console.log('📥 Google Ads webhook received:', body);
+  async handleGoogleAds(
+    @Body() body: any,
+    @Query('dryRun') dryRun?: string,
+  ) {
+    console.log('📥 Google Ads webhook received:', JSON.stringify(body, null, 2));
+
+    if (dryRun === 'true' || body.dryRun === true) {
+      this.logger.log('🧪 Google Ads dry-run mode — no lead will be created');
+      try {
+        fs.writeFileSync('/tmp/google-ads-sample.json', JSON.stringify(body, null, 2));
+        this.logger.log('📄 Saved payload → /tmp/google-ads-sample.json');
+      } catch (e) {
+        this.logger.warn('Could not write sample file:', e.message);
+      }
+      return {
+        success: true,
+        dryRun: true,
+        receivedFields: Object.keys(body),
+        payload: body,
+      };
+    }
 
     try {
       const addr = await normalizeLeadAddressAsync(body);
