@@ -96,6 +96,7 @@ export class WebhooksController {
 
       const leadData = {
         source: LeadSource.PROPERTY_LEADS,
+        organizationId: process.env.DEFAULT_ORGANIZATION_ID,
         propertyAddress: addr.propertyAddress,
         propertyCity: addr.propertyCity,
         propertyState: addr.propertyState,
@@ -151,6 +152,7 @@ export class WebhooksController {
       console.log('📍 Parsed address:', addr);
       const leadData = {
         source: LeadSource.GOOGLE_ADS,
+        organizationId: process.env.DEFAULT_ORGANIZATION_ID,
         propertyAddress: addr.propertyAddress,
         propertyCity: addr.propertyCity,
         propertyState: addr.propertyState,
