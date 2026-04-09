@@ -1,4 +1,5 @@
-import { Controller, Post, Body, Req, Res, HttpCode, Logger } from '@nestjs/common';
+import { Controller, Post, Body, Query, Req, Res, HttpCode, Logger } from '@nestjs/common';
+import * as fs from 'fs';
 import { Request, Response } from 'express';
 import { LeadsService } from '../leads/leads.service';
 import { MessagesService } from '../messages/messages.service';
@@ -31,8 +32,28 @@ export class WebhooksController {
    * Ingests leads from PropertyLeads
    */
   @Post('propertyleads')
-  async handlePropertyLeads(@Body() body: any) {
-    console.log('📥 PropertyLeads webhook received:', body);
+  async handlePropertyLeads(
+    @Body() body: any,
+    @Query('dryRun') dryRun?: string,
+  ) {
+    console.log('📥 PropertyLeads webhook received:', JSON.stringify(body, null, 2));
+
+    // Dry-run mode: log + dump payload, skip lead creation and outreach
+    if (dryRun === 'true' || body.dryRun === true) {
+      this.logger.log('🧪 PropertyLeads dry-run mode — no lead will be created');
+      try {
+        fs.writeFileSync('/tmp/propertyleads-sample.json', JSON.stringify(body, null, 2));
+        this.logger.log('📄 Saved payload → /tmp/propertyleads-sample.json');
+      } catch (e) {
+        this.logger.warn('Could not write sample file:', e.message);
+      }
+      return {
+        success: true,
+        dryRun: true,
+        receivedFields: Object.keys(body),
+        payload: body,
+      };
+    }
 
     try {
       // Map PropertyLeads fields to our schema
