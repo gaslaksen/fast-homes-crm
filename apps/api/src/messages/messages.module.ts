@@ -5,9 +5,10 @@ import { ScoringModule } from '../scoring/scoring.module';
 import { DripModule } from '../drip/drip.module';
 import { CampaignsModule } from '../campaigns/campaigns.module';
 import { LeadsModule } from '../leads/leads.module';
+import { SellerPortalModule } from '../seller-portal/seller-portal.module';
 
 @Module({
-  imports: [ScoringModule, forwardRef(() => DripModule), forwardRef(() => CampaignsModule), forwardRef(() => LeadsModule)],
+  imports: [ScoringModule, forwardRef(() => DripModule), forwardRef(() => CampaignsModule), forwardRef(() => LeadsModule), SellerPortalModule],
   controllers: [MessagesController],
   providers: [MessagesService],
   exports: [MessagesService],

@@ -191,6 +191,7 @@ model Lead {
   callLogs          CallLog[]
   campaignEnrollments CampaignEnrollment[]
   dealShares          DealShare[]
+  sellerPortal        SellerPortal?
 
   @@map("leads")
 }
@@ -471,16 +472,19 @@ model Contract {
 }
 
 model Offer {
-  id            String   @id @default(cuid())
-  leadId        String
-  lead          Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
-  offerAmount   Float
-  offerDate     DateTime @default(now())
-  status        String   @default("pending") // pending/accepted/rejected/countered/withdrawn
-  counterAmount Float?
-  notes         String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id               String    @id @default(cuid())
+  leadId           String
+  lead             Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  offerAmount      Float
+  offerDate        DateTime  @default(now())
+  status           String    @default("pending") // pending/accepted/rejected/countered/withdrawn
+  counterAmount    Float?
+  notes            String?
+  visibleOnPortal  Boolean   @default(false)
+  terms            String?   @db.Text
+  sellerRespondedAt DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   @@map("offers")
 }
@@ -749,4 +753,20 @@ model SavedSearch {
   updatedAt      DateTime      @updatedAt
 
   @@map("saved_searches")
+}
+
+model SellerPortal {
+  id               String    @id @default(cuid())
+  leadId           String    @unique
+  lead             Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  viewToken        String    @unique
+  status           String    @default("active") // active | disabled
+  portalLinkSentAt DateTime?
+  openedAt         DateTime?
+  openCount        Int       @default(0)
+  lastOpenedAt     DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@map("seller_portals")
 }

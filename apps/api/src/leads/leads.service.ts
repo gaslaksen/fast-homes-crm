@@ -5,6 +5,7 @@ import { MessagesService } from '../messages/messages.service';
 import { DripService } from '../drip/drip.service';
 import { CampaignEnrollmentService } from '../campaigns/campaign-enrollment.service';
 import { PhotosService } from '../photos/photos.service';
+import { SellerPortalService } from '../seller-portal/seller-portal.service';
 import { RentCastService } from '../comps/rentcast.service';
 import { CompsService } from '../comps/comps.service';
 import { AttomService } from '../comps/attom.service';
@@ -48,6 +49,7 @@ export class LeadsService {
     @Inject(forwardRef(() => CampaignEnrollmentService))
     private campaignEnrollmentService: CampaignEnrollmentService,
     @Optional() private photosService: PhotosService,
+    @Optional() private sellerPortalService: SellerPortalService,
     private rentCastService: RentCastService,
     private compsService: CompsService,
     private attomService: AttomService,
@@ -158,6 +160,13 @@ export class LeadsService {
       // a reliable data source is identified.
     } else {
       console.log(`📍 Lead created: ${lead.id} - ${data.propertyAddress}. No PhotosService available.`);
+    }
+
+    // Auto-create seller portal (non-blocking)
+    if (this.sellerPortalService) {
+      this.sellerPortalService.createPortal(lead.id).catch((err) => {
+        this.logger.error(`Seller portal creation failed for ${lead.id}: ${err.message}`);
+      });
     }
 
     // Auto-populate property details from RentCast (non-blocking)

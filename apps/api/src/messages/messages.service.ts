@@ -1,10 +1,11 @@
-import { Injectable, Inject, forwardRef, Logger } from '@nestjs/common';
+import { Injectable, Inject, forwardRef, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { ScoringService } from '../scoring/scoring.service';
 import { DripService } from '../drip/drip.service';
 import { CampaignEnrollmentService } from '../campaigns/campaign-enrollment.service';
 import { LeadsService } from '../leads/leads.service';
+import { SellerPortalService } from '../seller-portal/seller-portal.service';
 import { SmsProvider, createSmsProvider } from './sms.provider';
 import { formatPhoneNumber, isOptOutMessage } from '@fast-homes/shared';
 
@@ -102,6 +103,7 @@ export class MessagesService {
     private campaignEnrollmentService: CampaignEnrollmentService,
     @Inject(forwardRef(() => LeadsService))
     private leadsService: LeadsService,
+    @Optional() private sellerPortalService: SellerPortalService,
   ) {
     this.twilioNumber = this.config.get<string>('SMRTPHONE_PHONE_NUMBER') || this.config.get<string>('TWILIO_PHONE_NUMBER') || '';
     this.smsProvider = createSmsProvider(this.config);
@@ -413,6 +415,7 @@ export class MessagesService {
 
     // ── Build the purpose string — conversational, AI decides the approach ─────
     let purpose: string;
+    let portalInstruction = '';
 
     if (campComplete) {
       // CAMP is complete — close the conversation warmly, no more questions
@@ -433,6 +436,28 @@ Your message must:
 5. Do NOT repeat back their price or timeline in a way that implies agreement or commitment.`;
     } else {
       // CAMP not yet complete — let the AI decide what to explore next
+
+      // ── Seller Portal URL injection ──────────────────────────────────────
+      // When price + timeline are known but condition is missing, include the
+      // portal URL so the AI can ask the seller to verify details and upload photos.
+      if (
+        this.sellerPortalService &&
+        lead.askingPrice != null &&
+        lead.timeline != null &&
+        lead.conditionLevel == null
+      ) {
+        const portalSent = await this.sellerPortalService.hasPortalLinkBeenSent(leadId);
+        if (!portalSent) {
+          const portalUrl = await this.sellerPortalService.getPortalUrl(leadId);
+          if (portalUrl) {
+            portalInstruction = `
+IMPORTANT — INCLUDE THIS LINK: You have a property portal page for this seller. Include this URL in your message: ${portalUrl}
+Frame it naturally as you transition to asking about the property condition — something like "I put together a page with the details we have on file for your property — you can check it out here and upload any photos, that really helps us get a feel for the condition: ${portalUrl}"
+Do NOT just paste the link by itself. Weave it into your message naturally.`;
+          }
+        }
+      }
+
       purpose = `${propertyContext}${justExtractedSummary ? justExtractedSummary + ' ' : ''}
 CAMP PROGRESS:
 - Already gathered: ${knownFields.length > 0 ? knownFields.join(', ') : 'Nothing yet'}
@@ -442,7 +467,7 @@ Read the seller's last message carefully. Respond naturally to what they said.
 ${isActiveListing ? 'This property IS already listed for sale. Do not ask if they want to sell. Ask about their experience with the listing or why they are exploring a cash offer.' : ''}
 If the conversation naturally opens up a chance to learn about one of the missing topics, take it. But do NOT force it. It's fine to just respond to what the seller said without asking a CAMP question if the moment isn't right.
 If the seller seems frustrated, confused, sharing something personal, or asked you a direct question, address THAT first. Building rapport is more important than checking boxes.
-You decide the right approach based on the conversation flow.`.trim();
+You decide the right approach based on the conversation flow.${portalInstruction}`.trim();
     }
 
     const knownData = {
@@ -500,6 +525,13 @@ You decide the right approach based on the conversation flow.`.trim();
 
       await this.sendMessage(leadId, messageBody);
       await this.incrementAutoResponseCount(leadId);
+
+      // Mark portal link as sent if we included it in this message
+      if (portalInstruction && this.sellerPortalService) {
+        this.sellerPortalService.markPortalLinkSent(leadId).catch((err) => {
+          this.logger.warn(`Failed to mark portal link sent for ${leadId}: ${err.message}`);
+        });
+      }
 
       // Refresh CAMP flags
       await this.scoringService.refreshCampFlags(leadId);

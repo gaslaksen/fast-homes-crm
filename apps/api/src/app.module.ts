@@ -19,6 +19,7 @@ import { BoldSignModule } from './boldsign/boldsign.module';
 import { CampaignsModule } from './campaigns/campaigns.module';
 import { DealSearchModule } from './deal-search/deal-search.module';
 import { PartnersModule } from './partners/partners.module';
+import { SellerPortalModule } from './seller-portal/seller-portal.module';
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { PartnersModule } from './partners/partners.module';
     CampaignsModule,
     DealSearchModule,
     PartnersModule,
+    SellerPortalModule,
   ],
 })
 export class AppModule {}

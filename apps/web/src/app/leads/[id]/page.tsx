@@ -13,6 +13,7 @@ import AppNav from '@/components/AppNav';
 import LeadTabNav, { DETAIL_TABS, COMPS_TABS } from '@/components/LeadTabNav';
 import Avatar from '@/components/Avatar';
 import AiSummaryBox from '@/components/AiSummaryBox';
+import SellerPortalPanel from '@/components/SellerPortalPanel';
 import { format } from 'date-fns';
 import { formatPhoneDisplay } from '@/lib/format';
 
@@ -1132,6 +1133,9 @@ export default function LeadDetailPage() {
                 onRefresh={loadLead}
                 onViewAnalysis={() => router.push(`/leads/${leadId}/comps-analysis?tab=deal-intel`)}
               />
+
+              {/* Seller Portal */}
+              <SellerPortalPanel leadId={leadId} />
 
               {/* Assignment */}
               <div className="card">

@@ -364,6 +364,12 @@ export const partnersAPI = {
   resend: (shareId: string) => api.post(`/partners/shares/${shareId}/resend`),
 };
 
+export const sellerPortalAPI = {
+  getInfo: (leadId: string) => api.get(`/leads/${leadId}/seller-portal`),
+  sendLink: (leadId: string) => api.post(`/leads/${leadId}/seller-portal/send`),
+  updateStatus: (leadId: string, status: 'active' | 'disabled') => api.patch(`/leads/${leadId}/seller-portal`, { status }),
+};
+
 export const dispoAPI = {
   getSummary: (leadId: string) => api.get(`/leads/${leadId}/dispo`),
   updateDealNumbers: (leadId: string, data: { arv?: number | null; repairCosts?: number | null; askingPrice?: number | null; assignmentFee?: number | null; maoPercent?: number | null }) =>

@@ -9,9 +9,10 @@ import { CompsModule } from '../comps/comps.module';
 import { PipelineModule } from '../pipeline/pipeline.module';
 import { DripModule } from '../drip/drip.module';
 import { CampaignsModule } from '../campaigns/campaigns.module';
+import { SellerPortalModule } from '../seller-portal/seller-portal.module';
 
 @Module({
-  imports: [ScoringModule, forwardRef(() => MessagesModule), PhotosModule, CompsModule, PipelineModule, forwardRef(() => DripModule), forwardRef(() => CampaignsModule)],
+  imports: [ScoringModule, forwardRef(() => MessagesModule), PhotosModule, CompsModule, PipelineModule, forwardRef(() => DripModule), forwardRef(() => CampaignsModule), SellerPortalModule],
   controllers: [LeadsController, TasksController],
   providers: [LeadsService, LeadImportService],
   exports: [LeadsService],

@@ -120,7 +120,7 @@ export default function DispoTab({
   const [docSent, setDocSent] = useState<{ documentId: string; signingUrl: string; title: string } | null>(null);
 
   // Offer form state
-  const [offerForm, setOfferForm] = useState({ offerAmount: '', notes: '', offerDate: '' });
+  const [offerForm, setOfferForm] = useState({ offerAmount: '', notes: '', offerDate: '', visibleOnPortal: false, terms: '' });
 
   const load = useCallback(async () => {
     try {
@@ -189,8 +189,10 @@ export default function DispoTab({
         offerAmount: parseFloat(offerForm.offerAmount),
         notes: offerForm.notes || null,
         offerDate: offerForm.offerDate || undefined,
+        visibleOnPortal: offerForm.visibleOnPortal,
+        terms: offerForm.terms || null,
       });
-      setOfferForm({ offerAmount: '', notes: '', offerDate: '' });
+      setOfferForm({ offerAmount: '', notes: '', offerDate: '', visibleOnPortal: false, terms: '' });
       setShowOfferForm(false);
       await load();
     } catch (e) {
@@ -286,6 +288,28 @@ export default function DispoTab({
                 className="input w-full"
                 placeholder="Any context about this offer..."
               />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Terms for Seller</label>
+              <textarea
+                value={offerForm.terms}
+                onChange={(e) => setOfferForm((f) => ({ ...f, terms: e.target.value }))}
+                className="input w-full"
+                rows={3}
+                placeholder="Cash offer, close in 30 days, no repairs needed..."
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="visibleOnPortal"
+                checked={offerForm.visibleOnPortal}
+                onChange={(e) => setOfferForm((f) => ({ ...f, visibleOnPortal: e.target.checked }))}
+                className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              <label htmlFor="visibleOnPortal" className="text-xs text-gray-600 dark:text-gray-400">
+                Show on Seller Portal (seller can accept/decline)
+              </label>
             </div>
             <div className="flex gap-2 pt-1">
               <button onClick={handleCreateOffer} disabled={saving || !offerForm.offerAmount} className="btn btn-primary btn-sm">
