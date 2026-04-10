@@ -6,6 +6,7 @@ import { RedfinService } from './redfin.service';
 import { ZillowService } from './zillow.service';
 import { RentCastService } from '../comps/rentcast.service';
 import sharp from 'sharp';
+import heicConvert from 'heic-convert';
 import { randomUUID } from 'crypto';
 import axios from 'axios';
 
@@ -126,16 +127,33 @@ export class PhotosService {
     const lead = await this.prisma.lead.findUnique({ where: { id: leadId } });
     if (!lead) throw new Error('Lead not found');
 
-    // Process main image (max 800px wide, JPEG 80%) → base64 data URI
-    const mainBuffer = await sharp(buffer)
+    // Convert HEIC/HEIF to JPEG before processing (iPhone default format).
+    // Sharp's libvips may not have HEIF support on all platforms (e.g. Railway),
+    // so we use a pure-JS decoder as a preprocessing step.
+    let inputBuffer = buffer;
+    const isHeic = this.isHeicBuffer(buffer);
+    if (isHeic) {
+      console.log(`📸 Converting HEIC to JPEG for lead ${leadId}`);
+      const converted = await heicConvert({
+        buffer: buffer,
+        format: 'JPEG',
+        quality: 0.9,
+      });
+      inputBuffer = Buffer.from(converted);
+    }
+
+    // Process main image (max 800px wide, JPEG 70%) → base64 data URI
+    const mainBuffer = await sharp(inputBuffer)
+      .rotate() // auto-rotate based on EXIF orientation
       .resize(800, null, { withoutEnlargement: true })
-      .jpeg({ quality: 80 })
+      .jpeg({ quality: 70 })
       .toBuffer();
 
     // Process thumbnail (400px wide) → base64 data URI
-    const thumbBuffer = await sharp(buffer)
+    const thumbBuffer = await sharp(inputBuffer)
+      .rotate()
       .resize(400, null, { withoutEnlargement: true })
-      .jpeg({ quality: 70 })
+      .jpeg({ quality: 60 })
       .toBuffer();
 
     const photo: any = {
@@ -372,5 +390,17 @@ export class PhotosService {
     });
 
     this.logger.log(`Listing status overridden for lead ${leadId}: isActiveListing=${isActiveListing}`);
+  }
+
+  /**
+   * Detect HEIC/HEIF files by magic bytes.
+   * HEIC files have 'ftyp' at offset 4 followed by heic/heix/mif1/msf1.
+   */
+  private isHeicBuffer(buffer: Buffer): boolean {
+    if (buffer.length < 12) return false;
+    const ftyp = buffer.toString('ascii', 4, 8);
+    if (ftyp !== 'ftyp') return false;
+    const brand = buffer.toString('ascii', 8, 12);
+    return ['heic', 'heix', 'mif1', 'msf1', 'heis', 'hevc'].includes(brand);
   }
 }
