@@ -2,7 +2,7 @@ import { Injectable, Logger, NotFoundException, BadRequestException } from '@nes
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { PhotosService } from '../photos/photos.service';
-import { randomBytes } from 'crypto';
+import { randomBytes, randomInt } from 'crypto';
 
 @Injectable()
 export class SellerPortalService {
@@ -23,7 +23,13 @@ export class SellerPortalService {
     const existing = await this.prisma.sellerPortal.findUnique({ where: { leadId } });
     if (existing) return existing;
 
-    const viewToken = randomBytes(32).toString('hex');
+    // Short 8-char alphanumeric token — SMS-friendly, avoids carrier spam filters
+    // that flag long random URLs. 62^8 = 218 trillion combinations, collision-safe.
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    let viewToken = '';
+    for (let i = 0; i < 8; i++) {
+      viewToken += chars[randomInt(chars.length)];
+    }
 
     const portal = await this.prisma.sellerPortal.create({
       data: { leadId, viewToken },
