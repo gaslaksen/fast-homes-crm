@@ -876,55 +876,20 @@ export class RentCastService {
       return { comps: [], calculatedARV: 0, arvPerSqft: null, arvConfidence: 0, compCount: 0, methodology: 'avm-fallback', searchRadius: 0, searchDateRange: 0 };
     }
 
-    const minComps = 5;
-    const propType = this.mapPropertyType(subject.propertyType);
-
-    // 3-tier widening: narrow → medium → wide
-    const tiers = [
-      {
-        radius: options?.radius || 3,
-        saleDateRange: options?.saleDateRange || 180,
-        bedrooms: subject.bedrooms != null ? `${Math.max(1, subject.bedrooms - 1)}:${subject.bedrooms + 1}` : undefined,
-        bathrooms: subject.bathrooms != null ? `${Math.max(1, subject.bathrooms - 1)}:${subject.bathrooms + 1}` : undefined,
-        squareFootage: subject.squareFootage
-          ? `${Math.round(subject.squareFootage * 0.8)}:${Math.round(subject.squareFootage * 1.2)}`
-          : undefined,
-      },
-      {
-        radius: 5,
-        saleDateRange: 270,
-        bedrooms: subject.bedrooms != null ? `${Math.max(1, subject.bedrooms - 1)}:${subject.bedrooms + 1}` : undefined,
-        bathrooms: undefined, // relax bath filter
-        squareFootage: subject.squareFootage
-          ? `${Math.round(subject.squareFootage * 0.7)}:${Math.round(subject.squareFootage * 1.3)}`
-          : undefined,
-      },
-      {
-        radius: 5,
-        saleDateRange: 365,
-        bedrooms: undefined, // drop all attribute filters
-        bathrooms: undefined,
-        squareFootage: undefined,
-      },
-    ];
-
+    // Single wide-open call — no bed/bath/sqft/type filters. Let the UI handle manual filtering.
+    const usedRadius = options?.radius || 5;
+    const usedDateRange = options?.saleDateRange || 365;
     let rawComps: RentCastProperty[] = [];
-    let usedRadius = tiers[0].radius;
-    let usedDateRange = tiers[0].saleDateRange;
 
-    for (const tier of tiers) {
+    {
       const params: Record<string, any> = {
         address,
-        radius: tier.radius,
-        saleDateRange: tier.saleDateRange,
+        radius: usedRadius,
+        saleDateRange: usedDateRange,
         limit: options?.limit || 25,
       };
-      if (propType) params.propertyType = propType;
-      if (tier.bedrooms) params.bedrooms = tier.bedrooms;
-      if (tier.bathrooms) params.bathrooms = tier.bathrooms;
-      if (tier.squareFootage) params.squareFootage = tier.squareFootage;
 
-      this.logger.log(`getSoldComps tier: radius=${tier.radius}mi, dateRange=${tier.saleDateRange}d, beds=${tier.bedrooms || 'any'}, baths=${tier.bathrooms || 'any'}, sqft=${tier.squareFootage || 'any'}`);
+      this.logger.log(`getSoldComps: radius=${usedRadius}mi, dateRange=${usedDateRange}d, no attribute filters`);
 
       try {
         const response = await axios.get<RentCastProperty[]>(`${RENTCAST_BASE_URL}/properties`, {
@@ -934,8 +899,6 @@ export class RentCastService {
         });
 
         const results = response.data || [];
-        usedRadius = tier.radius;
-        usedDateRange = tier.saleDateRange;
 
         // Filter to only properties with confirmed sale data (exclude active/pending listings)
         // In non-disclosure states (e.g. TX), lastSalePrice may be absent — accept tax assessment as fallback
@@ -949,26 +912,14 @@ export class RentCastService {
         });
 
         this.logger.log(`getSoldComps: ${results.length} returned, ${soldResults.length} with confirmed sale data`);
-
-        if (soldResults.length >= minComps) {
-          rawComps = soldResults;
-          break;
-        }
-
-        // Keep what we have and try next tier if not enough
-        if (soldResults.length > rawComps.length) {
-          rawComps = soldResults;
-        }
+        rawComps = soldResults;
       } catch (error) {
         this.handleApiError(error, 'getSoldComps');
-        if (error instanceof AxiosError && (error.response?.status === 401 || error.response?.status === 429)) {
-          break; // Don't retry on auth/rate limit
-        }
       }
     }
 
     if (rawComps.length === 0) {
-      this.logger.warn('getSoldComps: no sold comps found after all tiers');
+      this.logger.warn('getSoldComps: no sold comps found');
       return { comps: [], calculatedARV: 0, arvPerSqft: null, arvConfidence: 0, compCount: 0, methodology: 'avm-fallback', searchRadius: usedRadius, searchDateRange: usedDateRange };
     }
 
