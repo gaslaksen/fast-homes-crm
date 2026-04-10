@@ -366,6 +366,7 @@ export const partnersAPI = {
 
 export const sellerPortalAPI = {
   getInfo: (leadId: string) => api.get(`/leads/${leadId}/seller-portal`),
+  create: (leadId: string) => api.post(`/leads/${leadId}/seller-portal`),
   sendLink: (leadId: string) => api.post(`/leads/${leadId}/seller-portal/send`),
   updateStatus: (leadId: string, status: 'active' | 'disabled') => api.patch(`/leads/${leadId}/seller-portal`, { status }),
 };

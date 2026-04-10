@@ -66,6 +66,12 @@ export class SellerPortalController {
     return this.sellerPortalService.getPortalInfo(leadId);
   }
 
+  @Post('leads/:id/seller-portal')
+  async createPortal(@Param('id') leadId: string) {
+    const portal = await this.sellerPortalService.createPortal(leadId);
+    return this.sellerPortalService.getPortalInfo(leadId);
+  }
+
   @Post('leads/:id/seller-portal/send')
   async sendPortalLink(
     @Param('id') leadId: string,

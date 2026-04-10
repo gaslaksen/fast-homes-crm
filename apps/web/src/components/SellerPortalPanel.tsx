@@ -10,6 +10,7 @@ interface SellerPortalPanelProps {
 export default function SellerPortalPanel({ leadId }: SellerPortalPanelProps) {
   const [portal, setPortal] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [creating, setCreating] = useState(false);
   const [sending, setSending] = useState(false);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState('');
@@ -22,6 +23,19 @@ export default function SellerPortalPanel({ leadId }: SellerPortalPanelProps) {
   };
 
   useEffect(() => { fetchPortal(); }, [leadId]);
+
+  const handleCreate = async () => {
+    setCreating(true);
+    setError('');
+    try {
+      const res = await sellerPortalAPI.create(leadId);
+      setPortal(res.data);
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Failed to create portal');
+    } finally {
+      setCreating(false);
+    }
+  };
 
   const handleCopy = () => {
     if (portal?.portalUrl) {
@@ -36,7 +50,7 @@ export default function SellerPortalPanel({ leadId }: SellerPortalPanelProps) {
     setError('');
     try {
       await sellerPortalAPI.sendLink(leadId);
-      fetchPortal(); // Refresh to show updated sentAt
+      fetchPortal();
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to send portal link');
     } finally {
@@ -56,7 +70,26 @@ export default function SellerPortalPanel({ leadId }: SellerPortalPanelProps) {
   };
 
   if (loading) return null;
-  if (!portal) return null;
+
+  // No portal exists — show create button
+  if (!portal) {
+    return (
+      <div className="bg-white rounded-lg border border-gray-200 p-4">
+        <h3 className="text-sm font-semibold text-gray-900 mb-2">Seller Portal</h3>
+        <p className="text-xs text-gray-500 mb-3">
+          Create a branded property page for this seller where they can view details, upload photos, and respond to offers.
+        </p>
+        <button
+          onClick={handleCreate}
+          disabled={creating}
+          className="w-full px-3 py-2 text-xs font-medium text-white bg-blue-600 rounded hover:bg-blue-700 transition disabled:opacity-50"
+        >
+          {creating ? 'Creating...' : 'Create Seller Portal'}
+        </button>
+        {error && <p className="text-xs text-red-600 mt-2">{error}</p>}
+      </div>
+    );
+  }
 
   const isActive = portal.status === 'active';
 
