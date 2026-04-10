@@ -67,11 +67,6 @@ export class CompsService {
         this.logger.error(`RentCast requested but not configured for lead ${leadId}`);
         return { arv: 0, confidence: 0, compsCount: 0, source: 'rentcast (not configured)', attom: null };
       }
-      // Fire ATTOM enrichment in parallel for property details (non-blocking)
-      if (this.attomService.isConfigured) {
-        this.attomService.enrichLead(leadId, address, { forceRefresh: options?.forceRefresh })
-          .catch(err => this.logger.warn(`ATTOM enrichment failed (non-fatal): ${err.message}`));
-      }
       return await this.runRentCastPipeline(leadId, address, options);
     }
 
