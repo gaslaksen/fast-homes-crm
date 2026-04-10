@@ -33,6 +33,7 @@ interface Lead {
   conditionLevel?: string;
   lastCompsDate?: string;
   primaryPhoto?: string;
+  photos?: any[];
   scoreBand?: string;
   totalScore?: number;
   yearBuilt?: number;
