@@ -1244,6 +1244,8 @@ export class LeadsService {
         offerDate: data.offerDate ? new Date(data.offerDate) : new Date(),
         status: data.status ?? 'pending',
         notes: data.notes ?? null,
+        visibleOnPortal: data.visibleOnPortal ?? false,
+        terms: data.terms ?? null,
       },
     });
 
@@ -1274,6 +1276,8 @@ export class LeadsService {
         ...(data.counterAmount !== undefined && { counterAmount: data.counterAmount }),
         ...(data.notes !== undefined && { notes: data.notes }),
         ...(data.offerAmount !== undefined && { offerAmount: data.offerAmount }),
+        ...(data.visibleOnPortal !== undefined && { visibleOnPortal: data.visibleOnPortal }),
+        ...(data.terms !== undefined && { terms: data.terms }),
       },
     });
 
