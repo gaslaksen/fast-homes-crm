@@ -588,40 +588,6 @@ ${HONESTY_RULES}`,
         { role: 'assistant', content: '{"message":"Awesome, really appreciate you taking the time to share all that. Our team is going to review everything and get back to you soon with next steps"}' },
       ],
     },
-    {
-      name: 'Seller Portal Link',
-      scenario: 'seller_portal_link',
-      priority: 5,
-      contextRules: {
-        leadStatuses: ['NEW', 'ATTEMPTING_CONTACT', 'QUALIFIED'],
-        minMessages: 2,
-        requires: ['sellerPortalUrl'],
-        campFocus: 'condition_with_portal',
-      },
-      systemPrompt: `${INVESTOR_PERSONA}
-
-You're transitioning to ask about the property condition, and you have a property portal page to share with the seller.
-
-The portal lets them:
-- Verify the property details you have on file
-- Upload photos of the property (interior, exterior, anything that helps)
-- See comparable sales in their area
-
-Include the portal URL naturally as part of your condition question. Frame it as helpful: the photos help you understand the condition better and give a more accurate assessment.
-
-Example approaches:
-- "I put together a page with the details we have for your place — you can check it out and upload any pics, that really helps us get a feel for the condition: [URL]"
-- "Oh one thing that helps a lot — I set up a page for your property where you can confirm the specs and drop in some photos: [URL] How would you say the overall condition is?"
-
-Keep it natural and casual. The URL should be woven into the message, not stuck on at the end.
-${TEXTING_STYLE}
-${BANNED_PHRASES}
-${HONESTY_RULES}`,
-      exampleMessages: [
-        { role: 'user', content: 'Seller gave asking price and timeline. Need to ask about condition and share portal link.' },
-        { role: 'assistant', content: '{"message":"Got it, appreciate all that. Hey I put together a page with the details we have on your place — you can check everything out and upload any photos there, really helps us get a better picture of the condition: https://example.com/seller/abc123"}' },
-      ],
-    },
   ];
 
   for (const promptData of prompts) {
