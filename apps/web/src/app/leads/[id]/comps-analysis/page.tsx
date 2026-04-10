@@ -208,6 +208,8 @@ export default function CompsAnalysisPage() {
   const [analyzingPhotos, setAnalyzingPhotos] = useState(false);
   const [selectedPhotos, setSelectedPhotos] = useState<File[]>([]);
   const [photoThumbnails, setPhotoThumbnails] = useState<{file: File; url: string; status: 'ready'|'uploading'|'done'}[]>([]);
+  const [selectedLeadPhotoIds, setSelectedLeadPhotoIds] = useState<Set<string>>(new Set());
+  const [analyzingLeadPhotos, setAnalyzingLeadPhotos] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
 
   // ATTOM enrichment
@@ -546,6 +548,40 @@ export default function CompsAnalysisPage() {
       setPhotoThumbnails(prev => prev.map(t => ({ ...t, status: 'ready' as const })));
     } finally {
       setAnalyzingPhotos(false);
+    }
+  };
+
+  const toggleLeadPhoto = (photoId: string) => {
+    setSelectedLeadPhotoIds(prev => {
+      const next = new Set(prev);
+      if (next.has(photoId)) next.delete(photoId);
+      else if (next.size < 30) next.add(photoId);
+      return next;
+    });
+  };
+
+  const selectAllLeadPhotos = () => {
+    const photos = (lead?.photos as any[]) || [];
+    if (selectedLeadPhotoIds.size === photos.length) {
+      setSelectedLeadPhotoIds(new Set());
+    } else {
+      setSelectedLeadPhotoIds(new Set(photos.slice(0, 30).map((p: any) => p.id)));
+    }
+  };
+
+  const handleAnalyzeLeadPhotos = async () => {
+    if (!analysis || selectedLeadPhotoIds.size === 0) return;
+    setAnalyzingLeadPhotos(true);
+    try {
+      const res = await compAnalysisAPI.analyzeLeadPhotos(leadId, analysis.id, Array.from(selectedLeadPhotoIds));
+      if (res.data.repairLow) setRepairCosts(Math.round((res.data.repairLow + res.data.repairHigh) / 2));
+      setSelectedLeadPhotoIds(new Set());
+      await refreshAnalysis();
+    } catch (error: any) {
+      const msg = error?.response?.data?.message || error?.message || 'Unknown error';
+      alert(`Photo analysis failed: ${msg}`);
+    } finally {
+      setAnalyzingLeadPhotos(false);
     }
   };
 
@@ -2255,6 +2291,75 @@ export default function CompsAnalysisPage() {
                   ))}
                 </div>
               )}
+
+              {/* Select from existing lead photos */}
+              {(() => {
+                const leadPhotos = (lead?.photos as any[]) || [];
+                if (leadPhotos.length === 0) return null;
+                return (
+                  <div className="mb-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                        Or select from property photos ({leadPhotos.length})
+                      </p>
+                      <button
+                        onClick={selectAllLeadPhotos}
+                        className="text-xs text-purple-600 hover:text-purple-800 font-medium"
+                      >
+                        {selectedLeadPhotoIds.size === leadPhotos.length ? 'Deselect All' : 'Select All'}
+                      </button>
+                    </div>
+                    <div className="flex flex-wrap gap-2 mb-3">
+                      {leadPhotos.map((p: any) => {
+                        const isSelected = selectedLeadPhotoIds.has(p.id);
+                        return (
+                          <button
+                            key={p.id}
+                            onClick={() => toggleLeadPhoto(p.id)}
+                            className={`relative w-16 h-16 rounded-lg overflow-hidden border-2 transition-all ${
+                              isSelected
+                                ? 'border-purple-500 ring-2 ring-purple-300'
+                                : 'border-gray-200 dark:border-gray-600 hover:border-purple-300'
+                            }`}
+                          >
+                            <img
+                              src={p.thumbnailUrl || p.url}
+                              alt=""
+                              className="w-full h-full object-cover"
+                            />
+                            {isSelected && (
+                              <div className="absolute inset-0 bg-purple-500/20 flex items-center justify-center">
+                                <span className="text-white text-sm font-bold bg-purple-600 rounded-full w-5 h-5 flex items-center justify-center">✓</span>
+                              </div>
+                            )}
+                            {p.source && (
+                              <span className="absolute bottom-0 left-0 right-0 text-[9px] text-center bg-black/50 text-white py-0.5 truncate">
+                                {p.source === 'seller-portal' ? 'Seller' : p.source === 'seller-mms' ? 'MMS' : p.source === 'streetview' ? 'Street' : p.source}
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {selectedLeadPhotoIds.size > 0 && (
+                      <button
+                        onClick={handleAnalyzeLeadPhotos}
+                        disabled={analyzingLeadPhotos || !analysis}
+                        className="btn bg-purple-600 hover:bg-purple-700 text-white w-full mb-4"
+                      >
+                        {analyzingLeadPhotos ? (
+                          <span className="flex items-center justify-center gap-2">
+                            <span className="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
+                            Analyzing {selectedLeadPhotoIds.size} property photo{selectedLeadPhotoIds.size !== 1 ? 's' : ''} with AI...
+                          </span>
+                        ) : (
+                          `Analyze ${selectedLeadPhotoIds.size} Property Photo${selectedLeadPhotoIds.size !== 1 ? 's' : ''} with AI`
+                        )}
+                      </button>
+                    )}
+                  </div>
+                );
+              })()}
 
               <button
                 onClick={handleAnalyzePhotos}

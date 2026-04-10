@@ -150,6 +150,17 @@ export class CompAnalysisController {
     return this.compAnalysisService.analyzePhotos(analysisId, photos);
   }
 
+  @Post(':analysisId/analyze-lead-photos')
+  async analyzeLeadPhotos(
+    @Param('leadId') leadId: string,
+    @Param('analysisId') analysisId: string,
+    @Body() body: { photoIds?: string[] },
+  ) {
+    return this.compAnalysisService.analyzePhotosFromLead(analysisId, leadId, {
+      photoIds: body.photoIds,
+    });
+  }
+
   @Post(':analysisId/risk-flags')
   async assessRiskFlags(
     @Param('analysisId') analysisId: string,

@@ -1630,20 +1630,29 @@ Use Midwest/rural Ohio pricing. Be specific about what you see — don't general
   async analyzePhotosFromLead(
     analysisId: string,
     leadId: string,
-    source = 'seller-mms',
+    options?: { source?: string; photoIds?: string[] },
   ): Promise<{ assessment: string; repairLow: number; repairHigh: number }> {
     const lead = await this.prisma.lead.findUnique({ where: { id: leadId } });
     if (!lead) throw new Error('Lead not found');
 
     const allPhotos = (lead.photos as any[]) || [];
-    const mmsPhotos = allPhotos.filter((p: any) => p.source === source);
 
-    if (mmsPhotos.length === 0) {
-      throw new Error(`No ${source} photos found for lead ${leadId}`);
+    // Filter: specific photo IDs, or by source, or all photos
+    let selected: any[];
+    if (options?.photoIds?.length) {
+      selected = allPhotos.filter((p: any) => options.photoIds!.includes(p.id));
+    } else if (options?.source) {
+      selected = allPhotos.filter((p: any) => p.source === options.source);
+    } else {
+      selected = allPhotos;
+    }
+
+    if (selected.length === 0) {
+      throw new Error('No matching photos found for analysis');
     }
 
     // Convert base64 data URIs back to Multer-like objects for analyzePhotos()
-    const multerFiles: Express.Multer.File[] = mmsPhotos.map((p: any, i: number) => {
+    const multerFiles: Express.Multer.File[] = selected.slice(0, 30).map((p: any, i: number) => {
       let buffer: Buffer;
       if (typeof p.url === 'string' && p.url.startsWith('data:')) {
         const base64Data = p.url.split(',')[1];
@@ -1654,7 +1663,7 @@ Use Midwest/rural Ohio pricing. Be specific about what you see — don't general
 
       return {
         fieldname: 'photos',
-        originalname: `seller-mms-${i}.jpg`,
+        originalname: `lead-photo-${i}.jpg`,
         encoding: '7bit',
         mimetype: 'image/jpeg',
         buffer,
@@ -1662,7 +1671,7 @@ Use Midwest/rural Ohio pricing. Be specific about what you see — don't general
       } as Express.Multer.File;
     });
 
-    this.logger.log(`Auto-analyzing ${multerFiles.length} ${source} photos for lead ${leadId}`);
+    this.logger.log(`Analyzing ${multerFiles.length} lead photos for lead ${leadId}`);
     return this.analyzePhotos(analysisId, multerFiles);
   }
 

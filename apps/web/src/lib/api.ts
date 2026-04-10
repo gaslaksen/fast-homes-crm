@@ -180,6 +180,8 @@ export const compAnalysisAPI = {
     api.post(`/leads/${leadId}/comp-analysis/${analysisId}/analyze-photos`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     }),
+  analyzeLeadPhotos: (leadId: string, analysisId: string, photoIds: string[]) =>
+    api.post(`/leads/${leadId}/comp-analysis/${analysisId}/analyze-lead-photos`, { photoIds }),
 };
 
 // Dashboard API
