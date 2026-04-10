@@ -168,6 +168,7 @@ export interface ScoredComp {
   longitude: number | null;
   lastSaleDate: string;
   lastSalePrice: number;
+  priceSource?: 'sale' | 'tax-assessment';
   bedrooms: number | null;
   bathrooms: number | null;
   squareFootage: number | null;

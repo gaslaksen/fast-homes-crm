@@ -937,11 +937,15 @@ export class RentCastService {
         usedRadius = tier.radius;
         usedDateRange = tier.saleDateRange;
 
-        // Filter to only properties with actual sale data (exclude active/pending listings)
+        // Filter to only properties with confirmed sale data (exclude active/pending listings)
+        // In non-disclosure states (e.g. TX), lastSalePrice may be absent — accept tax assessment as fallback
         const soldResults = results.filter(p => {
           const status = (p.status || '').toLowerCase();
           if (status === 'active' || status === 'pending') return false;
-          return p.lastSaleDate && p.lastSalePrice && p.lastSalePrice > 0;
+          if (!p.lastSaleDate) return false;
+          if (p.lastSalePrice && p.lastSalePrice > 0) return true;
+          if (p.taxAssessments && Object.keys(p.taxAssessments).length > 0) return true;
+          return false;
         });
 
         this.logger.log(`getSoldComps: ${results.length} returned, ${soldResults.length} with confirmed sale data`);
@@ -1012,9 +1016,28 @@ export class RentCastService {
       this.logger.log(`getSoldComps: filtered ${rawComps.length} → ${filteredComps.length} (removed subject/non-residential)`);
     }
 
+    // Helper: get best available price (sale price preferred, tax assessment fallback)
+    const getBestPrice = (p: RentCastProperty): { price: number; source: 'sale' | 'tax-assessment' } | null => {
+      if (p.lastSalePrice && p.lastSalePrice > 0) return { price: p.lastSalePrice, source: 'sale' };
+      if (p.taxAssessments) {
+        const years = Object.keys(p.taxAssessments).sort().reverse();
+        for (const year of years) {
+          const val = p.taxAssessments[year]?.value;
+          if (val && val > 0) return { price: val, source: 'tax-assessment' };
+        }
+      }
+      return null;
+    };
+
     // Score each comp
+    let taxAssessmentCount = 0;
     const now = new Date();
     const scored: ScoredComp[] = filteredComps.map(c => {
+      const priceData = getBestPrice(c);
+      if (!priceData) return null!; // filtered out below
+
+      if (priceData.source === 'tax-assessment') taxAssessmentCount++;
+
       // Calculate distance
       let dist = 0;
       if (subject.latitude && subject.longitude && c.latitude && c.longitude) {
@@ -1031,7 +1054,8 @@ export class RentCastService {
         latitude: c.latitude || null,
         longitude: c.longitude || null,
         lastSaleDate: c.lastSaleDate!,
-        lastSalePrice: c.lastSalePrice!,
+        lastSalePrice: priceData.price,
+        priceSource: priceData.source,
         bedrooms: c.bedrooms ?? null,
         bathrooms: c.bathrooms ?? null,
         squareFootage: c.squareFootage ?? null,
@@ -1044,7 +1068,11 @@ export class RentCastService {
         hasGarage: c.features?.garage || false,
         ...scores,
       };
-    });
+    }).filter(Boolean);
+
+    if (taxAssessmentCount > 0) {
+      this.logger.log(`getSoldComps: ${taxAssessmentCount}/${scored.length} comps using tax assessment as price (non-disclosure state)`);
+    }
 
     // Sort by score descending, take top 8
     scored.sort((a, b) => b.totalScore - a.totalScore);
