@@ -59,10 +59,10 @@ interface RentCastProperty {
   apn?: string;
   subdivision?: string;
   zoning?: string;
+  status?: string;
 }
 
 interface RentCastComparable extends RentCastProperty {
-  status?: string;          // "Sold" | "Active" | "Pending" — MUST be "Sold" to use as comp
   price?: number;           // Listing price or AVM estimate — NOT necessarily the sale price
   listingType?: string;
   listedDate?: string;      // When listed — NOT a sale date
@@ -937,10 +937,12 @@ export class RentCastService {
         usedRadius = tier.radius;
         usedDateRange = tier.saleDateRange;
 
-        // Filter to only properties with actual sale data
-        const soldResults = results.filter(p =>
-          p.lastSaleDate && p.lastSalePrice && p.lastSalePrice > 0,
-        );
+        // Filter to only properties with actual sale data (exclude active/pending listings)
+        const soldResults = results.filter(p => {
+          const status = (p.status || '').toLowerCase();
+          if (status === 'active' || status === 'pending') return false;
+          return p.lastSaleDate && p.lastSalePrice && p.lastSalePrice > 0;
+        });
 
         this.logger.log(`getSoldComps: ${results.length} returned, ${soldResults.length} with confirmed sale data`);
 
