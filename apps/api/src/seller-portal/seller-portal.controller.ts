@@ -72,6 +72,11 @@ export class SellerPortalController {
     return this.sellerPortalService.getPortalInfo(leadId);
   }
 
+  @Post('leads/:id/seller-portal/regenerate')
+  async regenerateToken(@Param('id') leadId: string) {
+    return this.sellerPortalService.regenerateToken(leadId);
+  }
+
   @Post('leads/:id/seller-portal/send')
   async sendPortalLink(
     @Param('id') leadId: string,

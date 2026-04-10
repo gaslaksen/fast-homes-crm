@@ -298,6 +298,28 @@ export class SellerPortalService {
   }
 
   /**
+   * Regenerate the portal token (replaces old long token with short one).
+   */
+  async regenerateToken(leadId: string) {
+    const portal = await this.prisma.sellerPortal.findUnique({ where: { leadId } });
+    if (!portal) throw new NotFoundException('No portal found for this lead');
+
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    let newToken = '';
+    for (let i = 0; i < 8; i++) {
+      newToken += chars[randomInt(chars.length)];
+    }
+
+    await this.prisma.sellerPortal.update({
+      where: { id: portal.id },
+      data: { viewToken: newToken, portalLinkSentAt: null },
+    });
+
+    this.logger.log(`Portal token regenerated for lead ${leadId}`);
+    return this.getPortalInfo(leadId);
+  }
+
+  /**
    * Enable or disable a portal (CRM agent action).
    */
   async updatePortalStatus(leadId: string, status: 'active' | 'disabled') {

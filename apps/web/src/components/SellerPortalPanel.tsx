@@ -58,6 +58,16 @@ export default function SellerPortalPanel({ leadId }: SellerPortalPanelProps) {
     }
   };
 
+  const handleRegenerate = async () => {
+    setError('');
+    try {
+      const res = await sellerPortalAPI.regenerate(leadId);
+      setPortal(res.data);
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Failed to regenerate token');
+    }
+  };
+
   const handleToggle = async () => {
     if (!portal) return;
     const newStatus = portal.status === 'active' ? 'disabled' : 'active';
@@ -157,6 +167,12 @@ export default function SellerPortalPanel({ leadId }: SellerPortalPanelProps) {
             >
               View Portal
             </a>
+          </div>
+
+          <div className="mt-2 text-center">
+            <button onClick={handleRegenerate} className="text-xs text-gray-400 hover:text-gray-600 transition">
+              Regenerate link
+            </button>
           </div>
 
           {error && <p className="text-xs text-red-600 mt-2">{error}</p>}
