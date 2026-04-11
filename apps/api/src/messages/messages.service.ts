@@ -577,7 +577,7 @@ You decide the right approach based on the conversation flow.${portalInstruction
     }
 
     // Fixed initial message — no AI. Asks for price and timeline upfront.
-    const messageBody = `Hi ${lead.sellerFirstName}, this is Ian. We just received your information about you looking to sell your house. How much are you asking for it? What are your timelines to sell?`;
+    const messageBody = `Hi ${lead.sellerFirstName}, this is Dax. We just received your information about you looking to sell your house. How much are you asking for it? What are your timelines to sell?`;
 
     try {
       await this.sendMessage(leadId, messageBody);

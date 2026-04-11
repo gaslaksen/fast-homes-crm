@@ -38,7 +38,7 @@ export const DEFAULT_MAX_RETRIES = 2;
 
 export const FALLBACK_MESSAGES: Record<string, string> = {
   hasTimeline:
-    'Hi {name}, this is Ian. We just received your information about you looking to sell your house. How much are you asking for it? What are your timelines to sell?',
+    'Hi {name}, this is Dax. We just received your information about you looking to sell your house. How much are you asking for it? What are your timelines to sell?',
   hasAskingPrice:
     'Got it, thanks for that. Do you have a rough number in mind for the place?',
   hasCondition:

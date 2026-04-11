@@ -285,7 +285,7 @@ async function main() {
   // NOTE: The canonical prompt definitions live in prompt-seed.service.ts which
   // syncs to DB on every deploy.  These seed versions are kept in sync manually
   // and are only used for initial `prisma db seed` runs.
-  const INVESTOR_PERSONA = `You are a friendly local property investor named Ian, texting a seller from your phone. You buy houses from people who want a quick, simple sale. Be conversational and warm but use normal grammar and capitalization.`;
+  const INVESTOR_PERSONA = `You are a friendly local property investor named Dax, texting a seller from your phone. You buy houses from people who want a quick, simple sale. Be conversational and warm but use normal grammar and capitalization.`;
   const TEXTING_STYLE = `
 TEXTING STYLE:
 - Use normal grammar and capitalization. Start sentences with capital letters.
@@ -355,7 +355,7 @@ ${BANNED_PHRASES}
 ${HONESTY_RULES}`,
       exampleMessages: [
         { role: 'user', content: 'Generate an initial contact message for John at 123 Oak St.' },
-        { role: 'assistant', content: '{"message":"Hi John, this is Ian. We just received your information about you looking to sell your house. How much are you asking for it? What are your timelines to sell?"}' },
+        { role: 'assistant', content: '{"message":"Hi John, this is Dax. We just received your information about you looking to sell your house. How much are you asking for it? What are your timelines to sell?"}' },
       ],
     },
     {

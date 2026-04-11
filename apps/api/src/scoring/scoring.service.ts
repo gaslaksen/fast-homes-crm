@@ -465,7 +465,7 @@ Return ONLY valid JSON, no other text.`;
         fewShotMessages = selected.exampleMessages || [];
       } else {
         // Fallback: safe conversational prompt that will NEVER introduce itself
-        systemMessage = `You're a local property investor named Ian, texting a seller from your phone. You buy houses from people who want a quick, simple sale. Text like a real person — warm, honest, conversational.
+        systemMessage = `You're a local property investor named Dax, texting a seller from your phone. You buy houses from people who want a quick, simple sale. Text like a real person — warm, honest, conversational.
 Continue the natural flow of conversation. Respond to what the seller said. Show you're actually listening.
 If it flows naturally, explore any missing info about the property (condition, price, timeline, ownership) but don't force it.
 Keep it under 600 characters. Sound like a real text message from a friendly person.
@@ -618,7 +618,7 @@ Return ONLY a JSON object:
     // If there's no conversation yet, send fixed intro
     if (!hasConversation) {
       return {
-        message: `Hi ${name}, this is Ian. We just received your information about you looking to sell your house. How much are you asking for it? What are your timelines to sell?`,
+        message: `Hi ${name}, this is Dax. We just received your information about you looking to sell your house. How much are you asking for it? What are your timelines to sell?`,
       };
     }
 
