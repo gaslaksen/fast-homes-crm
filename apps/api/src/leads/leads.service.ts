@@ -10,7 +10,7 @@ import { RentCastService } from '../comps/rentcast.service';
 import { CompsService } from '../comps/comps.service';
 import { AttomService } from '../comps/attom.service';
 import { PipelineService } from '../pipeline/pipeline.service';
-import { LeadStatus, LeadSource, formatPhoneNumber } from '@fast-homes/shared';
+import { LeadStatus, LeadSource, formatPhoneNumber, toTitleCase } from '@fast-homes/shared';
 import { Prisma } from '@prisma/client';
 import { enrichAddressFromZip, cleanStreetAddress, lookupCityStateFromZip } from '../webhooks/address-parser';
 import * as XLSX from 'xlsx';
@@ -108,6 +108,14 @@ export class LeadsService {
     // Always store phone in E.164 format so inbound webhook lookups match
     if (data.sellerPhone) {
       data.sellerPhone = formatPhoneNumber(data.sellerPhone);
+    }
+
+    // Normalize names to title case (e.g. "JOHN DOE" → "John Doe")
+    if (data.sellerFirstName) {
+      data.sellerFirstName = toTitleCase(data.sellerFirstName);
+    }
+    if (data.sellerLastName) {
+      data.sellerLastName = toTitleCase(data.sellerLastName);
     }
 
     const lead = await this.prisma.lead.create({

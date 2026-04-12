@@ -52,6 +52,16 @@ export function formatPhoneNumber(phone: string): string {
 }
 
 /**
+ * Normalize a name to title case ("john doe" / "JOHN DOE" → "John Doe")
+ */
+export function toTitleCase(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/**
  * Check if message is opt-out
  */
 export function isOptOutMessage(body: string): boolean {
