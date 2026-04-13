@@ -20,6 +20,7 @@ import { CampaignsModule } from './campaigns/campaigns.module';
 import { DealSearchModule } from './deal-search/deal-search.module';
 import { PartnersModule } from './partners/partners.module';
 import { SellerPortalModule } from './seller-portal/seller-portal.module';
+import { RemindersModule } from './reminders/reminders.module';
 
 @Module({
   imports: [
@@ -46,6 +47,7 @@ import { SellerPortalModule } from './seller-portal/seller-portal.module';
     DealSearchModule,
     PartnersModule,
     SellerPortalModule,
+    RemindersModule,
   ],
 })
 export class AppModule {}

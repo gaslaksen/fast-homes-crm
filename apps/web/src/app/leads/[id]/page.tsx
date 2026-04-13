@@ -97,6 +97,11 @@ export default function LeadDetailPage() {
   const [selectedCampaignId, setSelectedCampaignId] = useState('');
   const [enrollingInCampaign, setEnrollingInCampaign] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
+  const [leadTasks, setLeadTasks] = useState<any[]>([]);
+  const [showFollowUpForm, setShowFollowUpForm] = useState(false);
+  const [followUpDate, setFollowUpDate] = useState('');
+  const [followUpNote, setFollowUpNote] = useState('');
+  const [savingFollowUp, setSavingFollowUp] = useState(false);
 
   useEffect(() => {
     loadLead();
@@ -107,6 +112,7 @@ export default function LeadDetailPage() {
     gmailAPI.emails(leadId).then((res) => setEmails(res.data || [])).catch(() => {});
     campaignAPI.leadCampaigns(leadId).then((res) => setLeadEnrollments(res.data || [])).catch(() => {});
     campaignAPI.list().then((res) => setAvailableCampaigns(res.data || [])).catch(() => {});
+    leadsAPI.getTasks(leadId).then((res) => setLeadTasks(res.data || [])).catch(() => {});
   }, [leadId]);
 
   const loadLead = async () => {
@@ -305,6 +311,40 @@ export default function LeadDetailPage() {
       alert('Failed to mark lead as dead');
     } finally {
       setMarkingDead(false);
+    }
+  };
+
+  const handleCreateFollowUp = async () => {
+    if (!followUpDate) return;
+    setSavingFollowUp(true);
+    try {
+      const sellerName = [lead?.sellerFirstName, lead?.sellerLastName].filter(Boolean).join(' ') || 'seller';
+      await leadsAPI.createTask(leadId, {
+        title: `Follow up with ${sellerName}`,
+        description: followUpNote || undefined,
+        dueDate: new Date(followUpDate + 'T09:00:00').toISOString(),
+        userId: currentUser?.id,
+      });
+      setShowFollowUpForm(false);
+      setFollowUpDate('');
+      setFollowUpNote('');
+      const res = await leadsAPI.getTasks(leadId);
+      setLeadTasks(res.data || []);
+    } catch (error) {
+      console.error('Failed to create follow-up:', error);
+      alert('Failed to schedule follow-up');
+    } finally {
+      setSavingFollowUp(false);
+    }
+  };
+
+  const handleCompleteTask = async (taskId: string) => {
+    try {
+      await tasksAPI.complete(taskId, currentUser?.id);
+      const res = await leadsAPI.getTasks(leadId);
+      setLeadTasks(res.data || []);
+    } catch (error) {
+      console.error('Failed to complete task:', error);
     }
   };
 
@@ -1282,6 +1322,93 @@ export default function LeadDetailPage() {
                       </button>
                     </div>
                   </div>
+                )}
+              </div>
+
+              {/* Follow-Up Reminders */}
+              <div className="card">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-lg font-bold">Follow-Ups</h3>
+                  {!showFollowUpForm && (
+                    <button
+                      onClick={() => {
+                        const tomorrow = new Date();
+                        tomorrow.setDate(tomorrow.getDate() + 1);
+                        setFollowUpDate(tomorrow.toISOString().split('T')[0]);
+                        setShowFollowUpForm(true);
+                      }}
+                      className="text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline"
+                    >
+                      + Schedule
+                    </button>
+                  )}
+                </div>
+
+                {showFollowUpForm && (
+                  <div className="space-y-2 mb-3 p-3 bg-gray-50 dark:bg-gray-900 rounded-lg">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Follow-up date</label>
+                      <input
+                        type="date"
+                        value={followUpDate}
+                        onChange={(e) => setFollowUpDate(e.target.value)}
+                        className="input w-full text-sm"
+                        min={new Date().toISOString().split('T')[0]}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Note (optional)</label>
+                      <input
+                        type="text"
+                        value={followUpNote}
+                        onChange={(e) => setFollowUpNote(e.target.value)}
+                        placeholder="e.g. Check on payoff status"
+                        className="input w-full text-sm"
+                      />
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={handleCreateFollowUp}
+                        disabled={savingFollowUp || !followUpDate}
+                        className="flex-1 px-3 py-1.5 rounded-lg bg-primary-600 text-white text-sm font-medium hover:bg-primary-700 disabled:opacity-50 transition-colors"
+                      >
+                        {savingFollowUp ? 'Saving...' : 'Schedule'}
+                      </button>
+                      <button
+                        onClick={() => { setShowFollowUpForm(false); setFollowUpNote(''); }}
+                        className="px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {leadTasks.filter((t: any) => !t.completed).length > 0 ? (
+                  <div className="space-y-2">
+                    {leadTasks.filter((t: any) => !t.completed).map((task: any) => (
+                      <div key={task.id} className="flex items-start gap-2 p-2 rounded-lg bg-gray-50 dark:bg-gray-900">
+                        <button
+                          onClick={() => handleCompleteTask(task.id)}
+                          className="mt-0.5 w-4 h-4 rounded border-2 border-gray-300 dark:border-gray-600 hover:border-primary-500 flex-shrink-0 transition-colors"
+                          title="Mark complete"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{task.title}</div>
+                          {task.description && (
+                            <div className="text-xs text-gray-500 dark:text-gray-400 truncate">{task.description}</div>
+                          )}
+                          {task.dueDate && (
+                            <div className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                              {format(new Date(task.dueDate), 'MMM d, yyyy')}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-400 dark:text-gray-500">No upcoming follow-ups</p>
                 )}
               </div>
 

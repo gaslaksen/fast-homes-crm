@@ -65,6 +65,7 @@ export const leadsAPI = {
   get: (id: string) => api.get(`/leads/${id}`),
   create: (data: any) => api.post('/leads', data),
   update: (id: string, data: any) => api.patch(`/leads/${id}`, data),
+  getTasks: (id: string) => api.get(`/leads/${id}/tasks`),
   createTask: (id: string, data: any) => api.post(`/leads/${id}/tasks`, data),
   addNote: (id: string, content: string, userId: string) =>
     api.post(`/leads/${id}/notes`, { content, userId }),

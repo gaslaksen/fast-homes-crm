@@ -951,6 +951,17 @@ export class LeadsService {
   }
 
   /**
+   * Get tasks for a lead
+   */
+  async getLeadTasks(leadId: string) {
+    return this.prisma.task.findMany({
+      where: { leadId },
+      orderBy: [{ completed: 'asc' }, { dueDate: 'asc' }],
+      include: { user: { select: { id: true, firstName: true, lastName: true } } },
+    });
+  }
+
+  /**
    * Create task for lead
    */
   async createTask(leadId: string, data: {

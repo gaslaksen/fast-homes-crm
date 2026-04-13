@@ -242,6 +242,11 @@ export class LeadsController {
     }
   }
 
+  @Get(':id/tasks')
+  async getTasks(@Param('id') leadId: string) {
+    return this.leadsService.getLeadTasks(leadId);
+  }
+
   @Post(':id/tasks')
   async createTask(@Param('id') leadId: string, @Body() body: any) {
     return this.leadsService.createTask(leadId, body);
