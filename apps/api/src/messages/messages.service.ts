@@ -418,6 +418,23 @@ export class MessagesService {
     let portalInstruction = '';
 
     if (campComplete) {
+      // ── Closing-message portal fallback ──────────────────────────────────
+      // If the portal link was never sent during mid-conversation messages,
+      // include it in the closing message so the seller still gets the link.
+      if (this.sellerPortalService) {
+        const portalSent = await this.sellerPortalService.hasPortalLinkBeenSent(leadId);
+        if (!portalSent) {
+          const portalUrl = await this.sellerPortalService.getPortalUrl(leadId);
+          if (portalUrl) {
+            portalInstruction = `
+IMPORTANT — INCLUDE THIS LINK in your closing message: ${portalUrl}
+After thanking them, mention you've put together a page where they can verify property details and upload photos at their convenience. Frame it naturally — something like:
+"Before I let you go — I put together a quick page for your property where you can double-check the details and upload any photos when you get a chance:\n${portalUrl}\n\nNo rush on that, but it helps our team when they review everything."
+CRITICAL: Do NOT place a period, comma, or any punctuation immediately after the URL — it breaks the link on phones.`;
+          }
+        }
+      }
+
       // CAMP is complete — close the conversation warmly, no more questions
       const knownSummary = [
         lead.timeline != null ? `timeline of ${lead.timeline === 365 ? 'no specific urgency' : `~${lead.timeline} days`}` : null,
@@ -433,26 +450,30 @@ Your message must:
 2. Tell them someone from the team will review the information and reach out soon to discuss next steps
 3. Keep it warm and genuine
 4. Do NOT ask anything. Do NOT request more info. End the conversation professionally.
-5. Do NOT repeat back their price or timeline in a way that implies agreement or commitment.`;
+5. Do NOT repeat back their price or timeline in a way that implies agreement or commitment.${portalInstruction}`;
     } else {
       // CAMP not yet complete — let the AI decide what to explore next
 
       // ── Seller Portal URL injection ──────────────────────────────────────
-      // When price + timeline are known but condition is missing, include the
-      // portal URL so the AI can ask the seller to verify details and upload photos.
+      // Once 2+ CAMP fields are known, include the portal URL so the AI can
+      // ask the seller to verify details and upload photos. Framing adapts
+      // based on whether condition is still unknown or already gathered.
       if (
         this.sellerPortalService &&
-        lead.askingPrice != null &&
-        lead.timeline != null &&
-        lead.conditionLevel == null
+        knownFields.length >= 2
       ) {
         const portalSent = await this.sellerPortalService.hasPortalLinkBeenSent(leadId);
         if (!portalSent) {
           const portalUrl = await this.sellerPortalService.getPortalUrl(leadId);
           if (portalUrl) {
+            const conditionUnknown = lead.conditionLevel == null;
+            const framingHint = conditionUnknown
+              ? `Frame it naturally — something like "I put together a page for your property where you can check the details we have on file and upload any photos. That really helps us get a feel for the place:\n${portalUrl}\n\nWhat kind of shape is the house in currently?"`
+              : `Frame it naturally — something like "I put together a page for your property where you can verify the details and upload any photos when you get a chance:\n${portalUrl}\n\nThat helps our team put together the best offer for you."`;
+
             portalInstruction = `
 IMPORTANT — INCLUDE THIS LINK: You have a property portal page for this seller. Include this URL in your message: ${portalUrl}
-Frame it naturally as you transition to asking about the property condition — something like "I put together a page with the info we have on file for your property, you can check it out here and upload any photos when you get a chance — that really helps us get a feel for the condition:\n${portalUrl}\n\nWhat kind of shape is the house in currently?"
+${framingHint}
 CRITICAL: Do NOT place a period, comma, or any punctuation immediately after the URL — it breaks the link on phones. End the sentence BEFORE the URL (use a colon or dash), then start the next question as a new paragraph after the URL.
 Do NOT just paste the link by itself. Weave it into your message naturally.`;
           }
