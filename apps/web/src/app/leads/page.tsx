@@ -103,20 +103,6 @@ const SOURCE_LABELS: Record<string, string> = {
 
 // ─── Tier computation (client-side, no DB field needed) ───────────────────────
 
-function computeTier(lead: any): 1 | 2 | 3 {
-  // Explicitly dead or closed lost → Tier 3
-  if (['DEAD', 'CLOSED_LOST'].includes(lead.status)) return 3;
-  // Deal math: MAO = ARV * 0.70 - repairs - assignment fee
-  const maoVal = lead.arv ? Math.round(lead.arv * 0.7 - 40000 - 15000) : null;
-  const pencils = maoVal !== null && lead.askingPrice != null && maoVal >= lead.askingPrice;
-  // Tier 1: hot score band AND deal pencils → send contract now
-  if ((lead.scoreBand === 'STRIKE_ZONE' || lead.scoreBand === 'HOT') && pencils) return 1;
-  // Tier 3: dead-cold score, low score, deal doesn't pencil
-  if (lead.scoreBand === 'DEAD_COLD' && lead.totalScore <= 2 && !pencils) return 3;
-  // Everything else in the middle
-  return 2;
-}
-
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 function TierBadge({ tier }: { tier: 1 | 2 | 3 }) {
@@ -209,7 +195,7 @@ function SortHeader({
 }
 
 function MobileLeadCard({ lead, spread: s }: { lead: any; spread: number | null }) {
-  const tier = lead._tier as 1 | 2 | 3;
+  const tier = (lead.tier || 2) as 1 | 2 | 3;
   const hoursAgo = lead.lastTouchedAt
     ? Math.round((Date.now() - new Date(lead.lastTouchedAt).getTime()) / 3600000)
     : null;
@@ -278,7 +264,11 @@ function LeadsPageInner() {
   const pathname = usePathname();
 
   // Initialize filter/sort state from URL params so back-navigation restores the view
-  const [allLeads,      setAllLeads]      = useState<any[]>([]);
+  const [leads,         setLeads]         = useState<any[]>([]);
+  const [pagination,    setPagination]    = useState({ page: 1, limit: 50, total: 0, totalPages: 0 });
+  const [counts,        setCounts]        = useState<{ tiers: Record<number, number>; bands: Record<string, number>; hiddenInactive: number }>({ tiers: { 1: 0, 2: 0, 3: 0 }, bands: {}, hiddenInactive: 0 });
+  const [availableStates, setAvailableStates] = useState<string[]>([]);
+  const [pipelineData,  setPipelineData]  = useState<Record<string, { leads: any[]; total: number }>>({});
   const [loading,       setLoading]       = useState(true);
   const [search,        setSearch]        = useState(searchParams.get('q') || '');
   const [bandFilter,    setBandFilter]    = useState(searchParams.get('band') || '');
@@ -296,6 +286,7 @@ function LeadsPageInner() {
   const [sortKey,       setSortKey]       = useState<SortKey>((searchParams.get('sort') as SortKey) || 'tier');
   const [sortDir,       setSortDir]       = useState<SortDir>((searchParams.get('dir') as SortDir) || 'asc');
   const [viewMode,      setViewMode]      = useState<ViewMode>((searchParams.get('view') as ViewMode) || 'table');
+  const [page,          setPage]          = useState(Number(searchParams.get('page')) || 1);
 
   const [selectedIds,   setSelectedIds]   = useState<Set<string>>(new Set());
   const [bulkStatus,    setBulkStatus]    = useState('');
@@ -343,6 +334,7 @@ function LeadsPageInner() {
       if (sortKey !== 'tier')       params.set('sort', sortKey);
       if (sortDir !== 'asc')        params.set('dir', sortDir);
       if (viewMode !== 'table')     params.set('view', viewMode);
+      if (page > 1)                 params.set('page', String(page));
 
       const qs = params.toString();
       router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
@@ -355,119 +347,129 @@ function LeadsPageInner() {
     return () => clearTimeout(searchDebounceRef.current);
   }, [search, bandFilter, statusFilter, sourceFilter, dateFilter, staleFilter, arvFilter,
       dealFilter, stateFilter, assigneeFilter, tierFilter, showInactive, sortKey, sortDir,
-      viewMode, pathname, router]);
+      viewMode, page, pathname, router]);
 
-  // Load all leads once; filter/sort client-side for instant feedback
+  // Abort controller for cancelling in-flight requests when filters change
+  const abortRef = useRef<AbortController>();
+
+  // Build query params and fetch leads from server
+  const fetchLeads = useCallback(async () => {
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setLoading(true);
+
+    const params: Record<string, string> = { page: String(page), limit: '50' };
+    if (search)          params.search = search;
+    if (bandFilter)      params.scoreBand = bandFilter;
+    if (statusFilter)    params.status = statusFilter;
+    if (sourceFilter)    params.source = sourceFilter;
+    if (tierFilter)      params.tier = String(tierFilter);
+    if (stateFilter)     params.propertyState = stateFilter;
+    if (staleFilter)     params.staleMinDays = staleFilter;
+    if (arvFilter)       params.arvFilter = arvFilter;
+    if (dealFilter === 'pencils') params.dealPencils = 'yes';
+    if (dealFilter === 'no')      params.dealPencils = 'no';
+    if (showInactive)    params.showInactive = 'true';
+    if (sortKey)         params.sort = sortKey;
+    if (sortDir)         params.dir = sortDir;
+    if (assigneeFilter === 'unassigned') params.assignedToUserId = 'none';
+    else if (assigneeFilter)             params.assignedToUserId = assigneeFilter;
+
+    // Map date filter to createdAfter/createdBefore
+    if (dateFilter === 'today') {
+      params.createdAfter = new Date(Date.now() - 86400000).toISOString();
+    } else if (dateFilter === 'week') {
+      params.createdAfter = new Date(Date.now() - 7 * 86400000).toISOString();
+    } else if (dateFilter === 'month') {
+      params.createdAfter = new Date(Date.now() - 30 * 86400000).toISOString();
+    } else if (dateFilter === 'older') {
+      params.createdBefore = new Date(Date.now() - 30 * 86400000).toISOString();
+    }
+
+    try {
+      const res = await leadsAPI.list(params);
+      if (controller.signal.aborted) return;
+      setLeads(res.data.leads || []);
+      setPagination(res.data.pagination || { page: 1, limit: 50, total: 0, totalPages: 0 });
+      if (res.data.counts) setCounts(res.data.counts);
+      if (res.data.availableStates) setAvailableStates(res.data.availableStates);
+    } catch (err: any) {
+      if (err?.name !== 'CanceledError' && err?.code !== 'ERR_CANCELED') console.error(err);
+    } finally {
+      if (!controller.signal.aborted) setLoading(false);
+    }
+  }, [page, search, bandFilter, statusFilter, sourceFilter, dateFilter, staleFilter,
+      arvFilter, dealFilter, stateFilter, assigneeFilter, tierFilter, showInactive, sortKey, sortDir]);
+
+  // Fetch pipeline data when in grid view
+  const fetchPipeline = useCallback(async () => {
+    const params: Record<string, string> = {};
+    if (search)     params.search = search;
+    if (tierFilter) params.tier = String(tierFilter);
+    if (bandFilter) params.scoreBand = bandFilter;
+    if (assigneeFilter === 'unassigned') params.assignedToUserId = 'none';
+    else if (assigneeFilter)             params.assignedToUserId = assigneeFilter;
+
+    try {
+      const res = await leadsAPI.pipeline(params);
+      setPipelineData(res.data.stages || {});
+    } catch (err) {
+      console.error(err);
+    }
+  }, [search, tierFilter, bandFilter, assigneeFilter]);
+
+  // Fetch data on filter/sort/page changes
+  const searchDebounceRef2 = useRef<ReturnType<typeof setTimeout>>();
   useEffect(() => {
-    leadsAPI.list({ limit: 2000 })
-      .then(r => setAllLeads(r.data.leads || []))
-      .catch(console.error)
-      .finally(() => setLoading(false));
+    // Debounce search typing, fetch immediately for other filter changes
+    clearTimeout(searchDebounceRef2.current);
+    const delay = search ? 300 : 0;
+    searchDebounceRef2.current = setTimeout(() => {
+      if (viewMode === 'cards') {
+        fetchPipeline();
+      } else {
+        fetchLeads();
+      }
+    }, delay);
+    return () => clearTimeout(searchDebounceRef2.current);
+  }, [fetchLeads, fetchPipeline, viewMode, search]);
+
+  // Also fetch when switching view modes
+  useEffect(() => {
+    if (viewMode === 'cards') fetchPipeline();
+    else fetchLeads();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewMode]);
+
+  // Load team members once
+  useEffect(() => {
     authAPI.getTeam()
       .then(r => setTeamMembers(r.data || []))
       .catch(() => {});
   }, []);
+
+  // Reset to page 1 when any filter changes (not page itself)
+  const prevFiltersRef = useRef('');
+  useEffect(() => {
+    const key = [search, bandFilter, statusFilter, sourceFilter, dateFilter, staleFilter,
+                 arvFilter, dealFilter, stateFilter, assigneeFilter, tierFilter, showInactive, sortKey, sortDir].join('|');
+    if (prevFiltersRef.current && prevFiltersRef.current !== key) {
+      setPage(1);
+    }
+    prevFiltersRef.current = key;
+  }, [search, bandFilter, statusFilter, sourceFilter, dateFilter, staleFilter,
+      arvFilter, dealFilter, stateFilter, assigneeFilter, tierFilter, showInactive, sortKey, sortDir]);
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) setSortDir(d => d === 'desc' ? 'asc' : 'desc');
     else { setSortKey(key); setSortDir('asc'); }
   };
 
-  // Attach computed tier to every lead, then filter + sort
-  const filtered = useMemo(() => {
-    const now = Date.now();
-    const q   = search.toLowerCase();
-
-    const leadsWithTier = allLeads.map(l => ({ ...l, _tier: computeTier(l) }));
-
-    return leadsWithTier
-      .filter(l => {
-        // Default: hide DEAD / CLOSED unless user opted in or status filter shows them
-        if (!showInactive && !statusFilter && tierFilter !== 3 && INACTIVE_STATUSES.includes(l.status)) return false;
-
-        if (tierFilter   && l._tier !== tierFilter)                                       return false;
-        if (bandFilter   && l.scoreBand !== bandFilter)                                   return false;
-        if (statusFilter && l.status !== statusFilter)                                    return false;
-        if (sourceFilter && l.source !== sourceFilter)                                    return false;
-        if (stateFilter  && (l.propertyState || '').toUpperCase() !== stateFilter.toUpperCase()) return false;
-        if (assigneeFilter === 'unassigned' && l.assignedToUserId)                        return false;
-        if (assigneeFilter && assigneeFilter !== 'unassigned' && l.assignedToUserId !== assigneeFilter) return false;
-
-        if (q && ![l.propertyAddress, l.propertyCity, l.propertyState, l.sellerFirstName, l.sellerLastName, l.sellerPhone]
-          .filter(Boolean).join(' ').toLowerCase().includes(q)) return false;
-
-        if (dateFilter) {
-          const age = (now - new Date(l.createdAt).getTime()) / 86400000;
-          if (dateFilter === 'today'  && age > 1)   return false;
-          if (dateFilter === 'week'   && age > 7)   return false;
-          if (dateFilter === 'month'  && age > 30)  return false;
-          if (dateFilter === 'older'  && age <= 30) return false;
-        }
-        if (staleFilter) {
-          const days       = parseInt(staleFilter);
-          const hoursStale = l.lastTouchedAt
-            ? (now - new Date(l.lastTouchedAt).getTime()) / 3600000
-            : Infinity;
-          if (hoursStale < days * 24) return false;
-        }
-        if (arvFilter === 'has'  && !(l.arv > 0)) return false;
-        if (arvFilter === 'none' && l.arv > 0)    return false;
-
-        if (dealFilter === 'pencils') {
-          const m = l.arv ? l.arv * 0.7 - 55000 : null;
-          if (!m || !l.askingPrice || m < l.askingPrice) return false;
-        }
-        if (dealFilter === 'no') {
-          const m = l.arv ? l.arv * 0.7 - 55000 : null;
-          if (m && l.askingPrice && m >= l.askingPrice) return false;
-        }
-
-        return true;
-      })
-      .sort((a, b) => {
-        let av: any, bv: any;
-        if (sortKey === 'tier')    { av = a._tier;                                    bv = b._tier; }
-        if (sortKey === 'score')   { av = a.totalScore;                               bv = b.totalScore; }
-        if (sortKey === 'arv')     { av = a.arv || 0;                                 bv = b.arv || 0; }
-        if (sortKey === 'asking')  { av = a.askingPrice || 0;                         bv = b.askingPrice || 0; }
-        if (sortKey === 'created') { av = new Date(a.createdAt).getTime();            bv = new Date(b.createdAt).getTime(); }
-        if (sortKey === 'touched') { av = new Date(a.lastTouchedAt || 0).getTime();   bv = new Date(b.lastTouchedAt || 0).getTime(); }
-        if (sortKey === 'touches') { av = a.touchCount || 0;                         bv = b.touchCount || 0; }
-        if (sortKey === 'address') { av = a.propertyAddress;                          bv = b.propertyAddress; }
-        if (av < bv) return sortDir === 'desc' ? 1 : -1;
-        if (av > bv) return sortDir === 'desc' ? -1 : 1;
-        return 0;
-      });
-  }, [allLeads, search, bandFilter, statusFilter, sourceFilter, dateFilter, staleFilter,
-      arvFilter, dealFilter, stateFilter, assigneeFilter, tierFilter, showInactive, sortKey, sortDir]);
-
-  // Counts
-  const tierCounts = useMemo(() => {
-    const c: Record<number, number> = { 1: 0, 2: 0, 3: 0 };
-    allLeads.forEach(l => {
-      if (!INACTIVE_STATUSES.includes(l.status) || showInactive) {
-        const t = computeTier(l);
-        c[t] = (c[t] || 0) + 1;
-      }
-    });
-    return c;
-  }, [allLeads, showInactive]);
-
-  const bandCounts = useMemo(() => {
-    const c: Record<string, number> = {};
-    allLeads.forEach(l => { c[l.scoreBand] = (c[l.scoreBand] || 0) + 1; });
-    return c;
-  }, [allLeads]);
-
-  const hiddenInactiveCount = useMemo(
-    () => showInactive || statusFilter ? 0 : allLeads.filter(l => INACTIVE_STATUSES.includes(l.status)).length,
-    [allLeads, showInactive, statusFilter],
-  );
-
-  const availableStates = useMemo(() => {
-    const s = new Set(allLeads.map(l => l.propertyState).filter(Boolean));
-    return Array.from(s).sort();
-  }, [allLeads]);
+  // Server provides filtered/sorted leads, counts, and available states
+  const tierCounts = counts.tiers;
+  const bandCounts = counts.bands;
+  const hiddenInactiveCount = showInactive || statusFilter ? 0 : counts.hiddenInactive;
 
   const maoFn  = (l: any) => l.arv ? Math.round(l.arv * 0.7 - 55000) : null;
   const spread = (l: any) => { const m = maoFn(l); return m && l.askingPrice ? m - l.askingPrice : null; };
@@ -479,22 +481,22 @@ function LeadsPageInner() {
   const handleBulkDelete = async () => {
     if (!window.confirm(`Delete ${selectedIds.size} lead(s)?`)) return;
     await leadsAPI.bulkDelete(Array.from(selectedIds));
-    setAllLeads(p => p.filter(l => !selectedIds.has(l.id)));
     setSelectedIds(new Set());
+    fetchLeads();
   };
 
   const handleBulkStatus = async () => {
     if (!bulkStatus) return;
     await leadsAPI.bulkUpdateStatus(Array.from(selectedIds), bulkStatus);
-    setAllLeads(p => p.map(l => selectedIds.has(l.id) ? { ...l, status: bulkStatus } : l));
     setBulkStatus(''); setSelectedIds(new Set());
+    fetchLeads();
   };
 
   const handleBulkSource = async () => {
     if (!bulkSource) return;
     await leadsAPI.bulkUpdateSource(Array.from(selectedIds), bulkSource);
-    setAllLeads(p => p.map(l => selectedIds.has(l.id) ? { ...l, source: bulkSource } : l));
     setBulkSource(''); setSelectedIds(new Set());
+    fetchLeads();
   };
 
   const handleExport = async () => {
@@ -504,7 +506,15 @@ function LeadsPageInner() {
       const mime = exportFormat === 'xlsx'
         ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         : 'text/csv';
-      const res = await leadsAPI.exportLeads({}, fields, exportFormat);
+      const exportFilters: Record<string, string> = {};
+      if (search)          exportFilters.search = search;
+      if (bandFilter)      exportFilters.scoreBand = bandFilter;
+      if (statusFilter)    exportFilters.status = statusFilter;
+      if (sourceFilter)    exportFilters.source = sourceFilter;
+      if (tierFilter)      exportFilters.tier = String(tierFilter);
+      if (stateFilter)     exportFilters.propertyState = stateFilter;
+      if (showInactive)    exportFilters.showInactive = 'true';
+      const res = await leadsAPI.exportLeads(exportFilters, fields, exportFormat);
       const url = URL.createObjectURL(new Blob([res.data], { type: mime }));
       const a   = document.createElement('a');
       a.href = url;
@@ -559,28 +569,32 @@ function LeadsPageInner() {
     if (!result.destination) return;
     const { draggableId: leadId, source, destination } = result;
     if (source.droppableId === destination.droppableId) return;
-    setAllLeads(prev => prev.map(l =>
-      l.id === leadId ? { ...l, status: destination.droppableId } : l,
-    ));
+    // Optimistic update on pipeline data
+    setPipelineData(prev => {
+      const next = { ...prev };
+      const srcStage = next[source.droppableId];
+      const dstStage = next[destination.droppableId];
+      if (srcStage && dstStage) {
+        const lead = srcStage.leads.find((l: any) => l.id === leadId);
+        if (lead) {
+          next[source.droppableId] = { ...srcStage, leads: srcStage.leads.filter((l: any) => l.id !== leadId), total: srcStage.total - 1 };
+          next[destination.droppableId] = { ...dstStage, leads: [...dstStage.leads, { ...lead, status: destination.droppableId }], total: dstStage.total + 1 };
+        }
+      }
+      return next;
+    });
     try {
       await pipelineAPI.updateStage(leadId, destination.droppableId);
     } catch {
-      setAllLeads(prev => prev.map(l =>
-        l.id === leadId ? { ...l, status: source.droppableId } : l,
-      ));
+      fetchPipeline(); // Revert on error
     }
-  }, []);
+  }, [fetchPipeline]);
 
   const pipelineByStage = useMemo(() => {
     const map: Record<string, any[]> = {};
-    for (const s of PIPELINE_STAGES) map[s.id] = [];
-    for (const lead of filtered) {
-      if (!INACTIVE_STATUSES.includes(lead.status) && map[lead.status] !== undefined) {
-        map[lead.status].push(lead);
-      }
-    }
+    for (const s of PIPELINE_STAGES) map[s.id] = pipelineData[s.id]?.leads || [];
     return map;
-  }, [filtered]);
+  }, [pipelineData]);
 
   // ─── Render ─────────────────────────────────────────────────────────────────
 
@@ -594,7 +608,7 @@ function LeadsPageInner() {
           <div>
             <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">Leads</h1>
             <p className="text-sm text-gray-400 dark:text-gray-500 mt-0.5">
-              {filtered.length} active lead{filtered.length !== 1 ? 's' : ''}
+              {pagination.total} active lead{pagination.total !== 1 ? 's' : ''}
               {hiddenInactiveCount > 0 && (
                 <button
                   onClick={() => setShowInactive(true)}
@@ -837,7 +851,7 @@ function LeadsPageInner() {
         {/* Main Content */}
         {loading ? (
           <div className="text-center py-16 text-gray-400 dark:text-gray-500 text-sm animate-pulse">Loading leads...</div>
-        ) : filtered.length === 0 ? (
+        ) : leads.length === 0 ? (
           <div className="text-center py-16 text-gray-400 dark:text-gray-500">
             <div className="text-4xl mb-3">🔍</div>
             <div className="text-sm">No leads match your filters.</div>
@@ -853,7 +867,7 @@ function LeadsPageInner() {
           <>
           {/* Mobile card list */}
           <div className="block md:hidden space-y-2">
-            {filtered.map(lead => (
+            {leads.map(lead => (
               <MobileLeadCard key={lead.id} lead={lead} spread={spread(lead)} />
             ))}
           </div>
@@ -864,11 +878,11 @@ function LeadsPageInner() {
             <div className="grid grid-cols-[auto_44px_2fr_110px_68px_72px_72px_72px_80px_60px_72px] gap-3 px-4 py-2.5 border-b border-gray-100 dark:border-gray-800 bg-gray-50/80 dark:bg-gray-800/80">
               <input
                 type="checkbox"
-                checked={selectedIds.size === filtered.length && filtered.length > 0}
+                checked={selectedIds.size === leads.length && leads.length > 0}
                 onChange={() =>
-                  selectedIds.size === filtered.length
+                  selectedIds.size === leads.length
                     ? setSelectedIds(new Set())
-                    : setSelectedIds(new Set(filtered.map(l => l.id)))
+                    : setSelectedIds(new Set(leads.map(l => l.id)))
                 }
                 className="h-3.5 w-3.5 rounded border-gray-300 dark:border-gray-600"
               />
@@ -885,13 +899,13 @@ function LeadsPageInner() {
             </div>
 
             <div className="divide-y divide-gray-50 dark:divide-gray-800">
-              {filtered.map(lead => {
+              {leads.map(lead => {
                 const s       = spread(lead);
                 const hoursAgo = lead.lastTouchedAt
                   ? Math.round((Date.now() - new Date(lead.lastTouchedAt).getTime()) / 3600000)
                   : null;
                 const stale = hoursAgo !== null && hoursAgo > 72 && !INACTIVE_STATUSES.includes(lead.status);
-                const tier  = lead._tier as 1 | 2 | 3;
+                const tier  = (lead.tier || 2) as 1 | 2 | 3;
 
                 return (
                   <div
@@ -976,6 +990,62 @@ function LeadsPageInner() {
             </div>
           </div>
           </div>
+
+          {/* Pagination */}
+          {pagination.totalPages > 1 && (
+            <div className="flex items-center justify-between px-2 py-3">
+              <span className="text-xs text-gray-400 dark:text-gray-500">
+                Showing {(pagination.page - 1) * pagination.limit + 1}–{Math.min(pagination.page * pagination.limit, pagination.total)} of {pagination.total}
+              </span>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setPage(p => Math.max(1, p - 1))}
+                  disabled={page <= 1}
+                  className="px-2 py-1 text-xs rounded border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Prev
+                </button>
+                {(() => {
+                  const pages: (number | '...')[] = [];
+                  const tp = pagination.totalPages;
+                  const cp = page;
+                  if (tp <= 7) {
+                    for (let i = 1; i <= tp; i++) pages.push(i);
+                  } else {
+                    pages.push(1);
+                    if (cp > 3) pages.push('...');
+                    for (let i = Math.max(2, cp - 1); i <= Math.min(tp - 1, cp + 1); i++) pages.push(i);
+                    if (cp < tp - 2) pages.push('...');
+                    pages.push(tp);
+                  }
+                  return pages.map((p, i) =>
+                    p === '...' ? (
+                      <span key={`e${i}`} className="px-1 text-xs text-gray-400 dark:text-gray-500">...</span>
+                    ) : (
+                      <button
+                        key={p}
+                        onClick={() => setPage(p as number)}
+                        className={`px-2.5 py-1 text-xs rounded border ${
+                          p === cp
+                            ? 'bg-primary-600 text-white border-primary-600'
+                            : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+                        }`}
+                      >
+                        {p}
+                      </button>
+                    )
+                  );
+                })()}
+                <button
+                  onClick={() => setPage(p => Math.min(pagination.totalPages, p + 1))}
+                  disabled={page >= pagination.totalPages}
+                  className="px-2 py-1 text-xs rounded border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
           </>
 
         ) : (
@@ -1010,7 +1080,7 @@ function LeadsPageInner() {
                             }`}
                           >
                             {stageLeads.map((lead, index) => {
-                              const tier = lead._tier as 1 | 2 | 3;
+                              const tier = (lead.tier || 2) as 1 | 2 | 3;
                               const hoursAgo = lead.lastTouchedAt
                                 ? Math.round((Date.now() - new Date(lead.lastTouchedAt).getTime()) / 3_600_000)
                                 : null;

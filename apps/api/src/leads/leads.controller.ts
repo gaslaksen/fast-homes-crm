@@ -66,6 +66,14 @@ export class LeadsController {
     @Query('createdBefore') createdBefore?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('tier') tier?: string,
+    @Query('propertyState') propertyState?: string,
+    @Query('staleMinDays') staleMinDays?: string,
+    @Query('arvFilter') arvFilter?: string,
+    @Query('dealPencils') dealPencils?: string,
+    @Query('showInactive') showInactive?: string,
+    @Query('sort') sort?: string,
+    @Query('dir') dir?: string,
   ) {
     const { organizationId } = this.decodeToken(authHeader);
     return this.leadsService.listLeads({
@@ -82,6 +90,14 @@ export class LeadsController {
       page: page ? parseInt(page) : undefined,
       limit: limit ? parseInt(limit) : undefined,
       organizationId,
+      tier: tier ? parseInt(tier) : undefined,
+      propertyState,
+      staleMinDays: staleMinDays ? parseInt(staleMinDays) : undefined,
+      arvFilter: arvFilter as 'has' | 'none' | undefined,
+      dealPencils: dealPencils as 'yes' | 'no' | undefined,
+      showInactive: showInactive === 'true',
+      sort,
+      dir: dir as 'asc' | 'desc' | undefined,
     });
   }
 
@@ -161,6 +177,26 @@ export class LeadsController {
       ...options,
       organizationId: options.organizationId || organizationId,
       userId,
+    });
+  }
+
+  @Get('pipeline')
+  async getPipelineLeads(
+    @Headers('authorization') authHeader?: string,
+    @Query('search') search?: string,
+    @Query('tier') tier?: string,
+    @Query('scoreBand') scoreBand?: string,
+    @Query('assignedToUserId') assignedToUserId?: string,
+    @Query('limitPerStage') limitPerStage?: string,
+  ) {
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.leadsService.getPipelineLeads({
+      organizationId,
+      search,
+      tier: tier ? parseInt(tier) : undefined,
+      scoreBand,
+      assignedToUserId,
+      limitPerStage: limitPerStage ? parseInt(limitPerStage) : undefined,
     });
   }
 

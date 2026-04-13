@@ -59,6 +59,35 @@ export class LeadsService {
   /**
    * Create a new lead
    */
+  /** Recompute and persist tier + dealPencils for a lead. Call after ARV or score changes. */
+  async refreshTierAndDealPencils(leadId: string) {
+    const lead = await this.prisma.lead.findUnique({ where: { id: leadId } });
+    if (!lead) return;
+    await this.prisma.lead.update({
+      where: { id: leadId },
+      data: {
+        tier: this.computeTier(lead),
+        dealPencils: this.computeDealPencils(lead.arv, lead.askingPrice),
+      },
+    });
+  }
+
+  /** Compute deal tier from lead data. Mirrors client-side computeTier(). */
+  private computeTier(lead: { status: string; scoreBand: string; totalScore: number; arv?: number | null; askingPrice?: number | null }): number {
+    if (['DEAD', 'CLOSED_LOST'].includes(lead.status)) return 3;
+    const mao = lead.arv ? Math.round(lead.arv * 0.7 - 40000 - 15000) : null;
+    const pencils = mao !== null && lead.askingPrice != null && mao >= lead.askingPrice;
+    if ((lead.scoreBand === 'STRIKE_ZONE' || lead.scoreBand === 'HOT') && pencils) return 1;
+    if (lead.scoreBand === 'DEAD_COLD' && lead.totalScore <= 2 && !pencils) return 3;
+    return 2;
+  }
+
+  /** Compute whether deal pencils (MAO >= asking). */
+  private computeDealPencils(arv?: number | null, askingPrice?: number | null): boolean {
+    if (!arv || !askingPrice) return false;
+    return (arv * 0.7 - 55000) >= askingPrice;
+  }
+
   async createLead(data: {
     source: LeadSource;
     propertyAddress: string;
@@ -139,6 +168,14 @@ export class LeadsService {
         lastTouchedAt: new Date(),
         touchCount: 0,
         daysInStage: 0,
+        // Computed fields for server-side filtering/sorting
+        tier: this.computeTier({
+          status: 'NEW',
+          scoreBand: scoringResult.scoreBand,
+          totalScore: scoringResult.totalScore,
+          askingPrice: data.askingPrice,
+        }),
+        dealPencils: false, // No ARV at creation time
       },
     });
 
@@ -338,6 +375,9 @@ export class LeadsService {
       this.logger.log(
         `Comps fetched for lead ${leadId}: ${result.compsCount} comps, ARV: $${result.arv.toLocaleString()} (${result.source})`,
       );
+
+      // Recompute tier and dealPencils now that ARV is set
+      await this.refreshTierAndDealPencils(leadId);
     } catch (error) {
       this.logger.error(`Comps fetch failed for lead ${leadId}: ${error.message}`);
     }
@@ -458,12 +498,25 @@ export class LeadsService {
     page?: number;
     limit?: number;
     organizationId?: string;
+    tier?: number;
+    propertyState?: string;
+    staleMinDays?: number;
+    arvFilter?: 'has' | 'none';
+    dealPencils?: 'yes' | 'no';
+    showInactive?: boolean;
+    sort?: string;
+    dir?: 'asc' | 'desc';
   }) {
     const page = filters.page || 1;
     const limit = filters.limit || 50;
     const skip = (page - 1) * limit;
 
-    const where: Prisma.LeadWhereInput = {};
+    // Base WHERE scoped to org (used for aggregate counts)
+    const baseWhere: Prisma.LeadWhereInput = {};
+    if (filters.organizationId) baseWhere.organizationId = filters.organizationId;
+
+    // Full WHERE including user filters
+    const where: Prisma.LeadWhereInput = { ...baseWhere };
 
     if (filters.source) where.source = filters.source;
     if (filters.status) where.status = filters.status;
@@ -481,15 +534,18 @@ export class LeadsService {
       where.totalScore = scoreFilter;
     }
 
-    if (filters.organizationId) where.organizationId = filters.organizationId;
-
     if (filters.search) {
-      where.OR = [
-        { propertyAddress: { contains: filters.search, mode: 'insensitive' } },
-        { sellerFirstName: { contains: filters.search, mode: 'insensitive' } },
-        { sellerLastName: { contains: filters.search, mode: 'insensitive' } },
-        { sellerPhone: { contains: filters.search, mode: 'insensitive' } },
-        { sellerEmail: { contains: filters.search, mode: 'insensitive' } },
+      where.AND = [
+        ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
+        {
+          OR: [
+            { propertyAddress: { contains: filters.search, mode: 'insensitive' } },
+            { sellerFirstName: { contains: filters.search, mode: 'insensitive' } },
+            { sellerLastName: { contains: filters.search, mode: 'insensitive' } },
+            { sellerPhone: { contains: filters.search, mode: 'insensitive' } },
+            { sellerEmail: { contains: filters.search, mode: 'insensitive' } },
+          ],
+        },
       ];
     }
 
@@ -500,21 +556,76 @@ export class LeadsService {
       where.createdAt = dateFilter;
     }
 
-    const [leads, total] = await Promise.all([
+    // New filters
+    if (filters.tier) where.tier = filters.tier;
+    if (filters.propertyState) where.propertyState = { equals: filters.propertyState, mode: 'insensitive' };
+
+    // Hide inactive (DEAD/CLOSED_WON/CLOSED_LOST) by default unless showInactive or specific status filter
+    if (!filters.showInactive && !filters.status) {
+      where.status = { notIn: ['DEAD', 'CLOSED_WON', 'CLOSED_LOST'] };
+    }
+
+    if (filters.staleMinDays) {
+      const cutoff = new Date(Date.now() - filters.staleMinDays * 24 * 3600000);
+      where.lastTouchedAt = { lt: cutoff };
+    }
+
+    if (filters.arvFilter === 'has') where.arv = { gt: 0 };
+    if (filters.arvFilter === 'none') {
+      where.AND = [
+        ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
+        { OR: [{ arv: null }, { arv: 0 }] },
+      ];
+    }
+
+    if (filters.dealPencils === 'yes') where.dealPencils = true;
+    if (filters.dealPencils === 'no') where.dealPencils = false;
+
+    // Dynamic sort
+    const dir = filters.dir || 'asc';
+    const sortMap: Record<string, Prisma.LeadOrderByWithRelationInput[]> = {
+      tier:     [{ tier: dir }, { totalScore: 'desc' }],
+      score:    [{ totalScore: dir }, { createdAt: 'desc' }],
+      arv:      [{ arv: dir }, { createdAt: 'desc' }],
+      asking:   [{ askingPrice: dir }, { createdAt: 'desc' }],
+      created:  [{ createdAt: dir }],
+      touched:  [{ lastTouchedAt: dir }, { createdAt: 'desc' }],
+      touches:  [{ touchCount: dir }, { createdAt: 'desc' }],
+      address:  [{ propertyAddress: dir }],
+    };
+    const orderBy = sortMap[filters.sort || 'tier'] || sortMap.tier;
+
+    // Run data query, count, and aggregate counts in parallel
+    const [leads, total, tierGroups, bandGroups, inactiveCount, stateRows] = await Promise.all([
       this.prisma.lead.findMany({
         where,
-        include: {
-          assignedTo: true,
-        },
-        orderBy: [
-          { totalScore: 'desc' },
-          { createdAt: 'desc' },
-        ],
+        include: { assignedTo: true },
+        orderBy,
         skip,
         take: limit,
       }),
       this.prisma.lead.count({ where }),
+      this.prisma.lead.groupBy({ by: ['tier'], where: baseWhere, _count: true }),
+      this.prisma.lead.groupBy({ by: ['scoreBand'], where: baseWhere, _count: true }),
+      this.prisma.lead.count({
+        where: { ...baseWhere, status: { in: ['DEAD', 'CLOSED_WON', 'CLOSED_LOST'] } },
+      }),
+      this.prisma.lead.findMany({
+        where: baseWhere,
+        select: { propertyState: true },
+        distinct: ['propertyState'],
+      }),
     ]);
+
+    // Shape aggregate counts
+    const tierCounts: Record<number, number> = { 1: 0, 2: 0, 3: 0 };
+    for (const g of tierGroups) {
+      if (g.tier != null) tierCounts[g.tier] = g._count;
+    }
+    const bandCounts: Record<string, number> = {};
+    for (const g of bandGroups) {
+      bandCounts[g.scoreBand] = g._count;
+    }
 
     return {
       leads,
@@ -524,7 +635,77 @@ export class LeadsService {
         total,
         totalPages: Math.ceil(total / limit),
       },
+      counts: {
+        tiers: tierCounts,
+        bands: bandCounts,
+        hiddenInactive: inactiveCount,
+      },
+      availableStates: stateRows
+        .map(r => r.propertyState)
+        .filter(Boolean)
+        .sort(),
     };
+  }
+
+  /**
+   * Get leads grouped by pipeline stage for kanban view.
+   */
+  async getPipelineLeads(filters: {
+    organizationId?: string;
+    search?: string;
+    tier?: number;
+    scoreBand?: string;
+    assignedToUserId?: string;
+    limitPerStage?: number;
+  }) {
+    const limitPerStage = filters.limitPerStage || 50;
+    const stages = ['NEW', 'ATTEMPTING_CONTACT', 'QUALIFYING', 'QUALIFIED', 'OFFER_SENT', 'NEGOTIATING', 'UNDER_CONTRACT', 'CLOSING', 'NURTURE'];
+
+    // Build shared WHERE (excluding status, which varies per stage)
+    const baseWhere: Prisma.LeadWhereInput = {};
+    if (filters.organizationId) baseWhere.organizationId = filters.organizationId;
+    if (filters.tier) baseWhere.tier = filters.tier;
+    if (filters.scoreBand) baseWhere.scoreBand = filters.scoreBand as any;
+    if (filters.assignedToUserId === 'none') {
+      baseWhere.assignedToUserId = null;
+    } else if (filters.assignedToUserId) {
+      baseWhere.assignedToUserId = filters.assignedToUserId;
+    }
+    if (filters.search) {
+      baseWhere.AND = [{
+        OR: [
+          { propertyAddress: { contains: filters.search, mode: 'insensitive' } },
+          { sellerFirstName: { contains: filters.search, mode: 'insensitive' } },
+          { sellerLastName: { contains: filters.search, mode: 'insensitive' } },
+          { sellerPhone: { contains: filters.search, mode: 'insensitive' } },
+          { sellerEmail: { contains: filters.search, mode: 'insensitive' } },
+        ],
+      }];
+    }
+
+    // Query all stages in parallel
+    const stageResults = await Promise.all(
+      stages.map(async (status) => {
+        const where = { ...baseWhere, status };
+        const [leads, total] = await Promise.all([
+          this.prisma.lead.findMany({
+            where,
+            include: { assignedTo: true },
+            orderBy: [{ totalScore: 'desc' }, { createdAt: 'desc' }],
+            take: limitPerStage,
+          }),
+          this.prisma.lead.count({ where }),
+        ]);
+        return { status, leads, total };
+      }),
+    );
+
+    const stagesMap: Record<string, { leads: any[]; total: number }> = {};
+    for (const r of stageResults) {
+      stagesMap[r.status] = { leads: r.leads, total: r.total };
+    }
+
+    return { stages: stagesMap };
   }
 
   /**
@@ -627,6 +808,28 @@ export class LeadsService {
               oldBand: lead.scoreBand,
               newBand: scoringResult.scoreBand,
             },
+          },
+        });
+      }
+    }
+
+    // Recompute tier and dealPencils if relevant fields changed
+    const tierFields = ['status', 'arv', 'askingPrice', 'scoreBand', 'totalScore'];
+    const needsTierUpdate = needsRescore || tierFields.some(f => f in data);
+    if (needsTierUpdate) {
+      const fresh = await this.prisma.lead.findUnique({ where: { id } });
+      if (fresh) {
+        await this.prisma.lead.update({
+          where: { id },
+          data: {
+            tier: this.computeTier({
+              status: fresh.status,
+              scoreBand: fresh.scoreBand,
+              totalScore: fresh.totalScore,
+              arv: fresh.arv,
+              askingPrice: fresh.askingPrice,
+            }),
+            dealPencils: this.computeDealPencils(fresh.arv, fresh.askingPrice),
           },
         });
       }

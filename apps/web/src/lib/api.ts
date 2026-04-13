@@ -61,6 +61,7 @@ export const authAPI = {
 // Leads API
 export const leadsAPI = {
   list: (params?: any) => api.get('/leads', { params }),
+  pipeline: (params?: any) => api.get('/leads/pipeline', { params }),
   get: (id: string) => api.get(`/leads/${id}`),
   create: (data: any) => api.post('/leads', data),
   update: (id: string, data: any) => api.patch(`/leads/${id}`, data),
