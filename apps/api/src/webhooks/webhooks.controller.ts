@@ -492,7 +492,7 @@ export class WebhooksController {
           // Use createdAt (auto-set by Prisma) instead of sentAt for the time window.
           // PENDING records have sentAt=NULL because it's only set after the SMS API
           // responds, but the webhook can arrive before that update completes.
-          const recentCutoff = new Date(Date.now() - 2 * 60 * 1000); // 2 minutes ago
+          const recentCutoff = new Date(Date.now() - 10 * 60 * 1000); // 10 minutes ago
           const existingByContent = !existingMsg
             ? await this.leadsService['prisma'].message.findFirst({
                 where: {
@@ -511,6 +511,10 @@ export class WebhooksController {
                 },
               })
             : null;
+
+          if (!existingMsg && !existingByContent) {
+            console.log(`⚠️  ${event}: no app-originated match for lead ${outboundLead.id} — smsId=${outSmsId}, coreBody="${coreBody.substring(0, 60)}…", cutoff=${recentCutoff.toISOString()}`);
+          }
 
           if (existingMsg || existingByContent) {
             // Message already in our DB — this was sent by our app (AI or Draft).
