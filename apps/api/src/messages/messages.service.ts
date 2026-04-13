@@ -452,7 +452,8 @@ Your message must:
           if (portalUrl) {
             portalInstruction = `
 IMPORTANT — INCLUDE THIS LINK: You have a property portal page for this seller. Include this URL in your message: ${portalUrl}
-Frame it naturally as you transition to asking about the property condition — something like "I put together a page with the details we have on file for your property — you can check it out here and upload any photos, that really helps us get a feel for the condition: ${portalUrl}"
+Frame it naturally as you transition to asking about the property condition — something like "I put together a page with the info we have on file for your property, you can check it out here and upload any photos when you get a chance — that really helps us get a feel for the condition:\n${portalUrl}\n\nWhat kind of shape is the house in currently?"
+CRITICAL: Do NOT place a period, comma, or any punctuation immediately after the URL — it breaks the link on phones. End the sentence BEFORE the URL (use a colon or dash), then start the next question as a new paragraph after the URL.
 Do NOT just paste the link by itself. Weave it into your message naturally.`;
           }
         }
