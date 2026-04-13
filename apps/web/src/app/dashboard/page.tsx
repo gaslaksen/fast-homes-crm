@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { dashboardAPI, authAPI } from '@/lib/api';
+import { dashboardAPI, authAPI, tasksAPI } from '@/lib/api';
 import { formatDistanceToNow, format } from 'date-fns';
 import PropertyPhoto from '@/components/PropertyPhoto';
 import AppNav from '@/components/AppNav';
@@ -109,21 +109,28 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const today = new Date();
 
+  const loadTasks = (userId?: string) => {
+    dashboardAPI.tasks(userId).then((res) => setTasks(res.data || [])).catch(() => {});
+  };
+
   useEffect(() => {
     Promise.allSettled([
       dashboardAPI.stats(),
       dashboardAPI.hotLeads(8),
       dashboardAPI.staleLeads(5),
-      dashboardAPI.tasks(),
       dashboardAPI.newLeads(10),
       authAPI.getMe(),
-    ]).then(([s, h, stale, t, nl, me]) => {
+    ]).then(([s, h, stale, nl, me]) => {
       if (s.status === 'fulfilled') setStats(s.value.data);
       if (h.status === 'fulfilled') setHotLeads(h.value.data);
       if (stale.status === 'fulfilled') setStaleLeads(stale.value.data);
-      if (t.status === 'fulfilled') setTasks(t.value.data);
       if (nl.status === 'fulfilled') setNewLeads(nl.value.data);
-      if (me.status === 'fulfilled') setCurrentUser(me.value.data);
+      if (me.status === 'fulfilled') {
+        setCurrentUser(me.value.data);
+        loadTasks(me.value.data?.id);
+      } else {
+        loadTasks();
+      }
     }).finally(() => setLoading(false));
   }, []);
 
@@ -334,30 +341,40 @@ export default function DashboardPage() {
               )}
             </div>
 
-            {/* Upcoming Tasks */}
+            {/* Follow-Up Reminders */}
             <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
               <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-800">
-                <h2 className="font-bold text-gray-900 dark:text-gray-100">📋 Tasks</h2>
+                <h2 className="font-bold text-gray-900 dark:text-gray-100">📋 Follow-Ups</h2>
                 <span className="text-xs text-gray-400 dark:text-gray-500">{tasks.length} pending</span>
               </div>
               {tasks.length === 0 ? (
-                <div className="px-5 py-8 text-center text-sm text-gray-400 dark:text-gray-500">No upcoming tasks.</div>
+                <div className="px-5 py-8 text-center text-sm text-gray-400 dark:text-gray-500">No upcoming follow-ups. Schedule one from a lead page.</div>
               ) : (
                 <div className="divide-y divide-gray-100 dark:divide-gray-800">
-                  {tasks.slice(0, 5).map((task) => (
-                    <Link key={task.id} href={`/leads/${task.lead.id}`} className="flex items-start justify-between px-5 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
-                      <div>
+                  {tasks.slice(0, 10).map((task) => (
+                    <div key={task.id} className="flex items-start gap-3 px-5 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+                      <button
+                        onClick={() => {
+                          tasksAPI.complete(task.id, currentUser?.id).then(() => loadTasks(currentUser?.id));
+                        }}
+                        className="mt-1 w-4 h-4 rounded border-2 border-gray-300 dark:border-gray-600 hover:border-green-500 hover:bg-green-50 dark:hover:bg-green-900/30 flex-shrink-0 transition-colors"
+                        title="Mark complete"
+                      />
+                      <Link href={`/leads/${task.lead.id}`} className="flex-1 min-w-0">
                         <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{task.title}</div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                        {task.description && (
+                          <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate">{task.description}</div>
+                        )}
+                        <div className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
                           {task.lead.propertyAddress} · {task.lead.sellerFirstName} {task.lead.sellerLastName}
                         </div>
-                      </div>
+                      </Link>
                       {task.dueDate && (
-                        <div className={`text-xs font-medium flex-shrink-0 ml-4 mt-0.5 ${new Date(task.dueDate) < new Date() ? 'text-red-500' : 'text-gray-400 dark:text-gray-500'}`}>
+                        <div className={`text-xs font-medium flex-shrink-0 ml-2 mt-1 ${new Date(task.dueDate) < new Date() ? 'text-red-500' : 'text-gray-400 dark:text-gray-500'}`}>
                           {format(new Date(task.dueDate), 'MMM d')}
                         </div>
                       )}
-                    </Link>
+                    </div>
                   ))}
                 </div>
               )}

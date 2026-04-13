@@ -518,28 +518,12 @@ You decide the right approach based on the conversation flow.${portalInstruction
 
       const messageBody = drafts.message;
 
-      // If all CAMP is complete, create follow-up task and shut off auto-respond
+      // If all CAMP is complete, shut off auto-respond
       if (campComplete) {
-        try {
-          await this.prisma.task.create({
-            data: {
-              leadId,
-              title: 'Review CAMP info and make offer',
-              description: 'AI has gathered all CAMP information from the seller. Review the details and follow up with an offer.',
-              dueDate: new Date(Date.now() + 24 * 60 * 60 * 1000),
-            },
-          });
-          this.logger.log(`📋 Follow-up task created for lead ${leadId} — CAMP complete`);
-        } catch (err) {
-          this.logger.warn(`Could not create follow-up task for lead ${leadId}: ${err.message}`);
-        }
-
-        // Turn off auto-respond so no more AI messages fire after the closing
         await this.prisma.lead.update({
           where: { id: leadId },
           data: { autoRespond: false, status: 'QUALIFIED' },
         }).catch(() => {
-          // fallback: just turn off auto-respond
           this.prisma.lead.update({ where: { id: leadId }, data: { autoRespond: false } });
         });
         this.logger.log(`🔕 Auto-respond disabled for lead ${leadId} — CAMP complete, closing message sent`);
