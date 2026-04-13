@@ -22,8 +22,8 @@ export default function PhotoUpload({ token, onUploadComplete }: PhotoUploadProp
       setError('Please select image files only.');
       return;
     }
-    if (fileArray.length > 10) {
-      setError('You can upload up to 10 photos at a time.');
+    if (fileArray.length > 30) {
+      setError('You can upload up to 30 photos at a time.');
       return;
     }
 
@@ -127,7 +127,7 @@ export default function PhotoUpload({ token, onUploadComplete }: PhotoUploadProp
                 Tap to upload photos or drag and drop
               </p>
               <p className="text-xs text-gray-400 mt-1">
-                Up to 10 photos at a time, 10MB each. JPG, PNG, HEIC accepted.
+                Up to 30 photos at a time, 10MB each. JPG, PNG, HEIC accepted.
               </p>
             </div>
           </div>

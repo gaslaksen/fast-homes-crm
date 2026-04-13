@@ -38,7 +38,7 @@ export class SellerPortalController {
   }
 
   @Post('seller-portal/:token/photos')
-  @UseInterceptors(FilesInterceptor('photos', 10, UPLOAD_OPTIONS))
+  @UseInterceptors(FilesInterceptor('photos', 30, UPLOAD_OPTIONS))
   async uploadSellerPhotos(
     @Param('token') token: string,
     @UploadedFiles() files: Express.Multer.File[],
