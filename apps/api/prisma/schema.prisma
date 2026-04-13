@@ -155,7 +155,6 @@ model Lead {
 
   // Deal tier: 1 = contract now, 2 = opportunity, 3 = dead/no go
   tier                  Int?
-  dealPencils           Boolean  @default(false)  // (arv * 0.7 - 55000) >= askingPrice
 
   sourceMetadata    Json?
   primaryPhoto      String?

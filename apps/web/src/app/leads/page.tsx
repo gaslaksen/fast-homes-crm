@@ -368,8 +368,6 @@ function LeadsPageInner() {
     if (stateFilter)     params.propertyState = stateFilter;
     if (staleFilter)     params.staleMinDays = staleFilter;
     if (arvFilter)       params.arvFilter = arvFilter;
-    if (dealFilter === 'pencils') params.dealPencils = 'yes';
-    if (dealFilter === 'no')      params.dealPencils = 'no';
     if (showInactive)    params.showInactive = 'true';
     if (sortKey)         params.sort = sortKey;
     if (sortDir)         params.dir = sortDir;

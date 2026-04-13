@@ -59,16 +59,13 @@ export class LeadsService {
   /**
    * Create a new lead
    */
-  /** Recompute and persist tier + dealPencils for a lead. Call after ARV or score changes. */
-  async refreshTierAndDealPencils(leadId: string) {
+  /** Recompute and persist tier for a lead. Call after ARV or score changes. */
+  async refreshTier(leadId: string) {
     const lead = await this.prisma.lead.findUnique({ where: { id: leadId } });
     if (!lead) return;
     await this.prisma.lead.update({
       where: { id: leadId },
-      data: {
-        tier: this.computeTier(lead),
-        dealPencils: this.computeDealPencils(lead.arv, lead.askingPrice),
-      },
+      data: { tier: this.computeTier(lead) },
     });
   }
 
@@ -80,12 +77,6 @@ export class LeadsService {
     if ((lead.scoreBand === 'STRIKE_ZONE' || lead.scoreBand === 'HOT') && pencils) return 1;
     if (lead.scoreBand === 'DEAD_COLD' && lead.totalScore <= 2 && !pencils) return 3;
     return 2;
-  }
-
-  /** Compute whether deal pencils (MAO >= asking). */
-  private computeDealPencils(arv?: number | null, askingPrice?: number | null): boolean {
-    if (!arv || !askingPrice) return false;
-    return (arv * 0.7 - 55000) >= askingPrice;
   }
 
   async createLead(data: {
@@ -168,14 +159,13 @@ export class LeadsService {
         lastTouchedAt: new Date(),
         touchCount: 0,
         daysInStage: 0,
-        // Computed fields for server-side filtering/sorting
+        // Computed tier for server-side filtering/sorting
         tier: this.computeTier({
           status: 'NEW',
           scoreBand: scoringResult.scoreBand,
           totalScore: scoringResult.totalScore,
           askingPrice: data.askingPrice,
         }),
-        dealPencils: false, // No ARV at creation time
       },
     });
 
@@ -376,8 +366,8 @@ export class LeadsService {
         `Comps fetched for lead ${leadId}: ${result.compsCount} comps, ARV: $${result.arv.toLocaleString()} (${result.source})`,
       );
 
-      // Recompute tier and dealPencils now that ARV is set
-      await this.refreshTierAndDealPencils(leadId);
+      // Recompute tier now that ARV is set
+      await this.refreshTier(leadId);
     } catch (error) {
       this.logger.error(`Comps fetch failed for lead ${leadId}: ${error.message}`);
     }
@@ -502,7 +492,6 @@ export class LeadsService {
     propertyState?: string;
     staleMinDays?: number;
     arvFilter?: 'has' | 'none';
-    dealPencils?: 'yes' | 'no';
     showInactive?: boolean;
     sort?: string;
     dir?: 'asc' | 'desc';
@@ -577,9 +566,6 @@ export class LeadsService {
         { OR: [{ arv: null }, { arv: 0 }] },
       ];
     }
-
-    if (filters.dealPencils === 'yes') where.dealPencils = true;
-    if (filters.dealPencils === 'no') where.dealPencils = false;
 
     // Dynamic sort
     const dir = filters.dir || 'asc';
@@ -813,7 +799,7 @@ export class LeadsService {
       }
     }
 
-    // Recompute tier and dealPencils if relevant fields changed
+    // Recompute tier if relevant fields changed
     const tierFields = ['status', 'arv', 'askingPrice', 'scoreBand', 'totalScore'];
     const needsTierUpdate = needsRescore || tierFields.some(f => f in data);
     if (needsTierUpdate) {
@@ -829,7 +815,6 @@ export class LeadsService {
               arv: fresh.arv,
               askingPrice: fresh.askingPrice,
             }),
-            dealPencils: this.computeDealPencils(fresh.arv, fresh.askingPrice),
           },
         });
       }
