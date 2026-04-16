@@ -6,9 +6,10 @@ import { DripModule } from '../drip/drip.module';
 import { CampaignsModule } from '../campaigns/campaigns.module';
 import { LeadsModule } from '../leads/leads.module';
 import { SellerPortalModule } from '../seller-portal/seller-portal.module';
+import { GmailModule } from '../gmail/gmail.module';
 
 @Module({
-  imports: [ScoringModule, forwardRef(() => DripModule), forwardRef(() => CampaignsModule), forwardRef(() => LeadsModule), SellerPortalModule],
+  imports: [ScoringModule, forwardRef(() => DripModule), forwardRef(() => CampaignsModule), forwardRef(() => LeadsModule), SellerPortalModule, GmailModule],
   controllers: [MessagesController],
   providers: [MessagesService],
   exports: [MessagesService],

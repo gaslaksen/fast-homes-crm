@@ -7,6 +7,7 @@ import { CampaignEnrollmentService } from '../campaigns/campaign-enrollment.serv
 import { LeadsService } from '../leads/leads.service';
 import { SellerPortalService } from '../seller-portal/seller-portal.service';
 import { SmsProvider, createSmsProvider } from './sms.provider';
+import { GmailService } from '../gmail/gmail.service';
 import { formatPhoneNumber, isOptOutMessage } from '@fast-homes/shared';
 
 const MAX_AUTO_RESPONSES_PER_DAY = 10;
@@ -104,6 +105,7 @@ export class MessagesService {
     @Inject(forwardRef(() => LeadsService))
     private leadsService: LeadsService,
     @Optional() private sellerPortalService: SellerPortalService,
+    private gmailService: GmailService,
   ) {
     this.twilioNumber = this.config.get<string>('SMRTPHONE_PHONE_NUMBER') || this.config.get<string>('TWILIO_PHONE_NUMBER') || '';
     this.smsProvider = createSmsProvider(this.config);
@@ -590,11 +592,54 @@ You decide the right approach based on the conversation flow.${portalInstruction
       await this.incrementAutoResponseCount(leadId);
 
       this.logger.log(`Initial outreach sent for lead ${leadId}`);
+
+      // Send matching email if the lead has an email address and org Gmail is connected
+      if (lead.sellerEmail && lead.organizationId) {
+        this.sendInitialEmailOutreach(lead).catch((err) => {
+          this.logger.error(`Initial email outreach failed for lead ${leadId}: ${err.message}`);
+        });
+      }
+
       return messageBody;
     } catch (error) {
       this.logger.error(`Initial outreach failed for lead ${leadId}: ${error.message}`);
       return null;
     }
+  }
+
+  /**
+   * Send an initial outreach email mirroring the SMS, via org Gmail (deals@).
+   * Fire-and-forget — failures here should never block the SMS flow.
+   */
+  private async sendInitialEmailOutreach(lead: {
+    id: string;
+    organizationId: string | null;
+    sellerFirstName: string;
+    sellerEmail: string | null;
+    propertyAddress: string;
+  }): Promise<void> {
+    if (!lead.sellerEmail || !lead.organizationId) return;
+
+    // Check org Gmail is connected before attempting
+    const status = await this.gmailService.getOrgGmailStatus(lead.organizationId);
+    if (!status.connected) {
+      this.logger.warn(`Org Gmail not connected for org ${lead.organizationId}, skipping initial email outreach`);
+      return;
+    }
+
+    const emailBody = `Hi ${lead.sellerFirstName},\n\nThis is Dax from Quick Cash Home Buyers. We just received your information about selling your property at ${lead.propertyAddress}.\n\nWe'd love to learn more about your situation. How much are you asking for the property? And what's your ideal timeline to sell?\n\nLooking forward to hearing from you!`;
+
+    const unsubscribeUrl = this.gmailService.buildUnsubscribeUrl(lead.id);
+
+    await this.gmailService.sendOrgEmail(lead.organizationId, {
+      to: lead.sellerEmail,
+      subject: `Quick question about your property at ${lead.propertyAddress}`,
+      bodyText: emailBody,
+      leadId: lead.id,
+      listUnsubscribeUrl: unsubscribeUrl,
+    });
+
+    this.logger.log(`Initial email outreach sent for lead ${lead.id} to ${lead.sellerEmail}`);
   }
 
   /**
