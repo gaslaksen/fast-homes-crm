@@ -11,6 +11,7 @@ interface Campaign {
   name: string;
   description?: string;
   triggerDays: number;
+  enrollmentMode: 'manual' | 'auto';
   isActive: boolean;
   isDefault: boolean;
   steps: any[];
@@ -214,7 +215,9 @@ export default function DripCampaignsPage() {
                   </div>
 
                   <div className="text-xs text-gray-500 dark:text-gray-400">
-                    Triggers at {campaign.triggerDays} days no contact
+                    {(campaign.enrollmentMode || 'manual') === 'auto'
+                      ? 'Auto-enroll on first reply'
+                      : 'Manual enrollment'}
                   </div>
 
                   {/* Actions */}

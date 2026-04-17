@@ -56,41 +56,8 @@ export class CampaignExecutionService implements OnModuleInit {
   ) {}
 
   async onModuleInit() {
-    await this.deactivateOldSeedCampaigns();
-  }
-
-  /**
-   * One-time cleanup: deactivate the old hardcoded seed campaigns that were
-   * auto-enrolling leads and conflicting with the AI CAMP system.
-   * Campaigns are now managed entirely through the UI.
-   */
-  private async deactivateOldSeedCampaigns() {
-    const result = await this.prisma.campaign.updateMany({
-      where: { isDefault: true, isActive: true },
-      data: { isActive: false },
-    });
-    if (result.count > 0) {
-      this.logger.log(`🗑️ Deactivated ${result.count} old seed campaign(s) — campaigns are now managed via UI only`);
-
-      // Also remove any active/paused enrollments from these campaigns
-      const deactivated = await this.prisma.campaign.findMany({
-        where: { isDefault: true, isActive: false },
-        select: { id: true },
-      });
-      const campaignIds = deactivated.map((c) => c.id);
-      if (campaignIds.length > 0) {
-        const removed = await this.prisma.campaignEnrollment.updateMany({
-          where: {
-            campaignId: { in: campaignIds },
-            status: { in: ['ACTIVE', 'PAUSED'] },
-          },
-          data: { status: 'REMOVED' },
-        });
-        if (removed.count > 0) {
-          this.logger.log(`🗑️ Removed ${removed.count} active enrollment(s) from deactivated seed campaigns`);
-        }
-      }
-    }
+    // Old seed campaign deactivation removed — enrollment is now controlled
+    // per-campaign via enrollmentMode ('manual' | 'auto').
   }
 
   // Run every 5 minutes

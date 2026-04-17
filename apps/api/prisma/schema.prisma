@@ -597,6 +597,7 @@ model Campaign {
   name           String
   description    String?
   triggerDays    Int      @default(15)
+  enrollmentMode String   @default("manual")  // "manual" | "auto"
   isActive       Boolean  @default(true)
   isDefault      Boolean  @default(false)
   organizationId String?

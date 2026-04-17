@@ -22,6 +22,7 @@ interface CampaignData {
   name: string;
   description: string;
   triggerDays: number;
+  enrollmentMode: 'manual' | 'auto';
   isActive: boolean;
   steps: Step[];
 }
@@ -558,6 +559,7 @@ export default function CampaignBuilder({ initial, onSave }: CampaignBuilderProp
       name: 'New Campaign',
       description: '',
       triggerDays: 15,
+      enrollmentMode: 'manual',
       isActive: true,
       steps: [],
     },
@@ -688,16 +690,31 @@ export default function CampaignBuilder({ initial, onSave }: CampaignBuilderProp
             className="w-full border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-sm dark:bg-gray-800 dark:text-gray-100"
           />
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-sm text-gray-700 dark:text-gray-300">Enroll leads with no contact for</span>
-          <input
-            type="number"
-            min={1}
-            value={campaign.triggerDays}
-            onChange={(e) => setCampaign((c) => ({ ...c, triggerDays: parseInt(e.target.value) || 15 }))}
-            className="w-20 border border-gray-200 dark:border-gray-700 rounded-lg px-2 py-1 text-sm dark:bg-gray-800 dark:text-gray-100 text-center"
-          />
-          <span className="text-sm text-gray-700 dark:text-gray-300">days</span>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Enrollment mode</label>
+          <div className="flex rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 w-fit">
+            {([
+              { value: 'manual' as const, label: 'Manual', desc: 'Enroll leads manually' },
+              { value: 'auto' as const, label: 'Auto', desc: 'Enroll on first reply' },
+            ]).map(({ value, label }) => (
+              <button
+                key={value}
+                onClick={() => setCampaign((c) => ({ ...c, enrollmentMode: value }))}
+                className={`px-4 py-2 text-sm font-medium transition-colors ${
+                  campaign.enrollmentMode === value
+                    ? 'bg-blue-600 text-white'
+                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            {campaign.enrollmentMode === 'manual'
+              ? 'Leads are enrolled manually from the lead detail page'
+              : 'Leads are automatically enrolled when they first reply'}
+          </p>
         </div>
       </div>
 

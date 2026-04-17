@@ -45,6 +45,7 @@ export default function EditCampaignPage() {
               name: campaign.name,
               description: campaign.description || '',
               triggerDays: campaign.triggerDays,
+              enrollmentMode: campaign.enrollmentMode || 'manual',
               isActive: campaign.isActive,
               steps: (campaign.steps || []).map((s: any) => ({
                 id: s.id,

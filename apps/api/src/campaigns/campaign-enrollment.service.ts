@@ -148,7 +148,7 @@ export class CampaignEnrollmentService {
    */
   async autoEnrollInDefaults(leadId: string) {
     const campaigns = await this.prisma.campaign.findMany({
-      where: { isDefault: true, isActive: true },
+      where: { isActive: true, enrollmentMode: 'auto' },
     });
     for (const campaign of campaigns) {
       try {

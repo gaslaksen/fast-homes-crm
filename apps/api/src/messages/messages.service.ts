@@ -269,8 +269,14 @@ export class MessagesService {
 
     const lead = await this.prisma.lead.findUnique({ where: { id: leadId } });
     if (!lead) return false;
-    if (!lead.autoRespond) return false;
-    if (lead.doNotContact) return false;
+    if (!lead.autoRespond) {
+      this.logger.log(`⏸️ Auto-respond disabled for lead ${leadId}`);
+      return false;
+    }
+    if (lead.doNotContact) {
+      this.logger.log(`🚫 Lead ${leadId} is Do Not Contact — blocking auto-respond`);
+      return false;
+    }
 
     // Check daily limit
     const today = new Date();

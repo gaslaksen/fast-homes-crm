@@ -5,6 +5,7 @@ export interface CreateCampaignDto {
   name: string;
   description?: string;
   triggerDays?: number;
+  enrollmentMode?: string;
   isActive?: boolean;
   steps?: CreateStepDto[];
 }
