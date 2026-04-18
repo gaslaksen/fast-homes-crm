@@ -176,24 +176,6 @@ export class MessagesService {
       throw new Error('Lead is marked as Do Not Contact');
     }
 
-    // Throttle: skip if an outbound message was sent to this lead in the last 5 minutes.
-    // Prevents race conditions (campaigns + initial outreach + drip) from spamming the seller.
-    // Manual agent sends (userId present) bypass the throttle.
-    if (!userId) {
-      const recentOutbound = await this.prisma.message.findFirst({
-        where: {
-          leadId,
-          direction: 'OUTBOUND',
-          createdAt: { gte: new Date(Date.now() - 5 * 60 * 1000) },
-        },
-        orderBy: { createdAt: 'desc' },
-      });
-      if (recentOutbound) {
-        this.logger.warn(`⚡ Throttled: automated outbound to lead ${leadId} skipped — last sent ${recentOutbound.createdAt.toISOString()}`);
-        return null;
-      }
-    }
-
     const to = formatPhoneNumber(lead.sellerPhone);
     const from = this.twilioNumber;
 

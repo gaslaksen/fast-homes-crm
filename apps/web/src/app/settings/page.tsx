@@ -111,11 +111,11 @@ export default function SettingsPage() {
           <span className="text-primary-600 font-medium text-sm">Manage Leads &rarr;</span>
         </Link>
 
-        {/* Drip Sequence Card */}
+        {/* Qualification Messaging Card */}
         <div className="card max-w-2xl">
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Drip Sequence</h3>
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Qualification Messaging</h3>
           <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
-            Configure timing and retry behavior for automated CAMP question sequences.
+            Configure timing and retry behavior for the CAMP qualification Q&amp;A sequence (the auto-messages sent after a lead arrives to qualify them on price, timeline, condition, and ownership).
           </p>
 
           <div className="space-y-4">
