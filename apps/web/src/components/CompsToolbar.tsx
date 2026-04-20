@@ -1,16 +1,19 @@
 'use client';
 
+export type CompsSource = 'reapi' | 'attom' | 'rentcast';
+
 interface CompsToolbarProps {
   allCompsCount: number;
   selectedCompsCount: number;
+  compsFromReapi?: number;
   compsFromAttom: number;
   compsFromRentcast: number;
-  compsSource: 'attom' | 'rentcast';
+  compsSource: CompsSource;
   sortField: string;
   sortDir: 'asc' | 'desc';
   fetchingComps: boolean;
   hasAnalysis: boolean;
-  onSetCompsSource: (source: 'attom' | 'rentcast') => void;
+  onSetCompsSource: (source: CompsSource) => void;
   onSort: (field: string) => void;
   onSelectAll: (selected: boolean) => void;
   onRefreshComps: () => void;
@@ -28,6 +31,7 @@ const SORT_OPTIONS = [
 export default function CompsToolbar({
   allCompsCount,
   selectedCompsCount,
+  compsFromReapi = 0,
   compsFromAttom,
   compsFromRentcast,
   compsSource,
@@ -51,6 +55,11 @@ export default function CompsToolbar({
           <span className="text-xs text-gray-500 dark:text-gray-400">
             {selectedCompsCount}/{allCompsCount} selected
           </span>
+          {compsFromReapi > 0 && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 font-medium">
+              {compsFromReapi} REAPI
+            </span>
+          )}
           {compsFromAttom > 0 && (
             <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 font-medium">
               {compsFromAttom} ATTOM
@@ -67,6 +76,16 @@ export default function CompsToolbar({
         <div className="flex items-center gap-2 flex-wrap">
           {/* Source toggle */}
           <div className="flex rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 text-[10px]">
+            <button
+              onClick={() => onSetCompsSource('reapi')}
+              className={`px-2 py-1 font-medium transition-colors ${
+                compsSource === 'reapi'
+                  ? 'bg-emerald-600 text-white'
+                  : 'bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
+              }`}
+            >
+              REAPI
+            </button>
             <button
               onClick={() => onSetCompsSource('attom')}
               className={`px-2 py-1 font-medium transition-colors ${

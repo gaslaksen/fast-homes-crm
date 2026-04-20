@@ -92,7 +92,7 @@ model Lead {
   arv               Float?
   arvConfidence     Float?
   lastCompsDate     DateTime?
-  compsProvider     String?  @default("attom") // 'attom' | 'rentcast' | 'auto' — last-used comp provider per lead
+  compsProvider     String?  @default("reapi") // 'reapi' | 'attom' | 'rentcast' | 'auto' — last-used comp provider per lead
   repairCosts       Float?   // Deal-level repair cost override
   assignmentFee     Float?   // Deal-level assignment fee override
   maoPercent        Float?   // MAO % override (default 70)
@@ -125,7 +125,19 @@ model Lead {
   heatingType          String?   // ATTOM: FORCED AIR / BASEBOARD / etc.
   apn                  String?   // Assessor's Parcel Number (from ATTOM)
   ownerName            String?   // Owner name from ATTOM assessment records
-  
+
+  // ── RealEstateAPI (REAPI) enrichment ─────────────────────────────────────
+  reapiId                 String?   // REAPI property ID for subsequent lookups
+  reapiEnrichedAt         DateTime? // when REAPI data was last fetched
+  reapiEstimatedValue     Float?    // REAPI AVM point estimate
+  reapiEstimatedValueLow  Float?
+  reapiEstimatedValueHigh Float?
+  reapiEquity             Float?    // Estimated owner equity
+  reapiMortgageData       Json?     // Current mortgage(s): lender, amount, rate, type, term, origination, lien position
+  reapiSaleHistory        Json?     // Prior sales from REAPI
+  reapiFeatures           Json?     // pool, garage, basement, stories, heating/cooling, condition, etc.
+  reapiOwnerData          Json?     // Owner name(s), mailing address, owner-occupied, LLC flag
+
   challengeScore    Int      @default(0)
   authorityScore    Int      @default(0)
   moneyScore        Int      @default(0)
@@ -339,6 +351,15 @@ model CompAnalysis {
   // Deal intelligence: full investor reasoning (market velocity, $/sqft anchoring,
   // multi-scenario exits, lot value, seller pitch)
   dealIntelligence  String?  @db.Text
+
+  // ── PropGPT (REAPI AI-powered property analysis) ─────────────────────────
+  propGptAnalysis   String?   @db.Text // Raw markdown/text response from PropGPT
+  propGptArv        Float?             // Parsed ARV point estimate (best-effort regex)
+  propGptArvLow     Float?
+  propGptArvHigh    Float?
+  propGptConfidence Float?             // 0-100
+  propGptFetchedAt  DateTime?
+  propGptModel      String?            // e.g. "gpt-4o"
 
   comps             Comp[]
   createdAt         DateTime @default(now())

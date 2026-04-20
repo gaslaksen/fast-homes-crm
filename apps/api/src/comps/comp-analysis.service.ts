@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
+import { ReapiService } from './reapi.service';
 import Anthropic from '@anthropic-ai/sdk';
 
 interface AdjustmentConfig {
@@ -60,11 +61,78 @@ export class CompAnalysisService {
   constructor(
     private prisma: PrismaService,
     private config: ConfigService,
+    private reapiService: ReapiService,
   ) {
     const apiKey = this.config.get<string>('ANTHROPIC_API_KEY');
     if (apiKey) {
       this.anthropic = new Anthropic({ apiKey });
     }
+  }
+
+  /**
+   * Run REAPI PropGPT analysis for an analysis session. Persists the raw text,
+   * best-effort parsed ARV range, confidence, and timestamp. Output appears
+   * alongside the DealCore (Claude) AI analysis on the ARV tab for comparison.
+   */
+  async runPropGPT(analysisId: string) {
+    const analysis = await this.prisma.compAnalysis.findUnique({
+      where: { id: analysisId },
+      include: {
+        lead: {
+          select: {
+            id: true,
+            propertyAddress: true, propertyCity: true, propertyState: true, propertyZip: true,
+            bedrooms: true, bathrooms: true, sqft: true, sqftOverride: true,
+            yearBuilt: true, lotSize: true, propertyType: true, askingPrice: true,
+            propertyCondition: true,
+          },
+        },
+        comps: { where: { selected: true }, take: 15 },
+      },
+    });
+    if (!analysis || !analysis.lead) throw new Error('Analysis or lead not found');
+
+    const lead = analysis.lead;
+    const address = `${lead.propertyAddress}, ${lead.propertyCity}, ${lead.propertyState} ${lead.propertyZip}`;
+
+    const parsed = await this.reapiService.runPropGPT(
+      address,
+      {
+        bedrooms: lead.bedrooms,
+        bathrooms: lead.bathrooms,
+        sqft: lead.sqftOverride ?? lead.sqft,
+        yearBuilt: lead.yearBuilt,
+        lotSize: lead.lotSize,
+        propertyType: lead.propertyType,
+        askingPrice: lead.askingPrice,
+        condition: lead.propertyCondition,
+      },
+      analysis.comps.map(c => ({
+        address: c.address,
+        soldPrice: c.soldPrice,
+        sqft: c.sqft,
+        distance: c.distance,
+      })),
+    );
+
+    if (!parsed) {
+      throw new Error('PropGPT returned no response (REAPI/OpenAI key missing or API error)');
+    }
+
+    const updated = await this.prisma.compAnalysis.update({
+      where: { id: analysisId },
+      data: {
+        propGptAnalysis: parsed.text,
+        propGptArv: parsed.arv ?? null,
+        propGptArvLow: parsed.arvLow ?? null,
+        propGptArvHigh: parsed.arvHigh ?? null,
+        propGptConfidence: parsed.confidence ?? null,
+        propGptFetchedAt: new Date(),
+        propGptModel: parsed.model ?? null,
+      },
+    });
+
+    return updated;
   }
 
   /** Returns true if the sale date is within `months` months of today */

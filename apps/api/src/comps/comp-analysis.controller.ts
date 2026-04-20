@@ -179,4 +179,9 @@ export class CompAnalysisController {
     const intelligence = await this.compAnalysisService.generateDealIntelligence(analysisId);
     return { intelligence };
   }
+
+  @Post(':analysisId/propgpt')
+  async runPropGPT(@Param('analysisId') analysisId: string) {
+    return this.compAnalysisService.runPropGPT(analysisId);
+  }
 }

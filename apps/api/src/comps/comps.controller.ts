@@ -36,11 +36,11 @@ export class CompsController {
       throw new Error('Lead not found');
     }
 
-    // Provider priority: explicit ?source= → lead.compsProvider → 'attom' default
+    // Provider priority: explicit ?source= → lead.compsProvider → 'reapi' default
     const preferSource =
-      (source as 'attom' | 'rentcast' | 'auto') ||
-      (lead.compsProvider as 'attom' | 'rentcast' | 'auto' | null) ||
-      'attom';
+      (source as 'reapi' | 'attom' | 'rentcast' | 'auto') ||
+      (lead.compsProvider as 'reapi' | 'attom' | 'rentcast' | 'auto' | null) ||
+      'reapi';
 
     const result = await this.compsService.fetchComps(
       leadId,

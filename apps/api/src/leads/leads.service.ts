@@ -9,6 +9,7 @@ import { SellerPortalService } from '../seller-portal/seller-portal.service';
 import { RentCastService } from '../comps/rentcast.service';
 import { CompsService } from '../comps/comps.service';
 import { AttomService } from '../comps/attom.service';
+import { ReapiService } from '../comps/reapi.service';
 import { PipelineService } from '../pipeline/pipeline.service';
 import { LeadStatus, LeadSource, formatPhoneNumber, toTitleCase } from '@fast-homes/shared';
 import { Prisma } from '@prisma/client';
@@ -53,6 +54,7 @@ export class LeadsService {
     private rentCastService: RentCastService,
     private compsService: CompsService,
     private attomService: AttomService,
+    private reapiService: ReapiService,
     private pipelineService: PipelineService,
   ) {}
 
@@ -251,82 +253,91 @@ export class LeadsService {
   }
 
   /**
-   * Auto-populate property details from RentCast, then fetch comps.
+   * Auto-populate property details. Primary source is REAPI. RentCast is a
+   * fallback if REAPI is unconfigured or returns nothing. ATTOM is no longer
+   * called on the initial pull — the user must explicitly trigger it from
+   * the Comps tab if they want ATTOM data for a specific lead.
    */
   private async autoPopulatePropertyDetails(
     leadId: string,
     data: { propertyAddress: string; propertyCity: string; propertyState: string; propertyZip: string },
   ) {
-    // Skip if no address
     if (!data.propertyAddress || !data.propertyCity) return;
 
-    const address = `${data.propertyAddress}, ${data.propertyCity}, ${data.propertyState} ${data.propertyZip}`;
-    this.logger.log(`Looking up property details for lead ${leadId}: ${address}`);
+    const fullAddress = `${data.propertyAddress}, ${data.propertyCity}, ${data.propertyState} ${data.propertyZip}`;
+    const addressObj = {
+      street: data.propertyAddress,
+      city: data.propertyCity,
+      state: data.propertyState,
+      zip: data.propertyZip,
+    };
+    this.logger.log(`Looking up property details for lead ${leadId}: ${fullAddress}`);
 
-    const property = await this.rentCastService.getPropertyDetails(address);
+    let enrichedFromReapi = false;
+    if (this.reapiService.isConfigured) {
+      try {
+        const reapiResult = await this.reapiService.enrichLead(leadId, addressObj, { forceRefresh: true });
+        if (reapiResult) {
+          enrichedFromReapi = true;
+          this.logger.log(`Property details populated from REAPI for lead ${leadId}`);
+        } else {
+          this.logger.warn(`REAPI returned no data for lead ${leadId} — falling back to RentCast`);
+        }
+      } catch (err) {
+        this.logger.warn(`REAPI enrichment failed for lead ${leadId} — falling back to RentCast: ${(err as Error).message}`);
+      }
+    }
 
-    if (property) {
-      // Only update fields that aren't already set on the lead
-      const lead = await this.prisma.lead.findUnique({
-        where: { id: leadId },
-        select: { bedrooms: true, bathrooms: true, sqft: true, propertyType: true, yearBuilt: true, lotSize: true },
-      });
+    if (!enrichedFromReapi) {
+      const property = await this.rentCastService.getPropertyDetails(fullAddress);
 
-      const updates: Record<string, any> = {};
-      if (!lead?.bedrooms && property.bedrooms) updates.bedrooms = property.bedrooms;
-      if (!lead?.bathrooms && property.bathrooms) updates.bathrooms = property.bathrooms;
-      if (!lead?.sqft && property.squareFootage) updates.sqft = property.squareFootage;
-      if (!lead?.propertyType && property.propertyType) updates.propertyType = property.propertyType;
-      if (!lead?.yearBuilt && property.yearBuilt) updates.yearBuilt = property.yearBuilt;
-      if (property.lotSize) updates.lotSize = normalizeLotSize(property.lotSize);
-      if (property.lastSaleDate) updates.lastSaleDate = new Date(property.lastSaleDate);
-      if (property.lastSalePrice) updates.lastSalePrice = property.lastSalePrice;
-      const taxVal = latestTaxAssessment((property as any).taxAssessments);
-      if (taxVal) updates.taxAssessedValue = taxVal;
-      if ((property as any).ownerOccupied != null) updates.ownerOccupied = (property as any).ownerOccupied;
-      if (property.hoa?.fee) updates.hoaFee = property.hoa.fee;
-
-      if (Object.keys(updates).length > 0) {
-        await this.prisma.lead.update({
+      if (property) {
+        const lead = await this.prisma.lead.findUnique({
           where: { id: leadId },
-          data: updates,
+          select: { bedrooms: true, bathrooms: true, sqft: true, propertyType: true, yearBuilt: true, lotSize: true },
         });
 
-        this.logger.log(`Property details auto-populated for lead ${leadId}: ${JSON.stringify(updates)}`);
+        const updates: Record<string, any> = {};
+        if (!lead?.bedrooms && property.bedrooms) updates.bedrooms = property.bedrooms;
+        if (!lead?.bathrooms && property.bathrooms) updates.bathrooms = property.bathrooms;
+        if (!lead?.sqft && property.squareFootage) updates.sqft = property.squareFootage;
+        if (!lead?.propertyType && property.propertyType) updates.propertyType = property.propertyType;
+        if (!lead?.yearBuilt && property.yearBuilt) updates.yearBuilt = property.yearBuilt;
+        if (property.lotSize) updates.lotSize = normalizeLotSize(property.lotSize);
+        if (property.lastSaleDate) updates.lastSaleDate = new Date(property.lastSaleDate);
+        if (property.lastSalePrice) updates.lastSalePrice = property.lastSalePrice;
+        const taxVal = latestTaxAssessment((property as any).taxAssessments);
+        if (taxVal) updates.taxAssessedValue = taxVal;
+        if ((property as any).ownerOccupied != null) updates.ownerOccupied = (property as any).ownerOccupied;
+        if (property.hoa?.fee) updates.hoaFee = property.hoa.fee;
 
+        if (Object.keys(updates).length > 0) {
+          await this.prisma.lead.update({ where: { id: leadId }, data: updates });
+          this.logger.log(`Property details auto-populated from RentCast for lead ${leadId}: ${JSON.stringify(updates)}`);
+
+          await this.prisma.activity.create({
+            data: {
+              leadId,
+              type: 'FIELD_UPDATED',
+              description: `Property details auto-populated from public records (${Object.keys(updates).join(', ')})`,
+              metadata: { source: 'rentcast', fields: Object.keys(updates) },
+            },
+          });
+        }
+      } else {
+        this.logger.warn(`Property details not found for lead ${leadId} (REAPI + RentCast both empty)`);
         await this.prisma.activity.create({
           data: {
             leadId,
             type: 'FIELD_UPDATED',
-            description: `Property details auto-populated from public records (${Object.keys(updates).join(', ')})`,
-            metadata: { source: 'rentcast', fields: Object.keys(updates) },
+            description: 'Property details not found — manual entry or ATTOM/REAPI refresh may be needed',
           },
         });
       }
-    } else {
-      this.logger.warn(`Property details not found for lead ${leadId}`);
-      await this.prisma.activity.create({
-        data: {
-          leadId,
-          type: 'FIELD_UPDATED',
-          description: 'Property details not found in public records — manual entry may be needed',
-        },
-      });
     }
 
-    // ATTOM enrichment: AVM, tax assessment, pool, cooling, APN, owner name, condition-adjusted ARV
-    if (this.attomService.isConfigured) {
-      this.attomService.enrichLead(leadId, {
-        street: data.propertyAddress,
-        city: data.propertyCity,
-        state: data.propertyState,
-        zip: data.propertyZip,
-      }).catch((err) => {
-        this.logger.error(`ATTOM enrichment failed for lead ${leadId}: ${err.message}`);
-      });
-    }
-
-    // Fetch comps now that we may have property details
+    // Fetch comps now that we have property details. Default provider is REAPI
+    // (set via lead.compsProvider default). User can still override from UI.
     await this.fetchCompsForLead(leadId);
   }
 

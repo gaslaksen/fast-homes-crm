@@ -122,8 +122,9 @@ export const messagesAPI = {
 };
 
 // Comps API
+export type CompsSource = 'reapi' | 'attom' | 'rentcast' | 'auto';
 export const compsAPI = {
-  fetch: (leadId: string, forceRefresh?: boolean, source?: string) => {
+  fetch: (leadId: string, forceRefresh?: boolean, source?: CompsSource) => {
     const params = new URLSearchParams();
     if (forceRefresh) params.set('forceRefresh', 'true');
     if (source) params.set('source', source);
@@ -178,6 +179,8 @@ export const compAnalysisAPI = {
     api.post(`/leads/${leadId}/comp-analysis/${analysisId}/assessment`),
   dealIntelligence: (leadId: string, analysisId: string) =>
     api.post(`/leads/${leadId}/comp-analysis/${analysisId}/deal-intelligence`),
+  runPropGPT: (leadId: string, analysisId: string) =>
+    api.post(`/leads/${leadId}/comp-analysis/${analysisId}/propgpt`),
   analyzePhotos: (leadId: string, analysisId: string, formData: FormData) =>
     api.post(`/leads/${leadId}/comp-analysis/${analysisId}/analyze-photos`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },

@@ -162,7 +162,7 @@ export default function CompsAnalysisPage() {
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [loading, setLoading] = useState(true);
   const [fetchingComps, setFetchingComps] = useState(false);
-  const [compsSource, setCompsSource] = useState<'attom' | 'rentcast'>('attom');
+  const [compsSource, setCompsSource] = useState<'reapi' | 'attom' | 'rentcast'>('reapi');
   const [sortField, setSortField] = useState<string>('distance');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [hoveredCompId, setHoveredCompId] = useState<string | null>(null);
@@ -206,6 +206,7 @@ export default function CompsAnalysisPage() {
   const [generatingAi, setGeneratingAi] = useState(false);
   const [generatingAssessment, setGeneratingAssessment] = useState(false);
   const [generatingDealIntel, setGeneratingDealIntel] = useState(false);
+  const [runningPropGPT, setRunningPropGPT] = useState(false);
   const [analyzingPhotos, setAnalyzingPhotos] = useState(false);
   const [selectedPhotos, setSelectedPhotos] = useState<File[]>([]);
   const [photoThumbnails, setPhotoThumbnails] = useState<{file: File; url: string; status: 'ready'|'uploading'|'done'}[]>([]);
@@ -227,7 +228,7 @@ export default function CompsAnalysisPage() {
       setLead(leadRes.data);
       // Initialize provider toggle from lead's last-used provider
       const savedProvider = (leadRes.data as any).compsProvider;
-      if (savedProvider === 'rentcast' || savedProvider === 'attom') {
+      if (savedProvider === 'reapi' || savedProvider === 'rentcast' || savedProvider === 'attom') {
         setCompsSource(savedProvider);
       }
       if (leadRes.data?.aiAnalysis) { try { setAiAnalysis(JSON.parse(leadRes.data.aiAnalysis)); } catch {} }
@@ -309,9 +310,11 @@ export default function CompsAnalysisPage() {
 
       // If the chosen provider returned 0 comps, tell the user clearly — no silent fallback.
       if ((result.data?.compsCount ?? 0) === 0) {
-        const providerLabel = compsSource === 'attom' ? 'ATTOM' : 'RentCast';
-        const other = compsSource === 'attom' ? 'RentCast' : 'ATTOM';
-        alert(`${providerLabel} found 0 comps for this property. Try switching to ${other} and refreshing.`);
+        const providerLabel =
+          compsSource === 'reapi' ? 'REAPI' :
+          compsSource === 'attom' ? 'ATTOM' :
+          'RentCast';
+        alert(`${providerLabel} found 0 comps for this property. Try switching providers (REAPI / ATTOM / RentCast) and refreshing.`);
       }
     } catch (error: any) {
       console.error('Failed to fetch comps:', error);
@@ -444,6 +447,21 @@ export default function CompsAnalysisPage() {
       alert('Failed to generate assessment');
     } finally {
       setGeneratingAssessment(false);
+    }
+  };
+
+  // ─── PropGPT (REAPI AI analysis) ────────────────────────────────────────────
+  const handleRunPropGPT = async () => {
+    if (!analysis) return;
+    setRunningPropGPT(true);
+    try {
+      await compAnalysisAPI.runPropGPT(leadId, analysis.id);
+      await refreshAnalysis();
+    } catch (error: any) {
+      console.error('PropGPT failed:', error);
+      alert(error?.response?.data?.message || 'PropGPT failed — check REAPI and OpenAI API keys');
+    } finally {
+      setRunningPropGPT(false);
     }
   };
 
@@ -731,9 +749,10 @@ export default function CompsAnalysisPage() {
         selectedComps.filter(c => c.sqft).length || 0
       )
     : 0;
+  const compsFromReapi = allComps.filter(c => c.source === 'reapi').length;
   const compsFromAttom = allComps.filter(c => c.source === 'attom').length;
   const compsFromRentcast = allComps.filter(c => c.source === 'rentcast').length;
-  const compsWithSource = compsFromAttom + compsFromRentcast;
+  const compsWithSource = compsFromReapi + compsFromAttom + compsFromRentcast;
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
@@ -883,6 +902,7 @@ export default function CompsAnalysisPage() {
               <CompsToolbar
                 allCompsCount={allComps.length}
                 selectedCompsCount={selectedComps.length}
+                compsFromReapi={compsFromReapi}
                 compsFromAttom={compsFromAttom}
                 compsFromRentcast={compsFromRentcast}
                 compsSource={compsSource}
@@ -916,7 +936,9 @@ export default function CompsAnalysisPage() {
                     disabled={fetchingComps}
                     className="btn btn-primary"
                   >
-                    {fetchingComps ? `Fetching from ${compsSource === 'rentcast' ? 'RentCast' : 'ATTOM'}...` : 'Find Comps'}
+                    {fetchingComps
+                      ? `Fetching from ${compsSource === 'reapi' ? 'REAPI' : compsSource === 'rentcast' ? 'RentCast' : 'ATTOM'}...`
+                      : 'Find Comps'}
                   </button>
                 </div>
               ) : (
@@ -1228,6 +1250,79 @@ export default function CompsAnalysisPage() {
                       }
                       return <p key={i} className={line === '' ? 'mb-2' : 'mb-0.5'}>{line}</p>;
                     })}
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* PropGPT (REAPI AI-powered property analysis) */}
+            <div className="card border border-emerald-200 dark:border-emerald-800">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-xl">🏘️</span>
+                  <h3 className="font-bold text-gray-900 dark:text-gray-100">PropGPT Analysis</h3>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 font-medium">REAPI</span>
+                  {(analysis as any)?.propGptFetchedAt && (
+                    <span className="text-[10px] text-gray-500 dark:text-gray-400">
+                      updated {new Date((analysis as any).propGptFetchedAt).toLocaleString()}
+                    </span>
+                  )}
+                </div>
+                <button
+                  onClick={handleRunPropGPT}
+                  disabled={runningPropGPT || !analysis}
+                  className="btn btn-sm bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+                >
+                  {runningPropGPT ? (
+                    <span className="flex items-center gap-2">
+                      <span className="animate-spin inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full" />
+                      Running...
+                    </span>
+                  ) : (analysis as any)?.propGptAnalysis ? 'Re-run PropGPT' : 'Run PropGPT'}
+                </button>
+              </div>
+              {(() => {
+                const a: any = analysis || {};
+                if (!a.propGptAnalysis) {
+                  return (
+                    <p className="text-sm text-gray-500 dark:text-gray-400 italic">
+                      Run PropGPT to get REAPI's AI-powered ARV, repair estimate, and investment analysis.
+                      Compare its output with the DealCore AI assessment above.
+                    </p>
+                  );
+                }
+                return (
+                  <div className="space-y-3">
+                    {(a.propGptArv || a.propGptArvLow) && (
+                      <div className="grid grid-cols-3 gap-3">
+                        {a.propGptArv != null && (
+                          <div className="bg-emerald-50 dark:bg-emerald-950 border border-emerald-200 dark:border-emerald-800 rounded-xl p-3">
+                            <div className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-400 uppercase tracking-wide mb-0.5">PropGPT ARV</div>
+                            <div className="text-lg font-bold text-emerald-900 dark:text-emerald-200">${Math.round(a.propGptArv).toLocaleString()}</div>
+                          </div>
+                        )}
+                        {a.propGptArvLow != null && a.propGptArvHigh != null && (
+                          <div className="bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 rounded-xl p-3">
+                            <div className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-0.5">Range</div>
+                            <div className="text-sm font-semibold text-gray-800 dark:text-gray-200">
+                              ${Math.round(a.propGptArvLow).toLocaleString()} – ${Math.round(a.propGptArvHigh).toLocaleString()}
+                            </div>
+                          </div>
+                        )}
+                        {a.propGptConfidence != null && (
+                          <div className="bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-xl p-3">
+                            <div className="text-[10px] font-semibold text-blue-700 dark:text-blue-400 uppercase tracking-wide mb-0.5">Confidence</div>
+                            <div className="text-sm font-semibold text-blue-900 dark:text-blue-200">{a.propGptConfidence}%</div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    <div className="prose prose-sm max-w-none text-gray-800 dark:text-gray-200 bg-emerald-50/50 dark:bg-emerald-950/30 rounded-lg p-4 text-sm leading-relaxed whitespace-pre-wrap">
+                      {a.propGptAnalysis}
+                    </div>
+                    {a.propGptModel && (
+                      <div className="text-[10px] text-gray-400 dark:text-gray-500">Model: {a.propGptModel}</div>
+                    )}
                   </div>
                 );
               })()}
