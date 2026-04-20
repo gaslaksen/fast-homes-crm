@@ -385,7 +385,8 @@ export class LeadsService {
   }
 
   /**
-   * Refresh property details from RentCast for an existing lead.
+   * Refresh property details for an existing lead. Prefers REAPI; falls back
+   * to RentCast if REAPI is unconfigured or returns no data.
    */
   async refreshPropertyDetails(leadId: string) {
     const lead = await this.prisma.lead.findUnique({
@@ -399,11 +400,35 @@ export class LeadsService {
     });
     if (!lead) throw new Error('Lead not found');
 
+    const addressObj = {
+      street: lead.propertyAddress,
+      city: lead.propertyCity,
+      state: lead.propertyState,
+      zip: lead.propertyZip,
+    };
+
+    // Try REAPI first (forceRefresh bypasses 24h cache)
+    if (this.reapiService.isConfigured) {
+      try {
+        const reapiResult = await this.reapiService.enrichLead(leadId, addressObj, { forceRefresh: true });
+        if (reapiResult) {
+          return {
+            success: true,
+            source: 'reapi',
+            message: 'Property details refreshed from REAPI',
+          };
+        }
+      } catch (err) {
+        this.logger.warn(`REAPI refresh failed for lead ${leadId} — falling back to RentCast: ${(err as Error).message}`);
+      }
+    }
+
+    // Fallback: RentCast
     const address = `${lead.propertyAddress}, ${lead.propertyCity}, ${lead.propertyState} ${lead.propertyZip}`;
     const property = await this.rentCastService.getPropertyDetails(address);
 
     if (!property) {
-      return { success: false, message: 'Property details not found' };
+      return { success: false, message: 'Property details not found (REAPI + RentCast both empty)' };
     }
 
     const updates: Record<string, any> = {};
@@ -430,7 +455,7 @@ export class LeadsService {
         data: {
           leadId,
           type: 'FIELD_UPDATED',
-          description: `Property details refreshed from public records (${Object.keys(updates).join(', ')})`,
+          description: `Property details refreshed from RentCast (${Object.keys(updates).join(', ')})`,
           metadata: { source: 'rentcast', fields: Object.keys(updates) },
         },
       });
@@ -438,8 +463,9 @@ export class LeadsService {
 
     return {
       success: true,
+      source: 'rentcast',
       details: updates,
-      message: `Property details updated: ${Object.keys(updates).join(', ')}`,
+      message: `Property details refreshed from RentCast: ${Object.keys(updates).join(', ')}`,
     };
   }
 

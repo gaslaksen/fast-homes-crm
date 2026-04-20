@@ -1,165 +1,267 @@
 /**
- * RealEstateAPI (REAPI) response types.
+ * RealEstateAPI (REAPI) response types — derived from live v2/PropertyDetail,
+ * v2/PropertySearch and v3/PropertyComps responses (2026-04-20).
  *
- * REAPI returns highly variable shapes across endpoints, so these are a
- * deliberately loose mapping of the fields we care about. Every field is
- * optional because different endpoints/record sources populate different
- * subsets. The service layer pulls what's present and writes it onto the
- * Lead / Comp / CompAnalysis models.
+ * PropertyDetail returns a deeply nested object under `data`:
+ *   data: {
+ *     <flat top-level fields like estimatedValue, propertyType, ownerOccupied, ...>
+ *     propertyInfo:  { address, bedrooms, bathrooms, buildingSquareFeet, lotSquareFeet, yearBuilt, ... }
+ *     lotInfo:       { apn, subdivision, lotAcres, legalDescription, ... }
+ *     ownerInfo:     { owner1FullName, ownerOccupied, mailAddress, ... }
+ *     taxInfo:       { assessedValue, marketValue, taxAmount, ... }
+ *     lastSale:      { saleAmount, saleDate, transactionType, ... }
+ *     currentMortgages: [ { amount, lenderName, loanType, interestRate, term, ... } ]
+ *     saleHistory:      [ { saleAmount, saleDate, transactionType, ... } ]
+ *   }
  */
 
-export interface ReapiProperty {
-  // Identity
-  id?: string;                     // REAPI internal property id
-  apn?: string;                    // Assessor's Parcel Number
+export interface ReapiAddressObject {
+  address?: string;        // full formatted
+  city?: string;
+  county?: string;
+  state?: string;
+  street?: string;
+  zip?: string;
   fips?: string;
+  latitude?: number;       // only on some endpoints
+  longitude?: number;
+  label?: string;          // v2/PropertyDetail uses this for the full formatted string
+}
 
-  // Address
-  address?: {
-    street?: string;
-    address?: string;              // full formatted
-    city?: string;
-    state?: string;
-    zip?: string;
-    county?: string;
-    latitude?: number;
-    longitude?: number;
-  };
-
-  // Core property details
+export interface ReapiPropertyInfo {
+  address?: ReapiAddressObject;
   bedrooms?: number;
   bathrooms?: number;
-  squareFeet?: number;
-  lotSquareFeet?: number;          // REAPI often returns sqft for lot
+  partialBathrooms?: number;
+  buildingSquareFeet?: number;
+  livingSquareFeet?: number;
+  lotSquareFeet?: number;
   yearBuilt?: number;
-  propertyType?: string;
-  propertyUse?: string;
   stories?: number;
-
-  // Features
-  hasPool?: boolean;
-  hasGarage?: boolean;
-  garageSpaces?: number;
-  hasBasement?: boolean;
-  basementSqft?: number;
+  roomsCount?: number;
+  fireplace?: boolean;
+  pool?: boolean;
+  poolArea?: number;
+  patio?: boolean;
+  patioArea?: number | string;
+  deck?: boolean;
+  deckArea?: number;
+  attic?: boolean;
+  basementType?: string;
+  basementSquareFeet?: number;
+  garageType?: string;
+  garageSquareFeet?: number;
+  parkingSpaces?: number;
+  carport?: boolean;
   heatingType?: string;
-  coolingType?: string;
-  roofType?: string;
-  wallType?: string;
-
-  // Valuation
-  estimatedValue?: number;
-  estimatedValueLow?: number;
-  estimatedValueHigh?: number;
-  estimatedEquity?: number;
+  heatingFuelType?: string;
+  airConditioningAvailable?: boolean | null;
+  airConditioningType?: string | null;
+  construction?: string | null;
+  roofConstruction?: string | null;
+  roofMaterial?: string | null;
+  propertyUse?: string;
+  propertyUseCode?: number;
+  latitude?: number;
+  longitude?: number;
+  unitsCount?: number;
   pricePerSquareFoot?: number;
+  taxExemptionHomeownerFlag?: boolean;
+}
 
-  // Tax / Assessment
-  taxAssessedValue?: number;
-  taxAssessedLandValue?: number;
-  taxAssessedImprovementValue?: number;
-  annualTaxAmount?: number;
-  taxYear?: number;
+export interface ReapiLotInfo {
+  apn?: string;
+  apnUnformatted?: string;
+  subdivision?: string;
+  lotAcres?: number | string;
+  lotSquareFeet?: number;
+  lotDepthFeet?: number;
+  lotWidthFeet?: number;
+  landUse?: string;
+  legalDescription?: string;
+  zoning?: string | null;
+  propertyClass?: string;
+  propertyUse?: string;
+}
+
+export interface ReapiOwnerInfo {
+  absenteeOwner?: boolean;
+  outOfStateAbsenteeOwner?: boolean;
+  inStateAbsenteeOwner?: boolean;
+  corporateOwned?: boolean;
+  companyName?: string | null;
+  equity?: number;
+  mailAddress?: ReapiAddressObject;
+  owner1FirstName?: string;
+  owner1LastName?: string;
+  owner1FullName?: string;
+  owner1Type?: string;
+  owner2FirstName?: string | null;
+  owner2LastName?: string | null;
+  owner2FullName?: string | null;
+  ownerOccupied?: boolean;
+  ownershipLength?: number;
+}
+
+export interface ReapiTaxInfo {
+  assessedValue?: number;
+  assessedLandValue?: number;
+  assessedImprovementValue?: number;
   assessmentYear?: number;
+  marketValue?: number;
+  marketLandValue?: number;
+  marketImprovementValue?: number;
+  taxAmount?: string | number;
+  taxDelinquentYear?: number | null;
+  year?: number;
+}
 
-  // Ownership
+export interface ReapiSaleRecord {
+  saleAmount?: number;
+  saleDate?: string;
+  recordingDate?: string;
+  documentType?: string;
+  documentTypeCode?: string;
+  transactionType?: string;
+  purchaseMethod?: string;
+  armsLength?: boolean;
+  buyerNames?: string;
+  sellerNames?: string;
+  downPayment?: number;
+  ltv?: number | null;
+  seqNo?: number;
+}
+
+export interface ReapiMortgageRecord {
+  amount?: number;
+  lenderName?: string;
+  lenderType?: string;
+  lenderCode?: string;
+  loanType?: string;             // "Conventional" | "FHA" | "VA" | "USDA" | ...
+  loanTypeCode?: string;         // "COV" | "FHA" | "VA" | "USDA" | ...
+  interestRate?: number | null;
+  interestRateType?: string | null;  // "Fixed" | "Adjustable" | null
+  term?: string | number;        // months
+  termType?: string;             // "Month" | "Year"
+  documentDate?: string;
+  recordingDate?: string;
+  maturityDate?: string;
+  assumable?: boolean;
+  position?: string;             // "First" | "Second" | ...
+  mortgageId?: string;
+}
+
+export interface ReapiPropertyData {
+  id?: number | string;
+  propertyType?: string;               // "SFR" | "CND" | "MFR" | ...
+  estimatedValue?: number;
+  estimatedEquity?: number;
+  estimatedMortgageBalance?: number | string;
+  estimatedMortgagePayment?: number;
+  equity?: number;
+  equityPercent?: number;
+  highEquity?: boolean;
+  openMortgageBalance?: number;
+  lastSaleDate?: string;
+  lastSalePrice?: string | number;     // often "0" in non-disclosure states
+  lastUpdateDate?: string;
+  floodZone?: boolean;
+  floodZoneType?: string;
+  floodZoneDescription?: string;
+  vacant?: boolean;
   ownerOccupied?: boolean;
   absenteeOwner?: boolean;
   corporateOwned?: boolean;
-  ownerName?: string;
-  ownerNames?: string[];
-  mailingAddress?: {
-    street?: string;
-    city?: string;
-    state?: string;
-    zip?: string;
-  };
+  mlsActive?: boolean;
+  mlsPending?: boolean;
+  mlsSold?: boolean;
+  mlsDaysOnMarket?: number | null;
+  mlsListingPrice?: number | null;
+  loanTypeCodeFirst?: string;
+  loanTypeCodeSecond?: string | null;
+  loanTypeCodeThird?: string | null;
+  maturityDateFirst?: string | null;
 
-  // Sale history
-  lastSaleDate?: string;
-  lastSalePrice?: number;
-  priorSaleDate?: string;
-  priorSalePrice?: number;
-  saleHistory?: Array<{
-    saleDate?: string;
-    salePrice?: number;
-    transactionType?: string;
-  }>;
+  // Nested groups
+  propertyInfo?: ReapiPropertyInfo;
+  lotInfo?: ReapiLotInfo;
+  ownerInfo?: ReapiOwnerInfo;
+  taxInfo?: ReapiTaxInfo;
+  lastSale?: ReapiSaleRecord;
+  saleHistory?: ReapiSaleRecord[];
+  currentMortgages?: ReapiMortgageRecord[];
+  mortgageHistory?: ReapiMortgageRecord[];
 
-  // Mortgage (current lien info)
-  mortgage?: {
-    lender?: string;
-    loanAmount?: number;
-    loanType?: string;             // CONV / FHA / VA / USDA / etc.
-    interestRate?: number;
-    interestRateType?: string;     // FIXED / ARM
-    loanTermYears?: number;
-    originationDate?: string;
-    dueDate?: string;
-    lienPosition?: number;         // 1 = first, 2 = second
-    openLien?: boolean;
-  };
-  secondMortgage?: {
-    lender?: string;
-    loanAmount?: number;
-    loanType?: string;
-    interestRate?: number;
-    originationDate?: string;
-  };
-
-  // HOA
-  hoaFee?: number;
-
-  // Optional: full raw response passthrough for storage in JSON fields
-  _raw?: Record<string, unknown>;
-}
-
-export interface ReapiComp {
-  id?: string;
-  address?: string;
-  city?: string;
-  state?: string;
-  zip?: string;
-  latitude?: number;
-  longitude?: number;
-
-  // Sale data
-  lastSalePrice?: number;
-  lastSaleDate?: string;
-
-  // Physical
-  bedrooms?: number;
-  bathrooms?: number;
-  squareFeet?: number;
-  lotSquareFeet?: number;
-  yearBuilt?: number;
-  propertyType?: string;
-
-  // Features
-  hasPool?: boolean;
-  hasGarage?: boolean;
-
-  // Distance & scoring (from comps endpoint)
-  distance?: number;               // miles
-  daysOnMarket?: number;
-  pricePerSquareFoot?: number;
-  similarityScore?: number;        // 0-100 if provided
-
-  // Passthrough
-  sourceUrl?: string;
+  // Catch-all for fields we don't type
+  [key: string]: unknown;
 }
 
 export interface ReapiPropertyDetailResponse {
-  data?: ReapiProperty | ReapiProperty[];
-  property?: ReapiProperty;
-  // REAPI may also return top-level fields directly:
+  input?: Record<string, unknown>;
+  data?: ReapiPropertyData;
+  statusCode?: number;
+  statusMessage?: string;
+  live?: boolean;
+  requestExecutionTimeMS?: string;
+}
+
+/**
+ * v3/PropertyComps response. Comps are returned at top level under `comps`,
+ * along with `subject` (the target property) and REAPI's AVM (`reapiAvm`).
+ */
+export interface ReapiComp {
+  id?: string;
+  distance?: number;              // miles
+  address?: ReapiAddressObject;
+  latitude?: number;
+  longitude?: number;
+  bedrooms?: number;
+  bathrooms?: number;
+  yearBuilt?: string | number;
+  squareFeet?: string | number;   // REAPI returns these as strings in v3 comps
+  lotSquareFeet?: string | number;
+  propertyType?: string;
+  apn?: string;
+  fips?: string;
+  landUse?: string;
+
+  // Sale / valuation — lastSaleAmount is "0" in non-disclosure states
+  lastSaleAmount?: string | number;
+  lastSaleDate?: string;
+  estimatedValue?: string | number;
+  estimatedEquity?: string | number;
+  taxAssessedValue?: number;
+  taxAmount?: string | number;
+
+  // Features
+  garageAvailable?: boolean;
+  airConditioningAvailable?: boolean;
+  pool?: boolean;
+
+  // MLS
+  mlsListingDate?: string | null;
+  mlsLastStatusDate?: string | null;
+  mlsSoldPrice?: number | null;
+  mlsListingPrice?: number | null;
+
+  age?: number;
+
+  // Catch-all
   [key: string]: unknown;
 }
 
-export interface ReapiCompsResponse {
+export interface ReapiPropertyCompsResponse {
+  live?: boolean;
+  input?: Record<string, unknown>;
+  subject?: ReapiPropertyData;
   comps?: ReapiComp[];
-  data?: ReapiComp[];
-  [key: string]: unknown;
+  reapiAvm?: number;
+  reapiAvmLow?: number;
+  reapiAvmHigh?: number;
+  warning?: string;
+  recordCount?: number;
+  statusCode?: number;
+  statusMessage?: string;
 }
 
 export interface ReapiPropGPTResponse {

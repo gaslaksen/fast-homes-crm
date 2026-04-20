@@ -662,7 +662,11 @@ export default function LeadDetailPage() {
                 <div className="flex justify-between items-center mb-4">
                   <div className="flex items-center gap-2">
                     <h2 className="text-xl font-bold">Property Details</h2>
-                    {(lead as any).attomId && (
+                    {(lead as any).reapiId ? (
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 font-medium">
+                        ✓ REAPI Verified
+                      </span>
+                    ) : (lead as any).attomId && (
                       <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 font-medium">
                         ✓ ATTOM Verified
                       </span>
@@ -702,7 +706,7 @@ export default function LeadDetailPage() {
                     <dt className="text-sm font-medium text-gray-500 dark:text-gray-400">Sq Ft</dt>
                     <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">
                       {(lead as any).sqftOverride
-                        ? <><span className="font-semibold text-amber-700 dark:text-amber-400">{(lead as any).sqftOverride.toLocaleString()}</span><span className="text-xs text-amber-600 dark:text-amber-400 ml-1">(override)</span><span className="text-xs text-gray-400 dark:text-gray-500 ml-1">ATTOM: {lead.sqft?.toLocaleString() || '—'}</span></>
+                        ? <><span className="font-semibold text-amber-700 dark:text-amber-400">{(lead as any).sqftOverride.toLocaleString()}</span><span className="text-xs text-amber-600 dark:text-amber-400 ml-1">(override)</span><span className="text-xs text-gray-400 dark:text-gray-500 ml-1">{(lead as any).reapiId ? 'REAPI' : 'Public records'}: {lead.sqft?.toLocaleString() || '—'}</span></>
                         : lead.sqft?.toLocaleString() || 'Unknown'
                       }
                     </dd>
@@ -748,7 +752,7 @@ export default function LeadDetailPage() {
                       <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">
                         {lead.conditionLevel}
                         {(lead as any).propertyCondition && (lead as any).propertyCondition !== lead.conditionLevel && (
-                          <span className="text-xs text-indigo-600 dark:text-indigo-400 ml-1">(ATTOM: {(lead as any).propertyCondition})</span>
+                          <span className="text-xs text-indigo-600 dark:text-indigo-400 ml-1">(public records: {(lead as any).propertyCondition})</span>
                         )}
                       </dd>
                     </div>
@@ -866,7 +870,10 @@ export default function LeadDetailPage() {
 
                 {/* ── Sale History ── */}
                 {(() => {
-                  const saleHistory: any[] = (lead as any).attomSaleHistory || [];
+                  const reapiSaleHistory: any[] = (lead as any).reapiSaleHistory || [];
+                  const attomSaleHistory: any[] = (lead as any).attomSaleHistory || [];
+                  const saleHistory = reapiSaleHistory.length > 0 ? reapiSaleHistory : attomSaleHistory;
+                  const saleHistorySource = reapiSaleHistory.length > 0 ? 'REAPI' : attomSaleHistory.length > 0 ? 'ATTOM' : null;
                   const hasAnySale = lead.lastSaleDate || lead.lastSalePrice || saleHistory.length > 0;
                   if (!hasAnySale) return null;
                   return (
@@ -874,8 +881,8 @@ export default function LeadDetailPage() {
                       <summary className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-1.5 cursor-pointer list-none [&::-webkit-details-marker]:hidden">
                         <svg className="w-3.5 h-3.5 text-gray-400 transition-transform group-open:rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
                         🏷️ Sale History
-                        {saleHistory.length > 0 && (
-                          <span className="text-xs text-gray-400 dark:text-gray-500 font-normal">via ATTOM</span>
+                        {saleHistorySource && (
+                          <span className="text-xs text-gray-400 dark:text-gray-500 font-normal">via {saleHistorySource}</span>
                         )}
                       </summary>
 
@@ -958,7 +965,10 @@ export default function LeadDetailPage() {
 
                 {/* ── Mortgage Information ── */}
                 {(() => {
-                  const mortgage = (lead as any).attomMortgageData;
+                  const reapiMortgage = (lead as any).reapiMortgageData;
+                  const attomMortgage = (lead as any).attomMortgageData;
+                  const mortgage = reapiMortgage ?? attomMortgage;
+                  const mortgageSource = reapiMortgage ? 'REAPI' : attomMortgage ? 'ATTOM' : null;
                   if (!mortgage || (!mortgage.firstConcurrent && !mortgage.secondConcurrent)) return null;
                   const formatLoanType = (code: string | undefined) => {
                     if (!code) return null;
@@ -1033,7 +1043,9 @@ export default function LeadDetailPage() {
                       <summary className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-1.5 cursor-pointer list-none [&::-webkit-details-marker]:hidden">
                         <svg className="w-3.5 h-3.5 text-gray-400 transition-transform group-open:rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
                         🏠 Mortgage Information
-                        <span className="text-xs text-gray-400 dark:text-gray-500 font-normal">via ATTOM</span>
+                        {mortgageSource && (
+                          <span className="text-xs text-gray-400 dark:text-gray-500 font-normal">via {mortgageSource}</span>
+                        )}
                       </summary>
                       <div className="space-y-2">
                         {renderLoan(mortgage.firstConcurrent, '1st Mortgage')}
@@ -1090,7 +1102,7 @@ export default function LeadDetailPage() {
                   </div>
                 ) : (
                   <div className="mb-4 p-3 rounded-lg bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 text-sm text-gray-400 dark:text-gray-500 italic">
-                    ARV pending — ATTOM data loading or not available for this address
+                    ARV pending — REAPI data loading or not available for this address
                   </div>
                 )}
 
