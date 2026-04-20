@@ -71,31 +71,29 @@ export class CompsController {
       },
     });
 
-    // Auto-run full valuation pipeline so ARV tab is populated immediately
-    // without requiring a manual Recalculate ARV click
+    // Import fresh comps into the lead's current CompAnalysis so the Comps tab
+    // is populated when the user opens it. We intentionally do NOT auto-run
+    // calculateArv here — user wants lead.arv to stay at the provider's
+    // subject AVM (e.g. REAPI's $300,930) until they manually click "Calculate
+    // ARV" from the Comps tab. Auto-calc was overwriting a reliable AVM with
+    // a thin comps-based average (see the 1-comp-survives case in rural areas).
     setImmediate(async () => {
       try {
-        // Find or create a CompAnalysis for this lead
         const existing = await this.prisma.compAnalysis.findFirst({
           where: { leadId },
           orderBy: { updatedAt: 'desc' },
         });
 
-        let analysisId: string;
         if (existing) {
           // Re-import any new comps that aren't linked yet
           await this.compAnalysisService.importExistingComps(existing.id, leadId);
-          analysisId = existing.id;
+          this.logger.log(`Comps imported into existing analysis ${existing.id} for lead ${leadId} (ARV calculation deferred to manual trigger)`);
         } else {
           const analysis = await this.compAnalysisService.createAnalysis(leadId, { importExistingComps: true });
-          analysisId = analysis.id;
+          this.logger.log(`Comps imported into new analysis ${analysis.id} for lead ${leadId} (ARV calculation deferred to manual trigger)`);
         }
-
-        // Run the full pipeline: ARV → cost → income → triangulate → risk-adjust
-        await this.compAnalysisService.calculateArv(analysisId, 'weighted');
-        this.logger.log(`✅ Auto-calculated full ARV pipeline for lead ${leadId} (analysis ${analysisId})`);
       } catch (err) {
-        this.logger.warn(`Auto ARV pipeline failed for lead ${leadId} (non-fatal): ${err.message}`);
+        this.logger.warn(`Comp import failed for lead ${leadId} (non-fatal): ${err.message}`);
       }
     });
 

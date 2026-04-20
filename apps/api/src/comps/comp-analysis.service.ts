@@ -171,16 +171,10 @@ export class CompAnalysisService {
       importedCount = await this.importExistingComps(analysis.id, leadId, params.sourceFilter);
     }
 
-    // Run calculateArv so comparableSalesValue / pricePerSqft / arvEstimate are populated.
-    // Without this, a new analysis has null comps-side numbers and any downstream AI blend
-    // falls back to AI-only, collapsing the Valuation Breakdown to a single redundant row.
-    if (importedCount > 0) {
-      try {
-        await this.calculateArv(analysis.id, 'weighted');
-      } catch (err) {
-        this.logger.warn(`calculateArv on new analysis ${analysis.id} failed (non-fatal): ${(err as Error).message}`);
-      }
-    }
+    // Intentionally do NOT auto-run calculateArv here. The user wants to own
+    // the "run the ARV calculation" click explicitly so their REAPI subject
+    // AVM on the lead isn't overwritten by an automated comps-based average.
+    // The Comps tab's "Calculate ARV" button triggers calculateArv on demand.
 
     return analysis;
   }

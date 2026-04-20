@@ -1492,6 +1492,39 @@ export default function CompsAnalysisPage() {
                   </div>
                 )}
 
+                {/* REAPI subject AVM strip (Low / Medium / High from v3/PropertyComps) */}
+                {(lead as any)?.reapiEstimatedValue && (
+                  <div className="mb-5 rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950 px-4 py-3">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-400 uppercase tracking-wide">REAPI Independent Valuation</span>
+                      {(lead as any)?.reapiEnrichedAt && (
+                        <span className="text-xs text-emerald-600 dark:text-emerald-400">updated {new Date((lead as any).reapiEnrichedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                      )}
+                      {(lead as any)?.reapiEstimatedValue && analysis?.arvEstimate && (() => {
+                        const reapiAvm = (lead as any).reapiEstimatedValue;
+                        const delta = Math.abs(reapiAvm - analysis.arvEstimate) / analysis.arvEstimate;
+                        if (delta > 0.15) return <span className="text-xs px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 font-medium">⚠️ {Math.round(delta * 100)}% divergence from comps</span>;
+                        if (delta <= 0.05) return <span className="text-xs px-1.5 py-0.5 rounded bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 font-medium">✓ Confirms comps ARV</span>;
+                        return <span className="text-xs px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400">{Math.round(delta * 100)}% difference</span>;
+                      })()}
+                    </div>
+                    <div className="grid grid-cols-3 gap-3 text-center">
+                      <div className="bg-orange-50 dark:bg-orange-950 rounded-lg p-2 border border-orange-200 dark:border-orange-800">
+                        <div className="text-xs text-orange-700 dark:text-orange-400 font-medium mb-0.5">Low</div>
+                        <div className="text-base font-bold text-orange-700 dark:text-orange-400">{(lead as any)?.reapiEstimatedValueLow ? `$${Math.round((lead as any).reapiEstimatedValueLow).toLocaleString()}` : '—'}</div>
+                      </div>
+                      <div className="bg-emerald-100 dark:bg-emerald-900 rounded-lg p-2 border border-emerald-300 dark:border-emerald-700 ring-1 ring-emerald-400">
+                        <div className="text-xs text-emerald-700 dark:text-emerald-400 font-medium mb-0.5">AVM (Medium)</div>
+                        <div className="text-base font-bold text-emerald-700 dark:text-emerald-400">${Math.round((lead as any).reapiEstimatedValue).toLocaleString()}</div>
+                      </div>
+                      <div className="bg-green-50 dark:bg-green-950 rounded-lg p-2 border border-green-200 dark:border-green-800">
+                        <div className="text-xs text-green-700 dark:text-green-400 font-medium mb-0.5">High</div>
+                        <div className="text-base font-bold text-green-700 dark:text-green-400">{(lead as any)?.reapiEstimatedValueHigh ? `$${Math.round((lead as any).reapiEstimatedValueHigh).toLocaleString()}` : '—'}</div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {/* ATTOM independent validation strip */}
                 {attomData?.attomAvm && (
                   <div className="mb-5 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950 px-4 py-3">
