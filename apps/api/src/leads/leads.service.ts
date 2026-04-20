@@ -366,12 +366,16 @@ export class LeadsService {
     this.logger.log(`Fetching comps for lead ${leadId}`);
 
     try {
+      // New leads always fetch from REAPI. ATTOM/RentCast are manual-only
+      // via the Comps tab toggle. Passing 'reapi' explicitly (instead of
+      // falling through to 'auto') also prevents the lead's compsProvider
+      // from being overwritten to 'auto'.
       const result = await this.compsService.fetchComps(leadId, {
         street: lead.propertyAddress,
         city: lead.propertyCity,
         state: lead.propertyState,
         zip: lead.propertyZip,
-      });
+      }, { preferSource: 'reapi' });
 
       this.logger.log(
         `Comps fetched for lead ${leadId}: ${result.compsCount} comps, ARV: $${result.arv.toLocaleString()} (${result.source})`,

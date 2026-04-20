@@ -90,19 +90,17 @@ export class CompsService {
       return await this.runRentCastPipeline(leadId, address, options);
     }
 
-    // ── ATTOM and Auto share the enrichment + lat/lon lookup ────────────────
-    const attomPromise = this.attomService.isConfigured
-      ? this.attomService.enrichLead(leadId, address, { forceRefresh: options?.forceRefresh })
-          .catch(err => { this.logger.warn(`ATTOM enrichment failed (non-fatal): ${err.message}`); return null; })
-      : Promise.resolve(null);
-
     // ── Explicit ATTOM — no fallback ────────────────────────────────────────
+    // ATTOM enrichment only fires when the user explicitly chooses it from
+    // the Comps tab. It does NOT run in auto mode or alongside REAPI.
     if (preferSource === 'attom') {
       if (!this.attomService.isConfigured) {
         this.logger.error(`ATTOM requested but not configured for lead ${leadId}`);
         return { arv: 0, confidence: 0, compsCount: 0, source: 'attom (not configured)', attom: null };
       }
-      const attomEnrichment = await attomPromise;
+      const attomEnrichment = await this.attomService
+        .enrichLead(leadId, address, { forceRefresh: options?.forceRefresh })
+        .catch(err => { this.logger.warn(`ATTOM enrichment failed (non-fatal): ${err.message}`); return null; });
       const result = await this.tryAttomComps(leadId, address, attomEnrichment, options);
 
       if (result && result.compsCount >= 1) {
@@ -150,8 +148,9 @@ export class CompsService {
       }
     }
 
-    const attom = await attomPromise;
-    return { ...(await this.fetchRentCastOrFallback(leadId, address, options)), attom };
+    // Auto fallback: RentCast (or the RentCast→ChatARV→placeholder chain).
+    // ATTOM is intentionally NOT called here — the user wants manual-only.
+    return { ...(await this.fetchRentCastOrFallback(leadId, address, options)), attom: null };
   }
 
   /**

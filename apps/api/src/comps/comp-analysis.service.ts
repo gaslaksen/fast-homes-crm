@@ -205,41 +205,51 @@ export class CompAnalysisService {
         where: { id: leadId },
         select: { compsProvider: true },
       });
-      const provider = lead?.compsProvider || 'attom';
+      const provider = lead?.compsProvider || 'reapi';
 
-      if (provider === 'rentcast') {
-        // RentCast is chosen — use RentCast comps if available, else ATTOM as best-effort
-        const rentcastCount = await this.prisma.comp.count({
-          where: { leadId, source: 'rentcast', analysisId: null },
-        });
+      const countBy = (src: string) =>
+        this.prisma.comp.count({ where: { leadId, source: src, analysisId: null } });
+
+      if (provider === 'reapi') {
+        // REAPI is chosen — use REAPI comps only. No fallback; user picked REAPI.
+        const reapiCount = await countBy('reapi');
+        if (reapiCount > 0) {
+          where.source = 'reapi';
+          this.logger.log(`importExistingComps: REAPI comps available (${reapiCount}) — using as primary for lead ${leadId}`);
+        }
+      } else if (provider === 'rentcast') {
+        // RentCast is chosen — use RentCast only (manual selection by user).
+        const rentcastCount = await countBy('rentcast');
         if (rentcastCount > 0) {
           where.source = 'rentcast';
           this.logger.log(`importExistingComps: RentCast comps available (${rentcastCount}) — using as primary for lead ${leadId}`);
-        } else {
-          const attomCount = await this.prisma.comp.count({
-            where: { leadId, source: 'attom', analysisId: null },
-          });
-          if (attomCount > 0) {
-            where.source = 'attom';
-            this.logger.log(`importExistingComps: no RentCast comps, using ATTOM (${attomCount}) for lead ${leadId}`);
-          }
         }
-      } else {
-        // ATTOM (or auto): prefer ATTOM — if ATTOM comps exist, exclude RentCast entirely.
-        const attomCount = await this.prisma.comp.count({
-          where: { leadId, source: 'attom', analysisId: null },
-        });
+      } else if (provider === 'attom') {
+        // ATTOM is chosen — use ATTOM only (manual selection by user).
+        const attomCount = await countBy('attom');
         if (attomCount > 0) {
           where.source = 'attom';
-          this.logger.log(`importExistingComps: ATTOM comps available (${attomCount}) — excluding RentCast for lead ${leadId}`);
-        } else if (provider === 'auto') {
-          // Auto mode only: fall back to RentCast if ATTOM has nothing
-          const rentcastCount = await this.prisma.comp.count({
-            where: { leadId, source: 'rentcast', analysisId: null },
-          });
+          this.logger.log(`importExistingComps: ATTOM comps available (${attomCount}) — using as primary for lead ${leadId}`);
+        }
+      } else {
+        // Auto: REAPI → RentCast → ATTOM priority. ATTOM is last because it's
+        // expected to be manual-only; it only falls back here if REAPI and
+        // RentCast both returned nothing for this lead.
+        const reapiCount = await countBy('reapi');
+        if (reapiCount > 0) {
+          where.source = 'reapi';
+          this.logger.log(`importExistingComps: auto mode — using REAPI (${reapiCount}) for lead ${leadId}`);
+        } else {
+          const rentcastCount = await countBy('rentcast');
           if (rentcastCount > 0) {
             where.source = 'rentcast';
-            this.logger.log(`importExistingComps: auto mode — no ATTOM comps, using RentCast (${rentcastCount}) for lead ${leadId}`);
+            this.logger.log(`importExistingComps: auto mode — no REAPI, using RentCast (${rentcastCount}) for lead ${leadId}`);
+          } else {
+            const attomCount = await countBy('attom');
+            if (attomCount > 0) {
+              where.source = 'attom';
+              this.logger.log(`importExistingComps: auto mode — no REAPI/RentCast, using ATTOM (${attomCount}) for lead ${leadId}`);
+            }
           }
         }
       }

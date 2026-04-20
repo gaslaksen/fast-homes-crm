@@ -1,6 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { LeadsService } from '../leads/leads.service';
-import { RentCastService } from '../comps/rentcast.service';
 import { LeadSource } from '@fast-homes/shared';
 import * as fs from 'fs';
 
@@ -8,9 +7,11 @@ import * as fs from 'fs';
  * Handles InvestorFuse "opportunity created" webhooks.
  *
  * Flow:
- *   InvestorFuse fires webhook → parse lead → create in DB → auto-fetch comps
+ *   InvestorFuse fires webhook → parse lead → create in DB.
  *
- * By the time you open the lead in fast-homes-crm, comps are already there.
+ * LeadsService.createLead triggers REAPI property enrichment + comp fetch
+ * via autoPopulatePropertyDetails → fetchCompsForLead (REAPI-first). No
+ * parallel fetch is kicked off from here.
  *
  * On first receipt, saves raw payload to /tmp/investorfuse-sample.json
  * so field mapping can be verified/adjusted.
@@ -22,7 +23,6 @@ export class InvestorFuseService {
 
   constructor(
     private leadsService: LeadsService,
-    private rentcast: RentCastService,
   ) {}
 
   // ─── Parse InvestorFuse payload ───────────────────────────────────────────
@@ -135,30 +135,15 @@ export class InvestorFuseService {
       return { success: false, message: `Failed to create lead: ${err.message}` };
     }
 
-    // ── Auto-fetch comps in background (non-blocking) ──
-    // By the time Geoff opens the lead, comps are ready.
-    setImmediate(async () => {
-      try {
-        this.logger.log(`🔍 Auto-fetching comps for lead ${lead.id}: ${fullAddress}`);
-        const result = await this.rentcast.fetchAndSaveComps(lead.id, {
-          street: leadData.propertyAddress,
-          city: leadData.propertyCity,
-          state: leadData.propertyState,
-          zip: leadData.propertyZip,
-        });
-        this.logger.log(
-          `✅ Comps ready for lead ${lead.id}: ARV $${result.arv.toLocaleString()}, ` +
-          `${result.compsCount} comps, ${result.confidence}% confidence`
-        );
-      } catch (err) {
-        this.logger.warn(`⚠️  Comp fetch failed for lead ${lead.id}: ${err.message}`);
-      }
-    });
+    // Comp auto-fetch is handled by LeadsService.createLead →
+    // autoPopulatePropertyDetails → fetchCompsForLead (REAPI-first).
+    // Do NOT kick off a parallel fetch here — it used to hard-code RentCast
+    // and resulted in RentCast comps overriding REAPI comps on new leads.
 
     return {
       success: true,
       leadId: lead.id,
-      message: `Lead created (${lead.id}) — comps fetching in background`,
+      message: `Lead created (${lead.id}) — property enrichment and comps in progress`,
     };
   }
 }
