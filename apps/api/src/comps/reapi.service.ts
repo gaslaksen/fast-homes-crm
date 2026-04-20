@@ -374,7 +374,8 @@ export class ReapiService {
     // AVM range — REAPI PropertyDetail only returns a point estimate. For a
     // range we'd normally pull from PropertyComps. As a rough default
     // construct ±5% so the Overview tab has something to render.
-    const avm = d.estimatedValue;
+    // Coerce to Number — REAPI sometimes returns these as strings.
+    const avm = toNumber(d.estimatedValue);
     const avmLow = avm ? Math.round(avm * 0.95) : undefined;
     const avmHigh = avm ? Math.round(avm * 1.05) : undefined;
 
@@ -406,7 +407,7 @@ export class ReapiService {
       estimatedValue: avm,
       estimatedValueLow: avmLow,
       estimatedValueHigh: avmHigh,
-      equity: d.estimatedEquity ?? d.equity,
+      equity: toNumber(d.estimatedEquity) ?? toNumber(d.equity),
       mortgageData,
       saleHistory,
       features: Object.keys(features).length > 0 ? features : undefined,
@@ -488,15 +489,41 @@ export class ReapiService {
       where: { leadId, source: 'reapi', analysisId: null },
     });
 
+    // Outlier filters — REAPI returns 50 raw comps per request. Date filtering
+    // happens at the API (all recent sales), but we still have to guard against
+    // degenerate records: missing sqft, vacant-lot AVMs, clerical zero prices.
+    const subjectAvm = toNumber(result.reapiAvm) ?? 0;
+    const MAX_AGE_MONTHS = 12;            // belt-and-suspenders: never save older than 12mo
+    const PRICE_FLOOR_RATIO = 0.25;       // reject comps priced < 25% of subject AVM
+    const PRICE_CEILING_RATIO = 3.0;      // reject comps priced > 300% of subject AVM
+    const ABSOLUTE_PRICE_FLOOR = 25_000;  // absolute floor when no subject AVM
+
+    const priceFloor = subjectAvm > 0 ? Math.round(subjectAvm * PRICE_FLOOR_RATIO) : ABSOLUTE_PRICE_FLOOR;
+    const priceCeiling = subjectAvm > 0 ? Math.round(subjectAvm * PRICE_CEILING_RATIO) : Number.MAX_SAFE_INTEGER;
+    const ageCutoff = new Date();
+    ageCutoff.setMonth(ageCutoff.getMonth() - MAX_AGE_MONTHS);
+
     let nonDisclosedCount = 0;
     let saved = 0;
+    let filteredNoDate = 0, filteredStale = 0, filteredNoPrice = 0, filteredNoSqft = 0, filteredOutlier = 0;
+
     for (const c of result.comps) {
-      if (!c.lastSaleDate) continue;
+      if (!c.lastSaleDate) { filteredNoDate += 1; continue; }
+
+      const soldDate = new Date(c.lastSaleDate);
+      if (isNaN(soldDate.getTime()) || soldDate < ageCutoff) { filteredStale += 1; continue; }
+
       const recordedSale = toNumber(c.lastSaleAmount);
       const avm = toNumber(c.estimatedValue);
-      // Use recorded sale if > 0, else AVM fallback
       const soldPrice = (recordedSale && recordedSale > 0) ? recordedSale : avm;
-      if (!soldPrice || soldPrice <= 0) continue;
+      if (!soldPrice || soldPrice <= 0) { filteredNoPrice += 1; continue; }
+
+      const sqft = toNumber(c.squareFeet);
+      // Degenerate record: no sqft AND no beds/baths → skip (vacant lot, demolished, bad data)
+      if ((!sqft || sqft <= 0) && !c.bedrooms && !c.bathrooms) { filteredNoSqft += 1; continue; }
+
+      // Outlier guards (only applied when we have a subject AVM to compare against)
+      if (soldPrice < priceFloor || soldPrice > priceCeiling) { filteredOutlier += 1; continue; }
 
       const isAvmFallback = !recordedSale || recordedSale === 0;
       if (isAvmFallback) nonDisclosedCount += 1;
@@ -510,11 +537,11 @@ export class ReapiService {
             address: compAddress,
             distance: c.distance ?? 0,
             soldPrice,
-            soldDate: new Date(c.lastSaleDate),
+            soldDate,
             daysOnMarket: null,
             bedrooms: c.bedrooms ?? null,
             bathrooms: c.bathrooms ?? null,
-            sqft: toNumber(c.squareFeet) ?? null,
+            sqft: sqft ?? null,
             lotSize: normalizeLotAcres(toNumber(c.lotSquareFeet)) ?? null,
             yearBuilt: toNumber(c.yearBuilt) ?? null,
             propertyType: c.propertyType ?? null,
@@ -536,10 +563,23 @@ export class ReapiService {
       }
     }
 
-    // ARV: prefer REAPI's subject AVM; fall back to comps average
-    let arv = result.reapiAvm ?? 0;
-    let arvLow = result.reapiAvmLow;
-    let arvHigh = result.reapiAvmHigh;
+    const filteredTotal = filteredNoDate + filteredStale + filteredNoPrice + filteredNoSqft + filteredOutlier;
+    if (filteredTotal > 0) {
+      this.logger.log(
+        `REAPI comps filtered ${filteredTotal}/${result.comps.length}: ` +
+        `no-date=${filteredNoDate}, stale>${MAX_AGE_MONTHS}mo=${filteredStale}, ` +
+        `no-price=${filteredNoPrice}, no-sqft=${filteredNoSqft}, outlier=${filteredOutlier} ` +
+        `(floor=$${priceFloor.toLocaleString()} ceiling=$${priceCeiling === Number.MAX_SAFE_INTEGER ? '∞' : priceCeiling.toLocaleString()})`,
+      );
+    }
+    this.logger.log(`REAPI comps saved: ${saved} (${nonDisclosedCount} AVM-fallback, ${saved - nonDisclosedCount} recorded sales)`);
+
+    // ARV: prefer REAPI's subject AVM; fall back to comps average.
+    // REAPI occasionally returns these as strings ("92133.00") — coerce to Number
+    // so Prisma accepts them on the `Float?` columns below.
+    let arv = toNumber(result.reapiAvm) ?? 0;
+    let arvLow = toNumber(result.reapiAvmLow);
+    let arvHigh = toNumber(result.reapiAvmHigh);
 
     if (!arv) {
       const savedComps = await this.prisma.comp.findMany({

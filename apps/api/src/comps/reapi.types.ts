@@ -154,8 +154,9 @@ export interface ReapiMortgageRecord {
 export interface ReapiPropertyData {
   id?: number | string;
   propertyType?: string;               // "SFR" | "CND" | "MFR" | ...
-  estimatedValue?: number;
-  estimatedEquity?: number;
+  // REAPI sometimes returns numeric fields as strings — always coerce via toNumber().
+  estimatedValue?: number | string;
+  estimatedEquity?: number | string;
   estimatedMortgageBalance?: number | string;
   estimatedMortgagePayment?: number;
   equity?: number;
@@ -255,9 +256,11 @@ export interface ReapiPropertyCompsResponse {
   input?: Record<string, unknown>;
   subject?: ReapiPropertyData;
   comps?: ReapiComp[];
-  reapiAvm?: number;
-  reapiAvmLow?: number;
-  reapiAvmHigh?: number;
+  // REAPI occasionally returns these as strings ("92133.00") despite them being
+  // numeric — always coerce via toNumber() before using in math or persisting.
+  reapiAvm?: number | string;
+  reapiAvmLow?: number | string;
+  reapiAvmHigh?: number | string;
   warning?: string;
   recordCount?: number;
   statusCode?: number;
