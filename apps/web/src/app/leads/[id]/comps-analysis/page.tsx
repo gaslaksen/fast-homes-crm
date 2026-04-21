@@ -8,7 +8,7 @@ import { leadsAPI, compsAPI, compAnalysisAPI, photosAPI } from '@/lib/api';
 import AppNav from '@/components/AppNav';
 import LeadTabNav, { COMPS_TABS, DETAIL_TABS } from '@/components/LeadTabNav';
 import AnalysisTab from '@/components/AnalysisTab';
-import PropertyPhoto from '@/components/PropertyPhoto';
+import LeadHeader from '@/components/LeadHeader';
 import ShareDealModal from '@/components/ShareDealModal';
 import CompRow from '@/components/CompRow';
 import SubjectPropertyCard from '@/components/SubjectPropertyCard';
@@ -741,53 +741,19 @@ export default function CompsAnalysisPage() {
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
       <AppNav />
-      {/* Lead Sub-header */}
-      <header className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
-        <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex justify-between items-center">
-            <div className="flex items-center gap-4">
-              <PropertyPhoto
-                src={lead.primaryPhoto}
-                scoreBand={lead.scoreBand}
-                address={lead.propertyAddress}
-                size="md"
-              />
-              <div>
-                <div className="flex items-center gap-1.5 mb-1 text-xs text-gray-400 dark:text-gray-500">
-                  <Link href="/leads" className="hover:text-gray-700 dark:hover:text-gray-300">Leads</Link>
-                  <span>/</span>
-                  <span className="text-gray-600 dark:text-gray-400 font-medium">{lead.propertyAddress}</span>
-                </div>
-                <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">{lead.propertyAddress}</h1>
-                <p className="text-gray-600 dark:text-gray-400 text-sm">{lead.propertyCity}, {lead.propertyState} {lead.propertyZip}</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-5">
-              {/* Lead score donut */}
-              <DonutStat
-                value={lead.totalScore ?? 0}
-                max={12}
-                label={({ STRIKE_ZONE: 'Strike Zone', HOT: 'Hot', WORKABLE: 'Workable', DEAD_COLD: 'Cold' } as Record<string,string>)[lead.scoreBand ?? 'DEAD_COLD'] ?? (lead.scoreBand ?? 'Cold').replace('_', ' ')}
-                color={lead.scoreBand === 'HOT' ? '#ef4444' : lead.scoreBand === 'WARM' ? '#f97316' : '#6b7280'}
-                size={60}
-              />
-              {/* AI score donut */}
-              {aiAnalysis?.dealRating != null ? (
-                <DonutStat
-                  value={aiAnalysis.dealRating}
-                  max={10}
-                  label="AI Score"
-                  color={aiAnalysis.dealRating >= 7 ? '#10b981' : aiAnalysis.dealRating >= 4 ? '#f59e0b' : '#ef4444'}
-                  size={60}
-                />
-              ) : null}
-              <Link href={`/leads/${leadId}/edit`} className="btn btn-primary">
-                Edit Lead
-              </Link>
-            </div>
-          </div>
-        </div>
-      </header>
+      <LeadHeader
+        lead={lead}
+        leadId={leadId}
+        aiAnalysis={aiAnalysis}
+        onStatusChange={async (newStatus) => {
+          try {
+            await leadsAPI.update(leadId, { status: newStatus });
+            setLead((prev: any) => prev ? { ...prev, status: newStatus } : prev);
+          } catch (err) {
+            console.error('Failed to update status', err);
+          }
+        }}
+      />
 
       {/* Unified Tab Nav */}
       <LeadTabNav leadId={leadId} activeTab={activeSection} />
