@@ -45,6 +45,9 @@ interface CompRowProps {
 
 function SourceBadgeInline({ source }: { source?: string }) {
   if (!source || source === 'manual') return <span className="text-[10px] text-gray-400 dark:text-gray-500">Manual</span>;
+  if (source === 'reapi') return (
+    <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 font-medium">REAPI</span>
+  );
   if (source === 'attom') return (
     <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 font-medium">ATTOM</span>
   );

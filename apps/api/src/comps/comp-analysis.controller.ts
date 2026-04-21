@@ -172,8 +172,7 @@ export class CompAnalysisController {
     return { intelligence };
   }
 
-  @Post(':analysisId/propgpt')
-  async runPropGPT(@Param('analysisId') analysisId: string) {
-    return this.compAnalysisService.runPropGPT(analysisId);
-  }
+  // PropGPT endpoint removed — REAPI's PropGPT is a property-search frontend
+  // (natural language → PropertySearch), not an analysis chatbot. DealCore's
+  // aiAdjustComps is the single source of AI ARV for this codebase.
 }

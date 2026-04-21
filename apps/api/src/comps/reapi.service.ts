@@ -7,10 +7,8 @@ import {
   ReapiComp,
   ReapiPropertyDetailResponse,
   ReapiPropertyCompsResponse,
-  ReapiPropGPTResponse,
   ReapiMortgageRecord,
   ReapiSaleRecord,
-  PropGPTParsed,
 } from './reapi.types';
 
 const REAPI_BASE_URL = 'https://api.realestateapi.com';
@@ -101,6 +99,57 @@ function mapRateType(rt: string | null | undefined): string | undefined {
   if (up.includes('FIX')) return 'FIX';
   if (up.includes('ADJ') || up === 'ARM') return 'ARM';
   return up;
+}
+
+/**
+ * 0-100 similarity between subject and comp. Same weighting as
+ * CompsService.calculateSimilarityScore in comps.service.ts:
+ *   bedrooms 25 · bathrooms 25 · sqft 40 · propertyType 10
+ * Inlined here to avoid a circular dependency between CompsService and
+ * ReapiService (CompsService already injects ReapiService). Returns null
+ * if neither subject nor comp have enough data to score.
+ */
+function computeSimilarityScore(
+  subject: { bedrooms?: number | null; bathrooms?: number | null; sqft?: number | null; propertyType?: string | null },
+  comp: { bedrooms?: number | null; bathrooms?: number | null; sqft?: number | null; propertyType?: string | null },
+): number | null {
+  let score = 0;
+  let touched = false;
+
+  if (subject.bedrooms != null && comp.bedrooms != null) {
+    touched = true;
+    const diff = Math.abs(subject.bedrooms - comp.bedrooms);
+    if (diff === 0) score += 25;
+    else if (diff === 1) score += 15;
+    else if (diff === 2) score += 5;
+  }
+
+  if (subject.bathrooms != null && comp.bathrooms != null) {
+    touched = true;
+    const diff = Math.abs(subject.bathrooms - comp.bathrooms);
+    if (diff === 0) score += 25;
+    else if (diff <= 0.5) score += 20;
+    else if (diff <= 1) score += 10;
+    else if (diff <= 1.5) score += 5;
+  }
+
+  if (subject.sqft && comp.sqft && subject.sqft > 0) {
+    touched = true;
+    const pctDiff = (Math.abs(subject.sqft - comp.sqft) / subject.sqft) * 100;
+    if (pctDiff <= 5) score += 40;
+    else if (pctDiff <= 10) score += 35;
+    else if (pctDiff <= 15) score += 25;
+    else if (pctDiff <= 20) score += 15;
+    else if (pctDiff <= 30) score += 5;
+  }
+
+  if (subject.propertyType && comp.propertyType) {
+    touched = true;
+    if (subject.propertyType.toLowerCase() === comp.propertyType.toLowerCase()) score += 10;
+  }
+
+  if (!touched) return null;
+  return Math.min(100, Math.max(0, Math.round(score)));
 }
 
 @Injectable()
@@ -485,6 +534,16 @@ export class ReapiService {
       return { arv: 0, arvLow: 0, arvHigh: 0, confidence: 0, compsCount: 0, source: 'reapi (no data)' };
     }
 
+    // Load the subject lead's basic features so we can score each comp's
+    // correlation (bed/bath/sqft/type similarity — same formula as
+    // CompsService.calculateSimilarityScore, inlined here to avoid a
+    // circular DI between CompsService and ReapiService).
+    const subject = await this.prisma.lead.findUnique({
+      where: { id: leadId },
+      select: { bedrooms: true, bathrooms: true, sqft: true, sqftOverride: true, propertyType: true },
+    });
+    const subjectSqftForScore = subject?.sqftOverride ?? subject?.sqft ?? null;
+
     await this.prisma.comp.deleteMany({
       where: { leadId, source: 'reapi', analysisId: null },
     });
@@ -530,6 +589,26 @@ export class ReapiService {
 
       const compAddress = c.address?.address || c.address?.label || 'Unknown';
 
+      // Similarity score (0-100) and correlation (0-1) — same bed/bath/sqft/type
+      // math as CompsService.calculateSimilarityScore. Stored so the Comps tab
+      // can sort by Correlation just like RentCast comps do, and so the value
+      // flows through importExistingComps into the Comparable Properties Table.
+      const similarityScore = computeSimilarityScore(
+        {
+          bedrooms: subject?.bedrooms ?? null,
+          bathrooms: subject?.bathrooms ?? null,
+          sqft: subjectSqftForScore,
+          propertyType: subject?.propertyType ?? null,
+        },
+        {
+          bedrooms: c.bedrooms ?? null,
+          bathrooms: c.bathrooms ?? null,
+          sqft: sqft ?? null,
+          propertyType: c.propertyType ?? null,
+        },
+      );
+      const correlation = similarityScore != null ? similarityScore / 100 : null;
+
       try {
         await this.prisma.comp.create({
           data: {
@@ -549,7 +628,8 @@ export class ReapiService {
             hasGarage: c.garageAvailable ?? false,
             latitude: c.latitude ?? null,
             longitude: c.longitude ?? null,
-            similarityScore: null,
+            similarityScore,
+            correlation,
             selected: true,
             source: 'reapi',
             notes: isAvmFallback
@@ -622,120 +702,8 @@ export class ReapiService {
     return { arv: Math.round(arv), arvLow, arvHigh, confidence, compsCount: saved, source: sourceLabel };
   }
 
-  // ─── PropGPT ──────────────────────────────────────────────────────────────
-
-  /**
-   * REAPI PropGPT endpoint — POST /v2/PropGPT.
-   * Accepts a natural-language `query`; returns text. Requires both
-   * x-api-key (REAPI) and x-openai-key headers.
-   */
-  async runPropGPT(
-    address: string,
-    subject: {
-      bedrooms?: number | null;
-      bathrooms?: number | null;
-      sqft?: number | null;
-      yearBuilt?: number | null;
-      lotSize?: number | null;
-      propertyType?: string | null;
-      askingPrice?: number | null;
-      condition?: string | null;
-    },
-    compsContext?: Array<{ address: string; soldPrice: number; sqft?: number | null; distance?: number | null }>,
-  ): Promise<PropGPTParsed | null> {
-    if (!this.apiKey) return null;
-
-    const openaiKey = this.config.get<string>('OPENAI_API_KEY');
-    if (!openaiKey) {
-      this.logger.warn('PropGPT requires OPENAI_API_KEY — skipping');
-      return null;
-    }
-
-    const subjectLine = [
-      `${subject.bedrooms ?? '?'}bd/${subject.bathrooms ?? '?'}ba`,
-      subject.sqft ? `${subject.sqft} sqft` : null,
-      subject.yearBuilt ? `built ${subject.yearBuilt}` : null,
-      subject.lotSize ? `${subject.lotSize} ac lot` : null,
-      subject.propertyType ?? null,
-      subject.condition ? `condition: ${subject.condition}` : null,
-      subject.askingPrice ? `seller asking $${subject.askingPrice.toLocaleString()}` : null,
-    ].filter(Boolean).join(', ');
-
-    const compsLine = compsContext && compsContext.length > 0
-      ? compsContext.slice(0, 10).map(c =>
-          `${c.address} sold $${c.soldPrice.toLocaleString()}${c.sqft ? ` (${c.sqft} sqft)` : ''}${c.distance != null ? ` — ${c.distance.toFixed(2)}mi` : ''}`,
-        ).join('; ')
-      : 'none provided';
-
-    const query = [
-      `Analyze this property for real-estate investment (wholesale / fix-and-flip).`,
-      `Subject: ${address}. ${subjectLine}.`,
-      `Selected comps: ${compsLine}.`,
-      `Please provide:`,
-      `1. ARV (point estimate and range) with reasoning`,
-      `2. Estimated repair range`,
-      `3. Key risks and red flags`,
-      `4. Summary recommendation (strong deal / marginal / pass)`,
-      `Format numeric answers as "ARV: $XXX,XXX (range $XXX,XXX – $XXX,XXX)" so they're parseable.`,
-    ].join('\n');
-
-    try {
-      this.logger.log(`Calling REAPI PropGPT for: ${address}`);
-      const response = await axios.post<ReapiPropGPTResponse>(
-        `${REAPI_BASE_URL}/v2/PropGPT`,
-        { query, size: 1, model: 'gpt-4o' },
-        {
-          headers: {
-            ...this.headers(),
-            'x-openai-key': openaiKey,
-            'Accept': 'text/plain, application/json',
-          },
-          timeout: 60000,
-        },
-      );
-
-      const raw = response.data;
-      const text =
-        typeof raw === 'string'
-          ? raw
-          : (raw.text ?? raw.response ?? raw.result ?? JSON.stringify(raw));
-
-      if (!text) return null;
-
-      const parsed = this.parsePropGPTResponse(text);
-      parsed.model = (typeof raw === 'object' && raw.model) ? raw.model : 'gpt-4o';
-      return parsed;
-    } catch (err) {
-      this.handleApiError(err, 'runPropGPT');
-      return null;
-    }
-  }
-
-  private parsePropGPTResponse(text: string): PropGPTParsed {
-    const result: PropGPTParsed = { text };
-
-    const arvPointMatch = text.match(/ARV[:\s]*(?:of\s*)?\$?([\d,]+(?:\.\d+)?)/i);
-    if (arvPointMatch) {
-      const n = Number(arvPointMatch[1].replace(/,/g, ''));
-      if (!isNaN(n) && n > 1000) result.arv = n;
-    }
-
-    const rangeMatch = text.match(/\$?([\d,]+)\s*[–\-to]+\s*\$?([\d,]+)/i);
-    if (rangeMatch) {
-      const low = Number(rangeMatch[1].replace(/,/g, ''));
-      const high = Number(rangeMatch[2].replace(/,/g, ''));
-      if (!isNaN(low) && !isNaN(high) && low < high && low > 1000) {
-        result.arvLow = low;
-        result.arvHigh = high;
-      }
-    }
-
-    const confMatch = text.match(/(\d{1,3})\s*%\s*confidence|confidence[:\s]*(\d{1,3})\s*%/i);
-    if (confMatch) {
-      const n = Number(confMatch[1] || confMatch[2]);
-      if (!isNaN(n) && n >= 0 && n <= 100) result.confidence = n;
-    }
-
-    return result;
-  }
+  // PropGPT support removed — REAPI's PropGPT is a natural-language
+  // property-search frontend (translates a text query into PropertySearch
+  // filters and returns matching properties), not an analysis chatbot.
+  // DealCore's aiAdjustComps (Claude) is the single AI ARV path.
 }

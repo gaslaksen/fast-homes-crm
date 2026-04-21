@@ -267,19 +267,4 @@ export interface ReapiPropertyCompsResponse {
   statusMessage?: string;
 }
 
-export interface ReapiPropGPTResponse {
-  text?: string;
-  response?: string;
-  result?: string;
-  model?: string;
-  [key: string]: unknown;
-}
-
-export interface PropGPTParsed {
-  text: string;
-  model?: string;
-  arv?: number;
-  arvLow?: number;
-  arvHigh?: number;
-  confidence?: number;
-}
+// PropGPT types removed — see reapi.service.ts removal note.
