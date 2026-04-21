@@ -256,7 +256,22 @@ export class ReapiService {
 
       const body = response.data;
       if (body?.statusCode && body.statusCode >= 400) {
-        this.logger.warn(`REAPI PropertyComps ${body.statusCode}: ${body.statusMessage} for "${address}"`);
+        // REAPI overloads statusCode=404 to mean "no comparable properties in
+        // our dataset" (very common for rural/sparse areas) — not a real API
+        // error. Log that as INFO so it doesn't look like a failure. Any other
+        // 4xx/5xx is a real problem and still logs as WARN.
+        const reason = (body as unknown as { reason?: string }).reason ?? '';
+        const isNoCompsSemantic =
+          body.statusCode === 404 && /no\s+comparable|no\s+comps?/i.test(reason);
+        if (isNoCompsSemantic) {
+          this.logger.log(
+            `REAPI returned 0 comparable properties for "${address}" — likely rural/sparse area with no matching sales in REAPI's dataset. Try RentCast or ATTOM from the Comps tab.`,
+          );
+        } else {
+          this.logger.warn(
+            `REAPI PropertyComps ${body.statusCode}: ${body.statusMessage} for "${address}"${reason ? ` — reason: ${reason}` : ''}`,
+          );
+        }
         return null;
       }
       this.logger.log(
