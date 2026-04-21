@@ -931,6 +931,37 @@ export class CompAnalysisService {
     const comps = analysis.comps as any[];
     if (comps.length === 0) throw new Error('No comps selected');
 
+    // Populate the Comparable Sales reference ($/sqft math) on the analysis
+    // so the "Comparable Sales" panel shows under the AI ARV in the UI.
+    // This mirrors the calculation in calculateArv but does NOT touch arvEstimate —
+    // that stays controlled by the AI result below.
+    const useAdjusted = analysis.adjustmentsEnabled;
+    const subjectSqft = (lead?.sqftOverride || lead?.sqft) as number | null;
+    const compsWithSqft = comps.filter(c => c.sqft && c.sqft > 0);
+    if (compsWithSqft.length > 0 && subjectSqft && subjectSqft > 0) {
+      const ppsfValues = compsWithSqft.map(c => {
+        const price = (useAdjusted && c.adjustedPrice ? c.adjustedPrice : c.soldPrice) as number;
+        return price / c.sqft!;
+      });
+      const avgPpsf = Math.round(ppsfValues.reduce((s, v) => s + v, 0) / ppsfValues.length);
+      const sortedPpsf = [...ppsfValues].sort((a, b) => a - b);
+      const mid = Math.floor(sortedPpsf.length / 2);
+      const medianPpsf = Math.round(
+        sortedPpsf.length % 2 === 0
+          ? (sortedPpsf[mid - 1] + sortedPpsf[mid]) / 2
+          : sortedPpsf[mid],
+      );
+      const comparableSalesValue = Math.round(((avgPpsf + medianPpsf) / 2) * subjectSqft);
+      await this.prisma.compAnalysis.update({
+        where: { id: analysisId },
+        data: {
+          pricePerSqft: avgPpsf,
+          medianPricePerSqft: medianPpsf,
+          comparableSalesValue,
+        },
+      });
+    }
+
     // Build subject property summary
     const subjectDesc = [
       `Address: ${lead.propertyAddress}, ${lead.propertyCity}, ${lead.propertyState}`,

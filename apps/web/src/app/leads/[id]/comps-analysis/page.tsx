@@ -1404,54 +1404,21 @@ export default function CompsAnalysisPage() {
                   </div>
                 )}
 
-                {/* ── Valuation Breakdown — AI ARV + Comparable Sales reference ── */}
-                {((analysis as any).aiArvEstimate || analysis.comparableSalesValue) && (
+                {/* ── Comparable Sales ($/sqft reference only — AI ARV is in the hero above) ── */}
+                {analysis.comparableSalesValue && (
                   <div className="bg-gradient-to-r from-purple-50 to-indigo-50 dark:from-purple-950 dark:to-indigo-950 border border-purple-200 dark:border-purple-800 rounded-2xl p-5 mb-5">
-                    <h3 className="text-sm font-bold text-purple-900 dark:text-purple-200 uppercase tracking-wide mb-4">Valuation Breakdown</h3>
-
-                    <div className="border-t border-purple-200 dark:border-purple-800">
-                      <div className="grid grid-cols-12 gap-2 py-2 text-xs font-semibold text-purple-600 dark:text-purple-400 uppercase tracking-wide border-b border-purple-100 dark:border-purple-800">
-                        <div className="col-span-7">Method</div>
-                        <div className="col-span-3 text-right">Value</div>
-                        <div className="col-span-2 text-right">Conf</div>
+                    <h3 className="text-sm font-bold text-purple-900 dark:text-purple-200 uppercase tracking-wide mb-4">Comparable Sales</h3>
+                    <div className="grid grid-cols-12 gap-2 py-2 items-center">
+                      <div className="col-span-6 text-sm text-purple-900 dark:text-purple-200 font-medium">${Math.round(analysis.comparableSalesValue).toLocaleString()}</div>
+                      <div className="col-span-6 text-right text-xs text-purple-500 dark:text-purple-400">
+                        <span className="font-semibold text-purple-700 dark:text-purple-400">${analysis.pricePerSqft || '—'}</span>/sqft avg
+                        {' · '}<span className="font-semibold text-purple-700 dark:text-purple-400">${(analysis as any).medianPricePerSqft || '—'}</span>/sqft median
+                        {' · '}<span className="font-semibold text-purple-700 dark:text-purple-400">
+                          {(lead as any)?.sqftOverride
+                            ? `${(lead as any).sqftOverride.toLocaleString()} (override)`
+                            : (lead?.sqft?.toLocaleString() || '—')}
+                        </span> sqft
                       </div>
-
-                      {/* AI-Adjusted row (the ARV we trust) */}
-                      {(analysis as any).aiArvEstimate && (
-                        <div className="grid grid-cols-12 gap-2 py-2.5 border-b border-purple-50 dark:border-purple-900 items-center">
-                          <div className="col-span-7 text-sm text-purple-900 dark:text-purple-200 font-semibold">AI-Adjusted ARV</div>
-                          <div className="col-span-3 text-right text-sm font-bold text-purple-800 dark:text-purple-300">
-                            ${Math.round((analysis as any).aiArvEstimate).toLocaleString()}
-                          </div>
-                          <div className="col-span-2 text-right text-xs text-purple-500 dark:text-purple-400">
-                            {(analysis as any).aiConfidence ?? '—'}%
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Comparable Sales row — raw $/sqft math, reference only */}
-                      {analysis.comparableSalesValue && (
-                        <div>
-                          <div className="grid grid-cols-12 gap-2 py-2.5 border-b border-purple-50 dark:border-purple-900 items-center">
-                            <div className="col-span-7 text-sm text-purple-900 dark:text-purple-200 font-medium">Comparable Sales (reference)</div>
-                            <div className="col-span-3 text-right text-sm font-semibold text-purple-800 dark:text-purple-400">
-                              ${Math.round(analysis.comparableSalesValue).toLocaleString()}
-                            </div>
-                            <div className="col-span-2 text-right text-xs text-purple-500 dark:text-purple-400">
-                              {analysis.confidenceScore}%
-                            </div>
-                          </div>
-                          <div className="pb-2 pl-4 text-xs text-purple-500 dark:text-purple-400">
-                            avg $/sqft: <span className="font-semibold text-purple-700 dark:text-purple-400">${analysis.pricePerSqft || '—'}</span>
-                            {' · '}median: <span className="font-semibold text-purple-700 dark:text-purple-400">${(analysis as any).medianPricePerSqft || '—'}</span>
-                            {' · '}sqft: <span className="font-semibold text-purple-700 dark:text-purple-400">
-                              {(lead as any)?.sqftOverride
-                                ? `${(lead as any).sqftOverride.toLocaleString()} (override)`
-                                : (lead?.sqft?.toLocaleString() || '—')}
-                            </span>
-                          </div>
-                        </div>
-                      )}
                     </div>
                   </div>
                 )}
