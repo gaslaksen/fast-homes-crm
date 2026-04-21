@@ -321,7 +321,7 @@ export default function LeadDetailPage() {
       await leadsAPI.createTask(leadId, {
         title: `Follow up with ${sellerName}`,
         description: followUpNote || undefined,
-        dueDate: new Date(followUpDate + 'T09:00:00').toISOString(),
+        dueDate: new Date(followUpDate).toISOString(),
         userId: currentUser?.id,
       });
       setShowFollowUpForm(false);
@@ -1223,7 +1223,11 @@ export default function LeadDetailPage() {
                       onClick={() => {
                         const tomorrow = new Date();
                         tomorrow.setDate(tomorrow.getDate() + 1);
-                        setFollowUpDate(tomorrow.toISOString().split('T')[0]);
+                        tomorrow.setHours(9, 0, 0, 0);
+                        // Build YYYY-MM-DDTHH:mm in local time (not UTC) for datetime-local input
+                        const pad = (n: number) => String(n).padStart(2, '0');
+                        const local = `${tomorrow.getFullYear()}-${pad(tomorrow.getMonth() + 1)}-${pad(tomorrow.getDate())}T${pad(tomorrow.getHours())}:${pad(tomorrow.getMinutes())}`;
+                        setFollowUpDate(local);
                         setShowFollowUpForm(true);
                       }}
                       className="text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline"
@@ -1236,13 +1240,12 @@ export default function LeadDetailPage() {
                 {showFollowUpForm && (
                   <div className="space-y-2 mb-3 p-3 bg-gray-50 dark:bg-gray-900 rounded-lg">
                     <div>
-                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Follow-up date</label>
+                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Follow-up date &amp; time</label>
                       <input
-                        type="date"
+                        type="datetime-local"
                         value={followUpDate}
                         onChange={(e) => setFollowUpDate(e.target.value)}
                         className="input w-full text-sm"
-                        min={new Date().toISOString().split('T')[0]}
                       />
                     </div>
                     <div>
@@ -1289,7 +1292,7 @@ export default function LeadDetailPage() {
                           )}
                           {task.dueDate && (
                             <div className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
-                              {format(new Date(task.dueDate), 'MMM d, yyyy')}
+                              {format(new Date(task.dueDate), 'MMM d, yyyy · h:mm a')}
                             </div>
                           )}
                         </div>

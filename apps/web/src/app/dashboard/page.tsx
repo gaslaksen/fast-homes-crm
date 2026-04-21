@@ -371,7 +371,7 @@ export default function DashboardPage() {
                       </Link>
                       {task.dueDate && (
                         <div className={`text-xs font-medium flex-shrink-0 ml-2 mt-1 ${new Date(task.dueDate) < new Date() ? 'text-red-500' : 'text-gray-400 dark:text-gray-500'}`}>
-                          {format(new Date(task.dueDate), 'MMM d')}
+                          {format(new Date(task.dueDate), 'MMM d · h:mm a')}
                         </div>
                       )}
                     </div>

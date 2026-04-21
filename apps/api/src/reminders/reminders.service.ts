@@ -1,11 +1,11 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailerService } from '../mailer/mailer.service';
 
 @Injectable()
-export class RemindersService {
+export class RemindersService implements OnModuleInit {
   private readonly logger = new Logger(RemindersService.name);
 
   constructor(
@@ -14,9 +14,14 @@ export class RemindersService {
     private config: ConfigService,
   ) {}
 
+  onModuleInit() {
+    this.logger.log('⏰ RemindersService initialized — cron will fire every 5 minutes');
+  }
+
   @Cron('*/5 * * * *')
   async processReminders() {
     const now = new Date();
+    this.logger.log(`⏰ Reminder cron fired at ${now.toISOString()}`);
 
     const dueTasks = await this.prisma.task.findMany({
       where: {
@@ -30,7 +35,10 @@ export class RemindersService {
       },
     });
 
-    if (dueTasks.length === 0) return;
+    if (dueTasks.length === 0) {
+      this.logger.log('No due reminders to process');
+      return;
+    }
 
     this.logger.log(`Processing ${dueTasks.length} due reminder(s)`);
 
