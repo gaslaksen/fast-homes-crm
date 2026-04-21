@@ -1363,17 +1363,13 @@ export default function CompsAnalysisPage() {
                     <div className="flex items-end justify-between flex-wrap gap-4">
                       <div>
                         <div className="text-xs font-semibold text-green-700 dark:text-green-400 uppercase tracking-wide mb-1">
-                          {(analysis as any).aiArvEstimate && analysis.comparableSalesValue
-                            ? 'Blended ARV'
-                            : (analysis as any).aiArvEstimate
-                              ? 'AI Estimated ARV'
-                              : 'Comparable Sales ARV'}
+                          {(analysis as any).aiArvEstimate ? 'AI-Adjusted ARV' : 'Comparable Sales ARV'}
                         </div>
                         <div className="text-5xl font-bold text-green-700 dark:text-green-400">${analysis.arvEstimate.toLocaleString()}</div>
                         <div className="text-sm text-green-600 dark:text-green-400 mt-2">
-                          {(analysis as any).aiArvEstimate && analysis.comparableSalesValue
-                            ? `Confidence-weighted blend of comps + AI across ${selectedComps.length} comp${selectedComps.length !== 1 ? 's' : ''}`
-                            : `Weighted average of ${selectedComps.length} ${(analysis as any).aiArvEstimate ? 'AI-adjusted ' : ''}comp${selectedComps.length !== 1 ? 's' : ''}`}
+                          {(analysis as any).aiArvEstimate
+                            ? `Claude analysis of ${selectedComps.length} selected comp${selectedComps.length !== 1 ? 's' : ''}`
+                            : `Weighted average of ${selectedComps.length} selected comp${selectedComps.length !== 1 ? 's' : ''}`}
                           {analysis.arvLow && analysis.arvHigh && (
                             <span className="ml-2 text-green-500 dark:text-green-400">
                               Range: ${analysis.arvLow.toLocaleString()} – ${analysis.arvHigh.toLocaleString()}
@@ -1408,8 +1404,8 @@ export default function CompsAnalysisPage() {
                   </div>
                 )}
 
-                {/* ── Valuation Breakdown — Comps + AI blend ── */}
-                {(analysis.comparableSalesValue || (analysis as any).aiArvEstimate) && (
+                {/* ── Valuation Breakdown — AI ARV + Comparable Sales reference ── */}
+                {((analysis as any).aiArvEstimate || analysis.comparableSalesValue) && (
                   <div className="bg-gradient-to-r from-purple-50 to-indigo-50 dark:from-purple-950 dark:to-indigo-950 border border-purple-200 dark:border-purple-800 rounded-2xl p-5 mb-5">
                     <h3 className="text-sm font-bold text-purple-900 dark:text-purple-200 uppercase tracking-wide mb-4">Valuation Breakdown</h3>
 
@@ -1420,11 +1416,24 @@ export default function CompsAnalysisPage() {
                         <div className="col-span-2 text-right">Conf</div>
                       </div>
 
-                      {/* Comparable Sales row */}
+                      {/* AI-Adjusted row (the ARV we trust) */}
+                      {(analysis as any).aiArvEstimate && (
+                        <div className="grid grid-cols-12 gap-2 py-2.5 border-b border-purple-50 dark:border-purple-900 items-center">
+                          <div className="col-span-7 text-sm text-purple-900 dark:text-purple-200 font-semibold">AI-Adjusted ARV</div>
+                          <div className="col-span-3 text-right text-sm font-bold text-purple-800 dark:text-purple-300">
+                            ${Math.round((analysis as any).aiArvEstimate).toLocaleString()}
+                          </div>
+                          <div className="col-span-2 text-right text-xs text-purple-500 dark:text-purple-400">
+                            {(analysis as any).aiConfidence ?? '—'}%
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Comparable Sales row — raw $/sqft math, reference only */}
                       {analysis.comparableSalesValue && (
                         <div>
                           <div className="grid grid-cols-12 gap-2 py-2.5 border-b border-purple-50 dark:border-purple-900 items-center">
-                            <div className="col-span-7 text-sm text-purple-900 dark:text-purple-200 font-medium">Comparable Sales</div>
+                            <div className="col-span-7 text-sm text-purple-900 dark:text-purple-200 font-medium">Comparable Sales (reference)</div>
                             <div className="col-span-3 text-right text-sm font-semibold text-purple-800 dark:text-purple-400">
                               ${Math.round(analysis.comparableSalesValue).toLocaleString()}
                             </div>
@@ -1432,7 +1441,7 @@ export default function CompsAnalysisPage() {
                               {analysis.confidenceScore}%
                             </div>
                           </div>
-                          <div className="pb-2 border-b border-purple-50 dark:border-purple-900 pl-4 text-xs text-purple-500 dark:text-purple-400">
+                          <div className="pb-2 pl-4 text-xs text-purple-500 dark:text-purple-400">
                             avg $/sqft: <span className="font-semibold text-purple-700 dark:text-purple-400">${analysis.pricePerSqft || '—'}</span>
                             {' · '}median: <span className="font-semibold text-purple-700 dark:text-purple-400">${(analysis as any).medianPricePerSqft || '—'}</span>
                             {' · '}sqft: <span className="font-semibold text-purple-700 dark:text-purple-400">
@@ -1443,52 +1452,7 @@ export default function CompsAnalysisPage() {
                           </div>
                         </div>
                       )}
-
-                      {/* AI-Adjusted row (only if AI has run) */}
-                      {(analysis as any).aiArvEstimate && (
-                        <div className="grid grid-cols-12 gap-2 py-2.5 border-b border-purple-50 dark:border-purple-900 items-center">
-                          <div className="col-span-7 text-sm text-purple-900 dark:text-purple-200 font-medium">AI-Adjusted</div>
-                          <div className="col-span-3 text-right text-sm font-semibold text-purple-800 dark:text-purple-400">
-                            ${Math.round((analysis as any).aiArvEstimate).toLocaleString()}
-                          </div>
-                          <div className="col-span-2 text-right text-xs text-purple-500 dark:text-purple-400">
-                            {(analysis as any).aiConfidence ?? '—'}%
-                          </div>
-                        </div>
-                      )}
                     </div>
-
-                    {/* Blended final ARV — only render when BOTH inputs exist (i.e. the blend
-                        actually combined two numbers). When only one input exists, the single
-                        row above already carries the full story and a Total here would just
-                        duplicate it. The hero card above the Breakdown always shows the final. */}
-                    {analysis.arvEstimate && analysis.comparableSalesValue && (analysis as any).aiArvEstimate && (
-                      <div className="mt-3 pt-3 border-t border-purple-200 dark:border-purple-800 flex items-center justify-between">
-                        <div>
-                          <div className="text-xs text-purple-500 dark:text-purple-400 uppercase tracking-wide mb-0.5">Blended ARV</div>
-                          <div className="text-xl font-bold text-purple-700 dark:text-purple-400">${Math.round(analysis.arvEstimate).toLocaleString()}</div>
-                          {(analysis.arvLow || analysis.arvHigh) && (
-                            <div className="text-xs text-purple-500 dark:text-purple-400 mt-0.5">
-                              Range: ${Math.round(analysis.arvLow || 0).toLocaleString()}–${Math.round(analysis.arvHigh || 0).toLocaleString()}
-                            </div>
-                          )}
-                        </div>
-                        {analysis.riskAdjustedArv && analysis.riskAdjustedArv !== analysis.arvEstimate && (
-                          <div className="text-right text-xs text-purple-400">
-                            <div>After risk adj</div>
-                            <div className="font-semibold text-green-600 dark:text-green-400">${analysis.riskAdjustedArv.toLocaleString()}</div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Cost approach — display-only reference, no warning */}
-                    {analysis.costApproachValue && (
-                      <div className="mt-3 pt-3 border-t border-purple-100 dark:border-purple-900 text-xs text-purple-500 dark:text-purple-400">
-                        Replacement cost (reference): <span className="font-semibold text-purple-600 dark:text-purple-400">${Math.round(analysis.costApproachValue).toLocaleString()}</span>
-                        {lead?.yearBuilt && <span> · built {lead.yearBuilt}</span>}
-                      </div>
-                    )}
                   </div>
                 )}
 

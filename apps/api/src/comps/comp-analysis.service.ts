@@ -788,64 +788,37 @@ export class CompAnalysisService {
       avgDist <= 3.0 && avgMonthsAgo <= 12 ? 'Medium' :
       'Low';
 
-    // Persist the comp-weighted number as comparableSalesValue (the stable comps-side input to the blend).
-    // Also write it to arvEstimate/arvLow/arvHigh as the default final value — this will be overwritten
-    // with a blended value below if an AI-adjusted ARV already exists on this analysis.
-    await this.prisma.compAnalysis.update({
-      where: { id: analysisId },
-      data: {
-        arvEstimate: arv,
-        arvLow,
-        arvHigh,
-        arvMethod: method,
-        pricePerSqft,
-        medianPricePerSqft: medianPpsf,
-        comparableSalesValue,
-        confidenceScore: confidence,
-        confidenceTier,
-      },
-    });
-
-    this.logger.log(`ARV calculated: $${arv.toLocaleString()} (${method}) range $${arvLow.toLocaleString()}–$${arvHigh.toLocaleString()} confidence=${confidence}`);
-
-    // If the AI has already run on this analysis, re-blend the comps number with the stored AI number
-    // so the final arvEstimate reflects both signals.
+    // Persist the comp-weighted number as both comparableSalesValue (the reference
+    // under the ARV tab) and as arvEstimate when no AI ARV has been run yet.
+    // If an AI ARV already exists on this analysis, keep it as the primary
+    // arvEstimate — comps refresh just updates the reference fields.
     const existing = await this.prisma.compAnalysis.findUnique({
       where: { id: analysisId },
       select: { aiArvEstimate: true, aiArvLow: true, aiArvHigh: true, aiConfidence: true },
     });
-    if (existing?.aiArvEstimate != null && existing?.aiConfidence != null) {
-      const blended = this.blendArv(
-        arv, confidence, arvLow, arvHigh,
-        existing.aiArvEstimate, existing.aiConfidence, existing.aiArvLow ?? existing.aiArvEstimate, existing.aiArvHigh ?? existing.aiArvEstimate,
-      );
-      await this.prisma.compAnalysis.update({
-        where: { id: analysisId },
-        data: {
-          arvEstimate: blended.arv,
-          arvLow: blended.low,
-          arvHigh: blended.high,
-          confidenceScore: Math.round(blended.confidence),
-        },
-      });
-      this.logger.log(
-        `Blended ARV: $${blended.arv.toLocaleString()} from comps=$${arv.toLocaleString()} (conf=${confidence}) + ai=$${existing.aiArvEstimate.toLocaleString()} (conf=${existing.aiConfidence})`,
-      );
-    }
+    const hasAi = existing?.aiArvEstimate != null;
 
-    // Auto-calculate cost approach as a display-only sanity reference (not used in ARV math)
-    await this.calculateCostApproach(analysisId).catch((err) => {
-      this.logger.warn(`Cost approach auto-calc failed: ${err.message}`);
+    await this.prisma.compAnalysis.update({
+      where: { id: analysisId },
+      data: {
+        // arvEstimate holds the primary number the UI uses. Prefer AI when present.
+        arvEstimate: hasAi ? existing!.aiArvEstimate : arv,
+        arvLow: hasAi ? (existing!.aiArvLow ?? arvLow) : arvLow,
+        arvHigh: hasAi ? (existing!.aiArvHigh ?? arvHigh) : arvHigh,
+        arvMethod: method,
+        pricePerSqft,
+        medianPricePerSqft: medianPpsf,
+        comparableSalesValue,
+        confidenceScore: hasAi ? (existing!.aiConfidence ?? confidence) : confidence,
+        confidenceTier,
+      },
     });
 
-    // Auto-assess risk flags after ARV is set
-    try {
-      await this.assessRiskFlags(analysisId);
-    } catch (e) {
-      this.logger.warn(`Risk flag assessment failed (non-fatal): ${(e as Error).message}`);
-    }
+    this.logger.log(`ARV calculated: comps=$${arv.toLocaleString()} ($${pricePerSqft}/sqft) range $${arvLow.toLocaleString()}–$${arvHigh.toLocaleString()} confidence=${confidence}${hasAi ? ' — AI ARV already set, not overwriting' : ''}`);
 
-    // Auto-save ARV to lead so Overview tab always stays in sync
+    // Auto-save ARV to lead so Overview tab always stays in sync.
+    // Blended ARV / Risk adjustment / Cost approach have all been removed —
+    // users explicitly asked for only AI ARV + comparable-sales reference.
     try {
       await this.saveToLead(analysisId);
       this.logger.log(`✅ ARV auto-saved to lead for analysis ${analysisId}`);
@@ -856,42 +829,8 @@ export class CompAnalysisService {
     return { arv, arvLow, arvHigh, pricePerSqft, medianPricePerSqft: medianPpsf, comparableSalesValue, confidence, method };
   }
 
-  /**
-   * Confidence-weighted blend of two ARV estimates. The final ARV is a weighted average
-   * where each estimate contributes in proportion to its confidence. Returns the higher
-   * of the two input confidences so the blend is at least as confident as its strongest input.
-   * Falls back to a 50/50 blend if both confidences are zero.
-   */
-  private blendArv(
-    compArv: number,
-    compConf: number,
-    compLow: number,
-    compHigh: number,
-    aiArv: number,
-    aiConf: number,
-    aiLow: number,
-    aiHigh: number,
-  ): { arv: number; low: number; high: number; confidence: number } {
-    const totalConf = compConf + aiConf;
-    let arv: number;
-    let low: number;
-    let high: number;
-    if (totalConf <= 0) {
-      arv = (compArv + aiArv) / 2;
-      low = (compLow + aiLow) / 2;
-      high = (compHigh + aiHigh) / 2;
-    } else {
-      arv = (compArv * compConf + aiArv * aiConf) / totalConf;
-      low = (compLow * compConf + aiLow * aiConf) / totalConf;
-      high = (compHigh * compConf + aiHigh * aiConf) / totalConf;
-    }
-    return {
-      arv: Math.round(arv),
-      low: Math.round(low),
-      high: Math.round(high),
-      confidence: Math.max(compConf, aiConf),
-    };
-  }
+  // blendArv removed — ARV is either comps-only (from calculateArv) or AI-only
+  // (from aiAdjustComps). No more confidence-weighted blending.
 
   private calculateConfidence(comps: any[], lead: any, arvLow?: number, arvHigh?: number, arv?: number): number {
     let score = 0;
@@ -1155,56 +1094,20 @@ Respond ONLY with valid JSON:
 
     this.logger.log(`AI adjustment complete: ARV=$${aiArv.toLocaleString()} range $${aiLow.toLocaleString()}–$${aiHigh.toLocaleString()} confidence=${aiConfidence}`);
 
-    // Blend AI ARV with the stored comparable-sales value to produce the final arvEstimate.
-    // Read the current comps-side numbers (calculateArv writes these before AI runs).
-    const current = await this.prisma.compAnalysis.findUnique({
+    // AI ARV is the final ARV. No blending with comps — the AI already
+    // considered them. The raw comparable-sales value stays on the analysis
+    // as a reference but does NOT drive arvEstimate.
+    await this.prisma.compAnalysis.update({
       where: { id: analysisId },
-      select: {
-        comparableSalesValue: true,
-        confidenceScore: true,
-        arvLow: true,
-        arvHigh: true,
+      data: {
+        arvEstimate: aiArv,
+        arvLow: aiLow,
+        arvHigh: aiHigh,
+        confidenceScore: aiConfidence,
       },
     });
 
-    if (current?.comparableSalesValue != null && current.comparableSalesValue > 0) {
-      const compArv = current.comparableSalesValue;
-      const compConf = current.confidenceScore ?? 0;
-      const compLow = current.arvLow ?? compArv;
-      const compHigh = current.arvHigh ?? compArv;
-
-      const blended = this.blendArv(
-        compArv, compConf, compLow, compHigh,
-        aiArv, aiConfidence, aiLow, aiHigh,
-      );
-
-      await this.prisma.compAnalysis.update({
-        where: { id: analysisId },
-        data: {
-          arvEstimate: blended.arv,
-          arvLow: blended.low,
-          arvHigh: blended.high,
-          confidenceScore: Math.round(blended.confidence),
-        },
-      });
-
-      this.logger.log(
-        `Blended ARV: $${blended.arv.toLocaleString()} from comps=$${compArv.toLocaleString()} (conf=${compConf}) + ai=$${aiArv.toLocaleString()} (conf=${aiConfidence})`,
-      );
-    } else {
-      // No comps-side value available — use AI ARV as the final estimate.
-      await this.prisma.compAnalysis.update({
-        where: { id: analysisId },
-        data: {
-          arvEstimate: aiArv,
-          arvLow: aiLow,
-          arvHigh: aiHigh,
-          confidenceScore: aiConfidence,
-        },
-      });
-    }
-
-    // Auto-save blended ARV to lead so Overview tab stays in sync
+    // Auto-save AI ARV to lead so Overview tab stays in sync
     try {
       await this.saveToLead(analysisId);
     } catch (e) {
@@ -1787,310 +1690,6 @@ Use Midwest/rural Ohio pricing. Be specific about what you see — don't general
     return { success: true };
   }
 
-  // ══════════════════════════════════════════════════════════════════════════════
-  // THREE-MODEL VALUATION
-  // ══════════════════════════════════════════════════════════════════════════════
-
-  /**
-   * Cost Approach: Land value + depreciated replacement cost
-   */
-  async calculateCostApproach(analysisId: string) {
-    const analysis = await this.prisma.compAnalysis.findUnique({
-      where: { id: analysisId },
-      include: {
-        lead: {
-          select: {
-            sqft: true, sqftOverride: true, yearBuilt: true, propertyType: true, lotSize: true,
-            taxAssessedValue: true, effectiveYearBuilt: true, propertyCity: true,
-            propertyState: true,
-          },
-        },
-      },
-    });
-    if (!analysis) throw new Error('Analysis not found');
-
-    const lead = analysis.lead as any;
-    const sqft = lead.sqftOverride || lead.sqft;
-    if (!sqft) {
-      this.logger.warn(`Cost approach skipped for analysis ${analysisId}: no sqft data`);
-      return null;
-    }
-
-    // Land value estimate
-    let landValue: number;
-    if (lead.taxAssessedValue) {
-      landValue = Math.round(lead.taxAssessedValue * 0.20);
-    } else {
-      landValue = Math.round(sqft * 30);
-    }
-    landValue = Math.min(landValue, 150000);
-
-    // Construction cost per sqft — default $150 as safe middle ground
-    const constructionCostPerSqft = 150;
-
-    // Depreciation: straight-line 1%/year, capped at 60%
-    const currentYear = new Date().getFullYear();
-    const effectiveYear = lead.effectiveYearBuilt ?? lead.yearBuilt ?? (currentYear - 20);
-    const age = currentYear - effectiveYear;
-    const depreciationRate = Math.min(Math.max(age, 0) * 0.01, 0.60);
-
-    const buildCost = Math.round(sqft * constructionCostPerSqft);
-    const costApproachValue = Math.round(landValue + buildCost * (1 - depreciationRate));
-
-    await this.prisma.compAnalysis.update({
-      where: { id: analysisId },
-      data: {
-        costApproachValue,
-        costApproachLandValue: landValue,
-        costApproachBuildCost: buildCost,
-        costApproachDepreciation: Math.round(depreciationRate * 100) / 100,
-      },
-    });
-
-    this.logger.log(
-      `Cost approach for ${analysisId}: $${costApproachValue.toLocaleString()} ` +
-      `(land=$${landValue.toLocaleString()}, build=$${buildCost.toLocaleString()}, ` +
-      `depr=${Math.round(depreciationRate * 100)}%, age=${age}yr)`,
-    );
-
-    return {
-      costApproachValue,
-      landValue,
-      buildCost,
-      depreciationRate: Math.round(depreciationRate * 100) / 100,
-      age,
-      constructionCostPerSqft,
-    };
-  }
-
-  /**
-   * Income Approach: Market rent × 12 × GRM
-   */
-  // ══════════════════════════════════════════════════════════════════════════════
-  // PHASE 2: RISK FLAGS, CONDITION TIERS, SELLER MOTIVATION
-  // ══════════════════════════════════════════════════════════════════════════════
-
-  async assessRiskFlags(analysisId: string, overrides?: {
-    functionalObsolescenceAdj?: number;
-    buyerPoolReduction?: number;
-    landUtilityReduction?: number;
-  }) {
-    // 3a. Fetch analysis + lead
-    const analysis = await this.prisma.compAnalysis.findUnique({
-      where: { id: analysisId },
-      include: {
-        lead: {
-          select: {
-            bedrooms: true, bathrooms: true, sqft: true, propertyType: true,
-            conditionLevel: true, distressSignals: true, sellerMotivation: true,
-            lotSize: true, attomId: true, propertyCondition: true,
-          },
-        },
-      },
-    });
-    if (!analysis) throw new Error('Analysis not found');
-
-    const lead = analysis.lead as any;
-    const riskFlags: string[] = [];
-
-    // 3b. Functional Obsolescence — auto-detect
-    let functionalObsolescenceAdj = 0;
-    const functionalNotes: string[] = [];
-
-    if (overrides?.functionalObsolescenceAdj != null) {
-      functionalObsolescenceAdj = overrides.functionalObsolescenceAdj;
-      functionalNotes.push(`Manual override: $${functionalObsolescenceAdj.toLocaleString()}`);
-    } else {
-      const propType = (lead.propertyType || '').toLowerCase();
-
-      if (lead.bedrooms != null && lead.bedrooms <= 2 && (propType.includes('residential') || propType.includes('single'))) {
-        functionalObsolescenceAdj += 20000;
-        const flag = '2BR home — reduced buyer pool vs 3BR market';
-        functionalNotes.push(flag);
-        riskFlags.push(flag);
-      }
-
-      if (lead.bathrooms != null && lead.bathrooms < 1.5 && (lead.sqft ?? 0) > 1200) {
-        functionalObsolescenceAdj += 12000;
-        const flag = 'Insufficient bathrooms for property size';
-        functionalNotes.push(flag);
-        riskFlags.push(flag);
-      }
-
-      if (propType.includes('manufactured') || propType.includes('mobile')) {
-        functionalObsolescenceAdj += 25000;
-        const flag = 'Manufactured home — limited financing options';
-        functionalNotes.push(flag);
-        riskFlags.push(flag);
-      }
-    }
-
-    this.logger.log(`Risk flags — functional obsolescence: $${functionalObsolescenceAdj.toLocaleString()} for ${analysisId}`);
-
-    // 3c. Buyer Pool Shrinkage
-    let buyerPoolReduction = 0;
-    const buyerPoolNotes: string[] = [];
-
-    if (overrides?.buyerPoolReduction != null) {
-      buyerPoolReduction = overrides.buyerPoolReduction;
-      buyerPoolNotes.push(`Manual override: ${(buyerPoolReduction * 100).toFixed(0)}%`);
-    } else {
-      const propType = (lead.propertyType || '').toLowerCase();
-
-      if (propType.includes('manufactured') || propType.includes('mobile')) {
-        buyerPoolReduction += 0.10;
-        const flag = 'Manufactured/mobile home buyer pool';
-        buyerPoolNotes.push(flag);
-        riskFlags.push(flag);
-      }
-
-      if ((lead.lotSize ?? 0) > 10) {
-        buyerPoolReduction += 0.05;
-        const flag = 'Large rural acreage — limited buyer pool';
-        buyerPoolNotes.push(flag);
-        riskFlags.push(flag);
-      }
-
-      buyerPoolReduction = Math.min(buyerPoolReduction, 0.20);
-    }
-
-    // 3d. Land Utility
-    let landUtilityReduction = 0;
-    const landUtilityNotes: string[] = [];
-
-    if (overrides?.landUtilityReduction != null) {
-      landUtilityReduction = overrides.landUtilityReduction;
-      landUtilityNotes.push(`Manual override: ${(landUtilityReduction * 100).toFixed(0)}%`);
-    } else {
-      if (lead.attomId && (lead.lotSize ?? 0) > 5) {
-        landUtilityReduction = 0.05;
-        const flag = 'Large rural parcel — verify flood zone and access';
-        landUtilityNotes.push(flag);
-        riskFlags.push(flag);
-      }
-    }
-
-    // 3e. Risk-Adjusted ARV
-    const base = analysis.arvEstimate ?? 0;
-    const afterFunctional = base - functionalObsolescenceAdj;
-    const afterBuyerPool = afterFunctional * (1 - buyerPoolReduction);
-    const afterLand = afterBuyerPool * (1 - landUtilityReduction);
-    const riskAdjustedArv = Math.round(afterLand);
-
-    this.logger.log(
-      `Risk-adjusted ARV for ${analysisId}: $${base.toLocaleString()} → $${riskAdjustedArv.toLocaleString()} ` +
-      `(functional=-$${functionalObsolescenceAdj.toLocaleString()}, buyerPool=-${(buyerPoolReduction * 100).toFixed(0)}%, land=-${(landUtilityReduction * 100).toFixed(0)}%)`,
-    );
-
-    // 3f. Seller Motivation Tier
-    const signals = ((lead.distressSignals as string[]) ?? []).map(s => s.toLowerCase());
-    let sellerMotivationTier: string;
-
-    if (signals.includes('foreclosure') || signals.includes('pre_foreclosure') || signals.includes('tax_lien')) {
-      sellerMotivationTier = 'foreclosure';
-    } else if (signals.includes('vacant') || signals.includes('code_violations') || signals.includes('major_repairs') || signals.includes('bankruptcy')) {
-      sellerMotivationTier = 'severe_distress';
-    } else if (signals.includes('divorce') || signals.includes('job_loss') || signals.includes('behind_on_payments') || signals.includes('estate_sale')) {
-      sellerMotivationTier = 'distressed';
-    } else if (signals.length > 0 || /motivated|need to sell|moving/i.test(lead.sellerMotivation || '')) {
-      sellerMotivationTier = 'minor_distress';
-    } else {
-      sellerMotivationTier = 'normal';
-    }
-
-    const sellerMotivationMaoPercent = MOTIVATION_TIERS[sellerMotivationTier].maoPercent;
-    this.logger.log(`Seller motivation tier for ${analysisId}: ${sellerMotivationTier} (MAO ${sellerMotivationMaoPercent}%)`);
-
-    // 3g. Condition Tier + Repair Costs
-    // Only calculate repair costs when we have explicit condition data from the seller
-    // or a photo analysis. Generic ATTOM values (fair/good/poor) are not reliable enough
-    // to generate repair estimates — leave repairs blank in that case.
-    let conditionTier: string | null = null;
-    const conditionLevel = (lead.conditionLevel || '').toLowerCase();
-    const hasSellerCondition = conditionLevel.length > 0;
-    const hasPhotoAnalysis = !!(analysis as any).photoRepairLow;
-
-    if (hasSellerCondition) {
-      if (/gut|tear|demolish/.test(conditionLevel)) {
-        conditionTier = 'full_gut';
-      } else if (/heavy|major|significant|complete/.test(conditionLevel)) {
-        conditionTier = 'heavy_rehab';
-      } else if (/moderate|medium|some/.test(conditionLevel)) {
-        conditionTier = 'moderate_rehab';
-      } else if (/light|cosmetic|minor|paint|carpet/.test(conditionLevel)) {
-        conditionTier = 'light_cosmetic';
-      } else if (/move|ready|excellent|great|updated|remodel/.test(conditionLevel)) {
-        conditionTier = 'move_in_ready';
-      }
-      // Generic ATTOM-style words like "fair", "good", "poor" alone → no estimate
-    }
-
-    // Photo analysis overrides seller condition for repair estimates
-    let repairCostLow: number | null = null;
-    let repairCostHigh: number | null = null;
-    let repairCostMid: number | null = null;
-
-    if (hasPhotoAnalysis) {
-      repairCostLow = (analysis as any).photoRepairLow;
-      repairCostHigh = (analysis as any).photoRepairHigh;
-      repairCostMid = Math.round((repairCostLow! + repairCostHigh!) / 2);
-      conditionTier = conditionTier || 'moderate_rehab';
-      this.logger.log(`Repair costs from photo analysis for ${analysisId}: $${repairCostLow}–$${repairCostHigh}`);
-    } else if (conditionTier) {
-      const sqft = (lead.sqftOverride || lead.sqft) ?? 1500;
-      const rate = CONDITION_REPAIR_RATES[conditionTier];
-      repairCostLow = Math.round(sqft * rate.low);
-      repairCostHigh = Math.round(sqft * rate.high);
-      repairCostMid = Math.round((repairCostLow + repairCostHigh) / 2);
-      this.logger.log(
-        `Condition tier for ${analysisId}: ${conditionTier} (${rate.label}) — ` +
-        `repairs $${repairCostLow.toLocaleString()}–$${repairCostHigh.toLocaleString()} on ${sqft} sqft`,
-      );
-    } else {
-      this.logger.log(`No repair estimate for ${analysisId} — no seller condition data or photo analysis`);
-    }
-
-    // 3i. Save to CompAnalysis
-    const updated = await this.prisma.compAnalysis.update({
-      where: { id: analysisId },
-      data: {
-        functionalObsolescenceAdj,
-        functionalObsolescenceNotes: functionalNotes.join('; ') || null,
-        buyerPoolReduction,
-        buyerPoolNotes: buyerPoolNotes.join('; ') || null,
-        landUtilityReduction,
-        landUtilityNotes: landUtilityNotes.join('; ') || null,
-        riskAdjustedArv,
-        riskFlags,
-        sellerMotivationTier,
-        sellerMotivationMaoPercent,
-        conditionTier: conditionTier || null,
-        repairCostLow: repairCostLow ?? null,
-        repairCostHigh: repairCostHigh ?? null,
-        repairCosts: repairCostMid ?? null,
-      },
-    });
-
-    return {
-      functionalObsolescenceAdj,
-      functionalObsolescenceNotes: functionalNotes,
-      buyerPoolReduction,
-      buyerPoolNotes,
-      landUtilityReduction,
-      landUtilityNotes,
-      riskAdjustedArv,
-      riskFlags,
-      sellerMotivationTier,
-      sellerMotivationMaoPercent,
-      sellerMotivationLabel: MOTIVATION_TIERS[sellerMotivationTier].label,
-      conditionTier,
-      conditionLabel: conditionTier ? CONDITION_REPAIR_RATES[conditionTier]?.label ?? null : null,
-      repairCostLow,
-      repairCostHigh,
-      repairCostMid,
-      baseArv: base,
-    };
-  }
 
   // ══════════════════════════════════════════════════════════════════════════════
   // DEAL INTELLIGENCE — Full investor reasoning layer

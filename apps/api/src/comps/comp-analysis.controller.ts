@@ -161,18 +161,10 @@ export class CompAnalysisController {
     });
   }
 
-  @Post(':analysisId/risk-flags')
-  async assessRiskFlags(
-    @Param('analysisId') analysisId: string,
-    @Body() body: { functionalObsolescenceAdj?: number; buyerPoolReduction?: number; landUtilityReduction?: number },
-  ) {
-    return this.compAnalysisService.assessRiskFlags(analysisId, body);
-  }
-
-  @Post(':analysisId/cost-approach')
-  async calculateCostApproach(@Param('analysisId') analysisId: string) {
-    return this.compAnalysisService.calculateCostApproach(analysisId);
-  }
+  // Risk-flags and cost-approach endpoints removed — those pipelines were
+  // unused from the UI and produced confusing secondary ARV numbers that
+  // the user didn't trust. The ARV tab now shows only the AI-adjusted value
+  // with raw Comparable Sales as a reference.
 
   @Post(':analysisId/deal-intelligence')
   async generateDealIntelligence(@Param('analysisId') analysisId: string) {
