@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import AppNav from '@/components/AppNav';
+import AppShell from '@/components/AppShell';
 import CampaignBuilder from '@/components/drip/CampaignBuilder';
 import { campaignAPI } from '@/lib/api';
 
@@ -22,8 +22,7 @@ export default function EditCampaignPage() {
   }, [id]);
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
-      <AppNav />
+    <AppShell>
       <div className="max-w-screen-xl mx-auto px-4 sm:px-6 py-8">
         <div className="mb-6">
           <Link
@@ -65,6 +64,6 @@ export default function EditCampaignPage() {
           <div className="text-center py-16 text-gray-400 dark:text-gray-500">Campaign not found.</div>
         )}
       </div>
-    </div>
+    </AppShell>
   );
 }

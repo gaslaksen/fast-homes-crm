@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import AppNav from '@/components/AppNav';
+import AppShell from '@/components/AppShell';
 import { campaignAPI } from '@/lib/api';
 
 interface Campaign {
@@ -102,8 +102,7 @@ export default function DripCampaignsPage() {
     totalSent > 0 ? Math.round((totalReplied / totalSent) * 100) : 0;
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
-      <AppNav />
+    <AppShell>
       <div className="max-w-screen-xl mx-auto px-4 sm:px-6 py-8">
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
@@ -263,6 +262,6 @@ export default function DripCampaignsPage() {
           </div>
         )}
       </div>
-    </div>
+    </AppShell>
   );
 }

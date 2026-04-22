@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { dashboardAPI, authAPI, tasksAPI } from '@/lib/api';
 import { formatDistanceToNow, format } from 'date-fns';
 import PropertyPhoto from '@/components/PropertyPhoto';
-import AppNav from '@/components/AppNav';
+import AppShell from '@/components/AppShell';
 
 function KpiCard({
   label,
@@ -147,9 +147,7 @@ export default function DashboardPage() {
   const warm = stats?.leadsByBand?.WARM || 0;
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
-      <AppNav />
-
+    <AppShell>
       <main className="max-w-screen-2xl mx-auto px-6 py-8 pb-16 md:pb-8 space-y-8">
 
         {/* Greeting + date */}
@@ -400,6 +398,6 @@ export default function DashboardPage() {
         )}
 
       </main>
-    </div>
+    </AppShell>
   );
 }

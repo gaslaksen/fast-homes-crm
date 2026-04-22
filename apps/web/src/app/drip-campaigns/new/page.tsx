@@ -1,13 +1,12 @@
 'use client';
 
-import AppNav from '@/components/AppNav';
+import AppShell from '@/components/AppShell';
 import CampaignBuilder from '@/components/drip/CampaignBuilder';
 import Link from 'next/link';
 
 export default function NewCampaignPage() {
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
-      <AppNav />
+    <AppShell>
       <div className="max-w-screen-xl mx-auto px-4 sm:px-6 py-8">
         <div className="mb-6">
           <Link
@@ -20,6 +19,6 @@ export default function NewCampaignPage() {
         </div>
         <CampaignBuilder />
       </div>
-    </div>
+    </AppShell>
   );
 }

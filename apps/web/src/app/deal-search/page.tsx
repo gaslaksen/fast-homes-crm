@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import AppNav from '@/components/AppNav';
+import AppShell from '@/components/AppShell';
 import FilterPanel from '@/components/deal-search/FilterPanel';
 import ResultsTable from '@/components/deal-search/ResultsTable';
 import DealSearchMap from '@/components/deal-search/DealSearchMap';
@@ -237,9 +237,7 @@ export default function DealSearchPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
-      <AppNav />
-
+    <AppShell>
       <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 py-6">
         {/* Page header */}
         <div className="flex items-center justify-between mb-6">
@@ -463,6 +461,6 @@ export default function DealSearchPage() {
         onSave={handleSaveSearch}
         activeFilterCount={countActiveFilters(filters)}
       />
-    </div>
+    </AppShell>
   );
 }

@@ -8,7 +8,7 @@ import ShareDealModal from '@/components/ShareDealModal';
 import ShareHistory from '@/components/ShareHistory';
 import DispoTab from '@/components/DispoTab';
 import PhotoGallery from '@/components/PhotoGallery';
-import AppNav from '@/components/AppNav';
+import AppShell from '@/components/AppShell';
 import LeadTabNav, { DETAIL_TABS, COMPS_TABS } from '@/components/LeadTabNav';
 import LeadHeader from '@/components/LeadHeader';
 import AiSummaryBox from '@/components/AiSummaryBox';
@@ -372,8 +372,7 @@ export default function LeadDetailPage() {
   const allCampComplete = progress === 4;
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
-      <AppNav />
+    <AppShell>
       <LeadHeader
         lead={lead}
         leadId={leadId}
@@ -2044,7 +2043,7 @@ export default function LeadDetailPage() {
           </div>
         )}
       </main>
-    </div>
+    </AppShell>
   );
 }
 

@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { settingsAPI, gmailAPI, authAPI } from '@/lib/api';
-import AppNav from '@/components/AppNav';
+import AppShell from '@/components/AppShell';
 import Avatar from '@/components/Avatar';
 
 function ProfilePageInner() {
@@ -113,12 +113,11 @@ function ProfilePageInner() {
 
   if (!profile) {
     return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
-        <AppNav />
+      <AppShell>
         <div className="flex items-center justify-center py-20">
           <div className="text-gray-400 dark:text-gray-500 text-sm animate-pulse">Loading profile...</div>
         </div>
-      </div>
+      </AppShell>
     );
   }
 
@@ -126,8 +125,7 @@ function ProfilePageInner() {
   const fullName = `${firstName} ${lastName}`.trim();
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
-      <AppNav />
+    <AppShell>
       <main className="max-w-xl mx-auto px-6 py-10 space-y-8">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Profile</h1>
 
@@ -337,13 +335,13 @@ function ProfilePageInner() {
           )}
         </div>
       </main>
-    </div>
+    </AppShell>
   );
 }
 
 export default function ProfilePage() {
   return (
-    <Suspense fallback={<div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center"><div className="text-gray-400 dark:text-gray-500 text-sm animate-pulse">Loading profile...</div></div>}>
+    <Suspense fallback={<AppShell><div className="flex items-center justify-center py-20"><div className="text-gray-400 dark:text-gray-500 text-sm animate-pulse">Loading profile...</div></div></AppShell>}>
       <ProfilePageInner />
     </Suspense>
   );
