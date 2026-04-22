@@ -563,23 +563,18 @@ export class ReapiService {
       where: { leadId, source: 'reapi', analysisId: null },
     });
 
-    // Outlier filters — REAPI returns 50 raw comps per request. Date filtering
-    // happens at the API (all recent sales), but we still have to guard against
-    // degenerate records: missing sqft, vacant-lot AVMs, clerical zero prices.
-    const subjectAvm = toNumber(result.reapiAvm) ?? 0;
+    // Minimal filters — we only discard records that are literally unusable.
+    // No outlier/price-range guards: REAPI's top-level reapiAvm is sometimes
+    // wildly wrong (saw $26M for a $367k FL condo) and would cause every legit
+    // comp to be filtered out as an "outlier". The user has explicitly chosen
+    // to see all raw comps and make outlier decisions themselves.
     const MAX_AGE_MONTHS = 12;            // belt-and-suspenders: never save older than 12mo
-    const PRICE_FLOOR_RATIO = 0.25;       // reject comps priced < 25% of subject AVM
-    const PRICE_CEILING_RATIO = 3.0;      // reject comps priced > 300% of subject AVM
-    const ABSOLUTE_PRICE_FLOOR = 25_000;  // absolute floor when no subject AVM
-
-    const priceFloor = subjectAvm > 0 ? Math.round(subjectAvm * PRICE_FLOOR_RATIO) : ABSOLUTE_PRICE_FLOOR;
-    const priceCeiling = subjectAvm > 0 ? Math.round(subjectAvm * PRICE_CEILING_RATIO) : Number.MAX_SAFE_INTEGER;
     const ageCutoff = new Date();
     ageCutoff.setMonth(ageCutoff.getMonth() - MAX_AGE_MONTHS);
 
     let nonDisclosedCount = 0;
     let saved = 0;
-    let filteredNoDate = 0, filteredStale = 0, filteredNoPrice = 0, filteredNoSqft = 0, filteredOutlier = 0;
+    let filteredNoDate = 0, filteredStale = 0, filteredNoPrice = 0, filteredNoSqft = 0;
 
     for (const c of result.comps) {
       if (!c.lastSaleDate) { filteredNoDate += 1; continue; }
@@ -595,9 +590,6 @@ export class ReapiService {
       const sqft = toNumber(c.squareFeet);
       // Degenerate record: no sqft AND no beds/baths → skip (vacant lot, demolished, bad data)
       if ((!sqft || sqft <= 0) && !c.bedrooms && !c.bathrooms) { filteredNoSqft += 1; continue; }
-
-      // Outlier guards (only applied when we have a subject AVM to compare against)
-      if (soldPrice < priceFloor || soldPrice > priceCeiling) { filteredOutlier += 1; continue; }
 
       const isAvmFallback = !recordedSale || recordedSale === 0;
       if (isAvmFallback) nonDisclosedCount += 1;
@@ -658,13 +650,12 @@ export class ReapiService {
       }
     }
 
-    const filteredTotal = filteredNoDate + filteredStale + filteredNoPrice + filteredNoSqft + filteredOutlier;
+    const filteredTotal = filteredNoDate + filteredStale + filteredNoPrice + filteredNoSqft;
     if (filteredTotal > 0) {
       this.logger.log(
         `REAPI comps filtered ${filteredTotal}/${result.comps.length}: ` +
         `no-date=${filteredNoDate}, stale>${MAX_AGE_MONTHS}mo=${filteredStale}, ` +
-        `no-price=${filteredNoPrice}, no-sqft=${filteredNoSqft}, outlier=${filteredOutlier} ` +
-        `(floor=$${priceFloor.toLocaleString()} ceiling=$${priceCeiling === Number.MAX_SAFE_INTEGER ? '∞' : priceCeiling.toLocaleString()})`,
+        `no-price=${filteredNoPrice}, no-sqft=${filteredNoSqft}`,
       );
     }
     this.logger.log(`REAPI comps saved: ${saved} (${nonDisclosedCount} AVM-fallback, ${saved - nonDisclosedCount} recorded sales)`);
