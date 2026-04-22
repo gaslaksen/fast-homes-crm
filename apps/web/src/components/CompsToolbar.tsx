@@ -13,12 +13,30 @@ interface CompsToolbarProps {
   sortDir: 'asc' | 'desc';
   fetchingComps: boolean;
   hasAnalysis: boolean;
+  // Filter state + callbacks (age in months, distance in miles)
+  filterMonths?: number;
+  filterDistance?: number;
+  onSetFilterMonths?: (months: number) => void;
+  onSetFilterDistance?: (miles: number) => void;
   onSetCompsSource: (source: CompsSource) => void;
   onSort: (field: string) => void;
   onSelectAll: (selected: boolean) => void;
   onRefreshComps: () => void;
   onAddManual: () => void;
 }
+
+const AGE_OPTIONS: Array<{ value: number; label: string }> = [
+  { value: 6,  label: '6mo' },
+  { value: 12, label: '12mo' },
+  { value: 24, label: '24mo' },
+];
+
+const DISTANCE_OPTIONS: Array<{ value: number; label: string }> = [
+  { value: 1, label: '≤1 mi' },
+  { value: 2, label: '≤2 mi' },
+  { value: 3, label: '≤3 mi' },
+  { value: 99, label: 'All' },
+];
 
 const SORT_OPTIONS = [
   { key: 'distance', label: 'Distance' },
@@ -39,6 +57,10 @@ export default function CompsToolbar({
   sortDir,
   fetchingComps,
   hasAnalysis,
+  filterMonths,
+  filterDistance,
+  onSetFilterMonths,
+  onSetFilterDistance,
   onSetCompsSource,
   onSort,
   onSelectAll,
@@ -146,6 +168,44 @@ export default function CompsToolbar({
           </button>
         </div>
       </div>
+
+      {/* Filter row — age + distance. Changes auto-select on each comp. */}
+      {hasAnalysis && onSetFilterMonths && onSetFilterDistance && (
+        <div className="flex items-center gap-3 mt-2 text-[10px] flex-wrap">
+          <div className="flex items-center gap-1">
+            <span className="text-gray-500 dark:text-gray-400 font-medium">Age:</span>
+            {AGE_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                onClick={() => onSetFilterMonths(opt.value)}
+                className={`px-1.5 py-0.5 rounded border transition-colors ${
+                  filterMonths === opt.value
+                    ? 'bg-emerald-100 dark:bg-emerald-900/30 border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-400 font-medium'
+                    : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="text-gray-500 dark:text-gray-400 font-medium">Distance:</span>
+            {DISTANCE_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                onClick={() => onSetFilterDistance(opt.value)}
+                className={`px-1.5 py-0.5 rounded border transition-colors ${
+                  filterDistance === opt.value
+                    ? 'bg-emerald-100 dark:bg-emerald-900/30 border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-400 font-medium'
+                    : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Sort row */}
       {allCompsCount > 0 && (

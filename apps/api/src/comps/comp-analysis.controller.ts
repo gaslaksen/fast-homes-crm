@@ -175,4 +175,12 @@ export class CompAnalysisController {
   // PropGPT endpoint removed — REAPI's PropGPT is a property-search frontend
   // (natural language → PropertySearch), not an analysis chatbot. DealCore's
   // aiAdjustComps is the single source of AI ARV for this codebase.
+
+  @Post(':analysisId/apply-filters')
+  async applyFilters(
+    @Param('analysisId') analysisId: string,
+    @Body() body: { maxDistance?: number; timeFrameMonths?: number },
+  ) {
+    return this.compAnalysisService.applyFilters(analysisId, body);
+  }
 }

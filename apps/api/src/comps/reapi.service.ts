@@ -568,7 +568,10 @@ export class ReapiService {
     // wildly wrong (saw $26M for a $367k FL condo) and would cause every legit
     // comp to be filtered out as an "outlier". The user has explicitly chosen
     // to see all raw comps and make outlier decisions themselves.
-    const MAX_AGE_MONTHS = 12;            // belt-and-suspenders: never save older than 12mo
+    // Age cap is 24 months so the Comps tab age filter (6/12/24mo) has data
+    // to narrow from. Display-time filter defaults to 12mo — anything between
+    // 12 and 24 months is in the DB but not auto-selected.
+    const MAX_AGE_MONTHS = 24;
     const ageCutoff = new Date();
     ageCutoff.setMonth(ageCutoff.getMonth() - MAX_AGE_MONTHS);
 

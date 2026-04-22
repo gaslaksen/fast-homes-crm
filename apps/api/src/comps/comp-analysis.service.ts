@@ -194,6 +194,21 @@ export class CompAnalysisService {
 
     if (existingComps.length === 0) return 0;
 
+    // Load the analysis's filter thresholds (UI-configurable via the Comps tab).
+    // Defaults from the Prisma schema are 3mi / 12mo, but we want the initial
+    // auto-select to match the historical default of 1mi / 12mo if the user
+    // hasn't overridden them. Treat "maxDistance still at schema default 3"
+    // as a signal to use 1mi for initial import; once the user picks a value
+    // via the UI, it'll persist on the analysis and be used here verbatim.
+    const analysisForFilter = await this.prisma.compAnalysis.findUnique({
+      where: { id: analysisId },
+      select: { maxDistance: true, timeFrameMonths: true },
+    });
+    const maxDistance = analysisForFilter?.maxDistance != null && analysisForFilter.maxDistance !== 3
+      ? analysisForFilter.maxDistance
+      : 1.0;
+    const timeFrameMonths = analysisForFilter?.timeFrameMonths ?? 12;
+
     for (const comp of existingComps) {
       await this.prisma.comp.create({
         data: {
@@ -222,22 +237,22 @@ export class CompAnalysisService {
           notes: comp.notes,
           photoUrl: comp.photoUrl,
           sourceUrl: comp.sourceUrl,
-          // Auto-select: within 1 mile AND sold within the last 12 months
-          selected: comp.distance <= 1.0 && this.isRecentSale(comp.soldDate, 12),
+          // Auto-select honors the analysis's maxDistance + timeFrameMonths filters.
+          selected: comp.distance <= maxDistance && this.isRecentSale(comp.soldDate, timeFrameMonths),
         },
       });
     }
 
     const autoSelected = existingComps.filter(
-      (c) => c.distance <= 1.0 && this.isRecentSale(c.soldDate, 12),
+      (c) => c.distance <= maxDistance && this.isRecentSale(c.soldDate, timeFrameMonths),
     ).length;
     this.logger.log(
-      `Imported ${existingComps.length} existing comps into analysis ${analysisId} — ${autoSelected} auto-selected (≤1 mi, sold ≤12 months)`,
+      `Imported ${existingComps.length} existing comps into analysis ${analysisId} — ${autoSelected} auto-selected (≤${maxDistance}mi, sold ≤${timeFrameMonths}mo)`,
     );
 
     // Immediately calculate initial confidence score so it's not stuck at default 0/1
     if (existingComps.length > 0) {
-      const selected = existingComps.filter(c => c.distance <= 1.0 && this.isRecentSale(c.soldDate, 12));
+      const selected = existingComps.filter(c => c.distance <= maxDistance && this.isRecentSale(c.soldDate, timeFrameMonths));
       const compsForScore = selected.length > 0 ? selected : existingComps;
       const initialConfidence = this.calculateConfidence(compsForScore, null, undefined, undefined, undefined);
 
@@ -1990,5 +2005,53 @@ Now think through this deal systematically. Respond ONLY with a valid JSON objec
       where: { id: analysisId },
       data,
     });
+  }
+
+  /**
+   * Update the analysis's distance + age filters and re-flag every linked
+   * comp's `selected` field accordingly. Called when the user changes the
+   * Age / Distance controls on the Comps tab. No re-fetch from the provider —
+   * works on comps already in the DB.
+   */
+  async applyFilters(
+    analysisId: string,
+    opts: { maxDistance?: number; timeFrameMonths?: number },
+  ) {
+    const analysis = await this.prisma.compAnalysis.findUnique({
+      where: { id: analysisId },
+      select: { maxDistance: true, timeFrameMonths: true },
+    });
+    if (!analysis) throw new Error('Analysis not found');
+
+    const maxDistance = opts.maxDistance ?? analysis.maxDistance ?? 1.0;
+    const timeFrameMonths = opts.timeFrameMonths ?? analysis.timeFrameMonths ?? 12;
+
+    await this.prisma.compAnalysis.update({
+      where: { id: analysisId },
+      data: { maxDistance, timeFrameMonths },
+    });
+
+    // Re-flag `selected` on every analysis-linked comp based on the new filters.
+    const comps = await this.prisma.comp.findMany({
+      where: { analysisId },
+      select: { id: true, distance: true, soldDate: true },
+    });
+
+    let selectedCount = 0;
+    for (const c of comps) {
+      const shouldSelect =
+        c.distance <= maxDistance && this.isRecentSale(c.soldDate, timeFrameMonths);
+      if (shouldSelect) selectedCount += 1;
+      await this.prisma.comp.update({
+        where: { id: c.id },
+        data: { selected: shouldSelect },
+      });
+    }
+
+    this.logger.log(
+      `applyFilters for analysis ${analysisId}: ≤${maxDistance}mi, ≤${timeFrameMonths}mo — ${selectedCount}/${comps.length} selected`,
+    );
+
+    return { maxDistance, timeFrameMonths, selectedCount, totalCount: comps.length };
   }
 }

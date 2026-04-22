@@ -859,6 +859,26 @@ export default function CompsAnalysisPage() {
                 sortDir={sortDir}
                 fetchingComps={fetchingComps}
                 hasAnalysis={!!analysis}
+                filterMonths={analysis?.timeFrameMonths ?? 12}
+                filterDistance={analysis?.maxDistance ?? 1}
+                onSetFilterMonths={async (months) => {
+                  if (!analysis) return;
+                  try {
+                    await compAnalysisAPI.applyFilters(leadId, analysis.id, { timeFrameMonths: months });
+                    await refreshAnalysis();
+                  } catch (err) {
+                    console.error('Failed to apply age filter:', err);
+                  }
+                }}
+                onSetFilterDistance={async (miles) => {
+                  if (!analysis) return;
+                  try {
+                    await compAnalysisAPI.applyFilters(leadId, analysis.id, { maxDistance: miles });
+                    await refreshAnalysis();
+                  } catch (err) {
+                    console.error('Failed to apply distance filter:', err);
+                  }
+                }}
                 onSetCompsSource={setCompsSource}
                 onSort={handleSort}
                 onSelectAll={async (selected) => {
