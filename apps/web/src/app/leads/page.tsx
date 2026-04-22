@@ -7,7 +7,7 @@ import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea
 import { leadsAPI, authAPI, pipelineAPI } from '@/lib/api';
 import PropertyPhoto from '@/components/PropertyPhoto';
 import Avatar from '@/components/Avatar';
-import AppNav from '@/components/AppNav';
+import AppShell from '@/components/AppShell';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -597,8 +597,7 @@ function LeadsPageInner() {
   // ─── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
-      <AppNav />
+    <AppShell>
       <main className="max-w-screen-2xl mx-auto px-3 py-4 sm:px-6 sm:py-6 pb-16 md:pb-0 space-y-4">
 
         {/* Page Header */}
@@ -1248,7 +1247,7 @@ function LeadsPageInner() {
           </div>
         </div>
       )}
-    </div>
+    </AppShell>
   );
 }
 

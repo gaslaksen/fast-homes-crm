@@ -5,7 +5,7 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { leadsAPI, compsAPI, compAnalysisAPI, photosAPI } from '@/lib/api';
-import AppNav from '@/components/AppNav';
+import AppShell from '@/components/AppShell';
 import LeadTabNav, { COMPS_TABS, DETAIL_TABS } from '@/components/LeadTabNav';
 import AnalysisTab from '@/components/AnalysisTab';
 import LeadHeader from '@/components/LeadHeader';
@@ -739,8 +739,7 @@ export default function CompsAnalysisPage() {
   const compsWithSource = compsFromReapi + compsFromAttom + compsFromRentcast;
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
-      <AppNav />
+    <AppShell>
       <LeadHeader
         lead={lead}
         leadId={leadId}
@@ -2887,7 +2886,7 @@ export default function CompsAnalysisPage() {
         isOpen={showShareModal}
         onClose={() => setShowShareModal(false)}
       />
-    </div>
+    </AppShell>
   );
 }
 

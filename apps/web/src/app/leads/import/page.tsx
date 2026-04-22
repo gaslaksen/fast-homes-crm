@@ -4,7 +4,7 @@ import { useState, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { leadsAPI } from '@/lib/api';
-import AppNav from '@/components/AppNav';
+import AppShell from '@/components/AppShell';
 
 type Step = 'upload' | 'mapping' | 'importing' | 'results';
 
@@ -110,8 +110,7 @@ export default function ImportLeadsPage() {
   const unmappedRequired = requiredFields.filter((f) => !mappedTargets.has(f.key));
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
-      <AppNav />
+    <AppShell>
       <div className="max-w-5xl mx-auto px-4 py-6">
         {/* Header */}
         <div className="flex items-center gap-3 mb-6">
@@ -422,6 +421,6 @@ export default function ImportLeadsPage() {
           </div>
         )}
       </div>
-    </div>
+    </AppShell>
   );
 }

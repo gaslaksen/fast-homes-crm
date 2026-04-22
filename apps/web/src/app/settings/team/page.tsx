@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import AppNav from '@/components/AppNav';
+import AppShell from '@/components/AppShell';
 import { authAPI, gmailAPI } from '@/lib/api';
 import { formatPhoneDisplay } from '@/lib/format';
 
@@ -18,7 +18,7 @@ function getUser() {
 
 export default function TeamPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen bg-gray-50 dark:bg-gray-950"><AppNav /><div className="max-w-3xl mx-auto px-6 py-8 text-sm text-gray-400 animate-pulse">Loading...</div></div>}>
+    <Suspense fallback={<AppShell><div className="max-w-3xl mx-auto px-6 py-8 text-sm text-gray-400 animate-pulse">Loading...</div></AppShell>}>
       <TeamPageInner />
     </Suspense>
   );
@@ -188,8 +188,7 @@ function TeamPageInner() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
-      <AppNav />
+    <AppShell>
       <main className="max-w-3xl mx-auto px-6 py-8 space-y-8">
 
         <div>
@@ -561,6 +560,6 @@ function TeamPageInner() {
         </div>
 
       </main>
-    </div>
+    </AppShell>
   );
 }

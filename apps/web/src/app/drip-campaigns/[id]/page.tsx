@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import AppNav from '@/components/AppNav';
+import AppShell from '@/components/AppShell';
 import { campaignAPI, leadsAPI } from '@/lib/api';
 import { format } from 'date-fns';
 
@@ -107,19 +107,17 @@ export default function CampaignDetailPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
-        <AppNav />
+      <AppShell>
         <div className="text-center py-24 text-gray-400 dark:text-gray-500">Loading...</div>
-      </div>
+      </AppShell>
     );
   }
 
   if (!campaign) {
     return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
-        <AppNav />
+      <AppShell>
         <div className="text-center py-24 text-gray-400 dark:text-gray-500">Campaign not found.</div>
-      </div>
+      </AppShell>
     );
   }
 
@@ -146,8 +144,7 @@ export default function CampaignDetailPage() {
     : [];
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
-      <AppNav />
+    <AppShell>
       <div className="max-w-screen-xl mx-auto px-4 sm:px-6 py-8">
         {/* Breadcrumb */}
         <div className="mb-4">
@@ -401,6 +398,6 @@ export default function CampaignDetailPage() {
           )}
         </div>
       </div>
-    </div>
+    </AppShell>
   );
 }

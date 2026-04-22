@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import AppNav from '@/components/AppNav';
+import AppShell from '@/components/AppShell';
 import { partnersAPI } from '@/lib/api';
 
 const PARTNER_TYPES = [
@@ -104,8 +104,7 @@ export default function PartnersPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
-      <AppNav />
+    <AppShell>
       <div className="max-w-5xl mx-auto px-6 py-8">
         <div className="flex items-center justify-between mb-6">
           <div>
@@ -285,6 +284,6 @@ export default function PartnersPage() {
           </div>
         </div>
       )}
-    </div>
+    </AppShell>
   );
 }

@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { settingsAPI } from '@/lib/api';
-import AppNav from '@/components/AppNav';
+import AppShell from '@/components/AppShell';
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -78,8 +78,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
-      <AppNav />
+    <AppShell>
       <main className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-6">Settings</h2>
 
@@ -371,6 +370,6 @@ export default function SettingsPage() {
           )}
         </div>
       </main>
-    </div>
+    </AppShell>
   );
 }

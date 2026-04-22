@@ -1,5 +1,5 @@
 interface LogoProps {
-  size?: 'sm' | 'md' | 'lg';
+  size?: 'sm' | 'md' | 'lg' | 'xl';
   showText?: boolean;
   className?: string;
 }
@@ -8,6 +8,7 @@ const sizes = {
   sm: { icon: 24, text: 'text-base' },
   md: { icon: 32, text: 'text-xl' },
   lg: { icon: 40, text: 'text-3xl' },
+  xl: { icon: 56, text: 'text-2xl' },
 };
 
 export default function Logo({ size = 'md', showText = true, className = '' }: LogoProps) {
