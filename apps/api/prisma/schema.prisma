@@ -801,3 +801,35 @@ model SellerPortal {
 
   @@map("seller_portals")
 }
+
+// Action Queue: per-user state for the dashboard Action Queue. The queue items
+// themselves are computed on read; these tables only persist user intent
+// (dismissals, snoozes) and a "last seen" marker for unseen badging.
+model ActionDismissal {
+  id          String   @id @default(cuid())
+  userId      String
+  actionKey   String
+  dismissedAt DateTime @default(now())
+
+  @@unique([userId, actionKey])
+  @@index([userId])
+  @@map("action_dismissals")
+}
+
+model ActionSnooze {
+  id           String   @id @default(cuid())
+  userId       String
+  actionKey    String
+  snoozedUntil DateTime
+
+  @@unique([userId, actionKey])
+  @@index([userId, snoozedUntil])
+  @@map("action_snoozes")
+}
+
+model ActionLastSeen {
+  userId     String   @id
+  lastSeenAt DateTime @default(now())
+
+  @@map("action_last_seen")
+}

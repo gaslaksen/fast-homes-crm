@@ -22,6 +22,7 @@ import { DealSearchModule } from './deal-search/deal-search.module';
 import { PartnersModule } from './partners/partners.module';
 import { SellerPortalModule } from './seller-portal/seller-portal.module';
 import { RemindersModule } from './reminders/reminders.module';
+import { ActionsModule } from './actions/actions.module';
 
 @Module({
   imports: [
@@ -50,6 +51,7 @@ import { RemindersModule } from './reminders/reminders.module';
     PartnersModule,
     SellerPortalModule,
     RemindersModule,
+    ActionsModule,
   ],
 })
 export class AppModule {}

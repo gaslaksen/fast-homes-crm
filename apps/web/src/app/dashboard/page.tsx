@@ -6,6 +6,9 @@ import { dashboardAPI, authAPI, tasksAPI } from '@/lib/api';
 import { formatDistanceToNow, format } from 'date-fns';
 import PropertyPhoto from '@/components/PropertyPhoto';
 import AppShell from '@/components/AppShell';
+import ActionQueueDashboard from './ActionQueueDashboard';
+
+const DASHBOARD_V2 = process.env.NEXT_PUBLIC_DASHBOARD_V2 === 'actionqueue';
 
 function KpiCard({
   label,
@@ -100,6 +103,13 @@ function LeadRow({ lead, showLastTouched = false }: { lead: any; showLastTouched
 }
 
 export default function DashboardPage() {
+  if (DASHBOARD_V2) {
+    return <ActionQueueDashboard />;
+  }
+  return <MetricsDashboard />;
+}
+
+function MetricsDashboard() {
   const [stats, setStats] = useState<any>(null);
   const [hotLeads, setHotLeads] = useState<any[]>([]);
   const [staleLeads, setStaleLeads] = useState<any[]>([]);

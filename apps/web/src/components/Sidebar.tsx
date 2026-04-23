@@ -5,6 +5,7 @@ import { ReactNode } from 'react';
 import Logo from '@/components/Logo';
 import SidebarNavItem from '@/components/SidebarNavItem';
 import SidebarNavSection from '@/components/SidebarNavSection';
+import { useActionBadges } from '@/hooks/useActionBadges';
 
 const iconClass = 'w-5 h-5';
 const strokeProps = {
@@ -80,37 +81,39 @@ type NavItem = {
 
 type NavGroup = { label: string; items: NavItem[] };
 
-const NAV_GROUPS: NavGroup[] = [
-  {
-    label: 'Workspace',
-    items: [
-      { label: 'Dashboard', href: '/dashboard', icon: ICON.dashboard },
-      { label: 'Inbox', href: '/inbox', icon: ICON.inbox, badge: 0 },
-    ],
-  },
-  {
-    label: 'Pipeline',
-    items: [
-      { label: 'Leads', href: '/leads', icon: ICON.leads, badge: 0 },
-      { label: 'Deals', href: '/deals', icon: ICON.deals },
-    ],
-  },
-  {
-    label: 'Acquisition',
-    items: [
-      { label: 'Deal Search', href: '/deal-search', icon: ICON.dealSearch },
-      { label: 'Drip Campaigns', href: '/drip-campaigns', icon: ICON.drip, badge: 0 },
-      { label: 'Comps & Analysis', href: '/comps-analysis', icon: ICON.comps },
-    ],
-  },
-  {
-    label: 'Network',
-    items: [
-      { label: 'Partners', href: '/settings/partners', icon: ICON.partners },
-      { label: 'Team', href: '/settings/team', icon: ICON.team },
-    ],
-  },
-];
+function buildNavGroups(badges: { needsReply: number; newLeads: number }): NavGroup[] {
+  return [
+    {
+      label: 'Workspace',
+      items: [
+        { label: 'Dashboard', href: '/dashboard', icon: ICON.dashboard },
+        { label: 'Inbox', href: '/inbox', icon: ICON.inbox, badge: badges.needsReply },
+      ],
+    },
+    {
+      label: 'Pipeline',
+      items: [
+        { label: 'Leads', href: '/leads', icon: ICON.leads, badge: badges.newLeads },
+        { label: 'Deals', href: '/deals', icon: ICON.deals },
+      ],
+    },
+    {
+      label: 'Acquisition',
+      items: [
+        { label: 'Deal Search', href: '/deal-search', icon: ICON.dealSearch },
+        { label: 'Drip Campaigns', href: '/drip-campaigns', icon: ICON.drip },
+        { label: 'Comps & Analysis', href: '/comps-analysis', icon: ICON.comps },
+      ],
+    },
+    {
+      label: 'Network',
+      items: [
+        { label: 'Partners', href: '/settings/partners', icon: ICON.partners },
+        { label: 'Team', href: '/settings/team', icon: ICON.team },
+      ],
+    },
+  ];
+}
 
 interface SidebarProps {
   collapsed: boolean;
@@ -127,6 +130,8 @@ export default function Sidebar({
 }: SidebarProps) {
   const width = collapsed ? 'md:w-16' : 'md:w-60';
   const mobileTransform = mobileOpen ? 'translate-x-0' : '-translate-x-full';
+  const badges = useActionBadges();
+  const navGroups = buildNavGroups(badges);
 
   return (
     <aside
@@ -154,7 +159,7 @@ export default function Sidebar({
 
       {/* Nav */}
       <nav className={`flex-1 overflow-y-auto overflow-x-hidden py-4 ${collapsed ? 'px-2' : 'px-3'}`}>
-        {NAV_GROUPS.map((group) => (
+        {navGroups.map((group) => (
           <SidebarNavSection key={group.label} label={group.label} collapsed={collapsed}>
             {group.items.map((item) => (
               <SidebarNavItem

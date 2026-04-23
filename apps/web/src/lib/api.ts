@@ -236,6 +236,25 @@ export const tasksAPI = {
     api.post(`/tasks/${id}/complete`, { userId }),
 };
 
+// Actions API (Dashboard V2 Action Queue)
+export const actionsAPI = {
+  queue: (params?: { category?: string | string[]; sort?: 'priority' | 'oldest' | 'newest'; limit?: number }) =>
+    api.get('/actions/queue', {
+      params: {
+        ...params,
+        category: Array.isArray(params?.category) ? params!.category.join(',') : params?.category,
+      },
+    }),
+  badges: () => api.get('/actions/badges'),
+  markSeen: () => api.post('/actions/seen'),
+  dismiss: (actionKey: string) =>
+    api.post(`/actions/${encodeURIComponent(actionKey)}/dismiss`),
+  snooze: (actionKey: string, until: string) =>
+    api.post(`/actions/${encodeURIComponent(actionKey)}/snooze`, { until }),
+  complete: (actionKey: string) =>
+    api.post(`/actions/${encodeURIComponent(actionKey)}/complete`),
+};
+
 // Pipeline API
 export const pipelineAPI = {
   get: () => api.get('/pipeline'),
