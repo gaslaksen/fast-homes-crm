@@ -155,6 +155,12 @@ export class CompsService {
 
   /**
    * Run the REAPI comps pipeline — fetch + persist + compute a summary ARV.
+   *
+   * If a CompAnalysis already exists for the lead, we read the user's chosen
+   * Age + Distance filters from it and pass them through to REAPI as
+   * max_days_back / max_radius_miles. That way clicking "Refresh Comps" with
+   * the slider at 24mo / ≤3mi actually pulls a wider set from REAPI, not
+   * just narrows what was already in the DB.
    */
   private async runReapiPipeline(
     leadId: string,
@@ -164,9 +170,24 @@ export class CompsService {
     arv: number; arvLow?: number; arvHigh?: number; confidence: number; compsCount: number; source: string; attom: null;
   }> {
     this.logger.log(`Using REAPI comps pipeline for lead ${leadId}`);
+
+    // Pull current filter prefs from the most recent CompAnalysis (if any).
+    // Falls back to the wide defaults baked into reapi.service.ts.
+    const analysis = await this.prisma.compAnalysis.findFirst({
+      where: { leadId },
+      orderBy: { updatedAt: 'desc' },
+      select: { maxDistance: true, timeFrameMonths: true },
+    });
+    const maxRadiusMiles = analysis?.maxDistance ?? undefined;
+    const maxDaysBack = analysis?.timeFrameMonths
+      ? Math.round(analysis.timeFrameMonths * 30.4)
+      : undefined;
+
     try {
       const result = await this.reapiService.fetchAndSaveComps(leadId, address, {
         forceRefresh: options?.forceRefresh,
+        maxRadiusMiles,
+        maxDaysBack,
       });
       this.logger.log(
         `REAPI pipeline complete: ARV=$${(result.arv || 0).toLocaleString()}, ${result.compsCount} comps`,

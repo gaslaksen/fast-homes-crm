@@ -241,43 +241,62 @@ export class ReapiService {
 
   /**
    * POST /v3/PropertyComps — returns `{ subject, comps[], reapiAvm, reapiAvmLow, reapiAvmHigh }`.
-   * Only accepts `address` or `id` in the body; radius/size are not supported.
+   * Accepted body params (verified live against REAPI):
+   *   address           string  required (or use id)
+   *   max_radius_miles  number  0.1-100 — search radius from subject
+   *   max_days_back     integer — cutoff for sale date (e.g. 730 = 2 years)
+   *   max_results       integer — cap on comps returned (REAPI max ~50)
+   * Without max_radius_miles / max_days_back, REAPI uses a tight default
+   * (~0.5mi, ~6mo) which leaves a lot of valid comps unreturned.
    */
-  async getComps(address: string): Promise<ReapiPropertyCompsResponse | null> {
+  async getComps(
+    address: string,
+    opts?: { maxRadiusMiles?: number; maxDaysBack?: number; maxResults?: number },
+  ): Promise<ReapiPropertyCompsResponse | null> {
     if (!this.apiKey) return null;
 
+    const body: Record<string, unknown> = { address };
+    if (opts?.maxRadiusMiles != null) body.max_radius_miles = opts.maxRadiusMiles;
+    if (opts?.maxDaysBack != null) body.max_days_back = opts.maxDaysBack;
+    if (opts?.maxResults != null) body.max_results = opts.maxResults;
+
     try {
-      this.logger.log(`Fetching REAPI comps for: ${address}`);
+      this.logger.log(
+        `Fetching REAPI comps for: ${address} ` +
+        `(radius=${opts?.maxRadiusMiles ?? 'default'}mi, ` +
+        `daysBack=${opts?.maxDaysBack ?? 'default'}, ` +
+        `maxResults=${opts?.maxResults ?? 'default'})`,
+      );
       const response = await axios.post<ReapiPropertyCompsResponse>(
         `${REAPI_BASE_URL}/v3/PropertyComps`,
-        { address },
+        body,
         { headers: this.headers(), timeout: 45000 },
       );
 
-      const body = response.data;
-      if (body?.statusCode && body.statusCode >= 400) {
+      const respBody = response.data;
+      if (respBody?.statusCode && respBody.statusCode >= 400) {
         // REAPI overloads statusCode=404 to mean "no comparable properties in
         // our dataset" (very common for rural/sparse areas) — not a real API
         // error. Log that as INFO so it doesn't look like a failure. Any other
         // 4xx/5xx is a real problem and still logs as WARN.
-        const reason = (body as unknown as { reason?: string }).reason ?? '';
+        const reason = (respBody as unknown as { reason?: string }).reason ?? '';
         const isNoCompsSemantic =
-          body.statusCode === 404 && /no\s+comparable|no\s+comps?/i.test(reason);
+          respBody.statusCode === 404 && /no\s+comparable|no\s+comps?/i.test(reason);
         if (isNoCompsSemantic) {
           this.logger.log(
             `REAPI returned 0 comparable properties for "${address}" — likely rural/sparse area with no matching sales in REAPI's dataset. Try RentCast or ATTOM from the Comps tab.`,
           );
         } else {
           this.logger.warn(
-            `REAPI PropertyComps ${body.statusCode}: ${body.statusMessage} for "${address}"${reason ? ` — reason: ${reason}` : ''}`,
+            `REAPI PropertyComps ${respBody.statusCode}: ${respBody.statusMessage} for "${address}"${reason ? ` — reason: ${reason}` : ''}`,
           );
         }
         return null;
       }
       this.logger.log(
-        `REAPI returned ${body?.comps?.length ?? 0} comps, subject AVM $${(body?.reapiAvm ?? 0).toLocaleString()}`,
+        `REAPI returned ${respBody?.comps?.length ?? 0} comps, subject AVM $${(respBody?.reapiAvm ?? 0).toLocaleString()}`,
       );
-      return body;
+      return respBody;
     } catch (err) {
       this.handleApiError(err, 'getComps');
       return null;
@@ -540,10 +559,23 @@ export class ReapiService {
   async fetchAndSaveComps(
     leadId: string,
     address: EnrichAddress,
-    _opts?: { forceRefresh?: boolean },
+    opts?: {
+      forceRefresh?: boolean;
+      maxRadiusMiles?: number;
+      maxDaysBack?: number;
+      maxResults?: number;
+    },
   ): Promise<{ arv: number; arvLow?: number; arvHigh?: number; confidence: number; compsCount: number; source: string }> {
     const full = this.formatAddress(address);
-    const result = await this.getComps(full);
+
+    // Default pull is wide on purpose — the user filters down via the
+    // Comps tab Age/Distance controls. REAPI's defaults (no params) are
+    // very tight (~0.5mi, ~6mo); explicitly setting these widens the net.
+    const result = await this.getComps(full, {
+      maxRadiusMiles: opts?.maxRadiusMiles ?? 5,
+      maxDaysBack: opts?.maxDaysBack ?? 730,    // ~24 months
+      maxResults: opts?.maxResults ?? 50,
+    });
 
     if (!result || !result.comps || result.comps.length === 0) {
       return { arv: 0, arvLow: 0, arvHigh: 0, confidence: 0, compsCount: 0, source: 'reapi (no data)' };
