@@ -4,6 +4,7 @@ import { memoryStorage } from 'multer';
 import { Response } from 'express';
 import { LeadsService } from './leads.service';
 import { LeadImportService, IMPORTABLE_FIELDS } from './lead-import.service';
+import { AiInsightService } from './ai-insight.service';
 import { RentCastService } from '../comps/rentcast.service';
 import { LeadStatus, LeadSource } from '@fast-homes/shared';
 import * as jwt from 'jsonwebtoken';
@@ -32,6 +33,7 @@ export class LeadsController {
     private leadsService: LeadsService,
     private leadImportService: LeadImportService,
     private rentCastService: RentCastService,
+    private aiInsightService: AiInsightService,
   ) {}
 
   private decodeToken(authHeader?: string): { userId?: string; organizationId?: string; role?: string } {
@@ -240,6 +242,39 @@ export class LeadsController {
         error.status || HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
+  }
+
+  @Post(':id/drip/cancel')
+  async cancelDrip(@Param('id') leadId: string, @Body() body: { reason?: string }) {
+    await this.leadsService.cancelDripForLead(leadId, body?.reason || 'User paused drip from lead page');
+    return { ok: true };
+  }
+
+  @Get(':id/ai-insight')
+  async getAiInsight(
+    @Param('id') leadId: string,
+    @Query('regenerate') regenerate?: string,
+  ) {
+    const result = await this.aiInsightService.getInsight(leadId, regenerate === '1' || regenerate === 'true');
+    return result;
+  }
+
+  @Get(':id/alert-dismissals')
+  async getAlertDismissals(@Param('id') leadId: string) {
+    const lead = await this.leadsService.getLead(leadId);
+    return lead?.alertDismissals ?? {};
+  }
+
+  @Post(':id/alert-dismissals')
+  async upsertAlertDismissal(
+    @Param('id') leadId: string,
+    @Body() body: { ruleId: string; fingerprint: string },
+  ) {
+    const lead = await this.leadsService.getLead(leadId);
+    const current = (lead?.alertDismissals as Record<string, any>) || {};
+    current[body.ruleId] = { fingerprint: body.fingerprint, dismissedAt: new Date().toISOString() };
+    await this.leadsService.updateLead(leadId, { alertDismissals: current });
+    return current;
   }
 
   @Get(':id/tasks')

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { leadsAPI, messagesAPI, compsAPI, settingsAPI, photosAPI, callsAPI, authAPI, tasksAPI, gmailAPI, campaignAPI, partnersAPI } from '@/lib/api';
@@ -14,8 +14,11 @@ import LeadHeader from '@/components/LeadHeader';
 import AiSummaryBox from '@/components/AiSummaryBox';
 import SellerPortalPanel from '@/components/SellerPortalPanel';
 import ScheduleFollowUpModal from '@/components/ScheduleFollowUpModal';
+import LeadOverviewV2 from '@/components/leadDetailV2/LeadOverviewV2';
 import { format } from 'date-fns';
 import { formatPhoneDisplay } from '@/lib/format';
+
+const LEAD_DETAIL_V2 = process.env.NEXT_PUBLIC_LEAD_DETAIL_V2 === 'restructured';
 
 function getNextCampFocus(lead: any): string | null {
   if (!lead.campPriorityComplete) return 'Priority (Timeline)';
@@ -61,6 +64,35 @@ export default function LeadDetailPage() {
       setActiveTab('overview');
     }
   }, [searchParams, leadId, router]);
+
+  // Deep-link intent handling: ?action=reply on Communications tab → pre-draft + focus
+  useEffect(() => {
+    if (!LEAD_DETAIL_V2 || !lead) return;
+    const action = searchParams.get('action');
+    if (action === 'reply' && activeTab === 'communications' && !replyIntentApplied.current) {
+      replyIntentApplied.current = true;
+      const lastMsg = lead.messages?.[0];
+      const hasUnansweredInbound = lastMsg?.direction === 'INBOUND';
+      if (hasUnansweredInbound) {
+        (async () => {
+          try {
+            const response = await messagesAPI.draft(leadId);
+            setMessageDrafts(response.data);
+            setSelectedDraft(response.data.message);
+          } catch (err) { console.error('Failed to auto-draft', err); }
+          setTimeout(() => {
+            messagesBottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+            composerRef.current?.focus();
+          }, 200);
+        })();
+      } else {
+        setTimeout(() => {
+          messagesBottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+          composerRef.current?.focus();
+        }, 200);
+      }
+    }
+  }, [activeTab, lead, leadId, searchParams]);
   const [messageDrafts, setMessageDrafts] = useState<any>(null);
   const [selectedDraft, setSelectedDraft] = useState('');
   const [loading, setLoading] = useState(true);
@@ -103,6 +135,10 @@ export default function LeadDetailPage() {
   const [arvInput, setArvInput] = useState('');
   const [savingArv, setSavingArv] = useState(false);
   const [sendingOutreach, setSendingOutreach] = useState(false);
+  const replyIntentApplied = useRef(false);
+  const offerIntentApplied = useRef(false);
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const messagesBottomRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     loadLead();
@@ -416,7 +452,63 @@ export default function LeadDetailPage() {
       <main className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
 
         {/* Overview Tab */}
-        {activeTab === 'overview' && (
+        {activeTab === 'overview' && LEAD_DETAIL_V2 && (
+          <LeadOverviewV2
+            lead={lead}
+            leadId={leadId}
+            aiAnalysis={aiAnalysis}
+            currentUser={currentUser}
+            teamMembers={teamMembers}
+            leadTasks={leadTasks}
+            setLead={setLead}
+            reload={loadLead}
+            handlers={{
+              onToggleAutoRespond: handleToggleAutoRespond,
+              onAssign: handleAssign,
+              onUnassign: handleUnassign,
+              onSetTier: handleSetTier,
+              onFetchComps: handleFetchComps,
+              onSendOutreach: handleSendOutreach,
+              onAiCall: handleAiCall,
+              onMarkDead: () => setShowDeadForm(true),
+              onSaveArv: handleSaveArv,
+              onUploadPhotos: handleUploadPhotos,
+              onFetchPhotos: handleFetchPhotos,
+              onDeletePhoto: handleDeletePhoto,
+              onSetPrimaryPhoto: handleSetPrimary,
+              onCompleteTask: handleCompleteTask,
+              onOpenFollowUpModal: openScheduleFollowUp,
+              onOpenShareModal: () => setShowShareModal(true),
+              openCommunications: (action?: string) => {
+                const q = action ? `?tab=communications&action=${action}` : '?tab=communications';
+                router.push(`/leads/${leadId}${q}`);
+              },
+              openDisposition: (action?: string) => {
+                const q = action ? `?tab=disposition&action=${action}` : '?tab=disposition';
+                router.push(`/leads/${leadId}${q}`);
+              },
+            }}
+            uiState={{
+              assignUserId,
+              setAssignUserId,
+              assignStage,
+              setAssignStage,
+              assignSaving,
+              togglingAutoRespond,
+              settingTier,
+              fetchingComps,
+              sendingOutreach,
+              initiatingCall,
+              showArvEdit,
+              setShowArvEdit,
+              arvInput,
+              setArvInput,
+              savingArv,
+            }}
+          />
+        )}
+
+        {activeTab === 'overview' && !LEAD_DETAIL_V2 && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2 space-y-6">
               {/* Property Photos */}
@@ -1603,6 +1695,7 @@ export default function LeadDetailPage() {
                       <div className="text-sm text-gray-900 dark:text-gray-100">{msg.body}</div>
                     </div>
                   ))}
+                  <div ref={messagesBottomRef} />
                 </div>
 
                 {demoMode && (
@@ -1824,7 +1917,15 @@ export default function LeadDetailPage() {
                   <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">AI Message</div>
                   <div className="text-sm text-gray-900 dark:text-gray-100">{messageDrafts.message}</div>
                 </div>
+                {LEAD_DETAIL_V2 && (
+                  <div className="mt-2 text-[11px] font-semibold text-blue-600 dark:text-blue-400 flex items-center gap-2">
+                    <span>✨ AI draft</span>
+                    <button onClick={handleDraftMessage} className="text-[11px] text-gray-500 dark:text-gray-400 hover:underline">Regenerate</button>
+                    <button onClick={() => { setMessageDrafts(null); setSelectedDraft(''); }} className="text-[11px] text-gray-500 dark:text-gray-400 hover:underline">Clear</button>
+                  </div>
+                )}
                 <textarea
+                  ref={composerRef}
                   value={selectedDraft}
                   onChange={(e) => setSelectedDraft(e.target.value)}
                   className="input mt-4"

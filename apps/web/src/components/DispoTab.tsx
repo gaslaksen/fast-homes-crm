@@ -1,9 +1,12 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { dispoAPI, boldSignAPI } from '@/lib/api';
 import { format } from 'date-fns';
 import Link from 'next/link';
+
+const LEAD_DETAIL_V2 = process.env.NEXT_PUBLIC_LEAD_DETAIL_V2 === 'restructured';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -121,6 +124,8 @@ export default function DispoTab({
 
   // Offer form state
   const [offerForm, setOfferForm] = useState({ offerAmount: '', notes: '', offerDate: '', visibleOnPortal: false, terms: '' });
+  const searchParams = useSearchParams();
+  const offerIntentApplied = useRef(false);
 
   const load = useCallback(async () => {
     try {
@@ -152,6 +157,17 @@ export default function DispoTab({
   }, [leadId]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Deep-link: ?action=offer — if deal analysis complete, pre-fill at MAO and open form
+  useEffect(() => {
+    if (!LEAD_DETAIL_V2 || !summary || offerIntentApplied.current) return;
+    if (searchParams.get('action') !== 'offer') return;
+    offerIntentApplied.current = true;
+    if (summary.mao && summary.mao > 0) {
+      setOfferForm((f) => ({ ...f, offerAmount: String(Math.round(summary.mao!)) }));
+      setShowOfferForm(true);
+    }
+  }, [summary, searchParams]);
 
   const handleSaveContract = async () => {
     setSaving(true);
@@ -228,8 +244,45 @@ export default function DispoTab({
 
   const s = summary!;
 
+  const intent = searchParams.get('action');
+
   return (
     <div className="space-y-6">
+
+      {/* Deep-link CTA: Create Offer at MAO */}
+      {LEAD_DETAIL_V2 && intent === 'offer' && (
+        s.mao && s.mao > 0 ? (
+          <div className="rounded-xl border-2 border-blue-300 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 p-5 flex items-center justify-between gap-4">
+            <div>
+              <div className="text-[11px] uppercase tracking-wide font-semibold text-blue-700 dark:text-blue-300">Recommended action</div>
+              <div className="text-lg font-bold text-blue-900 dark:text-blue-100 mt-1">Create offer at MAO {fmt(s.mao)}</div>
+              {s.askingPrice && (
+                <div className="text-xs text-blue-700 dark:text-blue-300 mt-0.5">
+                  Seller asking {fmt(s.askingPrice)} — spread {fmt(s.mao - s.askingPrice)}
+                </div>
+              )}
+            </div>
+            <button
+              onClick={() => {
+                setOfferForm((f) => ({ ...f, offerAmount: String(Math.round(s.mao!)) }));
+                setShowOfferForm(true);
+                setTimeout(() => window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }), 50);
+              }}
+              className="btn btn-primary"
+            >
+              Create offer
+            </button>
+          </div>
+        ) : (
+          <div className="rounded-xl border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 p-5">
+            <div className="text-sm font-semibold text-amber-900 dark:text-amber-200">Deal analysis required before sending an offer</div>
+            <div className="text-xs text-amber-800 dark:text-amber-300 mt-1">Run a full analysis to compute ARV and MAO.</div>
+            <Link href={`/leads/${leadId}/comps-analysis?tab=deal-intel`} className="inline-block mt-3 btn btn-primary btn-sm">
+              Open Deal Analysis
+            </Link>
+          </div>
+        )
+      )}
 
       {/* ── Exit Strategy ─────────────────────────────────────────────────── */}
       <ExitStrategyCosts
