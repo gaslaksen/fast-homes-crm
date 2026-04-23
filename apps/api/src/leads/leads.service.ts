@@ -1002,6 +1002,10 @@ export class LeadsService {
     });
   }
 
+  async cancelDripForLead(leadId: string, reason: string) {
+    await this.dripService.cancelByLeadId(leadId, reason);
+  }
+
   /**
    * Create task for lead
    */

@@ -28,7 +28,13 @@
       "Bash(pnpm remove:*)",
       "Bash(node -e:*)",
       "Bash(npx prisma db push:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(pnpm --filter web exec tsc --noEmit)",
+      "Bash(pnpm install *)",
+      "Bash(pnpm --filter api exec prisma generate)",
+      "Bash(pnpm --filter api exec tsc --noEmit)",
+      "Bash(pnpm --filter @fast-homes/shared build)",
+      "Bash(pnpm --filter web run build)"
     ]
   }
 }

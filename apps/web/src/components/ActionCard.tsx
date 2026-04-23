@@ -4,6 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import PropertyPhoto from '@/components/PropertyPhoto';
 import { actionsAPI, messagesAPI } from '@/lib/api';
+import { intentFromActionCategory } from '@/components/leadDetailV2/actionMap';
 
 export type ActionCategory =
   | 'NEEDS_REPLY'
@@ -318,7 +319,9 @@ export default function ActionCard({
                   Dismiss
                 </button>
                 <Link
-                  href={`/leads/${item.leadId}`}
+                  href={`/leads/${item.leadId}?action=${intentFromActionCategory(item.type)}${
+                    item.type === 'NEEDS_REPLY' || item.type === 'DRIP_REPLY_REVIEW' || item.type === 'NEW_LEAD_INBOUND' ? '&tab=communications' : ''
+                  }${item.type === 'OFFER_READY' ? '&tab=disposition' : ''}`}
                   className="block w-full text-left px-3 py-1.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-800"
                 >
                   Open lead

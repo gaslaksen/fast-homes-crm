@@ -106,6 +106,12 @@ export const leadsAPI = {
   },
   importFields: () => api.get('/leads/import/fields'),
   stats: () => api.get('/leads/stats'),
+  getAiInsight: (id: string, regenerate?: boolean) =>
+    api.get(`/leads/${id}/ai-insight${regenerate ? '?regenerate=1' : ''}`),
+  getAlertDismissals: (id: string) => api.get(`/leads/${id}/alert-dismissals`),
+  dismissAlert: (id: string, ruleId: string, fingerprint: string) =>
+    api.post(`/leads/${id}/alert-dismissals`, { ruleId, fingerprint }),
+  cancelDrip: (id: string, reason?: string) => api.post(`/leads/${id}/drip/cancel`, { reason }),
 };
 
 // Messages API

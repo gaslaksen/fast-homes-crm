@@ -190,6 +190,14 @@ model Lead {
   aiLastUpdated     DateTime?
   aiSummary         String?   // Brief summary for overview
 
+  // Hero strip AI insight (one-line lead-state summary, cached by state fingerprint)
+  aiInsight             String?
+  aiInsightGeneratedAt  DateTime?
+  aiInsightState        String?   // fingerprint of (stage, tier, lastMessageId, offerCount, campCompleteness)
+
+  // Alert dismissals for contradiction detector (keyed by ruleId → fingerprint)
+  alertDismissals       Json?     // { [ruleId: string]: { fingerprint: string, dismissedAt: string } }
+
   messages          Message[]
   emails            Email[]
   comps             Comp[]
