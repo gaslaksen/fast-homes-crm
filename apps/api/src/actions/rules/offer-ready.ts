@@ -15,9 +15,9 @@ function calculateMao(arv: number, askingPrice: number | null): number {
 }
 
 /**
- * OFFER_READY: Deal Analysis has run (aiDealWorthiness set), we have an ARV
- * and MAO to recommend, stage is Qualified/Negotiating/Offer Sent, but no
- * Offer row exists yet.
+ * OFFER_READY: ARV is known, MAO computes positive, asking price is at or
+ * below MAO (so the deal pencils), stage is Qualified/Negotiating/Offer Sent,
+ * and no Offer row exists yet.
  */
 export function evaluateOfferReady(leads: LeadForRules[]): ActionItem[] {
   const out: ActionItem[] = [];
@@ -25,12 +25,12 @@ export function evaluateOfferReady(leads: LeadForRules[]): ActionItem[] {
   for (const lead of leads) {
     if (!OFFER_STAGES.has(lead.status)) continue;
     if (!lead.arv || lead.arv <= 0) continue;
-    if (!lead.aiDealWorthiness || lead.aiDealWorthiness === 'NEED_MORE_DATA') continue;
-    if (lead.aiDealWorthiness === 'NO') continue;
     if (lead.offers.length > 0) continue;
 
     const mao = calculateMao(lead.arv, lead.askingPrice);
     if (mao <= 0) continue;
+    // Only suggest when asking is at or below MAO — otherwise it's a negotiation, not a ready offer.
+    if (lead.askingPrice && lead.askingPrice > mao) continue;
 
     const formatted = `$${Math.round(mao / 1000)}k`;
 
@@ -41,11 +41,9 @@ export function evaluateOfferReady(leads: LeadForRules[]): ActionItem[] {
       leadId: lead.id,
       lead: snapshotOf(lead),
       title: `Send offer to ${sellerDisplayName(lead)}`,
-      subtitle: `Deal analysis done — suggested MAO ${formatted}`,
+      subtitle: `Deal pencils — suggested MAO ${formatted}`,
       suggestedAction: { verb: 'Send offer', target: formatted },
-      createdAt: lead.aiLastUpdated
-        ? new Date(lead.aiLastUpdated).toISOString()
-        : new Date(lead.lastTouchedAt).toISOString(),
+      createdAt: new Date(lead.lastTouchedAt).toISOString(),
     });
   }
 

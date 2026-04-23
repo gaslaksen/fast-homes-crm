@@ -12,8 +12,6 @@ export interface LeadForRules extends ActionLeadSnapshot {
   campMoneyComplete: boolean;
   campChallengeComplete: boolean;
   campAuthorityComplete: boolean;
-  aiDealWorthiness: string | null;
-  aiLastUpdated: Date | null;
   arv: number | null;
   askingPrice: number | null;
   messages: Array<{
