@@ -181,15 +181,6 @@ model Lead {
   touchCount        Int       @default(0)
   aiRecommendation  String?
 
-  // AI Analysis fields
-  aiAnalysis        String?   // JSON string of full analysis
-  aiDealRating      Int?      // 1-10 rating
-  aiDealWorthiness  String?   // YES/NO/NEED_MORE_DATA
-  aiProfitPotential String?   // HIGH/MEDIUM/LOW/UNKNOWN
-  aiConfidence      Int?      // 0-100
-  aiLastUpdated     DateTime?
-  aiSummary         String?   // Brief summary for overview
-
   // Hero strip AI insight (one-line lead-state summary, cached by state fingerprint)
   aiInsight             String?
   aiInsightGeneratedAt  DateTime?

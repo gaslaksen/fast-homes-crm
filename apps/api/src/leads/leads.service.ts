@@ -19,9 +19,6 @@ import * as XLSX from 'xlsx';
 const INITIAL_OUTREACH_DELAY_MS = 60_000; // 1 minute
 const DEMO_OUTREACH_DELAY_MS = 3_000;     // 3 seconds in demo mode
 
-/** Fields that trigger AI analysis refresh when changed */
-const AI_REFRESH_FIELDS = ['arv', 'askingPrice', 'timeline', 'conditionLevel', 'ownershipStatus'];
-
 // Convert lot size: if value > 10 it's almost certainly sqft, convert to acres
 function normalizeLotSize(raw: number | undefined): number | undefined {
   if (!raw) return undefined;
@@ -859,15 +856,6 @@ export class LeadsService {
           },
         });
       }
-    }
-
-    // Auto-refresh AI analysis if key deal data changed
-    const shouldRefreshAi = AI_REFRESH_FIELDS.some((field) => data[field] !== undefined);
-    if (shouldRefreshAi) {
-      this.logger.log(`Key data changed for lead ${id}, refreshing AI analysis in background`);
-      this.pipelineService.generateLeadAnalysis(id).catch((err) =>
-        this.logger.error(`Background AI analysis refresh failed for ${id}: ${err.message}`),
-      );
     }
 
     return this.getLead(id);

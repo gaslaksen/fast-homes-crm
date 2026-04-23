@@ -11,7 +11,6 @@ import PhotoGallery from '@/components/PhotoGallery';
 import AppShell from '@/components/AppShell';
 import LeadTabNav, { DETAIL_TABS, COMPS_TABS } from '@/components/LeadTabNav';
 import LeadHeader from '@/components/LeadHeader';
-import AiSummaryBox from '@/components/AiSummaryBox';
 import SellerPortalPanel from '@/components/SellerPortalPanel';
 import ScheduleFollowUpModal from '@/components/ScheduleFollowUpModal';
 import LeadOverviewV2 from '@/components/leadDetailV2/LeadOverviewV2';
@@ -102,8 +101,6 @@ export default function LeadDetailPage() {
   const [togglingAutoRespond, setTogglingAutoRespond] = useState(false);
   const [fetchingComps, setFetchingComps] = useState(false);
   const [compsResult, setCompsResult] = useState<any>(null);
-  const [aiAnalysis, setAiAnalysis] = useState<any>(null);
-  const [analysisLoading, setAnalysisLoading] = useState(false);
   const [initiatingCall, setInitiatingCall] = useState(false);
   const [teamMembers, setTeamMembers] = useState<any[]>([]);
   const [assignUserId, setAssignUserId] = useState('');
@@ -158,9 +155,6 @@ export default function LeadDetailPage() {
       setLead(response.data);
       setAssignUserId(response.data?.assignedToUserId || '');
       setAssignStage(response.data?.assignedStage || '');
-      if (response.data?.aiAnalysis) {
-        try { setAiAnalysis(JSON.parse(response.data.aiAnalysis)); } catch {}
-      }
     } catch (error) {
       console.error('Failed to load lead:', error);
     } finally {
@@ -434,7 +428,6 @@ export default function LeadDetailPage() {
       <LeadHeader
         lead={lead}
         leadId={leadId}
-        aiAnalysis={aiAnalysis}
         leadEnrollments={leadEnrollments}
         onStatusChange={async (newStatus) => {
           try {
@@ -456,7 +449,6 @@ export default function LeadDetailPage() {
           <LeadOverviewV2
             lead={lead}
             leadId={leadId}
-            aiAnalysis={aiAnalysis}
             currentUser={currentUser}
             teamMembers={teamMembers}
             leadTasks={leadTasks}
@@ -1198,13 +1190,6 @@ export default function LeadDetailPage() {
                   </button>
                 )}
               </div>
-
-              {/* AI Summary Box */}
-              <AiSummaryBox
-                lead={lead}
-                onRefresh={loadLead}
-                onViewAnalysis={() => router.push(`/leads/${leadId}/comps-analysis?tab=deal-intel`)}
-              />
 
               {/* Seller Portal */}
               <SellerPortalPanel leadId={leadId} />

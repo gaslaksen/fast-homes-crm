@@ -7,7 +7,6 @@ import dynamic from 'next/dynamic';
 import { leadsAPI, compsAPI, compAnalysisAPI, photosAPI } from '@/lib/api';
 import AppShell from '@/components/AppShell';
 import LeadTabNav, { COMPS_TABS, DETAIL_TABS } from '@/components/LeadTabNav';
-import AnalysisTab from '@/components/AnalysisTab';
 import LeadHeader from '@/components/LeadHeader';
 import ShareDealModal from '@/components/ShareDealModal';
 import CompRow from '@/components/CompRow';
@@ -157,8 +156,6 @@ export default function CompsAnalysisPage() {
   }, [rawTab, leadId, router]);
 
   const [lead, setLead] = useState<Lead | null>(null);
-  const [aiAnalysis, setAiAnalysis] = useState<any>(null);
-  const [analysisLoading, setAnalysisLoading] = useState(false);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [loading, setLoading] = useState(true);
   const [fetchingComps, setFetchingComps] = useState(false);
@@ -230,8 +227,6 @@ export default function CompsAnalysisPage() {
       if (savedProvider === 'reapi' || savedProvider === 'rentcast' || savedProvider === 'attom') {
         setCompsSource(savedProvider);
       }
-      if (leadRes.data?.aiAnalysis) { try { setAiAnalysis(JSON.parse(leadRes.data.aiAnalysis)); } catch {} }
-
       // Load ATTOM data (non-blocking)
       compsAPI.getAttomData(leadId).then(r => setAttomData(r.data)).catch(() => {});
 
@@ -743,7 +738,6 @@ export default function CompsAnalysisPage() {
       <LeadHeader
         lead={lead}
         leadId={leadId}
-        aiAnalysis={aiAnalysis}
         onStatusChange={async (newStatus) => {
           try {
             await leadsAPI.update(leadId, { status: newStatus });
@@ -1823,23 +1817,6 @@ export default function CompsAnalysisPage() {
                 </div>
               </div>
             </div>
-          </div>
-
-          {/* AI Insights (merged from lead detail) */}
-          <div className="mt-8 border-t border-gray-200 dark:border-gray-700 pt-6">
-            <h2 className="text-lg font-bold mb-4">AI Insights</h2>
-            <AnalysisTab
-              leadId={leadId}
-              lead={lead}
-              aiAnalysis={aiAnalysis}
-              setAiAnalysis={setAiAnalysis}
-              analysisLoading={analysisLoading}
-              setAnalysisLoading={setAnalysisLoading}
-              onLeadRefresh={async () => {
-                const lr = await leadsAPI.get(leadId);
-                setLead(lr.data);
-              }}
-            />
           </div>
 
           <div className="mt-6 text-center">

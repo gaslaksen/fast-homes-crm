@@ -11,14 +11,12 @@ import PipelineTierCard from './PipelineTierCard';
 import AlertsCard from './AlertsCard';
 import { useContradictions } from './useContradictions';
 import { getPrimaryAction } from './actionMap';
-import AiSummaryBox from '@/components/AiSummaryBox';
 import SellerPortalPanel from '@/components/SellerPortalPanel';
 import { leadsAPI } from '@/lib/api';
 
 export interface LeadOverviewV2Props {
   lead: any;
   leadId: string;
-  aiAnalysis: any;
   currentUser: any;
   teamMembers: any[];
   leadTasks: any[];
@@ -163,13 +161,6 @@ export default function LeadOverviewV2(props: LeadOverviewV2Props) {
             lead={lead}
             onAskCampField={(field) => handlers.openCommunications(`camp&field=${field}`)}
           />
-          <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-4">
-            <AiSummaryBox
-              lead={lead}
-              onRefresh={props.reload}
-              onViewAnalysis={() => router.push(`/leads/${leadId}/comps-analysis?tab=deal-intel`)}
-            />
-          </div>
           <PhotosCard
             lead={lead}
             leadId={leadId}

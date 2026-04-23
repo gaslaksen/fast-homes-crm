@@ -24,14 +24,4 @@ export class PipelineController {
     const leadsByStage = await this.pipelineService.getLeadsByStage();
     return this.pipelineService.generateAiInsights(leadsByStage);
   }
-
-  @Get('leads/:id/analysis')
-  async getLeadAnalysis(@Param('id') id: string) {
-    return this.pipelineService.getCachedOrGenerateAnalysis(id);
-  }
-
-  @Post('leads/:id/analysis/refresh')
-  async refreshLeadAnalysis(@Param('id') id: string) {
-    return this.pipelineService.generateLeadAnalysis(id);
-  }
 }

@@ -221,8 +221,6 @@ export class ActionsService {
         campMoneyComplete: true,
         campChallengeComplete: true,
         campAuthorityComplete: true,
-        aiDealWorthiness: true,
-        aiLastUpdated: true,
         arv: true,
         askingPrice: true,
         messages: {

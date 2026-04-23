@@ -267,8 +267,6 @@ export const pipelineAPI = {
   updateStage: (id: string, stage: string) =>
     api.patch(`/pipeline/leads/${id}/stage`, { stage }),
   getInsights: () => api.post('/pipeline/insights'),
-  getLeadAnalysis: (id: string) => api.get(`/pipeline/leads/${id}/analysis`),
-  refreshLeadAnalysis: (id: string) => api.post(`/pipeline/leads/${id}/analysis/refresh`),
 };
 
 // Calls API

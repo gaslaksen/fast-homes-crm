@@ -8,7 +8,6 @@ import Avatar from '@/components/Avatar';
 type Props = {
   lead: any;
   leadId: string;
-  aiAnalysis: any | null;
   leadEnrollments?: any[];
   onStatusChange: (newStatus: string) => Promise<void> | void;
 };
@@ -16,7 +15,6 @@ type Props = {
 export default function LeadHeader({
   lead,
   leadId,
-  aiAnalysis,
   leadEnrollments = [],
   onStatusChange,
 }: Props) {
@@ -121,15 +119,6 @@ export default function LeadHeader({
               color={scoreBandColor}
               size={60}
             />
-            {aiAnalysis?.dealRating != null ? (
-              <DonutStat
-                value={aiAnalysis.dealRating}
-                max={10}
-                label="AI Score"
-                color={aiAnalysis.dealRating >= 7 ? '#10b981' : aiAnalysis.dealRating >= 4 ? '#f59e0b' : '#ef4444'}
-                size={60}
-              />
-            ) : null}
             <div className="flex flex-col gap-1.5">
               <a
                 href={`https://www.zillow.com/homes/${addressQuery}_rb/`}
