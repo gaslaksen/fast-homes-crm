@@ -173,12 +173,18 @@ export class CompsService {
 
     // Pull current filter prefs from the most recent CompAnalysis (if any).
     // Falls back to the wide defaults baked into reapi.service.ts.
+    // Hard cap radius at 5 miles — anything beyond that is rarely a useful
+    // comp and lets REAPI's matching reach into other towns/markets that
+    // drown out the local set. (UI Distance filter also capped at 5mi.)
+    const REAPI_MAX_RADIUS_CAP = 5;
     const analysis = await this.prisma.compAnalysis.findFirst({
       where: { leadId },
       orderBy: { updatedAt: 'desc' },
       select: { maxDistance: true, timeFrameMonths: true },
     });
-    const maxRadiusMiles = analysis?.maxDistance ?? undefined;
+    const maxRadiusMiles = analysis?.maxDistance != null
+      ? Math.min(analysis.maxDistance, REAPI_MAX_RADIUS_CAP)
+      : undefined;
     const maxDaysBack = analysis?.timeFrameMonths
       ? Math.round(analysis.timeFrameMonths * 30.4)
       : undefined;

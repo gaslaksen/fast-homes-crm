@@ -31,11 +31,13 @@ const AGE_OPTIONS: Array<{ value: number; label: string }> = [
   { value: 24, label: '24mo' },
 ];
 
+// Capped at 5 miles — anything beyond that is rarely a useful comp and
+// drowns out local matches when REAPI is asked for a wider radius.
 const DISTANCE_OPTIONS: Array<{ value: number; label: string }> = [
   { value: 1, label: '≤1 mi' },
   { value: 2, label: '≤2 mi' },
   { value: 3, label: '≤3 mi' },
-  { value: 99, label: 'All' },
+  { value: 5, label: '≤5 mi' },
 ];
 
 const SORT_OPTIONS = [
