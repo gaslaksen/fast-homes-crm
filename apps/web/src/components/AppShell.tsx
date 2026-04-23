@@ -4,6 +4,7 @@ import { ReactNode, useEffect, useState } from 'react';
 import AppNav from '@/components/AppNav';
 import Sidebar from '@/components/Sidebar';
 import SidebarTopBar from '@/components/SidebarTopBar';
+import CommandPalette from '@/components/CommandPalette';
 
 const LAYOUT = (process.env.NEXT_PUBLIC_NAV_LAYOUT || 'topbar').toLowerCase();
 const SIDEBAR_MODE = LAYOUT === 'sidebar';
@@ -49,6 +50,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
       <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
         <AppNav />
         {children}
+        <CommandPalette />
       </div>
     );
   }
@@ -75,6 +77,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
         <SidebarTopBar onOpenMobileSidebar={() => setMobileOpen(true)} />
         {children}
       </div>
+      <CommandPalette />
     </div>
   );
 }

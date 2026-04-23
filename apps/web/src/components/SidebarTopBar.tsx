@@ -57,8 +57,29 @@ export default function SidebarTopBar({
           <span className="block h-0.5 w-5 bg-gray-600 dark:bg-gray-400" />
         </button>
 
-        {/* Left spacer (reserved for future Cmd+K trigger + notifications) */}
-        <div className="flex-1" />
+        {/* Command palette trigger — dispatches the global Cmd+K shortcut */}
+        <div className="flex-1 flex items-center">
+          <button
+            type="button"
+            onClick={() => {
+              const ev = new KeyboardEvent('keydown', {
+                key: 'k',
+                code: 'KeyK',
+                metaKey: true,
+                ctrlKey: !navigator.platform.includes('Mac'),
+                bubbles: true,
+              });
+              document.dispatchEvent(ev);
+            }}
+            className="hidden md:flex items-center gap-2 text-xs text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 border border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 rounded-lg px-3 py-1.5 bg-gray-50 dark:bg-gray-800/50 transition-colors"
+            aria-label="Open command palette"
+          >
+            <span>Search or jump to…</span>
+            <kbd className="text-[10px] bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded px-1 py-0.5">
+              ⌘K
+            </kbd>
+          </button>
+        </div>
 
         {/* Right controls */}
         <div className="flex items-center gap-3">

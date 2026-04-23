@@ -13,6 +13,7 @@ import LeadTabNav, { DETAIL_TABS, COMPS_TABS } from '@/components/LeadTabNav';
 import LeadHeader from '@/components/LeadHeader';
 import AiSummaryBox from '@/components/AiSummaryBox';
 import SellerPortalPanel from '@/components/SellerPortalPanel';
+import ScheduleFollowUpModal from '@/components/ScheduleFollowUpModal';
 import { format } from 'date-fns';
 import { formatPhoneDisplay } from '@/lib/format';
 
@@ -97,10 +98,7 @@ export default function LeadDetailPage() {
   const [enrollingInCampaign, setEnrollingInCampaign] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
   const [leadTasks, setLeadTasks] = useState<any[]>([]);
-  const [showFollowUpForm, setShowFollowUpForm] = useState(false);
-  const [followUpDate, setFollowUpDate] = useState('');
-  const [followUpNote, setFollowUpNote] = useState('');
-  const [savingFollowUp, setSavingFollowUp] = useState(false);
+  const [showFollowUpModal, setShowFollowUpModal] = useState(false);
   const [showArvEdit, setShowArvEdit] = useState(false);
   const [arvInput, setArvInput] = useState('');
   const [savingArv, setSavingArv] = useState(false);
@@ -317,27 +315,12 @@ export default function LeadDetailPage() {
     }
   };
 
-  const handleCreateFollowUp = async () => {
-    if (!followUpDate) return;
-    setSavingFollowUp(true);
+  const refreshLeadTasks = async () => {
     try {
-      const sellerName = [lead?.sellerFirstName, lead?.sellerLastName].filter(Boolean).join(' ') || 'seller';
-      await leadsAPI.createTask(leadId, {
-        title: `Follow up with ${sellerName}`,
-        description: followUpNote || undefined,
-        dueDate: new Date(followUpDate).toISOString(),
-        userId: currentUser?.id,
-      });
-      setShowFollowUpForm(false);
-      setFollowUpDate('');
-      setFollowUpNote('');
       const res = await leadsAPI.getTasks(leadId);
       setLeadTasks(res.data || []);
-    } catch (error) {
-      console.error('Failed to create follow-up:', error);
-      alert('Failed to schedule follow-up');
-    } finally {
-      setSavingFollowUp(false);
+    } catch {
+      // keep existing list
     }
   };
 
@@ -396,15 +379,7 @@ export default function LeadDetailPage() {
     }
   };
 
-  const openScheduleFollowUp = () => {
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    tomorrow.setHours(9, 0, 0, 0);
-    const pad = (n: number) => String(n).padStart(2, '0');
-    const local = `${tomorrow.getFullYear()}-${pad(tomorrow.getMonth() + 1)}-${pad(tomorrow.getDate())}T${pad(tomorrow.getHours())}:${pad(tomorrow.getMinutes())}`;
-    setFollowUpDate(local);
-    setShowFollowUpForm(true);
-  };
+  const openScheduleFollowUp = () => setShowFollowUpModal(true);
 
   if (loading) {
     return <div className="min-h-screen flex items-center justify-center dark:bg-gray-950 dark:text-gray-100">Loading...</div>;
@@ -1335,54 +1310,13 @@ export default function LeadDetailPage() {
               <div className="card">
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-lg font-bold">Follow-Ups</h3>
-                  {!showFollowUpForm && (
-                    <button
-                      onClick={openScheduleFollowUp}
-                      className="text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline"
-                    >
-                      + Schedule
-                    </button>
-                  )}
+                  <button
+                    onClick={openScheduleFollowUp}
+                    className="text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline"
+                  >
+                    + Schedule
+                  </button>
                 </div>
-
-                {showFollowUpForm && (
-                  <div className="space-y-2 mb-3 p-3 bg-gray-50 dark:bg-gray-900 rounded-lg">
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Follow-up date &amp; time</label>
-                      <input
-                        type="datetime-local"
-                        value={followUpDate}
-                        onChange={(e) => setFollowUpDate(e.target.value)}
-                        className="input w-full text-sm"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Note (optional)</label>
-                      <input
-                        type="text"
-                        value={followUpNote}
-                        onChange={(e) => setFollowUpNote(e.target.value)}
-                        placeholder="e.g. Check on payoff status"
-                        className="input w-full text-sm"
-                      />
-                    </div>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={handleCreateFollowUp}
-                        disabled={savingFollowUp || !followUpDate}
-                        className="flex-1 px-3 py-1.5 rounded-lg bg-primary-600 text-white text-sm font-medium hover:bg-primary-700 disabled:opacity-50 transition-colors"
-                      >
-                        {savingFollowUp ? 'Saving...' : 'Schedule'}
-                      </button>
-                      <button
-                        onClick={() => { setShowFollowUpForm(false); setFollowUpNote(''); }}
-                        className="px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                )}
 
                 {leadTasks.filter((t: any) => !t.completed).length > 0 ? (
                   <div className="space-y-2">
@@ -1407,14 +1341,14 @@ export default function LeadDetailPage() {
                       </div>
                     ))}
                   </div>
-                ) : !showFollowUpForm ? (
+                ) : (
                   <button
                     onClick={openScheduleFollowUp}
                     className="w-full text-sm text-gray-500 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 py-4 border border-dashed border-gray-200 dark:border-gray-700 rounded-lg hover:border-primary-300 dark:hover:border-primary-800 transition-colors"
                   >
                     + Schedule your first follow-up
                   </button>
-                ) : null}
+                )}
               </div>
 
               {/* Share Deal */}
@@ -2157,6 +2091,19 @@ export default function LeadDetailPage() {
           </div>
         )}
       </main>
+      <ScheduleFollowUpModal
+        open={showFollowUpModal}
+        onClose={() => setShowFollowUpModal(false)}
+        onCreated={refreshLeadTasks}
+        lead={{
+          id: leadId,
+          propertyAddress: lead.propertyAddress,
+          propertyCity: lead.propertyCity,
+          propertyState: lead.propertyState,
+          sellerFirstName: lead.sellerFirstName,
+          sellerLastName: lead.sellerLastName,
+        }}
+      />
     </AppShell>
   );
 }
