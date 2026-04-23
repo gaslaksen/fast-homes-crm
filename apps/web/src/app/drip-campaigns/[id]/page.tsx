@@ -1,11 +1,88 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import AppShell from '@/components/AppShell';
 import { campaignAPI, leadsAPI } from '@/lib/api';
 import { format } from 'date-fns';
+
+function StepFunnel({ steps, stepSentMap }: { steps: any[]; stepSentMap: Record<string, number> }) {
+  const [expanded, setExpanded] = useState(false);
+
+  const { shown, hiddenZeroCount, maxSent } = useMemo(() => {
+    const sorted = [...steps].sort((a, b) => (a.stepOrder ?? 0) - (b.stepOrder ?? 0));
+    let lastWithTraffic = -1;
+    for (let i = 0; i < sorted.length; i++) {
+      if ((stepSentMap[sorted[i].id] || 0) > 0) lastWithTraffic = i;
+    }
+    const visibleEndExclusive = expanded ? sorted.length : lastWithTraffic + 1;
+    const shown = sorted.slice(0, Math.max(visibleEndExclusive, 0));
+    const hiddenZeroCount = sorted.length - shown.length;
+    const maxSent = Math.max(
+      ...(Object.values(stepSentMap) as number[]),
+      1,
+    );
+    return { shown, hiddenZeroCount, maxSent };
+  }, [steps, stepSentMap, expanded]);
+
+  return (
+    <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5 mb-8">
+      <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-4">Step Funnel</h2>
+      {steps.length === 0 ? (
+        <div className="text-sm text-gray-400 dark:text-gray-500">No steps configured.</div>
+      ) : shown.length === 0 ? (
+        <div className="text-sm text-gray-400 dark:text-gray-500">
+          No sends yet across {steps.length} step{steps.length === 1 ? '' : 's'}.
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {shown.map((step: any) => {
+            const sent = stepSentMap[step.id] || 0;
+            const pct = Math.round((sent / maxSent) * 100);
+            return (
+              <div key={step.id} className="flex items-center gap-3">
+                <div className="w-20 text-xs text-gray-500 dark:text-gray-400 text-right flex-shrink-0">
+                  Step {step.stepOrder}
+                </div>
+                <div className="flex-1">
+                  <div className="h-6 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-blue-400 rounded-full transition-all"
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                </div>
+                <div className="w-24 text-xs text-gray-500 dark:text-gray-400">
+                  {sent} sent · {step.channel === 'TEXT' ? '📱' : '✉️'}{' '}
+                  {step.channel === 'TEXT' ? 'SMS' : 'Email'}
+                </div>
+              </div>
+            );
+          })}
+          {hiddenZeroCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setExpanded(true)}
+              className="text-xs text-primary-600 dark:text-primary-400 hover:underline mt-2"
+            >
+              Show all {steps.length} steps ({hiddenZeroCount} with 0 sends)
+            </button>
+          )}
+          {expanded && (
+            <button
+              type="button"
+              onClick={() => setExpanded(false)}
+              className="text-xs text-gray-500 dark:text-gray-400 hover:underline mt-2"
+            >
+              Hide zero-send steps
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 const STATUS_COLORS: Record<string, string> = {
   ACTIVE: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400',
@@ -194,44 +271,7 @@ export default function CampaignDetailPage() {
           ))}
         </div>
 
-        {/* Step funnel */}
-        <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5 mb-8">
-          <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-4">Step Funnel</h2>
-          {campaign.steps?.length === 0 ? (
-            <div className="text-sm text-gray-400 dark:text-gray-500">No steps configured.</div>
-          ) : (
-            <div className="space-y-2">
-              {campaign.steps?.map((step: any) => {
-                const sent = campaign.stepSentMap?.[step.id] || 0;
-                const maxSent = Math.max(
-                  ...(Object.values(campaign.stepSentMap || {}) as number[]),
-                  1,
-                );
-                const pct = Math.round((sent / maxSent) * 100);
-
-                return (
-                  <div key={step.id} className="flex items-center gap-3">
-                    <div className="w-20 text-xs text-gray-500 dark:text-gray-400 text-right flex-shrink-0">
-                      Step {step.stepOrder}
-                    </div>
-                    <div className="flex-1">
-                      <div className="h-6 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-blue-400 rounded-full transition-all"
-                          style={{ width: `${pct}%` }}
-                        />
-                      </div>
-                    </div>
-                    <div className="w-24 text-xs text-gray-500 dark:text-gray-400">
-                      {sent} sent · {step.channel === 'TEXT' ? '📱' : '✉️'}{' '}
-                      {step.channel === 'TEXT' ? 'SMS' : 'Email'}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+        <StepFunnel steps={campaign.steps || []} stepSentMap={campaign.stepSentMap || {}} />
 
         {/* Enroll a lead */}
         <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5 mb-6">

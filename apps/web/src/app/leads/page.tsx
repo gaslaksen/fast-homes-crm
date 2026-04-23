@@ -951,15 +951,15 @@ function LeadsPageInner() {
                     <Link href={`/leads/${lead.id}`}>
                       <ScorePill band={lead.scoreBand} score={lead.totalScore} />
                     </Link>
-                    <Link href={`/leads/${lead.id}`}>
+                    <Link href={lead.arv ? `/leads/${lead.id}` : `/leads/${lead.id}/comps-analysis`}>
                       {lead.arv
                         ? <span className="text-xs font-semibold text-gray-700 dark:text-gray-300">${(lead.arv / 1000).toFixed(0)}k</span>
-                        : <span className="text-xs text-gray-300 dark:text-gray-600">—</span>}
+                        : <span className="text-[11px] text-primary-600 dark:text-primary-400 hover:underline">+ ARV</span>}
                     </Link>
                     <Link href={`/leads/${lead.id}`}>
                       {lead.askingPrice
                         ? <span className="text-xs text-gray-600 dark:text-gray-400">${(lead.askingPrice / 1000).toFixed(0)}k</span>
-                        : <span className="text-xs text-gray-300 dark:text-gray-600">—</span>}
+                        : <span className="text-[11px] text-primary-600 dark:text-primary-400 hover:underline">+ Ask</span>}
                     </Link>
                     <Link href={`/leads/${lead.id}`}>
                       {s !== null

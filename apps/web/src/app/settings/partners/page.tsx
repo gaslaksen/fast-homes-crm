@@ -145,8 +145,19 @@ export default function PartnersPage() {
           {loading ? (
             <div className="p-8 text-center text-sm text-gray-400 animate-pulse">Loading...</div>
           ) : partners.length === 0 ? (
-            <div className="p-12 text-center">
-              <p className="text-gray-400 dark:text-gray-500 text-sm">No partners yet. Add your first buyer partner to start sharing deals.</p>
+            <div className="p-12 text-center space-y-3">
+              <div className="text-sm text-gray-500 dark:text-gray-400">
+                No partners yet.
+              </div>
+              <div className="text-xs text-gray-400 dark:text-gray-500">
+                Add buyer partners so you can disposition deals when an offer is accepted.
+              </div>
+              <button
+                onClick={openAdd}
+                className="btn btn-primary btn-sm"
+              >
+                + Add your first partner
+              </button>
             </div>
           ) : (
             <table className="w-full text-sm">

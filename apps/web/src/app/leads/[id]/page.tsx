@@ -101,6 +101,10 @@ export default function LeadDetailPage() {
   const [followUpDate, setFollowUpDate] = useState('');
   const [followUpNote, setFollowUpNote] = useState('');
   const [savingFollowUp, setSavingFollowUp] = useState(false);
+  const [showArvEdit, setShowArvEdit] = useState(false);
+  const [arvInput, setArvInput] = useState('');
+  const [savingArv, setSavingArv] = useState(false);
+  const [sendingOutreach, setSendingOutreach] = useState(false);
 
   useEffect(() => {
     loadLead();
@@ -357,6 +361,49 @@ export default function LeadDetailPage() {
     } finally {
       setSettingTier(false);
     }
+  };
+
+  const handleSaveArv = async () => {
+    const value = Number(arvInput.replace(/[^0-9.]/g, ''));
+    if (!Number.isFinite(value) || value <= 0) {
+      alert('Enter a positive number');
+      return;
+    }
+    setSavingArv(true);
+    try {
+      await leadsAPI.update(leadId, { arv: value, arvConfidence: 100 });
+      setShowArvEdit(false);
+      setArvInput('');
+      loadLead();
+    } catch (error) {
+      console.error('Failed to save ARV:', error);
+      alert('Failed to save ARV');
+    } finally {
+      setSavingArv(false);
+    }
+  };
+
+  const handleSendOutreach = async () => {
+    setSendingOutreach(true);
+    try {
+      await leadsAPI.sendOutreach(leadId);
+      loadLead();
+    } catch (error: any) {
+      console.error('Failed to send outreach:', error);
+      alert(error?.response?.data?.message || 'Failed to send outreach');
+    } finally {
+      setSendingOutreach(false);
+    }
+  };
+
+  const openScheduleFollowUp = () => {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(9, 0, 0, 0);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const local = `${tomorrow.getFullYear()}-${pad(tomorrow.getMonth() + 1)}-${pad(tomorrow.getDate())}T${pad(tomorrow.getHours())}:${pad(tomorrow.getMinutes())}`;
+    setFollowUpDate(local);
+    setShowFollowUpForm(true);
   };
 
   if (loading) {
@@ -977,8 +1024,38 @@ export default function LeadDetailPage() {
                     </div>
                   </div>
                 ) : (
-                  <div className="mb-4 p-3 rounded-lg bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 text-sm text-gray-400 dark:text-gray-500 italic">
-                    ARV pending — REAPI data loading or not available for this address
+                  <div className="mb-4 p-3 rounded-lg bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 space-y-2">
+                    <div className="text-xs font-semibold text-gray-500 dark:text-gray-400">ARV not yet available</div>
+                    {showArvEdit ? (
+                      <div className="space-y-2">
+                        <input
+                          type="number"
+                          inputMode="decimal"
+                          placeholder="e.g. 185000"
+                          value={arvInput}
+                          onChange={(e) => setArvInput(e.target.value)}
+                          className="input w-full text-sm"
+                          autoFocus
+                        />
+                        <div className="flex gap-2">
+                          <button onClick={handleSaveArv} disabled={savingArv || !arvInput.trim()} className="btn btn-primary btn-sm flex-1">
+                            {savingArv ? 'Saving…' : 'Save ARV'}
+                          </button>
+                          <button onClick={() => { setShowArvEdit(false); setArvInput(''); }} className="btn btn-secondary btn-sm">
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex gap-2">
+                        <Link href={`/leads/${leadId}/comps-analysis`} className="btn btn-primary btn-sm flex-1 text-center">
+                          Run Full Analysis
+                        </Link>
+                        <button onClick={() => setShowArvEdit(true)} className="btn btn-secondary btn-sm flex-1">
+                          Enter manually
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -1171,13 +1248,54 @@ export default function LeadDetailPage() {
                     <span className="font-medium">Lead is Dead</span>
                   </div>
                 ) : !showDeadForm ? (
-                  <button
-                    onClick={() => setShowDeadForm(true)}
-                    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg border-2 border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950 text-sm font-medium transition-colors"
-                  >
-                    <span>💀</span>
-                    <span>Mark as Dead</span>
-                  </button>
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      onClick={handleSendOutreach}
+                      disabled={sendingOutreach || lead.doNotContact}
+                      className="flex flex-col items-center gap-1 px-2 py-3 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 text-xs text-gray-700 dark:text-gray-300 font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      title={lead.doNotContact ? 'Lead is Do Not Contact' : 'Send initial outreach SMS'}
+                    >
+                      <span className="text-lg">✉️</span>
+                      <span>{sendingOutreach ? 'Sending…' : 'Send SMS'}</span>
+                    </button>
+                    <button
+                      onClick={openScheduleFollowUp}
+                      className="flex flex-col items-center gap-1 px-2 py-3 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 text-xs text-gray-700 dark:text-gray-300 font-medium transition-colors"
+                    >
+                      <span className="text-lg">📅</span>
+                      <span>Follow-up</span>
+                    </button>
+                    <button
+                      onClick={() => setShowShareModal(true)}
+                      className="flex flex-col items-center gap-1 px-2 py-3 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 text-xs text-gray-700 dark:text-gray-300 font-medium transition-colors"
+                    >
+                      <span className="text-lg">🤝</span>
+                      <span>Share</span>
+                    </button>
+                    <button
+                      onClick={handleAiCall}
+                      disabled={!!lead.doNotContact}
+                      className="flex flex-col items-center gap-1 px-2 py-3 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 text-xs text-gray-700 dark:text-gray-300 font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      title={lead.doNotContact ? 'Lead is Do Not Contact' : 'Start AI call'}
+                    >
+                      <span className="text-lg">📞</span>
+                      <span>AI Call</span>
+                    </button>
+                    <Link
+                      href={`/leads/${leadId}/comps-analysis?tab=deal-intel`}
+                      className="flex flex-col items-center gap-1 px-2 py-3 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 text-xs text-gray-700 dark:text-gray-300 font-medium transition-colors"
+                    >
+                      <span className="text-lg">💰</span>
+                      <span>Offer</span>
+                    </Link>
+                    <button
+                      onClick={() => setShowDeadForm(true)}
+                      className="flex flex-col items-center gap-1 px-2 py-3 rounded-lg border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950 text-xs font-medium transition-colors"
+                    >
+                      <span className="text-lg">💀</span>
+                      <span>Mark Dead</span>
+                    </button>
+                  </div>
                 ) : (
                   <div className="space-y-3">
                     <div>
@@ -1219,16 +1337,7 @@ export default function LeadDetailPage() {
                   <h3 className="text-lg font-bold">Follow-Ups</h3>
                   {!showFollowUpForm && (
                     <button
-                      onClick={() => {
-                        const tomorrow = new Date();
-                        tomorrow.setDate(tomorrow.getDate() + 1);
-                        tomorrow.setHours(9, 0, 0, 0);
-                        // Build YYYY-MM-DDTHH:mm in local time (not UTC) for datetime-local input
-                        const pad = (n: number) => String(n).padStart(2, '0');
-                        const local = `${tomorrow.getFullYear()}-${pad(tomorrow.getMonth() + 1)}-${pad(tomorrow.getDate())}T${pad(tomorrow.getHours())}:${pad(tomorrow.getMinutes())}`;
-                        setFollowUpDate(local);
-                        setShowFollowUpForm(true);
-                      }}
+                      onClick={openScheduleFollowUp}
                       className="text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline"
                     >
                       + Schedule
@@ -1298,9 +1407,14 @@ export default function LeadDetailPage() {
                       </div>
                     ))}
                   </div>
-                ) : (
-                  <p className="text-sm text-gray-400 dark:text-gray-500">No upcoming follow-ups</p>
-                )}
+                ) : !showFollowUpForm ? (
+                  <button
+                    onClick={openScheduleFollowUp}
+                    className="w-full text-sm text-gray-500 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 py-4 border border-dashed border-gray-200 dark:border-gray-700 rounded-lg hover:border-primary-300 dark:hover:border-primary-800 transition-colors"
+                  >
+                    + Schedule your first follow-up
+                  </button>
+                ) : null}
               </div>
 
               {/* Share Deal */}

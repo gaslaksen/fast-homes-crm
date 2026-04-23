@@ -321,7 +321,26 @@ export default function DispoTab({
         )}
 
         {s.offers.length === 0 ? (
-          <p className="text-sm text-gray-400 dark:text-gray-500 text-center py-6">No offers yet. Click "+ Add Offer" to track your first offer.</p>
+          <div className="py-8 text-center space-y-3">
+            <div className="text-sm text-gray-500 dark:text-gray-400">
+              No offers yet.
+            </div>
+            {s.mao && s.mao > 0 ? (
+              <button
+                onClick={() => {
+                  setOfferForm((f) => ({ ...f, offerAmount: String(Math.round(s.mao!)) }));
+                  setShowOfferForm(true);
+                }}
+                className="btn btn-primary btn-sm"
+              >
+                Create offer at MAO {fmt(s.mao)}
+              </button>
+            ) : (
+              <button onClick={() => setShowOfferForm(true)} className="btn btn-primary btn-sm">
+                + Add offer
+              </button>
+            )}
+          </div>
         ) : (
           <div className="space-y-2">
             {s.offers.map((offer) => (
@@ -372,20 +391,33 @@ export default function DispoTab({
       </div>
 
       {/* ── Contract Details ──────────────────────────────────────────────── */}
+      {(() => {
+        const hasAcceptedOffer = s.offers.some((o) => o.status === 'accepted');
+        const canCreate = hasAcceptedOffer || !!s.contract;
+        return (
       <div className="card">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-bold">Contract Details</h2>
           {!showContractForm && (
-            <button onClick={() => setShowContractForm(true)} className="btn btn-primary btn-sm">
+            <button
+              onClick={() => setShowContractForm(true)}
+              disabled={!canCreate}
+              title={canCreate ? undefined : 'Accept an offer first to create a contract'}
+              className="btn btn-primary btn-sm disabled:opacity-40 disabled:cursor-not-allowed"
+            >
               + Create Contract
             </button>
           )}
         </div>
 
         {!showContractForm ? (
-          <p className="text-sm text-gray-400 dark:text-gray-500 text-center py-6">
-            No contract yet. Click "+ Create Contract" once an offer is accepted.
-          </p>
+          <div className="py-6 text-center space-y-2">
+            <p className="text-sm text-gray-400 dark:text-gray-500">
+              {hasAcceptedOffer
+                ? 'No contract yet. Click "+ Create Contract" to start one.'
+                : 'Accept an offer first — contract creation unlocks once a seller accepts.'}
+            </p>
+          </div>
         ) : (
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
@@ -547,6 +579,8 @@ export default function DispoTab({
           </div>
         )}
       </div>
+        );
+      })()}
 
       {/* ── E-Signature via BoldSign ──────────────────────────────────────── */}
       <div className="card border border-indigo-200 dark:border-indigo-800">
