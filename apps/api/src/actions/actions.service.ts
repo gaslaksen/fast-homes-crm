@@ -1,6 +1,5 @@
-import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { MessagesService } from '../messages/messages.service';
 import { evaluateNeedsReply } from './rules/needs-reply';
 import { evaluateFollowUpDue } from './rules/follow-up-due';
 import { evaluateContractPending } from './rules/contract-pending';
@@ -13,7 +12,6 @@ import { evaluateExhaustedLead } from './rules/exhausted-lead';
 import type { LeadForRules } from './rules/types';
 import {
   ACTION_QUEUE_MAX,
-  AI_DRAFT_TOP_N,
   CACHE_TTL_MS,
 } from './rules/priorities';
 import type {
@@ -35,11 +33,7 @@ export class ActionsService {
   /** Per-user queue cache. Key = userId (empty string for no-user/org-only). */
   private cache = new Map<string, CacheEntry>();
 
-  constructor(
-    private prisma: PrismaService,
-    @Inject(forwardRef(() => MessagesService))
-    private messagesService: MessagesService,
-  ) {}
+  constructor(private prisma: PrismaService) {}
 
   async getQueue(
     userId: string | undefined,
@@ -294,12 +288,12 @@ export class ActionsService {
       ? await this.stripUserState(userId, items)
       : items;
 
-    // Pre-compute AI drafts for the top N NEEDS_REPLY items.
-    const sorted = [...filtered].sort((a, b) => b.priority - a.priority);
-    const replyItems = sorted
-      .filter((i) => i.type === 'NEEDS_REPLY')
-      .slice(0, AI_DRAFT_TOP_N);
-    await this.populateAiDrafts(replyItems);
+    // NOTE: AI drafts are NOT pre-populated here. The UI (ActionCard,
+    // Inbox) fetches drafts on demand when the user expands a card or
+    // selects a conversation. Pre-populating caused a runaway spend on
+    // claude-sonnet-4-5 because the sidebar badge poll (every 60s) races
+    // with the 60s cache TTL, forcing a fresh compute + 10 Sonnet calls
+    // per minute per open tab whether or not anyone looked at the drafts.
 
     const ms = Date.now() - started;
     if (ms > 500) {
@@ -340,23 +334,4 @@ export class ActionsService {
     });
   }
 
-  private async populateAiDrafts(items: ActionItem[]): Promise<void> {
-    if (items.length === 0) return;
-    // Best-effort: failures here must not break the queue.
-    await Promise.all(
-      items.map(async (item) => {
-        try {
-          const result = await this.messagesService.generateDrafts(item.leadId);
-          const message = (result as any)?.message;
-          if (typeof message === 'string' && message.trim().length > 0) {
-            item.aiDraft = message;
-          }
-        } catch (err) {
-          this.logger.debug(
-            `AI draft failed for lead ${item.leadId}: ${(err as Error).message}`,
-          );
-        }
-      }),
-    );
-  }
 }
