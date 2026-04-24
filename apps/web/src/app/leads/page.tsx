@@ -761,30 +761,16 @@ function LeadsPageInner() {
                     label={`${cfg.emoji} ${cfg.label}${tierCounts[t] ? ` (${tierCounts[t]})` : ''}`}
                     active={tierFilter === t}
                     activeClass={cfg.chipActive}
-                    onClick={() => {
-                      setTierFilter(tierFilter === t ? 0 : t);
-                      if (t === 3) setShowInactive(true); // Tier 3 = show dead
-                    }}
+                    onClick={() => setTierFilter(tierFilter === t ? 0 : t)}
                   />
                 );
               })}
             </div>
 
-            <span className="text-gray-200 dark:text-gray-700 select-none hidden sm:inline">|</span>
-
-            {/* DEPRECATED: Score system being phased out. Do not extend. Replacement strategy TBD — likely a derived freshness/momentum metric. See docs/build-prompts/README.md. */}
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-xs text-gray-400 dark:text-gray-500 font-medium">Score:</span>
-              <FilterChip label="All" active={!bandFilter} onClick={() => setBandFilter('')} />
-              {['STRIKE_ZONE', 'HOT', 'WORKABLE', 'DEAD_COLD'].map(band => (
-                <FilterChip
-                  key={band}
-                  label={`${BAND_LABELS[band]}${bandCounts[band] ? ` (${bandCounts[band]})` : ''}`}
-                  active={bandFilter === band}
-                  onClick={() => setBandFilter(bandFilter === band ? '' : band)}
-                />
-              ))}
-            </div>
+            {/* Score chips removed — Score system is deprecated
+                (see docs/build-prompts/README.md 006). bandFilter state
+                and URL param remain so existing ?band=HOT links still
+                work, but no UI to set it. */}
 
             <span className="text-gray-200 dark:text-gray-700 select-none hidden sm:inline">|</span>
             <FilterChip
@@ -951,8 +937,7 @@ function LeadsPageInner() {
                 if (sortKey === k) setSortDir(d => d === 'desc' ? 'asc' : 'desc');
                 else { setSortKey(k as SortKey); setSortDir('asc'); }
               }}
-              renderTier={(l) => <TierBadge tier={(l.tier || 2) as 1 | 2 | 3} />}
-              renderScore={(l) => <ScorePill band={l.scoreBand} score={l.totalScore} />}
+              renderTier={(l) => <TierBadge tier={(l.tier || 3) as 1 | 2 | 3} />}
             />
           ) : (
           <div className="hidden md:block overflow-x-auto -mx-6 px-6 md:mx-0 md:px-0">

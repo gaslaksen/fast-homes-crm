@@ -53,7 +53,6 @@ interface Props {
   selected: boolean;
   onToggleSelect: (id: string) => void;
   onRenderTier: (lead: ListLead) => React.ReactNode;
-  onRenderScore: (lead: ListLead) => React.ReactNode;
 }
 
 function lastTouchCell(lastTouchedAt: string | null, status: string) {
@@ -89,7 +88,6 @@ export default function LeadRow({
   selected,
   onToggleSelect,
   onRenderTier,
-  onRenderScore,
 }: Props) {
   const maoInputs = {
     maoPercent: lead.maoPercent,
@@ -105,7 +103,7 @@ export default function LeadRow({
 
   return (
     <div
-      className={`grid grid-cols-[auto_44px_2fr_170px_68px_72px_72px_72px_72px_72px_60px_72px] gap-3 items-center px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors group ${
+      className={`grid grid-cols-[auto_44px_2fr_170px_68px_72px_72px_72px_72px_60px_72px] gap-3 items-center px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors group ${
         selected ? 'bg-primary-50/40 dark:bg-primary-950/40' : ''
       } ${isDead ? 'opacity-60' : ''}`}
     >
@@ -165,11 +163,6 @@ export default function LeadRow({
       {/* tier */}
       <Link href={`/leads/${lead.id}`} className="flex justify-center">
         {onRenderTier(lead)}
-      </Link>
-
-      {/* score (DEPRECATED: Score system being phased out; see docs/build-prompts/README.md 006) */}
-      <Link href={`/leads/${lead.id}`} className="flex justify-center">
-        {onRenderScore(lead)}
       </Link>
 
       {/* ARV */}
@@ -244,4 +237,4 @@ export default function LeadRow({
 }
 
 export const LIST_GRID_COLS_CLASS =
-  'grid-cols-[auto_44px_2fr_170px_68px_72px_72px_72px_72px_72px_60px_72px]';
+  'grid-cols-[auto_44px_2fr_170px_68px_72px_72px_72px_72px_60px_72px]';

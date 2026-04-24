@@ -586,8 +586,19 @@ export class LeadsService {
       where.createdAt = dateFilter;
     }
 
-    // New filters
-    if (filters.tier) where.tier = filters.tier;
+    // New filters. Tier 3 is the catch-all "cold / unlikely" bucket, so
+    // leads that haven't been tiered yet (tier IS NULL) get lumped in with
+    // Tier 3 both for counting and filtering — otherwise the tier chips
+    // don't sum to the total visible leads, which is confusing.
+    if (filters.tier === 3) {
+      where.OR = [
+        ...(Array.isArray(where.OR) ? where.OR : where.OR ? [where.OR] : []),
+        { tier: 3 },
+        { tier: null },
+      ];
+    } else if (filters.tier) {
+      where.tier = filters.tier;
+    }
     if (filters.propertyState) where.propertyState = { equals: filters.propertyState, mode: 'insensitive' };
 
     // Hide inactive (DEAD/CLOSED_WON/CLOSED_LOST) by default unless showInactive or specific status filter
@@ -721,10 +732,15 @@ export class LeadsService {
       }),
     ]);
 
-    // Shape aggregate counts
+    // Shape aggregate counts. Null-tier leads roll up into Tier 3 so the
+    // chip totals sum to the total visible-leads count on screen.
     const tierCounts: Record<number, number> = { 1: 0, 2: 0, 3: 0 };
     for (const g of tierGroups) {
-      if (g.tier != null) tierCounts[g.tier] = g._count;
+      if (g.tier == null) {
+        tierCounts[3] += g._count;
+      } else if (g.tier >= 1 && g.tier <= 3) {
+        tierCounts[g.tier] += g._count;
+      }
     }
     const bandCounts: Record<string, number> = {};
     for (const g of bandGroups) {

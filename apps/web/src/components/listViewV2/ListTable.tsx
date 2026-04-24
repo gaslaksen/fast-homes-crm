@@ -12,7 +12,6 @@ interface Props {
   sortDir: SortDir;
   onSort: (key: SortKey) => void;
   renderTier: (lead: ListLead) => React.ReactNode;
-  renderScore: (lead: ListLead) => React.ReactNode;
 }
 
 function Th({
@@ -59,7 +58,6 @@ export default function ListTable({
   sortDir,
   onSort,
   renderTier,
-  renderScore,
 }: Props) {
   const allSelected = leads.length > 0 && selectedIds.size >= leads.length;
 
@@ -85,7 +83,6 @@ export default function ListTable({
           <Th label="Property / Seller" sortKey="address" current={sortKey} dir={sortDir} onSort={onSort} />
           <Th label="Stage"             sortKey="stage"   current={sortKey} dir={sortDir} onSort={onSort} />
           <Th label="Tier"              sortKey="tier"    current={sortKey} dir={sortDir} onSort={onSort} align="center" />
-          <Th label="Score"             sortKey="score"   current={sortKey} dir={sortDir} onSort={onSort} align="center" />
           <Th label="ARV"               sortKey="arv"     current={sortKey} dir={sortDir} onSort={onSort} align="right" />
           <Th label="MAO"               sortKey="mao"     current={sortKey} dir={sortDir} onSort={onSort} align="right" />
           <Th label="Asking"            sortKey="asking"  current={sortKey} dir={sortDir} onSort={onSort} align="right" />
@@ -103,7 +100,6 @@ export default function ListTable({
               selected={selectedIds.has(lead.id)}
               onToggleSelect={onToggleSelect}
               onRenderTier={renderTier}
-              onRenderScore={renderScore}
             />
           ))}
         </div>
