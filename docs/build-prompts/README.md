@@ -18,6 +18,7 @@ Keeping these around gives us:
 - 003 — Kanban v2
 - 004 — Lead Detail redesign
 - 005 — Unified Inbox
+- 006 — Score deprecation (hard removal of Strike Zone / Hot / Workable / Cold system; replacement likely a derived freshness/momentum metric). As of 2026-04-24 the Score system is soft-deprecated — still functional, but no new work should extend it.
 
 ## Conventions
 

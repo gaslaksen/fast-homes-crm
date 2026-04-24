@@ -634,8 +634,48 @@ export class LeadsService {
     };
     const orderBy = sortMap[filters.sort || 'tier'] || sortMap.tier;
 
+    // Chip counts must reflect "how many leads would I see if I added this
+    // chip to my current selection," not "how many exist in the database."
+    // So: for each chip group, clone the full filter-applied `where` and drop
+    // that group's own key. Inactive-hiding, search, tier/band/other filters
+    // all carry through.
+    const whereForTier: Prisma.LeadWhereInput = { ...where };
+    delete (whereForTier as any).tier;
+    const whereForBand: Prisma.LeadWhereInput = { ...where };
+    delete (whereForBand as any).scoreBand;
+
+    // "In Drip (N)" chip: count leads in active drip, ignoring the inDrip
+    // filter itself. Mirrors the AND clause in the inDrip filter application
+    // above. Built as a fresh object so we don't mutate the user's filter.
+    const whereForDripActive: Prisma.LeadWhereInput = {
+      ...where,
+      AND: [
+        ...(Array.isArray(where.AND)
+          ? (where.AND as Prisma.LeadWhereInput[]).filter((c) => {
+              // strip the inDrip clause we added earlier (the OR on
+              // dripSequence/campaignEnrollments); everything else stays.
+              const or = (c as any).OR;
+              if (!Array.isArray(or)) return true;
+              const looksLikeDrip =
+                or.length === 2 &&
+                or.some((x: any) => x?.dripSequence?.status === 'ACTIVE') &&
+                or.some((x: any) => x?.campaignEnrollments?.some?.status === 'ACTIVE');
+              return !looksLikeDrip;
+            })
+          : where.AND
+          ? [where.AND]
+          : []),
+        {
+          OR: [
+            { dripSequence: { status: 'ACTIVE' } },
+            { campaignEnrollments: { some: { status: 'ACTIVE' } } },
+          ],
+        },
+      ],
+    };
+
     // Run data query, count, and aggregate counts in parallel
-    const [leads, total, tierGroups, bandGroups, inactiveCount, stateRows] = await Promise.all([
+    const [leads, total, tierGroups, bandGroups, dripActiveCount, inactiveCount, stateRows] = await Promise.all([
       this.prisma.lead.findMany({
         where,
         include: { assignedTo: true },
@@ -644,8 +684,9 @@ export class LeadsService {
         take: limit,
       }),
       this.prisma.lead.count({ where }),
-      this.prisma.lead.groupBy({ by: ['tier'], where: baseWhere, _count: true }),
-      this.prisma.lead.groupBy({ by: ['scoreBand'], where: baseWhere, _count: true }),
+      this.prisma.lead.groupBy({ by: ['tier'], where: whereForTier, _count: true }),
+      this.prisma.lead.groupBy({ by: ['scoreBand'], where: whereForBand, _count: true }),
+      this.prisma.lead.count({ where: whereForDripActive }),
       this.prisma.lead.count({
         where: { ...baseWhere, status: { in: ['DEAD', 'CLOSED_WON', 'CLOSED_LOST'] } },
       }),
@@ -677,6 +718,7 @@ export class LeadsService {
       counts: {
         tiers: tierCounts,
         bands: bandCounts,
+        dripActive: dripActiveCount,
         hiddenInactive: inactiveCount,
       },
       availableStates: stateRows

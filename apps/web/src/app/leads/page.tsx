@@ -268,7 +268,7 @@ function LeadsPageInner() {
   // Initialize filter/sort state from URL params so back-navigation restores the view
   const [leads,         setLeads]         = useState<any[]>([]);
   const [pagination,    setPagination]    = useState({ page: 1, limit: 50, total: 0, totalPages: 0 });
-  const [counts,        setCounts]        = useState<{ tiers: Record<number, number>; bands: Record<string, number>; hiddenInactive: number }>({ tiers: { 1: 0, 2: 0, 3: 0 }, bands: {}, hiddenInactive: 0 });
+  const [counts,        setCounts]        = useState<{ tiers: Record<number, number>; bands: Record<string, number>; dripActive: number; hiddenInactive: number }>({ tiers: { 1: 0, 2: 0, 3: 0 }, bands: {}, dripActive: 0, hiddenInactive: 0 });
   const [availableStates, setAvailableStates] = useState<string[]>([]);
   const [pipelineData,  setPipelineData]  = useState<Record<string, { leads: any[]; total: number }>>({});
   const [loading,       setLoading]       = useState(true);
@@ -284,6 +284,7 @@ function LeadsPageInner() {
   const [assigneeFilter,setAssigneeFilter]= useState(searchParams.get('assignee') || '');
   const [tierFilter,    setTierFilter]    = useState<number>(Number(searchParams.get('tier')) || 0); // 0 = all
   const [showInactive,  setShowInactive]  = useState(searchParams.get('inactive') === 'true');     // default: hide dead/closed
+  const [inDripFilter,  setInDripFilter]  = useState(searchParams.get('inDrip') === 'active');     // "In Drip (N)" chip
   const [teamMembers,   setTeamMembers]   = useState<any[]>([]);
   const [sortKey,       setSortKey]       = useState<SortKey>((searchParams.get('sort') as SortKey) || 'tier');
   const [sortDir,       setSortDir]       = useState<SortDir>((searchParams.get('dir') as SortDir) || 'asc');
@@ -333,6 +334,7 @@ function LeadsPageInner() {
       if (assigneeFilter)           params.set('assignee', assigneeFilter);
       if (tierFilter)               params.set('tier', String(tierFilter));
       if (showInactive)             params.set('inactive', 'true');
+      if (inDripFilter)             params.set('inDrip', 'active');
       if (sortKey !== 'tier')       params.set('sort', sortKey);
       if (sortDir !== 'asc')        params.set('dir', sortDir);
       if (viewMode !== 'table')     params.set('view', viewMode);
@@ -348,7 +350,7 @@ function LeadsPageInner() {
 
     return () => clearTimeout(searchDebounceRef.current);
   }, [search, bandFilter, statusFilter, sourceFilter, dateFilter, staleFilter, arvFilter,
-      dealFilter, stateFilter, assigneeFilter, tierFilter, showInactive, sortKey, sortDir,
+      dealFilter, stateFilter, assigneeFilter, tierFilter, showInactive, inDripFilter, sortKey, sortDir,
       viewMode, page, pathname, router]);
 
   // Abort controller for cancelling in-flight requests when filters change
@@ -371,6 +373,7 @@ function LeadsPageInner() {
     if (staleFilter)     params.staleMinDays = staleFilter;
     if (arvFilter)       params.arvFilter = arvFilter;
     if (showInactive)    params.showInactive = 'true';
+    if (inDripFilter)    params.inDrip = 'active';
     if (sortKey)         params.sort = sortKey;
     if (sortDir)         params.dir = sortDir;
     if (assigneeFilter === 'unassigned') params.assignedToUserId = 'none';
@@ -400,7 +403,7 @@ function LeadsPageInner() {
       if (!controller.signal.aborted) setLoading(false);
     }
   }, [page, search, bandFilter, statusFilter, sourceFilter, dateFilter, staleFilter,
-      arvFilter, dealFilter, stateFilter, assigneeFilter, tierFilter, showInactive, sortKey, sortDir]);
+      arvFilter, dealFilter, stateFilter, assigneeFilter, tierFilter, showInactive, inDripFilter, sortKey, sortDir]);
 
   // Fetch pipeline data when in grid view
   const fetchPipeline = useCallback(async () => {
@@ -453,13 +456,13 @@ function LeadsPageInner() {
   const prevFiltersRef = useRef('');
   useEffect(() => {
     const key = [search, bandFilter, statusFilter, sourceFilter, dateFilter, staleFilter,
-                 arvFilter, dealFilter, stateFilter, assigneeFilter, tierFilter, showInactive, sortKey, sortDir].join('|');
+                 arvFilter, dealFilter, stateFilter, assigneeFilter, tierFilter, showInactive, inDripFilter, sortKey, sortDir].join('|');
     if (prevFiltersRef.current && prevFiltersRef.current !== key) {
       setPage(1);
     }
     prevFiltersRef.current = key;
   }, [search, bandFilter, statusFilter, sourceFilter, dateFilter, staleFilter,
-      arvFilter, dealFilter, stateFilter, assigneeFilter, tierFilter, showInactive, sortKey, sortDir]);
+      arvFilter, dealFilter, stateFilter, assigneeFilter, tierFilter, showInactive, inDripFilter, sortKey, sortDir]);
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) setSortDir(d => d === 'desc' ? 'asc' : 'desc');
@@ -469,7 +472,7 @@ function LeadsPageInner() {
   // Server provides filtered/sorted leads, counts, and available states
   const tierCounts = counts.tiers;
   const bandCounts = counts.bands;
-  const hiddenInactiveCount = showInactive || statusFilter ? 0 : counts.hiddenInactive;
+  const dripActiveCount = counts.dripActive || 0;
 
   const maoFn  = (l: any) => l.arv ? Math.round(l.arv * 0.7 - 55000) : null;
   const spread = (l: any) => { const m = maoFn(l); return m && l.askingPrice ? m - l.askingPrice : null; };
@@ -559,10 +562,11 @@ function LeadsPageInner() {
     setSearch(''); setBandFilter(''); setStatusFilter(''); setSourceFilter('');
     setDateFilter(''); setStaleFilter(''); setArvFilter(''); setDealFilter('');
     setStateFilter(''); setAssigneeFilter(''); setTierFilter(0); setShowInactive(false);
+    setInDripFilter(false);
   };
 
   const hasFilters = !!(search || bandFilter || statusFilter || sourceFilter || dateFilter ||
-    staleFilter || arvFilter || dealFilter || stateFilter || assigneeFilter || tierFilter || showInactive);
+    staleFilter || arvFilter || dealFilter || stateFilter || assigneeFilter || tierFilter || showInactive || inDripFilter);
 
   // ─── Pipeline (Grid view) drag-and-drop ─────────────────────────────────────
   const onDragEnd = useCallback(async (result: DropResult) => {
@@ -608,14 +612,6 @@ function LeadsPageInner() {
             <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">Leads</h1>
             <p className="text-sm text-gray-400 dark:text-gray-500 mt-0.5">
               {pagination.total} active lead{pagination.total !== 1 ? 's' : ''}
-              {hiddenInactiveCount > 0 && (
-                <button
-                  onClick={() => setShowInactive(true)}
-                  className="ml-2 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 underline underline-offset-2 decoration-dashed"
-                >
-                  +{hiddenInactiveCount} dead/closed hidden
-                </button>
-              )}
               {hasFilters && (
                 <button onClick={clearFilters} className="ml-2 text-primary-500 hover:underline">
                   Clear filters
@@ -701,6 +697,7 @@ function LeadsPageInner() {
 
             <span className="text-gray-200 dark:text-gray-700 select-none hidden sm:inline">|</span>
 
+            {/* DEPRECATED: Score system being phased out. Do not extend. Replacement strategy TBD — likely a derived freshness/momentum metric. See docs/build-prompts/README.md. */}
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs text-gray-400 dark:text-gray-500 font-medium">Score:</span>
               <FilterChip label="All" active={!bandFilter} onClick={() => setBandFilter('')} />
@@ -713,6 +710,13 @@ function LeadsPageInner() {
                 />
               ))}
             </div>
+
+            <span className="text-gray-200 dark:text-gray-700 select-none hidden sm:inline">|</span>
+            <FilterChip
+              label={`✉ In Drip${dripActiveCount ? ` (${dripActiveCount})` : ''}`}
+              active={inDripFilter}
+              onClick={() => setInDripFilter(v => !v)}
+            />
 
             <span className="text-gray-200 dark:text-gray-700 select-none hidden sm:inline">|</span>
             <button
@@ -786,16 +790,6 @@ function LeadsPageInner() {
               </div>
             </div>
           )}
-        </div>
-
-        {/* Tier legend */}
-        <div className="flex items-center gap-4 px-1">
-          {([1, 2, 3] as const).map(t => (
-            <div key={t} className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
-              <span className={`w-2 h-2 rounded-full ${TIER_CONFIG[t].dot}`} />
-              <strong>{TIER_CONFIG[t].emoji} {TIER_CONFIG[t].label}:</strong> {TIER_CONFIG[t].desc}
-            </div>
-          ))}
         </div>
 
         {/* Bulk Action Bar */}

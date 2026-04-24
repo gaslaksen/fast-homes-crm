@@ -270,9 +270,6 @@ export default function KanbanV2Board() {
     prefs.setCollapsed(new Set());
     updateUrl({ collapsed: [] });
   };
-  const handleToggleInDrip = () => {
-    updateUrl({ inDrip: !urlInDrip });
-  };
 
   // Drip pause (single lead)
   const handlePauseDrip = async (leadId: string, enrollmentId: string | null) => {
@@ -360,14 +357,6 @@ export default function KanbanV2Board() {
     );
   }
 
-  const inDripCount = Object.values(data)
-    .flat()
-    .filter(
-      (l) =>
-        (l.campaignEnrollments && l.campaignEnrollments.length > 0) ||
-        l.dripSequence?.status === 'ACTIVE',
-    ).length;
-
   return (
     <div className="flex flex-col gap-2">
       {/* Toolbar */}
@@ -404,18 +393,9 @@ export default function KanbanV2Board() {
           Expand all
         </button>
 
-        <button
-          type="button"
-          onClick={handleToggleInDrip}
-          className={`text-xs px-2.5 py-1 rounded border ${
-            urlInDrip
-              ? 'bg-blue-600 text-white border-blue-600'
-              : 'bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800'
-          }`}
-          title="Show only leads with an active drip campaign"
-        >
-          ✉ In Drip ({inDripCount})
-        </button>
+        {/* "In Drip" filter chip lives in the shared filter bar above; it
+             toggles the same ?inDrip=active URL param, so both views stay in
+             sync. Nothing rendered here. */}
       </div>
 
       {/* Board */}

@@ -138,6 +138,9 @@ model Lead {
   reapiFeatures           Json?     // pool, garage, basement, stories, heating/cooling, condition, etc.
   reapiOwnerData          Json?     // Owner name(s), mailing address, owner-occupied, LLC flag
 
+  // DEPRECATED: Score system being phased out. Do not extend.
+  // Replacement strategy TBD — likely a derived freshness/momentum metric.
+  // See docs/build-prompts/README.md.
   challengeScore    Int      @default(0)
   authorityScore    Int      @default(0)
   moneyScore        Int      @default(0)
