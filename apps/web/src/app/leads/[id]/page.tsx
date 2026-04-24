@@ -270,10 +270,10 @@ export default function LeadDetailPage() {
   };
 
   const handleAssign = async () => {
-    if (!assignUserId || !assignStage) return;
+    if (!assignUserId) return;
     setAssignSaving(true);
     try {
-      await leadsAPI.assign(leadId, assignUserId, assignStage);
+      await leadsAPI.assign(leadId, assignUserId, assignStage || '');
       loadLead();
     } catch (error) {
       console.error('Failed to assign lead:', error);

@@ -56,19 +56,19 @@ export default function ActionBar({ lead, primary, onPrimary, quickActions, stat
   const isDead = lead.status === 'DEAD';
 
   return (
-    <div className="sticky top-0 z-20 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 py-2 bg-white/90 dark:bg-gray-950/90 backdrop-blur border-b border-gray-200 dark:border-gray-800">
+    <div className="sticky top-2 z-20 rounded-xl border border-gray-200 dark:border-gray-700 bg-white/95 dark:bg-gray-900/95 backdrop-blur px-3 py-2 shadow-sm">
       <div className="flex items-center gap-3 flex-wrap">
         {/* Primary action */}
         <div className="relative flex" ref={menuRef}>
           <button
             onClick={onPrimary}
-            className="px-4 py-2 rounded-l-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold shadow-sm transition-colors"
+            className="px-4 py-2 rounded-l-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-semibold shadow-sm transition-colors"
           >
             {primary.label}
           </button>
           <button
             onClick={() => setSecondaryOpen(!secondaryOpen)}
-            className="px-2 py-2 rounded-r-lg bg-blue-600 hover:bg-blue-700 text-white border-l border-blue-500 shadow-sm"
+            className="px-2 py-2 rounded-r-lg bg-primary-600 hover:bg-primary-700 text-white border-l border-primary-500 shadow-sm"
             aria-label="More actions"
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>

@@ -121,7 +121,7 @@ export default function PipelineTierCard({
             <button
               onClick={onAssign}
               disabled={!assignUserId || assignSaving}
-              className="w-full text-xs px-2 py-1.5 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-50"
+              className="text-xs px-3 py-1.5 rounded-lg bg-primary-600 text-white font-semibold hover:bg-primary-700 disabled:opacity-50"
             >
               {assignSaving ? 'Assigning…' : 'Assign'}
             </button>

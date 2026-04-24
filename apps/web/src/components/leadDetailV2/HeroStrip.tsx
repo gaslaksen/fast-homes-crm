@@ -70,7 +70,7 @@ export default function HeroStrip({ lead, leadId, aiInsight, insightLoading, onG
             ) : (
               <>
                 <div className="text-xl lg:text-2xl font-bold text-gray-400 dark:text-gray-600 leading-tight">—</div>
-                <button onClick={onRunAnalysis} className="text-[11px] text-blue-600 dark:text-blue-400 hover:underline mt-0.5">
+                <button onClick={onRunAnalysis} className="text-[11px] text-primary-600 dark:text-primary-400 hover:underline mt-0.5">
                   Run analysis →
                 </button>
               </>
@@ -81,13 +81,13 @@ export default function HeroStrip({ lead, leadId, aiInsight, insightLoading, onG
             <div className="text-[10px] uppercase tracking-wide font-semibold text-gray-400 dark:text-gray-500" title={arv ? `${Math.round(((lead.maoPercent ?? 70)))}% × ARV − repairs − fees` : ''}>MAO</div>
             {mao != null ? (
               <>
-                <div className="text-xl lg:text-2xl font-bold text-blue-700 dark:text-blue-400 leading-tight">{fmtMoney(mao)}</div>
+                <div className="text-xl lg:text-2xl font-bold text-primary-700 dark:text-primary-400 leading-tight">{fmtMoney(mao)}</div>
                 <div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">{Math.round(lead.maoPercent ?? 70)}% rule</div>
               </>
             ) : (
               <>
                 <div className="text-xl lg:text-2xl font-bold text-gray-400 dark:text-gray-600 leading-tight">—</div>
-                <Link href={`/leads/${leadId}/comps-analysis`} className="text-[11px] text-blue-600 dark:text-blue-400 hover:underline mt-0.5 inline-block">
+                <Link href={`/leads/${leadId}/comps-analysis`} className="text-[11px] text-primary-600 dark:text-primary-400 hover:underline mt-0.5 inline-block">
                   Complete analysis →
                 </Link>
               </>
@@ -110,7 +110,7 @@ export default function HeroStrip({ lead, leadId, aiInsight, insightLoading, onG
             ) : (
               <>
                 <div className="text-xl lg:text-2xl font-bold text-gray-400 dark:text-gray-600 leading-tight">—</div>
-                <button onClick={onAskPrice} className="text-[11px] text-blue-600 dark:text-blue-400 hover:underline mt-0.5">
+                <button onClick={onAskPrice} className="text-[11px] text-primary-600 dark:text-primary-400 hover:underline mt-0.5">
                   {asking ? 'Run analysis →' : 'Ask seller for price →'}
                 </button>
               </>
@@ -152,7 +152,7 @@ export default function HeroStrip({ lead, leadId, aiInsight, insightLoading, onG
           ) : (
             <button
               onClick={onGenerateInsight}
-              className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
+              className="text-sm text-primary-600 dark:text-primary-400 hover:underline"
               disabled={!onGenerateInsight}
             >
               Generate insight →
