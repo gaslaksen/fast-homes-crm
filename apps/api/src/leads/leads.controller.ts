@@ -73,6 +73,7 @@ export class LeadsController {
     @Query('staleMinDays') staleMinDays?: string,
     @Query('arvFilter') arvFilter?: string,
     @Query('showInactive') showInactive?: string,
+    @Query('inDrip') inDrip?: string,
     @Query('sort') sort?: string,
     @Query('dir') dir?: string,
   ) {
@@ -96,6 +97,7 @@ export class LeadsController {
       staleMinDays: staleMinDays ? parseInt(staleMinDays) : undefined,
       arvFilter: arvFilter as 'has' | 'none' | undefined,
       showInactive: showInactive === 'true',
+      inDrip: inDrip === 'active' ? 'active' : undefined,
       sort,
       dir: dir as 'asc' | 'desc' | undefined,
     });

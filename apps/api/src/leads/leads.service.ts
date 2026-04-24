@@ -533,6 +533,7 @@ export class LeadsService {
     staleMinDays?: number;
     arvFilter?: 'has' | 'none';
     showInactive?: boolean;
+    inDrip?: 'active';
     sort?: string;
     dir?: 'asc' | 'desc';
   }) {
@@ -604,6 +605,18 @@ export class LeadsService {
       where.AND = [
         ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
         { OR: [{ arv: null }, { arv: 0 }] },
+      ];
+    }
+
+    if (filters.inDrip === 'active') {
+      where.AND = [
+        ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
+        {
+          OR: [
+            { dripSequence: { status: 'ACTIVE' } },
+            { campaignEnrollments: { some: { status: 'ACTIVE' } } },
+          ],
+        },
       ];
     }
 
