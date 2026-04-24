@@ -23,7 +23,7 @@ function CampCell({ label, subtitle, complete, value, isNext, field, onAsk }: {
         complete
           ? 'border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950'
           : isNext
-          ? 'border-blue-300 dark:border-blue-800 bg-blue-50 dark:bg-blue-950 ring-2 ring-blue-300 dark:ring-blue-700'
+          ? 'border-primary-300 dark:border-primary-800 bg-primary-50 dark:bg-primary-950 ring-2 ring-primary-300 dark:ring-primary-700'
           : 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-950'
       }`}
     >
@@ -32,7 +32,7 @@ function CampCell({ label, subtitle, complete, value, isNext, field, onAsk }: {
         {complete ? (
           <span className="text-green-600 dark:text-green-400 text-xs font-bold">Done</span>
         ) : isNext ? (
-          <span className="text-blue-600 dark:text-blue-400 text-xs font-bold">Next</span>
+          <span className="text-primary-600 dark:text-primary-400 text-xs font-bold">Next</span>
         ) : (
           <span className="text-gray-400 dark:text-gray-500 text-xs">Pending</span>
         )}
@@ -41,7 +41,7 @@ function CampCell({ label, subtitle, complete, value, isNext, field, onAsk }: {
       {value ? (
         <div className="text-sm font-medium text-gray-800 dark:text-gray-200 mt-1">{value}</div>
       ) : (
-        <button onClick={() => onAsk(field)} className="text-xs text-blue-600 dark:text-blue-400 hover:underline mt-1">
+        <button onClick={() => onAsk(field)} className="text-xs text-primary-600 dark:text-primary-400 hover:underline mt-1">
           Ask →
         </button>
       )}
@@ -70,7 +70,7 @@ export default function CampDiscoveryCard({ lead, onAskCampField }: Props) {
               Timeline {lead.timeline ?? '?'} days • Asking {lead.askingPrice ? `$${lead.askingPrice.toLocaleString()}` : '?'} • {lead.conditionLevel ?? '?'} condition • {lead.ownershipStatus?.replace('_', ' ') ?? '?'}
             </div>
           </div>
-          <button onClick={() => setExpanded(true)} className="text-xs text-blue-600 dark:text-blue-400 hover:underline">Expand</button>
+          <button onClick={() => setExpanded(true)} className="text-xs text-primary-600 dark:text-primary-400 hover:underline">Expand</button>
         </div>
       </div>
     );
@@ -83,7 +83,7 @@ export default function CampDiscoveryCard({ lead, onAskCampField }: Props) {
         <div className="flex items-center gap-2">
           <span className="text-xs text-gray-500 dark:text-gray-400">{done}/4 complete</span>
           {allDone && (
-            <button onClick={() => setExpanded(false)} className="text-xs text-blue-600 dark:text-blue-400 hover:underline">Collapse</button>
+            <button onClick={() => setExpanded(false)} className="text-xs text-primary-600 dark:text-primary-400 hover:underline">Collapse</button>
           )}
         </div>
       </div>
@@ -95,14 +95,6 @@ export default function CampDiscoveryCard({ lead, onAskCampField }: Props) {
         <CampCell label="Authority" subtitle="Ownership" complete={!!lead.campAuthorityComplete} value={lead.ownershipStatus?.replace('_', ' ') || null} isNext={nextField === 'authority'} field="authority" onAsk={onAskCampField} />
       </div>
 
-      {!allDone && nextField && (
-        <button
-          onClick={() => onAskCampField(nextField)}
-          className="mt-4 w-full px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold"
-        >
-          Ask about {nextField === 'priority' ? 'timeline' : nextField === 'money' ? 'asking price' : nextField === 'challenge' ? 'condition' : 'ownership'} →
-        </button>
-      )}
     </div>
   );
 }

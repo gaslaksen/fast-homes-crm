@@ -84,19 +84,19 @@ export default function SellerPortalPanel({ leadId }: SellerPortalPanelProps) {
   // No portal exists — show create button
   if (!portal) {
     return (
-      <div className="bg-white rounded-lg border border-gray-200 p-4">
-        <h3 className="text-sm font-semibold text-gray-900 mb-2">Seller Portal</h3>
-        <p className="text-xs text-gray-500 mb-3">
+      <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+        <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-2">Seller Portal</h3>
+        <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
           Create a branded property page for this seller where they can view details, upload photos, and respond to offers.
         </p>
         <button
           onClick={handleCreate}
           disabled={creating}
-          className="w-full px-3 py-2 text-xs font-medium text-white bg-blue-600 rounded hover:bg-blue-700 transition disabled:opacity-50"
+          className="px-3 py-1.5 text-xs font-semibold text-white bg-primary-600 rounded-md hover:bg-primary-700 transition disabled:opacity-50"
         >
-          {creating ? 'Creating...' : 'Create Seller Portal'}
+          {creating ? 'Creating…' : 'Create Seller Portal'}
         </button>
-        {error && <p className="text-xs text-red-600 mt-2">{error}</p>}
+        {error && <p className="text-xs text-red-600 dark:text-red-400 mt-2">{error}</p>}
       </div>
     );
   }
@@ -104,13 +104,13 @@ export default function SellerPortalPanel({ leadId }: SellerPortalPanelProps) {
   const isActive = portal.status === 'active';
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 p-4">
+    <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-semibold text-gray-900">Seller Portal</h3>
+        <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Seller Portal</h3>
         <button
           onClick={handleToggle}
           className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-            isActive ? 'bg-green-500' : 'bg-gray-300'
+            isActive ? 'bg-primary-500' : 'bg-gray-300 dark:bg-gray-700'
           }`}
           title={isActive ? 'Disable portal' : 'Enable portal'}
         >
@@ -129,56 +129,53 @@ export default function SellerPortalPanel({ leadId }: SellerPortalPanelProps) {
             <input
               readOnly
               value={portal.portalUrl || ''}
-              className="flex-1 text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded px-2 py-1.5 truncate"
+              className="flex-1 text-xs text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded px-2 py-1.5 truncate"
             />
             <button
               onClick={handleCopy}
-              className="px-2.5 py-1.5 text-xs font-medium text-gray-700 bg-gray-100 rounded hover:bg-gray-200 transition whitespace-nowrap"
+              className="px-2.5 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition whitespace-nowrap"
             >
               {copied ? 'Copied!' : 'Copy'}
             </button>
           </div>
 
           {/* Stats */}
-          <div className="flex items-center gap-4 text-xs text-gray-500 mb-3">
-            <span>Opened: <strong className="text-gray-700">{portal.openCount || 0}</strong> times</span>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-500 dark:text-gray-400 mb-3">
+            <span>Opened: <strong className="text-gray-700 dark:text-gray-200">{portal.openCount || 0}</strong> {(portal.openCount === 1 ? 'time' : 'times')}</span>
             {portal.lastOpenedAt && (
-              <span>Last: <strong className="text-gray-700">{new Date(portal.lastOpenedAt).toLocaleDateString()}</strong></span>
+              <span>Last: <strong className="text-gray-700 dark:text-gray-200">{new Date(portal.lastOpenedAt).toLocaleDateString()}</strong></span>
             )}
             {portal.portalLinkSentAt && (
-              <span className="text-green-600">Link sent {new Date(portal.portalLinkSentAt).toLocaleDateString()}</span>
+              <span className="text-primary-600 dark:text-primary-400">Link sent {new Date(portal.portalLinkSentAt).toLocaleDateString()}</span>
             )}
           </div>
 
           {/* Actions */}
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button
               onClick={handleSendLink}
               disabled={sending}
-              className="flex-1 px-3 py-1.5 text-xs font-medium text-white bg-blue-600 rounded hover:bg-blue-700 transition disabled:opacity-50"
+              className="px-3 py-1.5 text-xs font-semibold text-white bg-primary-600 hover:bg-primary-700 rounded-md transition disabled:opacity-50"
             >
-              {sending ? 'Sending...' : portal.portalLinkSentAt ? 'Resend Portal Link' : 'Send Portal Link'}
+              {sending ? 'Sending…' : portal.portalLinkSentAt ? 'Resend Link' : 'Send Link'}
             </button>
             <a
               href={portal.portalUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-gray-100 rounded hover:bg-gray-200 transition"
+              className="px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-md transition"
             >
               View Portal
             </a>
-          </div>
-
-          <div className="mt-2 text-center">
-            <button onClick={handleRegenerate} className="text-xs text-gray-400 hover:text-gray-600 transition">
-              Regenerate link
+            <button onClick={handleRegenerate} className="text-xs text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition self-center ml-auto">
+              Regenerate
             </button>
           </div>
 
-          {error && <p className="text-xs text-red-600 mt-2">{error}</p>}
+          {error && <p className="text-xs text-red-600 dark:text-red-400 mt-2">{error}</p>}
         </>
       ) : (
-        <p className="text-xs text-gray-400">Portal is disabled. Toggle to enable.</p>
+        <p className="text-xs text-gray-400 dark:text-gray-500">Portal is disabled. Toggle to enable.</p>
       )}
     </div>
   );

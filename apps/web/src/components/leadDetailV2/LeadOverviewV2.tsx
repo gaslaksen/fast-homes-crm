@@ -89,7 +89,7 @@ export default function LeadOverviewV2(props: LeadOverviewV2Props) {
     }
   };
 
-  const portalViewCount = (lead?.sellerPortal?.viewCount as number | undefined) ?? 0;
+  const portalViewCount = (lead?.sellerPortal?.openCount as number | undefined) ?? 0;
 
   const [aiInsight, setAiInsight] = useState<string | null>(lead.aiInsight ?? null);
   const [insightLoading, setInsightLoading] = useState(false);

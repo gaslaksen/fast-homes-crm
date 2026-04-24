@@ -505,6 +505,8 @@ export class LeadsService {
           orderBy: { createdAt: 'desc' },
           take: 20,
         },
+        sellerPortal: true,
+        dripSequence: true,
       },
     });
   }

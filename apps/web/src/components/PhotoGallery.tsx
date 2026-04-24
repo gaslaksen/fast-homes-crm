@@ -46,10 +46,17 @@ export default function PhotoGallery({
   onSetPrimary,
 }: PhotoGalleryProps) {
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+  const [heroIndex, setHeroIndex] = useState<number>(0);
   const [uploading, setUploading] = useState(false);
   const [fetching, setFetching] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Sync heroIndex when primary photo changes (or photos list reshapes)
+  useEffect(() => {
+    const primaryIdx = photos.findIndex((p) => p.url === primaryPhotoUrl);
+    setHeroIndex(primaryIdx >= 0 ? primaryIdx : 0);
+  }, [primaryPhotoUrl, photos.length]);
 
   const handleFiles = async (files: File[]) => {
     const imageFiles = files.filter((f) => f.type.startsWith('image/'));
@@ -99,8 +106,11 @@ export default function PhotoGallery({
     await onDelete(photoId);
   };
 
-  // Find the primary photo to show as hero
-  const primaryPhoto = photos.find((p) => p.url === primaryPhotoUrl) || photos[0];
+  // Hero photo is whichever index the user has navigated to
+  const primaryPhoto = photos[heroIndex] || photos[0];
+  const showNav = photos.length > 1;
+  const goPrev = () => setHeroIndex((i) => (i - 1 + photos.length) % photos.length);
+  const goNext = () => setHeroIndex((i) => (i + 1) % photos.length);
 
   // Lightbox keyboard navigation
   const handleKeyDown = useCallback(
@@ -191,20 +201,41 @@ export default function PhotoGallery({
           {/* Hero photo */}
           {primaryPhoto && (
             <div
-              className="relative rounded-lg overflow-hidden cursor-pointer mb-3 bg-gray-100 dark:bg-gray-800"
+              className="relative rounded-lg overflow-hidden mb-3 bg-gray-100 dark:bg-gray-800 group"
               style={{ maxHeight: '300px' }}
-              onClick={() => setLightboxIndex(photos.indexOf(primaryPhoto))}
             >
               <img
                 src={resolveUrl(primaryPhoto.url)}
                 alt="Primary property photo"
-                className="w-full object-cover"
+                className="w-full object-cover cursor-pointer"
                 style={{ maxHeight: '300px' }}
+                onClick={() => setLightboxIndex(heroIndex)}
               />
               {primaryPhoto.source && (
                 <span className="absolute bottom-2 left-2 text-xs px-2 py-0.5 rounded bg-black/50 text-white">
                   {sourceLabel(primaryPhoto.source)}
                 </span>
+              )}
+              {showNav && (
+                <>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); goPrev(); }}
+                    aria-label="Previous photo"
+                    className="absolute left-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-black/50 hover:bg-black/70 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); goNext(); }}
+                    aria-label="Next photo"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-black/50 hover:bg-black/70 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
+                  </button>
+                  <span className="absolute bottom-2 right-2 text-[10px] px-2 py-0.5 rounded-full bg-black/50 text-white">
+                    {heroIndex + 1} / {photos.length}
+                  </span>
+                </>
               )}
             </div>
           )}
@@ -216,9 +247,9 @@ export default function PhotoGallery({
                 <div key={photo.id} className="relative group flex-shrink-0">
                   <div
                     className={`w-16 h-16 rounded-lg overflow-hidden cursor-pointer border-2 ${
-                      photo.url === primaryPhotoUrl ? 'border-primary-500' : 'border-transparent'
+                      idx === heroIndex ? 'border-primary-500' : photo.url === primaryPhotoUrl ? 'border-primary-300' : 'border-transparent'
                     }`}
-                    onClick={() => setLightboxIndex(idx)}
+                    onClick={() => setHeroIndex(idx)}
                   >
                     <img
                       src={resolveUrl(photo.thumbnailUrl)}
