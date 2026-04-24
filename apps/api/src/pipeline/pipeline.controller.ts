@@ -14,9 +14,22 @@ export class PipelineController {
   @Patch('leads/:id/stage')
   async updateStage(
     @Param('id') id: string,
-    @Body() body: { stage: string },
+    @Body() body: { stage: string; reason?: string; userId?: string },
   ) {
-    return this.pipelineService.updateLeadStage(id, body.stage);
+    return this.pipelineService.updateLeadStage(id, body.stage, {
+      reason: body.reason,
+      userId: body.userId,
+    });
+  }
+
+  @Post('leads/bulk-stage')
+  async bulkUpdateStage(
+    @Body() body: { ids: string[]; stage: string; reason?: string; userId?: string },
+  ) {
+    return this.pipelineService.bulkUpdateStage(body.ids, body.stage, {
+      reason: body.reason,
+      userId: body.userId,
+    });
   }
 
   @Post('insights')

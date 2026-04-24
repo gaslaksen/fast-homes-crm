@@ -48,17 +48,51 @@ export class PipelineService {
         status: true,
         totalScore: true,
         scoreBand: true,
+        tier: true,
         arv: true,
         askingPrice: true,
         primaryPhoto: true,
         lastTouchedAt: true,
         touchCount: true,
         daysInStage: true,
+        stageChangedAt: true,
         aiRecommendation: true,
         assignedToUserId: true,
         assignedTo: { select: { id: true, firstName: true, lastName: true } },
         assignedStage: true,
         createdAt: true,
+        dripSequence: {
+          select: {
+            id: true,
+            status: true,
+            currentStep: true,
+            lastMessageAt: true,
+          },
+        },
+        campaignEnrollments: {
+          where: { status: 'ACTIVE' },
+          select: {
+            id: true,
+            campaignId: true,
+            currentStepOrder: true,
+            nextSendAt: true,
+            campaign: {
+              select: { id: true, name: true },
+            },
+          },
+        },
+        activities: {
+          where: { type: 'STATUS_CHANGED' },
+          take: 1,
+          orderBy: { createdAt: 'desc' },
+          select: {
+            id: true,
+            metadata: true,
+            createdAt: true,
+            userId: true,
+            user: { select: { firstName: true, lastName: true } },
+          },
+        },
       },
     });
 
@@ -76,7 +110,11 @@ export class PipelineService {
     return grouped;
   }
 
-  async updateLeadStage(leadId: string, newStage: string) {
+  async updateLeadStage(
+    leadId: string,
+    newStage: string,
+    opts?: { reason?: string; userId?: string },
+  ) {
     const lead = await this.prisma.lead.findUnique({
       where: { id: leadId },
     });
@@ -84,6 +122,8 @@ export class PipelineService {
     if (!lead) {
       throw new Error('Lead not found');
     }
+
+    const reason = opts?.reason ?? 'manual';
 
     await this.prisma.lead.update({
       where: { id: leadId },
@@ -97,9 +137,14 @@ export class PipelineService {
     await this.prisma.activity.create({
       data: {
         leadId,
+        userId: opts?.userId ?? null,
         type: 'STATUS_CHANGED',
         description: `Pipeline stage changed from ${this.formatStageName(lead.status)} to ${this.formatStageName(newStage)}`,
-        metadata: { oldStatus: lead.status, newStatus: newStage },
+        metadata: {
+          oldStatus: lead.status,
+          newStatus: newStage,
+          reason,
+        },
       },
     });
 
@@ -109,6 +154,57 @@ export class PipelineService {
     );
 
     return { success: true };
+  }
+
+  async bulkUpdateStage(
+    ids: string[],
+    newStage: string,
+    opts?: { reason?: string; userId?: string },
+  ) {
+    if (!ids.length) return { success: true, updated: 0 };
+    if (!this.ACTIVE_STAGES.includes(newStage) && newStage !== 'DEAD' && newStage !== 'CLOSED_WON' && newStage !== 'CLOSED_LOST') {
+      throw new Error(`Invalid stage: ${newStage}`);
+    }
+    const reason = opts?.reason ?? 'manual';
+
+    const existing = await this.prisma.lead.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, status: true },
+    });
+    const byId = new Map(existing.map((l) => [l.id, l.status]));
+
+    const now = new Date();
+    await this.prisma.$transaction([
+      this.prisma.lead.updateMany({
+        where: { id: { in: ids } },
+        data: {
+          status: newStage,
+          stageChangedAt: now,
+          daysInStage: 0,
+        },
+      }),
+      this.prisma.activity.createMany({
+        data: existing.map((l) => ({
+          leadId: l.id,
+          userId: opts?.userId ?? null,
+          type: 'STATUS_CHANGED',
+          description: `Pipeline stage changed from ${this.formatStageName(l.status)} to ${this.formatStageName(newStage)}`,
+          metadata: {
+            oldStatus: l.status,
+            newStatus: newStage,
+            reason,
+            bulk: true,
+          },
+        })),
+      }),
+    ]);
+
+    // Fire background AI recommendations (best-effort)
+    for (const id of ids) {
+      this.generateLeadRecommendation(id).catch(() => {});
+    }
+
+    return { success: true, updated: existing.length };
   }
 
   async generateAiInsights(leadsByStage: Record<string, any[]>) {

@@ -8,6 +8,8 @@ import { leadsAPI, authAPI, pipelineAPI } from '@/lib/api';
 import PropertyPhoto from '@/components/PropertyPhoto';
 import Avatar from '@/components/Avatar';
 import AppShell from '@/components/AppShell';
+import { isKanbanV2 } from '@/lib/flags';
+import KanbanV2Board from '@/components/kanbanV2/KanbanV2Board';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -761,12 +763,6 @@ function LeadsPageInner() {
                   <option value="none">No ARV</option>
                 </FilterSelect>
 
-                <FilterSelect label="Deal math" value={dealFilter} onChange={setDealFilter}>
-                  <option value="">Any</option>
-                  <option value="pencils">Pencils ✓</option>
-                  <option value="no">Doesn't pencil</option>
-                </FilterSelect>
-
                 <FilterSelect label="Assigned" value={assigneeFilter} onChange={setAssigneeFilter}>
                   <option value="">All leads</option>
                   <option value="unassigned">Unassigned</option>
@@ -1044,6 +1040,11 @@ function LeadsPageInner() {
             </div>
           )}
           </>
+
+        ) : isKanbanV2() ? (
+
+          /* ─── GRID / PIPELINE VIEW (v2, behind NEXT_PUBLIC_KANBAN_V2) ─── */
+          <KanbanV2Board />
 
         ) : (
 

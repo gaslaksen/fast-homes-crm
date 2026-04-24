@@ -266,7 +266,20 @@ export const pipelineAPI = {
   get: () => api.get('/pipeline'),
   updateStage: (id: string, stage: string) =>
     api.patch(`/pipeline/leads/${id}/stage`, { stage }),
+  bulkUpdateStage: (ids: string[], stage: string) =>
+    api.post('/pipeline/leads/bulk-stage', { ids, stage }),
   getInsights: () => api.post('/pipeline/insights'),
+};
+
+// Campaigns API (drip)
+export const campaignsAPI = {
+  list: () => api.get('/campaigns'),
+  enroll: (campaignId: string, leadId: string) =>
+    api.post(`/campaigns/${campaignId}/enroll/${leadId}`),
+  pauseEnrollment: (enrollmentId: string) =>
+    api.patch(`/campaigns/enrollments/${enrollmentId}/pause`),
+  leadEnrollments: (leadId: string) =>
+    api.get(`/leads/${leadId}/campaigns`),
 };
 
 // Calls API
