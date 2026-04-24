@@ -312,7 +312,7 @@ export class ActionsService {
     const [dismissals, snoozes] = await Promise.all([
       this.prisma.actionDismissal.findMany({
         where: { userId, actionKey: { in: keys } },
-        select: { actionKey: true },
+        select: { actionKey: true, dismissedAt: true },
       }),
       this.prisma.actionSnooze.findMany({
         where: { userId, actionKey: { in: keys } },
@@ -320,12 +320,20 @@ export class ActionsService {
       }),
     ]);
     const now = new Date();
-    const dismissed = new Set(dismissals.map((d) => d.actionKey));
+    // Dismissal is keyed by actionKey but compared against item.createdAt so
+    // a new event (e.g. fresh inbound SMS on a dismissed NEEDS_REPLY action)
+    // supersedes the prior dismissal. `item.createdAt` for NEEDS_REPLY is the
+    // latest inbound message timestamp, so this gives us the "re-appears when
+    // the seller replies again" behavior surfaced in the Inbox UI.
+    const dismissedAt = new Map<string, Date>(
+      dismissals.map((d) => [d.actionKey, d.dismissedAt]),
+    );
     const snoozeMap = new Map(
       snoozes.map((s) => [s.actionKey, s.snoozedUntil]),
     );
     return items.filter((i) => {
-      if (dismissed.has(i.actionKey)) return false;
+      const d = dismissedAt.get(i.actionKey);
+      if (d && new Date(i.createdAt) <= d) return false;
       const until = snoozeMap.get(i.actionKey);
       if (until && until > now) return false;
       return true;

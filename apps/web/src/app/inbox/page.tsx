@@ -44,6 +44,7 @@ export default function InboxPage() {
   const [draft, setDraft] = useState('');
   const [draftLoading, setDraftLoading] = useState(false);
   const [sending, setSending] = useState(false);
+  const [dismissing, setDismissing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const threadRef = useRef<HTMLDivElement | null>(null);
@@ -117,6 +118,26 @@ export default function InboxPage() {
   };
 
   const clearDraft = () => setDraft('');
+
+  const handleMarkDone = async () => {
+    if (!selected || dismissing) return;
+    const key = selected.actionKey;
+    setDismissing(true);
+    setError(null);
+    try {
+      await actionsAPI.dismiss(key);
+      // Advance selection to the next conversation (prev if at the end)
+      const remaining = items.filter((i) => i.actionKey !== key);
+      const idx = items.findIndex((i) => i.actionKey === key);
+      const next = remaining[idx] || remaining[idx - 1] || null;
+      setItems(remaining);
+      setSelectedKey(next?.actionKey || null);
+    } catch (err: any) {
+      setError(err?.response?.data?.message || 'Failed to mark done');
+    } finally {
+      setDismissing(false);
+    }
+  };
 
   const handleSend = async () => {
     if (!selected || !draft.trim() || sending) return;
@@ -248,12 +269,23 @@ export default function InboxPage() {
                         {selected.lead.propertyState ? ` ${selected.lead.propertyState}` : ''}
                       </div>
                     </div>
-                    <Link
-                      href={`/leads/${selected.leadId}`}
-                      className="btn btn-secondary btn-sm flex-shrink-0"
-                    >
-                      Open lead
-                    </Link>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <button
+                        type="button"
+                        onClick={handleMarkDone}
+                        disabled={dismissing}
+                        title="Remove this conversation from your inbox (re-appears if seller replies)"
+                        className="btn btn-secondary btn-sm disabled:opacity-50"
+                      >
+                        {dismissing ? 'Marking…' : '✓ Mark done'}
+                      </button>
+                      <Link
+                        href={`/leads/${selected.leadId}`}
+                        className="btn btn-secondary btn-sm"
+                      >
+                        Open lead
+                      </Link>
+                    </div>
                   </header>
 
                   {/* Thread */}
