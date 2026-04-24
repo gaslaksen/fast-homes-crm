@@ -77,18 +77,39 @@ export class ActionsService {
    * means: dismiss the actionKey AND log an Activity row. If the underlying
    * condition still holds on next evaluation, the item will reappear — that's
    * intentional (the dismissal is per-intent, not forever).
+   *
+   * Special-cased categories:
+   * - FOLLOW_UP_DUE:taskId — also marks the underlying Task completed, since
+   *   the task itself is what's keeping the action alive. Without this,
+   *   the next queue rebuild would resurrect the action on its own.
    */
   async complete(
     userId: string,
     actionKey: string,
     organizationId?: string,
   ): Promise<void> {
-    const [category, leadId] = actionKey.split(':');
-    if (!leadId) {
+    const [category, ref] = actionKey.split(':');
+    if (!ref) {
       throw new Error(`Invalid actionKey: ${actionKey}`);
     }
+
+    // Resolve leadId from the actionKey based on category. Most rules embed
+    // the leadId directly; FOLLOW_UP_DUE embeds a taskId.
+    let leadId: string | null = null;
+    let taskId: string | null = null;
+    if (category === 'FOLLOW_UP_DUE') {
+      taskId = ref;
+      const task = await this.prisma.task.findUnique({
+        where: { id: ref },
+        select: { leadId: true },
+      });
+      leadId = task?.leadId ?? null;
+    } else {
+      leadId = ref;
+    }
+
     // Verify lead belongs to org (defense-in-depth for multi-tenant).
-    if (organizationId) {
+    if (leadId && organizationId) {
       const lead = await this.prisma.lead.findFirst({
         where: { id: leadId, organizationId },
         select: { id: true },
@@ -98,22 +119,36 @@ export class ActionsService {
       }
     }
 
-    await this.prisma.$transaction([
-      this.prisma.activity.create({
-        data: {
-          leadId,
-          userId,
-          type: 'ACTION_COMPLETED',
-          description: `${category} action completed`,
-          metadata: { actionKey, completedVia: 'dashboard' },
-        },
-      }),
+    const ops: any[] = [
       this.prisma.actionDismissal.upsert({
         where: { userId_actionKey: { userId, actionKey } },
         update: { dismissedAt: new Date() },
         create: { userId, actionKey },
       }),
-    ]);
+    ];
+    if (leadId) {
+      ops.unshift(
+        this.prisma.activity.create({
+          data: {
+            leadId,
+            userId,
+            type: 'ACTION_COMPLETED',
+            description: `${category} action completed`,
+            metadata: { actionKey, completedVia: 'dashboard' },
+          },
+        }),
+      );
+    }
+    if (taskId) {
+      ops.push(
+        this.prisma.task.update({
+          where: { id: taskId },
+          data: { completed: true, completedAt: new Date() },
+        }),
+      );
+    }
+
+    await this.prisma.$transaction(ops);
     this.invalidate(userId);
   }
 
