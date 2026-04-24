@@ -30,7 +30,7 @@ export default function StagePill({ status }: { status: string }) {
   const closed = CLOSED_VARIANTS[status];
   if (closed) {
     return (
-      <span className={`inline-flex items-center text-xs px-2 py-0.5 rounded-full font-medium ${closed.cls}`}>
+      <span className={`inline-flex items-center text-xs px-2 py-0.5 rounded-full font-medium whitespace-nowrap ${closed.cls}`}>
         {closed.label}
       </span>
     );
@@ -38,13 +38,13 @@ export default function StagePill({ status }: { status: string }) {
   const stage = getStage(status);
   if (!stage) {
     return (
-      <span className="inline-flex items-center text-xs px-2 py-0.5 rounded-full font-medium bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border border-gray-300 dark:border-gray-700">
+      <span className="inline-flex items-center text-xs px-2 py-0.5 rounded-full font-medium whitespace-nowrap bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border border-gray-300 dark:border-gray-700">
         {status.replace(/_/g, ' ')}
       </span>
     );
   }
   return (
-    <span className={`inline-flex items-center text-xs px-2 py-0.5 rounded-full font-medium border ${stage.color}`}>
+    <span className={`inline-flex items-center text-xs px-2 py-0.5 rounded-full font-medium whitespace-nowrap border ${stage.color}`}>
       {stage.name}
     </span>
   );

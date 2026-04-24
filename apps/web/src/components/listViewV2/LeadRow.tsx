@@ -32,6 +32,9 @@ export interface ListLead {
   tier: number | null;
   arv: number | null;
   askingPrice: number | null;
+  maoPercent: number | null;
+  repairCosts: number | null;
+  assignmentFee: number | null;
   primaryPhoto: string | null;
   lastTouchedAt: string | null;
   touchCount: number;
@@ -88,8 +91,13 @@ export default function LeadRow({
   onRenderTier,
   onRenderScore,
 }: Props) {
-  const mao = computeMao(lead.arv);
-  const spread = computeSpread(lead.arv, lead.askingPrice);
+  const maoInputs = {
+    maoPercent: lead.maoPercent,
+    repairCosts: lead.repairCosts,
+    assignmentFee: lead.assignmentFee,
+  };
+  const mao = computeMao(lead.arv, maoInputs);
+  const spread = computeSpread(lead.arv, lead.askingPrice, maoInputs);
   const isDead = lead.status === 'DEAD';
   const isInDrip =
     lead.dripSequence?.status === 'ACTIVE' ||
@@ -97,7 +105,7 @@ export default function LeadRow({
 
   return (
     <div
-      className={`grid grid-cols-[auto_44px_2fr_130px_68px_72px_72px_72px_72px_72px_60px_72px] gap-3 items-center px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors group ${
+      className={`grid grid-cols-[auto_44px_2fr_170px_68px_72px_72px_72px_72px_72px_60px_72px] gap-3 items-center px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors group ${
         selected ? 'bg-primary-50/40 dark:bg-primary-950/40' : ''
       } ${isDead ? 'opacity-60' : ''}`}
     >
@@ -185,7 +193,11 @@ export default function LeadRow({
           title={
             mao == null
               ? 'MAO requires ARV'
-              : `MAO = ARV × 0.7 − $55k repairs allowance`
+              : `MAO = ARV × ${Math.round((lead.maoPercent ?? 70))}%${
+                  (lead.repairCosts ?? 0) > 0 ? ` − $${(lead.repairCosts ?? 0).toLocaleString()} repairs` : ''
+                }${
+                  (lead.assignmentFee ?? 0) > 0 ? ` − $${(lead.assignmentFee ?? 0).toLocaleString()} fee` : ''
+                }`
           }
         />
       </div>
@@ -232,4 +244,4 @@ export default function LeadRow({
 }
 
 export const LIST_GRID_COLS_CLASS =
-  'grid-cols-[auto_44px_2fr_130px_68px_72px_72px_72px_72px_72px_60px_72px]';
+  'grid-cols-[auto_44px_2fr_170px_68px_72px_72px_72px_72px_72px_60px_72px]';

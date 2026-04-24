@@ -734,15 +734,20 @@ export class LeadsService {
     // In-page Spread re-sort: when the user sorts by spread, the DB returns
     // rows roughly ordered by ARV (set in sortMap above). Re-sort the page
     // by true (MAO − Asking) so the top-of-page rows are correct for what
-    // the user sees. Rows missing MAO or Asking sink to the bottom.
+    // the user sees. Rows missing ARV or Asking sink to the bottom.
+    //
+    // Formula mirrors Lead Detail (apps/web/src/app/leads/[id]/page.tsx:1148-1149):
+    //   MAO = ARV × (maoPercent/100 || 0.7) − repairCosts − assignmentFee
     let leads = leadsRaw as typeof leadsRaw;
     if (filters.sort === 'spread') {
-      const MAO_PCT = 0.7;
-      const MAO_REPAIRS = 55_000;
       const compSpread = (l: any): number | null => {
         if (l.arv == null || l.arv <= 0) return null;
         if (l.askingPrice == null || l.askingPrice <= 0) return null;
-        return Math.round(l.arv * MAO_PCT - MAO_REPAIRS) - l.askingPrice;
+        const pct = (l.maoPercent ?? 70) / 100;
+        const repairs = l.repairCosts ?? 0;
+        const fee = l.assignmentFee ?? 0;
+        const mao = Math.round(l.arv * pct - repairs - fee);
+        return mao - l.askingPrice;
       };
       leads = [...leadsRaw].sort((a: any, b: any) => {
         const sa = compSpread(a);

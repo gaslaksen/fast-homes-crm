@@ -537,8 +537,20 @@ function LeadsPageInner() {
   const bandCounts = counts.bands;
   const dripActiveCount = counts.dripActive || 0;
 
-  const maoFn  = (l: any) => l.arv ? Math.round(l.arv * 0.7 - 55000) : null;
-  const spread = (l: any) => { const m = maoFn(l); return m && l.askingPrice ? m - l.askingPrice : null; };
+  // Canonical formula — mirrors Lead Detail (apps/web/src/app/leads/[id]/page.tsx:1148-1149):
+  //   MAO = ARV × (maoPercent/100 || 0.7) − repairCosts − assignmentFee
+  // Defaults to 70% / 0 repairs / 0 fee when per-lead values are null.
+  const maoFn = (l: any): number | null => {
+    if (!l.arv) return null;
+    const pct = (l.maoPercent ?? 70) / 100;
+    const repairs = l.repairCosts ?? 0;
+    const fee = l.assignmentFee ?? 0;
+    return Math.round(l.arv * pct - repairs - fee);
+  };
+  const spread = (l: any): number | null => {
+    const m = maoFn(l);
+    return m !== null && l.askingPrice ? m - l.askingPrice : null;
+  };
 
   const toggleSelect = (id: string) => setSelectedIds(prev => {
     const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n;
