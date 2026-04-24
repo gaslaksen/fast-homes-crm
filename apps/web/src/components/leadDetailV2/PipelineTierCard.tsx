@@ -20,12 +20,16 @@ interface Props {
 
 const STAGE_OPTIONS: { value: string; label: string }[] = [
   { value: 'NEW', label: 'New' },
-  { value: 'CONTACTED', label: 'Contacted' },
+  { value: 'ATTEMPTING_CONTACT', label: 'Attempting Contact' },
+  { value: 'QUALIFYING', label: 'Qualifying' },
   { value: 'QUALIFIED', label: 'Qualified' },
-  { value: 'OFFER_MADE', label: 'Offer Made' },
+  { value: 'OFFER_SENT', label: 'Offer Sent' },
+  { value: 'NEGOTIATING', label: 'Negotiating' },
   { value: 'UNDER_CONTRACT', label: 'Under Contract' },
+  { value: 'CLOSING', label: 'Closing' },
   { value: 'CLOSED_WON', label: 'Closed Won' },
   { value: 'CLOSED_LOST', label: 'Closed Lost' },
+  { value: 'NURTURE', label: 'Nurture' },
   { value: 'DEAD', label: 'Dead' },
 ];
 
@@ -101,23 +105,17 @@ export default function PipelineTierCard({
             </button>
           </div>
         ) : (
-          <div className="space-y-1.5">
+          <div className="flex items-center gap-2">
             <select
               value={assignUserId}
               onChange={(e) => setAssignUserId(e.target.value)}
-              className="w-full text-sm px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800"
+              className="flex-1 text-sm px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800"
             >
               <option value="">— Select member —</option>
               {teamMembers.map((m) => (
                 <option key={m.id} value={m.id}>{m.firstName} {m.lastName}</option>
               ))}
             </select>
-            <input
-              value={assignStage}
-              onChange={(e) => setAssignStage(e.target.value)}
-              placeholder="Stage (optional)"
-              className="w-full text-sm px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800"
-            />
             <button
               onClick={onAssign}
               disabled={!assignUserId || assignSaving}
