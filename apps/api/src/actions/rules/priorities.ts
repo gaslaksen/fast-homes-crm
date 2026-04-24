@@ -30,4 +30,9 @@ export const EXHAUSTED_SILENCE_MS = 7 * 24 * 60 * 60 * 1000;
 export const CAMP_INCOMPLETE_MIN_TOUCHES = 3;
 
 export const ACTION_QUEUE_MAX = 50;
-export const CACHE_TTL_MS = 60 * 1000;
+// Cache TTL for computed queues. The sidebar badge poll fires every 60s
+// (apps/web/src/hooks/useActionBadges.ts:12); a 60s TTL races that poll
+// and hits the miss path every time — each miss triggers a 2-3s rule
+// compute. 120s means every other poll serves from cache. Freshness is
+// preserved because dismiss/snooze/complete explicitly invalidate.
+export const CACHE_TTL_MS = 120 * 1000;
