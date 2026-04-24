@@ -64,11 +64,16 @@ export default function ListTable({
   const allSelected = leads.length > 0 && selectedIds.size >= leads.length;
 
   return (
-    <div className="hidden md:block overflow-x-auto -mx-6 px-6 md:mx-0 md:px-0">
-      <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden min-w-[960px]">
-        {/* Header */}
+    <div className="hidden md:block">
+      <div
+        className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 overflow-auto"
+        style={{ maxHeight: 'calc(100vh - 18rem)' }}
+      >
+        <div className="min-w-[1000px]">
+        {/* Header — sticky within the scroll container so it stays put
+            while the list body scrolls vertically. */}
         <div
-          className={`grid ${LIST_GRID_COLS_CLASS} gap-3 px-4 py-2.5 border-b border-gray-100 dark:border-gray-800 bg-gray-50/80 dark:bg-gray-800/80 items-center`}
+          className={`sticky top-0 z-10 grid ${LIST_GRID_COLS_CLASS} gap-3 px-4 py-2.5 border-b border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800 items-center`}
         >
           <input
             type="checkbox"
@@ -101,6 +106,7 @@ export default function ListTable({
               onRenderScore={renderScore}
             />
           ))}
+        </div>
         </div>
       </div>
     </div>
