@@ -51,7 +51,9 @@ export default function ActionBar({ lead, primary, onPrimary, quickActions, stat
     return () => document.removeEventListener('mousedown', onDoc);
   }, [secondaryOpen]);
 
-  const isDead = lead.status === 'DEAD' || lead.tier === 3;
+  // Truly dead = lead.status === 'DEAD' (clicking the red X). T3 is "Cold/unlikely"
+  // and should NOT disable outreach — cold leads can still be worked.
+  const isDead = lead.status === 'DEAD';
 
   return (
     <div className="sticky top-0 z-20 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 py-2 bg-white/90 dark:bg-gray-950/90 backdrop-blur border-b border-gray-200 dark:border-gray-800">

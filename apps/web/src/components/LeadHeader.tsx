@@ -49,7 +49,7 @@ export default function LeadHeader({
                 <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">{lead.propertyAddress}</h1>
                 {lead.tier === 1 && <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-400 border border-green-300 dark:border-green-800 text-xs font-bold">T1 · Contract Now</span>}
                 {lead.tier === 2 && <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-400 border border-yellow-300 dark:border-yellow-800 text-xs font-bold">T2 · Opportunity</span>}
-                {lead.tier === 3 && <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 border border-gray-300 dark:border-gray-600 text-xs font-bold">T3 · Dead</span>}
+                {lead.tier === 3 && <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 border border-gray-300 dark:border-gray-600 text-xs font-bold">T3 · Cold</span>}
                 {lead.status === 'DEAD' && (
                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 text-xs font-semibold">
                     💀 Dead
