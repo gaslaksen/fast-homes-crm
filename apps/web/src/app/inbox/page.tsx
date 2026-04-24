@@ -77,7 +77,8 @@ export default function InboxPage() {
     loadQueue();
   }, [loadQueue]);
 
-  // Load thread + AI draft whenever selection changes.
+  // Load thread whenever selection changes. Composer stays empty by default —
+  // user can click "Generate AI draft" if they want one (saves AI tokens).
   useEffect(() => {
     if (!selected) {
       setMessages([]);
@@ -85,25 +86,13 @@ export default function InboxPage() {
       return;
     }
     setMessagesLoading(true);
-    setDraft(selected.aiDraft || '');
+    setDraft('');
     setError(null);
     messagesAPI
       .list(selected.leadId)
       .then((res) => setMessages(res.data || []))
       .catch(() => setMessages([]))
       .finally(() => setMessagesLoading(false));
-
-    if (!selected.aiDraft) {
-      setDraftLoading(true);
-      messagesAPI
-        .draft(selected.leadId)
-        .then((res) => {
-          const msg = (res.data as any)?.message;
-          if (typeof msg === 'string') setDraft(msg);
-        })
-        .catch(() => {})
-        .finally(() => setDraftLoading(false));
-    }
   }, [selected]);
 
   // Keep thread scrolled to bottom when messages load.
@@ -113,10 +102,9 @@ export default function InboxPage() {
     }
   }, [messages]);
 
-  const regenerate = async () => {
+  const generateDraft = async () => {
     if (!selected) return;
     setDraftLoading(true);
-    setDraft('');
     try {
       const res = await messagesAPI.draft(selected.leadId);
       const msg = (res.data as any)?.message;
@@ -127,6 +115,8 @@ export default function InboxPage() {
       setDraftLoading(false);
     }
   };
+
+  const clearDraft = () => setDraft('');
 
   const handleSend = async () => {
     if (!selected || !draft.trim() || sending) return;
@@ -297,22 +287,44 @@ export default function InboxPage() {
                   {/* Composer */}
                   <div className="border-t border-gray-200 dark:border-gray-700 px-4 py-3 space-y-2">
                     <div className="flex items-center justify-between text-xs">
-                      <div className="font-semibold text-teal-700 dark:text-teal-400">
-                        ✨ AI suggested reply
+                      <div className="text-gray-400 dark:text-gray-500">
+                        Reply to {selected.lead.sellerFirstName || 'seller'}
                       </div>
-                      <button
-                        type="button"
-                        onClick={regenerate}
-                        className="text-teal-700 dark:text-teal-400 hover:underline"
-                        disabled={draftLoading || sending}
-                      >
-                        Regenerate
-                      </button>
+                      {draft.trim() ? (
+                        <div className="flex items-center gap-3 text-xs">
+                          <span className="text-teal-700 dark:text-teal-400 font-semibold">✨ AI draft</span>
+                          <button
+                            type="button"
+                            onClick={generateDraft}
+                            disabled={draftLoading || sending}
+                            className="text-gray-500 dark:text-gray-400 hover:underline disabled:opacity-50"
+                          >
+                            Regenerate
+                          </button>
+                          <button
+                            type="button"
+                            onClick={clearDraft}
+                            disabled={draftLoading || sending}
+                            className="text-gray-500 dark:text-gray-400 hover:underline disabled:opacity-50"
+                          >
+                            Clear
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={generateDraft}
+                          disabled={draftLoading || sending}
+                          className="text-teal-700 dark:text-teal-400 hover:underline disabled:opacity-50"
+                        >
+                          {draftLoading ? 'Generating…' : '✨ Generate AI draft'}
+                        </button>
+                      )}
                     </div>
                     <textarea
                       className="input w-full text-sm"
                       rows={3}
-                      placeholder={draftLoading ? 'Generating draft…' : 'Type a reply or edit the AI draft…'}
+                      placeholder={draftLoading ? 'Generating draft…' : 'Type a reply…'}
                       value={draft}
                       onChange={(e) => setDraft(e.target.value)}
                       disabled={sending}
@@ -320,10 +332,7 @@ export default function InboxPage() {
                     {error && (
                       <div className="text-xs text-red-600 dark:text-red-400">{error}</div>
                     )}
-                    <div className="flex items-center justify-between">
-                      <div className="text-[11px] text-gray-400 dark:text-gray-500">
-                        Review before sending — AI drafts can miss context.
-                      </div>
+                    <div className="flex items-center justify-end">
                       <button
                         type="button"
                         className="btn btn-primary btn-sm"
