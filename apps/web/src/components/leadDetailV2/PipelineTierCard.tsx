@@ -32,7 +32,7 @@ const STAGE_OPTIONS: { value: string; label: string }[] = [
 const TIERS: { value: 1 | 2 | 3; label: string; desc: string; cls: string }[] = [
   { value: 1, label: 'T1', desc: 'Contract now', cls: 'border-green-300 dark:border-green-800 bg-green-50 dark:bg-green-950/40 text-green-700 dark:text-green-300' },
   { value: 2, label: 'T2', desc: 'Keep pursuing', cls: 'border-yellow-300 dark:border-yellow-800 bg-yellow-50 dark:bg-yellow-950/40 text-yellow-700 dark:text-yellow-300' },
-  { value: 3, label: 'T3', desc: 'Dead / no go', cls: 'border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 text-gray-500 dark:text-gray-400' },
+  { value: 3, label: 'T3', desc: 'Cold / unlikely', cls: 'border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 text-gray-500 dark:text-gray-400' },
 ];
 
 export default function PipelineTierCard({

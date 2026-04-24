@@ -14,12 +14,12 @@ export interface Contradiction {
 function computeFingerprint(lead: any, ruleId: string): string {
   // Rule-specific fingerprints so dismissals re-trigger when relevant state changes
   switch (ruleId) {
-    case 'dead-with-drip': return `${lead.tier}|${lead.dripSequence?.id ?? 'none'}|${lead.dripSequence?.status ?? 'none'}`;
-    case 'dead-with-auto-respond': return `${lead.tier}|${lead.autoRespond ? 1 : 0}`;
+    case 'dead-with-drip': return `${lead.status}|${lead.dripSequence?.id ?? 'none'}|${lead.dripSequence?.status ?? 'none'}`;
+    case 'dead-with-auto-respond': return `${lead.status}|${lead.autoRespond ? 1 : 0}`;
     case 'qualified-no-arv': return `${lead.status}|${lead.arv ?? 'none'}`;
     case 'contract-no-record': return `${lead.status}|${lead.contract?.id ?? 'none'}`;
     case 'won-no-offers': return `${lead.status}|${lead.offers?.length ?? 0}`;
-    case 'camp-complete-dead': return `${lead.tier}|${lead.campPriorityComplete}${lead.campMoneyComplete}${lead.campChallengeComplete}${lead.campAuthorityComplete}`;
+    case 'camp-complete-cold': return `${lead.tier}|${lead.campPriorityComplete}${lead.campMoneyComplete}${lead.campChallengeComplete}${lead.campAuthorityComplete}`;
     default: return '';
   }
 }
@@ -55,7 +55,7 @@ export function useContradictions({ lead, leadId, onPauseDrip, onTurnOffAutoResp
   const allRules: Contradiction[] = [];
 
   const dripActive = lead.dripSequence && lead.dripSequence.status === 'ACTIVE';
-  if (lead.tier === 3 && dripActive) {
+  if (lead.status === 'DEAD' && dripActive) {
     allRules.push({
       id: 'dead-with-drip',
       severity: 'warning',
@@ -64,7 +64,7 @@ export function useContradictions({ lead, leadId, onPauseDrip, onTurnOffAutoResp
       fingerprint: computeFingerprint(lead, 'dead-with-drip'),
     });
   }
-  if (lead.tier === 3 && lead.autoRespond) {
+  if (lead.status === 'DEAD' && lead.autoRespond) {
     allRules.push({
       id: 'dead-with-auto-respond',
       severity: 'warning',
@@ -103,11 +103,11 @@ export function useContradictions({ lead, leadId, onPauseDrip, onTurnOffAutoResp
   const campComplete = lead.campPriorityComplete && lead.campMoneyComplete && lead.campChallengeComplete && lead.campAuthorityComplete;
   if (campComplete && lead.tier === 3) {
     allRules.push({
-      id: 'camp-complete-dead',
+      id: 'camp-complete-cold',
       severity: 'warning',
-      message: 'CAMP data gathered but marked dead — consider reviewing tier.',
+      message: 'CAMP data gathered but tiered Cold — consider bumping to T2 or T1.',
       actions: [{ label: 'Review tier', onClick: onReviewTier }],
-      fingerprint: computeFingerprint(lead, 'camp-complete-dead'),
+      fingerprint: computeFingerprint(lead, 'camp-complete-cold'),
     });
   }
 
