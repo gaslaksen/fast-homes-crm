@@ -22,15 +22,20 @@ const TIER_CONFIG: Record<number, { label: string; cls: string }> = {
   3: { label: 'T3 Cold', cls: 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border-gray-300 dark:border-gray-700' },
 };
 
-const STAGE_LABELS: Record<string, string> = {
-  NEW: 'New',
-  CONTACTED: 'Contacted',
-  QUALIFIED: 'Qualified',
-  OFFER_MADE: 'Offer Made',
-  UNDER_CONTRACT: 'Under Contract',
-  CLOSED_WON: 'Closed Won',
-  CLOSED_LOST: 'Closed Lost',
-  DEAD: 'Dead',
+// Stage label + pill colors — mirrors LeadHeader so pills are consistent everywhere.
+const STAGE_META: Record<string, { label: string; cls: string }> = {
+  NEW:                { label: 'New',             cls: 'bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800' },
+  ATTEMPTING_CONTACT: { label: 'Attempting',      cls: 'bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800' },
+  QUALIFYING:         { label: 'Qualifying',      cls: 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 border-purple-200 dark:border-purple-800' },
+  QUALIFIED:          { label: 'Qualified',       cls: 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 border-purple-200 dark:border-purple-800' },
+  OFFER_SENT:         { label: 'Offer Sent',      cls: 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 border-orange-200 dark:border-orange-800' },
+  NEGOTIATING:        { label: 'Negotiating',     cls: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-800' },
+  UNDER_CONTRACT:     { label: 'Under Contract',  cls: 'bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-400 border-teal-200 dark:border-teal-800' },
+  CLOSING:            { label: 'Closing',         cls: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800' },
+  CLOSED_WON:         { label: 'Closed Won',      cls: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 border-green-200 dark:border-green-800' },
+  CLOSED_LOST:        { label: 'Closed Lost',     cls: 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-700' },
+  NURTURE:            { label: 'Nurture',         cls: 'bg-sky-100 dark:bg-sky-900/30 text-sky-700 dark:text-sky-400 border-sky-200 dark:border-sky-800' },
+  DEAD:               { label: 'Dead',            cls: 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-700' },
 };
 
 interface Props {
@@ -50,7 +55,7 @@ export default function HeroStrip({ lead, leadId, aiInsight, insightLoading, onG
   const spread = arv && asking ? arv - asking : null;
   const tier = lead.tier as number | null;
   const tierCfg = tier ? TIER_CONFIG[tier] : null;
-  const stageLabel = STAGE_LABELS[lead.status] || lead.status;
+  const stageMeta = STAGE_META[lead.status] || { label: lead.status, cls: 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700' };
   const lastTouchedAt = lead.lastTouchedAt ? new Date(lead.lastTouchedAt) : null;
 
   return (
@@ -124,8 +129,8 @@ export default function HeroStrip({ lead, leadId, aiInsight, insightLoading, onG
             {tierCfg && (
               <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${tierCfg.cls}`}>{tierCfg.label}</span>
             )}
-            <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700">
-              {stageLabel}
+            <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full border ${stageMeta.cls}`}>
+              {stageMeta.label}
             </span>
           </div>
           <div className="text-xs text-gray-500 dark:text-gray-400">
