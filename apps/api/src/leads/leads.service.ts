@@ -626,7 +626,19 @@ export class LeadsService {
       tier:     [{ tier: dir }, { totalScore: 'desc' }],
       score:    [{ totalScore: dir }, { createdAt: 'desc' }],
       arv:      [{ arv: dir }, { createdAt: 'desc' }],
+      // MAO is monotonic with ARV (MAO = ARV × 0.7 − $55k), so ARV order is
+      // identical to MAO order for non-null ARV rows.
+      mao:      [{ arv: dir }, { createdAt: 'desc' }],
       asking:   [{ askingPrice: dir }, { createdAt: 'desc' }],
+      // Spread isn't a stored column. We order by ARV as a rough proxy for
+      // the DB query, then the service re-sorts the returned page in memory
+      // by true (MAO − Asking). This keeps the top-of-page correct for the
+      // user without requiring a full-org computed scan.
+      spread:   [{ arv: dir }, { createdAt: 'desc' }],
+      // Stage groups by status; Prisma orders enum strings alphabetically,
+      // which isn't the pipeline's semantic order but does cluster same-stage
+      // leads together (the actual UX goal when a user clicks "Stage").
+      stage:    [{ status: dir }, { totalScore: 'desc' }],
       created:  [{ createdAt: dir }],
       touched:  [{ lastTouchedAt: dir }, { createdAt: 'desc' }],
       touches:  [{ touchCount: dir }, { createdAt: 'desc' }],
@@ -675,10 +687,22 @@ export class LeadsService {
     };
 
     // Run data query, count, and aggregate counts in parallel
-    const [leads, total, tierGroups, bandGroups, dripActiveCount, inactiveCount, stateRows] = await Promise.all([
+    const [leadsRaw, total, tierGroups, bandGroups, dripActiveCount, inactiveCount, stateRows] = await Promise.all([
       this.prisma.lead.findMany({
         where,
-        include: { assignedTo: true },
+        include: {
+          assignedTo: true,
+          // List view v2 renders an envelope icon on rows in an active drip.
+          // We only need a lightweight shape — campaign name isn't rendered
+          // in the List cell (just presence), so this stays cheap.
+          dripSequence: {
+            select: { id: true, status: true, currentStep: true },
+          },
+          campaignEnrollments: {
+            where: { status: 'ACTIVE' },
+            select: { id: true, status: true, campaignId: true },
+          },
+        },
         orderBy,
         skip,
         take: limit,
@@ -705,6 +729,29 @@ export class LeadsService {
     const bandCounts: Record<string, number> = {};
     for (const g of bandGroups) {
       bandCounts[g.scoreBand] = g._count;
+    }
+
+    // In-page Spread re-sort: when the user sorts by spread, the DB returns
+    // rows roughly ordered by ARV (set in sortMap above). Re-sort the page
+    // by true (MAO − Asking) so the top-of-page rows are correct for what
+    // the user sees. Rows missing MAO or Asking sink to the bottom.
+    let leads = leadsRaw as typeof leadsRaw;
+    if (filters.sort === 'spread') {
+      const MAO_PCT = 0.7;
+      const MAO_REPAIRS = 55_000;
+      const compSpread = (l: any): number | null => {
+        if (l.arv == null || l.arv <= 0) return null;
+        if (l.askingPrice == null || l.askingPrice <= 0) return null;
+        return Math.round(l.arv * MAO_PCT - MAO_REPAIRS) - l.askingPrice;
+      };
+      leads = [...leadsRaw].sort((a: any, b: any) => {
+        const sa = compSpread(a);
+        const sb = compSpread(b);
+        if (sa == null && sb == null) return 0;
+        if (sa == null) return 1; // nulls to bottom regardless of dir
+        if (sb == null) return -1;
+        return dir === 'desc' ? sb - sa : sa - sb;
+      }) as typeof leadsRaw;
     }
 
     return {

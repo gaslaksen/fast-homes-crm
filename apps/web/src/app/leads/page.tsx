@@ -8,12 +8,29 @@ import { leadsAPI, authAPI, pipelineAPI } from '@/lib/api';
 import PropertyPhoto from '@/components/PropertyPhoto';
 import Avatar from '@/components/Avatar';
 import AppShell from '@/components/AppShell';
-import { isKanbanV2 } from '@/lib/flags';
+import { isKanbanV2, isListViewV2 } from '@/lib/flags';
 import KanbanV2Board from '@/components/kanbanV2/KanbanV2Board';
+import ListTable from '@/components/listViewV2/ListTable';
+import {
+  useListSortPref,
+  DEFAULT_LIST_SORT,
+  type SortKey as ListSortKey,
+} from '@/components/listViewV2/hooks/useListSortPref';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type SortKey = 'score' | 'arv' | 'asking' | 'created' | 'touched' | 'touches' | 'address' | 'tier';
+type SortKey =
+  | 'score'
+  | 'arv'
+  | 'asking'
+  | 'created'
+  | 'touched'
+  | 'touches'
+  | 'address'
+  | 'tier'
+  | 'stage'
+  | 'mao'
+  | 'spread';
 type SortDir = 'asc' | 'desc';
 type ViewMode = 'table' | 'cards';
 
@@ -452,6 +469,52 @@ function LeadsPageInner() {
       .catch(() => {});
   }, []);
 
+  // List view v2: user id for localStorage-keyed sort pref
+  const [currentUserId, setCurrentUserId] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    if (!isListViewV2()) return;
+    authAPI.getMe()
+      .then(r => setCurrentUserId(r.data?.id || r.data?.userId || 'anon'))
+      .catch(() => setCurrentUserId('anon'));
+  }, []);
+
+  // List view v2: seed sort default (URL > localStorage > touched asc).
+  // Runs once after user id resolves; URL wins if it already specified a sort.
+  const seededV2SortRef = useRef(false);
+  useEffect(() => {
+    if (!isListViewV2()) return;
+    if (!currentUserId || seededV2SortRef.current) return;
+    seededV2SortRef.current = true;
+    if (searchParams.get('sort')) return; // URL wins
+    try {
+      const raw = window.localStorage.getItem(`listViewV2.sort.${currentUserId}`);
+      if (raw) {
+        const parsed = JSON.parse(raw) as { sort: SortKey; dir: SortDir };
+        if (parsed?.sort) {
+          setSortKey(parsed.sort);
+          if (parsed.dir === 'asc' || parsed.dir === 'desc') setSortDir(parsed.dir);
+          return;
+        }
+      }
+    } catch { /* ignore */ }
+    // Default: oldest last-touch first (most-neglected at top)
+    setSortKey(DEFAULT_LIST_SORT.sort as SortKey);
+    setSortDir(DEFAULT_LIST_SORT.dir);
+  }, [currentUserId, searchParams]);
+
+  // List view v2: persist sort changes to localStorage
+  useEffect(() => {
+    if (!isListViewV2()) return;
+    if (!currentUserId) return;
+    if (!seededV2SortRef.current) return;
+    try {
+      window.localStorage.setItem(
+        `listViewV2.sort.${currentUserId}`,
+        JSON.stringify({ sort: sortKey, dir: sortDir }),
+      );
+    } catch { /* ignore */ }
+  }, [currentUserId, sortKey, sortDir]);
+
   // Reset to page 1 when any filter changes (not page itself)
   const prevFiltersRef = useRef('');
   useEffect(() => {
@@ -859,7 +922,27 @@ function LeadsPageInner() {
             ))}
           </div>
 
-          {/* Desktop table */}
+          {/* Desktop table — v2 behind NEXT_PUBLIC_LIST_VIEW_V2 */}
+          {isListViewV2() ? (
+            <ListTable
+              leads={leads}
+              selectedIds={selectedIds}
+              onToggleSelect={toggleSelect}
+              onSelectAll={() =>
+                selectedIds.size === leads.length
+                  ? setSelectedIds(new Set())
+                  : setSelectedIds(new Set(leads.map(l => l.id)))
+              }
+              sortKey={sortKey as ListSortKey}
+              sortDir={sortDir}
+              onSort={(k) => {
+                if (sortKey === k) setSortDir(d => d === 'desc' ? 'asc' : 'desc');
+                else { setSortKey(k as SortKey); setSortDir('asc'); }
+              }}
+              renderTier={(l) => <TierBadge tier={(l.tier || 2) as 1 | 2 | 3} />}
+              renderScore={(l) => <ScorePill band={l.scoreBand} score={l.totalScore} />}
+            />
+          ) : (
           <div className="hidden md:block overflow-x-auto -mx-6 px-6 md:mx-0 md:px-0">
           <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden min-w-[900px]">
             <div className="grid grid-cols-[auto_44px_2fr_110px_68px_72px_72px_72px_80px_60px_72px] gap-3 px-4 py-2.5 border-b border-gray-100 dark:border-gray-800 bg-gray-50/80 dark:bg-gray-800/80">
@@ -977,6 +1060,7 @@ function LeadsPageInner() {
             </div>
           </div>
           </div>
+          )}
 
           {/* Pagination */}
           {pagination.totalPages > 1 && (

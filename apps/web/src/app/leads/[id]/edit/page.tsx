@@ -349,6 +349,7 @@ export default function EditLeadPage() {
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Asking Price</label>
                 <input
+                  id="askingPrice-input"
                   type="number"
                   name="askingPrice"
                   value={formData.askingPrice}
@@ -356,6 +357,7 @@ export default function EditLeadPage() {
                   className="input"
                   placeholder="200000"
                   min="0"
+                  autoFocus={typeof window !== 'undefined' && window.location.hash === '#asking'}
                 />
               </div>
               <div>
