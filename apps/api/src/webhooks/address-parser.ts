@@ -30,6 +30,21 @@ const US_STATES: Record<string, string> = {
   WY: 'WY', DC: 'DC',
 };
 
+// Full state names → abbreviation. Used when a payload sends "Ohio" instead of "OH".
+const US_STATE_NAMES: Record<string, string> = {
+  alabama: 'AL', alaska: 'AK', arizona: 'AZ', arkansas: 'AR', california: 'CA',
+  colorado: 'CO', connecticut: 'CT', delaware: 'DE', florida: 'FL', georgia: 'GA',
+  hawaii: 'HI', idaho: 'ID', illinois: 'IL', indiana: 'IN', iowa: 'IA',
+  kansas: 'KS', kentucky: 'KY', louisiana: 'LA', maine: 'ME', maryland: 'MD',
+  massachusetts: 'MA', michigan: 'MI', minnesota: 'MN', mississippi: 'MS', missouri: 'MO',
+  montana: 'MT', nebraska: 'NE', nevada: 'NV', 'new hampshire': 'NH', 'new jersey': 'NJ',
+  'new mexico': 'NM', 'new york': 'NY', 'north carolina': 'NC', 'north dakota': 'ND',
+  ohio: 'OH', oklahoma: 'OK', oregon: 'OR', pennsylvania: 'PA', 'rhode island': 'RI',
+  'south carolina': 'SC', 'south dakota': 'SD', tennessee: 'TN', texas: 'TX', utah: 'UT',
+  vermont: 'VT', virginia: 'VA', washington: 'WA', 'west virginia': 'WV',
+  wisconsin: 'WI', wyoming: 'WY',
+};
+
 export interface ParsedAddress {
   street: string;
   city: string;
@@ -160,7 +175,37 @@ export function parseAddressString(raw: string): Partial<ParsedAddress> {
     }
   }
 
-  // Pattern 4: "Street 12345" (street + zip only, no city/state)
+  // Pattern 4: "Street City ST [Zip]" with NO commas. Anchors on a street suffix
+  // (St/Ave/Rd/...) followed by city words and a 2-letter state abbreviation OR
+  // a full state name. Optional trailing zip. Common in SMS-shaped notifications.
+  // Tried before Patterns 5/6 because those would otherwise eagerly match the
+  // trailing zip and lose the city/state.
+  const STREET_SUFFIX = '(?:St|Street|Ave|Avenue|Rd|Road|Dr|Drive|Ln|Lane|Blvd|Boulevard|Ct|Court|Way|Pl|Place|Pkwy|Cir|Circle|Ter|Terrace|Hwy|Highway|Trl|Trail)';
+  const noCommaRe = new RegExp(
+    `^(.+?\\b${STREET_SUFFIX}\\.?)\\s+(.+?)\\s+([A-Za-z][A-Za-z\\s]{1,20}?)(?:\\s+(\\d{5}(?:-\\d{4})?))?\\s*$`,
+    'i',
+  );
+  const noCommaMatch = cleaned.match(noCommaRe);
+  if (noCommaMatch) {
+    const stateRaw = noCommaMatch[3].trim();
+    const stateUpper = stateRaw.toUpperCase();
+    let state = '';
+    if (stateUpper.length === 2 && US_STATES[stateUpper]) {
+      state = stateUpper;
+    } else {
+      state = US_STATE_NAMES[stateRaw.toLowerCase()] || '';
+    }
+    if (state) {
+      return {
+        street: noCommaMatch[1].trim(),
+        city: noCommaMatch[2].trim(),
+        state,
+        zip: noCommaMatch[4]?.trim() || '',
+      };
+    }
+  }
+
+  // Pattern 5: "Street 12345" (street + zip only, no city/state)
   const streetZipMatch = cleaned.match(/^(.+?)\s+(\d{5}(?:-\d{4})?)\s*$/);
   if (streetZipMatch && !streetZipMatch[1].match(/,/)) {
     return {
@@ -171,7 +216,7 @@ export function parseAddressString(raw: string): Partial<ParsedAddress> {
     };
   }
 
-  // Pattern 5: "Street, Zip" (comma-separated street and zip)
+  // Pattern 6: "Street, Zip" (comma-separated street and zip)
   const streetCommaZipMatch = cleaned.match(/^(.+?),\s*(\d{5}(?:-\d{4})?)\s*$/);
   if (streetCommaZipMatch) {
     return {
@@ -270,8 +315,21 @@ export async function normalizeLeadAddressAsync(
  * instead of a raw payload dict.
  */
 export async function enrichAddressFromZip(addr: NormalizedAddress): Promise<NormalizedAddress> {
-  // Clean the street field — strip any embedded city, state, zip, or country
-  addr.propertyAddress = cleanStreetAddress(addr.propertyAddress);
+  // First, try to parse the street field — it may be a full address string
+  // (e.g. "215 S Academy St Cary NC 27511"). Use any city/state/zip the parser
+  // recovers to fill in missing fields, and replace street with the cleaned
+  // version when parsing produced a shorter result.
+  if (addr.propertyAddress) {
+    const parsed = parseAddressString(addr.propertyAddress);
+    if (parsed.street && parsed.street.length < addr.propertyAddress.length) {
+      addr.propertyAddress = parsed.street;
+    } else {
+      addr.propertyAddress = cleanStreetAddress(addr.propertyAddress);
+    }
+    if (!addr.propertyCity && parsed.city) addr.propertyCity = parsed.city;
+    if (!addr.propertyState && parsed.state) addr.propertyState = parsed.state;
+    if (!addr.propertyZip && parsed.zip) addr.propertyZip = parsed.zip;
+  }
 
   if (addr.propertyCity && addr.propertyState) return addr;
   if (!addr.propertyZip) return addr;

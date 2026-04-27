@@ -195,43 +195,23 @@ export class WebhooksController {
     if (!parsed?.name || !parsed?.address) return null;
 
     const nameParts = parsed.name.trim().split(/\s+/);
-    const { street, city, state } = this.splitBoltDealsAddress(parsed.address);
     // Bolt Deals wraps emails in markdown link syntax: `[a@b.com](mailto:a@b.com)`
     const email = parsed.email?.replace(/^\[([^\]]+)\].*$/, '$1') ?? '';
+    // Reconstruct the full address line (with zip if available) and let the
+    // central parser in enrichAddressFromZip split street/city/state/zip.
+    const fullStreet = parsed.zip ? `${parsed.address} ${parsed.zip}` : parsed.address;
 
-    this.logger.log(
-      `📩 Bolt Deals SMS detected — ${parsed.name} | ${[street, city, state, parsed.zip].filter(Boolean).join(', ')}`,
-    );
+    this.logger.log(`📩 Bolt Deals SMS detected — ${parsed.name} | ${fullStreet}`);
 
     return {
       seller_first_name: nameParts[0] ?? '',
       seller_last_name: nameParts.slice(1).join(' '),
       seller_phone: parsed.phone ?? '',
       seller_email: email,
-      street_address: street,
-      city,
-      state,
-      zipcode: parsed.zip ?? '',
+      street_address: fullStreet,
       lead_source: 'google ads (Bolt Deals)',
       _twilioPayload: body,
     };
-  }
-
-  // Heuristic split of "215 S Academy St Cary NC" → street/city/state.
-  // Anchors on a street suffix (St/Ave/Rd/...) followed by city words and a
-  // 2-letter state at the end. Falls back to street-only on no match.
-  private splitBoltDealsAddress(addressLine: string): {
-    street: string;
-    city: string;
-    state: string;
-  } {
-    const m = addressLine.match(
-      /^(.+?\b(?:St|Street|Ave|Avenue|Rd|Road|Dr|Drive|Ln|Lane|Blvd|Boulevard|Ct|Court|Way|Pl|Place|Pkwy|Cir|Circle|Ter|Terrace|Hwy|Highway|Trl|Trail)\.?)\s+(.+?)\s+([A-Za-z]{2})\s*$/i,
-    );
-    if (m) {
-      return { street: m[1].trim(), city: m[2].trim(), state: m[3].toUpperCase() };
-    }
-    return { street: addressLine.trim(), city: '', state: '' };
   }
 
   /**
