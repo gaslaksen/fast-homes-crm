@@ -81,6 +81,11 @@ export default function LeadOverviewV2(props: LeadOverviewV2Props) {
         return handlers.openCommunications(intent?.startsWith('camp') ? intent : 'camp');
       case 'contract':
         return handlers.openDisposition('contract');
+      case 'dispo':
+        // Disposition v2 stages (ACQUIRED / SOLD / SOLD_LOSS / HELD / CANCELLED) —
+        // open the Disposition tab without a specific deep-link intent so the
+        // user lands on the tab and can pick the next step (cost / sale / etc).
+        return handlers.openDisposition();
       case 'call':
         window.location.href = `tel:${lead.sellerPhone}`;
         return;
