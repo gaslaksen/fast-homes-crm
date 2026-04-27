@@ -160,6 +160,16 @@ export class SmrtphoneSmsProvider implements SmsProvider {
   }): Promise<{ contactId: number; existed: boolean } | null> {
     if (!this.apiKey) return null;
 
+    const requestBody = {
+      phone: args.phone,
+      first_name: args.firstName,
+      last_name: args.lastName,
+    };
+    const apiKeyTail = this.apiKey.slice(-4);
+    this.logger.log(
+      `📞 SmrtPhone createContact → POST https://api.smrt.studio/api/v1/contacts/create | apiKey=…${apiKeyTail} | body=${JSON.stringify(requestBody)}`,
+    );
+
     let response: Response;
     try {
       response = await fetch('https://api.smrt.studio/api/v1/contacts/create', {
@@ -168,11 +178,7 @@ export class SmrtphoneSmsProvider implements SmsProvider {
           'X-Auth-smrtPhone': this.apiKey,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          phone: args.phone,
-          first_name: args.firstName,
-          last_name: args.lastName,
-        }),
+        body: JSON.stringify(requestBody),
         signal: AbortSignal.timeout(10000),
       });
     } catch (err: any) {
@@ -181,6 +187,10 @@ export class SmrtphoneSmsProvider implements SmsProvider {
     }
 
     const text = await response.text();
+    this.logger.log(
+      `📞 SmrtPhone createContact ← status=${response.status} body=${text}`,
+    );
+
     if (!response.ok) {
       throw new Error(`SmrtPhone contacts API error ${response.status}: ${text}`);
     }
