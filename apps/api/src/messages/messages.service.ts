@@ -6,7 +6,7 @@ import { DripService } from '../drip/drip.service';
 import { CampaignEnrollmentService } from '../campaigns/campaign-enrollment.service';
 import { LeadsService } from '../leads/leads.service';
 import { SellerPortalService } from '../seller-portal/seller-portal.service';
-import { SmsProvider, createSmsProvider } from './sms.provider';
+import { SmsProvider, SmrtphoneSmsProvider, createSmsProvider } from './sms.provider';
 import { GmailService } from '../gmail/gmail.service';
 import { formatPhoneNumber, isOptOutMessage } from '@fast-homes/shared';
 
@@ -582,6 +582,33 @@ You decide the right approach based on the conversation flow.${portalInstruction
     if (realMessages.length > 0) {
       this.logger.log(`Lead ${leadId}: real messages already exist (${realMessages.length}), skipping initial outreach`);
       return null;
+    }
+
+    // Create / upsert the contact in Smrtphone before sending so the SMS lands
+    // against a named contact in their UI. Idempotent on Smrtphone's side
+    // (dedupes by phone). Skip if we already have a stored contact_id.
+    if (
+      !lead.smrtphoneContactId &&
+      this.smsProvider instanceof SmrtphoneSmsProvider
+    ) {
+      try {
+        const result = await this.smsProvider.createContact({
+          phone: lead.sellerPhone,
+          firstName: lead.sellerFirstName,
+          lastName: lead.sellerLastName,
+        });
+        if (result?.contactId) {
+          await this.prisma.lead.update({
+            where: { id: leadId },
+            data: { smrtphoneContactId: result.contactId },
+          });
+          this.logger.log(
+            `Smrtphone contact ${result.existed ? 'matched' : 'created'} for lead ${leadId}: ${result.contactId}`,
+          );
+        }
+      } catch (err: any) {
+        this.logger.error(`Smrtphone contact create failed for lead ${leadId}: ${err.message}`);
+      }
     }
 
     // Fixed initial message — no AI. Asks for price and timeline upfront.

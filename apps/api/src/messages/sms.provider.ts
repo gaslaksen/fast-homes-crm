@@ -152,6 +152,49 @@ export class SmrtphoneSmsProvider implements SmsProvider {
 
     return { sid };
   }
+
+  async createContact(args: {
+    phone: string;
+    firstName: string;
+    lastName: string;
+  }): Promise<{ contactId: number; existed: boolean } | null> {
+    if (!this.apiKey) return null;
+
+    let response: Response;
+    try {
+      response = await fetch('https://api.smrt.studio/api/v1/contacts/create', {
+        method: 'POST',
+        headers: {
+          'X-Auth-smrtPhone': this.apiKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          phone: args.phone,
+          first_name: args.firstName,
+          last_name: args.lastName,
+        }),
+        signal: AbortSignal.timeout(10000),
+      });
+    } catch (err: any) {
+      this.logger.warn(`⚠️  SmrtPhone contacts API unreachable: ${err.message}`);
+      return null;
+    }
+
+    const text = await response.text();
+    if (!response.ok) {
+      throw new Error(`SmrtPhone contacts API error ${response.status}: ${text}`);
+    }
+
+    const data = JSON.parse(text);
+    if (data.error) {
+      throw new Error(`SmrtPhone contacts API returned error: ${text}`);
+    }
+
+    return {
+      contactId: Number(data.contact_id),
+      existed: Boolean(data.existed),
+    };
+  }
 }
 
 // ---------------------------------------------------------------------------

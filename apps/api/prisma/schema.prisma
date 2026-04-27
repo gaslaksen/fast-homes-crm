@@ -81,6 +81,7 @@ model Lead {
   sellerLastName    String
   sellerPhone       String
   sellerEmail       String?
+  smrtphoneContactId Int?    // Smrtphone contact ID (created on initial outreach)
   
   timeline          Int?
   askingPrice       Float?
