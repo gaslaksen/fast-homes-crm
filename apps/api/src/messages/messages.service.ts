@@ -205,6 +205,18 @@ export class MessagesService {
 
       this.logger.log(`Message sent via ${this.smsProvider.constructor.name}: ${sent.sid}`);
 
+      // Mark portal link as sent if this outbound message contains the portal URL
+      if (this.sellerPortalService) {
+        try {
+          const portalUrl = await this.sellerPortalService.getPortalUrl(leadId);
+          if (portalUrl && body.includes(portalUrl)) {
+            await this.sellerPortalService.markPortalLinkSent(leadId);
+          }
+        } catch (err: any) {
+          this.logger.warn(`Failed to check/mark portal link for ${leadId}: ${err.message}`);
+        }
+      }
+
       // Record touch (activity log + pipeline tracking)
       await this.leadsService.recordTouch(leadId, 'MESSAGE_SENT', {
         userId,

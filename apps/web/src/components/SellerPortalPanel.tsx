@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { sellerPortalAPI } from '@/lib/api';
 
 interface SellerPortalPanelProps {
@@ -8,10 +9,10 @@ interface SellerPortalPanelProps {
 }
 
 export default function SellerPortalPanel({ leadId }: SellerPortalPanelProps) {
+  const router = useRouter();
   const [portal, setPortal] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
-  const [sending, setSending] = useState(false);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState('');
 
@@ -45,17 +46,9 @@ export default function SellerPortalPanel({ leadId }: SellerPortalPanelProps) {
     }
   };
 
-  const handleSendLink = async () => {
-    setSending(true);
-    setError('');
-    try {
-      await sellerPortalAPI.sendLink(leadId);
-      fetchPortal();
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to send portal link');
-    } finally {
-      setSending(false);
-    }
+  const handleSendLink = () => {
+    const action = portal?.portalLinkSentAt ? 'resend-portal-link' : 'send-portal-link';
+    router.push(`/leads/${leadId}?tab=communications&action=${action}`);
   };
 
   const handleRegenerate = async () => {
@@ -154,10 +147,9 @@ export default function SellerPortalPanel({ leadId }: SellerPortalPanelProps) {
           <div className="flex flex-wrap gap-2">
             <button
               onClick={handleSendLink}
-              disabled={sending}
-              className="px-3 py-1.5 text-xs font-semibold text-white bg-primary-600 hover:bg-primary-700 rounded-md transition disabled:opacity-50"
+              className="px-3 py-1.5 text-xs font-semibold text-white bg-primary-600 hover:bg-primary-700 rounded-md transition"
             >
-              {sending ? 'Sending…' : portal.portalLinkSentAt ? 'Resend Link' : 'Send Link'}
+              {portal.portalLinkSentAt ? 'Resend Link' : 'Send Link'}
             </button>
             <a
               href={portal.portalUrl}

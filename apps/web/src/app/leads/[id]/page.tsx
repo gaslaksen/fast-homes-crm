@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { leadsAPI, messagesAPI, compsAPI, settingsAPI, photosAPI, callsAPI, authAPI, tasksAPI, gmailAPI, campaignAPI, partnersAPI } from '@/lib/api';
+import { leadsAPI, messagesAPI, compsAPI, settingsAPI, photosAPI, callsAPI, authAPI, tasksAPI, gmailAPI, campaignAPI, partnersAPI, sellerPortalAPI } from '@/lib/api';
 import ShareDealModal from '@/components/ShareDealModal';
 import ShareHistory from '@/components/ShareHistory';
 import DispoTab from '@/components/DispoTab';
@@ -91,6 +91,26 @@ export default function LeadDetailPage() {
         }, 200);
       }
     }
+    if ((action === 'send-portal-link' || action === 'resend-portal-link') && activeTab === 'communications' && !portalLinkIntentApplied.current) {
+      portalLinkIntentApplied.current = true;
+      (async () => {
+        try {
+          const res = await sellerPortalAPI.getInfo(leadId);
+          const portalUrl = res.data?.portalUrl;
+          if (!portalUrl) return;
+          const firstName = (lead.sellerFirstName || '').trim() || 'there';
+          const message = action === 'resend-portal-link'
+            ? `Hey ${firstName}, just resending the link in case you missed it — you can upload photos, see comps, and review offers here: ${portalUrl}`
+            : `Hey ${firstName}! Here's the link where you can upload photos of the property, view comps, and review offers: ${portalUrl}`;
+          setMessageDrafts({ message });
+          setSelectedDraft(message);
+        } catch (err) { console.error('Failed to load portal for draft', err); }
+        setTimeout(() => {
+          messagesBottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+          composerRef.current?.focus();
+        }, 200);
+      })();
+    }
   }, [activeTab, lead, leadId, searchParams]);
   const [messageDrafts, setMessageDrafts] = useState<any>(null);
   const [selectedDraft, setSelectedDraft] = useState('');
@@ -134,6 +154,7 @@ export default function LeadDetailPage() {
   const [sendingOutreach, setSendingOutreach] = useState(false);
   const replyIntentApplied = useRef(false);
   const offerIntentApplied = useRef(false);
+  const portalLinkIntentApplied = useRef(false);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const messagesBottomRef = useRef<HTMLDivElement | null>(null);
 
