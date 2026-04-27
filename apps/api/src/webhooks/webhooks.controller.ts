@@ -166,8 +166,14 @@ export class WebhooksController {
       };
     }
 
+    // Bolt Deals fires its lead notifications as Twilio SMS forwards. The
+    // payload looks like a Twilio message webhook and the actual lead data
+    // is embedded in `body.body`. Repack into the flat seller_* shape that
+    // InvestorFuseService expects.
+    const payload = this.extractBoltDealsLead(body) ?? body;
+
     const result = await this.investorFuseService.handleOpportunityCreated(
-      body,
+      payload,
       LeadSource.GOOGLE_ADS,
       '/tmp/google-ads-sample.json',
     );
@@ -177,6 +183,55 @@ export class WebhooksController {
     }
 
     return result;
+  }
+
+  private extractBoltDealsLead(body: any): Record<string, any> | null {
+    const smsBody: unknown = body?.body;
+    if (typeof smsBody !== 'string' || !smsBody.includes('New Lead in the CRM')) {
+      return null;
+    }
+
+    const parsed = this.slackLeadService.parseLeadNotification(smsBody);
+    if (!parsed?.name || !parsed?.address) return null;
+
+    const nameParts = parsed.name.trim().split(/\s+/);
+    const { street, city, state } = this.splitBoltDealsAddress(parsed.address);
+    // Bolt Deals wraps emails in markdown link syntax: `[a@b.com](mailto:a@b.com)`
+    const email = parsed.email?.replace(/^\[([^\]]+)\].*$/, '$1') ?? '';
+
+    this.logger.log(
+      `📩 Bolt Deals SMS detected — ${parsed.name} | ${[street, city, state, parsed.zip].filter(Boolean).join(', ')}`,
+    );
+
+    return {
+      seller_first_name: nameParts[0] ?? '',
+      seller_last_name: nameParts.slice(1).join(' '),
+      seller_phone: parsed.phone ?? '',
+      seller_email: email,
+      street_address: street,
+      city,
+      state,
+      zipcode: parsed.zip ?? '',
+      lead_source: 'google ads (Bolt Deals)',
+      _twilioPayload: body,
+    };
+  }
+
+  // Heuristic split of "215 S Academy St Cary NC" → street/city/state.
+  // Anchors on a street suffix (St/Ave/Rd/...) followed by city words and a
+  // 2-letter state at the end. Falls back to street-only on no match.
+  private splitBoltDealsAddress(addressLine: string): {
+    street: string;
+    city: string;
+    state: string;
+  } {
+    const m = addressLine.match(
+      /^(.+?\b(?:St|Street|Ave|Avenue|Rd|Road|Dr|Drive|Ln|Lane|Blvd|Boulevard|Ct|Court|Way|Pl|Place|Pkwy|Cir|Circle|Ter|Terrace|Hwy|Highway|Trl|Trail)\.?)\s+(.+?)\s+([A-Za-z]{2})\s*$/i,
+    );
+    if (m) {
+      return { street: m[1].trim(), city: m[2].trim(), state: m[3].toUpperCase() };
+    }
+    return { street: addressLine.trim(), city: '', state: '' };
   }
 
   /**
