@@ -9,6 +9,7 @@ interface Props {
   onCall: () => void;
   onText: () => void;
   onEmail: () => void;
+  onRefreshDetails: () => Promise<{ success: boolean; source?: string; message: string }>;
 }
 
 function Fact({ label, value }: { label: string; value: string | number | null | undefined }) {
@@ -28,8 +29,24 @@ function Fact({ label, value }: { label: string; value: string | number | null |
   );
 }
 
-export default function SellerPropertyCard({ lead, onCall, onText, onEmail }: Props) {
+export default function SellerPropertyCard({ lead, onCall, onText, onEmail, onRefreshDetails }: Props) {
   const [expanded, setExpanded] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  async function handleRefresh() {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      const result = await onRefreshDetails();
+      if (!result.success) {
+        alert(result.message || 'Property details not found');
+      }
+    } catch (err: any) {
+      alert(`Refresh failed: ${err?.message || 'Unknown error'}`);
+    } finally {
+      setRefreshing(false);
+    }
+  }
   const ownershipLabel = lead.ownershipStatus ? lead.ownershipStatus.replace('_', ' ') : null;
   const hasDetails = !!(
     lead.apn || lead.subdivision || lead.taxAssessedValue || lead.marketAssessedValue ||
@@ -78,13 +95,25 @@ export default function SellerPropertyCard({ lead, onCall, onText, onEmail }: Pr
       </div>
 
       {/* Property facts strip */}
-      <div className="border-t border-gray-200 dark:border-gray-700 pt-3 grid grid-cols-3 sm:grid-cols-6 gap-2">
-        <Fact label="Type" value={lead.propertyType || null} />
-        <Fact label="Beds" value={lead.bedrooms} />
-        <Fact label="Baths" value={lead.bathrooms} />
-        <Fact label="Sqft" value={(lead.sqftOverride || lead.sqft) ? Number(lead.sqftOverride || lead.sqft).toLocaleString() : null} />
-        <Fact label="Year" value={lead.yearBuilt} />
-        <Fact label="Lot" value={lead.lotSize ? `${lead.lotSize} ac` : null} />
+      <div className="border-t border-gray-200 dark:border-gray-700 pt-3">
+        <div className="flex items-center justify-end mb-2">
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing}
+            title="Re-fetch property details from REAPI (use after editing the address)"
+            className="text-[11px] text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {refreshing ? 'Refreshing…' : '↻ Refresh from REAPI'}
+          </button>
+        </div>
+        <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+          <Fact label="Type" value={lead.propertyType || null} />
+          <Fact label="Beds" value={lead.bedrooms} />
+          <Fact label="Baths" value={lead.bathrooms} />
+          <Fact label="Sqft" value={(lead.sqftOverride || lead.sqft) ? Number(lead.sqftOverride || lead.sqft).toLocaleString() : null} />
+          <Fact label="Year" value={lead.yearBuilt} />
+          <Fact label="Lot" value={lead.lotSize ? `${lead.lotSize} ac` : null} />
+        </div>
       </div>
 
       {/* Accordion */}

@@ -62,7 +62,7 @@ export interface LeadOverviewV2Props {
 }
 
 export default function LeadOverviewV2(props: LeadOverviewV2Props) {
-  const { lead, leadId, handlers, uiState } = props;
+  const { lead, leadId, handlers, uiState, reload } = props;
   const searchParams = useSearchParams();
   const router = useRouter();
   const intent = searchParams.get('action');
@@ -161,6 +161,11 @@ export default function LeadOverviewV2(props: LeadOverviewV2Props) {
             onCall={() => { window.location.href = `tel:${lead.sellerPhone}`; }}
             onText={() => handlers.openCommunications('reply')}
             onEmail={() => handlers.openCommunications('reply')}
+            onRefreshDetails={async () => {
+              const res = await leadsAPI.refreshPropertyDetails(leadId);
+              reload();
+              return res.data;
+            }}
           />
           <CampDiscoveryCard
             lead={lead}
