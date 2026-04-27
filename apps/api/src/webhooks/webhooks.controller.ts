@@ -166,38 +166,17 @@ export class WebhooksController {
       };
     }
 
-    try {
-      const addr = await normalizeLeadAddressAsync(body);
-      console.log('📍 Parsed address:', addr);
-      const leadData = {
-        source: LeadSource.GOOGLE_ADS,
-        organizationId: process.env.DEFAULT_ORGANIZATION_ID,
-        propertyAddress: addr.propertyAddress,
-        propertyCity: addr.propertyCity,
-        propertyState: addr.propertyState,
-        propertyZip: addr.propertyZip,
-        sellerFirstName: body.sellerFirstName || body.firstName || body.name?.split(' ')[0] || 'Unknown',
-        sellerLastName: body.sellerLastName || body.lastName || body.name?.split(' ').slice(1).join(' ') || '',
-        sellerPhone: formatPhoneNumber(body.sellerPhone || body.phone),
-        sellerEmail: body.sellerEmail || body.email,
-        sourceMetadata: body,
-      };
+    const result = await this.investorFuseService.handleOpportunityCreated(
+      body,
+      LeadSource.GOOGLE_ADS,
+      '/tmp/google-ads-sample.json',
+    );
 
-      const lead = await this.leadsService.createLead(leadData);
-
-      await this.triggerAiOutreach(lead.id, 'GoogleAds');
-
-      return {
-        success: true,
-        leadId: lead.id,
-      };
-    } catch (error) {
-      console.error('❌ Google Ads webhook error:', error);
-      return {
-        success: false,
-        error: error.message,
-      };
+    if (result.success && result.leadId) {
+      await this.triggerAiOutreach(result.leadId, 'GoogleAds');
     }
+
+    return result;
   }
 
   /**

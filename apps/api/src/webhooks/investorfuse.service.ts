@@ -19,7 +19,7 @@ import * as fs from 'fs';
 @Injectable()
 export class InvestorFuseService {
   private readonly logger = new Logger(InvestorFuseService.name);
-  private sampleSaved = false; // resets on each API restart — captures first real payload
+  private samplesSaved = new Set<string>(); // resets on each API restart — captures first payload per sample path
 
   constructor(
     private leadsService: LeadsService,
@@ -27,7 +27,7 @@ export class InvestorFuseService {
 
   // ─── Parse InvestorFuse payload ───────────────────────────────────────────
 
-  parseLead(body: any) {
+  parseLead(body: any, forceSource?: LeadSource) {
     // InvestorFuse sends a flat payload with seller_ prefixed fields.
     // Falls back to nested contact/property objects for flexibility.
     const contact  = body.contact  || body.Contact  || body;
@@ -68,9 +68,11 @@ export class InvestorFuseService {
     const rawPropertyType = body.property_type || property.property_type;
 
     const sourceStr = body.lead_source || body.source || body.campaign_name || '';
-    const source = sourceStr.toLowerCase().includes('google')
-      ? LeadSource.GOOGLE_ADS
-      : LeadSource.PROPERTY_LEADS;
+    const source =
+      forceSource ??
+      (sourceStr.toLowerCase().includes('google')
+        ? LeadSource.GOOGLE_ADS
+        : LeadSource.PROPERTY_LEADS);
 
     return {
       // Contact
@@ -99,20 +101,24 @@ export class InvestorFuseService {
 
   // ─── Main handler ─────────────────────────────────────────────────────────
 
-  async handleOpportunityCreated(body: any): Promise<{ success: boolean; leadId?: string; message: string }> {
-    // Save sample payload once for field verification
-    if (!this.sampleSaved) {
+  async handleOpportunityCreated(
+    body: any,
+    forceSource?: LeadSource,
+    sampleFilePath: string = '/tmp/investorfuse-sample.json',
+  ): Promise<{ success: boolean; leadId?: string; message: string }> {
+    // Save sample payload once per path for field verification
+    if (!this.samplesSaved.has(sampleFilePath)) {
       try {
-        fs.writeFileSync('/tmp/investorfuse-sample.json', JSON.stringify(body, null, 2));
-        this.logger.log('📄 Saved IF sample payload → /tmp/investorfuse-sample.json');
+        fs.writeFileSync(sampleFilePath, JSON.stringify(body, null, 2));
+        this.logger.log(`📄 Saved sample payload → ${sampleFilePath}`);
       } catch {}
-      this.sampleSaved = true;
+      this.samplesSaved.add(sampleFilePath);
     }
 
-    const leadData = this.parseLead(body);
+    const leadData = this.parseLead(body, forceSource);
 
     if (!leadData) {
-      this.logger.error('Could not parse address from IF payload — check /tmp/investorfuse-sample.json');
+      this.logger.error(`Could not parse address from payload — check ${sampleFilePath}`);
       return { success: false, message: 'Could not parse address from payload' };
     }
 
@@ -123,7 +129,7 @@ export class InvestorFuseService {
       leadData.propertyZip,
     ].filter(Boolean).join(', ');
 
-    this.logger.log(`📥 InvestorFuse lead: ${leadData.sellerFirstName} ${leadData.sellerLastName} | ${fullAddress}`);
+    this.logger.log(`📥 ${leadData.source} lead: ${leadData.sellerFirstName} ${leadData.sellerLastName} | ${fullAddress}`);
 
     // ── Create lead in DB ──
     let lead: any;
