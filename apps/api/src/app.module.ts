@@ -23,6 +23,7 @@ import { PartnersModule } from './partners/partners.module';
 import { SellerPortalModule } from './seller-portal/seller-portal.module';
 import { RemindersModule } from './reminders/reminders.module';
 import { ActionsModule } from './actions/actions.module';
+import { DispositionModule } from './disposition/disposition.module';
 
 @Module({
   imports: [
@@ -52,6 +53,7 @@ import { ActionsModule } from './actions/actions.module';
     SellerPortalModule,
     RemindersModule,
     ActionsModule,
+    DispositionModule,
   ],
 })
 export class AppModule {}

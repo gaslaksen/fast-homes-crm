@@ -424,3 +424,19 @@ export const dispoAPI = {
   updateOffer: (leadId: string, offerId: string, data: any) => api.patch(`/leads/${leadId}/offers/${offerId}`, data),
   deleteOffer: (leadId: string, offerId: string) => api.delete(`/leads/${leadId}/offers/${offerId}`),
 };
+
+// Disposition v2 — plan, costs, final sale, and stage transitions.
+export const dispositionAPI = {
+  getPlan: (leadId: string) => api.get(`/leads/${leadId}/disposition-plan`),
+  upsertPlan: (leadId: string, data: any) => api.post(`/leads/${leadId}/disposition-plan`, data),
+  listCosts: (leadId: string) => api.get(`/leads/${leadId}/disposition-costs`),
+  createCost: (leadId: string, data: any) => api.post(`/leads/${leadId}/disposition-costs`, data),
+  updateCost: (leadId: string, costId: string, data: any) =>
+    api.patch(`/leads/${leadId}/disposition-costs/${costId}`, data),
+  deleteCost: (leadId: string, costId: string) =>
+    api.delete(`/leads/${leadId}/disposition-costs/${costId}`),
+  getFinalSale: (leadId: string) => api.get(`/leads/${leadId}/final-sale`),
+  upsertFinalSale: (leadId: string, data: any) => api.post(`/leads/${leadId}/final-sale`, data),
+  markAcquired: (leadId: string) => api.post(`/leads/${leadId}/mark-acquired`),
+  markSold: (leadId: string) => api.post(`/leads/${leadId}/mark-sold`),
+};
