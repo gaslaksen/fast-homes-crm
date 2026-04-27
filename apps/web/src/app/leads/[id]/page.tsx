@@ -19,6 +19,24 @@ import { formatPhoneDisplay } from '@/lib/format';
 
 const LEAD_DETAIL_V2 = process.env.NEXT_PUBLIC_LEAD_DETAIL_V2 === 'restructured';
 
+// Lightweight icon + color cues for the Activity Log. Disposition-v2 events
+// (PROFIT_BUCKET_CHANGED, COST_*, LEAD_ACQUIRED, FINAL_SALE_RECORDED,
+// DISPOSITION_PLAN_UPDATED) get a money/calendar visual; legacy events stay
+// uncolored so the change doesn't perturb existing rows.
+const ACTIVITY_TYPE_META: Record<string, { icon?: string; color?: string }> = {
+  PROFIT_BUCKET_CHANGED:    { icon: '📊', color: 'text-blue-600 dark:text-blue-400' },
+  COST_ADDED:               { icon: '💸', color: 'text-amber-600 dark:text-amber-400' },
+  COST_UPDATED:             { icon: '💸', color: 'text-amber-600 dark:text-amber-400' },
+  COST_DELETED:             { icon: '💸', color: 'text-gray-400 dark:text-gray-500' },
+  LEAD_ACQUIRED:            { icon: '🏷️', color: 'text-cyan-600 dark:text-cyan-400' },
+  FINAL_SALE_RECORDED:      { icon: '🏁', color: 'text-green-600 dark:text-green-400' },
+  DISPOSITION_PLAN_UPDATED: { icon: '🗺️', color: 'text-purple-600 dark:text-purple-400' },
+  OFFER_MADE:               { icon: '✉️', color: 'text-orange-600 dark:text-orange-400' },
+  OFFER_ACCEPTED:           { icon: '✅', color: 'text-green-600 dark:text-green-400' },
+  STATUS_CHANGED:           { icon: '🔄', color: 'text-blue-500 dark:text-blue-400' },
+  DOCUMENT_SENT:            { icon: '📄', color: 'text-indigo-600 dark:text-indigo-400' },
+};
+
 function getNextCampFocus(lead: any): string | null {
   if (!lead.campPriorityComplete) return 'Priority (Timeline)';
   if (!lead.campMoneyComplete) return 'Money (Asking Price)';
@@ -2180,23 +2198,31 @@ export default function LeadDetailPage() {
             <div className="card">
               <h2 className="text-xl font-bold mb-4">Activity Log</h2>
               <div className="space-y-3">
-                {lead.activities?.map((activity: any) => (
-                  <div key={activity.id} className="p-3 bg-gray-50 dark:bg-gray-950 rounded">
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <div className="text-sm font-medium">{activity.description}</div>
-                        {activity.user && (
-                          <div className="text-xs text-gray-500 dark:text-gray-400">
-                            by {activity.user.firstName} {activity.user.lastName}
+                {lead.activities?.map((activity: any) => {
+                  const meta = ACTIVITY_TYPE_META[activity.type] ?? {};
+                  return (
+                    <div key={activity.id} className="p-3 bg-gray-50 dark:bg-gray-950 rounded">
+                      <div className="flex justify-between items-start gap-3">
+                        <div className="flex items-start gap-2 min-w-0">
+                          {meta.icon && (
+                            <span className={`shrink-0 text-base leading-none mt-0.5 ${meta.color ?? ''}`}>{meta.icon}</span>
+                          )}
+                          <div className="min-w-0">
+                            <div className="text-sm font-medium">{activity.description}</div>
+                            {activity.user && (
+                              <div className="text-xs text-gray-500 dark:text-gray-400">
+                                by {activity.user.firstName} {activity.user.lastName}
+                              </div>
+                            )}
                           </div>
-                        )}
-                      </div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400">
-                        {format(new Date(activity.createdAt), 'MMM d, h:mm a')}
+                        </div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400 shrink-0">
+                          {format(new Date(activity.createdAt), 'MMM d, h:mm a')}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
 
