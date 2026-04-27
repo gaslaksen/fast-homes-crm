@@ -9,7 +9,7 @@ import StagePill from './StagePill';
 import EmptyCellChip from './EmptyCellChip';
 import TouchBadge from './TouchBadge';
 
-const INACTIVE_STATUSES = ['DEAD', 'CLOSED_WON', 'CLOSED_LOST'];
+const INACTIVE_STATUSES = ['DEAD', 'SOLD', 'SOLD_LOSS', 'HELD_LONG_TERM', 'CANCELLED', 'CLOSED_LOST'];
 const SOURCE_LABELS: Record<string, string> = {
   PROPERTY_LEADS: 'PPL',
   GOOGLE_ADS: 'PPC',

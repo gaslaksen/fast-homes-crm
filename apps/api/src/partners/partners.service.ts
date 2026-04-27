@@ -1,5 +1,13 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+
+const ALLOWED_TYPES = ['buyer', 'jv', 'title', 'lender', 'agent', 'other'] as const;
+type PartnerType = (typeof ALLOWED_TYPES)[number];
+
+function normalizeType(t: string | undefined): PartnerType {
+  if (!t) return 'buyer';
+  return (ALLOWED_TYPES as readonly string[]).includes(t) ? (t as PartnerType) : 'other';
+}
 
 @Injectable()
 export class PartnersService {
@@ -35,7 +43,7 @@ export class PartnersService {
         email: data.email.toLowerCase(),
         company: data.company,
         phone: data.phone,
-        type: data.type || 'buyer',
+        type: normalizeType(data.type),
         tags: data.tags || [],
         notes: data.notes,
       },
@@ -98,6 +106,7 @@ export class PartnersService {
     type?: string;
     tags?: string[];
     notes?: string;
+    needsTypeReview?: boolean;
   }) {
     const partner = await this.prisma.partner.findFirst({
       where: { id, organizationId: orgId },
@@ -109,6 +118,10 @@ export class PartnersService {
         where: { organizationId_email: { organizationId: orgId, email: data.email.toLowerCase() } },
       });
       if (existing) throw new ConflictException('A partner with this email already exists');
+    }
+
+    if (data.type !== undefined && !(ALLOWED_TYPES as readonly string[]).includes(data.type)) {
+      throw new BadRequestException(`Invalid partner type. Must be one of: ${ALLOWED_TYPES.join(', ')}`);
     }
 
     return this.prisma.partner.update({

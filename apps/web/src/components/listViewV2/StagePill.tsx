@@ -3,10 +3,22 @@
 import { getStage } from '@/lib/pipelineStages';
 
 const CLOSED_VARIANTS: Record<string, { label: string; cls: string }> = {
-  CLOSED_WON: {
-    label: 'Closed ✓',
+  // SOLD is a kanban column (handled via PIPELINE_STAGES); the variants below
+  // are *terminal outcomes* that aren't surfaced as columns.
+  SOLD_LOSS: {
+    label: 'Sold (Loss)',
     cls:
-      'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-800',
+      'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 border border-red-200 dark:border-red-800',
+  },
+  HELD_LONG_TERM: {
+    label: 'Held',
+    cls:
+      'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700',
+  },
+  CANCELLED: {
+    label: 'Cancelled',
+    cls:
+      'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border border-gray-300 dark:border-gray-700',
   },
   CLOSED_LOST: {
     label: 'Lost',

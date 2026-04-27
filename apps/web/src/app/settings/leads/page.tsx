@@ -102,7 +102,11 @@ export default function LeadManagementPage() {
     OFFER_SENT: 'Offer Made',
     UNDER_CONTRACT: 'Under Contract',
     CLOSING: 'Closing',
-    CLOSED_WON: 'Closed Won',
+    ACQUIRED: 'Acquired',
+    SOLD: 'Sold',
+    SOLD_LOSS: 'Sold (Loss)',
+    HELD_LONG_TERM: 'Held (Long Term)',
+    CANCELLED: 'Cancelled',
     CLOSED_LOST: 'Closed Lost',
   };
 

@@ -278,9 +278,9 @@ export class DealPackageService {
       badgesHtml = `<tr><td style="padding:16px 32px 0 32px;">${badges.join(' &nbsp;')}</td></tr>`;
     }
 
-    // ── Exit scenarios (for JV and fix_and_flip) ────────────────────────────
+    // ── Exit scenarios (for JV partners) ────────────────────────────────────
     let exitScenariosHtml = '';
-    if ((partnerType === 'jv_partner' || partnerType === 'fix_and_flip') && di?.exitScenarios?.length) {
+    if (partnerType === 'jv' && di?.exitScenarios?.length) {
       const scenarios = di.exitScenarios.slice(0, 3);
       const scenarioCells = scenarios.map((s: any) => `
         <td style="padding:12px;width:${Math.floor(100/scenarios.length)}%;vertical-align:top;border-right:1px solid #e2e8f0;">
@@ -297,9 +297,9 @@ export class DealPackageService {
       </td></tr>`;
     }
 
-    // ── Risk factors (for hedge_fund) ───────────────────────────────────────
+    // ── Risk factors (lender-targeted disclosures) ──────────────────────────
     let riskHtml = '';
-    if (partnerType === 'hedge_fund' && di?.riskFactors?.length) {
+    if (partnerType === 'lender' && di?.riskFactors?.length) {
       const impactColors: Record<string, string> = { high: '#dc2626', medium: '#ca8a04', low: '#059669' };
       const riskItems = di.riskFactors.slice(0, 3).map((r: any) => `
         <tr>
@@ -481,7 +481,7 @@ export class DealPackageService {
     ].filter(Boolean).join(', ');
 
     switch (partnerType) {
-      case 'jv_partner': {
+      case 'jv': {
         const parts: string[] = [];
         if (propDesc) parts.push(`${propDesc} property`);
         if (arv) parts.push(`with an ARV of ${fmt(arv)}`);
@@ -500,7 +500,7 @@ export class DealPackageService {
         return `${intro}${profitLine}${buyLine}${condLine}`.trim();
       }
 
-      case 'hedge_fund': {
+      case 'lender': {
         const parts: string[] = [];
         if (propDesc) parts.push(`${propDesc} asset`);
         if (arv) parts.push(`valued at ${fmt(arv)} ARV`);
@@ -514,26 +514,7 @@ export class DealPackageService {
         return `${intro}${confLine}${repLine}`.trim();
       }
 
-      case 'fix_and_flip': {
-        const parts: string[] = [];
-        if (propDesc) parts.push(`${propDesc} flip opportunity`);
-        if (arv) parts.push(`with ${fmt(arv)} ARV`);
-        const intro = parts.length ? parts.join(' ') + '.' : '';
-
-        const repLine = repairs > 0 ? ` Estimated rehab of ${fmt(repairs)}${analysis.repairFinishLevel ? ` (${analysis.repairFinishLevel.replace(/_/g, ' ')})` : ''}.` : '';
-
-        let profitLine = '';
-        if (projectedProfit > 0) {
-          profitLine = ` Net profit potential of ${fmt(projectedProfit)} after acquisition at ${fmt(mao)} and all costs.`;
-        }
-
-        const condition = analysis.conditionTier || analysis.photoAnalysis?.overallCondition;
-        const condLine = condition ? ` Current condition: ${condition.toLowerCase()}.` : '';
-
-        return `${intro}${repLine}${profitLine}${condLine}`.trim();
-      }
-
-      default: { // buyer / wholesale
+      default: { // buyer / agent / title / other / wholesale
         const parts: string[] = [];
         if (propDesc) parts.push(`${propDesc} wholesale deal`);
         if (arv) parts.push(`with ${fmt(arv)} ARV`);
@@ -567,7 +548,7 @@ export class DealPackageService {
     const flipTimeline = bestExit?.timeToSell || '4-6 months';
 
     switch (partnerType) {
-      case 'jv_partner':
+      case 'jv':
         return {
           headline: 'Joint Venture Opportunity',
           accentColor: '#a78bfa', // purple
@@ -579,9 +560,9 @@ export class DealPackageService {
           metaLine: `ARV @ ${analysis?.maoPercent || 70}% &mdash; Built for equity partnership`,
         };
 
-      case 'hedge_fund':
+      case 'lender':
         return {
-          headline: 'Investment Opportunity',
+          headline: 'Lending Opportunity',
           accentColor: '#60a5fa', // blue
           numberCells: [
             { label: 'ARV', value: fmt(arv), color: '#059669', sub: analysis?.arvLow && analysis?.arvHigh ? `${fmt(analysis.arvLow)} - ${fmt(analysis.arvHigh)}` : '' },
@@ -591,19 +572,10 @@ export class DealPackageService {
           metaLine: `Est. Repairs: ${fmt(repairs)} &mdash; Risk-adjusted data available in full analysis`,
         };
 
-      case 'fix_and_flip':
-        return {
-          headline: 'Flip Opportunity',
-          accentColor: '#f97316', // orange
-          numberCells: [
-            { label: 'ARV', value: fmt(arv), color: '#059669', sub: '' },
-            { label: 'Rehab Cost', value: fmt(repairs), color: '#dc2626', sub: analysis?.repairFinishLevel?.replace(/_/g, ' ') || '' },
-            { label: 'Net Profit', value: fmt(projectedProfit), color: projectedProfit && projectedProfit > 0 ? '#059669' : '#dc2626', sub: `Buy @ ${fmt(mao)}` },
-          ],
-          metaLine: flipTimeline ? `Estimated timeline: ${flipTimeline}` : '',
-        };
-
       case 'buyer':
+      case 'agent':
+      case 'title':
+      case 'other':
       default:
         return {
           headline: 'Wholesale Opportunity',

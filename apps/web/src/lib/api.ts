@@ -397,7 +397,7 @@ export const partnersAPI = {
   get: (id: string) => api.get(`/partners/${id}`),
   create: (data: { name: string; email: string; company?: string; phone?: string; type?: string; tags?: string[]; notes?: string }) =>
     api.post('/partners', data),
-  update: (id: string, data: { name?: string; email?: string; company?: string; phone?: string; type?: string; tags?: string[]; notes?: string }) =>
+  update: (id: string, data: { name?: string; email?: string; company?: string; phone?: string; type?: string; tags?: string[]; notes?: string; needsTypeReview?: boolean }) =>
     api.patch(`/partners/${id}`, data),
   delete: (id: string) => api.delete(`/partners/${id}`),
   shareDeal: (data: { leadId: string; partnerIds: string[]; channel?: string; personalNote?: string; emailSubject?: string }) =>

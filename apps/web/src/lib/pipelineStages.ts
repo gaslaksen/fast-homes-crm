@@ -7,7 +7,21 @@ export type PipelineStageId =
   | 'NEGOTIATING'
   | 'UNDER_CONTRACT'
   | 'CLOSING'
+  | 'ACQUIRED'
+  | 'SOLD'
   | 'NURTURE';
+
+// Statuses that are terminal outcomes (not kanban columns). Kanban filters
+// these out; they appear only in list/detail views and outcome filters.
+export const TERMINAL_STATUSES = [
+  'SOLD_LOSS',
+  'HELD_LONG_TERM',
+  'CANCELLED',
+  'CLOSED_LOST',
+  'DEAD',
+] as const;
+
+export type TerminalStatusId = (typeof TERMINAL_STATUSES)[number];
 
 export interface PipelineStage {
   id: PipelineStageId;
@@ -72,6 +86,20 @@ export const PIPELINE_STAGES: PipelineStage[] = [
     color:
       'bg-emerald-100 dark:bg-emerald-900/30 border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-400',
     accent: 'bg-emerald-500',
+  },
+  {
+    id: 'ACQUIRED',
+    name: 'Acquired',
+    color:
+      'bg-cyan-100 dark:bg-cyan-900/30 border-cyan-300 dark:border-cyan-800 text-cyan-800 dark:text-cyan-400',
+    accent: 'bg-cyan-500',
+  },
+  {
+    id: 'SOLD',
+    name: 'Sold',
+    color:
+      'bg-green-100 dark:bg-green-900/30 border-green-300 dark:border-green-800 text-green-800 dark:text-green-400',
+    accent: 'bg-green-500',
   },
   {
     id: 'NURTURE',

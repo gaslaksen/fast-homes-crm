@@ -36,7 +36,7 @@ type ViewMode = 'table' | 'cards';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const INACTIVE_STATUSES = ['DEAD', 'CLOSED_WON', 'CLOSED_LOST'];
+const INACTIVE_STATUSES = ['DEAD', 'SOLD', 'SOLD_LOSS', 'HELD_LONG_TERM', 'CANCELLED', 'CLOSED_LOST'];
 
 const PIPELINE_STAGES = [
   { id: 'NEW',                name: 'New Leads',          color: 'bg-primary-100 dark:bg-primary-900/30 border-primary-300 dark:border-primary-800 text-primary-800 dark:text-primary-400' },
@@ -47,6 +47,8 @@ const PIPELINE_STAGES = [
   { id: 'NEGOTIATING',        name: 'Negotiating',        color: 'bg-amber-100 dark:bg-amber-900/30 border-amber-300 dark:border-amber-800 text-amber-800 dark:text-amber-400' },
   { id: 'UNDER_CONTRACT',     name: 'Under Contract',     color: 'bg-teal-100 dark:bg-teal-900/30 border-teal-300 dark:border-teal-800 text-teal-800 dark:text-teal-400' },
   { id: 'CLOSING',            name: 'Closing',            color: 'bg-emerald-100 dark:bg-emerald-900/30 border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-400' },
+  { id: 'ACQUIRED',           name: 'Acquired',           color: 'bg-cyan-100 dark:bg-cyan-900/30 border-cyan-300 dark:border-cyan-800 text-cyan-800 dark:text-cyan-400' },
+  { id: 'SOLD',               name: 'Sold',               color: 'bg-green-100 dark:bg-green-900/30 border-green-300 dark:border-green-800 text-green-800 dark:text-green-400' },
   { id: 'NURTURE',            name: 'Nurture',            color: 'bg-sky-100 dark:bg-sky-900/30 border-sky-300 dark:border-sky-800 text-sky-700 dark:text-sky-400' },
 ];
 
@@ -106,7 +108,11 @@ const STATUS_LABELS: Record<string, string> = {
   IN_NEGOTIATION: 'Negotiating',
   UNDER_CONTRACT: 'Under Contract',
   CLOSING: 'Closing',
-  CLOSED_WON: 'Closed ✓',
+  ACQUIRED: 'Acquired',
+  SOLD: 'Sold ✓',
+  SOLD_LOSS: 'Sold (Loss)',
+  HELD_LONG_TERM: 'Held',
+  CANCELLED: 'Cancelled',
   CLOSED_LOST: 'Lost',
   NURTURE: 'Nurture',
   DEAD: '💀 Dead',
@@ -147,8 +153,8 @@ function ScorePill({ band, score }: { band: string; score: number }) {
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const closed = status === 'CLOSED_WON';
-  const dead   = status === 'CLOSED_LOST' || status === 'DEAD';
+  const closed = status === 'SOLD';
+  const dead   = status === 'CLOSED_LOST' || status === 'DEAD' || status === 'SOLD_LOSS' || status === 'CANCELLED' || status === 'HELD_LONG_TERM';
   return (
     <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
       closed ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' :

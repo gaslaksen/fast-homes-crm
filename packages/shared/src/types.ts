@@ -1,4 +1,9 @@
-// Lead Status Pipeline
+// Lead Status Pipeline.
+// Active stages: NEW → ... → CLOSING → ACQUIRED → SOLD.
+// Pre-acquisition deal-loss: CLOSED_LOST. Post-acquisition outcomes:
+// SOLD (profitable close), SOLD_LOSS (closed below cost), HELD_LONG_TERM
+// (kept as rental — no further sale), CANCELLED (deal fell apart after offer).
+// NURTURE / DEAD are off-pipeline parking lanes.
 export enum LeadStatus {
   NEW = 'NEW',
   ATTEMPTING_CONTACT = 'ATTEMPTING_CONTACT',
@@ -8,11 +13,26 @@ export enum LeadStatus {
   NEGOTIATING = 'NEGOTIATING',
   UNDER_CONTRACT = 'UNDER_CONTRACT',
   CLOSING = 'CLOSING',
-  CLOSED_WON = 'CLOSED_WON',
+  ACQUIRED = 'ACQUIRED',
+  SOLD = 'SOLD',
+  SOLD_LOSS = 'SOLD_LOSS',
+  HELD_LONG_TERM = 'HELD_LONG_TERM',
+  CANCELLED = 'CANCELLED',
   CLOSED_LOST = 'CLOSED_LOST',
   NURTURE = 'NURTURE',
   DEAD = 'DEAD',
 }
+
+// Statuses that represent "out of active pipeline" — used by list filters,
+// inactive-deal counts, and dashboard tiles to hide closed deals by default.
+export const TERMINAL_STATUSES: LeadStatus[] = [
+  LeadStatus.SOLD,
+  LeadStatus.SOLD_LOSS,
+  LeadStatus.HELD_LONG_TERM,
+  LeadStatus.CANCELLED,
+  LeadStatus.CLOSED_LOST,
+  LeadStatus.DEAD,
+];
 
 // Lead Source
 export enum LeadSource {

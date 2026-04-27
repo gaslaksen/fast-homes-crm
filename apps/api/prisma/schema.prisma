@@ -723,7 +723,8 @@ model Partner {
   email          String
   company        String?
   phone          String?
-  type           String   @default("buyer")  // buyer | jv_partner | hedge_fund | fix_and_flip | other
+  type           String   @default("buyer")  // buyer | jv | title | lender | agent | other
+  needsTypeReview Boolean @default(false)     // set during the legacy-type remap; user clears after reclassifying
   tags           Json     @default("[]")
   notes          String?  @db.Text
   isActive       Boolean  @default(true)

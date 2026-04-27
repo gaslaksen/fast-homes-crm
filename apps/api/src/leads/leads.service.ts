@@ -601,9 +601,9 @@ export class LeadsService {
     }
     if (filters.propertyState) where.propertyState = { equals: filters.propertyState, mode: 'insensitive' };
 
-    // Hide inactive (DEAD/CLOSED_WON/CLOSED_LOST) by default unless showInactive or specific status filter
+    // Hide terminal statuses by default unless showInactive or specific status filter
     if (!filters.showInactive && !filters.status) {
-      where.status = { notIn: ['DEAD', 'CLOSED_WON', 'CLOSED_LOST'] };
+      where.status = { notIn: ['DEAD', 'SOLD', 'SOLD_LOSS', 'HELD_LONG_TERM', 'CANCELLED', 'CLOSED_LOST'] };
     }
 
     if (filters.staleMinDays) {
@@ -723,7 +723,7 @@ export class LeadsService {
       this.prisma.lead.groupBy({ by: ['scoreBand'], where: whereForBand, _count: true }),
       this.prisma.lead.count({ where: whereForDripActive }),
       this.prisma.lead.count({
-        where: { ...baseWhere, status: { in: ['DEAD', 'CLOSED_WON', 'CLOSED_LOST'] } },
+        where: { ...baseWhere, status: { in: ['DEAD', 'SOLD', 'SOLD_LOSS', 'HELD_LONG_TERM', 'CANCELLED', 'CLOSED_LOST'] } },
       }),
       this.prisma.lead.findMany({
         where: baseWhere,
@@ -891,8 +891,8 @@ export class LeadsService {
         },
       });
 
-      // Remove from campaigns and cancel drip when lead is dead/won/opted out
-      if (['DEAD', 'CLOSED_WON', 'OPTED_OUT'].includes(data.status)) {
+      // Remove from campaigns and cancel drip when lead reaches a terminal state
+      if (['DEAD', 'SOLD', 'SOLD_LOSS', 'HELD_LONG_TERM', 'CANCELLED', 'CLOSED_LOST', 'OPTED_OUT'].includes(data.status)) {
         try {
           await this.campaignEnrollmentService.removeAllActive(id);
         } catch (err) {
