@@ -197,18 +197,24 @@ export class WebhooksController {
     const nameParts = parsed.name.trim().split(/\s+/);
     // Bolt Deals wraps emails in markdown link syntax: `[a@b.com](mailto:a@b.com)`
     const email = parsed.email?.replace(/^\[([^\]]+)\].*$/, '$1') ?? '';
-    // Reconstruct the full address line (with zip if available) and let the
-    // central parser in enrichAddressFromZip split street/city/state/zip.
-    const fullStreet = parsed.zip ? `${parsed.address} ${parsed.zip}` : parsed.address;
 
-    this.logger.log(`📩 Bolt Deals SMS detected — ${parsed.name} | ${fullStreet}`);
+    const summary = [parsed.address, parsed.city, parsed.state, parsed.zip]
+      .filter(Boolean)
+      .join(', ');
+    this.logger.log(`📩 Bolt Deals SMS detected — ${parsed.name} | ${summary}`);
 
     return {
       seller_first_name: nameParts[0] ?? '',
       seller_last_name: nameParts.slice(1).join(' '),
       seller_phone: parsed.phone ?? '',
       seller_email: email,
-      street_address: fullStreet,
+      // Pass street as-is. enrichAddressFromZip will split it if it's a full
+      // single-line address; otherwise the explicit city/state/zipcode fields
+      // (when Bolt Deals sent them separately) take precedence.
+      street_address: parsed.address,
+      city: parsed.city ?? '',
+      state: parsed.state ?? '',
+      zipcode: parsed.zip ?? '',
       lead_source: 'google ads (Bolt Deals)',
       _twilioPayload: body,
     };

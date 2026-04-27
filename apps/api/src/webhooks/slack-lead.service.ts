@@ -45,22 +45,34 @@ export class SlackLeadService {
     const email = text.match(/Email:\s*(.+)/i)?.[1]?.trim();
     const addressLine = text.match(/Address:\s*(.+)/i)?.[1]?.trim();
 
+    // Bolt Deals sometimes splits the address into separate labelled lines.
+    const cityLine = text.match(/City:\s*(.+)/i)?.[1]?.trim();
+    const stateLine = text.match(/State:\s*(.+)/i)?.[1]?.trim();
+    const zipLine = text
+      .match(/(?:Zip|Zipcode|Zip Code|Postal Code|Postcode):\s*(.+)/i)?.[1]
+      ?.trim();
+
     if (!addressLine) return null;
 
-    // Try to extract zip from address line (5-digit number at end)
-    const zipMatch = addressLine.match(/(\d{5})(?:-\d{4})?$/);
-    const zip = zipMatch?.[1];
+    let address: string;
+    let city: string | undefined = cityLine;
+    let state: string | undefined = stateLine;
+    let zip: string | undefined = zipLine;
 
-    // Remove zip from address for RentCast lookup
-    const addressWithoutZip = addressLine.replace(/\s*\d{5}(?:-\d{4})?$/, '').trim();
+    if (cityLine || stateLine || zipLine) {
+      // Multi-field format: address line is just the street; structured fields
+      // carry the rest. Trust them as-is.
+      address = addressLine;
+    } else {
+      // Single-line format: zip may be embedded at the end of the address.
+      const zipMatch = addressLine.match(/(\d{5})(?:-\d{4})?$/);
+      zip = zipMatch?.[1];
+      address = addressLine.replace(/\s*\d{5}(?:-\d{4})?$/, '').trim();
+    }
 
-    // Build full address for RentCast — append TX if zip is known Texas zip
-    // We'll let RentCast figure out city/state from the address+zip combo
-    const fullAddress = zip
-      ? `${addressWithoutZip}, ${zip}`
-      : addressWithoutZip;
+    const fullAddress = [address, city, state, zip].filter(Boolean).join(' ');
 
-    return { name, phone, email, address: addressWithoutZip, zip, fullAddress };
+    return { name, phone, email, address, city, state, zip, fullAddress };
   }
 
   // ─── Run full analysis pipeline ───────────────────────────────────────────
