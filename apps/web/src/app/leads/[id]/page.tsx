@@ -1524,7 +1524,7 @@ export default function LeadDetailPage() {
                 <option value="DEAD">Dead</option>
               </select>
             </div>
-            <DispoTab leadId={leadId} leadAddress={lead.propertyAddress} />
+            <DispoTab leadId={leadId} leadAddress={lead.propertyAddress} leadStatus={lead.status} />
           </div>
         )}
 
