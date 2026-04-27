@@ -255,9 +255,23 @@ export interface Contract {
   actualCloseDate?: Date;
   dispositionNotes?: string;
   outcome?: 'WON' | 'LOST';
+  // Disposition v2 — acquisition tracking
+  acceptedOfferId?: string;
+  acquisitionClosingCosts?: number;
+  fundingSource?: FundingSource;
+  acquiredAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
+
+// Disposition v2 — funding source for the acquisition
+export type FundingSource =
+  | 'cash'
+  | 'hard_money'
+  | 'private_money'
+  | 'seller_finance'
+  | 'jv_capital'
+  | 'other';
 
 // User
 export interface User {
@@ -370,4 +384,81 @@ export interface DashboardStats {
   avgTimeToContract: number; // days
   conversionRate: number; // percentage
   totalRevenue: number;
+}
+
+// ── Disposition v2: post-acquisition lifecycle ─────────────────────────────
+
+export type ExitStrategy =
+  | 'wholesale'
+  | 'novation'
+  | 'double_close'
+  | 'fix_flip'
+  | 'hold_rental'
+  | 'jv'
+  | 'sub_to'
+  | 'other';
+
+export type JvSplitMode = 'none' | 'fifty_fifty' | 'custom';
+
+export type ProfitBucket = 'potential' | 'expected' | 'realized';
+
+export type DispositionCostCategory =
+  | 'holding'
+  | 'repair_prep'
+  | 'utilities'
+  | 'marketing'
+  | 'closing'
+  | 'jv_payout'
+  | 'other';
+
+export interface DispositionPlan {
+  id: string;
+  leadId: string;
+  exitStrategy: ExitStrategy;
+  targetSalePrice?: number;
+  targetCloseDate?: Date;
+  jvPartnerId?: string;
+  jvSplitMode?: JvSplitMode;
+  jvSplitPercent?: number; // our-share percent (0-100) when 'custom'
+  notes?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface DispositionCost {
+  id: string;
+  leadId: string;
+  category: DispositionCostCategory;
+  description?: string;
+  amount: number;
+  incurredAt: Date;
+  paidTo?: string;
+  receiptUrl?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface FinalSale {
+  id: string;
+  leadId: string;
+  buyerName?: string;
+  buyerPartnerId?: string;
+  finalSalePrice: number;
+  saleClosingCosts?: number;
+  netProceeds?: number;
+  closedAt: Date;
+  notes?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// Output of ProfitCalculationService.calculate(). Bucket reflects whether the
+// inputs are pre-acquisition (potential), under-contract (expected), or closed (realized).
+export interface ProfitCalcResult {
+  bucket: ProfitBucket;
+  gross: number | null;        // null when required inputs are missing
+  ourShare: number | null;     // gross × split (or full gross if no JV)
+  jvShare: number | null;      // gross − ourShare; 0 when no JV
+  formulaUsed: string;         // human-readable trace, e.g. "double_close: target − acq − costs"
+  warnings: string[];          // ["Missing target sale price", ...]
 }

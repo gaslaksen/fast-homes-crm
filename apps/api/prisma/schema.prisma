@@ -192,6 +192,13 @@ model Lead {
   // Alert dismissals for contradiction detector (keyed by ruleId → fingerprint)
   alertDismissals       Json?     // { [ruleId: string]: { fingerprint: string, dismissedAt: string } }
 
+  // ── Disposition v2: post-acquisition tracking ────────────────────────────
+  acquiredDate     DateTime?  // denormalized from contract.acquiredAt
+  soldDate         DateTime?  // denormalized from finalSale.closedAt
+  realizedProfit   Float?     // cached output of ProfitCalculationService.recalculate
+  profitBucket     String?    @default("potential") // potential | expected | realized
+  targetSalePrice  Float?     // disposition target; distinct from arv (comp valuation)
+
   messages          Message[]
   emails            Email[]
   comps             Comp[]
@@ -206,6 +213,9 @@ model Lead {
   campaignEnrollments CampaignEnrollment[]
   dealShares          DealShare[]
   sellerPortal        SellerPortal?
+  dispositionPlan     DispositionPlan?
+  dispositionCosts    DispositionCost[]
+  finalSale           FinalSale?
 
   @@index([organizationId, tier])
   @@index([organizationId, status])
@@ -497,6 +507,14 @@ model Contract {
   boldsignStatus       String?   // pending/completed/declined/revoked
   boldsignSigningUrl   String?   @db.Text
   boldsignSentAt       DateTime?
+
+  // ── Disposition v2: acquisition tracking ─────────────────────────────────
+  acceptedOfferId         String?  @unique
+  acceptedOffer           Offer?   @relation("ContractAcceptedOffer", fields: [acceptedOfferId], references: [id])
+  acquisitionClosingCosts Float?
+  fundingSource           String?  // cash | hard_money | private_money | seller_finance | jv_capital | other
+  acquiredAt              DateTime?
+
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
 
@@ -517,6 +535,8 @@ model Offer {
   sellerRespondedAt DateTime?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
+
+  acceptedForContract Contract? @relation("ContractAcceptedOffer")
 
   @@map("offers")
 }
@@ -712,7 +732,9 @@ model Partner {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  dealShares DealShare[]
+  dealShares          DealShare[]
+  jvDispositionPlans  DispositionPlan[] @relation("DispoJvPartner")
+  finalSalesAsBuyer   FinalSale[]       @relation("FinalSaleBuyer")
 
   @@unique([organizationId, email])
   @@map("partners")
@@ -834,4 +856,63 @@ model ActionLastSeen {
   lastSeenAt DateTime @default(now())
 
   @@map("action_last_seen")
+}
+
+// ─── Disposition v2: post-acquisition lifecycle ──────────────────────────────
+
+// Intended/actual disposition plan for a lead. One per lead. Created when the
+// user sets an exit strategy (typically pre-acquisition or at acquisition).
+model DispositionPlan {
+  id              String    @id @default(cuid())
+  leadId          String    @unique
+  lead            Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  exitStrategy    String    // wholesale | novation | double_close | fix_flip | hold_rental | jv | sub_to | other
+  targetSalePrice Float?
+  targetCloseDate DateTime?
+  jvPartnerId     String?
+  jvPartner       Partner?  @relation("DispoJvPartner", fields: [jvPartnerId], references: [id])
+  jvSplitMode     String?   // none | fifty_fifty | custom
+  jvSplitPercent  Float?    // our-side percent when 'custom' (0-100)
+  notes           String?   @db.Text
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@map("disposition_plans")
+}
+
+// Line-item costs incurred between acquisition and final sale. Many per lead.
+model DispositionCost {
+  id          String   @id @default(cuid())
+  leadId      String
+  lead        Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  category    String   // holding | repair_prep | utilities | marketing | closing | jv_payout | other
+  description String?
+  amount      Float
+  incurredAt  DateTime @default(now())
+  paidTo      String?
+  receiptUrl  String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([leadId])
+  @@map("disposition_costs")
+}
+
+// Final sale event. One per lead. Created when the disposition closes.
+model FinalSale {
+  id               String   @id @default(cuid())
+  leadId           String   @unique
+  lead             Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  buyerName        String?
+  buyerPartnerId   String?
+  buyerPartner     Partner? @relation("FinalSaleBuyer", fields: [buyerPartnerId], references: [id])
+  finalSalePrice   Float
+  saleClosingCosts Float?
+  netProceeds      Float?
+  closedAt         DateTime
+  notes            String?  @db.Text
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@map("final_sales")
 }
