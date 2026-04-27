@@ -3,6 +3,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { dispoAPI, boldSignAPI } from '@/lib/api';
+import { isDispositionV2 } from '@/lib/flags';
+import DispoTabV2 from './dispoV2/DispoTabV2';
 import { format } from 'date-fns';
 import Link from 'next/link';
 
@@ -89,6 +91,24 @@ const CONTRACT_STATUS_LABELS: Record<string, string> = {
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function DispoTab({
+  leadId,
+  leadAddress,
+  leadStatus,
+}: {
+  leadId: string;
+  leadAddress: string;
+  leadStatus?: string;
+}) {
+  // Flag-gated v2 lifecycle UI (Acquisition / Plan / Costs / Final Sale /
+  // Profit Sticky). Defaults off so this PR ships with no user-visible
+  // change unless NEXT_PUBLIC_DISPOSITION_V2=true.
+  if (isDispositionV2()) {
+    return <DispoTabV2 leadId={leadId} leadAddress={leadAddress} leadStatus={leadStatus} />;
+  }
+  return <LegacyDispoTab leadId={leadId} leadAddress={leadAddress} />;
+}
+
+function LegacyDispoTab({
   leadId,
   leadAddress,
 }: {

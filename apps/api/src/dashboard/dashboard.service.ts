@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { LeadSource, LeadStatus, ScoreBand } from '@fast-homes/shared';
 
-const INACTIVE = ['CLOSED_WON', 'CLOSED_LOST', 'DEAD'];
+const INACTIVE = ['SOLD', 'SOLD_LOSS', 'HELD_LONG_TERM', 'CANCELLED', 'CLOSED_LOST', 'DEAD'];
 
 @Injectable()
 export class DashboardService {
@@ -74,7 +74,7 @@ export class DashboardService {
 
     // Conversion rate (all time, org-scoped)
     const allLeads = await this.prisma.lead.count({ where: org });
-    const closedWon = await this.prisma.lead.count({ where: { ...org, status: 'CLOSED_WON' } });
+    const closedWon = await this.prisma.lead.count({ where: { ...org, status: 'SOLD' } });
     const conversionRate = allLeads > 0 ? (closedWon / allLeads) * 100 : 0;
 
     const sourceMap = leadsBySource.reduce((acc, item) => { acc[item.source] = item._count; return acc; }, {} as Record<string, number>);

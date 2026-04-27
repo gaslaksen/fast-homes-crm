@@ -91,11 +91,11 @@ export function useContradictions({ lead, leadId, onPauseDrip, onTurnOffAutoResp
       fingerprint: computeFingerprint(lead, 'contract-no-record'),
     });
   }
-  if (lead.status === 'CLOSED_WON' && (!lead.offers || lead.offers.length === 0)) {
+  if (lead.status === 'SOLD' && (!lead.offers || lead.offers.length === 0)) {
     allRules.push({
       id: 'won-no-offers',
       severity: 'warning',
-      message: 'Closed Won without offer history.',
+      message: 'Marked Sold without offer history.',
       actions: [],
       fingerprint: computeFingerprint(lead, 'won-no-offers'),
     });

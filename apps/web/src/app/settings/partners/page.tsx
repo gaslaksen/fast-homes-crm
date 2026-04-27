@@ -6,9 +6,10 @@ import { partnersAPI } from '@/lib/api';
 
 const PARTNER_TYPES = [
   { value: 'buyer', label: 'Cash Buyer' },
-  { value: 'jv_partner', label: 'JV Partner' },
-  { value: 'hedge_fund', label: 'Hedge Fund' },
-  { value: 'fix_and_flip', label: 'Fix & Flip' },
+  { value: 'jv', label: 'JV Partner' },
+  { value: 'title', label: 'Title Company' },
+  { value: 'lender', label: 'Lender' },
+  { value: 'agent', label: 'Agent' },
   { value: 'other', label: 'Other' },
 ];
 
@@ -21,6 +22,7 @@ interface Partner {
   company: string | null;
   phone: string | null;
   type: string;
+  needsTypeReview?: boolean;
   notes: string | null;
   shareCount: number;
   lastSharedAt: string | null;
@@ -103,6 +105,17 @@ export default function PartnersPage() {
     }
   };
 
+  const markReviewed = async (id: string) => {
+    try {
+      await partnersAPI.update(id, { needsTypeReview: false });
+      fetchPartners();
+    } catch {
+      // ignore
+    }
+  };
+
+  const reviewCount = partners.filter((p) => p.needsTypeReview).length;
+
   return (
     <AppShell>
       <div className="max-w-5xl mx-auto px-6 py-8">
@@ -118,6 +131,13 @@ export default function PartnersPage() {
             + Add Partner
           </button>
         </div>
+
+        {reviewCount > 0 && (
+          <div className="mb-4 rounded-lg border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-900/20 px-4 py-3 text-sm text-amber-900 dark:text-amber-200">
+            <strong>{reviewCount} partner{reviewCount === 1 ? '' : 's'} need{reviewCount === 1 ? 's' : ''} a type review.</strong>{' '}
+            We migrated legacy "Hedge Fund" and "Fix &amp; Flip" types to "Cash Buyer" — please reclassify any that should be Lender, Title, or Agent.
+          </div>
+        )}
 
         {/* Filters */}
         <div className="flex gap-3 mb-4">
@@ -182,12 +202,23 @@ export default function PartnersPage() {
                       <span className="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300">
                         {TYPE_LABELS[p.type] || p.type}
                       </span>
+                      {p.needsTypeReview && (
+                        <span
+                          title="Migrated from a legacy type — please reclassify if needed."
+                          className="ml-2 inline-flex px-1.5 py-0.5 text-[10px] font-semibold rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300"
+                        >
+                          Review
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-right text-gray-600 dark:text-gray-400">{p.shareCount}</td>
                     <td className="px-4 py-3 text-right text-gray-500 dark:text-gray-500 text-xs">
                       {p.lastSharedAt ? new Date(p.lastSharedAt).toLocaleDateString() : '-'}
                     </td>
                     <td className="px-4 py-3 text-right">
+                      {p.needsTypeReview && (
+                        <button onClick={() => markReviewed(p.id)} className="text-amber-600 hover:text-amber-800 text-xs font-medium mr-3">Mark reviewed</button>
+                      )}
                       <button onClick={() => openEdit(p)} className="text-blue-600 hover:text-blue-800 text-xs font-medium mr-3">Edit</button>
                       <button onClick={() => handleDelete(p.id)} className="text-red-500 hover:text-red-700 text-xs font-medium">Remove</button>
                     </td>

@@ -75,10 +75,9 @@ export default function DealViewPage() {
   const { lead, analysis, comps, orgName, senderName, senderEmail, partnerType } = data;
   const di = analysis?.dealIntelligence;
   const pa = analysis?.photoAnalysis;
-  const isJV = partnerType === 'jv_partner';
-  const isFlip = partnerType === 'fix_and_flip';
-  const isFund = partnerType === 'hedge_fund';
-  const isWholesale = !isJV && !isFlip && !isFund;
+  const isJV = partnerType === 'jv';
+  const isLender = partnerType === 'lender';
+  const isWholesale = !isJV && !isLender;
 
   // Dynamic deal numbers based on partner type
   const arv = analysis?.arvEstimate;
@@ -104,15 +103,7 @@ export default function DealViewPage() {
       if (mao) text += ` Target acquisition at ${fmt(mao)} (${analysis.maoPercent || 70}% of ARV).`;
       return text;
     }
-    if (isFlip) {
-      let text = propDesc ? `${propDesc} flip opportunity` : 'Flip opportunity';
-      if (arv) text += ` with ${fmt(arv)} ARV`;
-      text += '.';
-      if (repairs > 0) text += ` Estimated rehab of ${fmt(repairs)}.`;
-      if (projectedProfit > 0) text += ` Net profit potential of ${fmt(projectedProfit)} after acquisition at ${fmt(mao)} and all costs.`;
-      return text;
-    }
-    if (isFund) {
+    if (isLender) {
       let text = propDesc ? `${propDesc} asset` : 'Asset';
       if (arv) text += ` valued at ${fmt(arv)} ARV`;
       if (analysis.pricePerSqft) text += ` ($${Math.round(analysis.pricePerSqft)}/sqft)`;
@@ -212,7 +203,7 @@ export default function DealViewPage() {
         {analysis && (
           <div className="bg-white rounded-xl border border-gray-200 p-6">
             <h2 className="text-lg font-bold text-gray-900 mb-4">
-              {isJV ? 'Joint Venture Numbers' : isFlip ? 'Flip Numbers' : isFund ? 'Asset Valuation' : 'Deal Numbers'}
+              {isJV ? 'Joint Venture Numbers' : isLender ? 'Asset Valuation' : 'Deal Numbers'}
             </h2>
             <div className="grid grid-cols-3 gap-6 mb-4">
               <div className="text-center">
@@ -236,13 +227,7 @@ export default function DealViewPage() {
                     <p className={`text-3xl font-bold mt-1 ${projectedProfit > 0 ? 'text-purple-600' : 'text-red-600'}`}>{fmt(projectedProfit)}</p>
                     {halfProfit > 0 && <p className="text-xs text-gray-400 mt-1">{fmt(halfProfit)} each (50/50)</p>}
                   </>
-                ) : isFlip ? (
-                  <>
-                    <p className="text-xs text-gray-400 uppercase font-semibold">Net Profit</p>
-                    <p className={`text-3xl font-bold mt-1 ${projectedProfit > 0 ? 'text-green-600' : 'text-red-600'}`}>{fmt(projectedProfit)}</p>
-                    <p className="text-xs text-gray-400 mt-1">Buy @ {fmt(mao)}</p>
-                  </>
-                ) : isFund ? (
+                ) : isLender ? (
                   <>
                     <p className="text-xs text-gray-400 uppercase font-semibold">Confidence</p>
                     <p className={`text-3xl font-bold mt-1 ${
@@ -262,7 +247,7 @@ export default function DealViewPage() {
             </div>
             <div className="flex items-center justify-between border-t border-gray-100 pt-4 text-sm text-gray-600">
               <span>Deal Type: <strong className="text-gray-900">
-                {isJV ? 'Joint Venture' : isFlip ? 'Fix & Flip' : isFund ? 'Investment' : (DEAL_TYPE_LABELS[analysis.dealType] || analysis.dealType)}
+                {isJV ? 'Joint Venture' : isLender ? 'Investment' : (DEAL_TYPE_LABELS[analysis.dealType] || analysis.dealType)}
               </strong></span>
               {analysis.pricePerSqft && <span>$/Sqft: <strong className="text-gray-900">${Math.round(analysis.pricePerSqft)}</strong></span>}
               {isJV && <span>Acquisition: <strong className="text-gray-900">{fmt(mao)}</strong> @ {analysis.maoPercent || 70}%</span>}

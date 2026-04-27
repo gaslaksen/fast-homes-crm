@@ -11,6 +11,7 @@ import { CompsService } from '../comps/comps.service';
 import { AttomService } from '../comps/attom.service';
 import { ReapiService } from '../comps/reapi.service';
 import { PipelineService } from '../pipeline/pipeline.service';
+import { ProfitCalculationService } from './profit-calculation.service';
 import { LeadStatus, LeadSource, formatPhoneNumber, toTitleCase } from '@fast-homes/shared';
 import { Prisma } from '@prisma/client';
 import { enrichAddressFromZip, cleanStreetAddress, lookupCityStateFromZip } from '../webhooks/address-parser';
@@ -53,6 +54,7 @@ export class LeadsService {
     private attomService: AttomService,
     private reapiService: ReapiService,
     private pipelineService: PipelineService,
+    private profitCalc: ProfitCalculationService,
   ) {}
 
   /**
@@ -601,9 +603,9 @@ export class LeadsService {
     }
     if (filters.propertyState) where.propertyState = { equals: filters.propertyState, mode: 'insensitive' };
 
-    // Hide inactive (DEAD/CLOSED_WON/CLOSED_LOST) by default unless showInactive or specific status filter
+    // Hide terminal statuses by default unless showInactive or specific status filter
     if (!filters.showInactive && !filters.status) {
-      where.status = { notIn: ['DEAD', 'CLOSED_WON', 'CLOSED_LOST'] };
+      where.status = { notIn: ['DEAD', 'SOLD', 'SOLD_LOSS', 'HELD_LONG_TERM', 'CANCELLED', 'CLOSED_LOST'] };
     }
 
     if (filters.staleMinDays) {
@@ -723,7 +725,7 @@ export class LeadsService {
       this.prisma.lead.groupBy({ by: ['scoreBand'], where: whereForBand, _count: true }),
       this.prisma.lead.count({ where: whereForDripActive }),
       this.prisma.lead.count({
-        where: { ...baseWhere, status: { in: ['DEAD', 'CLOSED_WON', 'CLOSED_LOST'] } },
+        where: { ...baseWhere, status: { in: ['DEAD', 'SOLD', 'SOLD_LOSS', 'HELD_LONG_TERM', 'CANCELLED', 'CLOSED_LOST'] } },
       }),
       this.prisma.lead.findMany({
         where: baseWhere,
@@ -891,8 +893,8 @@ export class LeadsService {
         },
       });
 
-      // Remove from campaigns and cancel drip when lead is dead/won/opted out
-      if (['DEAD', 'CLOSED_WON', 'OPTED_OUT'].includes(data.status)) {
+      // Remove from campaigns and cancel drip when lead reaches a terminal state
+      if (['DEAD', 'SOLD', 'SOLD_LOSS', 'HELD_LONG_TERM', 'CANCELLED', 'CLOSED_LOST', 'OPTED_OUT'].includes(data.status)) {
         try {
           await this.campaignEnrollmentService.removeAllActive(id);
         } catch (err) {
@@ -1507,6 +1509,14 @@ export class LeadsService {
       }
     }
 
+    // Recalculate profit since contract changes drive acquisition price,
+    // assignment fee, closing costs, and the bucket transition to 'expected'.
+    try {
+      await this.profitCalc.recalculate(leadId);
+    } catch (err: any) {
+      this.logger.warn(`Profit recalc failed for ${leadId}: ${err.message}`);
+    }
+
     return contract;
   }
 
@@ -1523,6 +1533,17 @@ export class LeadsService {
     });
     if (!lead) throw new Error('Lead not found');
 
+    // Disposition v2 relations — fetched as separate queries (cast through
+    // `any`) so we don't disturb the well-typed include block above. Once the
+    // Prisma client is regenerated against the v2 schema, these can collapse
+    // back into the include.
+    const prismaAny = this.prisma as any;
+    const [dispositionPlan, dispositionCosts, finalSale] = await Promise.all([
+      prismaAny.dispositionPlan.findUnique({ where: { leadId } }),
+      prismaAny.dispositionCost.findMany({ where: { leadId }, orderBy: { incurredAt: 'desc' } }),
+      prismaAny.finalSale.findUnique({ where: { leadId } }),
+    ]);
+
     // Use the comp analysis that was saved to the lead first, then most recent
     const analysis =
       lead.compAnalyses.find((c) => c.savedToLead) ?? lead.compAnalyses[0] ?? null;
@@ -1533,40 +1554,67 @@ export class LeadsService {
     const mao = arv != null && repairCost != null ? arv * maoFactor - repairCost : null;
 
     const offers = lead.offers ?? [];
-    const acceptedOffer = [...offers].sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).find((o: any) => o.status === 'accepted') ?? null;
-    const offerAmount = lead.contract?.offerAmount ?? acceptedOffer?.offerAmount ?? null;
+    // Bug #1 fix: surface the newest pending offer alongside the accepted one,
+    // so the UI can render a "current offer" pill even when nothing is accepted.
+    const sortedByNewest = [...offers].sort(
+      (a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
+    const acceptedOffer = sortedByNewest.find((o: any) => o.status === 'accepted') ?? null;
+    const pendingOffer = sortedByNewest.find((o: any) => o.status === 'pending') ?? null;
+    // Profit-input offer amount picks accepted → contract → pending → null
+    // so a lead with only a pending offer still gets a Potential profit number.
+    const offerAmount =
+      lead.contract?.offerAmount ?? acceptedOffer?.offerAmount ?? pendingOffer?.offerAmount ?? null;
     // Never fall back to analysis.assignmentFee (always 15000 default) — only use explicitly saved values
     const assignmentFee = lead.contract?.assignmentFee ?? (lead as any).assignmentFee ?? null;
-    const exitStrategy = lead.contract?.exitStrategy ?? 'wholesale';
+
+    const costs: any[] = dispositionCosts ?? [];
+    const costsTotal = costs.reduce((sum, c) => sum + (c.amount ?? 0), 0);
+
+    // Bug #3 fix: prefer the disposition plan's targetSalePrice over ARV for
+    // sale-side calcs. Falls back to ARV only when no plan exists yet.
+    const targetSalePrice =
+      dispositionPlan?.targetSalePrice ?? (lead as any).targetSalePrice ?? arv ?? null;
+
+    const exitStrategy =
+      dispositionPlan?.exitStrategy ?? lead.contract?.exitStrategy ?? 'wholesale';
 
     // Buyer's All-In Price: what the end buyer pays (offer to seller + assignment fee)
-    // For novation/sub-to, the "buyer" is the eventual end buyer — all-in = ARV (market price)
+    // For novation/sub-to, the "buyer" is the eventual end buyer — all-in = target sale price
     // For wholesale/creative, all-in = offer + assignment fee
     const isWholesale = exitStrategy === 'wholesale' || exitStrategy === 'creative_finance';
     const buyerPrice = isWholesale
       ? (offerAmount != null && assignmentFee != null ? offerAmount + assignmentFee : null)
-      : arv; // novation/sub-to: end buyer pays market value (ARV)
+      : targetSalePrice; // novation/sub-to/etc: end buyer pays the target sale price
 
     // Buyer's Spread: equity left for the end buyer after purchase
-    const buyerSpread = arv != null && buyerPrice != null ? arv - buyerPrice : null;
+    const buyerSpread =
+      targetSalePrice != null && buyerPrice != null ? targetSalePrice - buyerPrice : null;
 
-    // Your Profit depends on exit strategy:
-    //   wholesale: your profit = assignment fee (you flip the contract)
-    //   novation/sub-to: your profit = ARV - offer to seller - repairs (you sell the property)
-    let projectedProfit: number | null = null;
-    if (exitStrategy === 'wholesale') {
-      projectedProfit = assignmentFee ?? null;
-    } else if (exitStrategy === 'novation' || exitStrategy === 'subject_to' || exitStrategy === 'owner_finance') {
-      projectedProfit = arv != null && offerAmount != null
-        ? arv - offerAmount - (repairCost ?? 0)
-        : null;
-    } else {
-      // fallback: use assignment fee if set, else ARV spread
-      projectedProfit = assignmentFee ?? (arv != null && offerAmount != null ? arv - offerAmount - (repairCost ?? 0) : null);
-    }
+    // Use ProfitCalculationService for the new profit shape; keep
+    // projectedProfit populated for one release as a deprecated alias of
+    // profit.ourShare so existing UI code still renders something.
+    const profit = this.profitCalc.calculate({
+      exitStrategy: exitStrategy as any,
+      acquisitionPrice: offerAmount,
+      acquisitionClosingCosts: (lead as any).contract?.acquisitionClosingCosts ?? null,
+      assignmentFee,
+      targetSalePrice,
+      finalSalePrice: finalSale?.finalSalePrice ?? null,
+      saleClosingCosts: finalSale?.saleClosingCosts ?? null,
+      costsTotal,
+      jvSplitMode: dispositionPlan?.jvSplitMode ?? null,
+      jvSplitPercent: dispositionPlan?.jvSplitPercent ?? null,
+      outcomeStatus: lead.status,
+      hasContract:
+        lead.contract?.contractStatus === 'signed' || !!(lead.contract as any)?.acquiredAt,
+      hasFinalSale: !!finalSale,
+    });
+    const projectedProfit = profit.ourShare ?? null;
 
     return {
       arv,
+      targetSalePrice,
       repairCost,
       mao,
       maoPercent: Math.round(maoFactor * 100),
@@ -1580,6 +1628,19 @@ export class LeadsService {
       projectedProfit,
       contract: lead.contract ?? null,
       offers: lead.offers,
+      acceptedOffer,
+      pendingOffer,
+      dispositionPlan,
+      costs,
+      costsTotal,
+      finalSale,
+      profit,
+      acquiredDate: (lead as any).acquiredDate ?? null,
+      soldDate: (lead as any).soldDate ?? null,
+      // Backfill cue: lead is in a sold state but has no FinalSale record yet —
+      // shows the per-lead manual-entry banner.
+      needsBackfillBanner:
+        ['SOLD', 'SOLD_LOSS', 'HELD_LONG_TERM'].includes(lead.status) && !finalSale,
       latestCompAnalysis: analysis
         ? {
             repairCosts: analysis.repairCosts,
@@ -1630,6 +1691,13 @@ export class LeadsService {
       await this.updateLead(leadId, { status: LeadStatus.OFFER_SENT });
     }
 
+    // New offer changes the Potential profit number even before acceptance.
+    try {
+      await this.profitCalc.recalculate(leadId);
+    } catch (err: any) {
+      this.logger.warn(`Profit recalc failed for ${leadId}: ${err.message}`);
+    }
+
     return offer;
   }
 
@@ -1655,6 +1723,14 @@ export class LeadsService {
           metadata: { offerId: offer.id },
         },
       });
+    }
+
+    // Status changes between pending/accepted/rejected swap which offer drives
+    // the profit calc — recompute.
+    try {
+      await this.profitCalc.recalculate(leadId);
+    } catch (err: any) {
+      this.logger.warn(`Profit recalc failed for ${leadId}: ${err.message}`);
     }
 
     return offer;

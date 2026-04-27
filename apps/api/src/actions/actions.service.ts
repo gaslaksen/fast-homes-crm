@@ -20,7 +20,7 @@ import type {
   ActionCategory,
 } from './actions.types';
 
-const INACTIVE_STATUSES = ['CLOSED_WON', 'CLOSED_LOST', 'DEAD'];
+const INACTIVE_STATUSES = ['SOLD', 'SOLD_LOSS', 'HELD_LONG_TERM', 'CANCELLED', 'CLOSED_LOST', 'DEAD'];
 
 interface CacheEntry {
   items: ActionItem[];

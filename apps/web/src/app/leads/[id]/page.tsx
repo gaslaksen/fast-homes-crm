@@ -19,6 +19,24 @@ import { formatPhoneDisplay } from '@/lib/format';
 
 const LEAD_DETAIL_V2 = process.env.NEXT_PUBLIC_LEAD_DETAIL_V2 === 'restructured';
 
+// Lightweight icon + color cues for the Activity Log. Disposition-v2 events
+// (PROFIT_BUCKET_CHANGED, COST_*, LEAD_ACQUIRED, FINAL_SALE_RECORDED,
+// DISPOSITION_PLAN_UPDATED) get a money/calendar visual; legacy events stay
+// uncolored so the change doesn't perturb existing rows.
+const ACTIVITY_TYPE_META: Record<string, { icon?: string; color?: string }> = {
+  PROFIT_BUCKET_CHANGED:    { icon: '📊', color: 'text-blue-600 dark:text-blue-400' },
+  COST_ADDED:               { icon: '💸', color: 'text-amber-600 dark:text-amber-400' },
+  COST_UPDATED:             { icon: '💸', color: 'text-amber-600 dark:text-amber-400' },
+  COST_DELETED:             { icon: '💸', color: 'text-gray-400 dark:text-gray-500' },
+  LEAD_ACQUIRED:            { icon: '🏷️', color: 'text-cyan-600 dark:text-cyan-400' },
+  FINAL_SALE_RECORDED:      { icon: '🏁', color: 'text-green-600 dark:text-green-400' },
+  DISPOSITION_PLAN_UPDATED: { icon: '🗺️', color: 'text-purple-600 dark:text-purple-400' },
+  OFFER_MADE:               { icon: '✉️', color: 'text-orange-600 dark:text-orange-400' },
+  OFFER_ACCEPTED:           { icon: '✅', color: 'text-green-600 dark:text-green-400' },
+  STATUS_CHANGED:           { icon: '🔄', color: 'text-blue-500 dark:text-blue-400' },
+  DOCUMENT_SENT:            { icon: '📄', color: 'text-indigo-600 dark:text-indigo-400' },
+};
+
 function getNextCampFocus(lead: any): string | null {
   if (!lead.campPriorityComplete) return 'Priority (Timeline)';
   if (!lead.campMoneyComplete) return 'Money (Asking Price)';
@@ -1494,8 +1512,9 @@ export default function LeadDetailPage() {
                   }
                 }}
                 className={`text-sm font-semibold px-4 py-2 rounded-lg border cursor-pointer focus:outline-none focus:ring-2 focus:ring-offset-1 min-w-[180px] ${
-                  lead.status === 'CLOSED_WON'                               ? 'bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-400 border-green-200 dark:border-green-800 focus:ring-green-400' :
-                  lead.status === 'DEAD' || lead.status === 'CLOSED_LOST'    ? 'bg-gray-50 dark:bg-gray-950 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-700 focus:ring-gray-400' :
+                  lead.status === 'SOLD'                                     ? 'bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-400 border-green-200 dark:border-green-800 focus:ring-green-400' :
+                  lead.status === 'ACQUIRED'                                 ? 'bg-cyan-50 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-400 border-cyan-200 dark:border-cyan-800 focus:ring-cyan-400' :
+                  ['DEAD','CLOSED_LOST','SOLD_LOSS','HELD_LONG_TERM','CANCELLED'].includes(lead.status) ? 'bg-gray-50 dark:bg-gray-950 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-700 focus:ring-gray-400' :
                   lead.status === 'UNDER_CONTRACT'                           ? 'bg-teal-50 dark:bg-teal-950 text-teal-700 dark:text-teal-400 border-teal-200 dark:border-teal-800 focus:ring-teal-400' :
                   lead.status === 'OFFER_SENT'                               ? 'bg-orange-50 dark:bg-orange-950 text-orange-700 dark:text-orange-400 border-orange-200 dark:border-orange-800 focus:ring-orange-400' :
                   lead.status === 'NEGOTIATING'                              ? 'bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-800 focus:ring-amber-400' :
@@ -1513,13 +1532,17 @@ export default function LeadDetailPage() {
                 <option value="NEGOTIATING">Negotiating</option>
                 <option value="UNDER_CONTRACT">Under Contract</option>
                 <option value="CLOSING">Closing</option>
-                <option value="CLOSED_WON">Closed / Won</option>
+                <option value="ACQUIRED">Acquired</option>
+                <option value="SOLD">Sold</option>
+                <option value="SOLD_LOSS">Sold (Loss)</option>
+                <option value="HELD_LONG_TERM">Held (Long Term)</option>
+                <option value="CANCELLED">Cancelled</option>
                 <option value="CLOSED_LOST">Closed / Lost</option>
                 <option value="NURTURE">Nurture</option>
                 <option value="DEAD">Dead</option>
               </select>
             </div>
-            <DispoTab leadId={leadId} leadAddress={lead.propertyAddress} />
+            <DispoTab leadId={leadId} leadAddress={lead.propertyAddress} leadStatus={lead.status} />
           </div>
         )}
 
@@ -2175,23 +2198,31 @@ export default function LeadDetailPage() {
             <div className="card">
               <h2 className="text-xl font-bold mb-4">Activity Log</h2>
               <div className="space-y-3">
-                {lead.activities?.map((activity: any) => (
-                  <div key={activity.id} className="p-3 bg-gray-50 dark:bg-gray-950 rounded">
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <div className="text-sm font-medium">{activity.description}</div>
-                        {activity.user && (
-                          <div className="text-xs text-gray-500 dark:text-gray-400">
-                            by {activity.user.firstName} {activity.user.lastName}
+                {lead.activities?.map((activity: any) => {
+                  const meta = ACTIVITY_TYPE_META[activity.type] ?? {};
+                  return (
+                    <div key={activity.id} className="p-3 bg-gray-50 dark:bg-gray-950 rounded">
+                      <div className="flex justify-between items-start gap-3">
+                        <div className="flex items-start gap-2 min-w-0">
+                          {meta.icon && (
+                            <span className={`shrink-0 text-base leading-none mt-0.5 ${meta.color ?? ''}`}>{meta.icon}</span>
+                          )}
+                          <div className="min-w-0">
+                            <div className="text-sm font-medium">{activity.description}</div>
+                            {activity.user && (
+                              <div className="text-xs text-gray-500 dark:text-gray-400">
+                                by {activity.user.firstName} {activity.user.lastName}
+                              </div>
+                            )}
                           </div>
-                        )}
-                      </div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400">
-                        {format(new Date(activity.createdAt), 'MMM d, h:mm a')}
+                        </div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400 shrink-0">
+                          {format(new Date(activity.createdAt), 'MMM d, h:mm a')}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
 

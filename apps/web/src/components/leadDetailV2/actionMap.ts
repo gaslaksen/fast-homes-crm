@@ -1,6 +1,6 @@
 import type { ActionCategory } from '../ActionCard';
 
-export type ActionIntent = 'reply' | 'offer' | 'follow-up' | 'camp' | 'contract' | 'call' | 'share' | 'sms';
+export type ActionIntent = 'reply' | 'offer' | 'follow-up' | 'camp' | 'contract' | 'call' | 'share' | 'sms' | 'dispo';
 
 export interface PrimaryAction {
   label: string;
@@ -23,6 +23,7 @@ export function getPrimaryAction(lead: any, intent: string | null): PrimaryActio
       case 'call': return { label: 'Call seller', intent: 'call' };
       case 'share': return { label: 'Share with partners', intent: 'share' };
       case 'sms': return { label: 'Send SMS', intent: 'sms' };
+      case 'dispo': return { label: 'Open disposition', intent: 'dispo' };
       default:
         if (intent.startsWith('camp')) return { label: 'Ask CAMP question', intent: 'camp' };
     }
@@ -35,6 +36,14 @@ export function getPrimaryAction(lead: any, intent: string | null): PrimaryActio
 
   if (tier === 3 || stage === 'DEAD' || stage === 'CLOSED_LOST') {
     return { label: 'Send SMS', intent: 'sms' };
+  }
+  // Post-sale outcomes — disposition tab is the main thing left to look at.
+  if (stage === 'SOLD' || stage === 'SOLD_LOSS' || stage === 'HELD_LONG_TERM' || stage === 'CANCELLED') {
+    return { label: 'View profit summary', intent: 'dispo' };
+  }
+  // Acquired but not yet sold — primary action is logging costs / sale.
+  if (stage === 'ACQUIRED') {
+    return { label: 'Add cost or log sale', intent: 'dispo' };
   }
   if (stage === 'UNDER_CONTRACT') return { label: 'Open contract', intent: 'contract' };
   if (stage === 'OFFER_MADE') return { label: 'Follow up on offer', intent: 'follow-up' };

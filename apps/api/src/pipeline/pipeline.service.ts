@@ -27,6 +27,8 @@ export class PipelineService {
     'NEGOTIATING',
     'UNDER_CONTRACT',
     'CLOSING',
+    'ACQUIRED',
+    'SOLD',
     'NURTURE',
   ];
 
@@ -162,7 +164,8 @@ export class PipelineService {
     opts?: { reason?: string; userId?: string },
   ) {
     if (!ids.length) return { success: true, updated: 0 };
-    if (!this.ACTIVE_STAGES.includes(newStage) && newStage !== 'DEAD' && newStage !== 'CLOSED_WON' && newStage !== 'CLOSED_LOST') {
+    const TERMINAL = ['DEAD', 'SOLD_LOSS', 'HELD_LONG_TERM', 'CANCELLED', 'CLOSED_LOST'];
+    if (!this.ACTIVE_STAGES.includes(newStage) && !TERMINAL.includes(newStage)) {
       throw new Error(`Invalid stage: ${newStage}`);
     }
     const reason = opts?.reason ?? 'manual';

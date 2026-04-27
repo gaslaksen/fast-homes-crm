@@ -67,8 +67,9 @@ export default function LeadHeader({
                   value={lead.status}
                   onChange={(e) => onStatusChange(e.target.value)}
                   className={`text-xs font-semibold px-2.5 py-0.5 rounded-full border-0 cursor-pointer appearance-none focus:ring-2 focus:ring-offset-1 ${
-                    lead.status === 'CLOSED_WON'                               ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 focus:ring-green-400' :
-                    lead.status === 'DEAD' || lead.status === 'CLOSED_LOST'    ? 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 focus:ring-gray-400' :
+                    lead.status === 'SOLD'                                     ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 focus:ring-green-400' :
+                    lead.status === 'ACQUIRED'                                 ? 'bg-cyan-100 dark:bg-cyan-900/30 text-cyan-700 dark:text-cyan-400 focus:ring-cyan-400' :
+                    ['DEAD','CLOSED_LOST','SOLD_LOSS','HELD_LONG_TERM','CANCELLED'].includes(lead.status) ? 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 focus:ring-gray-400' :
                     lead.status === 'UNDER_CONTRACT'                           ? 'bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-400 focus:ring-teal-400' :
                     lead.status === 'OFFER_SENT'                               ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 focus:ring-orange-400' :
                     lead.status === 'NEGOTIATING'                              ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 focus:ring-amber-400' :
@@ -87,7 +88,11 @@ export default function LeadHeader({
                   <option value="NEGOTIATING">Negotiating</option>
                   <option value="UNDER_CONTRACT">Under Contract</option>
                   <option value="CLOSING">Closing</option>
-                  <option value="CLOSED_WON">Closed / Won</option>
+                  <option value="ACQUIRED">Acquired</option>
+                  <option value="SOLD">Sold</option>
+                  <option value="SOLD_LOSS">Sold (Loss)</option>
+                  <option value="HELD_LONG_TERM">Held (Long Term)</option>
+                  <option value="CANCELLED">Cancelled</option>
                   <option value="CLOSED_LOST">Closed / Lost</option>
                   <option value="NURTURE">Nurture</option>
                   <option value="DEAD">Dead</option>

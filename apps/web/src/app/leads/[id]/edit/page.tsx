@@ -179,7 +179,11 @@ export default function EditLeadPage() {
                   <option value="OFFER_SENT">Offer Made</option>
                   <option value="UNDER_CONTRACT">Under Contract</option>
                   <option value="CLOSING">Closing</option>
-                  <option value="CLOSED_WON">Closed Won</option>
+                  <option value="ACQUIRED">Acquired</option>
+                  <option value="SOLD">Sold</option>
+                  <option value="SOLD_LOSS">Sold (Loss)</option>
+                  <option value="HELD_LONG_TERM">Held (Long Term)</option>
+                  <option value="CANCELLED">Cancelled</option>
                   <option value="CLOSED_LOST">Closed Lost</option>
                   <option value="NURTURE">Nurture</option>
                   <option value="DEAD">💀 Dead</option>

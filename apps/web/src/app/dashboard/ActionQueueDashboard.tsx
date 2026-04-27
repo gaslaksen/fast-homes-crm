@@ -46,7 +46,7 @@ function QuickStatsBar({ stats }: { stats: any }) {
     { label: 'Strike Zone', value: strikeZone, href: '/leads?band=STRIKE_ZONE' },
     { label: 'Hot + Workable', value: hot, href: '/leads?band=HOT' },
     { label: 'Under Contract', value: stats.underContract || 0, href: '/leads?status=UNDER_CONTRACT' },
-    { label: 'Closed', value: stats.closedDeals || 0, href: '/leads?status=CLOSED_WON' },
+    { label: 'Sold', value: stats.closedDeals || 0, href: '/leads?status=SOLD' },
   ];
   return (
     <div className="grid grid-cols-3 md:grid-cols-6 gap-3">

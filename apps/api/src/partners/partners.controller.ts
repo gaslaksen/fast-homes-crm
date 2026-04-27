@@ -70,7 +70,7 @@ export class PartnersController {
   async updatePartner(
     @Headers('authorization') auth: string,
     @Param('id') id: string,
-    @Body() body: { name?: string; email?: string; company?: string; phone?: string; type?: string; tags?: string[]; notes?: string },
+    @Body() body: { name?: string; email?: string; company?: string; phone?: string; type?: string; tags?: string[]; notes?: string; needsTypeReview?: boolean },
   ) {
     const { organizationId } = this.decodeToken(auth);
     return this.partners.update(organizationId, id, body);

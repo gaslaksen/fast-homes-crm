@@ -209,21 +209,22 @@ function MetricsDashboard() {
             value={stats?.closedDeals || 0}
             sub={stats?.totalRevenue > 0 ? `$${(stats.totalRevenue / 1000).toFixed(0)}k earned` : 'All time'}
             color="green"
-            href="/leads?status=CLOSED_WON"
+            href="/leads?status=SOLD"
           />
         </div>
 
         {/* Pipeline Stage Breakdown */}
         <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-6">
           <h2 className="font-bold text-gray-900 dark:text-gray-100 mb-4">Pipeline Breakdown</h2>
-          <div className="grid grid-cols-3 md:grid-cols-6 gap-4">
+          <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-4">
             {[
               { label: 'Attempting Contact', keys: ['ATTEMPTING_CONTACT'],        color: 'bg-gray-200 dark:bg-gray-700' },
               { label: 'Qualifying',         keys: ['QUALIFYING', 'QUALIFIED'],   color: 'bg-blue-200 dark:bg-blue-800' },
               { label: 'Offer Made',         keys: ['OFFER_SENT'],                color: 'bg-orange-200 dark:bg-orange-800' },
               { label: 'Negotiating',        keys: ['NEGOTIATING'],               color: 'bg-yellow-200 dark:bg-yellow-800' },
               { label: 'Under Contract',     keys: ['UNDER_CONTRACT', 'CLOSING'], color: 'bg-purple-200 dark:bg-purple-800' },
-              { label: 'Closed Won',         keys: ['CLOSED_WON'],                color: 'bg-green-200 dark:bg-green-800' },
+              { label: 'Acquired',           keys: ['ACQUIRED'],                  color: 'bg-cyan-200 dark:bg-cyan-800' },
+              { label: 'Sold',               keys: ['SOLD'],                      color: 'bg-green-200 dark:bg-green-800' },
             ].map(({ label, keys, color }) => {
               const count = keys.reduce((sum, k) => sum + (stats?.leadsByStatus?.[k] || 0), 0);
               const activeTotal = Object.entries(stats?.leadsByStatus || {})
@@ -289,13 +290,14 @@ function MetricsDashboard() {
                       QUALIFYING: 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400',
                       OFFER_SENT: 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400',
                       UNDER_CONTRACT: 'bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-400',
-                      CLOSED_WON: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400',
+                      ACQUIRED: 'bg-cyan-100 dark:bg-cyan-900/30 text-cyan-700 dark:text-cyan-400',
+                      SOLD: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400',
                       DEAD: 'bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500',
                     };
                     const statusLabel: Record<string, string> = {
                       NEW: 'New', ATTEMPTING_CONTACT: 'Contacting', QUALIFYING: 'Qualifying',
                       OFFER_SENT: 'Offer Made', UNDER_CONTRACT: 'Under Contract',
-                      CLOSED_WON: 'Closed', DEAD: 'Dead',
+                      ACQUIRED: 'Acquired', SOLD: 'Sold', DEAD: 'Dead',
                     };
                     return (
                       <Link
