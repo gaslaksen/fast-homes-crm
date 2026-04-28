@@ -141,10 +141,6 @@ Situation acknowledgments:
 - Divorce: "I understand this is a difficult time. We'll make this part as simple and fast as possible."
 - Landlord exit: "That makes sense. We make it clean and simple."
 
-VOICEMAILS
-"Hey, this is Riley with QuickCashHomeBuyers calling about the property at ${propertyAddress}. Give us a call back at 704-471-3920 or we'll try you again soon. Have a great day."
-Keep it under 20 seconds. No personal details beyond the property address.
-
 CLOSING A SUCCESSFUL CALL
 "I have everything I need to pass along to our team. Someone will be reaching out within 24 hours with a cash offer. Also, if you can send over some photos of the property that would really help — interior, exterior, kitchen, bathrooms, and any areas that need work. You can text them to us at 704-471-3920. I'll say that again slowly — 704-471-3920. Is there anything else you want us to know before I let you go?"
 
@@ -225,6 +221,22 @@ HARD RULES
 
         firstMessage: this.buildFirstMessage(lead),
         firstMessageMode: 'assistant-speaks-first',
+        // Wait for the audio path to settle and let the callee say "hello"
+        // before Riley speaks. Without this Vapi defaults to 0.4s and the
+        // first message gets clipped on cell pickup.
+        startSpeakingPlan: {
+          waitSeconds: 1.5,
+          smartEndpointingPlan: {
+            provider: 'livekit',
+            waitFunction: '200 + 8000 * x',
+          },
+        },
+        voicemailDetection: {
+          provider: 'vapi',
+          beepMaxAwaitSeconds: 30,
+          type: 'audio',
+        },
+        voicemailMessage: `Hey, this is Riley with QuickCashHomeBuyers calling about ${lead.propertyAddress || 'your property'}. Give us a call back at 704-471-3920 or we'll try you again soon. Have a great day.`,
         endCallMessage: "Thanks so much for your time today. Have a wonderful day!",
         endCallPhrases: [
           'goodbye',
