@@ -43,29 +43,24 @@ export class DealsService {
     if (realizedFrom) realizedDateClause.gte = realizedFrom;
     if (realizedTo) realizedDateClause.lte = realizedTo;
 
+    // Status is the source of truth for which bucket a deal belongs to —
+    // the cached `profitBucket` column can lag behind status changes (it
+    // only refreshes on disposition mutations, not on bare status moves).
+    // Filtering by status alone keeps the cards consistent with the table.
     const [potential, expected, realized] = await Promise.all([
       this.prisma.lead.aggregate({
-        where: {
-          ...orgFilter,
-          profitBucket: 'potential',
-          status: { in: POTENTIAL_STATUSES },
-        },
+        where: { ...orgFilter, status: { in: POTENTIAL_STATUSES } },
+        _sum: { realizedProfit: true },
+        _count: true,
+      }),
+      this.prisma.lead.aggregate({
+        where: { ...orgFilter, status: { in: EXPECTED_STATUSES } },
         _sum: { realizedProfit: true },
         _count: true,
       }),
       this.prisma.lead.aggregate({
         where: {
           ...orgFilter,
-          profitBucket: 'expected',
-          status: { in: EXPECTED_STATUSES },
-        },
-        _sum: { realizedProfit: true },
-        _count: true,
-      }),
-      this.prisma.lead.aggregate({
-        where: {
-          ...orgFilter,
-          profitBucket: 'realized',
           status: { in: REALIZED_STATUSES },
           ...(Object.keys(realizedDateClause).length
             ? { soldDate: realizedDateClause }
@@ -222,7 +217,7 @@ export class DealsService {
         costsByCategory['other'] ?? '',
         ourShare ?? '',
         gross ?? '',
-        r.profitBucket ?? '',
+        bucketFromStatus(r.status) ?? '',
         r.daysInStage ?? '',
         r.acquiredDate ? new Date(r.acquiredDate).toISOString().slice(0, 10) : '',
         r.soldDate ? new Date(r.soldDate).toISOString().slice(0, 10) : '',
@@ -240,8 +235,22 @@ export class DealsService {
       status: { in: filters.status?.length ? filters.status : DEAL_STATUSES },
     };
 
+    // Bucket filter is implemented by status membership, not by the cached
+    // profitBucket column — status is authoritative (see summary query).
     if (filters.bucket?.length) {
-      where.profitBucket = { in: filters.bucket };
+      const allowed = new Set<string>();
+      for (const b of filters.bucket) {
+        if (b === 'potential') POTENTIAL_STATUSES.forEach((s) => allowed.add(s));
+        else if (b === 'expected') EXPECTED_STATUSES.forEach((s) => allowed.add(s));
+        else if (b === 'realized') REALIZED_STATUSES.forEach((s) => allowed.add(s));
+      }
+      // Intersect with any status filter the caller already set.
+      if (filters.status?.length) {
+        const inter = filters.status.filter((s) => allowed.has(s));
+        where.status = { in: inter.length ? inter : Array.from(allowed) };
+      } else {
+        where.status = { in: Array.from(allowed) };
+      }
     }
 
     if (filters.exitStrategy?.length) {
@@ -316,8 +325,9 @@ export class DealsService {
         where: this.buildListWhere(baseForStage),
         _count: true,
       }),
+      // Bucket counts derived from status groupings (see summary).
       this.prisma.lead.groupBy({
-        by: ['profitBucket'],
+        by: ['status'],
         where: this.buildListWhere(baseForBucket),
         _count: true,
       }),
@@ -339,9 +349,10 @@ export class DealsService {
     const byStage: Record<string, number> = {};
     for (const g of byStageGroups) byStage[g.status] = g._count;
 
-    const byBucket: Record<string, number> = {};
+    const byBucket: Record<string, number> = { potential: 0, expected: 0, realized: 0 };
     for (const g of byBucketGroups) {
-      if (g.profitBucket) byBucket[g.profitBucket] = g._count;
+      const b = bucketFromStatus(g.status);
+      if (b) byBucket[b] += g._count;
     }
 
     const byExitStrategy: Record<string, number> = {};
@@ -372,7 +383,9 @@ export class DealsService {
       propertyCity: r.propertyCity ?? '',
       propertyState: r.propertyState ?? '',
       status: r.status,
-      bucket: (r.profitBucket as ProfitBucket) ?? null,
+      // Bucket derived from status (see summary query) — keeps row badge
+      // and hero card in sync even when the cached profitBucket is stale.
+      bucket: bucketFromStatus(r.status),
       exitStrategy: plan?.exitStrategy ?? null,
       jvPartnerId: plan?.jvPartnerId ?? null,
       jvPartnerName: plan?.jvPartner?.name ?? null,
@@ -400,6 +413,13 @@ export class DealsService {
     if (mode === 'custom' && pct && pct > 0) return ourShare / (pct / 100);
     return ourShare;
   }
+}
+
+function bucketFromStatus(status: string): ProfitBucket | null {
+  if (POTENTIAL_STATUSES.includes(status as any)) return 'potential';
+  if (EXPECTED_STATUSES.includes(status as any)) return 'expected';
+  if (REALIZED_STATUSES.includes(status as any)) return 'realized';
+  return null;
 }
 
 function csvField(s: string): string {

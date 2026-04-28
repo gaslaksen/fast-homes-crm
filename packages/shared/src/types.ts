@@ -413,6 +413,7 @@ export type ExitStrategy =
   | 'novation'
   | 'double_close'
   | 'fix_flip'
+  | 'concierge_listing'
   | 'hold_rental'
   | 'jv'
   | 'sub_to'

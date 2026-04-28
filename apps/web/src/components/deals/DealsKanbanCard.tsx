@@ -2,8 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import {
-  EXIT_GROUP_LABELS,
-  exitStrategyGroup,
+  EXIT_STRATEGY_SHORT_LABELS,
   type DealStageId,
 } from '@/lib/dealStages';
 import ProfitBadge from './ProfitBadge';
@@ -17,8 +16,9 @@ interface Props {
 
 export default function DealsKanbanCard({ deal, onContextMenu }: Props) {
   const router = useRouter();
-  const group = exitStrategyGroup(deal.exitStrategy);
-  const exitLabel = group ? EXIT_GROUP_LABELS[group] : null;
+  const exitLabel = deal.exitStrategy
+    ? EXIT_STRATEGY_SHORT_LABELS[deal.exitStrategy] ?? deal.exitStrategy
+    : null;
 
   return (
     <div
