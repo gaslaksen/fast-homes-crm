@@ -47,15 +47,20 @@ export class InvestorFuseService {
       body.seller_email || contact.email || '';
 
     // Address — IF uses street_address + city/state/zipcode at top level
+    // GoHighLevel uses address1 / postal_code; also accept full_address as a
+    // last-resort single-string fallback (parseAddressString will split it).
+    // Do NOT read body.location.* — in GHL that's the agency's office address,
+    // not the lead's property.
     const street =
-      body.street_address || body.seller_address ||
-      property.street || property.street_address || property.address || '';
+      body.street_address || body.seller_address || body.address1 ||
+      property.street || property.street_address || property.address ||
+      body.full_address || '';
     const city =
       body.city  || property.city  || '';
     const state =
       body.state || property.state || '';
     const zip =
-      body.zipcode || body.zip_code || body.zip ||
+      body.zipcode || body.zip_code || body.zip || body.postal_code ||
       property.zipcode || property.zip || '';
 
     if (!street) return null;
