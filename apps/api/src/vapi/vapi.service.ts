@@ -220,15 +220,14 @@ HARD RULES
         },
 
         firstMessage: this.buildFirstMessage(lead),
-        firstMessageMode: 'assistant-speaks-first',
-        // Wait for the audio path to settle and let the callee say "hello"
-        // before Riley speaks. Without this Vapi defaults to 0.4s and the
-        // first message gets clipped on cell pickup.
+        // Wait for the human's "Hello?" before Riley greets — natural for
+        // outbound calls and avoids the opening getting clipped on pickup.
+        firstMessageMode: 'assistant-waits-for-user',
+        // LiveKit smart endpointing handles mid-call turn detection.
+        // Keep waitSeconds at the Vapi default so responses feel snappy.
         startSpeakingPlan: {
-          waitSeconds: 1.5,
           smartEndpointingPlan: {
             provider: 'livekit',
-            waitFunction: '200 + 8000 * x',
           },
         },
         voicemailDetection: {
