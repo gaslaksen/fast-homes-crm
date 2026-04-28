@@ -10,6 +10,7 @@ const ALLOWED_EXIT_STRATEGIES = [
   'hold_rental',
   'jv',
   'sub_to',
+  'concierge_listing',
   'other',
 ] as const;
 
