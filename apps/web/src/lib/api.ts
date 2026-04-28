@@ -440,3 +440,12 @@ export const dispositionAPI = {
   markAcquired: (leadId: string) => api.post(`/leads/${leadId}/mark-acquired`),
   markSold: (leadId: string) => api.post(`/leads/${leadId}/mark-sold`),
 };
+
+// Deals API (portfolio-level view of late-stage leads)
+export const dealsAPI = {
+  summary: (params?: { realizedFrom?: string; realizedTo?: string }) =>
+    api.get('/deals/summary', { params }),
+  list: (params?: Record<string, any>) => api.get('/deals', { params }),
+  exportCsv: (filters: Record<string, any>) =>
+    api.post('/deals/export-csv', filters, { responseType: 'blob' }),
+};

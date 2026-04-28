@@ -24,6 +24,7 @@ import { SellerPortalModule } from './seller-portal/seller-portal.module';
 import { RemindersModule } from './reminders/reminders.module';
 import { ActionsModule } from './actions/actions.module';
 import { DispositionModule } from './disposition/disposition.module';
+import { DealsModule } from './deals/deals.module';
 
 @Module({
   imports: [
@@ -54,6 +55,7 @@ import { DispositionModule } from './disposition/disposition.module';
     RemindersModule,
     ActionsModule,
     DispositionModule,
+    DealsModule,
   ],
 })
 export class AppModule {}

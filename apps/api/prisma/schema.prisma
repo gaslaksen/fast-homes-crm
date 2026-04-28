@@ -226,6 +226,9 @@ model Lead {
   @@index([organizationId, propertyState])
   @@index([organizationId, scoreBand])
   @@index([organizationId, source])
+  @@index([organizationId, profitBucket, status])
+  @@index([organizationId, soldDate])
+  @@index([organizationId, stageChangedAt])
   @@map("leads")
 }
 
