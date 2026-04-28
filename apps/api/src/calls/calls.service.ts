@@ -8,6 +8,11 @@ import Anthropic from '@anthropic-ai/sdk';
 
 const DEFAULT_CALL_DELAY_MS = 120_000; // 2 minutes
 
+const TERMINAL_STATUSES = [
+  'DEAD', 'CLOSED_LOST', 'SOLD', 'SOLD_LOSS',
+  'HELD_LONG_TERM', 'CANCELLED',
+] as const;
+
 @Injectable()
 export class CallsService {
   private readonly logger = new Logger(CallsService.name);
@@ -287,11 +292,19 @@ export class CallsService {
     }
 
     // ── Lead status: advance pipeline based on call outcome ──────────────
+    // Never auto-terminate from a single transcript: voicemails and brief
+    // exchanges have been misread as "not_interested" and killed leads that
+    // were actively replying via SMS. Soft-park in NURTURE so a human can
+    // review before terminating.
     if (data.reachedSeller && lead.status === 'ATTEMPTING_CONTACT') {
       updates.status = 'QUALIFYING';
     }
-    if (data.interestLevel === 'not_interested') {
-      updates.status = 'LOST';
+    if (
+      data.interestLevel === 'not_interested' &&
+      !TERMINAL_STATUSES.includes(lead.status as any) &&
+      lead.status !== 'NURTURE'
+    ) {
+      updates.status = 'NURTURE';
     }
 
     if (Object.keys(updates).length > 0) {
