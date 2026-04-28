@@ -37,6 +37,7 @@ export default function AcquisitionSection({ leadId, summary, onChanged }: Props
   const [showOfferForm, setShowOfferForm] = useState(summary.offers.length === 0);
   const [offerAmount, setOfferAmount] = useState('');
   const [offerNotes, setOfferNotes] = useState('');
+  const [visibleOnPortal, setVisibleOnPortal] = useState(true);
   const [savingOffer, setSavingOffer] = useState(false);
   const [offerErr, setOfferErr] = useState<string | null>(null);
 
@@ -46,9 +47,10 @@ export default function AcquisitionSection({ leadId, summary, onChanged }: Props
     if (amt == null || amt <= 0) { setOfferErr('Offer amount required'); return; }
     setSavingOffer(true);
     try {
-      await dispoAPI.createOffer(leadId, { offerAmount: amt, notes: offerNotes || null });
+      await dispoAPI.createOffer(leadId, { offerAmount: amt, notes: offerNotes || null, visibleOnPortal });
       setOfferAmount('');
       setOfferNotes('');
+      setVisibleOnPortal(true);
       setShowOfferForm(false);
       await onChanged();
     } catch (e: any) {
@@ -61,6 +63,15 @@ export default function AcquisitionSection({ leadId, summary, onChanged }: Props
   const setOfferStatus = async (offerId: string, status: string) => {
     try {
       await dispoAPI.updateOffer(leadId, offerId, { status });
+      await onChanged();
+    } catch {
+      // ignore
+    }
+  };
+
+  const setOfferPortalVisible = async (offerId: string, next: boolean) => {
+    try {
+      await dispoAPI.updateOffer(leadId, offerId, { visibleOnPortal: next });
       await onChanged();
     } catch {
       // ignore
@@ -198,6 +209,13 @@ export default function AcquisitionSection({ leadId, summary, onChanged }: Props
                   <td className="px-3 py-2 text-right space-x-2">
                     {o.status === 'pending' && (
                       <>
+                        <button
+                          onClick={() => setOfferPortalVisible(o.id, !o.visibleOnPortal)}
+                          className="text-xs text-blue-600 hover:text-blue-800"
+                          title={o.visibleOnPortal ? 'Hide this offer from the seller portal' : 'Show this offer on the seller portal'}
+                        >
+                          {o.visibleOnPortal ? 'Hide from portal' : 'Show on portal'}
+                        </button>
                         <button onClick={() => setOfferStatus(o.id, 'accepted')} className="text-xs text-green-600 hover:text-green-800">Accept</button>
                         <button onClick={() => setOfferStatus(o.id, 'rejected')} className="text-xs text-red-500 hover:text-red-700">Reject</button>
                       </>
@@ -229,6 +247,15 @@ export default function AcquisitionSection({ leadId, summary, onChanged }: Props
               className="px-3 py-2 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
             />
           </div>
+          <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
+            <input
+              type="checkbox"
+              checked={visibleOnPortal}
+              onChange={(e) => setVisibleOnPortal(e.target.checked)}
+              className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+            />
+            Show on Seller Portal (seller can accept/decline)
+          </label>
           {offerErr && <div className="text-xs text-red-600 dark:text-red-400">{offerErr}</div>}
           <div className="flex gap-2">
             <button onClick={addOffer} disabled={savingOffer} className="px-3 py-1.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg disabled:opacity-50">
