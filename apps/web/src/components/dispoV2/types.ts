@@ -10,6 +10,7 @@ export type ExitStrategy =
   | 'novation'
   | 'double_close'
   | 'fix_flip'
+  | 'concierge_listing'
   | 'hold_rental'
   | 'jv'
   | 'sub_to'
@@ -123,6 +124,7 @@ export const EXIT_STRATEGY_LABELS: Record<ExitStrategy, string> = {
   novation: 'Novation Agreement',
   double_close: 'Double Close',
   fix_flip: 'Fix & Flip',
+  concierge_listing: 'Concierge Listing (Houzeo + 1%)',
   hold_rental: 'Hold (Rental)',
   jv: 'Joint Venture',
   sub_to: 'Subject-To',

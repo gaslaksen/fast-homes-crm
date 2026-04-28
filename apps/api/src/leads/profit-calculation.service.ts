@@ -86,6 +86,7 @@ export class ProfitCalculationService {
 
       case 'double_close':
       case 'fix_flip':
+      case 'concierge_listing':
       case 'hold_rental':
       case 'jv':
       case 'other':

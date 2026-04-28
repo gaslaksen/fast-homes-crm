@@ -5,7 +5,7 @@ import { useState } from 'react';
 import StagePill from '@/components/listViewV2/StagePill';
 import {
   DEAL_STAGE_LABELS,
-  EXIT_GROUP_LABELS,
+  EXIT_STRATEGY_SHORT_LABELS,
   exitStrategyGroup,
   type DealStageId,
 } from '@/lib/dealStages';
@@ -130,7 +130,7 @@ export default function DealsTable({ deals }: Props) {
 function renderExit(d: DealRow): React.ReactNode {
   if (!d.exitStrategy) return <span className="text-gray-400">—</span>;
   const group = exitStrategyGroup(d.exitStrategy);
-  const label = group ? EXIT_GROUP_LABELS[group] : d.exitStrategy;
+  const label = EXIT_STRATEGY_SHORT_LABELS[d.exitStrategy] ?? d.exitStrategy;
   if (group === 'jv' && d.jvPartnerName) {
     return (
       <div className="min-w-0">

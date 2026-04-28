@@ -99,6 +99,7 @@ export function exitStrategyGroup(strategy: string | null | undefined): ExitStra
     case 'double_close':
       return 'wholesale';
     case 'fix_flip':
+    case 'concierge_listing':
       return 'concierge';
     case 'jv':
       return 'jv';
@@ -115,7 +116,7 @@ export function exitStrategyGroup(strategy: string | null | undefined): ExitStra
 export function exitStrategiesInGroup(group: ExitStrategyGroup): string[] {
   switch (group) {
     case 'concierge':
-      return ['fix_flip'];
+      return ['fix_flip', 'concierge_listing'];
     case 'jv':
       return ['jv'];
     case 'wholesale':
@@ -126,3 +127,18 @@ export function exitStrategiesInGroup(group: ExitStrategyGroup): string[] {
       return ['sub_to', 'other'];
   }
 }
+
+// Display label for an exit strategy in the Deals table. Distinguishes
+// concierge_listing from fix_flip even though they share the same chip
+// group on the filter bar.
+export const EXIT_STRATEGY_SHORT_LABELS: Record<string, string> = {
+  wholesale: 'Wholesale',
+  novation: 'Novation',
+  double_close: 'Double Close',
+  fix_flip: 'Fix & Flip',
+  concierge_listing: 'Concierge Listing',
+  hold_rental: 'Hold (Rental)',
+  jv: 'JV',
+  sub_to: 'Subject-To',
+  other: 'Other',
+};
