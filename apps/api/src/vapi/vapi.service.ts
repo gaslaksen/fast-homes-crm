@@ -263,14 +263,14 @@ HARD RULES
         },
         voice: {
           provider: '11labs',
-          voiceId: 'andrea',
-          model: 'eleven_multilingual_v2', // highest-quality 11Labs model
-          stability: 0.6,                  // steadier = cleaner output
+          voiceId: 'marissa',
+          model: 'eleven_multilingual_v2',
+          stability: 0.6,
           similarityBoost: 0.75,
           style: 0,
           useSpeakerBoost: false,
-          speed: 0.97,
-          optimizeStreamingLatency: 0,     // 0 = no latency optimization, max audio quality
+          speed: 1.05,                     // slightly faster than natural pace
+          optimizeStreamingLatency: 0,
         },
         backgroundSound: 'off',
 
@@ -278,11 +278,15 @@ HARD RULES
         // Wait for the human's "Hello?" before Riley greets — natural for
         // outbound calls and avoids the opening getting clipped on pickup.
         firstMessageMode: 'assistant-waits-for-user',
-        // LiveKit smart endpointing handles mid-call turn detection.
-        // Keep waitSeconds at the Vapi default so responses feel snappy.
+        // Aggressive endpointing for snappy response. LiveKit default
+        // waitFunction can hold up to ~3s when uncertainty is high; this
+        // tuned curve caps at ~1.6s and starts much faster on confident
+        // endpoints. Pair with low waitSeconds for a sub-second feel.
         startSpeakingPlan: {
+          waitSeconds: 0.2,
           smartEndpointingPlan: {
             provider: 'livekit',
+            waitFunction: '20 + 250 * sqrt(x) + 1300 * x^3',
           },
         },
         voicemailDetection: {
