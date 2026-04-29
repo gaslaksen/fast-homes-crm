@@ -1,8 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
-import { RentCastService } from './rentcast.service';
-import { AttomService, AttomEnrichmentResult } from './attom.service';
 import { ReapiService } from './reapi.service';
 import axios from 'axios';
 
@@ -29,24 +27,19 @@ export class CompsService {
   constructor(
     private prisma: PrismaService,
     private config: ConfigService,
-    private rentCastService: RentCastService,
-    private attomService: AttomService,
     private reapiService: ReapiService,
   ) {}
 
   /**
    * Fetch comps and ARV for a property. Provider selection is per-request via preferSource:
-   *   - 'reapi'    → run REAPI /v3/PropertyComps; NO fallback.
-   *   - 'rentcast' → run RentCast full analysis pipeline; NO fallback.
-   *   - 'attom'    → run ATTOM /sale/detail comp search; NO fallback (returns 0 if nothing found).
-   *   - 'auto'     → try REAPI → RentCast → ChatARV → placeholder (ATTOM excluded from auto; key expired).
-   * ATTOM enrichment only runs when the user explicitly chooses 'attom'.
+   *   - 'reapi' → run REAPI /v3/PropertyComps; NO fallback.
+   *   - 'auto'  → try REAPI → ChatARV → placeholder.
    * Persists the chosen provider on lead.compsProvider.
    */
   async fetchComps(
     leadId: string,
     address: { street: string; city: string; state: string; zip: string },
-    options?: { forceRefresh?: boolean; preferSource?: 'reapi' | 'attom' | 'rentcast' | 'auto' },
+    options?: { forceRefresh?: boolean; preferSource?: 'reapi' | 'auto' },
   ): Promise<{
     arv: number;
     arvLow?: number;
@@ -54,7 +47,6 @@ export class CompsService {
     confidence: number;
     compsCount: number;
     source: string;
-    attom?: AttomEnrichmentResult | null;
   }> {
     const preferSource = options?.preferSource || 'auto';
 
@@ -68,89 +60,27 @@ export class CompsService {
     if (preferSource === 'reapi') {
       if (!this.reapiService.isConfigured) {
         this.logger.error(`REAPI requested but not configured for lead ${leadId}`);
-        return { arv: 0, confidence: 0, compsCount: 0, source: 'reapi (not configured)', attom: null };
+        return { arv: 0, confidence: 0, compsCount: 0, source: 'reapi (not configured)' };
       }
-      const result = await this.runReapiPipeline(leadId, address, options);
-      // Clear stale comps from other providers (REAPI is now the chosen source)
-      const deleted = await this.prisma.comp.deleteMany({
-        where: { leadId, source: { in: ['rentcast', 'attom'] }, analysisId: null },
-      });
-      if (deleted.count > 0) {
-        this.logger.log(`Cleared ${deleted.count} stale comps for lead ${leadId} (REAPI chosen)`);
-      }
-      return result;
+      return await this.runReapiPipeline(leadId, address, options);
     }
 
-    // ── Explicit RentCast ───────────────────────────────────────────────────
-    if (preferSource === 'rentcast') {
-      if (!this.rentCastService.isConfigured) {
-        this.logger.error(`RentCast requested but not configured for lead ${leadId}`);
-        return { arv: 0, confidence: 0, compsCount: 0, source: 'rentcast (not configured)', attom: null };
-      }
-      return await this.runRentCastPipeline(leadId, address, options);
-    }
-
-    // ── Explicit ATTOM — no fallback ────────────────────────────────────────
-    // ATTOM enrichment only fires when the user explicitly chooses it from
-    // the Comps tab. It does NOT run in auto mode or alongside REAPI.
-    if (preferSource === 'attom') {
-      if (!this.attomService.isConfigured) {
-        this.logger.error(`ATTOM requested but not configured for lead ${leadId}`);
-        return { arv: 0, confidence: 0, compsCount: 0, source: 'attom (not configured)', attom: null };
-      }
-      const attomEnrichment = await this.attomService
-        .enrichLead(leadId, address, { forceRefresh: options?.forceRefresh })
-        .catch(err => { this.logger.warn(`ATTOM enrichment failed (non-fatal): ${err.message}`); return null; });
-      const result = await this.tryAttomComps(leadId, address, attomEnrichment, options);
-
-      if (result && result.compsCount >= 1) {
-        this.logger.log(`ATTOM comps: ${result.compsCount} deed-verified sales found`);
-        // Clear any stale RentCast comps — ATTOM is the chosen source
-        const deleted = await this.prisma.comp.deleteMany({
-          where: { leadId, source: 'rentcast', analysisId: null },
-        });
-        if (deleted.count > 0) {
-          this.logger.log(`Cleared ${deleted.count} stale RentCast comps for lead ${leadId} (ATTOM chosen)`);
-        }
-        return { ...result, arv: result.arv!, attom: attomEnrichment };
-      }
-
-      // Empty or failed — respect the user's explicit choice, do NOT fall back.
-      this.logger.warn(`ATTOM returned 0 comps for lead ${leadId} — user explicitly chose ATTOM, NOT falling back`);
-      // Remove any stale RentCast comps so the analysis shows empty, not mixed.
-      await this.prisma.comp.deleteMany({
-        where: { leadId, source: 'rentcast', analysisId: null },
-      });
-      return {
-        arv: 0,
-        confidence: 0,
-        compsCount: 0,
-        source: 'attom (no comps found)',
-        attom: attomEnrichment,
-      };
-    }
-
-    // ── Auto: REAPI first, then RentCast → ChatARV → placeholder ───────────
-    // (ATTOM excluded from auto — user must explicitly choose it.)
+    // ── Auto: REAPI first, then ChatARV → placeholder ──────────────────────
     if (this.reapiService.isConfigured) {
       try {
         const result = await this.runReapiPipeline(leadId, address, options);
         if (result.compsCount >= 1) {
           this.logger.log(`REAPI comps (auto): ${result.compsCount} found`);
-          await this.prisma.comp.deleteMany({
-            where: { leadId, source: { in: ['rentcast', 'attom'] }, analysisId: null },
-          });
           return result;
         }
-        this.logger.warn(`REAPI returned 0 comps — falling back to RentCast (auto mode)`);
+        this.logger.warn(`REAPI returned 0 comps — falling back to ChatARV (auto mode)`);
       } catch (err) {
-        this.logger.warn(`REAPI failed in auto mode — falling back to RentCast: ${(err as Error).message}`);
+        this.logger.warn(`REAPI failed in auto mode — falling back to ChatARV: ${(err as Error).message}`);
       }
     }
 
-    // Auto fallback: RentCast (or the RentCast→ChatARV→placeholder chain).
-    // ATTOM is intentionally NOT called here — the user wants manual-only.
-    return { ...(await this.fetchRentCastOrFallback(leadId, address, options)), attom: null };
+    // Auto fallback: ChatARV → placeholder.
+    return await this.fetchCompsWithFallback(leadId, address);
   }
 
   /**
@@ -167,7 +97,7 @@ export class CompsService {
     address: { street: string; city: string; state: string; zip: string },
     options?: { forceRefresh?: boolean },
   ): Promise<{
-    arv: number; arvLow?: number; arvHigh?: number; confidence: number; compsCount: number; source: string; attom: null;
+    arv: number; arvLow?: number; arvHigh?: number; confidence: number; compsCount: number; source: string;
   }> {
     this.logger.log(`Using REAPI comps pipeline for lead ${leadId}`);
 
@@ -198,191 +128,18 @@ export class CompsService {
       this.logger.log(
         `REAPI pipeline complete: ARV=$${(result.arv || 0).toLocaleString()}, ${result.compsCount} comps`,
       );
-      return { ...result, attom: null };
+      return result;
     } catch (err) {
       this.logger.error(`REAPI pipeline failed for lead ${leadId}: ${(err as Error).message}`);
-      return { arv: 0, confidence: 0, compsCount: 0, source: 'reapi (error)', attom: null };
+      return { arv: 0, confidence: 0, compsCount: 0, source: 'reapi (error)' };
     }
-  }
-
-  /**
-   * Run the full RentCast analyzeProperty pipeline, persist comps, update lead ARV.
-   */
-  private async runRentCastPipeline(
-    leadId: string,
-    address: { street: string; city: string; state: string; zip: string },
-    options?: { forceRefresh?: boolean },
-  ): Promise<{
-    arv: number; arvLow?: number; arvHigh?: number; confidence: number; compsCount: number; source: string; attom: null;
-  }> {
-    this.logger.log(`Using RentCast full analysis pipeline for lead ${leadId}`);
-    const fullAddress = `${address.street}, ${address.city}, ${address.state} ${address.zip}`;
-
-    try {
-      const payload = await this.rentCastService.analyzeProperty(fullAddress, address.zip, leadId);
-
-      // Persist scored comps to DB
-      await this.prisma.comp.deleteMany({
-        where: { leadId, source: 'rentcast', analysisId: null },
-      });
-      // Also clear any stale ATTOM comps — RentCast is the chosen source
-      await this.prisma.comp.deleteMany({
-        where: { leadId, source: 'attom', analysisId: null },
-      });
-
-      for (const comp of payload.compAnalysis.soldComps) {
-        await this.prisma.comp.create({
-          data: {
-            leadId,
-            address: comp.address,
-            soldPrice: comp.lastSalePrice,
-            soldDate: new Date(comp.lastSaleDate),
-            distance: comp.distanceMiles,
-            bedrooms: comp.bedrooms,
-            bathrooms: comp.bathrooms,
-            sqft: comp.squareFootage,
-            lotSize: comp.lotSize,
-            yearBuilt: comp.yearBuilt,
-            propertyType: comp.propertyType,
-            latitude: comp.latitude,
-            longitude: comp.longitude,
-            hasPool: comp.hasPool,
-            hasGarage: comp.hasGarage,
-            similarityScore: Math.round(comp.totalScore),
-            selected: true,
-            source: 'rentcast',
-            notes: `Scores: sqft=${comp.sqftScore} bed=${comp.bedroomScore} bath=${comp.bathroomScore} prox=${comp.proximityScore} rec=${comp.recencyScore}`,
-          },
-        });
-      }
-
-      const leadUpdate: Record<string, any> = {
-        arv: payload.deal.arv,
-        arvConfidence: payload.compAnalysis.arvConfidence,
-        lastCompsDate: new Date(),
-      };
-      if (payload.subject.latitude) leadUpdate.latitude = payload.subject.latitude;
-      if (payload.subject.longitude) leadUpdate.longitude = payload.subject.longitude;
-
-      await this.prisma.lead.update({ where: { id: leadId }, data: leadUpdate });
-
-      this.logger.log(
-        `RentCast pipeline complete: ARV=$${payload.deal.arv.toLocaleString()}, ` +
-        `${payload.compAnalysis.compCount} comps, method=${payload.compAnalysis.methodology}`,
-      );
-
-      return {
-        arv: payload.deal.arv,
-        arvLow: Math.round(payload.deal.arv * 0.95),
-        arvHigh: Math.round(payload.deal.arv * 1.05),
-        confidence: payload.compAnalysis.arvConfidence,
-        compsCount: payload.compAnalysis.compCount,
-        source: `rentcast (${payload.compAnalysis.methodology})`,
-        attom: null,
-      };
-    } catch (err) {
-      this.logger.error(`RentCast analyzeProperty failed for lead ${leadId}: ${err.message}`);
-      return { arv: 0, confidence: 0, compsCount: 0, source: 'rentcast (error)', attom: null };
-    }
-  }
-
-  /**
-   * Attempt an ATTOM /sale/detail comp search. Returns null on failure or missing lat/lon.
-   */
-  private async tryAttomComps(
-    leadId: string,
-    address: { street: string; city: string; state: string; zip: string },
-    attomEnrichment: AttomEnrichmentResult | null,
-    options?: { forceRefresh?: boolean },
-  ): Promise<{ arv?: number; arvLow?: number; arvHigh?: number; confidence: number; compsCount: number; source: string } | null> {
-    const lead = await this.prisma.lead.findUnique({
-      where: { id: leadId },
-      select: { latitude: true, longitude: true, propertyType: true, sqft: true, bedrooms: true },
-    });
-
-    const latitude  = lead?.latitude  ?? attomEnrichment?.latitude;
-    const longitude = lead?.longitude ?? attomEnrichment?.longitude;
-
-    if (!latitude || !longitude) {
-      this.logger.warn(`No lat/lon available for lead ${leadId} (even after ATTOM enrichment)`);
-      return null;
-    }
-
-    try {
-      this.logger.log(`Fetching comps via ATTOM /sale/detail for lead ${leadId} (${latitude}, ${longitude})`);
-      return await this.attomService.fetchCompsFromAttom(
-        leadId,
-        address,
-        { latitude, longitude },
-        {
-          forceRefresh: options?.forceRefresh,
-          propertyType: lead?.propertyType || undefined,
-          sqft: lead?.sqft || undefined,
-          bedrooms: lead?.bedrooms || undefined,
-        },
-      );
-    } catch (err) {
-      this.logger.warn(`ATTOM comp fetch failed for lead ${leadId}: ${err.message}`);
-      return null;
-    }
-  }
-
-  /**
-   * RentCast with tiered radius, then ChatARV, then placeholder fallback.
-   */
-  private async fetchRentCastOrFallback(
-    leadId: string,
-    address: { street: string; city: string; state: string; zip: string },
-    options?: { forceRefresh?: boolean },
-  ): Promise<{ arv: number; arvLow?: number; arvHigh?: number; confidence: number; compsCount: number; source: string }> {
-    if (this.rentCastService.isConfigured) {
-      try {
-        this.logger.log(`Fetching comps via RentCast for lead ${leadId}`);
-        return await this.fetchWithTieredRadius(leadId, address, options);
-      } catch (error) {
-        this.logger.error(`RentCast fetch failed, trying fallbacks: ${error.message}`);
-        return this.fetchCompsWithFallback(leadId, address);
-      }
-    }
-    return this.fetchCompsWithFallback(leadId, address);
-  }
-
-  /**
-   * Tiered radius expansion: if fewer than 3 comps are returned,
-   * automatically widen the search radius up to 3 miles.
-   */
-  private async fetchWithTieredRadius(
-    leadId: string,
-    address: { street: string; city: string; state: string; zip: string },
-    options?: { forceRefresh?: boolean },
-  ) {
-    const radiusTiers = [0.5, 1.0, 2.0, 3.0]; // miles
-    let result: { arv: number; arvLow?: number; arvHigh?: number; confidence: number; compsCount: number; source: string } | null = null;
-    let compsCount = 0;
-
-    for (const radius of radiusTiers) {
-      try {
-        result = await this.rentCastService.fetchAndSaveComps(leadId, address, {
-          forceRefresh: options?.forceRefresh || radius > radiusTiers[0], // always force on expansion
-          maxRadius: radius,
-        });
-        compsCount = result.compsCount;
-        this.logger.log(`Tiered comp search: radius=${radius}mi returned ${compsCount} comps`);
-        if (compsCount >= 3) break; // enough comps found — stop expanding
-      } catch (err) {
-        this.logger.warn(`Comp search at radius=${radius}mi failed: ${err.message}`);
-      }
-    }
-
-    if (result) return result;
-    return this.createPlaceholderComps(leadId, address);
   }
 
   private async fetchCompsWithFallback(
     leadId: string,
     address: { street: string; city: string; state: string; zip: string },
   ) {
-    // 2) Try ChatARV
+    // 1) Try ChatARV
     const chatARVKey = this.config.get<string>('CHATARV_API_KEY');
     if (chatARVKey) {
       try {
@@ -393,7 +150,7 @@ export class CompsService {
       }
     }
 
-    // 3) Fallback to placeholder
+    // 2) Fallback to placeholder
     this.logger.log(`Using placeholder comps for lead ${leadId}`);
     return await this.createPlaceholderComps(leadId, address);
   }

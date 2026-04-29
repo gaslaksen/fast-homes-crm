@@ -89,7 +89,7 @@ export class CompAnalysisService {
     propertyType?: string;
     importExistingComps?: boolean;
     selectedCompIds?: string[];
-    sourceFilter?: string;  // only import comps from this source (e.g. 'attom', 'rentcast')
+    sourceFilter?: string;  // only import comps from this source (e.g. 'attom')
   }) {
     const analysis = await this.prisma.compAnalysis.create({
       data: {
@@ -119,8 +119,8 @@ export class CompAnalysisService {
   }
 
   /**
-   * Link existing lead-level comps (from RentCast/ChatARV fetch) into a CompAnalysis.
-   * Copies the comps so they can be toggled/adjusted independently.
+   * Link existing lead-level comps into a CompAnalysis. Copies the comps so
+   * they can be toggled/adjusted independently.
    */
   async importExistingComps(analysisId: string, leadId: string, sourceFilter?: string): Promise<number> {
     const where: any = {
@@ -150,13 +150,6 @@ export class CompAnalysisService {
           where.source = 'reapi';
           this.logger.log(`importExistingComps: REAPI comps available (${reapiCount}) — using as primary for lead ${leadId}`);
         }
-      } else if (provider === 'rentcast') {
-        // RentCast is chosen — use RentCast only (manual selection by user).
-        const rentcastCount = await countBy('rentcast');
-        if (rentcastCount > 0) {
-          where.source = 'rentcast';
-          this.logger.log(`importExistingComps: RentCast comps available (${rentcastCount}) — using as primary for lead ${leadId}`);
-        }
       } else if (provider === 'attom') {
         // ATTOM is chosen — use ATTOM only (manual selection by user).
         const attomCount = await countBy('attom');
@@ -165,24 +158,18 @@ export class CompAnalysisService {
           this.logger.log(`importExistingComps: ATTOM comps available (${attomCount}) — using as primary for lead ${leadId}`);
         }
       } else {
-        // Auto: REAPI → RentCast → ATTOM priority. ATTOM is last because it's
-        // expected to be manual-only; it only falls back here if REAPI and
-        // RentCast both returned nothing for this lead.
+        // Auto: REAPI → ATTOM priority. ATTOM is last because it's expected
+        // to be manual-only; it only falls back here if REAPI returned
+        // nothing for this lead.
         const reapiCount = await countBy('reapi');
         if (reapiCount > 0) {
           where.source = 'reapi';
           this.logger.log(`importExistingComps: auto mode — using REAPI (${reapiCount}) for lead ${leadId}`);
         } else {
-          const rentcastCount = await countBy('rentcast');
-          if (rentcastCount > 0) {
-            where.source = 'rentcast';
-            this.logger.log(`importExistingComps: auto mode — no REAPI, using RentCast (${rentcastCount}) for lead ${leadId}`);
-          } else {
-            const attomCount = await countBy('attom');
-            if (attomCount > 0) {
-              where.source = 'attom';
-              this.logger.log(`importExistingComps: auto mode — no REAPI/RentCast, using ATTOM (${attomCount}) for lead ${leadId}`);
-            }
+          const attomCount = await countBy('attom');
+          if (attomCount > 0) {
+            where.source = 'attom';
+            this.logger.log(`importExistingComps: auto mode — no REAPI, using ATTOM (${attomCount}) for lead ${leadId}`);
           }
         }
       }
@@ -1139,7 +1126,7 @@ ${selectedComps.map((c, i) =>
   `${i + 1}. ${c.address}
      Sold: $${c.soldPrice.toLocaleString()} on ${new Date(c.soldDate).toLocaleDateString()} (${Math.round((Date.now() - new Date(c.soldDate).getTime()) / (30 * 24 * 60 * 60 * 1000))}mo ago)
      Details: ${c.bedrooms || '?'}bd/${c.bathrooms || '?'}ba, ${c.sqft?.toLocaleString() || '?'} sqft, ${c.distance.toFixed(1)} miles away
-     ${c.correlation ? `RentCast correlation: ${(c.correlation * 100).toFixed(0)}%` : ''}
+     ${c.correlation ? `Correlation: ${(c.correlation * 100).toFixed(0)}%` : ''}
      ${c.adjustedPrice && c.adjustedPrice !== c.soldPrice ? `Adjusted to: $${c.adjustedPrice.toLocaleString()} (${(c.adjustmentAmount || 0) >= 0 ? '+' : ''}$${(c.adjustmentAmount || 0).toLocaleString()})` : ''}
      ${c.notes ? `Notes: ${c.notes}` : ''}`
 ).join('\n')}
@@ -1385,7 +1372,7 @@ COMP POOL STATS:
 Total comps: ${allComps.length} | Selected: ${selectedComps.length}
 Avg distance: ${avgDist.toFixed(2)} miles
 Avg months ago: ${avgDaysOld.toFixed(1)} months
-Avg RentCast correlation: ${(avgCorrelation * 100).toFixed(0)}%
+Avg correlation: ${(avgCorrelation * 100).toFixed(0)}%
 Price spread (selected): $${minPrice.toLocaleString()} – $${maxPrice.toLocaleString()} ($${spread.toLocaleString()} spread)
 
 TOP COMPS (showing AI-adjusted prices — do NOT recalculate ARV from these):
@@ -1711,7 +1698,7 @@ Use Midwest/rural Ohio pricing. Be specific about what you see — don't general
     const now = Date.now();
 
     // ── Build pending comp context ──────────────────────────────────────────
-    // RentCast returns pending/active comps in some datasets — flag them
+    // Some provider datasets return pending/active comps — flag them
     const pendingComps = allComps.filter((c) =>
       (c.notes || '').toLowerCase().includes('pending') ||
       (c.notes || '').toLowerCase().includes('under contract') ||

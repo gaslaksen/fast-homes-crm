@@ -6,9 +6,7 @@ import { DripService } from '../drip/drip.service';
 import { CampaignEnrollmentService } from '../campaigns/campaign-enrollment.service';
 import { PhotosService } from '../photos/photos.service';
 import { SellerPortalService } from '../seller-portal/seller-portal.service';
-import { RentCastService } from '../comps/rentcast.service';
 import { CompsService } from '../comps/comps.service';
-import { AttomService } from '../comps/attom.service';
 import { ReapiService } from '../comps/reapi.service';
 import { PipelineService } from '../pipeline/pipeline.service';
 import { ProfitCalculationService } from './profit-calculation.service';
@@ -19,19 +17,6 @@ import * as XLSX from 'xlsx';
 
 const INITIAL_OUTREACH_DELAY_MS = 60_000; // 1 minute
 const DEMO_OUTREACH_DELAY_MS = 3_000;     // 3 seconds in demo mode
-
-// Convert lot size: if value > 10 it's almost certainly sqft, convert to acres
-function normalizeLotSize(raw: number | undefined): number | undefined {
-  if (!raw) return undefined;
-  return raw > 100 ? parseFloat((raw / 43560).toFixed(4)) : raw;
-}
-
-// Get most recent tax assessed value from RentCast taxAssessments map
-function latestTaxAssessment(taxAssessments?: Record<string, any>): number | undefined {
-  if (!taxAssessments) return undefined;
-  const years = Object.keys(taxAssessments).sort().reverse();
-  return years.length ? taxAssessments[years[0]]?.value : undefined;
-}
 
 
 @Injectable()
@@ -49,9 +34,7 @@ export class LeadsService {
     private campaignEnrollmentService: CampaignEnrollmentService,
     @Optional() private photosService: PhotosService,
     @Optional() private sellerPortalService: SellerPortalService,
-    private rentCastService: RentCastService,
     private compsService: CompsService,
-    private attomService: AttomService,
     private reapiService: ReapiService,
     private pipelineService: PipelineService,
     private profitCalc: ProfitCalculationService,
@@ -191,9 +174,9 @@ export class LeadsService {
       this.photosService.fetchAllPhotos(lead.id).catch((err) => {
         console.log(`⚠️ Photo fetch failed for ${lead.id}: ${err.message}`);
       });
-      // MLS listing status check disabled — RentCast/Zillow data is unreliable
-      // and was producing false positives on almost every lead. Re-enable once
-      // a reliable data source is identified.
+      // MLS listing status check disabled — Zillow data is unreliable and was
+      // producing false positives on almost every lead. Re-enable once a
+      // reliable data source is identified.
     } else {
       console.log(`📍 Lead created: ${lead.id} - ${data.propertyAddress}. No PhotosService available.`);
     }
@@ -205,7 +188,7 @@ export class LeadsService {
       });
     }
 
-    // Auto-populate property details from RentCast (non-blocking)
+    // Auto-populate property details from REAPI (non-blocking)
     this.autoPopulatePropertyDetails(lead.id, data).catch((err) => {
       this.logger.error(`Property details auto-population failed for ${lead.id}: ${err.message}`);
     });
@@ -252,10 +235,9 @@ export class LeadsService {
   }
 
   /**
-   * Auto-populate property details. Primary source is REAPI. RentCast is a
-   * fallback if REAPI is unconfigured or returns nothing. ATTOM is no longer
-   * called on the initial pull — the user must explicitly trigger it from
-   * the Comps tab if they want ATTOM data for a specific lead.
+   * Auto-populate property details from REAPI. ATTOM is no longer called on
+   * the initial pull — the user must explicitly trigger it from the Comps tab
+   * if they want ATTOM data for a specific lead.
    */
   private async autoPopulatePropertyDetails(
     leadId: string,
@@ -280,59 +262,22 @@ export class LeadsService {
           enrichedFromReapi = true;
           this.logger.log(`Property details populated from REAPI for lead ${leadId}`);
         } else {
-          this.logger.warn(`REAPI returned no data for lead ${leadId} — falling back to RentCast`);
+          this.logger.warn(`REAPI returned no data for lead ${leadId}`);
         }
       } catch (err) {
-        this.logger.warn(`REAPI enrichment failed for lead ${leadId} — falling back to RentCast: ${(err as Error).message}`);
+        this.logger.warn(`REAPI enrichment failed for lead ${leadId}: ${(err as Error).message}`);
       }
     }
 
     if (!enrichedFromReapi) {
-      const property = await this.rentCastService.getPropertyDetails(fullAddress);
-
-      if (property) {
-        const lead = await this.prisma.lead.findUnique({
-          where: { id: leadId },
-          select: { bedrooms: true, bathrooms: true, sqft: true, propertyType: true, yearBuilt: true, lotSize: true },
-        });
-
-        const updates: Record<string, any> = {};
-        if (!lead?.bedrooms && property.bedrooms) updates.bedrooms = property.bedrooms;
-        if (!lead?.bathrooms && property.bathrooms) updates.bathrooms = property.bathrooms;
-        if (!lead?.sqft && property.squareFootage) updates.sqft = property.squareFootage;
-        if (!lead?.propertyType && property.propertyType) updates.propertyType = property.propertyType;
-        if (!lead?.yearBuilt && property.yearBuilt) updates.yearBuilt = property.yearBuilt;
-        if (property.lotSize) updates.lotSize = normalizeLotSize(property.lotSize);
-        if (property.lastSaleDate) updates.lastSaleDate = new Date(property.lastSaleDate);
-        if (property.lastSalePrice) updates.lastSalePrice = property.lastSalePrice;
-        const taxVal = latestTaxAssessment((property as any).taxAssessments);
-        if (taxVal) updates.taxAssessedValue = taxVal;
-        if ((property as any).ownerOccupied != null) updates.ownerOccupied = (property as any).ownerOccupied;
-        if (property.hoa?.fee) updates.hoaFee = property.hoa.fee;
-
-        if (Object.keys(updates).length > 0) {
-          await this.prisma.lead.update({ where: { id: leadId }, data: updates });
-          this.logger.log(`Property details auto-populated from RentCast for lead ${leadId}: ${JSON.stringify(updates)}`);
-
-          await this.prisma.activity.create({
-            data: {
-              leadId,
-              type: 'FIELD_UPDATED',
-              description: `Property details auto-populated from public records (${Object.keys(updates).join(', ')})`,
-              metadata: { source: 'rentcast', fields: Object.keys(updates) },
-            },
-          });
-        }
-      } else {
-        this.logger.warn(`Property details not found for lead ${leadId} (REAPI + RentCast both empty)`);
-        await this.prisma.activity.create({
-          data: {
-            leadId,
-            type: 'FIELD_UPDATED',
-            description: 'Property details not found — manual entry or ATTOM/REAPI refresh may be needed',
-          },
-        });
-      }
+      this.logger.warn(`Property details not found for lead ${leadId} (REAPI returned no data)`);
+      await this.prisma.activity.create({
+        data: {
+          leadId,
+          type: 'FIELD_UPDATED',
+          description: 'Property details not found — manual entry or ATTOM/REAPI refresh may be needed',
+        },
+      });
     }
 
     // Fetch comps now that we have property details. Default provider is REAPI
@@ -365,10 +310,10 @@ export class LeadsService {
     this.logger.log(`Fetching comps for lead ${leadId}`);
 
     try {
-      // New leads always fetch from REAPI. ATTOM/RentCast are manual-only
-      // via the Comps tab toggle. Passing 'reapi' explicitly (instead of
-      // falling through to 'auto') also prevents the lead's compsProvider
-      // from being overwritten to 'auto'.
+      // New leads always fetch from REAPI. ATTOM is manual-only via the
+      // Comps tab toggle. Passing 'reapi' explicitly (instead of falling
+      // through to 'auto') also prevents the lead's compsProvider from
+      // being overwritten to 'auto'.
       const result = await this.compsService.fetchComps(leadId, {
         street: lead.propertyAddress,
         city: lead.propertyCity,
@@ -388,8 +333,7 @@ export class LeadsService {
   }
 
   /**
-   * Refresh property details for an existing lead. Prefers REAPI; falls back
-   * to RentCast if REAPI is unconfigured or returns no data.
+   * Refresh property details for an existing lead from REAPI.
    */
   async refreshPropertyDetails(leadId: string) {
     const lead = await this.prisma.lead.findUnique({
@@ -410,66 +354,24 @@ export class LeadsService {
       zip: lead.propertyZip,
     };
 
-    // Try REAPI first (forceRefresh bypasses 24h cache)
-    if (this.reapiService.isConfigured) {
-      try {
-        const reapiResult = await this.reapiService.enrichLead(leadId, addressObj, { forceRefresh: true });
-        if (reapiResult) {
-          return {
-            success: true,
-            source: 'reapi',
-            message: 'Property details refreshed from REAPI',
-          };
-        }
-      } catch (err) {
-        this.logger.warn(`REAPI refresh failed for lead ${leadId} — falling back to RentCast: ${(err as Error).message}`);
+    if (!this.reapiService.isConfigured) {
+      return { success: false, message: 'REAPI not configured' };
+    }
+
+    try {
+      const reapiResult = await this.reapiService.enrichLead(leadId, addressObj, { forceRefresh: true });
+      if (reapiResult) {
+        return {
+          success: true,
+          source: 'reapi',
+          message: 'Property details refreshed from REAPI',
+        };
       }
+      return { success: false, message: 'Property details not found in REAPI' };
+    } catch (err) {
+      this.logger.warn(`REAPI refresh failed for lead ${leadId}: ${(err as Error).message}`);
+      return { success: false, message: `REAPI refresh failed: ${(err as Error).message}` };
     }
-
-    // Fallback: RentCast
-    const address = `${lead.propertyAddress}, ${lead.propertyCity}, ${lead.propertyState} ${lead.propertyZip}`;
-    const property = await this.rentCastService.getPropertyDetails(address);
-
-    if (!property) {
-      return { success: false, message: 'Property details not found (REAPI + RentCast both empty)' };
-    }
-
-    const updates: Record<string, any> = {};
-    if (property.bedrooms) updates.bedrooms = property.bedrooms;
-    if (property.bathrooms) updates.bathrooms = property.bathrooms;
-    if (property.squareFootage) updates.sqft = property.squareFootage;
-    if (property.propertyType) updates.propertyType = property.propertyType;
-    if (property.yearBuilt) updates.yearBuilt = property.yearBuilt;
-    if (property.lotSize) updates.lotSize = normalizeLotSize(property.lotSize);
-    if (property.lastSaleDate) updates.lastSaleDate = new Date(property.lastSaleDate);
-    if (property.lastSalePrice) updates.lastSalePrice = property.lastSalePrice;
-    const taxVal = latestTaxAssessment((property as any).taxAssessments);
-    if (taxVal) updates.taxAssessedValue = taxVal;
-    if ((property as any).ownerOccupied != null) updates.ownerOccupied = (property as any).ownerOccupied;
-    if (property.hoa?.fee) updates.hoaFee = property.hoa.fee;
-
-    if (Object.keys(updates).length > 0) {
-      await this.prisma.lead.update({
-        where: { id: leadId },
-        data: updates,
-      });
-
-      await this.prisma.activity.create({
-        data: {
-          leadId,
-          type: 'FIELD_UPDATED',
-          description: `Property details refreshed from RentCast (${Object.keys(updates).join(', ')})`,
-          metadata: { source: 'rentcast', fields: Object.keys(updates) },
-        },
-      });
-    }
-
-    return {
-      success: true,
-      source: 'rentcast',
-      details: updates,
-      message: `Property details refreshed from RentCast: ${Object.keys(updates).join(', ')}`,
-    };
   }
 
   /**

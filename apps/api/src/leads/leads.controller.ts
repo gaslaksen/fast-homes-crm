@@ -5,7 +5,6 @@ import { Response } from 'express';
 import { LeadsService } from './leads.service';
 import { LeadImportService, IMPORTABLE_FIELDS } from './lead-import.service';
 import { AiInsightService } from './ai-insight.service';
-import { RentCastService } from '../comps/rentcast.service';
 import { LeadStatus, LeadSource } from '@fast-homes/shared';
 import * as jwt from 'jsonwebtoken';
 
@@ -32,7 +31,6 @@ export class LeadsController {
   constructor(
     private leadsService: LeadsService,
     private leadImportService: LeadImportService,
-    private rentCastService: RentCastService,
     private aiInsightService: AiInsightService,
   ) {}
 
@@ -205,27 +203,6 @@ export class LeadsController {
   @Get('stats')
   async getStats() {
     return this.leadsService.getLeadStats();
-  }
-
-  @Get('test-property-details')
-  async testPropertyDetails(@Query('address') address?: string): Promise<Record<string, any>> {
-    const testAddress = address || '248 Clairborne Ct, Matthews, NC 28104';
-    try {
-      const data = await this.rentCastService.getPropertyDetails(testAddress);
-      return {
-        success: !!data,
-        address: testAddress,
-        apiKeyConfigured: this.rentCastService.isConfigured,
-        data: data || null,
-      };
-    } catch (error) {
-      return {
-        success: false,
-        address: testAddress,
-        apiKeyConfigured: this.rentCastService.isConfigured,
-        error: error.message,
-      };
-    }
   }
 
   @Get(':id')

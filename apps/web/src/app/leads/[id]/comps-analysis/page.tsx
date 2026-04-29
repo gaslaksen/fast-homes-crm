@@ -159,7 +159,7 @@ export default function CompsAnalysisPage() {
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [loading, setLoading] = useState(true);
   const [fetchingComps, setFetchingComps] = useState(false);
-  const [compsSource, setCompsSource] = useState<'reapi' | 'attom' | 'rentcast'>('reapi');
+  const [compsSource, setCompsSource] = useState<'reapi'>('reapi');
   const [sortField, setSortField] = useState<string>('distance');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [hoveredCompId, setHoveredCompId] = useState<string | null>(null);
@@ -210,10 +210,6 @@ export default function CompsAnalysisPage() {
   const [analyzingLeadPhotos, setAnalyzingLeadPhotos] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
 
-  // ATTOM enrichment
-  const [attomData, setAttomData] = useState<any>(null);
-  const [attomLoading, setAttomLoading] = useState(false);
-
   useEffect(() => {
     loadData();
   }, [leadId]);
@@ -224,11 +220,9 @@ export default function CompsAnalysisPage() {
       setLead(leadRes.data);
       // Initialize provider toggle from lead's last-used provider
       const savedProvider = (leadRes.data as any).compsProvider;
-      if (savedProvider === 'reapi' || savedProvider === 'rentcast' || savedProvider === 'attom') {
+      if (savedProvider === 'reapi') {
         setCompsSource(savedProvider);
       }
-      // Load ATTOM data (non-blocking)
-      compsAPI.getAttomData(leadId).then(r => setAttomData(r.data)).catch(() => {});
 
       // Check for existing analyses
       const analyses = await compAnalysisAPI.list(leadId);
@@ -302,13 +296,9 @@ export default function CompsAnalysisPage() {
       setDealArv(savedLeadArv || full.data.arvEstimate || result.data.arv || 0);
       router.replace(`/leads/${leadId}/comps-analysis?tab=comps`, { scroll: false });
 
-      // If the chosen provider returned 0 comps, tell the user clearly — no silent fallback.
+      // If REAPI returned 0 comps, tell the user clearly.
       if ((result.data?.compsCount ?? 0) === 0) {
-        const providerLabel =
-          compsSource === 'reapi' ? 'REAPI' :
-          compsSource === 'attom' ? 'ATTOM' :
-          'RentCast';
-        alert(`${providerLabel} found 0 comps for this property. Try switching providers (REAPI / ATTOM / RentCast) and refreshing.`);
+        alert(`REAPI found 0 comps for this property — likely a sparse market with no recent matching sales.`);
       }
     } catch (error: any) {
       console.error('Failed to fetch comps:', error);
@@ -729,9 +719,7 @@ export default function CompsAnalysisPage() {
       )
     : 0;
   const compsFromReapi = allComps.filter(c => c.source === 'reapi').length;
-  const compsFromAttom = allComps.filter(c => c.source === 'attom').length;
-  const compsFromRentcast = allComps.filter(c => c.source === 'rentcast').length;
-  const compsWithSource = compsFromReapi + compsFromAttom + compsFromRentcast;
+  const compsWithSource = compsFromReapi;
 
   return (
     <AppShell>
@@ -801,39 +789,10 @@ export default function CompsAnalysisPage() {
             {/* Subject Property (compact on desktop, full on mobile) */}
             <div className="border-t border-gray-200 dark:border-gray-700">
               <div className="hidden lg:block">
-                <SubjectPropertyCard
-                  lead={lead}
-                  attomData={attomData}
-                  attomLoading={attomLoading}
-                  onAttomEnrich={async () => {
-                    setAttomLoading(true);
-                    try {
-                      const r = await compsAPI.attomEnrich(leadId);
-                      setAttomData(r.data);
-                      const lr = await leadsAPI.get(leadId);
-                      setLead(lr.data);
-                    } catch {}
-                    setAttomLoading(false);
-                  }}
-                  compact
-                />
+                <SubjectPropertyCard lead={lead} compact />
               </div>
               <div className="lg:hidden">
-                <SubjectPropertyCard
-                  lead={lead}
-                  attomData={attomData}
-                  attomLoading={attomLoading}
-                  onAttomEnrich={async () => {
-                    setAttomLoading(true);
-                    try {
-                      const r = await compsAPI.attomEnrich(leadId);
-                      setAttomData(r.data);
-                      const lr = await leadsAPI.get(leadId);
-                      setLead(lr.data);
-                    } catch {}
-                    setAttomLoading(false);
-                  }}
-                />
+                <SubjectPropertyCard lead={lead} />
               </div>
             </div>
           </div>
@@ -846,9 +805,6 @@ export default function CompsAnalysisPage() {
                 allCompsCount={allComps.length}
                 selectedCompsCount={selectedComps.length}
                 compsFromReapi={compsFromReapi}
-                compsFromAttom={compsFromAttom}
-                compsFromRentcast={compsFromRentcast}
-                compsSource={compsSource}
                 sortField={sortField}
                 sortDir={sortDir}
                 fetchingComps={fetchingComps}
@@ -873,7 +829,6 @@ export default function CompsAnalysisPage() {
                     console.error('Failed to apply distance filter:', err);
                   }
                 }}
-                onSetCompsSource={setCompsSource}
                 onSort={handleSort}
                 onSelectAll={async (selected) => {
                   if (!analysis) return;
@@ -899,9 +854,7 @@ export default function CompsAnalysisPage() {
                     disabled={fetchingComps}
                     className="btn btn-primary"
                   >
-                    {fetchingComps
-                      ? `Fetching from ${compsSource === 'reapi' ? 'REAPI' : compsSource === 'rentcast' ? 'RentCast' : 'ATTOM'}...`
-                      : 'Find Comps'}
+                    {fetchingComps ? 'Fetching from REAPI...' : 'Find Comps'}
                   </button>
                 </div>
               ) : (
@@ -1340,38 +1293,6 @@ export default function CompsAnalysisPage() {
                       <div className="bg-green-50 dark:bg-green-950 rounded-lg p-2 border border-green-200 dark:border-green-800">
                         <div className="text-xs text-green-700 dark:text-green-400 font-medium mb-0.5">High</div>
                         <div className="text-base font-bold text-green-700 dark:text-green-400">{(lead as any)?.reapiEstimatedValueHigh ? `$${Math.round((lead as any).reapiEstimatedValueHigh).toLocaleString()}` : '—'}</div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* ATTOM independent validation strip */}
-                {attomData?.attomAvm && (
-                  <div className="mb-5 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950 px-4 py-3">
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className="text-xs font-semibold text-indigo-700 dark:text-indigo-400 uppercase tracking-wide">ATTOM Independent Valuation</span>
-                      {attomData.attomAvmConfidence && (
-                        <span className="text-xs px-1.5 py-0.5 rounded bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400">{attomData.attomAvmConfidence}% confidence</span>
-                      )}
-                      {attomData.avmExcellentHigh && analysis?.arvEstimate && (() => {
-                        const delta = Math.abs(attomData.avmExcellentHigh - analysis.arvEstimate) / analysis.arvEstimate;
-                        if (delta > 0.15) return <span className="text-xs px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 font-medium">⚠️ {Math.round(delta * 100)}% divergence from comps</span>;
-                        if (delta <= 0.05) return <span className="text-xs px-1.5 py-0.5 rounded bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 font-medium">✓ Confirms comps ARV</span>;
-                        return <span className="text-xs px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400">{Math.round(delta * 100)}% difference</span>;
-                      })()}
-                    </div>
-                    <div className="grid grid-cols-3 gap-3 text-center">
-                      <div className="bg-red-50 dark:bg-red-950 rounded-lg p-2 border border-red-200 dark:border-red-800">
-                        <div className="text-xs text-red-600 dark:text-red-400 font-medium mb-0.5">AS-IS / Distressed</div>
-                        <div className="text-base font-bold text-red-700 dark:text-red-400">{attomData.avmPoorHigh ? `$${Math.round(attomData.avmPoorHigh).toLocaleString()}` : '—'}</div>
-                      </div>
-                      <div className="bg-yellow-50 dark:bg-yellow-950 rounded-lg p-2 border border-yellow-200 dark:border-yellow-800">
-                        <div className="text-xs text-yellow-700 dark:text-yellow-400 font-medium mb-0.5">Good Condition</div>
-                        <div className="text-base font-bold text-yellow-700 dark:text-yellow-400">{attomData.avmGoodHigh ? `$${Math.round(attomData.avmGoodHigh).toLocaleString()}` : '—'}</div>
-                      </div>
-                      <div className="bg-green-50 dark:bg-green-950 rounded-lg p-2 border border-green-300 dark:border-green-800 ring-1 ring-green-400">
-                        <div className="text-xs text-green-700 dark:text-green-400 font-medium mb-0.5">After Repair (ARV)</div>
-                        <div className="text-base font-bold text-green-700 dark:text-green-400">{attomData.avmExcellentHigh ? `$${Math.round(attomData.avmExcellentHigh).toLocaleString()}` : '—'}</div>
                       </div>
                     </div>
                   </div>
@@ -2634,246 +2555,13 @@ export default function CompsAnalysisPage() {
           </div>
         )}
 
-        {/* ═══════════════ PROPERTY INTEL (ATTOM) — kept for reference, not shown as tab ═══════════════ */}
-        {false && activeSection === 'property-intel' && (
-          <div className="space-y-6">
-
-            {/* Header */}
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">🏠 Property Intelligence</h2>
-                <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-                  Deep property data & valuation ranges from ATTOM — the industry standard for real estate data.
-                </p>
-              </div>
-              <button
-                onClick={async () => {
-                  setAttomLoading(true);
-                  try {
-                    const r = await compsAPI.attomEnrich(leadId, true);
-                    setAttomData(r.data);
-                    // Reload lead to pick up newly filled fields
-                    const lr = await leadsAPI.get(leadId);
-                    setLead(lr.data);
-                  } catch {}
-                  setAttomLoading(false);
-                }}
-                disabled={attomLoading}
-                className="btn btn-secondary btn-sm"
-              >
-                {attomLoading ? '⏳ Fetching…' : '🔄 Refresh ATTOM Data'}
-              </button>
-            </div>
-
-            {!attomData?.attomId ? (
-              <div className="card border-dashed border-2 border-gray-200 dark:border-gray-700 text-center py-12">
-                <div className="text-4xl mb-3">🏘️</div>
-                <div className="text-gray-600 dark:text-gray-400 font-medium">No ATTOM data loaded yet</div>
-                <p className="text-sm text-gray-400 dark:text-gray-500 mt-1 mb-4">
-                  Fetch to enrich this property with deep data: AVM, tax records, building details, condition-adjusted value ranges.
-                </p>
-                <button
-                  onClick={async () => {
-                    setAttomLoading(true);
-                    try {
-                      const r = await compsAPI.attomEnrich(leadId);
-                      setAttomData(r.data);
-                      const lr = await leadsAPI.get(leadId);
-                      setLead(lr.data);
-                    } catch {}
-                    setAttomLoading(false);
-                  }}
-                  disabled={attomLoading}
-                  className="btn btn-primary"
-                >
-                  {attomLoading ? '⏳ Fetching ATTOM data…' : '📡 Fetch Property Intelligence'}
-                </button>
-              </div>
-            ) : (
-              <>
-                {/* ── Condition-Adjusted AVM (investor's crown jewel) ── */}
-                <div className="card border border-indigo-200 dark:border-indigo-800 bg-gradient-to-br from-indigo-50 to-white">
-                  <div className="flex items-center gap-2 mb-4">
-                    <span className="text-2xl">💎</span>
-                    <div>
-                      <h3 className="font-bold text-gray-900 dark:text-gray-100">Condition-Adjusted Valuation</h3>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">ATTOM AVM ranges based on property condition — critical for investor ARV</p>
-                    </div>
-                    {attomData.attomAvmConfidence && (
-                      <span className="ml-auto text-xs px-2 py-1 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 rounded-full font-medium">
-                        {attomData.attomAvmConfidence}% confidence
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    {/* Distressed / AS-IS */}
-                    <div className="rounded-xl border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950 p-4 text-center">
-                      <div className="text-xs font-semibold text-red-600 uppercase tracking-wide mb-1">😰 Distressed / AS-IS</div>
-                      <div className="text-2xl font-bold text-red-700 dark:text-red-400">
-                        {attomData.avmPoorHigh ? `$${Math.round(attomData.avmPoorHigh).toLocaleString()}` : '—'}
-                      </div>
-                      {attomData.avmPoorLow && attomData.avmPoorHigh && (
-                        <div className="text-xs text-red-500 mt-1">
-                          ${Math.round(attomData.avmPoorLow).toLocaleString()} – ${Math.round(attomData.avmPoorHigh).toLocaleString()}
-                        </div>
-                      )}
-                      <div className="text-xs text-gray-500 dark:text-gray-400 mt-2">Poor condition, needs major work</div>
-                    </div>
-
-                    {/* Good condition */}
-                    <div className="rounded-xl border border-yellow-200 dark:border-yellow-800 bg-yellow-50 dark:bg-yellow-950 p-4 text-center">
-                      <div className="text-xs font-semibold text-yellow-700 dark:text-yellow-400 uppercase tracking-wide mb-1">👍 Good Condition</div>
-                      <div className="text-2xl font-bold text-yellow-700 dark:text-yellow-400">
-                        {attomData.avmGoodHigh ? `$${Math.round(attomData.avmGoodHigh).toLocaleString()}` : '—'}
-                      </div>
-                      {attomData.avmGoodLow && attomData.avmGoodHigh && (
-                        <div className="text-xs text-yellow-600 mt-1">
-                          ${Math.round(attomData.avmGoodLow).toLocaleString()} – ${Math.round(attomData.avmGoodHigh).toLocaleString()}
-                        </div>
-                      )}
-                      <div className="text-xs text-gray-500 dark:text-gray-400 mt-2">Average condition, minor repairs needed</div>
-                    </div>
-
-                    {/* After-Repair / Excellent = TRUE ARV */}
-                    <div className="rounded-xl border border-green-300 dark:border-green-800 bg-green-50 dark:bg-green-950 p-4 text-center ring-2 ring-green-400">
-                      <div className="text-xs font-semibold text-green-700 dark:text-green-400 uppercase tracking-wide mb-1">✨ After Repair (ARV)</div>
-                      <div className="text-3xl font-bold text-green-700 dark:text-green-400">
-                        {attomData.avmExcellentHigh ? `$${Math.round(attomData.avmExcellentHigh).toLocaleString()}` : '—'}
-                      </div>
-                      {attomData.avmExcellentLow && attomData.avmExcellentHigh && (
-                        <div className="text-xs text-green-600 mt-1">
-                          ${Math.round(attomData.avmExcellentLow).toLocaleString()} – ${Math.round(attomData.avmExcellentHigh).toLocaleString()}
-                        </div>
-                      )}
-                      <div className="text-xs text-gray-500 dark:text-gray-400 mt-2">Fully renovated / excellent condition</div>
-                    </div>
-                  </div>
-
-                  {/* ATTOM AVM baseline */}
-                  {attomData.attomAvm && (
-                    <div className="mt-4 flex items-center gap-4 text-sm text-gray-600 dark:text-gray-400 bg-white dark:bg-gray-900 rounded-lg px-4 py-3 border border-gray-200 dark:border-gray-700">
-                      <span className="font-medium">ATTOM AVM Baseline:</span>
-                      <span className="font-bold text-gray-900 dark:text-gray-100">${Math.round(attomData.attomAvm).toLocaleString()}</span>
-                      {attomData.attomAvmLow && attomData.attomAvmHigh && (
-                        <span className="text-gray-400 dark:text-gray-500 text-xs">
-                          (range: ${Math.round(attomData.attomAvmLow).toLocaleString()} – ${Math.round(attomData.attomAvmHigh).toLocaleString()})
-                        </span>
-                      )}
-                      {attomData.attomAvmConfidence && (
-                        <span className="ml-auto text-xs text-gray-400 dark:text-gray-500">Updated {attomData.attomEnrichedAt ? new Date(attomData.attomEnrichedAt).toLocaleDateString() : '—'}</span>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {/* ── Property Details ── */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-
-                  {/* Building Details */}
-                  <div className="card">
-                    <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
-                      <span>🏗️</span> Building Details
-                    </h3>
-                    <div className="grid grid-cols-2 gap-3">
-                      {[
-                        { label: 'Beds', value: attomData.bedrooms ? `${attomData.bedrooms} bed` : '—' },
-                        { label: 'Baths', value: attomData.bathrooms ? `${attomData.bathrooms} bath` : '—' },
-                        { label: 'Sq Ft (Living)', value: attomData.sqft ? `${attomData.sqft.toLocaleString()} sqft` : '—' },
-                        { label: 'Lot Size', value: attomData.lotSize ? `${attomData.lotSize.toFixed(3)} acres` : '—' },
-                        { label: 'Year Built', value: attomData.yearBuilt ? String(attomData.yearBuilt) : '—' },
-                        { label: 'Effective Year', value: attomData.effectiveYearBuilt ? String(attomData.effectiveYearBuilt) : '—' },
-                        { label: 'Stories', value: attomData.stories ? String(attomData.stories) : '—' },
-                        { label: 'Basement', value: attomData.basementSqft ? `${attomData.basementSqft.toLocaleString()} sqft` : '—' },
-                        { label: 'Wall Type', value: attomData.wallType || '—' },
-                        { label: 'Condition', value: attomData.propertyCondition || '—' },
-                        { label: 'Quality', value: attomData.propertyQuality || '—' },
-                        { label: 'Subdivision', value: attomData.subdivision || '—' },
-                      ].map(({ label, value }) => (
-                        <div key={label} className="bg-gray-50 dark:bg-gray-950 rounded-lg p-3">
-                          <div className="text-xs text-gray-500 dark:text-gray-400 mb-0.5">{label}</div>
-                          <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">{value}</div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Tax & Assessment */}
-                  <div className="space-y-4">
-                    <div className="card">
-                      <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
-                        <span>🏦</span> Tax & Assessment
-                      </h3>
-                      <div className="space-y-3">
-                        {[
-                          { label: 'Annual Tax', value: attomData.annualTaxAmount ? `$${Math.round(attomData.annualTaxAmount).toLocaleString()}/yr` : '—', highlight: true },
-                          { label: 'Assessed Value', value: attomData.taxAssessedValue ? `$${Math.round(attomData.taxAssessedValue).toLocaleString()}` : '—' },
-                          { label: 'Market Assessed', value: attomData.marketAssessedValue ? `$${Math.round(attomData.marketAssessedValue).toLocaleString()}` : '—' },
-                          { label: 'Last Sale Price', value: attomData.lastSalePrice ? `$${Math.round(attomData.lastSalePrice).toLocaleString()}` : '—' },
-                          { label: 'Last Sale Date', value: attomData.lastSaleDate ? new Date(attomData.lastSaleDate).toLocaleDateString() : '—' },
-                        ].map(({ label, value, highlight }) => (
-                          <div key={label} className={`flex justify-between items-center py-2 border-b border-gray-100 dark:border-gray-800 last:border-0 ${highlight ? 'text-gray-900 dark:text-gray-100 font-semibold' : ''}`}>
-                            <span className="text-sm text-gray-600 dark:text-gray-400">{label}</span>
-                            <span className={`text-sm ${highlight ? 'text-gray-900 dark:text-gray-100 font-bold' : 'text-gray-900 dark:text-gray-100'}`}>{value}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Quick investor math using ATTOM data */}
-                    {attomData.avmExcellentHigh && attomData.avmPoorHigh && (
-                      <div className="card border border-purple-200 dark:border-purple-800 bg-purple-50 dark:bg-purple-950">
-                        <h3 className="font-semibold text-purple-900 mb-3 flex items-center gap-2">
-                          <span>🎯</span> ATTOM Investor Snapshot
-                        </h3>
-                        <div className="space-y-2 text-sm">
-                          <div className="flex justify-between">
-                            <span className="text-purple-700 dark:text-purple-400">ARV (after repair)</span>
-                            <span className="font-bold text-green-700 dark:text-green-400">${Math.round(attomData.avmExcellentHigh).toLocaleString()}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-purple-700 dark:text-purple-400">AS-IS value</span>
-                            <span className="font-semibold text-red-600">${Math.round(attomData.avmPoorHigh).toLocaleString()}</span>
-                          </div>
-                          <div className="flex justify-between border-t border-purple-200 dark:border-purple-800 pt-2 mt-2">
-                            <span className="text-purple-700 dark:text-purple-400 font-medium">Upside potential</span>
-                            <span className="font-bold text-purple-800 dark:text-purple-400">
-                              ${Math.round(attomData.avmExcellentHigh - attomData.avmPoorHigh).toLocaleString()}
-                            </span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-purple-700 dark:text-purple-400">70% MAO (of ARV)</span>
-                            <span className="font-semibold text-blue-700 dark:text-blue-400">
-                              ${Math.round(attomData.avmExcellentHigh * 0.7).toLocaleString()}
-                            </span>
-                          </div>
-                          {attomData.annualTaxAmount && (
-                            <div className="flex justify-between text-xs text-purple-600 mt-1">
-                              <span>Monthly tax hold cost</span>
-                              <span>${Math.round(attomData.annualTaxAmount / 12).toLocaleString()}/mo</span>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <p className="text-xs text-gray-400 dark:text-gray-500 text-center">
-                  Property intelligence powered by ATTOM Data Solutions · Last updated: {attomData.attomEnrichedAt ? new Date(attomData.attomEnrichedAt).toLocaleString() : '—'}
-                </p>
-              </>
-            )}
-          </div>
-        )}
 
       </main>
 
       {/* Attribution */}
       {compsWithSource > 0 && (
         <div className="text-center text-xs text-gray-400 dark:text-gray-500 pb-4">
-          {compsFromAttom > 0 ? 'Deed-verified comparables powered by ATTOM' : 'Comparable data powered by RentCast'}
-          {compsFromAttom > 0 && compsFromRentcast > 0 ? ' · Additional comps from RentCast' : ''}
+          Comparable data powered by REAPI
         </div>
       )}
 
@@ -2911,12 +2599,6 @@ function SourceBadge({ source }: { source?: string }) {
   if (!source || source === 'manual') return <span className="text-xs text-gray-400 dark:text-gray-500">Manual</span>;
   if (source === 'reapi') return (
     <span className="text-xs px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 font-medium">REAPI</span>
-  );
-  if (source === 'attom') return (
-    <span className="text-xs px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 font-medium">ATTOM Verified</span>
-  );
-  if (source === 'rentcast') return (
-    <span className="text-xs px-1.5 py-0.5 rounded bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 font-medium">RentCast</span>
   );
   if (source === 'chatarv') return (
     <span className="text-xs px-1.5 py-0.5 rounded bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 font-medium">ChatARV</span>

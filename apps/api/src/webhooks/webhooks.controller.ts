@@ -254,8 +254,7 @@ export class WebhooksController {
    * Paste this URL into InvestorFuse Settings → Integrations → Webhook
    * Format: https://your-tunnel.loca.lt/webhooks/investorfuse
    *
-   * On receipt: parses address, fetches RentCast comps + Claude analysis,
-   * posts full breakdown to Slack.
+   * On receipt: parses address and acknowledges the lead in Slack.
    */
   @Post('investorfuse')
   @HttpCode(200)
@@ -267,8 +266,7 @@ export class WebhooksController {
   /**
    * Slack lead notification webhook
    * Called by Zapier when a new lead posts in the #esl-1-llc channel.
-   * Parses the address, fetches RentCast comps + Claude analysis,
-   * and posts the full breakdown back to Slack.
+   * Parses the address and posts a minimal lead-received ack back to Slack.
    */
   @Post('slack-lead')
   @HttpCode(200)

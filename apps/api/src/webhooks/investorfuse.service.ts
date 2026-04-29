@@ -148,8 +148,7 @@ export class InvestorFuseService {
 
     // Comp auto-fetch is handled by LeadsService.createLead →
     // autoPopulatePropertyDetails → fetchCompsForLead (REAPI-first).
-    // Do NOT kick off a parallel fetch here — it used to hard-code RentCast
-    // and resulted in RentCast comps overriding REAPI comps on new leads.
+    // Do NOT kick off a parallel fetch here.
 
     return {
       success: true,

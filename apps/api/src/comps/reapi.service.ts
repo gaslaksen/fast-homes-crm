@@ -284,7 +284,7 @@ export class ReapiService {
           respBody.statusCode === 404 && /no\s+comparable|no\s+comps?/i.test(reason);
         if (isNoCompsSemantic) {
           this.logger.log(
-            `REAPI returned 0 comparable properties for "${address}" — likely rural/sparse area with no matching sales in REAPI's dataset. Try RentCast or ATTOM from the Comps tab.`,
+            `REAPI returned 0 comparable properties for "${address}" — likely rural/sparse area with no matching sales in REAPI's dataset. Try ATTOM from the Comps tab.`,
           );
         } else {
           this.logger.warn(
@@ -633,8 +633,8 @@ export class ReapiService {
 
       // Similarity score (0-100) and correlation (0-1) — same bed/bath/sqft/type
       // math as CompsService.calculateSimilarityScore. Stored so the Comps tab
-      // can sort by Correlation just like RentCast comps do, and so the value
-      // flows through importExistingComps into the Comparable Properties Table.
+      // can sort by Correlation, and so the value flows through
+      // importExistingComps into the Comparable Properties Table.
       const similarityScore = computeSimilarityScore(
         {
           bedrooms: subject?.bedrooms ?? null,

@@ -286,7 +286,7 @@ export default function EditLeadPage() {
                 <input type="number" name="bathrooms" value={formData.bathrooms} onChange={handleChange} className="input" step="0.5" min="0" />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Square Feet <span className="text-xs text-gray-400 dark:text-gray-500">(from ATTOM)</span></label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Square Feet <span className="text-xs text-gray-400 dark:text-gray-500">(from public records)</span></label>
                 <input type="number" name="sqft" value={formData.sqft} onChange={handleChange} className="input" min="0" />
               </div>
               <div>

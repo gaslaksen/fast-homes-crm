@@ -1,14 +1,9 @@
 'use client';
 
-export type CompsSource = 'reapi' | 'attom' | 'rentcast';
-
 interface CompsToolbarProps {
   allCompsCount: number;
   selectedCompsCount: number;
   compsFromReapi?: number;
-  compsFromAttom: number;
-  compsFromRentcast: number;
-  compsSource: CompsSource;
   sortField: string;
   sortDir: 'asc' | 'desc';
   fetchingComps: boolean;
@@ -18,7 +13,6 @@ interface CompsToolbarProps {
   filterDistance?: number;
   onSetFilterMonths?: (months: number) => void;
   onSetFilterDistance?: (miles: number) => void;
-  onSetCompsSource: (source: CompsSource) => void;
   onSort: (field: string) => void;
   onSelectAll: (selected: boolean) => void;
   onRefreshComps: () => void;
@@ -52,9 +46,6 @@ export default function CompsToolbar({
   allCompsCount,
   selectedCompsCount,
   compsFromReapi = 0,
-  compsFromAttom,
-  compsFromRentcast,
-  compsSource,
   sortField,
   sortDir,
   fetchingComps,
@@ -63,7 +54,6 @@ export default function CompsToolbar({
   filterDistance,
   onSetFilterMonths,
   onSetFilterDistance,
-  onSetCompsSource,
   onSort,
   onSelectAll,
   onRefreshComps,
@@ -84,54 +74,10 @@ export default function CompsToolbar({
               {compsFromReapi} REAPI
             </span>
           )}
-          {compsFromAttom > 0 && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 font-medium">
-              {compsFromAttom} ATTOM
-            </span>
-          )}
-          {compsFromRentcast > 0 && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 font-medium">
-              {compsFromRentcast} RentCast
-            </span>
-          )}
         </div>
 
         {/* Right: controls */}
         <div className="flex items-center gap-2 flex-wrap">
-          {/* Source toggle */}
-          <div className="flex rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 text-[10px]">
-            <button
-              onClick={() => onSetCompsSource('reapi')}
-              className={`px-2 py-1 font-medium transition-colors ${
-                compsSource === 'reapi'
-                  ? 'bg-emerald-600 text-white'
-                  : 'bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
-              }`}
-            >
-              REAPI
-            </button>
-            <button
-              onClick={() => onSetCompsSource('attom')}
-              className={`px-2 py-1 font-medium transition-colors ${
-                compsSource === 'attom'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
-              }`}
-            >
-              ATTOM
-            </button>
-            <button
-              onClick={() => onSetCompsSource('rentcast')}
-              className={`px-2 py-1 font-medium transition-colors ${
-                compsSource === 'rentcast'
-                  ? 'bg-purple-600 text-white'
-                  : 'bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
-              }`}
-            >
-              RentCast
-            </button>
-          </div>
-
           {/* Select All / Deselect All */}
           {hasAnalysis && allCompsCount > 0 && (
             <div className="flex rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 text-[10px]">

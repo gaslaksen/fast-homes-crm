@@ -128,7 +128,7 @@ export const messagesAPI = {
 };
 
 // Comps API
-export type CompsSource = 'reapi' | 'attom' | 'rentcast' | 'auto';
+export type CompsSource = 'reapi' | 'auto';
 export const compsAPI = {
   fetch: (leadId: string, forceRefresh?: boolean, source?: CompsSource) => {
     const params = new URLSearchParams();
@@ -142,10 +142,6 @@ export const compsAPI = {
     api.post(`/leads/${leadId}/comps/${compId}/toggle`),
   autoSelect: (leadId: string, minSimilarity: number, maxDistance: number) =>
     api.post(`/leads/${leadId}/comps/auto-select`, { minSimilarity, maxDistance }),
-  attomEnrich: (leadId: string, forceRefresh?: boolean) =>
-    api.post(`/leads/${leadId}/comps/attom-enrich${forceRefresh ? '?forceRefresh=true' : ''}`),
-  getAttomData: (leadId: string) =>
-    api.get(`/leads/${leadId}/comps/attom-data`),
 };
 
 // Comp Analysis API
