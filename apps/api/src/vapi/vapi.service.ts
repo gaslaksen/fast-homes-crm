@@ -33,6 +33,32 @@ export class VapiService {
     this.client = new VapiClient({ token: apiKey || '' });
   }
 
+  /**
+   * Expand common US street/directional abbreviations so TTS reads
+   * "123 Oak Ct" as "123 Oak Court" rather than "see-tee" or clipping.
+   * Word-boundary matching avoids touching street names like "Stewart".
+   */
+  private expandAddressForSpeech(address: string | undefined): string | undefined {
+    if (!address) return address;
+    const map: Record<string, string> = {
+      St: 'Street', Ave: 'Avenue', Blvd: 'Boulevard', Rd: 'Road', Dr: 'Drive',
+      Ct: 'Court', Ln: 'Lane', Pl: 'Place', Pkwy: 'Parkway', Hwy: 'Highway',
+      Cir: 'Circle', Ter: 'Terrace', Trl: 'Trail', Sq: 'Square', Cv: 'Cove',
+      Xing: 'Crossing', Pt: 'Point', Aly: 'Alley', Plz: 'Plaza', Mnr: 'Manor',
+      Mdw: 'Meadow', Rdg: 'Ridge', Grv: 'Grove', Hts: 'Heights',
+      // Directionals — only as standalone tokens (handled by \b)
+      N: 'North', S: 'South', E: 'East', W: 'West',
+      NE: 'Northeast', NW: 'Northwest', SE: 'Southeast', SW: 'Southwest',
+    };
+    let out = address;
+    for (const [abbr, full] of Object.entries(map)) {
+      // Match the abbreviation as a whole word, optionally followed by a period.
+      const re = new RegExp(`\\b${abbr}\\b\\.?`, 'gi');
+      out = out.replace(re, full);
+    }
+    return out;
+  }
+
   private buildSystemPrompt(lead: LeadContext): string {
     const sellerFirstName = lead.sellerFirstName || 'the seller';
     const propertyAddress = lead.propertyAddress || 'their property';
@@ -188,6 +214,12 @@ HARD RULES
       .filter(Boolean)
       .join(' ');
 
+    // Use a speech-friendly version of the lead for everything Riley says aloud.
+    const speechLead: LeadContext = {
+      ...lead,
+      propertyAddress: this.expandAddressForSpeech(lead.propertyAddress),
+    };
+
     const result = await this.client.calls.create({
       phoneNumberId,
       customer: {
@@ -208,18 +240,27 @@ HARD RULES
           messages: [
             {
               role: 'system',
-              content: this.buildSystemPrompt(lead),
+              content: this.buildSystemPrompt(speechLead),
             },
           ],
           maxTokens: 150,
         },
-        // Cast: SDK 0.11 types don't yet include the Clara voice preset.
         voice: {
-          provider: 'vapi',
-          voiceId: 'Clara' as any,
+          provider: '11labs',
+          voiceId: 'sarah',
+          model: 'eleven_turbo_v2_5',
+          stability: 0.45,
+          similarityBoost: 0.75,
+          style: 0.15,
+          useSpeakerBoost: true,
+          speed: 0.97,
+          optimizeStreamingLatency: 3,
         },
+        // Subtle call-center ambience — paradoxically makes Riley sound MORE
+        // human, since real callers never call from a perfectly silent room.
+        backgroundSound: 'office',
 
-        firstMessage: this.buildFirstMessage(lead),
+        firstMessage: this.buildFirstMessage(speechLead),
         // Wait for the human's "Hello?" before Riley greets — natural for
         // outbound calls and avoids the opening getting clipped on pickup.
         firstMessageMode: 'assistant-waits-for-user',
@@ -235,7 +276,7 @@ HARD RULES
           beepMaxAwaitSeconds: 30,
           type: 'audio',
         },
-        voicemailMessage: `Hey, this is Riley with QuickCashHomeBuyers calling about ${lead.propertyAddress || 'your property'}. Give us a call back at 704-471-3920 or we'll try you again soon. Have a great day.`,
+        voicemailMessage: `Hey, this is Riley with QuickCashHomeBuyers calling about ${speechLead.propertyAddress || 'your property'}. Give us a call back at 704-471-3920 or we'll try you again soon. Have a great day.`,
         endCallMessage: "Thanks so much for your time today. Have a wonderful day!",
         endCallPhrases: [
           'goodbye',
@@ -245,7 +286,6 @@ HARD RULES
           'remove me from your list',
           'do not call again',
         ],
-        backgroundSound: 'off',
         maxDurationSeconds: 600, // 10 min hard cap
         analysisPlan: {
           summaryPlan: {
