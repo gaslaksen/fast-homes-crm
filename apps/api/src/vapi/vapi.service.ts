@@ -247,7 +247,7 @@ HARD RULES
         },
         voice: {
           provider: '11labs',
-          voiceId: 'sarah',
+          voiceId: 'andrea',
           model: 'eleven_turbo_v2_5',
           stability: 0.45,
           similarityBoost: 0.75,
@@ -256,9 +256,7 @@ HARD RULES
           speed: 0.97,
           optimizeStreamingLatency: 3,
         },
-        // Subtle call-center ambience — paradoxically makes Riley sound MORE
-        // human, since real callers never call from a perfectly silent room.
-        backgroundSound: 'office',
+        backgroundSound: 'off',
 
         firstMessage: this.buildFirstMessage(speechLead),
         // Wait for the human's "Hello?" before Riley greets — natural for
