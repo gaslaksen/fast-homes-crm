@@ -264,13 +264,13 @@ HARD RULES
         voice: {
           provider: '11labs',
           voiceId: 'andrea',
-          model: 'eleven_turbo_v2_5',
-          stability: 0.5,
+          model: 'eleven_multilingual_v2', // highest-quality 11Labs model
+          stability: 0.6,                  // steadier = cleaner output
           similarityBoost: 0.75,
-          style: 0,                  // 0 = cleanest output, no style artifacts
-          useSpeakerBoost: false,    // boost can over-amplify and add hiss
+          style: 0,
+          useSpeakerBoost: false,
           speed: 0.97,
-          optimizeStreamingLatency: 1, // 1 keeps text normalizer on; 3 disables it
+          optimizeStreamingLatency: 0,     // 0 = no latency optimization, max audio quality
         },
         backgroundSound: 'off',
 
