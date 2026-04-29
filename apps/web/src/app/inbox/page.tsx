@@ -8,6 +8,8 @@ import PropertyPhoto from '@/components/PropertyPhoto';
 import { actionsAPI, messagesAPI } from '@/lib/api';
 import type { ActionItemProps } from '@/components/ActionCard';
 
+const POLL_MS = 60_000;
+
 interface MessageRow {
   id: string;
   direction: string;
@@ -74,8 +76,47 @@ export default function InboxPage() {
     }
   }, []);
 
+  // Pause polling while a user action is in flight so the list can't
+  // reshuffle mid-send/dismiss and yank the selection out from under us.
+  const pausePollRef = useRef(false);
+  useEffect(() => {
+    pausePollRef.current = sending || dismissing;
+  }, [sending, dismissing]);
+
   useEffect(() => {
     loadQueue();
+
+    let interval: ReturnType<typeof setInterval> | null = null;
+    const start = () => {
+      if (interval) return;
+      interval = setInterval(() => {
+        if (!pausePollRef.current) loadQueue();
+      }, POLL_MS);
+    };
+    const stop = () => {
+      if (interval) {
+        clearInterval(interval);
+        interval = null;
+      }
+    };
+
+    const onVisibility = () => {
+      if (document.hidden) {
+        stop();
+      } else {
+        // Fresh fetch on return, then resume the interval.
+        if (!pausePollRef.current) loadQueue();
+        start();
+      }
+    };
+
+    if (!document.hidden) start();
+    document.addEventListener('visibilitychange', onVisibility);
+
+    return () => {
+      stop();
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
   }, [loadQueue]);
 
   // Load thread whenever selection changes. Composer stays empty by default —
