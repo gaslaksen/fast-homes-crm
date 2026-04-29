@@ -248,10 +248,12 @@ HARD RULES
           url: this.config.get<string>('VAPI_WEBHOOK_URL') ||
             'https://api.mydealcore.com/calls/vapi-webhook',
         },
-        // Cast: SDK 0.11 types don't yet include claude-sonnet-4-6; Vapi API accepts it.
+        // Haiku 4.5 for low-latency conversational turn-taking. ~300-400ms
+        // TTFT vs Sonnet 4.6's 600-900ms. Cast: SDK types don't yet include
+        // the latest Haiku build; Vapi API accepts it.
         model: {
           provider: 'anthropic',
-          model: 'claude-sonnet-4-6' as any,
+          model: 'claude-haiku-4-5' as any,
           temperature: 0.7,
           messages: [
             {
@@ -263,7 +265,7 @@ HARD RULES
         },
         voice: {
           provider: '11labs',
-          voiceId: 'marissa',
+          voiceId: 'andrea',
           model: 'eleven_multilingual_v2',
           stability: 0.6,
           similarityBoost: 0.75,
@@ -278,15 +280,15 @@ HARD RULES
         // Wait for the human's "Hello?" before Riley greets — natural for
         // outbound calls and avoids the opening getting clipped on pickup.
         firstMessageMode: 'assistant-waits-for-user',
-        // Aggressive endpointing for snappy response. LiveKit default
-        // waitFunction can hold up to ~3s when uncertainty is high; this
-        // tuned curve caps at ~1.6s and starts much faster on confident
-        // endpoints. Pair with low waitSeconds for a sub-second feel.
+        // Aggressive endpointing for natural turn-taking. Caps at ~960ms
+        // even on low-confidence endpoints; near-instant on confident ones.
+        // waitSeconds=0 lets the LLM/TTS pipeline start as soon as
+        // endpointing fires.
         startSpeakingPlan: {
-          waitSeconds: 0.2,
+          waitSeconds: 0,
           smartEndpointingPlan: {
             provider: 'livekit',
-            waitFunction: '20 + 250 * sqrt(x) + 1300 * x^3',
+            waitFunction: '10 + 150 * sqrt(x) + 800 * x^3',
           },
         },
         voicemailDetection: {
