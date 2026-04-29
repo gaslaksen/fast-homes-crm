@@ -253,7 +253,7 @@ HARD RULES
         // the latest Haiku build; Vapi API accepts it.
         model: {
           provider: 'anthropic',
-          model: 'claude-haiku-4-5' as any,
+          model: 'claude-haiku-4-5-20251001' as any,
           temperature: 0.7,
           messages: [
             {
