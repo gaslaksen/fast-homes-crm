@@ -71,8 +71,18 @@ export class CompsService {
     // ── Explicit BatchData — no fallback ────────────────────────────────────
     if (preferSource === 'batchdata') {
       this.logger.log(`Using BatchData comps pipeline for lead ${leadId}`);
+      // Honor the user's saved Age + Distance filters from CompAnalysis,
+      // same as the REAPI pipeline does. Falls back to BatchData service
+      // defaults (1mi / 12mo / 25 results) if no analysis exists.
+      const analysis = await this.prisma.compAnalysis.findFirst({
+        where: { leadId },
+        orderBy: { updatedAt: 'desc' },
+        select: { maxDistance: true, timeFrameMonths: true },
+      });
       return await this.batchDataCompService.fetchAndSaveComps(leadId, address, {
         forceRefresh: options?.forceRefresh,
+        maxRadiusMiles: analysis?.maxDistance ?? undefined,
+        maxAgeMonths: analysis?.timeFrameMonths ?? undefined,
       });
     }
 

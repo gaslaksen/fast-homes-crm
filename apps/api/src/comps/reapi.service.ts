@@ -518,13 +518,14 @@ export class ReapiService {
   ): Promise<{ arv: number; arvLow?: number; arvHigh?: number; confidence: number; compsCount: number; source: string }> {
     const full = this.formatAddress(address);
 
-    // Default pull is wide on purpose — the user filters down via the
-    // Comps tab Age/Distance controls. REAPI's defaults (no params) are
-    // very tight (~0.5mi, ~6mo); explicitly setting these widens the net.
+    // Default pull is tight on purpose — 1mi / 12mo / 25 records to match
+    // BatchData's posture for honest cross-provider comparison. The user
+    // can widen via the Comps tab Distance/Age filter buttons (1/2/3/5mi,
+    // 6/12/24mo); those persist on CompAnalysis and override these defaults.
     const result = await this.getComps(full, {
-      maxRadiusMiles: opts?.maxRadiusMiles ?? 5,
-      maxDaysBack: opts?.maxDaysBack ?? 730,    // ~24 months
-      maxResults: opts?.maxResults ?? 50,
+      maxRadiusMiles: opts?.maxRadiusMiles ?? 1,
+      maxDaysBack: opts?.maxDaysBack ?? 365,    // ~12 months
+      maxResults: opts?.maxResults ?? 25,
     });
 
     if (!result || !result.comps || result.comps.length === 0) {

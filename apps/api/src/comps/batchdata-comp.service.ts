@@ -33,6 +33,7 @@ export class BatchDataCompService {
     opts?: {
       forceRefresh?: boolean;
       maxRadiusMiles?: number;
+      maxAgeMonths?: number;
       maxResults?: number;
     },
   ): Promise<FetchResult> {
@@ -43,6 +44,44 @@ export class BatchDataCompService {
         compsCount: 0,
         source: 'batchdata (not configured)',
       };
+    }
+
+    // ── 24-hour cache ──────────────────────────────────────────────────────
+    // BatchData bills per record. Skip the API call if we already have
+    // BatchData comps for this lead written within the last 24h.
+    if (!opts?.forceRefresh) {
+      const newest = await this.prisma.comp.findFirst({
+        where: { leadId, source: 'batchdata', analysisId: null },
+        orderBy: { createdAt: 'desc' },
+        select: { createdAt: true },
+      });
+      const cacheAgeMs = newest ? Date.now() - newest.createdAt.getTime() : Infinity;
+      const cacheTtlMs = 24 * 60 * 60 * 1000;
+      if (newest && cacheAgeMs < cacheTtlMs) {
+        const existing = await this.prisma.comp.findMany({
+          where: { leadId, source: 'batchdata', analysisId: null },
+          select: { soldPrice: true },
+        });
+        const prices = existing
+          .map((c) => c.soldPrice)
+          .filter((p) => p > 0)
+          .sort((a, b) => a - b);
+        const arv = prices.length
+          ? Math.round(prices.reduce((s, v) => s + v, 0) / prices.length)
+          : 0;
+        const hoursOld = (cacheAgeMs / (60 * 60 * 1000)).toFixed(1);
+        this.logger.log(
+          `BatchData cache hit for lead ${leadId} (${hoursOld}h old, ${existing.length} comps) — skipping API call`,
+        );
+        return {
+          arv,
+          arvLow: prices[0],
+          arvHigh: prices[prices.length - 1],
+          confidence: existing.length > 0 ? Math.max(40, Math.min(90, Math.round(45 + existing.length * 1.5))) : 0,
+          compsCount: existing.length,
+          source: `batchdata (cached ${hoursOld}h old)`,
+        };
+      }
     }
 
     const subject = await this.prisma.lead.findUnique({
@@ -59,28 +98,22 @@ export class BatchDataCompService {
     });
     const subjectSqftForScore = subject?.sqftOverride ?? subject?.sqft ?? null;
 
-    // 24-month sale recency window — matches the REAPI pipeline's MAX_AGE_MONTHS
-    // so the Comps tab age filter (6/12/24mo) has comparable data from both
-    // providers. BatchData does NOT filter sale recency by default.
+    // Sale-recency window. Default 12 months. Caller can widen via the
+    // Comps tab Age filter button (6/12/24mo on CompAnalysis).
+    const ageMonths = opts?.maxAgeMonths ?? 12;
     const cutoff = new Date();
-    cutoff.setMonth(cutoff.getMonth() - 24);
+    cutoff.setMonth(cutoff.getMonth() - ageMonths);
     const saleDateMinDate = cutoff.toISOString().slice(0, 10); // YYYY-MM-DD
 
-    // Pull a wide net of recent SFR sales — let the user filter in the UI.
-    // BatchData's comp algorithm narrows by beds/area/year built by default,
-    // which makes its results dramatically thinner than REAPI's. We disable
-    // those filters and just lean on distance + sale recency + property type.
-    // The Comps tab age/distance filters and similarity-score sort still
-    // narrow client-side, so nothing is lost — but the candidate pool is
-    // honest.
-    //
-    // Cost note: ~50 billable records per call (was ~25).
+    // Defaults match BatchData's original tight comp algorithm:
+    // 1mi radius, 25 records, beds ±1, sqft ±20%, year built ±10y.
+    // The user can widen via the Comps tab Distance filter (1/2/3/5mi)
+    // for rural leads — that flows through opts.maxRadiusMiles.
     const response = await this.batchData.searchComps(address, {
-      distanceMiles: opts?.maxRadiusMiles ?? 5,    // match REAPI 5mi default
-      take: opts?.maxResults ?? 50,                 // match REAPI 50 max
-      useBedrooms: false,                           // don't pre-filter beds
-      useArea: false,                               // don't pre-filter sqft
-      useYearBuilt: false,                          // don't pre-filter year built
+      distanceMiles: opts?.maxRadiusMiles ?? 1,
+      take: opts?.maxResults ?? 25,
+      // Restored dimensional filters (default to true in DEFAULT_COMP_OPTIONS):
+      // useBedrooms: ±1, useArea: ±20%, useYearBuilt: ±10y
       propertyTypeCategory: ['Residential'],
       propertyTypeDetail: ['Single Family'],
       saleDateMinDate,
