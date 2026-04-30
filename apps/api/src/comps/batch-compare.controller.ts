@@ -24,12 +24,60 @@ export class BatchCompareController {
 
   @Post()
   async batchCompare(
-    @Body() body: { leadIds?: string[]; appUrl?: string },
+    @Body()
+    body: {
+      leadIds?: string[];
+      autoSelect?: { count?: number; mode?: 'diverse-states' | 'random' };
+      appUrl?: string;
+    },
     @Res() res: Response,
   ) {
-    const leadIds = (body.leadIds || []).filter(Boolean);
+    let leadIds = (body.leadIds || []).filter(Boolean);
+
+    // autoSelect mode — endpoint picks leads itself so the caller doesn't
+    // have to wrangle SQL.
+    if (leadIds.length === 0 && body.autoSelect) {
+      const count = Math.max(1, Math.min(50, body.autoSelect.count ?? 10));
+      const mode = body.autoSelect.mode ?? 'diverse-states';
+
+      if (mode === 'diverse-states') {
+        // One lead per state, up to `count`, randomized within each state.
+        const picked = await this.prisma.$queryRawUnsafe<Array<{ id: string }>>(
+          `SELECT DISTINCT ON ("propertyState") id
+           FROM leads
+           WHERE "propertyAddress" IS NOT NULL
+             AND "propertyCity" IS NOT NULL
+             AND "propertyState" IS NOT NULL
+             AND "propertyZip" IS NOT NULL
+             AND status::text != 'DEAD'
+           ORDER BY "propertyState", random()
+           LIMIT $1`,
+          count,
+        );
+        leadIds = picked.map((r) => r.id);
+      } else {
+        const picked = await this.prisma.$queryRawUnsafe<Array<{ id: string }>>(
+          `SELECT id FROM leads
+           WHERE "propertyAddress" IS NOT NULL
+             AND "propertyCity" IS NOT NULL
+             AND "propertyState" IS NOT NULL
+             AND "propertyZip" IS NOT NULL
+             AND status::text != 'DEAD'
+           ORDER BY random()
+           LIMIT $1`,
+          count,
+        );
+        leadIds = picked.map((r) => r.id);
+      }
+
+      this.logger.log(`autoSelect picked ${leadIds.length} leads (mode=${mode})`);
+    }
+
     if (leadIds.length === 0) {
-      res.status(400).json({ error: 'Provide a non-empty leadIds array in the request body.' });
+      res.status(400).json({
+        error:
+          'Provide either { leadIds: [...] } or { autoSelect: { count: N, mode: "diverse-states" | "random" } } in the request body.',
+      });
       return;
     }
     if (leadIds.length > 50) {
