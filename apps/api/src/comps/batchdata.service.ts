@@ -28,9 +28,10 @@ const DEFAULT_COMP_OPTIONS = {
   useArea: true,
   minAreaPercent: -20,
   maxAreaPercent: 20,
-  useYearBuilt: true,
-  minYearBuilt: -10,
-  maxYearBuilt: 10,
+  // Year built intentionally NOT filtered — remodeled older homes are valid
+  // comps and BatchData would otherwise exclude them. Pass false explicitly
+  // because BatchData's server-side default is true.
+  useYearBuilt: false,
 } as const;
 
 /**

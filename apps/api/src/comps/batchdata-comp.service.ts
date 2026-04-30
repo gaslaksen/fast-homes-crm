@@ -105,15 +105,15 @@ export class BatchDataCompService {
     cutoff.setMonth(cutoff.getMonth() - ageMonths);
     const saleDateMinDate = cutoff.toISOString().slice(0, 10); // YYYY-MM-DD
 
-    // Defaults match BatchData's original tight comp algorithm:
-    // 1mi radius, 25 records, beds ±1, sqft ±20%, year built ±10y.
+    // Defaults: 1mi radius, 25 records, beds ±1, sqft ±20%. Year built is
+    // intentionally NOT filtered — remodeled older homes are valid comps.
     // The user can widen via the Comps tab Distance filter (1/2/3/5mi)
     // for rural leads — that flows through opts.maxRadiusMiles.
     const response = await this.batchData.searchComps(address, {
       distanceMiles: opts?.maxRadiusMiles ?? 1,
       take: opts?.maxResults ?? 25,
-      // Restored dimensional filters (default to true in DEFAULT_COMP_OPTIONS):
-      // useBedrooms: ±1, useArea: ±20%, useYearBuilt: ±10y
+      // Dimensional filters from DEFAULT_COMP_OPTIONS:
+      //   useBedrooms ±1, useArea ±20%, useYearBuilt OFF
       propertyTypeCategory: ['Residential'],
       propertyTypeDetail: ['Single Family'],
       saleDateMinDate,
