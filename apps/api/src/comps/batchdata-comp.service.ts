@@ -109,13 +109,19 @@ export class BatchDataCompService {
     // intentionally NOT filtered — remodeled older homes are valid comps.
     // The user can widen via the Comps tab Distance filter (1/2/3/5mi)
     // for rural leads — that flows through opts.maxRadiusMiles.
+    //
+    // propertyTypeDetail is dynamically mapped from the lead's propertyType
+    // so mobile homes match mobile homes, condos match condos, etc. If the
+    // lead's type is unknown, we omit the filter and let any Residential
+    // comp through (the user filters in the UI).
+    const propertyTypeDetail = mapPropertyTypeForBatchData(subject?.propertyType);
     const response = await this.batchData.searchComps(address, {
       distanceMiles: opts?.maxRadiusMiles ?? 1,
       take: opts?.maxResults ?? 25,
       // Dimensional filters from DEFAULT_COMP_OPTIONS:
       //   useBedrooms ±1, useArea ±20%, useYearBuilt OFF
       propertyTypeCategory: ['Residential'],
-      propertyTypeDetail: ['Single Family'],
+      ...(propertyTypeDetail && { propertyTypeDetail }),
       saleDateMinDate,
     });
 
@@ -295,4 +301,33 @@ function formatAddress(addr?: BatchDataProperty['address']): string {
   const parts = [addr.street, addr.city, addr.state].filter(Boolean);
   const base = parts.join(', ');
   return addr.zip ? `${base} ${addr.zip}` : base || 'Unknown';
+}
+
+/**
+ * Map a free-text lead.propertyType (REAPI/manual entry) to BatchData's
+ * propertyTypeDetail enum. Returns undefined when the input is unknown so
+ * the caller can skip the filter entirely (lets any Residential comp
+ * through, which the user can sort/filter in the UI).
+ *
+ * BatchData's exact taxonomy isn't fully documented; we send multiple
+ * candidate strings where reasonable to maximize matches.
+ */
+function mapPropertyTypeForBatchData(
+  leadType?: string | null,
+): string[] | undefined {
+  if (!leadType) return undefined;
+  const t = leadType.toLowerCase();
+  if (t.includes('mobile') || t.includes('manufactured')) {
+    return ['Mobile Home', 'Manufactured Home'];
+  }
+  if (t.includes('condo')) return ['Condominium'];
+  if (t.includes('town')) return ['Townhouse'];
+  if (t.includes('multi') || t.includes('duplex') || t.includes('triplex') || t.includes('fourplex')) {
+    return ['Multi-Family', 'Duplex', 'Triplex'];
+  }
+  if (t.includes('single') || t.includes('sfr') || t === 'house' || t === 'home') {
+    return ['Single Family'];
+  }
+  // Unknown → no filter; let any Residential through.
+  return undefined;
 }
