@@ -108,6 +108,10 @@ export class BatchDataService {
       // Convenience: filter to single-family residential by default
       propertyTypeDetail?: string[];
       propertyTypeCategory?: string[];
+      // Sale-date floor — comps sold before this date are filtered out by
+      // BatchData. ISO date string (YYYY-MM-DD).
+      saleDateMinDate?: string;
+      saleDateMaxDate?: string;
     },
   ): Promise<BatchDataSearchResponse | null> {
     if (!this.isConfigured) {
@@ -115,7 +119,13 @@ export class BatchDataService {
       return null;
     }
 
-    const { propertyTypeDetail, propertyTypeCategory, ...optionOverrides } = overrides ?? {};
+    const {
+      propertyTypeDetail,
+      propertyTypeCategory,
+      saleDateMinDate,
+      saleDateMaxDate,
+      ...optionOverrides
+    } = overrides ?? {};
 
     const body: BatchDataPropertySearchRequest = {
       searchCriteria: {
@@ -128,6 +138,14 @@ export class BatchDataService {
             ...(propertyTypeDetail && {
               propertyTypeDetail: { inList: propertyTypeDetail },
             }),
+          },
+        }),
+        ...((saleDateMinDate || saleDateMaxDate) && {
+          sale: {
+            lastSaleDate: {
+              ...(saleDateMinDate && { minDate: saleDateMinDate }),
+              ...(saleDateMaxDate && { maxDate: saleDateMaxDate }),
+            },
           },
         }),
       },

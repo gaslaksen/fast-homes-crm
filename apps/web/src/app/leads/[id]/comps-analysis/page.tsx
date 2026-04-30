@@ -161,6 +161,10 @@ export default function CompsAnalysisPage() {
   const [fetchingComps, setFetchingComps] = useState(false);
   const [compsSource, setCompsSource] = useState<'reapi' | 'batchdata'>('reapi');
   const [comparisonMode, setComparisonMode] = useState(false);
+  // Raw comps for the lead, unfiltered by analysis source. Populated when
+  // entering comparison mode so the side-by-side view sees both providers'
+  // rows even though importExistingComps filters the analysis to one source.
+  const [comparisonComps, setComparisonComps] = useState<any[]>([]);
   const BATCHDATA_ENABLED = process.env.NEXT_PUBLIC_BATCHDATA_ENABLED === 'true';
   const [sortField, setSortField] = useState<string>('distance');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
@@ -316,19 +320,22 @@ export default function CompsAnalysisPage() {
     setFetchingComps(true);
     try {
       // Run both providers in parallel. Each persists Comp rows tagged with
-      // its source; the side-by-side view filters on c.source.
-      // forceRefresh=true so we always get fresh comparable data on demand.
+      // its source. forceRefresh=true so we always get fresh comparable data
+      // on demand.
       await Promise.all([
         compsAPI.fetch(leadId, true, 'reapi'),
         compsAPI.fetch(leadId, true, 'batchdata'),
       ]);
 
-      // Re-load analysis with both source sets
+      // Refresh lead (ARV may have moved)
       const leadRes = await leadsAPI.get(leadId);
       setLead(leadRes.data);
-      const res = await compAnalysisAPI.create(leadId, { importExistingComps: true });
-      const full = await compAnalysisAPI.get(leadId, res.data.id);
-      setAnalysis(full.data);
+
+      // Pull RAW comps for the lead (unfiltered by analysis source). The
+      // analysis-import path filters to a single provider based on
+      // lead.compsProvider; for the side-by-side view we want both.
+      const rawComps = await compsAPI.list(leadId);
+      setComparisonComps(rawComps.data || []);
 
       setComparisonMode(true);
       router.replace(`/leads/${leadId}/comps-analysis?tab=comps`, { scroll: false });
@@ -882,7 +889,7 @@ export default function CompsAnalysisPage() {
             <div className="flex-1 p-3 space-y-1.5">
               {comparisonMode ? (
                 <ProviderComparisonView
-                  comps={allComps}
+                  comps={comparisonComps}
                   lead={lead}
                   hoveredCompId={hoveredCompId}
                   setHoveredCompId={setHoveredCompId}

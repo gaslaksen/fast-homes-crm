@@ -59,12 +59,20 @@ export class BatchDataCompService {
     });
     const subjectSqftForScore = subject?.sqftOverride ?? subject?.sqft ?? null;
 
+    // 24-month sale recency window — matches the REAPI pipeline's MAX_AGE_MONTHS
+    // so the Comps tab age filter (6/12/24mo) has comparable data from both
+    // providers. BatchData does NOT filter sale recency by default.
+    const cutoff = new Date();
+    cutoff.setMonth(cutoff.getMonth() - 24);
+    const saleDateMinDate = cutoff.toISOString().slice(0, 10); // YYYY-MM-DD
+
     const response = await this.batchData.searchComps(address, {
       distanceMiles: opts?.maxRadiusMiles,
       take: opts?.maxResults,
       // Default scoping: SFR residential — same default as our REAPI flow.
       propertyTypeCategory: ['Residential'],
       propertyTypeDetail: ['Single Family'],
+      saleDateMinDate,
     });
 
     if (!response) {
@@ -95,6 +103,7 @@ export class BatchDataCompService {
     let saved = 0;
     let filteredNoPrice = 0;
     let filteredNoDate = 0;
+    let filteredStale = 0;
 
     for (const p of properties) {
       const soldPriceRaw = p.sale?.lastSale?.price;
@@ -110,6 +119,12 @@ export class BatchDataCompService {
       const soldDate = new Date(soldDateRaw);
       if (isNaN(soldDate.getTime())) {
         filteredNoDate += 1;
+        continue;
+      }
+      // Safety filter: drop comps older than 24 months even if the API
+      // ignored the searchCriteria.sale.lastSaleDate.minDate hint.
+      if (soldDate < cutoff) {
+        filteredStale += 1;
         continue;
       }
 
@@ -186,10 +201,11 @@ export class BatchDataCompService {
       }
     }
 
-    if (filteredNoPrice + filteredNoDate > 0) {
+    const filteredTotal = filteredNoPrice + filteredNoDate + filteredStale;
+    if (filteredTotal > 0) {
       this.logger.log(
-        `BatchData comps filtered ${filteredNoPrice + filteredNoDate}/${properties.length}: ` +
-        `no-price=${filteredNoPrice}, no-date=${filteredNoDate}`,
+        `BatchData comps filtered ${filteredTotal}/${properties.length}: ` +
+        `no-price=${filteredNoPrice}, no-date=${filteredNoDate}, stale>24mo=${filteredStale}`,
       );
     }
     this.logger.log(`BatchData comps saved: ${saved}`);

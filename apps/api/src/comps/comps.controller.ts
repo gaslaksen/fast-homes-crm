@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Patch, Param, Query, Body, Logger } from '@nestjs/common';
+import { Controller, Post, Get, Patch, Param, Query, Body, Logger, NotFoundException } from '@nestjs/common';
 import { CompsService } from './comps.service';
 import { CompAnalysisService } from './comp-analysis.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -31,7 +31,7 @@ export class CompsController {
     });
 
     if (!lead) {
-      throw new Error('Lead not found');
+      throw new NotFoundException(`Lead ${leadId} not found`);
     }
 
     // Provider priority: explicit ?source= → lead.compsProvider → 'reapi' default
