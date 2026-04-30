@@ -108,6 +108,8 @@ export class BatchCompareController {
             bedrooms: true,
             bathrooms: true,
             sqft: true,
+            status: true,
+            doNotContact: true,
           },
         });
         if (!lead) {
@@ -189,6 +191,7 @@ function buildCsv(
     row([
       'lead_id',
       'lead_url',
+      'status',
       'seller_name',
       'subject_address',
       'state',
@@ -206,7 +209,7 @@ function buildCsv(
 
   for (const r of results) {
     if ('error' in r) {
-      lines.push(row([r.leadId, `${appUrl}/leads/${r.leadId}`, '', '', '', '', '', '', '', '', '', '', '', r.error]));
+      lines.push(row([r.leadId, `${appUrl}/leads/${r.leadId}`, '', '', '', '', '', '', '', '', '', '', '', '', r.error]));
       continue;
     }
     const lead = r.lead;
@@ -225,6 +228,7 @@ function buildCsv(
       row([
         lead.id,
         `${appUrl}/leads/${lead.id}`,
+        lead.status,
         sellerName,
         subjectAddr,
         lead.propertyState,
