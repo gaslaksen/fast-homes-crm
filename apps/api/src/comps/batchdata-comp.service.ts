@@ -66,10 +66,21 @@ export class BatchDataCompService {
     cutoff.setMonth(cutoff.getMonth() - 24);
     const saleDateMinDate = cutoff.toISOString().slice(0, 10); // YYYY-MM-DD
 
+    // Pull a wide net of recent SFR sales — let the user filter in the UI.
+    // BatchData's comp algorithm narrows by beds/area/year built by default,
+    // which makes its results dramatically thinner than REAPI's. We disable
+    // those filters and just lean on distance + sale recency + property type.
+    // The Comps tab age/distance filters and similarity-score sort still
+    // narrow client-side, so nothing is lost — but the candidate pool is
+    // honest.
+    //
+    // Cost note: ~50 billable records per call (was ~25).
     const response = await this.batchData.searchComps(address, {
-      distanceMiles: opts?.maxRadiusMiles,
-      take: opts?.maxResults,
-      // Default scoping: SFR residential — same default as our REAPI flow.
+      distanceMiles: opts?.maxRadiusMiles ?? 5,    // match REAPI 5mi default
+      take: opts?.maxResults ?? 50,                 // match REAPI 50 max
+      useBedrooms: false,                           // don't pre-filter beds
+      useArea: false,                               // don't pre-filter sqft
+      useYearBuilt: false,                          // don't pre-filter year built
       propertyTypeCategory: ['Residential'],
       propertyTypeDetail: ['Single Family'],
       saleDateMinDate,
