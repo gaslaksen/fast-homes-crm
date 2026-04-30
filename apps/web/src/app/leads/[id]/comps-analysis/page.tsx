@@ -2600,6 +2600,9 @@ function SourceBadge({ source }: { source?: string }) {
   if (source === 'reapi') return (
     <span className="text-xs px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 font-medium">REAPI</span>
   );
+  if (source === 'batchdata') return (
+    <span className="text-xs px-1.5 py-0.5 rounded bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 font-medium">BatchData</span>
+  );
   if (source === 'chatarv') return (
     <span className="text-xs px-1.5 py-0.5 rounded bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 font-medium">ChatARV</span>
   );

@@ -128,7 +128,7 @@ export const messagesAPI = {
 };
 
 // Comps API
-export type CompsSource = 'reapi' | 'auto';
+export type CompsSource = 'reapi' | 'batchdata' | 'auto';
 export const compsAPI = {
   fetch: (leadId: string, forceRefresh?: boolean, source?: CompsSource) => {
     const params = new URLSearchParams();

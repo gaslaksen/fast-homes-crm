@@ -10,6 +10,7 @@ import {
   ReapiMortgageRecord,
   ReapiSaleRecord,
 } from './reapi.types';
+import { computeSimilarityScore } from './comp-similarity';
 
 const REAPI_BASE_URL = 'https://api.realestateapi.com';
 const CACHE_TTL_HOURS = 24;
@@ -99,57 +100,6 @@ function mapRateType(rt: string | null | undefined): string | undefined {
   if (up.includes('FIX')) return 'FIX';
   if (up.includes('ADJ') || up === 'ARM') return 'ARM';
   return up;
-}
-
-/**
- * 0-100 similarity between subject and comp. Same weighting as
- * CompsService.calculateSimilarityScore in comps.service.ts:
- *   bedrooms 25 · bathrooms 25 · sqft 40 · propertyType 10
- * Inlined here to avoid a circular dependency between CompsService and
- * ReapiService (CompsService already injects ReapiService). Returns null
- * if neither subject nor comp have enough data to score.
- */
-function computeSimilarityScore(
-  subject: { bedrooms?: number | null; bathrooms?: number | null; sqft?: number | null; propertyType?: string | null },
-  comp: { bedrooms?: number | null; bathrooms?: number | null; sqft?: number | null; propertyType?: string | null },
-): number | null {
-  let score = 0;
-  let touched = false;
-
-  if (subject.bedrooms != null && comp.bedrooms != null) {
-    touched = true;
-    const diff = Math.abs(subject.bedrooms - comp.bedrooms);
-    if (diff === 0) score += 25;
-    else if (diff === 1) score += 15;
-    else if (diff === 2) score += 5;
-  }
-
-  if (subject.bathrooms != null && comp.bathrooms != null) {
-    touched = true;
-    const diff = Math.abs(subject.bathrooms - comp.bathrooms);
-    if (diff === 0) score += 25;
-    else if (diff <= 0.5) score += 20;
-    else if (diff <= 1) score += 10;
-    else if (diff <= 1.5) score += 5;
-  }
-
-  if (subject.sqft && comp.sqft && subject.sqft > 0) {
-    touched = true;
-    const pctDiff = (Math.abs(subject.sqft - comp.sqft) / subject.sqft) * 100;
-    if (pctDiff <= 5) score += 40;
-    else if (pctDiff <= 10) score += 35;
-    else if (pctDiff <= 15) score += 25;
-    else if (pctDiff <= 20) score += 15;
-    else if (pctDiff <= 30) score += 5;
-  }
-
-  if (subject.propertyType && comp.propertyType) {
-    touched = true;
-    if (subject.propertyType.toLowerCase() === comp.propertyType.toLowerCase()) score += 10;
-  }
-
-  if (!touched) return null;
-  return Math.min(100, Math.max(0, Math.round(score)));
 }
 
 @Injectable()

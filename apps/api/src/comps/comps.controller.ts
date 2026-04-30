@@ -36,8 +36,8 @@ export class CompsController {
 
     // Provider priority: explicit ?source= → lead.compsProvider → 'reapi' default
     const preferSource =
-      (source as 'reapi' | 'auto') ||
-      (lead.compsProvider as 'reapi' | 'auto' | null) ||
+      (source as 'reapi' | 'batchdata' | 'auto') ||
+      (lead.compsProvider as 'reapi' | 'batchdata' | 'auto' | null) ||
       'reapi';
 
     const result = await this.compsService.fetchComps(

@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReapiService } from './reapi.service';
+import { BatchDataCompService } from './batchdata-comp.service';
 import axios from 'axios';
 
 interface ChatARVResponse {
@@ -28,18 +29,20 @@ export class CompsService {
     private prisma: PrismaService,
     private config: ConfigService,
     private reapiService: ReapiService,
+    private batchDataCompService: BatchDataCompService,
   ) {}
 
   /**
    * Fetch comps and ARV for a property. Provider selection is per-request via preferSource:
-   *   - 'reapi' → run REAPI /v3/PropertyComps; NO fallback.
-   *   - 'auto'  → try REAPI → ChatARV → placeholder.
+   *   - 'reapi'     → run REAPI /v3/PropertyComps; NO fallback.
+   *   - 'batchdata' → run BatchData /property/search compAddress; NO fallback.
+   *   - 'auto'      → try REAPI → ChatARV → placeholder.
    * Persists the chosen provider on lead.compsProvider.
    */
   async fetchComps(
     leadId: string,
     address: { street: string; city: string; state: string; zip: string },
-    options?: { forceRefresh?: boolean; preferSource?: 'reapi' | 'auto' },
+    options?: { forceRefresh?: boolean; preferSource?: 'reapi' | 'batchdata' | 'auto' },
   ): Promise<{
     arv: number;
     arvLow?: number;
@@ -63,6 +66,14 @@ export class CompsService {
         return { arv: 0, confidence: 0, compsCount: 0, source: 'reapi (not configured)' };
       }
       return await this.runReapiPipeline(leadId, address, options);
+    }
+
+    // ── Explicit BatchData — no fallback ────────────────────────────────────
+    if (preferSource === 'batchdata') {
+      this.logger.log(`Using BatchData comps pipeline for lead ${leadId}`);
+      return await this.batchDataCompService.fetchAndSaveComps(leadId, address, {
+        forceRefresh: options?.forceRefresh,
+      });
     }
 
     // ── Auto: REAPI first, then ChatARV → placeholder ──────────────────────
