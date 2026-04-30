@@ -93,39 +93,37 @@ model Lead {
   arv               Float?
   arvConfidence     Float?
   lastCompsDate     DateTime?
-  compsProvider     String?  @default("reapi") // 'reapi' | 'attom' | 'rentcast' | 'auto' — last-used comp provider per lead
+  compsProvider     String?  @default("reapi") // 'reapi' | 'batchdata' | 'auto' — last-used comp provider per lead
   repairCosts       Float?   // Deal-level repair cost override
   assignmentFee     Float?   // Deal-level assignment fee override
   maoPercent        Float?   // MAO % override (default 70)
 
-  // ── ATTOM enrichment ─────────────────────────────────────────────────────
+  // ── ATTOM enrichment (written by Deal Search flow) ───────────────────────
   attomId              String?   // ATTOM property ID for lookups
   attomEnrichedAt      DateTime? // when ATTOM data was last fetched
-  attomSaleHistory     Json?     // Array of prior sales from ATTOM /saleshistory/detail
-  attomMortgageData    Json?     // Mortgage data from ATTOM /property/detailmortgage + detailmortgageowner
   attomAvm             Float?    // ATTOM AVM estimate
   attomAvmLow          Float?
   attomAvmHigh         Float?
-  attomAvmConfidence   Float?    // ATTOM confidence score (0-100)
-  avmPoorLow           Float?    // Condition-adjusted: distressed/AS-IS range low
-  avmPoorHigh          Float?    // Condition-adjusted: distressed/AS-IS range high
-  avmGoodLow           Float?    // Good condition range low
-  avmGoodHigh          Float?    // Good condition range high
-  avmExcellentLow      Float?    // After-repair/renovated ARV range low
-  avmExcellentHigh     Float?    // After-repair/renovated ARV range high ← TRUE ARV
-  marketAssessedValue  Float?    // ATTOM market assessed value
+  avmPoorHigh          Float?    // Condition-adjusted: distressed/AS-IS value
+  avmExcellentHigh     Float?    // After-repair/renovated ARV ← TRUE ARV
+  marketAssessedValue  Float?    // Market assessed value (provider-neutral)
   annualTaxAmount      Float?    // Actual annual property tax
-  propertyCondition    String?   // ATTOM: GOOD / FAIR / POOR
-  propertyQuality      String?   // ATTOM: EXCELLENT / GOOD / AVERAGE / FAIR / POOR
-  wallType             String?   // ATTOM: BRICK / FRAME / STUCCO etc.
+  propertyCondition    String?   // GOOD / FAIR / POOR
+  propertyQuality      String?   // EXCELLENT / GOOD / AVERAGE / FAIR / POOR
+  wallType             String?   // BRICK / FRAME / STUCCO etc.
   stories              Int?      // Number of stories/levels
   basementSqft         Int?      // Basement square footage
-  effectiveYearBuilt   Int?      // Renovation/effective year (from ATTOM)
+  effectiveYearBuilt   Int?      // Renovation/effective year
   subdivision          String?   // Subdivision/neighborhood name
-  coolingType          String?   // ATTOM: CENTRAL / EVAPORATIVE / etc.
-  heatingType          String?   // ATTOM: FORCED AIR / BASEBOARD / etc.
-  apn                  String?   // Assessor's Parcel Number (from ATTOM)
-  ownerName            String?   // Owner name from ATTOM assessment records
+  coolingType          String?   // CENTRAL / EVAPORATIVE / etc.
+  heatingType          String?   // FORCED AIR / BASEBOARD / etc.
+  apn                  String?   // Assessor's Parcel Number
+  ownerName            String?   // Owner name from assessment records
+
+  // ── BatchData enrichment (validation phase) ──────────────────────────────
+  batchdataLookupData      Json?     // Full BatchData property lookup response
+  batchdataLookupFetchedAt DateTime? // When BatchData lookup was last fetched
+  dataProviderConflicts    Json?     // Log of fields where REAPI and BatchData disagreed
 
   // ── RealEstateAPI (REAPI) enrichment ─────────────────────────────────────
   reapiId                 String?   // REAPI property ID for subsequent lookups
@@ -274,7 +272,7 @@ model Comp {
   schoolDistrict  String?
   photoUrl        String?
   sourceUrl       String?
-  source          String        @default("manual")
+  source          String        @default("manual") // 'manual' | 'reapi' | 'batchdata' | 'chatarv' | 'placeholder'
   correlation     Float?
   latitude        Float?
   longitude       Float?
