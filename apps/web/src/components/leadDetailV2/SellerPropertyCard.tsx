@@ -53,9 +53,8 @@ export default function SellerPropertyCard({ lead, onCall, onText, onEmail, onRe
     lead.annualTaxAmount || lead.coolingType || lead.heatingType || lead.stories ||
     lead.ownerName || lead.lastSaleDate || lead.lastSalePrice || lead.hoaFee ||
     lead.propertyCondition || lead.propertyQuality ||
-    lead.reapiMortgageData || lead.attomMortgageData ||
-    (lead.reapiSaleHistory && lead.reapiSaleHistory.length > 0) ||
-    (lead.attomSaleHistory && lead.attomSaleHistory.length > 0)
+    lead.reapiMortgageData ||
+    (lead.reapiSaleHistory && lead.reapiSaleHistory.length > 0)
   );
 
   return (

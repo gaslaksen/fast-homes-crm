@@ -891,10 +891,8 @@ export default function LeadDetailPage() {
 
                 {/* ── Sale History ── */}
                 {(() => {
-                  const reapiSaleHistory: any[] = (lead as any).reapiSaleHistory || [];
-                  const attomSaleHistory: any[] = (lead as any).attomSaleHistory || [];
-                  const saleHistory = reapiSaleHistory.length > 0 ? reapiSaleHistory : attomSaleHistory;
-                  const saleHistorySource = reapiSaleHistory.length > 0 ? 'REAPI' : attomSaleHistory.length > 0 ? 'ATTOM' : null;
+                  const saleHistory: any[] = (lead as any).reapiSaleHistory || [];
+                  const saleHistorySource = saleHistory.length > 0 ? 'REAPI' : null;
                   const hasAnySale = lead.lastSaleDate || lead.lastSalePrice || saleHistory.length > 0;
                   if (!hasAnySale) return null;
                   return (
@@ -986,10 +984,8 @@ export default function LeadDetailPage() {
 
                 {/* ── Mortgage Information ── */}
                 {(() => {
-                  const reapiMortgage = (lead as any).reapiMortgageData;
-                  const attomMortgage = (lead as any).attomMortgageData;
-                  const mortgage = reapiMortgage ?? attomMortgage;
-                  const mortgageSource = reapiMortgage ? 'REAPI' : attomMortgage ? 'ATTOM' : null;
+                  const mortgage = (lead as any).reapiMortgageData;
+                  const mortgageSource = mortgage ? 'REAPI' : null;
                   if (!mortgage || (!mortgage.firstConcurrent && !mortgage.secondConcurrent)) return null;
                   const formatLoanType = (code: string | undefined) => {
                     if (!code) return null;

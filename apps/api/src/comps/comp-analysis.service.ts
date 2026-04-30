@@ -329,18 +329,13 @@ export class CompAnalysisService {
             askingPrice: true,
             arv: true,
             conditionLevel: true,
-            // ATTOM enrichment
+            // ATTOM enrichment (written by Deal Search flow)
             attomId: true,
             attomEnrichedAt: true,
             attomAvm: true,
             attomAvmLow: true,
             attomAvmHigh: true,
-            attomAvmConfidence: true,
-            avmPoorLow: true,
             avmPoorHigh: true,
-            avmGoodLow: true,
-            avmGoodHigh: true,
-            avmExcellentLow: true,
             avmExcellentHigh: true,
             propertyCondition: true,
             propertyQuality: true,
@@ -354,7 +349,7 @@ export class CompAnalysisService {
             marketAssessedValue: true,
             lastSaleDate: true,
             lastSalePrice: true,
-            attomSaleHistory: true,
+            reapiSaleHistory: true,
           },
         },
       },
@@ -854,10 +849,9 @@ export class CompAnalysisService {
             propertyAddress: true, propertyCity: true, propertyState: true,
             bedrooms: true, bathrooms: true, sqft: true, sqftOverride: true, yearBuilt: true,
             lotSize: true, conditionLevel: true, propertyType: true, askingPrice: true,
-            // ATTOM enrichment fields
-            attomAvm: true, attomAvmConfidence: true,
-            avmPoorHigh: true, avmGoodHigh: true, avmExcellentHigh: true,
-            avmExcellentLow: true, avmGoodLow: true, avmPoorLow: true,
+            // ATTOM enrichment fields (written by Deal Search flow)
+            attomAvm: true,
+            avmPoorHigh: true, avmExcellentHigh: true,
             propertyCondition: true, propertyQuality: true, wallType: true,
             effectiveYearBuilt: true, basementSqft: true, stories: true,
             annualTaxAmount: true, taxAssessedValue: true, subdivision: true,
@@ -924,13 +918,13 @@ export class CompAnalysisService {
       lead.annualTaxAmount ? `Annual Taxes: $${Math.round(lead.annualTaxAmount).toLocaleString()}/yr` : null,
     ].filter(Boolean).join('\n');
 
-    // Build ATTOM AVM context block (the investor's second opinion on value)
+    // Build ATTOM AVM context block (the investor's second opinion on value;
+    // populated for leads created via Deal Search)
     const attomContext = lead.attomAvm ? `
 ATTOM DATA SOLUTIONS — INDEPENDENT VALUATION:
-  AVM Estimate: $${Math.round(lead.attomAvm).toLocaleString()}${lead.attomAvmConfidence ? ` (${lead.attomAvmConfidence}% confidence)` : ''}
-  AS-IS / Distressed: ${lead.avmPoorHigh ? '$' + Math.round(lead.avmPoorHigh).toLocaleString() : 'N/A'}${lead.avmPoorLow ? ` (low: $${Math.round(lead.avmPoorLow).toLocaleString()})` : ''}
-  Good Condition:     ${lead.avmGoodHigh ? '$' + Math.round(lead.avmGoodHigh).toLocaleString() : 'N/A'}${lead.avmGoodLow ? ` (low: $${Math.round(lead.avmGoodLow).toLocaleString()})` : ''}
-  After Repair (ARV): ${lead.avmExcellentHigh ? '$' + Math.round(lead.avmExcellentHigh).toLocaleString() : 'N/A'}${lead.avmExcellentLow ? ` (low: $${Math.round(lead.avmExcellentLow).toLocaleString()})` : ''}
+  AVM Estimate:       $${Math.round(lead.attomAvm).toLocaleString()}
+  AS-IS / Distressed: ${lead.avmPoorHigh ? '$' + Math.round(lead.avmPoorHigh).toLocaleString() : 'N/A'}
+  After Repair (ARV): ${lead.avmExcellentHigh ? '$' + Math.round(lead.avmExcellentHigh).toLocaleString() : 'N/A'}
 NOTE: Use ATTOM's condition-adjusted ranges as a strong independent signal. If comps-based ARV and ATTOM after-repair value agree within 10%, high confidence. If they diverge >15%, explain why and which to trust more.` : '';
 
     // Photo condition if available
@@ -1102,13 +1096,14 @@ Respond ONLY with valid JSON:
       ? Math.round(selectedComps.reduce((s, c) => s + c.soldPrice, 0) / selectedComps.length)
       : 0;
 
-    // ATTOM second-opinion block for summary prompt
+    // ATTOM second-opinion block for summary prompt (populated for leads
+    // created via Deal Search)
     const attomSummaryBlock = lead.attomAvm ? `
 ATTOM Independent Valuation:
-- AVM: $${Math.round(lead.attomAvm).toLocaleString()}${lead.attomAvmConfidence ? ` (${lead.attomAvmConfidence}% confidence)` : ''}
+- AVM: $${Math.round(lead.attomAvm).toLocaleString()}
 - AS-IS value: ${lead.avmPoorHigh ? '$' + Math.round(lead.avmPoorHigh).toLocaleString() : 'N/A'}
 - After-repair ARV: ${lead.avmExcellentHigh ? '$' + Math.round(lead.avmExcellentHigh).toLocaleString() : 'N/A'}
-- ATTOM condition: ${lead.propertyCondition || 'N/A'} | Quality: ${lead.propertyQuality || 'N/A'}` : '';
+- Condition: ${lead.propertyCondition || 'N/A'} | Quality: ${lead.propertyQuality || 'N/A'}` : '';
 
     const prompt = `You are an expert real estate wholesaler analyzing comparable sales to determine ARV and offer strategy.
 
@@ -1342,14 +1337,14 @@ Respond with ONLY a JSON object: { "estimate": <number>, "breakdown": "<concise 
     }, 0) / (selectedComps.length || 1);
     const avgCorrelation = allComps.reduce((s, c) => s + (c.correlation || 0.5), 0) / (allComps.length || 1);
 
-    // ATTOM second-opinion block for assessment
+    // ATTOM second-opinion block for assessment (populated for leads
+    // created via Deal Search)
     const attomAssessmentBlock = lead.attomAvm ? `
 ATTOM DATA — INDEPENDENT PROPERTY INTELLIGENCE:
-  AVM Estimate: $${Math.round(lead.attomAvm).toLocaleString()}${lead.attomAvmConfidence ? ` (${lead.attomAvmConfidence}% confidence score)` : ''}
-  AS-IS / Distressed value:   ${lead.avmPoorHigh ? '$' + Math.round(lead.avmPoorHigh).toLocaleString() : 'N/A'}${lead.avmPoorLow ? ` – $${Math.round(lead.avmPoorLow).toLocaleString()} range` : ''}
-  Good-condition value:       ${lead.avmGoodHigh ? '$' + Math.round(lead.avmGoodHigh).toLocaleString() : 'N/A'}
-  After-repair ARV (excellent): ${lead.avmExcellentHigh ? '$' + Math.round(lead.avmExcellentHigh).toLocaleString() : 'N/A'}${lead.avmExcellentLow ? ` – $${Math.round(lead.avmExcellentLow).toLocaleString()} range` : ''}
-  ATTOM Condition Rating: ${lead.propertyCondition || 'N/A'} | Quality: ${lead.propertyQuality || 'N/A'}
+  AVM Estimate:               $${Math.round(lead.attomAvm).toLocaleString()}
+  AS-IS / Distressed value:   ${lead.avmPoorHigh ? '$' + Math.round(lead.avmPoorHigh).toLocaleString() : 'N/A'}
+  After-repair ARV (excellent): ${lead.avmExcellentHigh ? '$' + Math.round(lead.avmExcellentHigh).toLocaleString() : 'N/A'}
+  Condition: ${lead.propertyCondition || 'N/A'} | Quality: ${lead.propertyQuality || 'N/A'}
   Wall Type: ${lead.wallType || 'N/A'} | Stories: ${lead.stories || 'N/A'} | Basement: ${lead.basementSqft ? lead.basementSqft.toLocaleString() + ' sqft' : 'None'}
   Effective Year Built: ${lead.effectiveYearBuilt || 'N/A'} | Annual Tax: ${lead.annualTaxAmount ? '$' + Math.round(lead.annualTaxAmount).toLocaleString() + '/yr ($' + Math.round(lead.annualTaxAmount / 12).toLocaleString() + '/mo hold cost)' : 'N/A'}
   Assessed Value: ${lead.taxAssessedValue ? '$' + Math.round(lead.taxAssessedValue).toLocaleString() : 'N/A'} | Market Assessed: ${lead.marketAssessedValue ? '$' + Math.round(lead.marketAssessedValue).toLocaleString() : 'N/A'}
@@ -1728,11 +1723,10 @@ Use Midwest/rural Ohio pricing. Be specific about what you see — don't general
     const ppsfAnchoredValue = avgPpsf && sqft ? Math.round(avgPpsf * sqft) : null;
 
     // ── Seller purchase history ─────────────────────────────────────────────
-    // attomSaleHistory (from /saleshistory/detail) is the authoritative source
-    // — it's always refreshed on enrichment. lead.lastSaleDate/lastSalePrice
-    // may be stale (set once on import and never updated).
-    // Sort sale history newest-first so [0] is the most recent sale.
-    const rawSaleHistory = lead.attomSaleHistory as any[] | null;
+    // REAPI saleHistory is the authoritative source (always refreshed on
+    // enrichment). lead.lastSaleDate/lastSalePrice may be stale (set once
+    // on import and never updated). Sort newest-first so [0] is most recent.
+    const rawSaleHistory = (lead as any).reapiSaleHistory as any[] | null;
     const saleHistory = rawSaleHistory
       ? [...rawSaleHistory].sort((a, b) => {
           const da = a.saleTransDate ? new Date(a.saleTransDate).getTime() : 0;
@@ -1753,13 +1747,11 @@ Use Midwest/rural Ohio pricing. Be specific about what you see — don't general
       ? Math.round((now - lastPurchaseDate.getTime()) / (365.25 * 24 * 60 * 60 * 1000) * 10) / 10
       : null;
 
-    // ── ATTOM condition-adjusted AVM context ────────────────────────────────
+    // ── ATTOM condition-adjusted AVM context (Deal Search-created leads) ────
     const attomBlock = lead.attomAvm ? {
       avm: Math.round(lead.attomAvm),
       asIs: lead.avmPoorHigh ? Math.round(lead.avmPoorHigh) : null,
-      goodCondition: lead.avmGoodHigh ? Math.round(lead.avmGoodHigh) : null,
       afterRepair: lead.avmExcellentHigh ? Math.round(lead.avmExcellentHigh) : null,
-      confidence: lead.attomAvmConfidence,
     } : null;
 
     // ── Prior analysis results ───────────────────────────────────────────────
@@ -1792,9 +1784,8 @@ Seller Name: ${lead.sellerFirstName || 'Seller'} ${lead.sellerLastName || ''}
 ${lead.sellerMotivation ? 'Seller Motivation: ' + lead.sellerMotivation : ''}
 
 ATTOM INDEPENDENT VALUATION:
-${attomBlock ? `- AVM: $${attomBlock.avm.toLocaleString()}${attomBlock.confidence ? ` (${attomBlock.confidence}% confidence)` : ''}
+${attomBlock ? `- AVM: $${attomBlock.avm.toLocaleString()}
 - As-Is / Distressed: ${attomBlock.asIs ? '$' + attomBlock.asIs.toLocaleString() : 'N/A'}
-- Good Condition: ${attomBlock.goodCondition ? '$' + attomBlock.goodCondition.toLocaleString() : 'N/A'}
 - After Repair (ARV): ${attomBlock.afterRepair ? '$' + attomBlock.afterRepair.toLocaleString() : 'N/A'}` : 'Not available'}
 
 SELLER PURCHASE HISTORY:

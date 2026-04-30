@@ -5,16 +5,12 @@
  * Renders inside SellerPropertyCard's expandable section.
  */
 export default function PropertyDetailsExpanded({ lead }: { lead: any }) {
-  const reapiSaleHistory: any[] = lead.reapiSaleHistory || [];
-  const attomSaleHistory: any[] = lead.attomSaleHistory || [];
-  const saleHistory = reapiSaleHistory.length > 0 ? reapiSaleHistory : attomSaleHistory;
-  const saleHistorySource = reapiSaleHistory.length > 0 ? 'REAPI' : attomSaleHistory.length > 0 ? 'ATTOM' : null;
+  const saleHistory: any[] = lead.reapiSaleHistory || [];
+  const saleHistorySource = saleHistory.length > 0 ? 'REAPI' : null;
   const hasAnySale = lead.lastSaleDate || lead.lastSalePrice || saleHistory.length > 0;
 
-  const reapiMortgage = lead.reapiMortgageData;
-  const attomMortgage = lead.attomMortgageData;
-  const mortgage = reapiMortgage ?? attomMortgage;
-  const mortgageSource = reapiMortgage ? 'REAPI' : attomMortgage ? 'ATTOM' : null;
+  const mortgage = lead.reapiMortgageData;
+  const mortgageSource = mortgage ? 'REAPI' : null;
   const hasMortgage = !!(mortgage && (mortgage.firstConcurrent || mortgage.secondConcurrent));
 
   const formatLoanType = (code?: string) => {
