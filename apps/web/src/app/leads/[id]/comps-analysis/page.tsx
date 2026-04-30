@@ -2731,23 +2731,57 @@ function ProviderComparisonView({
     );
   };
 
+  const exportCsv = () => {
+    const escape = (v: any) => {
+      if (v == null) return '';
+      const s = String(v).replace(/"/g, '""');
+      return /[",\n]/.test(s) ? `"${s}"` : s;
+    };
+    const header = ['source', 'address', 'soldPrice', 'soldDate', 'sqft', 'pricePerSqft', 'bedrooms', 'bathrooms', 'distance', 'monthsAgo', 'correlation', 'yearBuilt'].join(',');
+    const rows = [...reapiComps, ...batchComps].map((c) => {
+      const monthsAgo = c.soldDate ? Math.round((Date.now() - new Date(c.soldDate).getTime()) / (30 * 24 * 60 * 60 * 1000)) : '';
+      const ppsf = c.sqft && c.soldPrice ? Math.round(c.soldPrice / c.sqft) : '';
+      return [c.source, c.address, c.soldPrice, c.soldDate ? new Date(c.soldDate).toISOString().slice(0, 10) : '', c.sqft, ppsf, c.bedrooms, c.bathrooms, c.distance, monthsAgo, c.correlation != null ? (c.correlation * 100).toFixed(0) + '%' : '', c.yearBuilt].map(escape).join(',');
+    });
+    const csv = [header, ...rows].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `comp-comparison-${lead?.propertyAddress?.replace(/[^a-z0-9]+/gi, '_') ?? 'lead'}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="space-y-4">
       {/* Header bar */}
-      <div className="flex items-center justify-between border-b border-gray-200 dark:border-gray-700 pb-2">
+      <div className="flex items-center justify-between border-b border-gray-200 dark:border-gray-700 pb-2 gap-2 flex-wrap">
         <div className="flex items-center gap-2">
           <span className="text-sm font-bold text-gray-900 dark:text-gray-100">⇆ Provider Comparison</span>
           <span className="text-xs text-gray-500 dark:text-gray-400">
             REAPI vs BatchData on the same property
           </span>
         </div>
-        <button onClick={onClose} className="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300">
-          ✕ Exit comparison
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={exportCsv}
+            className="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+            title="Download both providers' comps as CSV"
+          >
+            ⤓ Export CSV
+          </button>
+          <button onClick={onClose} className="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300">
+            ✕ Exit comparison
+          </button>
+        </div>
       </div>
 
-      {/* Two columns */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      {/* Two providers stacked vertically — full pane width keeps addresses readable.
+          (Side-by-side at typical screen widths squeezed addresses to "1..."). */}
+      <div className="space-y-6">
         {renderColumn(reapiComps, 'REAPI', 'emerald', reapiArv)}
         {renderColumn(batchComps, 'BatchData', 'orange', batchArv)}
       </div>
