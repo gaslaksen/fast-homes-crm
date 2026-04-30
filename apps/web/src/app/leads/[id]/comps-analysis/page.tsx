@@ -159,7 +159,9 @@ export default function CompsAnalysisPage() {
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [loading, setLoading] = useState(true);
   const [fetchingComps, setFetchingComps] = useState(false);
-  const [compsSource, setCompsSource] = useState<'reapi'>('reapi');
+  const [compsSource, setCompsSource] = useState<'reapi' | 'batchdata'>('reapi');
+  const [comparisonMode, setComparisonMode] = useState(false);
+  const BATCHDATA_ENABLED = process.env.NEXT_PUBLIC_BATCHDATA_ENABLED === 'true';
   const [sortField, setSortField] = useState<string>('distance');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [hoveredCompId, setHoveredCompId] = useState<string | null>(null);
@@ -220,7 +222,7 @@ export default function CompsAnalysisPage() {
       setLead(leadRes.data);
       // Initialize provider toggle from lead's last-used provider
       const savedProvider = (leadRes.data as any).compsProvider;
-      if (savedProvider === 'reapi') {
+      if (savedProvider === 'reapi' || savedProvider === 'batchdata') {
         setCompsSource(savedProvider);
       }
 
@@ -298,11 +300,41 @@ export default function CompsAnalysisPage() {
 
       // If REAPI returned 0 comps, tell the user clearly.
       if ((result.data?.compsCount ?? 0) === 0) {
-        alert(`REAPI found 0 comps for this property — likely a sparse market with no recent matching sales.`);
+        const providerLabel = compsSource === 'batchdata' ? 'BatchData' : 'REAPI';
+        alert(`${providerLabel} found 0 comps for this property — likely a sparse market with no recent matching sales.`);
       }
     } catch (error: any) {
       console.error('Failed to fetch comps:', error);
       alert(error.response?.data?.message || 'Failed to fetch comps');
+    } finally {
+      setFetchingComps(false);
+    }
+  };
+
+  // ─── Compare Providers (run REAPI + BatchData side-by-side) ────────────────
+  const handleCompareProviders = async () => {
+    setFetchingComps(true);
+    try {
+      // Run both providers in parallel. Each persists Comp rows tagged with
+      // its source; the side-by-side view filters on c.source.
+      // forceRefresh=true so we always get fresh comparable data on demand.
+      await Promise.all([
+        compsAPI.fetch(leadId, true, 'reapi'),
+        compsAPI.fetch(leadId, true, 'batchdata'),
+      ]);
+
+      // Re-load analysis with both source sets
+      const leadRes = await leadsAPI.get(leadId);
+      setLead(leadRes.data);
+      const res = await compAnalysisAPI.create(leadId, { importExistingComps: true });
+      const full = await compAnalysisAPI.get(leadId, res.data.id);
+      setAnalysis(full.data);
+
+      setComparisonMode(true);
+      router.replace(`/leads/${leadId}/comps-analysis?tab=comps`, { scroll: false });
+    } catch (error: any) {
+      console.error('Compare Providers failed:', error);
+      alert(error.response?.data?.message || 'Comparison failed — check that both providers are configured.');
     } finally {
       setFetchingComps(false);
     }
@@ -719,7 +751,8 @@ export default function CompsAnalysisPage() {
       )
     : 0;
   const compsFromReapi = allComps.filter(c => c.source === 'reapi').length;
-  const compsWithSource = compsFromReapi;
+  const compsFromBatchData = allComps.filter(c => c.source === 'batchdata').length;
+  const compsWithSource = compsFromReapi + compsFromBatchData;
 
   return (
     <AppShell>
@@ -805,6 +838,11 @@ export default function CompsAnalysisPage() {
                 allCompsCount={allComps.length}
                 selectedCompsCount={selectedComps.length}
                 compsFromReapi={compsFromReapi}
+                compsFromBatchData={compsFromBatchData}
+                compsSource={compsSource}
+                batchDataEnabled={BATCHDATA_ENABLED}
+                onSetCompsSource={setCompsSource}
+                onCompareProviders={handleCompareProviders}
                 sortField={sortField}
                 sortDir={sortDir}
                 fetchingComps={fetchingComps}
@@ -842,7 +880,29 @@ export default function CompsAnalysisPage() {
 
             {/* Comp rows */}
             <div className="flex-1 p-3 space-y-1.5">
-              {allComps.length === 0 ? (
+              {comparisonMode ? (
+                <ProviderComparisonView
+                  comps={allComps}
+                  lead={lead}
+                  hoveredCompId={hoveredCompId}
+                  setHoveredCompId={setHoveredCompId}
+                  onToggle={handleToggleComp}
+                  onDelete={handleDeleteComp}
+                  onClose={() => setComparisonMode(false)}
+                  onUseProvider={async (provider) => {
+                    setCompsSource(provider);
+                    setComparisonMode(false);
+                    // Persist provider choice; downstream comps stay in DB
+                    // tagged by source so we can re-enter comparison anytime.
+                    try {
+                      await leadsAPI.update(leadId, { compsProvider: provider } as any);
+                    } catch (err) {
+                      console.error('Failed to persist compsProvider:', err);
+                    }
+                  }}
+                  compIndexMap={compIndexMap}
+                />
+              ) : allComps.length === 0 ? (
                 <div className="text-center py-12 text-gray-500 dark:text-gray-400">
                   <div className="text-5xl mb-3">&#127968;</div>
                   <p className="font-medium text-lg">No comparables yet</p>
@@ -854,7 +914,7 @@ export default function CompsAnalysisPage() {
                     disabled={fetchingComps}
                     className="btn btn-primary"
                   >
-                    {fetchingComps ? 'Fetching from REAPI...' : 'Find Comps'}
+                    {fetchingComps ? `Fetching from ${compsSource === 'batchdata' ? 'BatchData' : 'REAPI'}...` : 'Find Comps'}
                   </button>
                 </div>
               ) : (
@@ -2576,6 +2636,173 @@ export default function CompsAnalysisPage() {
 }
 
 // ─── Sub-components ─────────────────────────────────────────────────────────
+
+function ProviderComparisonView({
+  comps,
+  lead,
+  hoveredCompId,
+  setHoveredCompId,
+  onToggle,
+  onDelete,
+  onClose,
+  onUseProvider,
+  compIndexMap,
+}: {
+  comps: any[];
+  lead: any;
+  hoveredCompId: string | null;
+  setHoveredCompId: (id: string | null) => void;
+  onToggle: (compId: string) => void;
+  onDelete: (compId: string) => void;
+  onClose: () => void;
+  onUseProvider: (provider: 'reapi' | 'batchdata') => void;
+  compIndexMap: Map<string, number>;
+}) {
+  const reapiComps = comps.filter((c) => c.source === 'reapi');
+  const batchComps = comps.filter((c) => c.source === 'batchdata');
+
+  const avg = (arr: number[]) => (arr.length ? Math.round(arr.reduce((s, v) => s + v, 0) / arr.length) : 0);
+  const reapiArv = avg(reapiComps.map((c) => c.soldPrice).filter(Boolean));
+  const batchArv = avg(batchComps.map((c) => c.soldPrice).filter(Boolean));
+  const divergencePct = reapiArv > 0 && batchArv > 0
+    ? Math.round(Math.abs(reapiArv - batchArv) / reapiArv * 100)
+    : null;
+
+  // Comp overlap by (address, sold price). Address strings differ slightly
+  // between providers so this is approximate; close-enough for the validation
+  // signal we're after.
+  const reapiKeys = new Set(reapiComps.map((c) => `${c.address?.toLowerCase().trim()}|${c.soldPrice}`));
+  const batchKeys = new Set(batchComps.map((c) => `${c.address?.toLowerCase().trim()}|${c.soldPrice}`));
+  const overlap = [...reapiKeys].filter((k) => batchKeys.has(k)).length;
+  const reapiOnly = reapiComps.length - overlap;
+  const batchOnly = batchComps.length - overlap;
+
+  const renderColumn = (
+    columnComps: any[],
+    label: string,
+    color: 'emerald' | 'orange',
+    arv: number,
+  ) => {
+    const badgeClass = color === 'emerald'
+      ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400'
+      : 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400';
+    return (
+    <div className="flex flex-col">
+      <div className="flex items-center justify-between mb-2 px-1">
+        <div className="flex items-center gap-2">
+          <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${badgeClass}`}>
+            {label}
+          </span>
+          <span className="text-xs text-gray-500 dark:text-gray-400">{columnComps.length} comps</span>
+        </div>
+        <div className="text-xs text-gray-600 dark:text-gray-400">
+          ARV avg: <span className="font-bold text-gray-900 dark:text-gray-100">{arv ? `$${arv.toLocaleString()}` : '—'}</span>
+        </div>
+      </div>
+      <div className="space-y-1.5 min-h-[200px]">
+        {columnComps.length === 0 ? (
+          <div className="text-center py-8 text-xs text-gray-400 dark:text-gray-500 bg-gray-50 dark:bg-gray-900 rounded-lg border border-dashed border-gray-300 dark:border-gray-700">
+            No comps returned by {label}
+          </div>
+        ) : (
+          columnComps.map((comp) => (
+            <CompRow
+              key={comp.id}
+              comp={comp}
+              lead={lead}
+              compIndex={compIndexMap.get(comp.id)}
+              isHovered={hoveredCompId === comp.id}
+              onHoverEnter={() => setHoveredCompId(comp.id)}
+              onHoverLeave={() => setHoveredCompId(null)}
+              onToggle={() => onToggle(comp.id)}
+              onDelete={() => onDelete(comp.id)}
+            />
+          ))
+        )}
+      </div>
+    </div>
+    );
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Header bar */}
+      <div className="flex items-center justify-between border-b border-gray-200 dark:border-gray-700 pb-2">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-bold text-gray-900 dark:text-gray-100">⇆ Provider Comparison</span>
+          <span className="text-xs text-gray-500 dark:text-gray-400">
+            REAPI vs BatchData on the same property
+          </span>
+        </div>
+        <button onClick={onClose} className="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300">
+          ✕ Exit comparison
+        </button>
+      </div>
+
+      {/* Two columns */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {renderColumn(reapiComps, 'REAPI', 'emerald', reapiArv)}
+        {renderColumn(batchComps, 'BatchData', 'orange', batchArv)}
+      </div>
+
+      {/* Comparison summary */}
+      <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 p-4 space-y-3">
+        <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide">
+          Comparison Summary
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+          <div>
+            <div className="text-gray-500 dark:text-gray-400">Comp overlap</div>
+            <div className="text-sm font-medium text-gray-900 dark:text-gray-100 mt-0.5">
+              {overlap} in both · {reapiOnly} REAPI-only · {batchOnly} BatchData-only
+            </div>
+          </div>
+          <div>
+            <div className="text-gray-500 dark:text-gray-400">ARV divergence</div>
+            <div className="text-sm font-medium text-gray-900 dark:text-gray-100 mt-0.5">
+              {divergencePct == null
+                ? '—'
+                : divergencePct < 5
+                  ? `${divergencePct}% — providers agree`
+                  : divergencePct < 15
+                    ? `${divergencePct}% — moderate divergence`
+                    : `${divergencePct}% — significant divergence`}
+            </div>
+            {reapiArv > 0 && batchArv > 0 && (
+              <div className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">
+                REAPI ${reapiArv.toLocaleString()} vs BatchData ${batchArv.toLocaleString()}
+              </div>
+            )}
+          </div>
+          <div>
+            <div className="text-gray-500 dark:text-gray-400">Make canonical</div>
+            <div className="flex gap-1 mt-1">
+              <button
+                onClick={() => onUseProvider('reapi')}
+                className="text-[10px] px-2 py-1 rounded bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 font-medium hover:bg-emerald-200 dark:hover:bg-emerald-900/50"
+              >
+                Use REAPI
+              </button>
+              <button
+                onClick={() => onUseProvider('batchdata')}
+                className="text-[10px] px-2 py-1 rounded bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 font-medium hover:bg-orange-200 dark:hover:bg-orange-900/50"
+              >
+                Use BatchData
+              </button>
+              <button
+                onClick={onClose}
+                className="text-[10px] px-2 py-1 rounded border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 font-medium hover:bg-gray-100 dark:hover:bg-gray-800"
+              >
+                Keep current
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function InfoItem({ label, value }: { label: string; value: string }) {
   return (
