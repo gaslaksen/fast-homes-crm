@@ -5,11 +5,12 @@ import { AttomService } from './attom.service';
 import { ReapiService } from './reapi.service';
 import { BatchDataService } from './batchdata.service';
 import { BatchDataCompService } from './batchdata-comp.service';
+import { BatchCompareController } from './batch-compare.controller';
 import { CompAnalysisController } from './comp-analysis.controller';
 import { CompAnalysisService } from './comp-analysis.service';
 
 @Module({
-  controllers: [CompsController, CompAnalysisController],
+  controllers: [CompsController, CompAnalysisController, BatchCompareController],
   providers: [CompsService, AttomService, ReapiService, BatchDataService, BatchDataCompService, CompAnalysisService],
   exports: [CompsService, AttomService, ReapiService, BatchDataService, BatchDataCompService, CompAnalysisService],
 })
