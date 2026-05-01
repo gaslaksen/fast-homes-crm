@@ -26,6 +26,8 @@ interface Comp {
   source?: string;
   correlation?: number;
   features?: any;
+  photoUrl?: string | null;
+  sourceUrl?: string | null;
 }
 
 interface Lead {
@@ -95,6 +97,28 @@ const CompRow = forwardRef<HTMLDivElement, CompRowProps>(function CompRow(
             {compIndex}
           </span>
         )}
+
+        {/* MLS thumbnail (only for comps with a listing photo) */}
+        {comp.photoUrl ? (
+          comp.sourceUrl ? (
+            <a
+              href={comp.sourceUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              className="w-12 h-12 shrink-0 rounded-md overflow-hidden bg-gray-100 dark:bg-gray-800 hover:ring-2 hover:ring-cyan-400 block"
+              title="Open MLS listing"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={comp.photoUrl} alt="Listing" className="w-full h-full object-cover" loading="lazy" />
+            </a>
+          ) : (
+            <div className="w-12 h-12 shrink-0 rounded-md overflow-hidden bg-gray-100 dark:bg-gray-800">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={comp.photoUrl} alt="Listing" className="w-full h-full object-cover" loading="lazy" />
+            </div>
+          )
+        ) : null}
 
         {/* Price column */}
         <div className="w-20 shrink-0">

@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
+import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import axios, { AxiosError } from 'axios';
 import {
@@ -271,8 +272,10 @@ export class ReapiService {
   ): Promise<ReapiMlsListing[] | null> {
     if (!this.apiKey) return null;
 
+    // listing_property_type: 'RESIDENTIAL' already filters out RENTAL / LAND /
+    // COMMERCIAL — no need for an `exclude` param (which REAPI rejects unless
+    // it's an array of objects).
     const body: Record<string, unknown> = {
-      exclude: ['RENTAL', 'LAND'],
       listing_property_type: 'RESIDENTIAL',
       include_photos: false,
       size: opts?.maxResults ?? 25,
@@ -557,6 +560,47 @@ export class ReapiService {
       updates.reapiMlsRemarks = mls.reapiMlsRemarks ?? null;
       mlsPhotosCount = Array.isArray(mls.reapiMlsPhotos) ? mls.reapiMlsPhotos.length : 0;
       mlsHistoryCount = Array.isArray(mls.reapiMlsHistory) ? mls.reapiMlsHistory.length : 0;
+
+      // Promote MLS photos into the main lead.photos gallery so they render
+      // in the Overview's PhotosCard (alongside any user uploads / Street View).
+      // Mirror the street-view.service pattern: dedupe prior 'mls' entries,
+      // append fresh ones, and update primaryPhoto when the current primary is
+      // unset or is the brittle Google Street View URL.
+      if (mlsPhotosCount > 0 && Array.isArray(mls.reapiMlsPhotos)) {
+        const currentLead = await this.prisma.lead.findUnique({
+          where: { id: leadId },
+          select: { photos: true, primaryPhoto: true },
+        });
+        const currentPhotos = (currentLead?.photos as unknown as Array<Record<string, unknown>>) || [];
+        const withoutOldMls = currentPhotos.filter((p) => p?.source !== 'mls');
+        const newMlsPhotos = (mls.reapiMlsPhotos as Array<Record<string, unknown>>)
+          .map((p) => {
+            const url = (p.highRes as string) || (p.midRes as string) || (p.lowRes as string);
+            const thumb = (p.midRes as string) || (p.lowRes as string) || (p.highRes as string);
+            if (!url) return null;
+            return {
+              id: randomUUID(),
+              url,
+              thumbnailUrl: thumb || url,
+              source: 'mls',
+              uploadedAt: new Date().toISOString(),
+            };
+          })
+          .filter((p): p is NonNullable<typeof p> => p !== null);
+
+        const updatedPhotos = [...newMlsPhotos, ...withoutOldMls];
+        const oldPrimary = currentLead?.primaryPhoto;
+        const shouldPromotePrimary =
+          !oldPrimary ||
+          oldPrimary.includes('maps.googleapis.com/maps/api/streetview') ||
+          // also replace any prior MLS primary (URLs may have rotated)
+          (currentPhotos.find((p) => p?.url === oldPrimary)?.source === 'mls');
+
+        updates.photos = updatedPhotos as unknown as Prisma.InputJsonValue;
+        if (shouldPromotePrimary && newMlsPhotos[0]) {
+          updates.primaryPhoto = newMlsPhotos[0].url;
+        }
+      }
     }
 
     await this.prisma.lead.update({ where: { id: leadId }, data: updates });
