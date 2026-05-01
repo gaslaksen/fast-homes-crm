@@ -264,15 +264,12 @@ HARD RULES
           maxTokens: 150,
         },
         voice: {
-          provider: '11labs',
-          voiceId: 'andrea',
-          model: 'eleven_multilingual_v2',
-          stability: 0.6,
-          similarityBoost: 0.75,
-          style: 0,
-          useSpeakerBoost: false,
-          speed: 1.05,                     // slightly faster than natural pace
-          optimizeStreamingLatency: 0,
+          provider: 'cartesia',
+          voiceId: 'c9440d34-5641-427b-bbb7-80ef7462576d',
+          model: 'sonic-3',
+          generationConfig: {
+            speed: 1.05, // slightly faster than natural pace
+          },
         },
         backgroundSound: 'off',
 
