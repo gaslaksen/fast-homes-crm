@@ -393,39 +393,64 @@ export class ReapiService {
   }
 
   /**
-   * Normalize an address into a stable dedup key (street + city + state + zip
-   * lowercased, whitespace and punctuation collapsed). Used to merge MLS comps
-   * with v3/PropertyComps results without double-counting the same property.
+   * Normalize an address into a stable dedup key. Prefers (house number + zip)
+   * since address-string formats differ between sources — MLS may return
+   * "123 N Main Street, Denver, CO 80202" while PropertyComps returns
+   * "123 MAIN ST". A property has at most one house number per zip, so this
+   * pair is collision-proof in practice.
+   *
+   * Falls back to the fully-stripped address string when house number or zip
+   * is missing (rural / partial-address records).
    */
   private addressDedupKey(addr: string | undefined | null): string {
     if (!addr) return '';
-    return addr
-      .toLowerCase()
-      .replace(/[.,#]/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
+    const lower = addr.toLowerCase();
+    const houseNumMatch = lower.match(/^\s*(\d+)\b/);
+    const zipMatch = lower.match(/\b(\d{5})(?:-\d{4})?\b/);
+    if (houseNumMatch && zipMatch) {
+      return `${houseNumMatch[1]}|${zipMatch[1]}`;
+    }
+    return lower.replace(/[^a-z0-9]/g, '');
   }
 
   /**
    * Translate an MLS listing into the same shape ReapiComp uses, so the
    * existing comp filtering/persistence loop in fetchAndSaveComps can handle
-   * MLS rows alongside PropertyComps rows. Adds a `_mlsRaw` pointer for
-   * features-blob enrichment.
+   * MLS rows alongside PropertyComps rows.
+   *
+   * Returns null for non-sold listings (active/pending/cancelled). Active
+   * listings have asking prices, not realized sale prices — they aren't
+   * comparables for ARV math. Surfacing them as comps would inflate ARV with
+   * what sellers HOPE to get rather than what buyers actually paid.
    */
-  private mlsListingToComp(item: ReapiMlsListing): ReapiComp & { _mlsRaw: ReapiMlsListing } {
+  private mlsListingToComp(item: ReapiMlsListing): (ReapiComp & { _mlsRaw: ReapiMlsListing }) | null {
     const l = item.listing ?? {};
     const lt = (l.leadTypes ?? {}) as Record<string, unknown>;
     const p = (l.property ?? {}) as Record<string, unknown>;
     const a = l.address ?? {};
 
-    // soldPrice candidates (defensive — REAPI varies by board):
-    //   listing.soldPrice (closed price) > listing.leadTypes.mlsListingPrice (close-time list)
-    //   > listing.listPrice (active list price as fallback)
+    const standardStatus = (l as Record<string, unknown>).standardStatus as string | undefined;
+    const mlsStatus = (lt.mlsStatus as string | undefined) ?? standardStatus;
+    const soldDateRaw = (l as Record<string, unknown>).soldDate as string | undefined;
+    const isSold =
+      lt.mlsSold === true ||
+      /sold|closed/i.test(standardStatus ?? '') ||
+      /sold|closed/i.test(mlsStatus ?? '') ||
+      !!soldDateRaw;
+    if (!isSold) return null;
+
+    // Sold-price candidates (varies by board: some return soldPrice, others
+    // closePrice, others tuck the close price into mlsListingPrice once sold).
     const soldPriceCandidate =
       toNumber((l as Record<string, unknown>).soldPrice) ??
       toNumber((l as Record<string, unknown>).closePrice) ??
-      toNumber(lt.mlsListingPrice) ??
-      toNumber((l as Record<string, unknown>).listPrice);
+      toNumber((l as Record<string, unknown>).price) ??
+      toNumber(lt.mlsListingPrice);
+    if (!soldPriceCandidate || soldPriceCandidate <= 0) return null;
+
+    const soldDateForComp =
+      soldDateRaw ?? (lt.mlsLastStatusDate as string | undefined);
+    if (!soldDateForComp) return null;
 
     return {
       id: item.id ?? (item.listingId != null ? String(item.listingId) : undefined),
@@ -447,9 +472,7 @@ export class ReapiService {
       lotSquareFeet: toNumber(p.lotSizeSquareFeet),
       propertyType: (p.propertyType as string) ?? undefined,
       lastSaleAmount: soldPriceCandidate,
-      lastSaleDate:
-        (l as Record<string, unknown>).soldDate as string | undefined ??
-        (lt.mlsLastStatusDate as string | undefined),
+      lastSaleDate: soldDateForComp,
       pool: (p.hasPool as boolean | undefined) ?? false,
       garageAvailable: !!p.garageSpaces && p.garageSpaces !== '0',
       mlsListingDate: (lt.mlsListingDate as string | undefined) ?? null,
@@ -882,7 +905,11 @@ export class ReapiService {
       this.getComps(full, { maxRadiusMiles: radius, maxDaysBack: daysBack, maxResults }),
     ]);
 
-    const mlsCompsRaw = (mlsListings ?? []).map((l) => this.mlsListingToComp(l));
+    const mlsRawCount = (mlsListings ?? []).length;
+    const mlsCompsRaw = (mlsListings ?? [])
+      .map((l) => this.mlsListingToComp(l))
+      .filter((c): c is NonNullable<typeof c> => c !== null);
+    const mlsDroppedNonSold = mlsRawCount - mlsCompsRaw.length;
     const propertyComps = result?.comps ?? [];
 
     // Build merged list: MLS first (so it wins when deduped), then PropertyComps.
@@ -897,18 +924,25 @@ export class ReapiService {
     let dedupedCount = 0;
 
     for (const m of mlsCompsRaw) {
-      const key = this.addressDedupKey(m.address?.address || m.address?.label);
+      const addr = m.address?.address || m.address?.label;
+      const key = this.addressDedupKey(addr);
       if (key) seenKeys.add(key);
       merged.push({ comp: m, method: 'mls', mlsRaw: m._mlsRaw });
     }
     for (const c of propertyComps) {
-      const key = this.addressDedupKey(c.address?.address || c.address?.label);
+      const addr = c.address?.address || c.address?.label;
+      const key = this.addressDedupKey(addr);
       if (key && seenKeys.has(key)) {
         dedupedCount += 1;
         continue;
       }
       if (key) seenKeys.add(key);
       merged.push({ comp: c, method: 'reapi-comps' });
+    }
+    if (mlsDroppedNonSold > 0) {
+      this.logger.log(
+        `REAPI MLS: dropped ${mlsDroppedNonSold}/${mlsRawCount} non-sold listings (active/pending/cancelled — not valid comps for ARV)`,
+      );
     }
 
     if (merged.length === 0) {
