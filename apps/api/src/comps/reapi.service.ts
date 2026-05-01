@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import axios, { AxiosError } from 'axios';
 import {
@@ -9,6 +10,10 @@ import {
   ReapiPropertyCompsResponse,
   ReapiMortgageRecord,
   ReapiSaleRecord,
+  ReapiMlsSearchResponse,
+  ReapiMlsDetailResponse,
+  ReapiMlsListing,
+  ReapiMlsDetailData,
 } from './reapi.types';
 import { computeSimilarityScore } from './comp-similarity';
 
@@ -253,6 +258,204 @@ export class ReapiService {
     }
   }
 
+  // ─── MLS add-on (v2/MLSSearch + v2/MLSDetail) ─────────────────────────────
+
+  /**
+   * POST /v2/MLSSearch — returns MLS listings (sold + active) matching filters.
+   * Use this for comps in disclosure states where MLS data is ground truth
+   * (no AVM-fallback noise like v3/PropertyComps has).
+   */
+  async getMlsComps(
+    addressOrLatLng: { address: string; latitude?: number | null; longitude?: number | null },
+    opts?: { maxRadiusMiles?: number; maxDaysBack?: number; maxResults?: number },
+  ): Promise<ReapiMlsListing[] | null> {
+    if (!this.apiKey) return null;
+
+    const body: Record<string, unknown> = {
+      exclude: ['RENTAL', 'LAND'],
+      listing_property_type: 'RESIDENTIAL',
+      include_photos: false,
+      size: opts?.maxResults ?? 25,
+      sort: { sold_date: 'desc' },
+    };
+
+    // Geo strategy: lat/lng + radius is more precise than address-string search.
+    // Fall back to address only when subject coords aren't populated yet.
+    if (
+      addressOrLatLng.latitude != null &&
+      addressOrLatLng.longitude != null &&
+      Number.isFinite(addressOrLatLng.latitude) &&
+      Number.isFinite(addressOrLatLng.longitude)
+    ) {
+      body.latitude = addressOrLatLng.latitude;
+      body.longitude = addressOrLatLng.longitude;
+      body.radius = opts?.maxRadiusMiles ?? 1;
+    } else {
+      body.address = addressOrLatLng.address;
+    }
+
+    // sold_date_min cutoff
+    if (opts?.maxDaysBack != null) {
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - opts.maxDaysBack);
+      body.sold_date_min = cutoff.toISOString().slice(0, 10); // YYYY-MM-DD
+    }
+
+    try {
+      this.logger.log(
+        `Fetching REAPI MLS comps for: ${addressOrLatLng.address} ` +
+        `(geo=${body.latitude != null ? 'latlng' : 'address'}, ` +
+        `radius=${body.radius ?? 'n/a'}mi, daysBack=${opts?.maxDaysBack ?? 'default'}, ` +
+        `size=${body.size})`,
+      );
+      const response = await axios.post<ReapiMlsSearchResponse>(
+        `${REAPI_BASE_URL}/v2/MLSSearch`,
+        body,
+        { headers: this.headers(), timeout: 45000 },
+      );
+
+      const respBody = response.data;
+      if (respBody?.statusCode && respBody.statusCode >= 400) {
+        const reason = respBody.reason ?? '';
+        const isNoCompsSemantic =
+          respBody.statusCode === 404 && /no\s+listings?|no\s+results?/i.test(reason);
+        if (isNoCompsSemantic) {
+          this.logger.log(
+            `REAPI MLSSearch returned 0 listings for "${addressOrLatLng.address}" — no MLS coverage in this area or no recent sales`,
+          );
+        } else {
+          this.logger.warn(
+            `REAPI MLSSearch ${respBody.statusCode}: ${respBody.statusMessage} for "${addressOrLatLng.address}"${reason ? ` — reason: ${reason}` : ''}`,
+          );
+        }
+        return null;
+      }
+
+      const listings = respBody?.data ?? [];
+      this.logger.log(`REAPI MLSSearch returned ${listings.length} listings`);
+      return listings;
+    } catch (err) {
+      this.handleApiError(err, 'getMlsComps');
+      return null;
+    }
+  }
+
+  /**
+   * POST /v2/MLSDetail — single listing detail with photos, agent, mlsHistory.
+   * Used to enrich the subject lead with active/recent MLS listing data.
+   */
+  async getMlsDetail(address: string): Promise<ReapiMlsDetailData | null> {
+    if (!this.apiKey) return null;
+
+    try {
+      this.logger.log(`Fetching REAPI MLS detail for: ${address}`);
+      const response = await axios.post<ReapiMlsDetailResponse>(
+        `${REAPI_BASE_URL}/v2/MLSDetail`,
+        { address },
+        { headers: this.headers(), timeout: 20000 },
+      );
+
+      const body = response.data;
+      if (body?.statusCode && body.statusCode >= 400) {
+        const reason = body.reason ?? '';
+        // 404 with "no listing" reason is normal — most properties never hit MLS.
+        const isNoListingSemantic =
+          body.statusCode === 404 && /no\s+listing|not\s+found/i.test(reason);
+        if (isNoListingSemantic) {
+          this.logger.log(`REAPI MLSDetail: no MLS listing for "${address}" (off-market/never-listed)`);
+        } else {
+          this.logger.warn(
+            `REAPI MLSDetail ${body.statusCode}: ${body.statusMessage} for "${address}"${reason ? ` — reason: ${reason}` : ''}`,
+          );
+        }
+        return null;
+      }
+
+      const data = body?.data;
+      if (!data || Object.keys(data).length === 0) {
+        this.logger.log(`REAPI MLSDetail returned empty data for "${address}"`);
+        return null;
+      }
+
+      this.logger.log(
+        `REAPI MLS listing found: status=${data.standardStatus ?? '?'}, ` +
+        `mlsNumber=${data.mlsNumber ?? '?'}, photos=${data.media?.photosList?.length ?? 0}, ` +
+        `historyEntries=${data.mlsHistory?.length ?? 0}`,
+      );
+      return data;
+    } catch (err) {
+      this.handleApiError(err, 'getMlsDetail');
+      return null;
+    }
+  }
+
+  /**
+   * Normalize an address into a stable dedup key (street + city + state + zip
+   * lowercased, whitespace and punctuation collapsed). Used to merge MLS comps
+   * with v3/PropertyComps results without double-counting the same property.
+   */
+  private addressDedupKey(addr: string | undefined | null): string {
+    if (!addr) return '';
+    return addr
+      .toLowerCase()
+      .replace(/[.,#]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  /**
+   * Translate an MLS listing into the same shape ReapiComp uses, so the
+   * existing comp filtering/persistence loop in fetchAndSaveComps can handle
+   * MLS rows alongside PropertyComps rows. Adds a `_mlsRaw` pointer for
+   * features-blob enrichment.
+   */
+  private mlsListingToComp(item: ReapiMlsListing): ReapiComp & { _mlsRaw: ReapiMlsListing } {
+    const l = item.listing ?? {};
+    const lt = (l.leadTypes ?? {}) as Record<string, unknown>;
+    const p = (l.property ?? {}) as Record<string, unknown>;
+    const a = l.address ?? {};
+
+    // soldPrice candidates (defensive — REAPI varies by board):
+    //   listing.soldPrice (closed price) > listing.leadTypes.mlsListingPrice (close-time list)
+    //   > listing.listPrice (active list price as fallback)
+    const soldPriceCandidate =
+      toNumber((l as Record<string, unknown>).soldPrice) ??
+      toNumber((l as Record<string, unknown>).closePrice) ??
+      toNumber(lt.mlsListingPrice) ??
+      toNumber((l as Record<string, unknown>).listPrice);
+
+    return {
+      id: item.id ?? (item.listingId != null ? String(item.listingId) : undefined),
+      distance: toNumber((item as Record<string, unknown>).distance) ?? 0,
+      address: {
+        address: a.unparsedAddress,
+        label: a.unparsedAddress,
+        city: a.city,
+        state: a.stateOrProvince,
+        zip: a.zipCode,
+        county: a.countyOrParish,
+      },
+      latitude: toNumber(p.latitude),
+      longitude: toNumber(p.longitude),
+      bedrooms: toNumber(p.bedroomsTotal),
+      bathrooms: toNumber(p.bathroomsTotal),
+      yearBuilt: toNumber(p.yearBuilt),
+      squareFeet: toNumber(p.livingArea),
+      lotSquareFeet: toNumber(p.lotSizeSquareFeet),
+      propertyType: (p.propertyType as string) ?? undefined,
+      lastSaleAmount: soldPriceCandidate,
+      lastSaleDate:
+        (l as Record<string, unknown>).soldDate as string | undefined ??
+        (lt.mlsLastStatusDate as string | undefined),
+      pool: (p.hasPool as boolean | undefined) ?? false,
+      garageAvailable: !!p.garageSpaces && p.garageSpaces !== '0',
+      mlsListingDate: (lt.mlsListingDate as string | undefined) ?? null,
+      mlsLastStatusDate: (lt.mlsLastStatusDate as string | undefined) ?? null,
+      mlsListingPrice: toNumber(lt.mlsListingPrice) ?? null,
+      _mlsRaw: item,
+    };
+  }
+
   // ─── Lead Enrichment ──────────────────────────────────────────────────────
 
   async enrichLead(
@@ -334,19 +537,106 @@ export class ReapiService {
     if (result.features) updates.reapiFeatures = result.features;
     if (result.ownerData) updates.reapiOwnerData = result.ownerData;
 
+    // ── MLS add-on enrichment (best-effort; silently skips if no MLS coverage) ──
+    const mlsDetail = await this.getMlsDetail(this.formatAddress(address));
+    let mlsPhotosCount = 0;
+    let mlsHistoryCount = 0;
+    if (mlsDetail) {
+      const mls = this.mapMlsToEnrichment(mlsDetail);
+      updates.reapiMlsListingId = mls.reapiMlsListingId ?? null;
+      updates.reapiMlsNumber = mls.reapiMlsNumber ?? null;
+      updates.reapiMlsStatus = mls.reapiMlsStatus ?? null;
+      updates.reapiMlsListPrice = mls.reapiMlsListPrice ?? null;
+      updates.reapiMlsSoldPrice = mls.reapiMlsSoldPrice ?? null;
+      updates.reapiMlsListDate = mls.reapiMlsListDate ?? null;
+      updates.reapiMlsSoldDate = mls.reapiMlsSoldDate ?? null;
+      updates.reapiMlsDaysOnMarket = mls.reapiMlsDaysOnMarket ?? null;
+      updates.reapiMlsHistory = mls.reapiMlsHistory ?? null;
+      updates.reapiMlsPhotos = mls.reapiMlsPhotos ?? null;
+      updates.reapiMlsAgent = mls.reapiMlsAgent ?? null;
+      updates.reapiMlsRemarks = mls.reapiMlsRemarks ?? null;
+      mlsPhotosCount = Array.isArray(mls.reapiMlsPhotos) ? mls.reapiMlsPhotos.length : 0;
+      mlsHistoryCount = Array.isArray(mls.reapiMlsHistory) ? mls.reapiMlsHistory.length : 0;
+    }
+
     await this.prisma.lead.update({ where: { id: leadId }, data: updates });
 
     await this.prisma.activity.create({
       data: {
         leadId,
         type: 'FIELD_UPDATED',
-        description: `Property enriched from REAPI (${Object.keys(updates).filter(k => !k.startsWith('reapi')).join(', ') || 'REAPI-only fields'})`,
-        metadata: { source: 'reapi', fields: Object.keys(updates) },
+        description: mlsDetail
+          ? `Property enriched from REAPI + MLS (${mlsPhotosCount} photos, ${mlsHistoryCount} history records)`
+          : `Property enriched from REAPI (${Object.keys(updates).filter(k => !k.startsWith('reapi')).join(', ') || 'REAPI-only fields'})`,
+        metadata: { source: 'reapi', fields: Object.keys(updates), mlsCovered: !!mlsDetail },
       },
     });
 
-    this.logger.log(`REAPI enrichment complete for lead ${leadId}`);
+    this.logger.log(`REAPI enrichment complete for lead ${leadId}${mlsDetail ? ` (+ MLS: ${mlsPhotosCount} photos, ${mlsHistoryCount} history)` : ''}`);
     return result;
+  }
+
+  /**
+   * Translate a REAPI MLSDetail response into the per-lead reapiMls* fields.
+   * Defensive: most fields are optional and absent for off-market properties.
+   */
+  private mapMlsToEnrichment(d: ReapiMlsDetailData): {
+    reapiMlsListingId?: string;
+    reapiMlsNumber?: string;
+    reapiMlsStatus?: string;
+    reapiMlsListPrice?: number;
+    reapiMlsSoldPrice?: number;
+    reapiMlsListDate?: Date;
+    reapiMlsSoldDate?: Date;
+    reapiMlsDaysOnMarket?: number;
+    reapiMlsHistory?: Array<Record<string, unknown>>;
+    reapiMlsPhotos?: Array<Record<string, unknown>>;
+    reapiMlsAgent?: Record<string, unknown>;
+    reapiMlsRemarks?: string;
+  } {
+    const listPrice = toNumber(d.listPrice);
+    const soldPrice =
+      toNumber(d.soldPrice) ??
+      toNumber((d as Record<string, unknown>).closePrice);
+
+    const parseDate = (s: string | undefined): Date | undefined => {
+      if (!s) return undefined;
+      const dt = new Date(s);
+      return Number.isFinite(dt.getTime()) ? dt : undefined;
+    };
+
+    const photosList = d.media?.photosList;
+    const photos = Array.isArray(photosList) && photosList.length > 0
+      ? photosList.map((p) => ({ lowRes: p?.lowRes, midRes: p?.midRes, highRes: p?.highRes }))
+      : undefined;
+
+    const agent = d.listingAgent
+      ? {
+          fullName: d.listingAgent.fullName,
+          email: d.listingAgent.email,
+          phone: d.listingAgent.phone,
+          mlsCode: d.listingAgent.mlsCode,
+          officeName: d.listingOffice?.name,
+          officePhone: d.listingOffice?.phone,
+        }
+      : undefined;
+
+    return {
+      reapiMlsListingId: d.listingId != null ? String(d.listingId) : undefined,
+      reapiMlsNumber: d.mlsNumber ?? undefined,
+      reapiMlsStatus: d.standardStatus ?? d.customStatus ?? undefined,
+      reapiMlsListPrice: listPrice,
+      reapiMlsSoldPrice: soldPrice,
+      reapiMlsListDate: parseDate(d.listingContractDate),
+      reapiMlsSoldDate: parseDate(d.soldDate),
+      reapiMlsDaysOnMarket: toNumber(d.daysOnMarket),
+      reapiMlsHistory: Array.isArray(d.mlsHistory) && d.mlsHistory.length > 0
+        ? (d.mlsHistory as unknown as Array<Record<string, unknown>>)
+        : undefined,
+      reapiMlsPhotos: photos,
+      reapiMlsAgent: agent,
+      reapiMlsRemarks: d.publicRemarks ?? undefined,
+    };
   }
 
   /**
@@ -517,30 +807,69 @@ export class ReapiService {
     },
   ): Promise<{ arv: number; arvLow?: number; arvHigh?: number; confidence: number; compsCount: number; source: string }> {
     const full = this.formatAddress(address);
+    const radius = opts?.maxRadiusMiles ?? 1;
+    const daysBack = opts?.maxDaysBack ?? 365;    // ~12 months
+    const maxResults = opts?.maxResults ?? 25;
+
+    // Load the subject lead's basic features for correlation scoring AND
+    // lat/lng for the MLS Search geo lookup (more precise than address string).
+    const subject = await this.prisma.lead.findUnique({
+      where: { id: leadId },
+      select: {
+        bedrooms: true, bathrooms: true, sqft: true, sqftOverride: true,
+        propertyType: true, latitude: true, longitude: true,
+      },
+    });
+    const subjectSqftForScore = subject?.sqftOverride ?? subject?.sqft ?? null;
 
     // Default pull is tight on purpose — 1mi / 12mo / 25 records to match
     // BatchData's posture for honest cross-provider comparison. The user
     // can widen via the Comps tab Distance/Age filter buttons (1/2/3/5mi,
     // 6/12/24mo); those persist on CompAnalysis and override these defaults.
-    const result = await this.getComps(full, {
-      maxRadiusMiles: opts?.maxRadiusMiles ?? 1,
-      maxDaysBack: opts?.maxDaysBack ?? 365,    // ~12 months
-      maxResults: opts?.maxResults ?? 25,
-    });
+    //
+    // Two-source pull: MLS Search (true sold prices, photos, status) + v3
+    // PropertyComps (broader coverage, AVM fallback for non-disclosure states).
+    // We dedup by address, preferring MLS when both have it.
+    const [mlsListings, result] = await Promise.all([
+      this.getMlsComps(
+        { address: full, latitude: subject?.latitude ?? null, longitude: subject?.longitude ?? null },
+        { maxRadiusMiles: radius, maxDaysBack: daysBack, maxResults },
+      ),
+      this.getComps(full, { maxRadiusMiles: radius, maxDaysBack: daysBack, maxResults }),
+    ]);
 
-    if (!result || !result.comps || result.comps.length === 0) {
-      return { arv: 0, arvLow: 0, arvHigh: 0, confidence: 0, compsCount: 0, source: 'reapi (no data)' };
+    const mlsCompsRaw = (mlsListings ?? []).map((l) => this.mlsListingToComp(l));
+    const propertyComps = result?.comps ?? [];
+
+    // Build merged list: MLS first (so it wins when deduped), then PropertyComps.
+    // Each entry carries its method tag for features.method.
+    type MergedComp = {
+      comp: ReapiComp;
+      method: 'mls' | 'reapi-comps';
+      mlsRaw?: ReapiMlsListing;
+    };
+    const seenKeys = new Set<string>();
+    const merged: MergedComp[] = [];
+    let dedupedCount = 0;
+
+    for (const m of mlsCompsRaw) {
+      const key = this.addressDedupKey(m.address?.address || m.address?.label);
+      if (key) seenKeys.add(key);
+      merged.push({ comp: m, method: 'mls', mlsRaw: m._mlsRaw });
+    }
+    for (const c of propertyComps) {
+      const key = this.addressDedupKey(c.address?.address || c.address?.label);
+      if (key && seenKeys.has(key)) {
+        dedupedCount += 1;
+        continue;
+      }
+      if (key) seenKeys.add(key);
+      merged.push({ comp: c, method: 'reapi-comps' });
     }
 
-    // Load the subject lead's basic features so we can score each comp's
-    // correlation (bed/bath/sqft/type similarity — same formula as
-    // CompsService.calculateSimilarityScore, inlined here to avoid a
-    // circular DI between CompsService and ReapiService).
-    const subject = await this.prisma.lead.findUnique({
-      where: { id: leadId },
-      select: { bedrooms: true, bathrooms: true, sqft: true, sqftOverride: true, propertyType: true },
-    });
-    const subjectSqftForScore = subject?.sqftOverride ?? subject?.sqft ?? null;
+    if (merged.length === 0) {
+      return { arv: 0, arvLow: 0, arvHigh: 0, confidence: 0, compsCount: 0, source: 'reapi (no data)' };
+    }
 
     await this.prisma.comp.deleteMany({
       where: { leadId, source: 'reapi', analysisId: null },
@@ -559,10 +888,11 @@ export class ReapiService {
     ageCutoff.setMonth(ageCutoff.getMonth() - MAX_AGE_MONTHS);
 
     let nonDisclosedCount = 0;
+    let mlsCount = 0;
     let saved = 0;
     let filteredNoDate = 0, filteredStale = 0, filteredNoPrice = 0, filteredNoSqft = 0;
 
-    for (const c of result.comps) {
+    for (const { comp: c, method, mlsRaw } of merged) {
       if (!c.lastSaleDate) { filteredNoDate += 1; continue; }
 
       const soldDate = new Date(c.lastSaleDate);
@@ -578,7 +908,10 @@ export class ReapiService {
       if ((!sqft || sqft <= 0) && !c.bedrooms && !c.bathrooms) { filteredNoSqft += 1; continue; }
 
       const isAvmFallback = !recordedSale || recordedSale === 0;
-      if (isAvmFallback) nonDisclosedCount += 1;
+      // MLS rows have true sold prices — they should never be AVM-fallback.
+      // PropertyComps rows in non-disclosure states are AVM-fallback.
+      if (isAvmFallback && method !== 'mls') nonDisclosedCount += 1;
+      if (method === 'mls') mlsCount += 1;
 
       const compAddress = c.address?.address || c.address?.label || 'Unknown';
 
@@ -602,6 +935,23 @@ export class ReapiService {
       );
       const correlation = similarityScore != null ? similarityScore / 100 : null;
 
+      // Per-comp features blob: tag the data-source method, attach MLS-only
+      // metadata when present (mlsNumber, list price, primary photo) so the
+      // UI can show the "MLS" badge and a thumbnail without a second lookup.
+      const features: Record<string, unknown> = { method };
+      if (method === 'mls' && mlsRaw?.listing) {
+        const ml = mlsRaw.listing;
+        features.mlsNumber = ml.mlsNumber;
+        features.mlsBoardCode = ml.mlsBoardCode;
+        features.mlsStatus = (ml as Record<string, unknown>).standardStatus ?? (ml.leadTypes as Record<string, unknown> | undefined)?.mlsStatus;
+        features.listPrice = toNumber((ml as Record<string, unknown>).listPrice) ?? toNumber(ml.leadTypes?.mlsListingPrice);
+        features.listDate = ml.leadTypes?.mlsListingDate;
+        features.daysOnMarket = ml.leadTypes?.mlsDaysOnMarket;
+        features.photoUrl = ml.media?.primaryListingImageUrl;
+        features.publicRemarks = ml.publicRemarks;
+        features.listingUrl = ml.url;
+      }
+
       try {
         await this.prisma.comp.create({
           data: {
@@ -610,7 +960,7 @@ export class ReapiService {
             distance: c.distance ?? 0,
             soldPrice,
             soldDate,
-            daysOnMarket: null,
+            daysOnMarket: method === 'mls' ? toNumber(mlsRaw?.listing?.leadTypes?.mlsDaysOnMarket) ?? null : null,
             bedrooms: c.bedrooms ?? null,
             bathrooms: c.bathrooms ?? null,
             sqft: sqft ?? null,
@@ -619,13 +969,16 @@ export class ReapiService {
             propertyType: c.propertyType ?? null,
             hasPool: c.pool ?? false,
             hasGarage: c.garageAvailable ?? false,
+            photoUrl: method === 'mls' ? (mlsRaw?.listing?.media?.primaryListingImageUrl ?? null) : null,
+            sourceUrl: method === 'mls' ? (mlsRaw?.listing?.url ?? null) : null,
             latitude: c.latitude ?? null,
             longitude: c.longitude ?? null,
             similarityScore,
             correlation,
             selected: true,
             source: 'reapi',
-            notes: isAvmFallback
+            features: features as Prisma.InputJsonValue,
+            notes: isAvmFallback && method !== 'mls'
               ? 'Sale price non-disclosed — using REAPI AVM as price estimate'
               : undefined,
           },
@@ -639,19 +992,22 @@ export class ReapiService {
     const filteredTotal = filteredNoDate + filteredStale + filteredNoPrice + filteredNoSqft;
     if (filteredTotal > 0) {
       this.logger.log(
-        `REAPI comps filtered ${filteredTotal}/${result.comps.length}: ` +
+        `REAPI comps filtered ${filteredTotal}/${merged.length}: ` +
         `no-date=${filteredNoDate}, stale>${MAX_AGE_MONTHS}mo=${filteredStale}, ` +
         `no-price=${filteredNoPrice}, no-sqft=${filteredNoSqft}`,
       );
     }
-    this.logger.log(`REAPI comps saved: ${saved} (${nonDisclosedCount} AVM-fallback, ${saved - nonDisclosedCount} recorded sales)`);
+    this.logger.log(
+      `REAPI comps merged: ${mlsCompsRaw.length} from MLS + ${propertyComps.length} from PropertyComps, ` +
+      `${dedupedCount} dedup'd → ${saved} saved (${mlsCount} MLS, ${nonDisclosedCount} AVM-fallback)`,
+    );
 
-    // ARV: prefer REAPI's subject AVM; fall back to comps average.
-    // REAPI occasionally returns these as strings ("92133.00") — coerce to Number
-    // so Prisma accepts them on the `Float?` columns below.
-    let arv = toNumber(result.reapiAvm) ?? 0;
-    let arvLow = toNumber(result.reapiAvmLow);
-    let arvHigh = toNumber(result.reapiAvmHigh);
+    // ARV: prefer REAPI's subject AVM (from PropertyComps); fall back to
+    // comps average. REAPI occasionally returns these as strings ("92133.00")
+    // — coerce to Number so Prisma accepts them on the `Float?` columns.
+    let arv = toNumber(result?.reapiAvm) ?? 0;
+    let arvLow = toNumber(result?.reapiAvmLow);
+    let arvHigh = toNumber(result?.reapiAvmHigh);
 
     if (!arv) {
       const savedComps = await this.prisma.comp.findMany({
@@ -665,11 +1021,14 @@ export class ReapiService {
       }
     }
 
-    // Confidence: higher when AVM-only is minority of comps, and when we have more comps
+    // Confidence: higher when AVM-only is minority of comps, when we have more
+    // comps, and when MLS data covers the majority (true sold prices > AVM
+    // estimates).
     let confidence = 0;
     if (arv && saved > 0) {
       const disclosedRatio = 1 - (nonDisclosedCount / saved);
-      confidence = Math.max(40, Math.min(95, Math.round(55 + saved * 1.2 + disclosedRatio * 15)));
+      const mlsBonus = (mlsCount / saved) > 0.5 ? 5 : 0;
+      confidence = Math.max(40, Math.min(95, Math.round(55 + saved * 1.2 + disclosedRatio * 15 + mlsBonus)));
     }
 
     await this.prisma.lead.update({
@@ -685,11 +1044,12 @@ export class ReapiService {
       },
     });
 
-    const sourceLabel = nonDisclosedCount === saved
-      ? 'reapi (AVM-based — non-disclosure)'
-      : nonDisclosedCount > 0
-        ? `reapi (${saved - nonDisclosedCount} disclosed + ${nonDisclosedCount} AVM)`
-        : 'reapi';
+    const parts: string[] = [];
+    if (mlsCount > 0) parts.push(`${mlsCount} MLS`);
+    const recordedSales = saved - mlsCount - nonDisclosedCount;
+    if (recordedSales > 0) parts.push(`${recordedSales} disclosed`);
+    if (nonDisclosedCount > 0) parts.push(`${nonDisclosedCount} AVM`);
+    const sourceLabel = parts.length > 0 ? `reapi (${parts.join(' + ')})` : 'reapi';
 
     return { arv: Math.round(arv), arvLow, arvHigh, confidence, compsCount: saved, source: sourceLabel };
   }

@@ -121,6 +121,14 @@ const CompRow = forwardRef<HTMLDivElement, CompRowProps>(function CompRow(
           <div className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">{comp.address}</div>
           <div className="flex items-center gap-1 mt-0.5 flex-wrap">
             <SourceBadgeInline source={comp.source} />
+            {(comp.features as any)?.method === 'mls' && (
+              <span
+                className="text-[10px] px-1 py-0.5 rounded bg-cyan-100 dark:bg-cyan-900/30 text-cyan-700 dark:text-cyan-400 font-medium"
+                title={`MLS data${(comp.features as any)?.mlsNumber ? ` · #${(comp.features as any).mlsNumber}` : ''}`}
+              >
+                MLS
+              </span>
+            )}
             {(comp.features as any)?.isDistressedSale && (
               <span className="text-[10px] px-1 py-0.5 rounded bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 font-medium">
                 Distressed

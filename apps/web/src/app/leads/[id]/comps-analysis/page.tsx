@@ -1422,7 +1422,19 @@ export default function CompsAnalysisPage() {
                   <tbody>
                     {selectedComps.map((comp) => (
                       <tr key={comp.id} className="border-b border-gray-100 dark:border-gray-800">
-                        <td className="py-2 pr-3 font-medium max-w-[200px] truncate">{comp.address}</td>
+                        <td className="py-2 pr-3 font-medium max-w-[200px] truncate">
+                          <div className="flex items-center gap-1.5">
+                            <span className="truncate">{comp.address}</span>
+                            {(comp.features as any)?.method === 'mls' && (
+                              <span
+                                className="shrink-0 text-[10px] px-1 py-0.5 rounded bg-cyan-100 dark:bg-cyan-900/30 text-cyan-700 dark:text-cyan-400 font-medium"
+                                title={`MLS data${(comp.features as any)?.mlsNumber ? ` · #${(comp.features as any).mlsNumber}` : ''}`}
+                              >
+                                MLS
+                              </span>
+                            )}
+                          </div>
+                        </td>
                         <td className="py-2 pr-3">
                           <SourceBadge source={comp.source} />
                         </td>
@@ -2928,6 +2940,14 @@ function CompCard({
             {comp.distance.toFixed(1)} mi
           </span>
           <SourceBadge source={comp.source} />
+          {(comp.features as any)?.method === 'mls' && (
+            <span
+              className="text-xs px-2 py-0.5 rounded-full bg-cyan-100 dark:bg-cyan-900/30 text-cyan-700 dark:text-cyan-400 font-medium"
+              title={`MLS data${(comp.features as any)?.mlsNumber ? ` · #${(comp.features as any).mlsNumber}` : ''}`}
+            >
+              MLS
+            </span>
+          )}
           {(comp.features as any)?.isDistressedSale && (
             <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 font-medium">
               {(comp.features as any)?.saleTransType || 'Distressed'}

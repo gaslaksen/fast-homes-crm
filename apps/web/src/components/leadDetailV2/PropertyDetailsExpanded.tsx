@@ -13,6 +13,21 @@ export default function PropertyDetailsExpanded({ lead }: { lead: any }) {
   const mortgageSource = mortgage ? 'REAPI' : null;
   const hasMortgage = !!(mortgage && (mortgage.firstConcurrent || mortgage.secondConcurrent));
 
+  const mlsHistory: any[] = lead.reapiMlsHistory || [];
+  const mlsPhotos: any[] = lead.reapiMlsPhotos || [];
+  const mlsAgent: any = lead.reapiMlsAgent || null;
+  const hasMls = !!(lead.reapiMlsStatus || mlsHistory.length > 0 || mlsPhotos.length > 0 || lead.reapiMlsRemarks);
+
+  const mlsStatusColor = (status?: string) => {
+    if (!status) return 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300';
+    const s = status.toLowerCase();
+    if (s.includes('active')) return 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400';
+    if (s.includes('pending')) return 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400';
+    if (s.includes('sold') || s.includes('closed')) return 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400';
+    if (s.includes('cancel') || s.includes('expired') || s.includes('fail') || s.includes('withdrawn')) return 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400';
+    return 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300';
+  };
+
   const formatLoanType = (code?: string) => {
     if (!code) return null;
     const map: Record<string, string> = { CNV: 'Conventional', FHA: 'FHA', VA: 'VA', USDA: 'USDA', HEL: 'Home Equity', RVS: 'Reverse' };
@@ -248,6 +263,123 @@ export default function PropertyDetailsExpanded({ lead }: { lead: any }) {
               <span>{totalOriginalDebt < lead.arv * 0.6 ? '💚' : totalOriginalDebt < lead.arv * 0.8 ? '⚠️' : '🔴'}</span>
               <span>Original debt ${Math.round(totalOriginalDebt).toLocaleString()} = {((totalOriginalDebt / lead.arv) * 100).toFixed(0)}% of ARV</span>
             </div>
+          )}
+        </div>
+      )}
+
+      {/* MLS Listing History */}
+      {hasMls && (
+        <div className="border-t border-gray-100 dark:border-gray-800 pt-4">
+          <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-1.5">
+            🏠 MLS Listing
+            {lead.reapiMlsStatus && (
+              <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${mlsStatusColor(lead.reapiMlsStatus)}`}>
+                {lead.reapiMlsStatus}
+              </span>
+            )}
+            {lead.reapiMlsDaysOnMarket != null && (
+              <span className="text-xs text-gray-500 dark:text-gray-400 font-normal">{lead.reapiMlsDaysOnMarket} DOM</span>
+            )}
+            <span className="text-xs text-gray-400 dark:text-gray-500 font-normal">via REAPI MLS</span>
+          </h4>
+
+          {/* Photo grid */}
+          {mlsPhotos.length > 0 && (
+            <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mb-3">
+              {mlsPhotos.slice(0, 8).map((p: any, i: number) => {
+                const url = p?.midRes || p?.lowRes || p?.highRes;
+                if (!url) return null;
+                return (
+                  <a
+                    key={i}
+                    href={p?.highRes || url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block aspect-square overflow-hidden rounded-lg bg-gray-100 dark:bg-gray-800 hover:ring-2 hover:ring-cyan-400"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={url} alt={`MLS photo ${i + 1}`} className="w-full h-full object-cover" loading="lazy" />
+                  </a>
+                );
+              })}
+              {mlsPhotos.length > 8 && (
+                <div className="aspect-square rounded-lg bg-gray-50 dark:bg-gray-900 flex items-center justify-center text-xs text-gray-500 dark:text-gray-400 border border-dashed border-gray-300 dark:border-gray-700">
+                  +{mlsPhotos.length - 8} more
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Price/date summary */}
+          <dl className="grid grid-cols-2 gap-3 mb-3 text-sm">
+            {lead.reapiMlsListPrice && (
+              <div>
+                <dt className="text-xs text-gray-500 dark:text-gray-400">List price</dt>
+                <dd className="font-bold text-gray-900 dark:text-gray-100">${lead.reapiMlsListPrice.toLocaleString()}</dd>
+              </div>
+            )}
+            {lead.reapiMlsSoldPrice && (
+              <div>
+                <dt className="text-xs text-gray-500 dark:text-gray-400">Sold price</dt>
+                <dd className="font-bold text-blue-700 dark:text-blue-400">${lead.reapiMlsSoldPrice.toLocaleString()}</dd>
+              </div>
+            )}
+            {lead.reapiMlsListDate && (
+              <div>
+                <dt className="text-xs text-gray-500 dark:text-gray-400">Listed</dt>
+                <dd className="text-gray-700 dark:text-gray-300">{new Date(lead.reapiMlsListDate).toLocaleDateString()}</dd>
+              </div>
+            )}
+            {lead.reapiMlsSoldDate && (
+              <div>
+                <dt className="text-xs text-gray-500 dark:text-gray-400">Closed</dt>
+                <dd className="text-gray-700 dark:text-gray-300">{new Date(lead.reapiMlsSoldDate).toLocaleDateString()}</dd>
+              </div>
+            )}
+          </dl>
+
+          {/* Listing agent */}
+          {mlsAgent && (mlsAgent.fullName || mlsAgent.officeName) && (
+            <div className="bg-gray-50 dark:bg-gray-950 rounded-lg px-3 py-2 mb-3 border border-gray-100 dark:border-gray-800">
+              <div className="text-xs text-gray-500 dark:text-gray-400 mb-0.5">Listing agent</div>
+              <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{mlsAgent.fullName || '—'}</div>
+              {mlsAgent.officeName && (
+                <div className="text-xs text-gray-600 dark:text-gray-400">{mlsAgent.officeName}</div>
+              )}
+              <div className="flex gap-3 mt-1 text-xs">
+                {mlsAgent.phone && (
+                  <a href={`tel:${mlsAgent.phone}`} className="text-cyan-600 dark:text-cyan-400 hover:underline">{mlsAgent.phone}</a>
+                )}
+                {mlsAgent.email && (
+                  <a href={`mailto:${mlsAgent.email}`} className="text-cyan-600 dark:text-cyan-400 hover:underline truncate">{mlsAgent.email}</a>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* History timeline */}
+          {mlsHistory.length > 0 && (
+            <div className="mb-3">
+              <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">History</div>
+              <div className="space-y-1">
+                {mlsHistory.map((h: any, i: number) => (
+                  <div key={i} className="flex items-center gap-2 text-xs text-gray-700 dark:text-gray-300">
+                    <span className="text-gray-400 dark:text-gray-500 w-20 shrink-0">{h.statusDate ? new Date(h.statusDate).toLocaleDateString() : '—'}</span>
+                    <span className={`px-1.5 py-0.5 rounded ${mlsStatusColor(h.status)} text-[10px]`}>{h.status || 'unknown'}</span>
+                    {h.price ? <span className="font-medium">${Number(h.price).toLocaleString()}</span> : null}
+                    {h.daysOnMarket != null ? <span className="text-gray-400 dark:text-gray-500">· {h.daysOnMarket}d</span> : null}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Public remarks */}
+          {lead.reapiMlsRemarks && (
+            <details className="text-xs">
+              <summary className="cursor-pointer text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300">Listing description</summary>
+              <p className="mt-1.5 text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-wrap">{lead.reapiMlsRemarks}</p>
+            </details>
           )}
         </div>
       )}
