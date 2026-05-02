@@ -12,7 +12,7 @@ function photoSrc(raw: string | null | undefined): string | null {
   return `${API_URL}${raw}`;
 }
 import { isStale, touchColor, wasRecentlyMoved } from '@/lib/kanbanThresholds';
-import { getLeadDisplayName } from '@/lib/format';
+import { formatPhoneDisplay, getLeadDisplayName } from '@/lib/format';
 import type { Density, KanbanLead } from './types';
 import DripIndicator from './DripIndicator';
 
@@ -230,20 +230,9 @@ export default function LeadCard({
       <div className="absolute top-2 right-2 z-10">{dripEl}</div>
       <div className="absolute top-2 left-2 z-10">{selectable}</div>
 
-      {photoSrc(lead.primaryPhoto) && (
-        <div className="mb-2 mt-1 overflow-hidden rounded">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={photoSrc(lead.primaryPhoto)!}
-            alt={lead.propertyAddress}
-            className="w-full h-20 object-cover"
-          />
-        </div>
-      )}
-
       <Link
         href={`/leads/${lead.id}`}
-        className="block text-sm font-semibold text-gray-900 dark:text-gray-100 truncate hover:underline"
+        className="block text-sm font-semibold text-gray-900 dark:text-gray-100 truncate hover:underline mt-1"
         title={addressLine}
       >
         {displayName}
@@ -251,6 +240,31 @@ export default function LeadCard({
       <div className="text-[11px] text-gray-500 dark:text-gray-400 truncate">
         {lead.propertyAddress} · {lead.propertyCity}, {lead.propertyState}
       </div>
+
+      {(lead.sellerPhone || lead.sellerEmail) && (
+        <div className="mt-1 text-[11px] leading-tight">
+          {lead.sellerPhone && (
+            <a
+              href={`tel:${lead.sellerPhone}`}
+              onClick={(e) => e.stopPropagation()}
+              className="block truncate text-gray-600 dark:text-gray-300 hover:text-primary-600 dark:hover:text-primary-400"
+              title={`Call ${formatPhoneDisplay(lead.sellerPhone)}`}
+            >
+              {formatPhoneDisplay(lead.sellerPhone)}
+            </a>
+          )}
+          {lead.sellerEmail && (
+            <a
+              href={`mailto:${lead.sellerEmail}`}
+              onClick={(e) => e.stopPropagation()}
+              className="block truncate text-gray-400 dark:text-gray-500 hover:text-primary-600 dark:hover:text-primary-400"
+              title={lead.sellerEmail}
+            >
+              {lead.sellerEmail}
+            </a>
+          )}
+        </div>
+      )}
 
       <div className="mt-1.5 flex items-center gap-2 text-[11px]">
         <TierDot tier={lead.tier} />

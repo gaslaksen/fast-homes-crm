@@ -47,6 +47,7 @@ export interface KanbanLead {
   sellerFirstName: string | null;
   sellerLastName: string | null;
   sellerPhone: string | null;
+  sellerEmail: string | null;
   status: string;
   totalScore: number;
   scoreBand: string;

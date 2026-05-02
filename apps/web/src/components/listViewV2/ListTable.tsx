@@ -79,8 +79,10 @@ export default function ListTable({
             onChange={onSelectAll}
             className="h-3.5 w-3.5 rounded border-gray-300 dark:border-gray-600"
           />
-          <div />
           <Th label="Seller / Property" sortKey="address" current={sortKey} dir={sortDir} onSort={onSort} />
+          <span className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 px-1">
+            Contact
+          </span>
           <Th label="Stage"             sortKey="stage"   current={sortKey} dir={sortDir} onSort={onSort} />
           <Th label="Tier"              sortKey="tier"    current={sortKey} dir={sortDir} onSort={onSort} align="center" />
           <Th label="ARV"               sortKey="arv"     current={sortKey} dir={sortDir} onSort={onSort} align="right" />

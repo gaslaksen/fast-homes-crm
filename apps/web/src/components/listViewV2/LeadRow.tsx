@@ -1,14 +1,13 @@
 'use client';
 
 import Link from 'next/link';
-import PropertyPhoto from '@/components/PropertyPhoto';
 import Avatar from '@/components/Avatar';
 import DripEnvelopeIcon from '@/components/icons/DripEnvelopeIcon';
 import { computeMao, computeSpread, formatK } from '@/lib/dealMath';
 import StagePill from './StagePill';
 import EmptyCellChip from './EmptyCellChip';
 import TouchBadge from './TouchBadge';
-import { getLeadDisplayName } from '@/lib/format';
+import { formatPhoneDisplay, getLeadDisplayName } from '@/lib/format';
 
 const INACTIVE_STATUSES = ['DEAD', 'SOLD', 'SOLD_LOSS', 'HELD_LONG_TERM', 'CANCELLED', 'CLOSED_LOST'];
 const SOURCE_LABELS: Record<string, string> = {
@@ -26,6 +25,8 @@ export interface ListLead {
   propertyState: string;
   sellerFirstName: string | null;
   sellerLastName: string | null;
+  sellerPhone: string | null;
+  sellerEmail: string | null;
   source: string | null;
   status: string;
   totalScore: number;
@@ -104,7 +105,7 @@ export default function LeadRow({
 
   return (
     <div
-      className={`grid grid-cols-[auto_44px_2fr_170px_68px_72px_72px_72px_72px_60px_72px] gap-3 items-center px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors group ${
+      className={`grid ${LIST_GRID_COLS_CLASS} gap-3 items-center px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors group ${
         selected ? 'bg-primary-50/40 dark:bg-primary-950/40' : ''
       } ${isDead ? 'opacity-60' : ''}`}
     >
@@ -115,14 +116,6 @@ export default function LeadRow({
         onChange={() => onToggleSelect(lead.id)}
         onClick={(e) => e.stopPropagation()}
         className="h-3.5 w-3.5 rounded border-gray-300 dark:border-gray-600"
-      />
-
-      {/* photo */}
-      <PropertyPhoto
-        src={lead.primaryPhoto}
-        scoreBand={lead.scoreBand}
-        address={lead.propertyAddress}
-        size="sm"
       />
 
       {/* seller / property */}
@@ -139,6 +132,34 @@ export default function LeadRow({
           )}
         </div>
       </Link>
+
+      {/* contact (phone + email) */}
+      <div className="min-w-0 text-xs leading-tight">
+        {lead.sellerPhone ? (
+          <a
+            href={`tel:${lead.sellerPhone}`}
+            onClick={(e) => e.stopPropagation()}
+            className="block truncate text-gray-700 dark:text-gray-200 hover:text-primary-600 dark:hover:text-primary-400"
+            title={`Call ${formatPhoneDisplay(lead.sellerPhone)}`}
+          >
+            {formatPhoneDisplay(lead.sellerPhone)}
+          </a>
+        ) : (
+          <span className="block text-gray-300 dark:text-gray-600">—</span>
+        )}
+        {lead.sellerEmail ? (
+          <a
+            href={`mailto:${lead.sellerEmail}`}
+            onClick={(e) => e.stopPropagation()}
+            className="block truncate text-gray-400 dark:text-gray-500 hover:text-primary-600 dark:hover:text-primary-400"
+            title={lead.sellerEmail}
+          >
+            {lead.sellerEmail}
+          </a>
+        ) : (
+          <span className="block text-gray-300 dark:text-gray-600">—</span>
+        )}
+      </div>
 
       {/* stage + drip indicator + assignee */}
       <Link href={`/leads/${lead.id}`} className="flex items-center gap-1.5 min-w-0">
@@ -237,4 +258,4 @@ export default function LeadRow({
 }
 
 export const LIST_GRID_COLS_CLASS =
-  'grid-cols-[auto_44px_2fr_170px_68px_72px_72px_72px_72px_60px_72px]';
+  'grid-cols-[auto_2fr_180px_170px_68px_72px_72px_72px_72px_60px_72px]';
