@@ -133,8 +133,8 @@ export default function LeadRow({
         </div>
       </Link>
 
-      {/* contact (phone + email) */}
-      <div className="min-w-0 text-xs leading-tight">
+      {/* phone */}
+      <div className="min-w-0 text-xs">
         {lead.sellerPhone ? (
           <a
             href={`tel:${lead.sellerPhone}`}
@@ -147,11 +147,15 @@ export default function LeadRow({
         ) : (
           <span className="block text-gray-300 dark:text-gray-600">—</span>
         )}
+      </div>
+
+      {/* email */}
+      <div className="min-w-0 text-xs">
         {lead.sellerEmail ? (
           <a
             href={`mailto:${lead.sellerEmail}`}
             onClick={(e) => e.stopPropagation()}
-            className="block truncate text-gray-400 dark:text-gray-500 hover:text-primary-600 dark:hover:text-primary-400"
+            className="block truncate text-gray-500 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-400"
             title={lead.sellerEmail}
           >
             {lead.sellerEmail}
@@ -258,4 +262,4 @@ export default function LeadRow({
 }
 
 export const LIST_GRID_COLS_CLASS =
-  'grid-cols-[auto_2fr_180px_170px_68px_72px_72px_72px_72px_60px_72px]';
+  'grid-cols-[auto_2fr_130px_180px_170px_68px_72px_72px_72px_72px_60px_72px]';
