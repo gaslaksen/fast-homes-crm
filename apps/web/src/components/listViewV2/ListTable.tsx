@@ -80,7 +80,7 @@ export default function ListTable({
             className="h-3.5 w-3.5 rounded border-gray-300 dark:border-gray-600"
           />
           <div />
-          <Th label="Property / Seller" sortKey="address" current={sortKey} dir={sortDir} onSort={onSort} />
+          <Th label="Seller / Property" sortKey="address" current={sortKey} dir={sortDir} onSort={onSort} />
           <Th label="Stage"             sortKey="stage"   current={sortKey} dir={sortDir} onSort={onSort} />
           <Th label="Tier"              sortKey="tier"    current={sortKey} dir={sortDir} onSort={onSort} align="center" />
           <Th label="ARV"               sortKey="arv"     current={sortKey} dir={sortDir} onSort={onSort} align="right" />

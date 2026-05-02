@@ -12,6 +12,7 @@ function photoSrc(raw: string | null | undefined): string | null {
   return `${API_URL}${raw}`;
 }
 import { isStale, touchColor, wasRecentlyMoved } from '@/lib/kanbanThresholds';
+import { getLeadDisplayName } from '@/lib/format';
 import type { Density, KanbanLead } from './types';
 import DripIndicator from './DripIndicator';
 
@@ -149,6 +150,7 @@ export default function LeadCard({
   const addressLine = `${lead.propertyAddress}${
     lead.propertyCity ? ` · ${lead.propertyCity}, ${lead.propertyState}` : ''
   }`;
+  const displayName = getLeadDisplayName(lead);
 
   if (density === 'ultra') {
     return (
@@ -164,7 +166,7 @@ export default function LeadCard({
           className="flex-1 truncate text-gray-900 dark:text-gray-100 hover:underline"
           title={addressLine}
         >
-          {lead.propertyAddress}
+          {displayName}
         </Link>
         <span className="text-gray-500 dark:text-gray-400 text-[11px]">
           <SpreadText arv={lead.arv} asking={lead.askingPrice} />
@@ -189,10 +191,10 @@ export default function LeadCard({
               className="block text-[13px] font-medium text-gray-900 dark:text-gray-100 truncate hover:underline"
               title={addressLine}
             >
-              {lead.propertyAddress}
+              {displayName}
             </Link>
             <div className="text-[11px] text-gray-500 dark:text-gray-400 truncate">
-              {lead.propertyCity}, {lead.propertyState}
+              {lead.propertyAddress}
             </div>
             <div className="mt-1 flex items-center gap-2 text-[11px]">
               <TierDot tier={lead.tier} />
@@ -244,10 +246,10 @@ export default function LeadCard({
         className="block text-sm font-semibold text-gray-900 dark:text-gray-100 truncate hover:underline"
         title={addressLine}
       >
-        {lead.propertyAddress}
+        {displayName}
       </Link>
       <div className="text-[11px] text-gray-500 dark:text-gray-400 truncate">
-        {lead.propertyCity}, {lead.propertyState}
+        {lead.propertyAddress} · {lead.propertyCity}, {lead.propertyState}
       </div>
 
       <div className="mt-1.5 flex items-center gap-2 text-[11px]">

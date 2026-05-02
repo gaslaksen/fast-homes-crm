@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { formatPhoneDisplay } from '@/lib/format';
 import PropertyDetailsExpanded from './PropertyDetailsExpanded';
 
@@ -58,9 +59,19 @@ export default function SellerPropertyCard({ lead, onCall, onText, onEmail, onRe
   );
 
   return (
-    <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-5">
+    <div className="relative rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-5">
+      <Link
+        href={`/leads/${lead.id}/edit`}
+        title="Edit seller and property details"
+        aria-label="Edit seller and property details"
+        className="absolute top-3 right-3 p-1.5 rounded-md text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+      >
+        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+        </svg>
+      </Link>
       {/* Seller section */}
-      <div className="mb-4">
+      <div className="mb-4 pr-8">
         <div className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-2">
           {lead.sellerFirstName} {lead.sellerLastName}
         </div>
@@ -118,13 +129,25 @@ export default function SellerPropertyCard({ lead, onCall, onText, onEmail, onRe
       {/* Accordion */}
       {hasDetails && (
         <div className="mt-3 border-t border-gray-200 dark:border-gray-700 pt-3">
-          <button
-            onClick={() => setExpanded(!expanded)}
-            className="w-full flex items-center justify-between text-xs font-semibold text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
-          >
-            <span>Full property details (taxes, sale history, mortgage)</span>
-            <svg className={`w-4 h-4 transition-transform ${expanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setExpanded(!expanded)}
+              className="flex-1 flex items-center justify-between text-xs font-semibold text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+            >
+              <span>Full property details (taxes, sale history, mortgage)</span>
+              <svg className={`w-4 h-4 transition-transform ${expanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+            </button>
+            <Link
+              href={`/leads/${lead.id}/edit`}
+              title="Edit property details"
+              aria-label="Edit property details"
+              className="p-1 rounded text-gray-400 hover:text-primary-600 dark:hover:text-primary-400"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+              </svg>
+            </Link>
+          </div>
           {expanded && <PropertyDetailsExpanded lead={lead} />}
         </div>
       )}

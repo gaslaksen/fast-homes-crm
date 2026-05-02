@@ -7,7 +7,7 @@ import dynamic from 'next/dynamic';
 import { leadsAPI, compsAPI, compAnalysisAPI, photosAPI } from '@/lib/api';
 import AppShell from '@/components/AppShell';
 import LeadTabNav, { COMPS_TABS, DETAIL_TABS } from '@/components/LeadTabNav';
-import LeadHeader from '@/components/LeadHeader';
+import LeadDetailHeader from '@/components/leadDetailV2/LeadDetailHeader';
 import ShareDealModal from '@/components/ShareDealModal';
 import CompRow from '@/components/CompRow';
 import SubjectPropertyCard from '@/components/SubjectPropertyCard';
@@ -763,15 +763,24 @@ export default function CompsAnalysisPage() {
 
   return (
     <AppShell>
-      <LeadHeader
+      <LeadDetailHeader
         lead={lead}
-        leadId={leadId}
-        onStatusChange={async (newStatus) => {
+        onMarkDead={async () => {
           try {
-            await leadsAPI.update(leadId, { status: newStatus });
-            setLead((prev: any) => prev ? { ...prev, status: newStatus } : prev);
+            await leadsAPI.update(leadId, { status: 'DEAD' });
           } catch (err) {
-            console.error('Failed to update status', err);
+            console.error('Failed to mark dead', err);
+          }
+          router.push(`/leads/${leadId}?tab=disposition`);
+        }}
+        onRefreshFromReapi={async () => {
+          try {
+            const res = await leadsAPI.refreshPropertyDetails(leadId);
+            const refreshed = await leadsAPI.get(leadId);
+            setLead(refreshed.data);
+            return { success: true, message: res?.data?.message };
+          } catch (err: any) {
+            return { success: false, message: err?.message || 'Refresh failed' };
           }
         }}
       />

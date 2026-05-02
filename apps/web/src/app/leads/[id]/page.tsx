@@ -10,7 +10,7 @@ import DispoTab from '@/components/DispoTab';
 import PhotoGallery from '@/components/PhotoGallery';
 import AppShell from '@/components/AppShell';
 import LeadTabNav, { DETAIL_TABS, COMPS_TABS } from '@/components/LeadTabNav';
-import LeadHeader from '@/components/LeadHeader';
+import LeadDetailHeader from '@/components/leadDetailV2/LeadDetailHeader';
 import SellerPortalPanel from '@/components/SellerPortalPanel';
 import ScheduleFollowUpModal from '@/components/ScheduleFollowUpModal';
 import LeadOverviewV2 from '@/components/leadDetailV2/LeadOverviewV2';
@@ -464,16 +464,21 @@ export default function LeadDetailPage() {
 
   return (
     <AppShell>
-      <LeadHeader
+      <LeadDetailHeader
         lead={lead}
-        leadId={leadId}
-        leadEnrollments={leadEnrollments}
-        onStatusChange={async (newStatus) => {
+        onMarkDead={() => {
+          setShowDeadForm(true);
+          if (activeTab !== 'disposition') {
+            router.push(`/leads/${leadId}?tab=disposition`);
+          }
+        }}
+        onRefreshFromReapi={async () => {
           try {
-            await leadsAPI.update(leadId, { status: newStatus });
-            setLead((prev: any) => prev ? { ...prev, status: newStatus } : prev);
-          } catch (err) {
-            console.error('Failed to update status', err);
+            const res = await leadsAPI.refreshPropertyDetails(leadId);
+            await loadLead();
+            return { success: true, message: res?.data?.message };
+          } catch (err: any) {
+            return { success: false, message: err?.message || 'Refresh failed' };
           }
         }}
       />

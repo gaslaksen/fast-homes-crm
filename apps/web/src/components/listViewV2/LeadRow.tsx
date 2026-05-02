@@ -8,6 +8,7 @@ import { computeMao, computeSpread, formatK } from '@/lib/dealMath';
 import StagePill from './StagePill';
 import EmptyCellChip from './EmptyCellChip';
 import TouchBadge from './TouchBadge';
+import { getLeadDisplayName } from '@/lib/format';
 
 const INACTIVE_STATUSES = ['DEAD', 'SOLD', 'SOLD_LOSS', 'HELD_LONG_TERM', 'CANCELLED', 'CLOSED_LOST'];
 const SOURCE_LABELS: Record<string, string> = {
@@ -124,14 +125,13 @@ export default function LeadRow({
         size="sm"
       />
 
-      {/* property / seller */}
+      {/* seller / property */}
       <Link href={`/leads/${lead.id}`} className="min-w-0">
         <div className="font-semibold text-sm text-gray-900 dark:text-gray-100 truncate group-hover:text-primary-700 dark:group-hover:text-primary-400">
-          {lead.propertyAddress}
+          {getLeadDisplayName(lead)}
         </div>
         <div className="text-xs text-gray-400 dark:text-gray-500 truncate">
-          {lead.propertyCity}, {lead.propertyState} · {lead.sellerFirstName}{' '}
-          {lead.sellerLastName}
+          {lead.propertyAddress} · {lead.propertyCity}, {lead.propertyState}
           {lead.source && (
             <span className="ml-1 text-gray-300 dark:text-gray-600">
               · {SOURCE_LABELS[lead.source] || lead.source}
