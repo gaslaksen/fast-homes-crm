@@ -47,6 +47,7 @@ export class PipelineService {
         sellerFirstName: true,
         sellerLastName: true,
         sellerPhone: true,
+        sellerEmail: true,
         status: true,
         totalScore: true,
         scoreBand: true,
