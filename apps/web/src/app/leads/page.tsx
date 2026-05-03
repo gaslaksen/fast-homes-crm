@@ -6,6 +6,7 @@ import { useSearchParams, useRouter, usePathname } from 'next/navigation';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 import { leadsAPI, authAPI, pipelineAPI } from '@/lib/api';
 import PropertyPhoto from '@/components/PropertyPhoto';
+import { formatPhoneDisplay, getLeadDisplayName } from '@/lib/format';
 import Avatar from '@/components/Avatar';
 import AppShell from '@/components/AppShell';
 import { isKanbanV2, isListViewV2 } from '@/lib/flags';
@@ -233,20 +234,26 @@ function MobileLeadCard({ lead, spread: s }: { lead: any; spread: number | null 
         lead.status === 'DEAD' ? 'opacity-60' : ''
       }`}
     >
-      {/* Row 1: Photo + address */}
-      <div className="flex items-start gap-3">
-        <PropertyPhoto
-          src={lead.primaryPhoto}
-          scoreBand={lead.scoreBand}
-          address={lead.propertyAddress}
-          size="sm"
-        />
-        <div className="min-w-0 flex-1">
-          <div className="font-semibold text-sm text-gray-900 dark:text-gray-100 truncate">{lead.propertyAddress}</div>
-          <div className="text-xs text-gray-400 dark:text-gray-500 truncate">
-            {lead.propertyCity}, {lead.propertyState} · {lead.sellerFirstName} {lead.sellerLastName}
-          </div>
+      {/* Row 1: seller name + address */}
+      <div className="min-w-0">
+        <div className="font-semibold text-sm text-gray-900 dark:text-gray-100 truncate">
+          {getLeadDisplayName(lead)}
         </div>
+        <div className="text-xs text-gray-400 dark:text-gray-500 truncate">
+          {lead.propertyAddress} · {lead.propertyCity}, {lead.propertyState}
+        </div>
+        {(lead.sellerPhone || lead.sellerEmail) && (
+          <div className="mt-1 text-xs leading-tight">
+            {lead.sellerPhone && (
+              <div className="text-gray-600 dark:text-gray-300 truncate">
+                {formatPhoneDisplay(lead.sellerPhone)}
+              </div>
+            )}
+            {lead.sellerEmail && (
+              <div className="text-gray-400 dark:text-gray-500 truncate">{lead.sellerEmail}</div>
+            )}
+          </div>
+        )}
       </div>
       {/* Row 2: Badges + ARV */}
       <div className="flex items-center justify-between">

@@ -81,10 +81,7 @@ export default function ListTable({
           />
           <Th label="Seller / Property" sortKey="address" current={sortKey} dir={sortDir} onSort={onSort} />
           <span className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 px-1">
-            Phone
-          </span>
-          <span className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 px-1">
-            Email
+            Contact
           </span>
           <Th label="Stage"             sortKey="stage"   current={sortKey} dir={sortDir} onSort={onSort} />
           <Th label="Tier"              sortKey="tier"    current={sortKey} dir={sortDir} onSort={onSort} align="center" />

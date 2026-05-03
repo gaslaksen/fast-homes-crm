@@ -61,10 +61,37 @@ export default function LeadDetailHeader({ lead, onMarkDead, onRefreshFromReapi 
       .join(', ')}`
   )}`;
 
+  const actionCluster = (
+    <div className="flex items-center gap-2 flex-shrink-0 w-full sm:w-auto">
+      <ActionButton
+        kind="call"
+        disabled={callDisabled}
+        tooltip={callTooltip}
+        href={callDisabled ? undefined : `tel:${lead.sellerPhone}`}
+        fullWidthOnMobile
+      />
+      <ActionButton
+        kind="text"
+        disabled={textDisabled}
+        tooltip={textTooltip}
+        href={textDisabled ? undefined : `/leads/${lead.id}?tab=communications`}
+        isInternal
+        fullWidthOnMobile
+      />
+      <OverflowMenu
+        leadId={lead.id}
+        zillowUrl={zillowUrl}
+        realtorUrl={realtorUrl}
+        onMarkDead={onMarkDead}
+        onRefreshFromReapi={onRefreshFromReapi}
+      />
+    </div>
+  );
+
   return (
     <header className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
       <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
-        <div className="flex items-center gap-4">
+        <div className="flex items-start sm:items-center gap-3 sm:gap-4">
           <PropertyPhoto
             src={lead.primaryPhoto}
             scoreBand={lead.scoreBand}
@@ -72,17 +99,17 @@ export default function LeadDetailHeader({ lead, onMarkDead, onRefreshFromReapi 
             size="sm"
           />
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-1.5 text-xs text-gray-400 dark:text-gray-500">
+            <div className="hidden sm:flex items-center gap-1.5 text-xs text-gray-400 dark:text-gray-500">
               <Link href="/leads" className="hover:text-gray-700 dark:hover:text-gray-100 transition-colors">
                 Leads
               </Link>
               <span>/</span>
               <span className="text-gray-600 dark:text-gray-400 font-medium truncate">{displayName}</span>
             </div>
-            <h1 className="text-[22px] font-medium text-gray-900 dark:text-gray-100 leading-tight truncate">
+            <h1 className="text-base sm:text-[22px] font-semibold sm:font-medium text-gray-900 dark:text-gray-100 leading-tight truncate">
               {displayName}
             </h1>
-            <p className="text-sm text-gray-600 dark:text-gray-400 truncate">{addressLine}</p>
+            <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400 truncate">{addressLine}</p>
             <StatusLine
               isDead={isDead}
               tier={lead.tier}
@@ -92,29 +119,9 @@ export default function LeadDetailHeader({ lead, onMarkDead, onRefreshFromReapi 
               lastTouched={lastTouched}
             />
           </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
-            <ActionButton
-              kind="call"
-              disabled={callDisabled}
-              tooltip={callTooltip}
-              href={callDisabled ? undefined : `tel:${lead.sellerPhone}`}
-            />
-            <ActionButton
-              kind="text"
-              disabled={textDisabled}
-              tooltip={textTooltip}
-              href={textDisabled ? undefined : `/leads/${lead.id}?tab=communications`}
-              isInternal
-            />
-            <OverflowMenu
-              leadId={lead.id}
-              zillowUrl={zillowUrl}
-              realtorUrl={realtorUrl}
-              onMarkDead={onMarkDead}
-              onRefreshFromReapi={onRefreshFromReapi}
-            />
-          </div>
+          <div className="hidden sm:block">{actionCluster}</div>
         </div>
+        <div className="mt-3 sm:hidden">{actionCluster}</div>
       </div>
     </header>
   );
@@ -145,28 +152,19 @@ function StatusLine({
     );
   }
   return (
-    <div className="mt-1 flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 flex-wrap">
+    <div className="mt-1 flex items-center gap-x-2 gap-y-1 text-xs text-gray-500 dark:text-gray-400 flex-wrap">
       {tier ? (
         <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full border text-[11px] font-semibold ${TIER_PILL[tier] || TIER_PILL[3]}`}>
           T{tier}
         </span>
       ) : null}
       {stageName ? (
-        <>
-          <span className="text-gray-300 dark:text-gray-600">·</span>
-          <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[11px] font-medium ${stageColor || 'bg-gray-100 text-gray-600'}`}>
-            {stageName}
-          </span>
-        </>
+        <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[11px] font-medium ${stageColor || 'bg-gray-100 text-gray-600'}`}>
+          {stageName}
+        </span>
       ) : null}
-      <span className="text-gray-300 dark:text-gray-600">·</span>
       <span>{touchCount} {touchCount === 1 ? 'touch' : 'touches'}</span>
-      {lastTouched ? (
-        <>
-          <span className="text-gray-300 dark:text-gray-600">·</span>
-          <span>Last touched {lastTouched}</span>
-        </>
-      ) : null}
+      {lastTouched ? <span>Last touched {lastTouched}</span> : null}
     </div>
   );
 }
@@ -177,12 +175,14 @@ function ActionButton({
   tooltip,
   href,
   isInternal,
+  fullWidthOnMobile,
 }: {
   kind: 'call' | 'text';
   disabled: boolean;
   tooltip: string;
   href?: string;
   isInternal?: boolean;
+  fullWidthOnMobile?: boolean;
 }) {
   const label = kind === 'call' ? 'Call' : 'Text';
   const icon =
@@ -200,7 +200,8 @@ function ActionButton({
     kind === 'call'
       ? 'bg-primary-600 hover:bg-primary-700 text-white border border-primary-600'
       : 'bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-200 border border-gray-300 dark:border-gray-600';
-  const className = `inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${baseClasses}`;
+  const widthClass = fullWidthOnMobile ? 'flex-1 justify-center sm:flex-initial' : '';
+  const className = `inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${widthClass} ${baseClasses}`;
 
   if (disabled || !href) {
     return (
