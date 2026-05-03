@@ -23,7 +23,7 @@ export interface SortPref {
 
 export const DEFAULT_LIST_SORT: SortPref = {
   sort: 'touched',
-  dir: 'asc', // oldest first = most-neglected first
+  dir: 'desc', // most recent touch first
 };
 
 const KEY = (userId: string) => `listViewV2.sort.${userId}`;

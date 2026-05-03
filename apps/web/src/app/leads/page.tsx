@@ -316,8 +316,8 @@ function LeadsPageInner() {
   const [showInactive,  setShowInactive]  = useState(searchParams.get('inactive') === 'true');     // default: hide dead/closed
   const [inDripFilter,  setInDripFilter]  = useState(searchParams.get('inDrip') === 'active');     // "In Drip (N)" chip
   const [teamMembers,   setTeamMembers]   = useState<any[]>([]);
-  const [sortKey,       setSortKey]       = useState<SortKey>((searchParams.get('sort') as SortKey) || 'tier');
-  const [sortDir,       setSortDir]       = useState<SortDir>((searchParams.get('dir') as SortDir) || 'asc');
+  const [sortKey,       setSortKey]       = useState<SortKey>((searchParams.get('sort') as SortKey) || 'touched');
+  const [sortDir,       setSortDir]       = useState<SortDir>((searchParams.get('dir') as SortDir) || 'desc');
   const [viewMode,      setViewMode]      = useState<ViewMode>((searchParams.get('view') as ViewMode) || 'table');
   const [page,          setPage]          = useState(Number(searchParams.get('page')) || 1);
 
@@ -365,8 +365,8 @@ function LeadsPageInner() {
       if (tierFilter)               params.set('tier', String(tierFilter));
       if (showInactive)             params.set('inactive', 'true');
       if (inDripFilter)             params.set('inDrip', 'active');
-      if (sortKey !== 'tier')       params.set('sort', sortKey);
-      if (sortDir !== 'asc')        params.set('dir', sortDir);
+      if (sortKey !== 'touched')    params.set('sort', sortKey);
+      if (sortDir !== 'desc')       params.set('dir', sortDir);
       if (viewMode !== 'table')     params.set('view', viewMode);
       if (page > 1)                 params.set('page', String(page));
 
@@ -718,43 +718,66 @@ function LeadsPageInner() {
         <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 px-4 py-3 space-y-3">
 
           {/* Top row: search + view mode + filter toggle */}
-          <div className="flex items-center gap-3">
-            <div className="relative flex-1 max-w-sm">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
+            <div className="relative w-full sm:flex-1 sm:max-w-sm">
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 text-sm">🔍</span>
               <input
                 type="text"
                 placeholder="Search name, address, phone..."
                 value={search}
                 onChange={e => setSearch(e.target.value)}
-                className="w-full pl-8 pr-3 py-1.5 text-sm border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 dark:bg-gray-800 dark:text-gray-200 dark:placeholder-gray-500"
+                className="w-full pl-8 pr-3 py-2 sm:py-1.5 text-sm border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 dark:bg-gray-800 dark:text-gray-200 dark:placeholder-gray-500"
               />
             </div>
 
-            <div className="flex items-center border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden ml-auto">
-              <button
-                onClick={() => setViewMode('table')}
-                className={`px-3 py-1.5 text-xs font-medium transition-colors ${viewMode === 'table' ? 'bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'}`}
+            <div className="flex items-center gap-2 sm:gap-3 sm:ml-auto">
+              <select
+                value={`${sortKey}|${sortDir}`}
+                onChange={(e) => {
+                  const [k, d] = e.target.value.split('|') as [SortKey, SortDir];
+                  setSortKey(k);
+                  setSortDir(d);
+                }}
+                title="Sort by"
+                className="md:hidden flex-1 text-xs px-2 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-primary-500"
               >
-                ☰ List
-              </button>
+                <option value="touched|desc">Most recent touch</option>
+                <option value="touched|asc">Oldest touch</option>
+                <option value="created|desc">Newest lead</option>
+                <option value="tier|asc">Tier</option>
+                <option value="stage|asc">Stage</option>
+                <option value="arv|desc">ARV (high → low)</option>
+                <option value="spread|desc">Spread (high → low)</option>
+                <option value="touches|desc">Most touches</option>
+                <option value="address|asc">Address (A → Z)</option>
+              </select>
+
+              <div className="flex items-center border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                <button
+                  onClick={() => setViewMode('table')}
+                  className={`px-3 py-1.5 text-xs font-medium transition-colors ${viewMode === 'table' ? 'bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'}`}
+                >
+                  ☰ List
+                </button>
+                <button
+                  onClick={() => setViewMode('cards')}
+                  className={`px-3 py-1.5 text-xs font-medium transition-colors ${viewMode === 'cards' ? 'bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'}`}
+                >
+                  ⊞ Grid
+                </button>
+              </div>
+
               <button
-                onClick={() => setViewMode('cards')}
-                className={`px-3 py-1.5 text-xs font-medium transition-colors ${viewMode === 'cards' ? 'bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'}`}
+                onClick={() => setShowFilters(f => !f)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
+                  showFilters || hasFilters
+                    ? 'border-primary-400 text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-950'
+                    : 'border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:border-gray-400 dark:hover:border-gray-500'
+                }`}
               >
-                ⊞ Grid
+                ⚙ Filters {hasFilters ? '•' : ''}
               </button>
             </div>
-
-            <button
-              onClick={() => setShowFilters(f => !f)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
-                showFilters || hasFilters
-                  ? 'border-primary-400 text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-950'
-                  : 'border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:border-gray-400 dark:hover:border-gray-500'
-              }`}
-            >
-              ⚙ Filters {hasFilters ? '•' : ''}
-            </button>
           </div>
 
           {/* Tier quick filters */}
