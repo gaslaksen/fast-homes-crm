@@ -29,7 +29,8 @@ export default function LeadDetailHeader({ lead, onMarkDead, onRefreshFromReapi 
   const callDisabled = noPhone || dnc || isDead;
   const textDisabled = noPhone || dnc || isDead;
 
-  // Smrtphone Chrome extension injects "| Send Text" next to tel: links.
+  // Smrtphone Chrome extension hijacks tel: links and rewrites the inner
+  // text to "| Send Text" (adding class .smrtphoneText + data-extension).
   // When detected, hide our redundant Text button and strip the leading pipe.
   const actionClusterRef = useRef<HTMLDivElement>(null);
   const [smsExtensionDetected, setSmsExtensionDetected] = useState(false);
@@ -40,12 +41,27 @@ export default function LeadDetailHeader({ lead, onMarkDead, onRefreshFromReapi 
     const checkAndClean = () => {
       if (!node) return;
       const text = node.textContent || '';
-      // Our own button reads "Text"; extension injects "Send Text" — match the longer phrase.
       const hasSendText = text.includes('Send Text');
       setSmsExtensionDetected(hasSendText);
       if (!hasSendText) return;
-      // Strip standalone pipe characters that the extension uses as a separator.
+
       observer?.disconnect();
+
+      // Strip the "| " prefix the extension adds inside .smrtphoneText elements.
+      const injected = node.querySelectorAll<HTMLElement>(
+        '.smrtphoneText, [data-extension="smrtPhone"]',
+      );
+      injected.forEach((el) => {
+        const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+        while (walker.nextNode()) {
+          const tn = walker.currentNode as Text;
+          const original = tn.textContent || '';
+          const cleaned = original.replace(/^\s*[│|]\s*/, '');
+          if (cleaned !== original) tn.textContent = cleaned;
+        }
+      });
+
+      // Fallback: any standalone pipe text node in the cluster.
       const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
       const toClear: Text[] = [];
       while (walker.nextNode()) {
@@ -55,6 +71,7 @@ export default function LeadDetailHeader({ lead, onMarkDead, onRefreshFromReapi 
       toClear.forEach((t) => {
         t.textContent = '';
       });
+
       observer?.observe(node, { childList: true, subtree: true, characterData: true });
     };
     const t1 = setTimeout(checkAndClean, 100);
