@@ -221,16 +221,29 @@ export class ScoringService {
    * Extract structured data from message text using AI.
    * Only uses the last 10 messages to keep context focused and costs low.
    */
-  async extractFromMessages(messages: string[]): Promise<AIExtractionResult> {
+  async extractFromMessages(
+    messages: Array<{ direction: 'INBOUND' | 'OUTBOUND'; body: string } | string>,
+  ): Promise<AIExtractionResult> {
     if (!this.anthropic || messages.length === 0) {
       return {};
     }
 
-    // Cap to last 10 messages
-    const recentMessages = messages.slice(-10);
-    const conversationText = recentMessages.join('\n\n');
+    // Cap to last 10 messages and label by direction so the AI can tell whose
+    // statement is whose. Backwards-compatible with bare strings (treated as
+    // INBOUND), but all production callers should pass directional objects.
+    const recentMessages = messages.slice(-10).map((m) =>
+      typeof m === 'string'
+        ? { direction: 'INBOUND' as const, body: m }
+        : m,
+    );
+    const conversationText = recentMessages
+      .map((m) => `${m.direction}: ${m.body}`)
+      .join('\n');
 
     const prompt = `You are analyzing SMS text messages from a property seller in a real estate context. Extract key information, being smart about informal language.
+
+The conversation below is labeled with INBOUND (the seller's messages) and OUTBOUND (the agent's questions).
+Only extract claims the SELLER made — i.e. only treat INBOUND lines as answers. Never extract a value from OUTBOUND lines (those are the agent's questions, not facts about the property).
 
 Conversation:
 ${conversationText}
@@ -269,6 +282,15 @@ IMPORTANT RULES FOR EXTRACTION:
 - If they mention ANY major repair (roof, foundation, HVAC, plumbing) → at most "fair", usually "poor"
 - IMPORTANT: If they say BOTH something okay AND a major repair (e.g. "it's ok, needs a new roof"),
   the repair wins — use "poor" or "fair", not their overall self-assessment.
+
+**Ownership** — map natural-language seller answers to one of the four enum values. Read INBOUND lines in light of the OUTBOUND question that came right before:
+- "I own it", "just me", "it's mine", "I'm the only owner", "yes I'm the sole owner", "yes just me" → "sole_owner"
+- "my wife/husband and I", "we own it", "we're both on it", "we're both on the title", "joint", "co-own with X", "my partner and I", "yes we both own it" → "co_owner"
+- "I inherited it", "it was my mom's/dad's", "estate", "she/he passed away", "I'm the executor", "we got it after [parent] died" → "heir"
+- "I rent it", "I'm not the owner", "my landlord", "I don't own it", "just helping a relative" → "not_owner"
+- A bare "yes" or "no" reply to an ambiguous compound question (e.g. "are you the only owner OR is anyone else on it?") is NOT enough — return null for ownership_status on that turn unless an earlier INBOUND line in the visible window already made it clear.
+- Earlier turns count: if the seller said "my husband and I are both on it" three messages ago, ownership_status is "co_owner" even if the most recent INBOUND is just "yes". Use the whole visible window, not just the last line.
+- Only return null if there is genuinely no ownership signal anywhere in the seller's messages.
 
 **fields_addressed** — list the CAMP topics the seller mentioned in their replies, even if vaguely.
 This is separate from extraction — if the seller said ANYTHING about timeline (even "no timeline"),

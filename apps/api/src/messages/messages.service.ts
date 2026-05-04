@@ -798,10 +798,16 @@ You decide the right approach based on the conversation flow.${portalInstruction
       }
     }
 
-    // Extract signals from message using AI
+    // Extract signals from message using AI.
+    // Pass directional objects so the extractor can distinguish seller answers
+    // from agent questions. lead.messages is ordered desc (most recent first),
+    // so reverse before appending the just-saved inbound.
+    const priorMessages = [...lead.messages]
+      .reverse()
+      .map((m) => ({ direction: m.direction as 'INBOUND' | 'OUTBOUND', body: m.body }));
     const allMessages = [
-      ...lead.messages.map((m) => m.body),
-      body,
+      ...priorMessages,
+      { direction: 'INBOUND' as const, body },
     ];
 
     let updateData: any = {};
@@ -1042,10 +1048,16 @@ You decide the right approach based on the conversation flow.${portalInstruction
       const allMessages = await this.prisma.message.findMany({
         where: { leadId },
         orderBy: { createdAt: 'asc' },
-        select: { body: true },
+        select: { direction: true, body: true },
       });
-      const messageTexts = [...allMessages.map(m => m.body), body];
-      const extracted = await this.scoringService.extractFromMessages(messageTexts);
+      const directionalMessages = [
+        ...allMessages.map((m) => ({
+          direction: m.direction as 'INBOUND' | 'OUTBOUND',
+          body: m.body,
+        })),
+        { direction: 'INBOUND' as const, body },
+      ];
+      const extracted = await this.scoringService.extractFromMessages(directionalMessages);
       const confidence = extracted.confidence ?? 100;
 
       if (confidence >= 50) {
