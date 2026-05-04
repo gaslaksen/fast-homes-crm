@@ -1640,8 +1640,8 @@ export default function CompsAnalysisPage() {
                     <div className="flex gap-2 mt-2">
                       {[
                         { label: '$20/sqft', rate: 20 },
-                        { label: '$30/sqft', rate: 30 },
-                        { label: '$45/sqft', rate: 45 },
+                        { label: '$50/sqft', rate: 50 },
+                        { label: '$100/sqft', rate: 100 },
                       ].map((opt) => (
                         <button
                           key={opt.rate}
@@ -2623,8 +2623,8 @@ export default function CompsAnalysisPage() {
                     <div className="grid grid-cols-3 gap-2">
                       {[
                         { label: 'Light', sublabel: '$20/sqft', rate: 20, color: 'border-green-300 dark:border-green-800 hover:bg-green-50 dark:bg-green-950' },
-                        { label: 'Moderate', sublabel: '$30/sqft', rate: 30, color: 'border-yellow-300 dark:border-yellow-800 hover:bg-yellow-50 dark:bg-yellow-950' },
-                        { label: 'Heavy', sublabel: '$45/sqft', rate: 45, color: 'border-red-300 dark:border-red-800 hover:bg-red-50 dark:bg-red-950' },
+                        { label: 'Moderate', sublabel: '$50/sqft', rate: 50, color: 'border-yellow-300 dark:border-yellow-800 hover:bg-yellow-50 dark:bg-yellow-950' },
+                        { label: 'Heavy', sublabel: '$100/sqft', rate: 100, color: 'border-red-300 dark:border-red-800 hover:bg-red-50 dark:bg-red-950' },
                       ].map((opt) => (
                         <button
                           key={opt.rate}

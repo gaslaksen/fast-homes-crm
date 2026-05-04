@@ -1,15 +1,24 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject, forwardRef, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Anthropic from '@anthropic-ai/sdk';
 import { PrismaService } from '../prisma/prisma.service';
+import { DripService } from '../drip/drip.service';
+import { CampaignEnrollmentService } from '../campaigns/campaign-enrollment.service';
+
+const TERMINAL_STATUSES_FOR_REMOVAL = ['DEAD', 'SOLD', 'SOLD_LOSS', 'HELD_LONG_TERM', 'CANCELLED', 'CLOSED_LOST', 'OPTED_OUT'];
 
 @Injectable()
 export class PipelineService {
+  private readonly logger = new Logger(PipelineService.name);
   private anthropic: Anthropic | null = null;
 
   constructor(
     private config: ConfigService,
     private prisma: PrismaService,
+    @Inject(forwardRef(() => DripService))
+    private dripService: DripService,
+    @Inject(forwardRef(() => CampaignEnrollmentService))
+    private campaignEnrollmentService: CampaignEnrollmentService,
   ) {
     const apiKey = this.config.get<string>('ANTHROPIC_API_KEY');
     if (apiKey) {
@@ -151,12 +160,30 @@ export class PipelineService {
       },
     });
 
+    if (lead.status !== newStage) {
+      await this.cancelOutreachIfTerminal(leadId, newStage);
+    }
+
     // Generate AI recommendation in background (don't block response)
     this.generateLeadRecommendation(leadId).catch((err) =>
       console.error(`AI recommendation failed for ${leadId}:`, err.message),
     );
 
     return { success: true };
+  }
+
+  private async cancelOutreachIfTerminal(leadId: string, newStatus: string) {
+    if (!TERMINAL_STATUSES_FOR_REMOVAL.includes(newStatus)) return;
+    try {
+      await this.campaignEnrollmentService.removeAllActive(leadId);
+    } catch (err: any) {
+      this.logger.error(`Failed to remove campaign enrollments for lead ${leadId}: ${err.message}`);
+    }
+    try {
+      await this.dripService.cancelByLeadId(leadId, `Lead status changed to ${newStatus}`);
+    } catch {
+      // Drip may not exist — that's fine
+    }
   }
 
   async bulkUpdateStage(
@@ -202,6 +229,15 @@ export class PipelineService {
         })),
       }),
     ]);
+
+    // Cancel campaigns + drip for any lead that actually transitioned into a terminal stage
+    if (TERMINAL_STATUSES_FOR_REMOVAL.includes(newStage)) {
+      for (const l of existing) {
+        if (l.status !== newStage) {
+          await this.cancelOutreachIfTerminal(l.id, newStage);
+        }
+      }
+    }
 
     // Fire background AI recommendations (best-effort)
     for (const id of ids) {
