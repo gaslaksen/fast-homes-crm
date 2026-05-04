@@ -29,6 +29,45 @@ export default function LeadDetailHeader({ lead, onMarkDead, onRefreshFromReapi 
   const callDisabled = noPhone || dnc || isDead;
   const textDisabled = noPhone || dnc || isDead;
 
+  // Smrtphone Chrome extension injects "| Send Text" next to tel: links.
+  // When detected, hide our redundant Text button and strip the leading pipe.
+  const actionClusterRef = useRef<HTMLDivElement>(null);
+  const [smsExtensionDetected, setSmsExtensionDetected] = useState(false);
+  useEffect(() => {
+    const node = actionClusterRef.current;
+    if (!node) return;
+    let observer: MutationObserver | null = null;
+    const checkAndClean = () => {
+      if (!node) return;
+      const text = node.textContent || '';
+      // Our own button reads "Text"; extension injects "Send Text" — match the longer phrase.
+      const hasSendText = text.includes('Send Text');
+      setSmsExtensionDetected(hasSendText);
+      if (!hasSendText) return;
+      // Strip standalone pipe characters that the extension uses as a separator.
+      observer?.disconnect();
+      const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+      const toClear: Text[] = [];
+      while (walker.nextNode()) {
+        const tn = walker.currentNode as Text;
+        if (/^\s*[│|]\s*$/.test(tn.textContent || '')) toClear.push(tn);
+      }
+      toClear.forEach((t) => {
+        t.textContent = '';
+      });
+      observer?.observe(node, { childList: true, subtree: true, characterData: true });
+    };
+    const t1 = setTimeout(checkAndClean, 100);
+    const t2 = setTimeout(checkAndClean, 600);
+    observer = new MutationObserver(checkAndClean);
+    observer.observe(node, { childList: true, subtree: true, characterData: true });
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      observer.disconnect();
+    };
+  }, [lead.sellerPhone, lead.id]);
+
   const callTooltip = noPhone
     ? 'No phone number on file'
     : dnc
@@ -62,7 +101,10 @@ export default function LeadDetailHeader({ lead, onMarkDead, onRefreshFromReapi 
   )}`;
 
   const actionCluster = (
-    <div className="flex items-center gap-2 flex-shrink-0 w-full sm:w-auto">
+    <div
+      ref={actionClusterRef}
+      className="lead-header-actions flex items-center gap-2 flex-shrink-0 w-full sm:w-auto"
+    >
       <ActionButton
         kind="call"
         disabled={callDisabled}
@@ -70,14 +112,16 @@ export default function LeadDetailHeader({ lead, onMarkDead, onRefreshFromReapi 
         href={callDisabled ? undefined : `tel:${lead.sellerPhone}`}
         fullWidthOnMobile
       />
-      <ActionButton
-        kind="text"
-        disabled={textDisabled}
-        tooltip={textTooltip}
-        href={textDisabled ? undefined : `/leads/${lead.id}?tab=communications`}
-        isInternal
-        fullWidthOnMobile
-      />
+      {!smsExtensionDetected && (
+        <ActionButton
+          kind="text"
+          disabled={textDisabled}
+          tooltip={textTooltip}
+          href={textDisabled ? undefined : `/leads/${lead.id}?tab=communications`}
+          isInternal
+          fullWidthOnMobile
+        />
+      )}
       <OverflowMenu
         leadId={lead.id}
         zillowUrl={zillowUrl}
