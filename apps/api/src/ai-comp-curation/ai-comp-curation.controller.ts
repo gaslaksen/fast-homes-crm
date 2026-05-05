@@ -128,12 +128,13 @@ export class AiCompCurationController {
       maxDistance: parsed.maxDistance,
       forceRefresh: parsed.force,
     });
-    // NestJS expects each emitted value to be a MessageEvent. Wrap our
-    // CurationEvent payload as `data` and a per-type `name` for client
-    // event listeners.
+    // NestJS shapes each emitted value into an SSE frame. Send all events
+    // through the default "message" channel (no `type` field) — using a
+    // named event would force the client to attach per-name listeners
+    // instead of the default `EventSource.onmessage`. The CurationEvent
+    // JSON already carries its own `type` field for client dispatch.
     return subject.asObservable().pipe(
       map((evt) => ({
-        type: evt.type,
         data: evt as unknown as Record<string, unknown>,
       })),
     );
