@@ -3,13 +3,16 @@ import {
   Controller,
   Get,
   Headers,
+  Logger,
   Param,
   Post,
   Query,
+  Res,
   Sse,
   UnauthorizedException,
   MessageEvent,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import * as jwt from 'jsonwebtoken';
 import { Observable, map } from 'rxjs';
 import { AiCompCurationService, HardConstraints } from './ai-comp-curation.service';
@@ -34,10 +37,20 @@ interface CurationQuery {
 
 @Controller()
 export class AiCompCurationController {
+  private readonly logger = new Logger(AiCompCurationController.name);
+
   constructor(
     private readonly service: AiCompCurationService,
     private readonly prisma: PrismaService,
   ) {}
+
+  // Routing smoke test: hit this with curl to confirm the API is up,
+  // CORS is configured, and the new module is wired correctly. No auth.
+  @Get('leads/:leadId/curate/_ping')
+  ping(@Param('leadId') leadId: string) {
+    this.logger.log(`curate _ping for lead ${leadId}`);
+    return { ok: true, leadId, service: 'ai-comp-curation' };
+  }
 
   private requireUser(
     authHeader?: string,
@@ -91,9 +104,22 @@ export class AiCompCurationController {
     @Param('leadId') leadId: string,
     @Query() query: CurationQuery,
     @Headers('authorization') authHeader?: string,
+    @Res({ passthrough: true }) res?: Response,
   ): Observable<MessageEvent> {
+    this.logger.log(
+      `SSE curate hit: leadId=${leadId} hasAuth=${!!authHeader} hasTokenQuery=${!!query?.token}`,
+    );
+    // Disable proxy buffering — Railway / nginx will otherwise buffer the
+    // SSE stream and the client never sees frames.
+    if (res) {
+      res.setHeader('X-Accel-Buffering', 'no');
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
+    }
     const { userId } = this.requireUser(authHeader, query.token);
     const parsed = this.parseInput(query);
+    this.logger.log(
+      `SSE curate accepted: leadId=${leadId} userId=${userId} mode=${parsed.valuationMode} maxDistance=${parsed.maxDistance}`,
+    );
     const subject = this.service.runCuration({
       leadId,
       userId,

@@ -85,17 +85,21 @@ export class AiCompCurationService {
 
   // Returns a Subject the SSE controller pipes to the client. Caller never
   // awaits — this fires and forgets, completing on success or error.
+  // Defer the start by a microtask so NestJS's SSE machinery has a chance
+  // to subscribe before the first event lands; otherwise early emissions
+  // on this hot Subject are lost.
   runCuration(input: RunCurationInput): Subject<CurationEvent> {
     const subject = new Subject<CurationEvent>();
-    // Run async without blocking caller.
-    this.executeCuration(input, subject).catch((err) => {
-      this.logger.error(`runCuration failed: ${err?.message ?? err}`);
-      subject.next({
-        type: 'error',
-        code: 'INTERNAL',
-        message: err?.message ?? 'Unknown error',
+    setImmediate(() => {
+      this.executeCuration(input, subject).catch((err) => {
+        this.logger.error(`runCuration failed: ${err?.message ?? err}`);
+        subject.next({
+          type: 'error',
+          code: 'INTERNAL',
+          message: err?.message ?? 'Unknown error',
+        });
+        subject.complete();
       });
-      subject.complete();
     });
     return subject;
   }
