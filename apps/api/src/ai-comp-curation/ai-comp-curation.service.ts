@@ -440,14 +440,28 @@ export class AiCompCurationService {
       .replace(/^```[\w]*\s*/m, '')
       .replace(/\s*```$/m, '')
       .trim();
-    const jsonMatch = stripped.match(/\{[\s\S]*\}/);
+    const jsonText = extractLargestJsonObject(stripped);
     let parsed: CurationResult | null = null;
-    if (jsonMatch) {
+    let parseFailureReason: string | null = null;
+    if (!jsonText) {
+      parseFailureReason = `no JSON object found in AI response (${fullText.length} chars total)`;
+      this.logger.warn(parseFailureReason);
+      this.logger.warn(`AI response head: ${fullText.slice(0, 500)}`);
+    } else {
       try {
-        const raw = JSON.parse(jsonMatch[0]);
-        parsed = parseCurationResult(raw);
+        const raw = JSON.parse(jsonText);
+        const outcome = parseCurationResult(raw);
+        if (outcome.ok === true) {
+          parsed = outcome.value;
+        } else if (outcome.ok === false) {
+          parseFailureReason = outcome.reason;
+          this.logger.warn(`Curation parse failed: ${outcome.reason}`);
+          this.logger.warn(`AI response head: ${fullText.slice(0, 500)}`);
+        }
       } catch (e) {
-        this.logger.warn(`First parse failed: ${(e as Error).message}`);
+        parseFailureReason = `JSON.parse threw: ${(e as Error).message}`;
+        this.logger.warn(parseFailureReason);
+        this.logger.warn(`AI response head: ${fullText.slice(0, 500)}`);
       }
     }
     if (parsed) {
@@ -469,17 +483,34 @@ export class AiCompCurationService {
           });
         }
       }
-      // Coverage check — if rankings don't cover every candidate, treat
-      // as parse failure for safety.
+      // Coverage check — if rankings don't cover every candidate, log
+      // but don't treat as a hard failure. Missing candidates get a
+      // synthetic borderline ranking; extra IDs are dropped silently.
       const cov = validateRankingsCoverage(parsed.rankings, candidateIds);
       if (cov.ok === false) {
         this.logger.warn(
-          `Ranking coverage mismatch: missing=${cov.missing.length} extra=${cov.extra.length}`,
+          `Ranking coverage mismatch (auto-repaired): missing=${cov.missing.length} extra=${cov.extra.length}`,
         );
-        parsed = null;
+        const seen = new Set(parsed.rankings.map((r) => r.candidateId));
+        for (const id of cov.missing) {
+          const cand = constraintFiltered.find((c) => c.id === id);
+          parsed.rankings.push({
+            candidateId: id,
+            rank: parsed.rankings.length + 1,
+            relevanceScore: 0,
+            inclusion: 'borderline',
+            reasoning: 'AI did not rank this candidate.',
+            flags: ['unranked_by_ai'],
+            externalLinks: cand
+              ? buildExternalLinks({ address: cand.address, city: null, state: null, zip: null })
+              : { zillow: '', realtor: '', googleMaps: '' },
+          });
+          seen.add(id);
+        }
+        parsed.rankings = parsed.rankings.filter((r) => candidateIds.includes(r.candidateId));
       }
     }
-    emit('parse', 'done', { ok: !!parsed });
+    emit('parse', 'done', { ok: !!parsed, reason: parseFailureReason ?? undefined });
 
     // 13. Persist.
     emit('persist', 'start');
@@ -530,13 +561,50 @@ export class AiCompCurationService {
       subject.next({
         type: 'error',
         code: 'AI_PARSE_FAILED',
-        message:
-          'AI response could not be parsed into the expected JSON shape',
+        message: parseFailureReason
+          ? `AI response could not be parsed: ${parseFailureReason}`
+          : 'AI response could not be parsed into the expected JSON shape',
         step: 'parse',
       });
     }
     subject.complete();
   }
+}
+
+// Walk the string left-to-right tracking brace depth (and string state)
+// and return the substring from the first '{' to the matching closing
+// brace. Survives JSON containing braces inside strings, nested objects,
+// and prose before/after.
+function extractLargestJsonObject(text: string): string | null {
+  const start = text.indexOf('{');
+  if (start === -1) return null;
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (escape) {
+        escape = false;
+      } else if (ch === '\\') {
+        escape = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+    } else if (ch === '{') {
+      depth++;
+    } else if (ch === '}') {
+      depth--;
+      if (depth === 0) {
+        return text.slice(start, i + 1);
+      }
+    }
+  }
+  return null;
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────
