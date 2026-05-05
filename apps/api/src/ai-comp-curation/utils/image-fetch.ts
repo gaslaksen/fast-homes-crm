@@ -6,8 +6,11 @@ export interface ResizedImage {
   mediaType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
 }
 
-const MAX_DIMENSION = 1024;
-const JPEG_QUALITY = 80;
+// 768px / q70 keeps each image ~50-100kb base64 — enough fidelity for
+// the AI to read condition / style cues without paying for resolution
+// the model doesn't actually use.
+const MAX_DIMENSION = 768;
+const JPEG_QUALITY = 70;
 const FETCH_TIMEOUT_MS = 8000;
 
 // Fetch an image URL, resize to MAX_DIMENSION longest side, re-encode as

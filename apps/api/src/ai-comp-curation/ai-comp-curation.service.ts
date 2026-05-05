@@ -34,16 +34,20 @@ import {
   validateRankingsCoverage,
 } from './prompts/comp-curation.prompt.v1';
 
-const MODEL = 'claude-opus-4-7';
-// Output token cap. Each comp ranking runs ~200-400 tokens (reasoning,
-// flags, adjustment notes, links). At ~30-50 comps in a typical pool plus
-// the summary, market observations, and search expansion narrative, the
-// JSON output can land in the 10-20k token range. 8k truncated mid-JSON
-// in prod; 32k leaves headroom without serious cost concerns. Opus 4.7
-// supports >64k output if we need to push further.
-const MAX_TOKENS = 32000;
+// Sonnet 4.6 is markedly faster and ~5x cheaper than Opus while still
+// strong at the structured judgment + image work this prompt requires.
+// Opus tier was overkill for ranking comps — reference tools like
+// ChatARV finish similar work in well under a minute.
+const MODEL = 'claude-sonnet-4-6';
+// Output token cap. JSON output for typical pools (10-30 comps) lands
+// in the 4-12k token range. 16k is a comfortable ceiling without
+// reserving so much capacity that the model slows down.
+const MAX_TOKENS = 16000;
 const TARGET_SURVIVOR_COUNT = 6;
-const PHOTO_BUDGET = 30;
+// Photo budget tuned down from 30. Each image is ~1-2k input tokens at
+// 768px and shapes the bulk of latency + cost. 12 is plenty to give the
+// AI visual signal on the most uncertain candidates.
+const PHOTO_BUDGET = 12;
 
 export interface RunCurationInput {
   leadId: string;
@@ -422,7 +426,10 @@ export class AiCompCurationService {
         },
       }),
     );
-    const response = await this.anthropic.messages.create({
+    // Stream the response. Sidesteps the SDK's 10-minute non-streaming
+    // limit and starts producing tokens immediately rather than waiting
+    // for the full body. We collect the final message at the end.
+    const stream = this.anthropic.messages.stream({
       model: MODEL,
       max_tokens: MAX_TOKENS,
       messages: [
@@ -432,9 +439,11 @@ export class AiCompCurationService {
         },
       ],
     });
+    const finalMessage = await stream.finalMessage();
     const latencyMs = Date.now() - t0;
-    const fullText = (response.content[0] as any)?.text ?? '';
-    const stopReason = (response as any).stop_reason as string | undefined;
+    const fullText =
+      (finalMessage.content.find((b) => b.type === 'text') as any)?.text ?? '';
+    const stopReason = finalMessage.stop_reason as string | undefined;
     if (stopReason === 'max_tokens') {
       this.logger.warn(
         `Claude hit max_tokens (${MAX_TOKENS}) — response truncated at ${fullText.length} chars; bump MAX_TOKENS or reduce input`,
@@ -442,8 +451,8 @@ export class AiCompCurationService {
     }
     emit('anthropic_call', 'done', {
       latencyMs,
-      inputTokens: response.usage?.input_tokens,
-      outputTokens: response.usage?.output_tokens,
+      inputTokens: finalMessage.usage?.input_tokens,
+      outputTokens: finalMessage.usage?.output_tokens,
       stopReason,
     });
 
@@ -534,8 +543,8 @@ export class AiCompCurationService {
       model: MODEL,
       promptVersion: PROMPT_V1.version,
       tokensUsed: {
-        input: response.usage?.input_tokens ?? 0,
-        output: response.usage?.output_tokens ?? 0,
+        input: finalMessage.usage?.input_tokens ?? 0,
+        output: finalMessage.usage?.output_tokens ?? 0,
       },
       latencyMs,
       timestamp: new Date().toISOString(),
@@ -554,7 +563,7 @@ export class AiCompCurationService {
         searchExpansion: { initialRadius, finalRadius, expansionPath } as any,
         promptText,
         promptVersion: PROMPT_V1.version,
-        rawResponse: { text: fullText, usage: response.usage } as any,
+        rawResponse: { text: fullText, usage: finalMessage.usage } as any,
         parsedResponse: parsed
           ? ({ ...parsed, modelMetadata } as any)
           : null,
