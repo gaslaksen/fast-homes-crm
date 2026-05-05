@@ -35,7 +35,13 @@ import {
 } from './prompts/comp-curation.prompt.v1';
 
 const MODEL = 'claude-opus-4-7';
-const MAX_TOKENS = 8000;
+// Output token cap. Each comp ranking runs ~200-400 tokens (reasoning,
+// flags, adjustment notes, links). At ~30-50 comps in a typical pool plus
+// the summary, market observations, and search expansion narrative, the
+// JSON output can land in the 10-20k token range. 8k truncated mid-JSON
+// in prod; 32k leaves headroom without serious cost concerns. Opus 4.7
+// supports >64k output if we need to push further.
+const MAX_TOKENS = 32000;
 const TARGET_SURVIVOR_COUNT = 6;
 const PHOTO_BUDGET = 30;
 
@@ -428,10 +434,17 @@ export class AiCompCurationService {
     });
     const latencyMs = Date.now() - t0;
     const fullText = (response.content[0] as any)?.text ?? '';
+    const stopReason = (response as any).stop_reason as string | undefined;
+    if (stopReason === 'max_tokens') {
+      this.logger.warn(
+        `Claude hit max_tokens (${MAX_TOKENS}) — response truncated at ${fullText.length} chars; bump MAX_TOKENS or reduce input`,
+      );
+    }
     emit('anthropic_call', 'done', {
       latencyMs,
       inputTokens: response.usage?.input_tokens,
       outputTokens: response.usage?.output_tokens,
+      stopReason,
     });
 
     // 12. Parse + validate.
@@ -444,7 +457,10 @@ export class AiCompCurationService {
     let parsed: CurationResult | null = null;
     let parseFailureReason: string | null = null;
     if (!jsonText) {
-      parseFailureReason = `no JSON object found in AI response (${fullText.length} chars total)`;
+      const truncated = stopReason === 'max_tokens';
+      parseFailureReason = truncated
+        ? `AI response was truncated at ${MAX_TOKENS} output tokens — JSON never closed (${fullText.length} chars output)`
+        : `no JSON object found in AI response (${fullText.length} chars total, stop_reason=${stopReason ?? 'unknown'})`;
       this.logger.warn(parseFailureReason);
       this.logger.warn(`AI response head: ${fullText.slice(0, 500)}`);
     } else {
