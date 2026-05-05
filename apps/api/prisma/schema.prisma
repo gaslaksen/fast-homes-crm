@@ -47,6 +47,7 @@ model User {
   activities    Activity[]
   gmailToken    GmailToken?
   savedSearches SavedSearch[]
+  aiCompCurations AiCompCuration[]
 
   @@map("users")
 }
@@ -229,6 +230,7 @@ model Lead {
   dispositionPlan     DispositionPlan?
   dispositionCosts    DispositionCost[]
   finalSale           FinalSale?
+  aiCompCurations     AiCompCuration[]
 
   @@index([organizationId, tier])
   @@index([organizationId, status])
@@ -932,4 +934,32 @@ model FinalSale {
   updatedAt        DateTime @updatedAt
 
   @@map("final_sales")
+}
+
+model AiCompCuration {
+  id                     String   @id @default(cuid())
+  leadId                 String
+  userId                 String
+  createdAt              DateTime @default(now())
+  subjectSnapshot        Json
+  valuationMode          String   // "ARV_RENOVATED" | "AS_IS"
+  hardConstraints        Json
+  candidateIds           String[]
+  excludedTypeMismatches Json
+  excludedConstraints    Json
+  searchExpansion        Json
+  promptText             String   @db.Text
+  promptVersion          String
+  rawResponse            Json
+  parsedResponse         Json?
+  modelMetadata          Json
+  isValidationRun        Boolean  @default(false)
+  validationPropertyId   String?
+  cacheKey               String
+  lead                   Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  user                   User     @relation(fields: [userId], references: [id])
+
+  @@index([leadId, createdAt])
+  @@index([cacheKey])
+  @@map("ai_comp_curations")
 }

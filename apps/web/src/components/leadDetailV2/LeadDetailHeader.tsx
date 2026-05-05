@@ -6,6 +6,7 @@ import { formatDistanceToNow } from 'date-fns';
 import PropertyPhoto from '@/components/PropertyPhoto';
 import { getStage } from '@/lib/pipelineStages';
 import { getLeadAddressLine, getLeadDisplayName } from '@/lib/format';
+import { zillowUrl, realtorUrl } from '@/lib/externalLinks';
 
 interface Props {
   lead: any;
@@ -105,17 +106,14 @@ export default function LeadDetailHeader({ lead, onMarkDead, onRefreshFromReapi 
       ? formatDistanceToNow(new Date(lead.lastTouchedAt), { addSuffix: true })
       : null;
 
-  const addressQuery = encodeURIComponent(
-    [lead.propertyAddress, lead.propertyCity, lead.propertyState, lead.propertyZip]
-      .filter(Boolean)
-      .join(', ')
-  );
-  const zillowUrl = `https://www.zillow.com/homes/${addressQuery}_rb/`;
-  const realtorUrl = `https://www.google.com/search?q=${encodeURIComponent(
-    `site:realtor.com ${[lead.propertyAddress, lead.propertyCity, lead.propertyState, lead.propertyZip]
-      .filter(Boolean)
-      .join(', ')}`
-  )}`;
+  const addressParts = {
+    address: lead.propertyAddress,
+    city: lead.propertyCity,
+    state: lead.propertyState,
+    zip: lead.propertyZip,
+  };
+  const zillowHref = zillowUrl(addressParts);
+  const realtorHref = realtorUrl(addressParts);
 
   const actionCluster = (
     <div
@@ -141,8 +139,8 @@ export default function LeadDetailHeader({ lead, onMarkDead, onRefreshFromReapi 
       )}
       <OverflowMenu
         leadId={lead.id}
-        zillowUrl={zillowUrl}
-        realtorUrl={realtorUrl}
+        zillowUrl={zillowHref}
+        realtorUrl={realtorHref}
         onMarkDead={onMarkDead}
         onRefreshFromReapi={onRefreshFromReapi}
       />

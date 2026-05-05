@@ -12,6 +12,13 @@ import ShareDealModal from '@/components/ShareDealModal';
 import CompRow from '@/components/CompRow';
 import SubjectPropertyCard from '@/components/SubjectPropertyCard';
 import CompsToolbar from '@/components/CompsToolbar';
+import CurationPanel from '@/components/aiCompCuration/CurationPanel';
+import CurationErrorBoundary from '@/components/aiCompCuration/CurationErrorBoundary';
+import { isAiCompCurationEnabled } from '@/lib/flags';
+import type {
+  AiCurationDecision,
+  CurationResult,
+} from '@/lib/aiCompCuration/types';
 
 const CompsMap = dynamic(() => import('@/components/CompsMap'), { ssr: false, loading: () => <div className="w-full h-64 bg-gray-100 dark:bg-gray-800 rounded-lg animate-pulse" /> });
 
@@ -161,6 +168,22 @@ export default function CompsAnalysisPage() {
   const [fetchingComps, setFetchingComps] = useState(false);
   const [compsSource, setCompsSource] = useState<'reapi' | 'batchdata'>('reapi');
   const [comparisonMode, setComparisonMode] = useState(false);
+  const [aiCurationResult, setAiCurationResult] = useState<CurationResult | null>(null);
+  const aiDecisionMap: Record<string, AiCurationDecision> = useMemo(() => {
+    if (!aiCurationResult) return {};
+    const out: Record<string, AiCurationDecision> = {};
+    for (const r of aiCurationResult.rankings) {
+      out[r.candidateId] = {
+        rank: r.rank,
+        inclusion: r.inclusion,
+        reasoning: r.reasoning,
+        flags: r.flags,
+        externalLinks: r.externalLinks,
+      };
+    }
+    return out;
+  }, [aiCurationResult]);
+  const aiCurationFlag = isAiCompCurationEnabled();
   // Raw comps for the lead, unfiltered by analysis source. Populated when
   // entering comparison mode so the side-by-side view sees both providers'
   // rows even though importExistingComps filters the analysis to one source.
@@ -894,6 +917,24 @@ export default function CompsAnalysisPage() {
               />
             </div>
 
+            {/* AI curation panel */}
+            {aiCurationFlag && lead && (
+              <div className="px-3 pt-3">
+                <CurationErrorBoundary>
+                  <CurationPanel
+                    leadId={leadId}
+                    analysisId={analysis?.id ?? null}
+                    comps={allComps.map((c) => ({ id: c.id, address: c.address }))}
+                    onResultChange={setAiCurationResult}
+                    onCurationApplied={() => {
+                      // Re-load comps + analysis so selection state and ARV reflect the bulk pick.
+                      void refreshAnalysis();
+                    }}
+                  />
+                </CurationErrorBoundary>
+              </div>
+            )}
+
             {/* Comp rows */}
             <div className="flex-1 p-3 space-y-1.5">
               {comparisonMode ? (
@@ -946,6 +987,7 @@ export default function CompsAnalysisPage() {
                     onHoverLeave={() => setHoveredCompId(null)}
                     onToggle={() => handleToggleComp(comp.id)}
                     onDelete={() => handleDeleteComp(comp.id)}
+                    aiDecision={aiCurationFlag ? aiDecisionMap[comp.id] : undefined}
                   />
                 ))
               )}

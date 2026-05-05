@@ -9,3 +9,6 @@ export const isDispositionV2 = (): boolean =>
 
 export const isDealsView = (): boolean =>
   process.env.NEXT_PUBLIC_DEALS_VIEW === 'true';
+
+export const isAiCompCurationEnabled = (): boolean =>
+  process.env.NEXT_PUBLIC_AI_COMP_CURATION === 'true';

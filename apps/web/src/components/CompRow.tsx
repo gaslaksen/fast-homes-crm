@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, forwardRef } from 'react';
+import AiBadge from '@/components/aiCompCuration/AiBadge';
+import type { AiCurationDecision } from '@/lib/aiCompCuration/types';
 
 interface Comp {
   id: string;
@@ -43,6 +45,7 @@ interface CompRowProps {
   onHoverLeave: () => void;
   onToggle: () => void;
   onDelete: () => void;
+  aiDecision?: AiCurationDecision;
 }
 
 function SourceBadgeInline({ source }: { source?: string }) {
@@ -60,7 +63,7 @@ function SourceBadgeInline({ source }: { source?: string }) {
 }
 
 const CompRow = forwardRef<HTMLDivElement, CompRowProps>(function CompRow(
-  { comp, lead, compIndex, isHovered, onHoverEnter, onHoverLeave, onToggle, onDelete },
+  { comp, lead, compIndex, isHovered, onHoverEnter, onHoverLeave, onToggle, onDelete, aiDecision },
   ref,
 ) {
   const [expanded, setExpanded] = useState(false);
@@ -145,6 +148,7 @@ const CompRow = forwardRef<HTMLDivElement, CompRowProps>(function CompRow(
           <div className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">{comp.address}</div>
           <div className="flex items-center gap-1 mt-0.5 flex-wrap">
             <SourceBadgeInline source={comp.source} />
+            <AiBadge decision={aiDecision} />
             {(comp.features as any)?.method === 'mls' && (() => {
               const f = comp.features as any;
               const status = f?.mlsStatus;

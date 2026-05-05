@@ -25,6 +25,7 @@ import { RemindersModule } from './reminders/reminders.module';
 import { ActionsModule } from './actions/actions.module';
 import { DispositionModule } from './disposition/disposition.module';
 import { DealsModule } from './deals/deals.module';
+import { AiCompCurationModule } from './ai-comp-curation/ai-comp-curation.module';
 
 @Module({
   imports: [
@@ -56,6 +57,7 @@ import { DealsModule } from './deals/deals.module';
     ActionsModule,
     DispositionModule,
     DealsModule,
+    AiCompCurationModule,
   ],
 })
 export class AppModule {}
