@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReapiService } from './reapi.service';
+import { dedupCompList } from './comp-dedup';
 import Anthropic from '@anthropic-ai/sdk';
 
 interface AdjustmentConfig {
@@ -307,8 +308,14 @@ export class CompAnalysisService {
     return comps.length;
   }
 
+  // Returns the analysis with embedded comps deduplicated. Cross-
+  // provider duplicates (REAPI MLS + BatchData on the same property,
+  // or repeat refreshes) collapse to one canonical row each. The
+  // Compare Providers view uses comps.service.getComps({raw:true}) and
+  // bypasses this path, so it still sees both providers' rows side-
+  // by-side.
   async getAnalysis(analysisId: string) {
-    return this.prisma.compAnalysis.findUnique({
+    const analysis = await this.prisma.compAnalysis.findUnique({
       where: { id: analysisId },
       include: {
         comps: { orderBy: { distance: 'asc' } },
@@ -354,6 +361,11 @@ export class CompAnalysisService {
         },
       },
     });
+    if (!analysis) return null;
+    return {
+      ...analysis,
+      comps: dedupCompList(analysis.comps as any[]),
+    };
   }
 
   async getAnalysesForLead(leadId: string) {

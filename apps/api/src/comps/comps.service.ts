@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReapiService } from './reapi.service';
 import { BatchDataCompService } from './batchdata-comp.service';
+import { dedupCompList, dedupCompGroups } from './comp-dedup';
 import axios from 'axios';
 
 interface ChatARVResponse {
@@ -286,8 +287,15 @@ export class CompsService {
   /**
    * Get comps for a lead.
    * Auto-backfills similarity scores if any are missing.
+   *
+   * Deduplicated by default — when REAPI MLS and BatchData both return
+   * the same property (or two refresh runs from the same provider end
+   * up persisting overlapping rows), the canonical row wins and the
+   * other duplicate(s) are filtered out. Pass `{ raw: true }` for the
+   * Compare Providers view, which needs both providers' rows visible
+   * side-by-side.
    */
-  async getComps(leadId: string) {
+  async getComps(leadId: string, opts?: { raw?: boolean }) {
     const comps = await this.prisma.comp.findMany({
       where: { leadId },
       orderBy: [{ similarityScore: 'desc' }, { distance: 'asc' }],
@@ -297,14 +305,18 @@ export class CompsService {
     const needsBackfill = comps.some((c) => c.similarityScore == null);
     if (needsBackfill && comps.length > 0) {
       await this.recalculateSimilarityScores(leadId);
-      return this.prisma.comp.findMany({
+      const refreshed = await this.prisma.comp.findMany({
         where: { leadId },
         orderBy: [{ similarityScore: 'desc' }, { distance: 'asc' }],
       });
+      return opts?.raw ? refreshed : dedupCompList(refreshed);
     }
 
-    return comps;
+    return opts?.raw ? comps : dedupCompList(comps);
   }
+
+  // dedup helpers live in `./comp-dedup.ts` — single source of truth
+  // shared with comp-analysis.service. Reference them directly below.
 
   /**
    * Recalculate similarity scores for all comps of a lead
@@ -332,21 +344,41 @@ export class CompsService {
   }
 
   /**
-   * Toggle comp selection and optionally recalculate ARV from selected comps
+   * Toggle comp selection. When the toggled row has duplicates in the
+   * pool (cross-provider overlap, etc.), propagate the new selected
+   * state to all members of the dedup group so the canonical's display
+   * state stays consistent with what the math actually uses.
    */
   async toggleCompSelection(compId: string) {
     const comp = await this.prisma.comp.findUnique({ where: { id: compId } });
     if (!comp) throw new Error('Comp not found');
 
-    const updated = await this.prisma.comp.update({
-      where: { id: compId },
-      data: { selected: !comp.selected },
+    const newSelected = !comp.selected;
+
+    // Find this comp's duplicate group in the lead's pool. The dedup
+    // util returns a list of `groups` with canonical + duplicate IDs;
+    // we apply the new selected state to every member regardless of
+    // which one was clicked.
+    const allInLead = await this.prisma.comp.findMany({
+      where: { leadId: comp.leadId, analysisId: null },
+    });
+    const result = dedupCompGroups(allInLead);
+    const group = result.groups.find(
+      (g) => g.canonicalId === compId || g.duplicateIds.includes(compId),
+    );
+    const idsToUpdate = group
+      ? [group.canonicalId, ...group.duplicateIds]
+      : [compId];
+
+    await this.prisma.comp.updateMany({
+      where: { id: { in: idsToUpdate } },
+      data: { selected: newSelected },
     });
 
-    // Recalculate ARV from selected comps
+    // Recalculate ARV from selected comps (dedups internally)
     await this.recalculateArv(comp.leadId);
 
-    return updated;
+    return { ...comp, selected: newSelected };
   }
 
   /**
@@ -380,7 +412,13 @@ export class CompsService {
   }
 
   /**
-   * Recalculate ARV from selected comps only
+   * Recalculate ARV from selected comps only.
+   *
+   * Dedups before averaging — when REAPI MLS and BatchData both
+   * persist the same property, ARV would otherwise count it twice.
+   * We average over canonical-only survivors so each property
+   * contributes to ARV exactly once regardless of how many provider
+   * rows back it.
    */
   async recalculateArv(leadId: string) {
     const selectedComps = await this.prisma.comp.findMany({
@@ -389,8 +427,11 @@ export class CompsService {
 
     if (selectedComps.length === 0) return;
 
-    const totalPrice = selectedComps.reduce((sum, c) => sum + c.soldPrice, 0);
-    const arv = Math.round(totalPrice / selectedComps.length);
+    const survivors = dedupCompList(selectedComps);
+    if (survivors.length === 0) return;
+
+    const totalPrice = survivors.reduce((sum, c) => sum + c.soldPrice, 0);
+    const arv = Math.round(totalPrice / survivors.length);
 
     await this.prisma.lead.update({
       where: { id: leadId },
