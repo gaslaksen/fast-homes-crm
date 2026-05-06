@@ -93,54 +93,58 @@ export default function HeroPhotoCarousel({
 
   const heroPhoto = photos[heroIndex];
 
+  const hasMultiple = photos.length > 1;
+
   return (
     <div className="space-y-2">
-      {/* Hero */}
-      <div
-        className="relative aspect-[4/3] bg-gray-100 dark:bg-gray-800 rounded-lg overflow-hidden shadow-sm cursor-zoom-in"
-        onClick={() => heroPhoto && setLightboxIndex(heroIndex)}
-      >
-        {heroPhoto ? (
-          <img
-            src={resolveUrl(heroPhoto.url)}
-            alt={heroPhoto.caption || 'Subject property'}
-            className="w-full h-full object-cover"
-            loading="eager"
-          />
-        ) : (
-          <div className="w-full h-full flex flex-col items-center justify-center text-gray-300 dark:text-gray-600 gap-2">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-              strokeWidth={1.5}
-              stroke="currentColor"
-              className="w-16 h-16"
-              aria-hidden
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M2.25 12 12 3l9.75 9M4.5 9.75v10.5h15V9.75"
-              />
-            </svg>
-            <span className="text-xs text-gray-400">
-              {streetViewFetching ? 'Loading photo…' : 'No photos available'}
-            </span>
-          </div>
-        )}
-      </div>
+      {/* Hero + vertical thumbnail strip on the right when multiple
+          photos. Single-photo case: hero takes full width. */}
+      <div className={`flex gap-2 ${hasMultiple ? 'items-start' : ''}`}>
+        <div
+          className={`relative aspect-[4/3] bg-gray-100 dark:bg-gray-800 rounded-lg overflow-hidden shadow-sm cursor-zoom-in ${
+            hasMultiple ? 'flex-1 min-w-0' : 'w-full'
+          }`}
+          onClick={() => heroPhoto && setLightboxIndex(heroIndex)}
+        >
+          {heroPhoto ? (
+            <img
+              src={resolveUrl(heroPhoto.url)}
+              alt={heroPhoto.caption || 'Subject property'}
+              className="w-full h-full object-cover"
+              loading="eager"
+            />
+          ) : (
+            <div className="w-full h-full flex flex-col items-center justify-center text-gray-300 dark:text-gray-600 gap-2">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+                strokeWidth={1.5}
+                stroke="currentColor"
+                className="w-16 h-16"
+                aria-hidden
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M2.25 12 12 3l9.75 9M4.5 9.75v10.5h15V9.75"
+                />
+              </svg>
+              <span className="text-xs text-gray-400">
+                {streetViewFetching ? 'Loading photo…' : 'No photos available'}
+              </span>
+            </div>
+          )}
+        </div>
 
-      {/* Thumbnail strip + counter */}
-      {photos.length > 1 && (
-        <div className="flex items-center gap-2">
-          <div className="flex-1 flex gap-1.5 overflow-x-auto pb-1">
+        {hasMultiple && (
+          <div className="flex flex-col gap-1.5 max-h-[400px] overflow-y-auto pr-1 flex-shrink-0">
             {photos.map((p, i) => (
               <button
                 key={p.id}
                 type="button"
                 onClick={() => setHeroIndex(i)}
-                className={`flex-shrink-0 w-[72px] h-[54px] rounded overflow-hidden border-2 transition ${
+                className={`w-[72px] h-[54px] rounded overflow-hidden border-2 transition flex-shrink-0 ${
                   i === heroIndex
                     ? 'border-emerald-500'
                     : 'border-transparent hover:border-gray-300 dark:hover:border-gray-600'
@@ -156,9 +160,12 @@ export default function HeroPhotoCarousel({
               </button>
             ))}
           </div>
-          <span className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap flex-shrink-0">
-            {heroIndex + 1} / {photos.length}
-          </span>
+        )}
+      </div>
+
+      {hasMultiple && (
+        <div className="text-xs text-gray-500 dark:text-gray-400 text-right">
+          {heroIndex + 1} / {photos.length}
         </div>
       )}
 

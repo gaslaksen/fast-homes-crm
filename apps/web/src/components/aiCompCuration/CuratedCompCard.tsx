@@ -43,6 +43,9 @@ interface Props {
   onAddressClick?: (compId: string) => void;
   // For staggered fade-in. Pass the index in the visible-cards list.
   index?: number;
+  // Compact variant for the Map view's right panel — smaller photo,
+  // tighter padding, only the most-essential fact rows.
+  compact?: boolean;
 }
 
 const INCLUSION_FOOTER: Record<
@@ -74,6 +77,7 @@ export default function CuratedCompCard({
   onToggle,
   onAddressClick,
   index = 0,
+  compact = false,
 }: Props) {
   const isExcluded = ranking?.inclusion === 'recommend_exclude';
   const photo = pickPrimaryPhoto(comp);
@@ -97,8 +101,10 @@ export default function CuratedCompCard({
         animationDelay,
       }}
     >
-      {/* Photo header (4:3) */}
-      <div className="relative aspect-[4/3] bg-gray-100 dark:bg-gray-800 overflow-hidden">
+      {/* Photo header — compact mode uses 16:9 to keep the card short */}
+      <div
+        className={`relative ${compact ? 'aspect-[16/9]' : 'aspect-[4/3]'} bg-gray-100 dark:bg-gray-800 overflow-hidden`}
+      >
         {photo ? (
           <img
             src={photo}
@@ -175,18 +181,18 @@ export default function CuratedCompCard({
         </div>
       </div>
 
-      {/* Address + facts */}
-      <div className="p-3 space-y-1.5">
+      {/* Address + facts — compact mode trims to the essential rows */}
+      <div className={compact ? 'p-2 space-y-1' : 'p-3 space-y-1.5'}>
         <button
           type="button"
           onClick={() => onAddressClick?.(comp.id)}
-          className="block w-full text-left text-sm font-semibold text-gray-800 dark:text-gray-200 truncate hover:text-blue-600 dark:hover:text-blue-400"
+          className={`block w-full text-left font-semibold text-gray-800 dark:text-gray-200 truncate hover:text-blue-600 dark:hover:text-blue-400 ${compact ? 'text-xs' : 'text-sm'}`}
           title={comp.address}
         >
           {comp.address}
         </button>
 
-        <div className="space-y-1 text-xs text-gray-600 dark:text-gray-400">
+        <div className={`text-xs text-gray-600 dark:text-gray-400 ${compact ? 'space-y-0.5' : 'space-y-1'}`}>
           <FactRow icon="🏠">
             {factBeds(comp)}
             {bedsBathsMatch && (
@@ -198,24 +204,32 @@ export default function CuratedCompCard({
           <FactRow icon="📐" hidden={!factSqft(comp)}>
             {factSqft(comp)}
           </FactRow>
-          <FactRow icon="💲" hidden={pricePerSqft == null}>
-            ${pricePerSqft}/sq ft
-          </FactRow>
-          <FactRow icon="🏫" hidden={!comp.schoolDistrict}>
-            {comp.schoolDistrict}
-          </FactRow>
+          {!compact && (
+            <FactRow icon="💲" hidden={pricePerSqft == null}>
+              ${pricePerSqft}/sq ft
+            </FactRow>
+          )}
+          {!compact && (
+            <FactRow icon="🏫" hidden={!comp.schoolDistrict}>
+              {comp.schoolDistrict}
+            </FactRow>
+          )}
           <FactRow icon="📅">
-            Sold {formatSaleDate(comp.soldDate)} ({relativeTime(comp.soldDate)})
+            {compact
+              ? `Sold ${relativeTime(comp.soldDate)}`
+              : `Sold ${formatSaleDate(comp.soldDate)} (${relativeTime(comp.soldDate)})`}
           </FactRow>
-          <FactRow icon="⏱" hidden={comp.daysOnMarket == null}>
-            {comp.daysOnMarket} days on market
-          </FactRow>
+          {!compact && (
+            <FactRow icon="⏱" hidden={comp.daysOnMarket == null}>
+              {comp.daysOnMarket} days on market
+            </FactRow>
+          )}
         </div>
 
         {/* AI brief reasoning footer — only when AI has run */}
         {ranking && footer && (
           <div
-            className={`mt-2 -mx-3 -mb-3 px-3 py-2 border-t ${footer.tint}`}
+            className={`border-t ${footer.tint} ${compact ? 'mt-1 -mx-2 -mb-2 px-2 py-1.5' : 'mt-2 -mx-3 -mb-3 px-3 py-2'}`}
             role="note"
           >
             <div className="flex items-start gap-1.5 text-xs">

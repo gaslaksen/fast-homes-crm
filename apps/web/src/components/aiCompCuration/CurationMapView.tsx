@@ -168,6 +168,7 @@ export default function CurationMapView({
                   onToggle={() => onToggle(comp.id)}
                   onAddressClick={onAddressClick}
                   index={i}
+                  compact
                 />
               </div>
             );

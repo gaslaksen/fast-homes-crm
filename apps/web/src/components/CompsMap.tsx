@@ -138,7 +138,7 @@ export default function CompsMap({
 
       // Comp markers — color priority: AI inclusion (when provided) →
       // user selection state (legacy). Subject pin stays red.
-      compsWithCoords.forEach((comp) => {
+      compsWithCoords.forEach((comp, fallbackIdx) => {
         const isSelected  = comp.selected;
         const inclusion   = inclusionByCompId?.get(comp.id);
         // Emerald include / amber borderline / red exclude when AI ran;
@@ -152,7 +152,11 @@ export default function CompsMap({
               : isSelected
                 ? '#2563eb'
                 : '#9ca3af';
-        const displayNum  = compIndexMap?.get(comp.id) ?? '?';
+        // Fall back to the marker's index in the visible-comps list
+        // when the parent didn't pass an explicit index map. Avoids the
+        // "every pin is a question mark" symptom when the new comp
+        // sections render the map without compIndexMap.
+        const displayNum  = compIndexMap?.get(comp.id) ?? (fallbackIdx + 1);
         const correlation = comp.correlation ? Math.round(comp.correlation * 100) : null;
         const monthsAgo   = Math.round(
           (Date.now() - new Date(comp.soldDate).getTime()) / (30 * 24 * 60 * 60 * 1000),

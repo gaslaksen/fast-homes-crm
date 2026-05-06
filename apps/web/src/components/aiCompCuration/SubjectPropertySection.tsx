@@ -24,6 +24,11 @@ export interface SubjectPropertySectionLead {
   lastSalePrice?: number | null;
   askingPrice?: number | null;
   ownerOccupied?: boolean | null;
+  // REAPI subject AVM — surfaced as a reference row above the data
+  // grid when present.
+  arv?: number | null;
+  arvLow?: number | null;
+  arvHigh?: number | null;
   // Optional richer fields from REAPI / BatchData enrichment.
   [key: string]: unknown;
 }
@@ -85,25 +90,64 @@ export default function SubjectPropertySection({ lead, onLeadRefresh }: Props) {
             />
           </div>
 
-          {/* Right: address + facts + data grid + external links */}
+          {/* Right: address + labeled data grid + external links */}
           <div className="flex flex-col gap-3">
-            <div>
-              <div className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                {addressFull || lead.propertyAddress || 'Unknown address'}
-              </div>
-              <div className="mt-1 text-sm text-gray-700 dark:text-gray-300">
-                {factOrDash(lead.sqft, formatSqft)} ·{' '}
-                {factOrDash(lead.bedrooms, (n) => `${n}bd`)}/
-                {factOrDash(lead.bathrooms, (n) => `${n}ba`)} ·{' '}
-                {factOrDash(lead.yearBuilt, (n) => `Built ${n}`)}
-              </div>
-              <div className="mt-0.5 text-xs text-gray-600 dark:text-gray-400">
-                {factOrDash(lead.lotSize, (n) => `${n.toFixed(2)} ac`)} ·{' '}
-                {lead.conditionLevel || '—'}
-              </div>
+            <div className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+              {addressFull || lead.propertyAddress || 'Unknown address'}
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-4 gap-y-3">
+            {/* REAPI ARV reference row — when available, surface the
+                provider's estimated value so users have a baseline
+                before comp adjustments. */}
+            {(lead.arv || lead.arvLow || lead.arvHigh) && (
+              <div className="grid grid-cols-3 gap-x-4 gap-y-2 rounded-md border border-blue-200 dark:border-blue-900 bg-blue-50/60 dark:bg-blue-900/15 px-3 py-2">
+                <Field
+                  label="REAPI ARV"
+                  value={(lead.arv as number | undefined) ?? null}
+                  format={formatMoney}
+                />
+                <Field
+                  label="ARV low"
+                  value={(lead.arvLow as number | undefined) ?? null}
+                  format={formatMoney}
+                />
+                <Field
+                  label="ARV high"
+                  value={(lead.arvHigh as number | undefined) ?? null}
+                  format={formatMoney}
+                />
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-3">
+              {/* Core property facts — promoted from the previous
+                  inline single-line text into labeled fields matching
+                  the rest of the grid for visual consistency. */}
+              <Field label="Sq ft" value={lead.sqft} format={(n) => Math.round(n).toLocaleString()} />
+              <Field label="Beds" value={lead.bedrooms} />
+              <Field label="Baths" value={lead.bathrooms} />
+              <Field label="Year built" value={lead.yearBuilt} />
+              <Field
+                label="Lot size"
+                value={lead.lotSize}
+                format={(n) => `${n.toFixed(2)} ac`}
+              />
+              <Field label="Condition" value={lead.conditionLevel} />
+              <Field
+                label="Property type"
+                value={propertyType}
+              />
+              <Field
+                label="Owner type"
+                value={
+                  lead.ownerOccupied === true
+                    ? 'Owner-occupied'
+                    : lead.ownerOccupied === false
+                      ? 'Non-owner-occupied'
+                      : null
+                }
+              />
+
               <Field label="Owner" value={ownerName} />
               <Field
                 label="Tax assessed"
@@ -124,16 +168,6 @@ export default function SubjectPropertySection({ lead, onLeadRefresh }: Props) {
                 format={formatMoney}
               />
 
-              <Field
-                label="Owner type"
-                value={
-                  lead.ownerOccupied === true
-                    ? 'Owner-occupied'
-                    : lead.ownerOccupied === false
-                      ? 'Non-owner-occupied'
-                      : null
-                }
-              />
               <Field label="Equity" value={equity} format={formatMoney} />
               <Field
                 label="Mortgage"
@@ -141,11 +175,9 @@ export default function SubjectPropertySection({ lead, onLeadRefresh }: Props) {
                 format={formatMoney}
               />
               <Field label="Listing status" value={listingStatus} />
-
               <Field label="School" value={schoolDistrict} />
+
               <Field label="Subdivision" value={subdivision} />
-              <Field label="Property type" value={propertyType} />
-              <Field label="Year built" value={lead.yearBuilt} />
             </div>
 
             <div className="flex flex-wrap items-center gap-3 pt-1 text-[12px]">

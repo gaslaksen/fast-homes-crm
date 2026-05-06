@@ -240,17 +240,14 @@ export default function ComparablePropertiesSection({
     [result],
   );
 
-  // Stale: candidate pool no longer matches the AI's ranked set.
-  const isStale = useMemo(() => {
-    if (!result) return false;
-    const ranked = [...result.rankings.map((r) => r.candidateId)].sort();
-    const current = comps.map((c) => c.id).sort();
-    if (ranked.length !== current.length) return true;
-    for (let i = 0; i < ranked.length; i++) {
-      if (ranked[i] !== current[i]) return true;
-    }
-    return false;
-  }, [result, comps]);
+  // Stale detection removed in Phase A.7.1 — comparing rankings.length
+  // against comps.length false-fired immediately after every curation
+  // because the AI ranks the deduped survivor set (smaller) while the
+  // page's comps array still includes dedup losers. The cache key
+  // includes sorted candidate IDs + subject fingerprint, so a real pool
+  // change naturally invalidates the cache on next hydration — the
+  // separate banner was redundant and noisy.
+  const isStale = false;
 
   // Visible comp set per the spec:
   //   - No AI: all comps show

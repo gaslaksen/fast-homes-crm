@@ -15,6 +15,7 @@ import CompsToolbar from '@/components/CompsToolbar';
 import CurationErrorBoundary from '@/components/aiCompCuration/CurationErrorBoundary';
 import SubjectPropertySection from '@/components/aiCompCuration/SubjectPropertySection';
 import ComparablePropertiesSection from '@/components/aiCompCuration/ComparablePropertiesSection';
+import { compDistance } from '@/lib/geo';
 import { isAiCompCurationEnabled } from '@/lib/flags';
 import type {
   AiCurationDecision,
@@ -877,7 +878,14 @@ export default function CompsAnalysisPage() {
               <ComparablePropertiesSection
                 leadId={leadId}
                 analysisId={analysis?.id ?? null}
-                comps={allComps as any}
+                comps={allComps.map((c: any) => ({
+                  ...c,
+                  // Backfill missing/zero distance with haversine when
+                  // both subject and comp coords are present. Mirrors
+                  // the backend's Phase A.7 fallback so existing rows
+                  // don't show 0.00mi until they're re-fetched.
+                  distance: compDistance(c, lead),
+                })) as any}
                 subject={{
                   bedrooms: lead.bedrooms,
                   bathrooms: lead.bathrooms,
