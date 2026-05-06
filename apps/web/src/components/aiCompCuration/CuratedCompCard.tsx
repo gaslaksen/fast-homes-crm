@@ -33,7 +33,10 @@ export interface CuratedCompCardSubject {
 
 interface Props {
   comp: CuratedCompCardComp;
-  ranking: CurationRanking;
+  // Ranking is optional — when absent (no AI run yet) the card renders
+  // the same photo + facts + checkbox without the AI footer or the
+  // colored inclusion border. One component for both states.
+  ranking?: CurationRanking;
   subject: CuratedCompCardSubject;
   selected: boolean;
   onToggle: () => void;
@@ -72,13 +75,13 @@ export default function CuratedCompCard({
   onAddressClick,
   index = 0,
 }: Props) {
-  const isExcluded = ranking.inclusion === 'recommend_exclude';
+  const isExcluded = ranking?.inclusion === 'recommend_exclude';
   const photo = pickPrimaryPhoto(comp);
   const status = pickStatusPill(comp, ranking);
   const sourcePill = pickSourcePill(comp);
   const bedsBathsMatch = bedsBathsExactMatch(comp, subject);
   const pricePerSqft = comp.sqft ? Math.round(comp.soldPrice / comp.sqft) : null;
-  const footer = INCLUSION_FOOTER[ranking.inclusion];
+  const footer = ranking ? INCLUSION_FOOTER[ranking.inclusion] : null;
 
   const animationDelay = `${Math.min(index * 50, 600)}ms`;
 
@@ -209,23 +212,25 @@ export default function CuratedCompCard({
           </FactRow>
         </div>
 
-        {/* AI brief reasoning footer */}
-        <div
-          className={`mt-2 -mx-3 -mb-3 px-3 py-2 border-t ${footer.tint}`}
-          role="note"
-        >
-          <div className="flex items-start gap-1.5 text-xs">
-            <span className={`${footer.iconColor} flex-shrink-0`} aria-hidden>
-              ✨
-            </span>
-            <span className="text-gray-700 dark:text-gray-300 leading-snug">
-              <span className={`font-semibold ${footer.iconColor}`}>
-                AI:
-              </span>{' '}
-              {ranking.briefReasoning}
-            </span>
+        {/* AI brief reasoning footer — only when AI has run */}
+        {ranking && footer && (
+          <div
+            className={`mt-2 -mx-3 -mb-3 px-3 py-2 border-t ${footer.tint}`}
+            role="note"
+          >
+            <div className="flex items-start gap-1.5 text-xs">
+              <span className={`${footer.iconColor} flex-shrink-0`} aria-hidden>
+                ✨
+              </span>
+              <span className="text-gray-700 dark:text-gray-300 leading-snug">
+                <span className={`font-semibold ${footer.iconColor}`}>
+                  AI:
+                </span>{' '}
+                {ranking.briefReasoning}
+              </span>
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );
@@ -263,9 +268,9 @@ function pickPrimaryPhoto(comp: CuratedCompCardComp): string | null {
 
 function pickStatusPill(
   comp: CuratedCompCardComp,
-  ranking: CurationRanking,
+  ranking: CurationRanking | undefined,
 ): { label: string; cls: string } | null {
-  if (ranking.flags.includes('distressed_sale_likely')) {
+  if (ranking?.flags.includes('distressed_sale_likely')) {
     return {
       label: 'Distressed',
       cls: 'bg-amber-500/90 text-white',

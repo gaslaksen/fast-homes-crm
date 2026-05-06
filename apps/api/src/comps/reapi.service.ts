@@ -16,7 +16,7 @@ import {
   ReapiMlsListing,
   ReapiMlsDetailData,
 } from './reapi.types';
-import { computeSimilarityScore } from './comp-similarity';
+import { computeSimilarityScore, haversineMiles } from './comp-similarity';
 
 const REAPI_BASE_URL = 'https://api.realestateapi.com';
 const CACHE_TTL_HOURS = 24;
@@ -1041,12 +1041,43 @@ export class ReapiService {
           : [];
       features.photoUrls = photoUrls;
 
+      // Distance: REAPI MLS often returns 0 / missing — compute from coords
+      // when subject and comp both have lat/lng. Otherwise fall back to whatever
+      // REAPI gave us (typically 0 for MLS, real value for PropertyComps).
+      const subjectLat = toNumber(subject?.latitude);
+      const subjectLng = toNumber(subject?.longitude);
+      const compLat = toNumber(c.latitude);
+      const compLng = toNumber(c.longitude);
+      let distance = c.distance ?? 0;
+      if (
+        (!distance || distance === 0) &&
+        subjectLat != null && subjectLng != null &&
+        compLat != null && compLng != null
+      ) {
+        distance = haversineMiles(
+          { latitude: subjectLat, longitude: subjectLng },
+          { latitude: compLat, longitude: compLng },
+        );
+      }
+      // Diagnostic: warn loudly when we end up persisting a comp without coords
+      // or distance — the Comps tab map filters these out (no pin) and the AI
+      // prompt can't reason about distance for them.
+      if (compLat == null || compLng == null) {
+        this.logger.warn(
+          `comp persisted without coords: source=${method} mlsId=${mlsRaw?.listing?.mlsNumber ?? 'n/a'} address="${compAddress}"`,
+        );
+      } else if (!distance || distance === 0) {
+        this.logger.warn(
+          `comp persisted with zero distance despite coords: source=${method} address="${compAddress}" subjectCoords=${subjectLat},${subjectLng} compCoords=${compLat},${compLng}`,
+        );
+      }
+
       try {
         await this.prisma.comp.create({
           data: {
             leadId,
             address: compAddress,
-            distance: c.distance ?? 0,
+            distance,
             soldPrice,
             soldDate,
             daysOnMarket: method === 'mls' ? toNumber(mlsRaw?.listing?.leadTypes?.mlsDaysOnMarket) ?? null : null,

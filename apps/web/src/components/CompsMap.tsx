@@ -29,6 +29,12 @@ interface Lead {
   longitude?: number;
 }
 
+// AI inclusion category — when provided per comp, drives pin color so
+// the map mirrors the AI's recommendation alongside the user's manual
+// selection state. When absent, pins use the legacy blue/gray
+// (selected/unselected).
+export type CompMapInclusion = 'recommend_include' | 'borderline' | 'recommend_exclude';
+
 interface CompsMapProps {
   lead: Lead;
   comps: Comp[];
@@ -36,6 +42,7 @@ interface CompsMapProps {
   hoveredCompId?: string | null;
   onHoverComp?: (id: string | null) => void;
   onToggleComp?: (compId: string) => void;
+  inclusionByCompId?: Map<string, CompMapInclusion>;
 }
 
 export default function CompsMap({
@@ -45,6 +52,7 @@ export default function CompsMap({
   hoveredCompId,
   onHoverComp,
   onToggleComp,
+  inclusionByCompId,
 }: CompsMapProps) {
   const mapRef        = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<any>(null);
@@ -76,6 +84,16 @@ export default function CompsMap({
       }
 
       const compsWithCoords = comps.filter((c) => c.latitude && c.longitude);
+      const compsWithoutCoords = comps.length - compsWithCoords.length;
+      if (compsWithoutCoords > 0 && typeof console !== 'undefined') {
+        // Diagnostic for the question-mark / "no pin" symptom — comps that
+        // make it into the pool but have no coords don't get a marker, and
+        // when paired with the missing default-icon CDN this tends to look
+        // like a broken pin in the UI rather than a missing one.
+        console.warn(
+          `[CompsMap] ${compsWithoutCoords} of ${comps.length} comps lack lat/lng and will not render as pins`,
+        );
+      }
       const hasSubject      = !!(lead.latitude && lead.longitude);
       if (!hasSubject && compsWithCoords.length === 0) return;
 
@@ -118,10 +136,22 @@ export default function CompsMap({
         bounds.push([lead.latitude!, lead.longitude!]);
       }
 
-      // Comp markers
+      // Comp markers — color priority: AI inclusion (when provided) →
+      // user selection state (legacy). Subject pin stays red.
       compsWithCoords.forEach((comp) => {
         const isSelected  = comp.selected;
-        const color       = isSelected ? '#2563eb' : '#9ca3af';
+        const inclusion   = inclusionByCompId?.get(comp.id);
+        // Emerald include / amber borderline / red exclude when AI ran;
+        // blue selected / gray unselected as the no-AI fallback.
+        const color = inclusion === 'recommend_include'
+          ? '#10b981'
+          : inclusion === 'borderline'
+            ? '#f59e0b'
+            : inclusion === 'recommend_exclude'
+              ? '#9ca3af'
+              : isSelected
+                ? '#2563eb'
+                : '#9ca3af';
         const displayNum  = compIndexMap?.get(comp.id) ?? '?';
         const correlation = comp.correlation ? Math.round(comp.correlation * 100) : null;
         const monthsAgo   = Math.round(

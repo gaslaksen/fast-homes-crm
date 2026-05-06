@@ -23,8 +23,12 @@ type SortKey =
   | 'soldDate';
 
 interface Props {
-  rankings: CurationRanking[];
-  compById: Map<string, CuratedCompCardComp>;
+  // Always-present source of truth — every comp shows in the table
+  // regardless of AI state (table view is for exhaustive review).
+  comps: CuratedCompCardComp[];
+  // When provided, decorates rows with AI inclusion + reasoning columns
+  // and enables sorting by AI rank. Absent → no AI columns.
+  rankingByCompId?: Map<string, CurationRanking>;
   subject: CuratedCompCardSubject;
   cardSelections: Record<string, boolean>;
   onToggle: (id: string) => void;
@@ -50,28 +54,26 @@ const INCLUSION_PILL: Record<
 };
 
 export default function CuratedCompsTable({
-  rankings,
-  compById,
+  comps,
+  rankingByCompId,
   subject,
   cardSelections,
   onToggle,
   onAddressClick,
 }: Props) {
-  const [sortKey, setSortKey] = useState<SortKey>('rank');
+  const hasAi = !!rankingByCompId && rankingByCompId.size > 0;
+  // Default sort: rank when AI ran, distance otherwise.
+  const [sortKey, setSortKey] = useState<SortKey>(hasAi ? 'rank' : 'distance');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
 
   const rows = useMemo(() => {
-    return rankings
-      .map((r) => {
-        const comp = compById.get(r.candidateId);
-        if (!comp) return null;
+    return comps
+      .map((comp) => {
+        const r = rankingByCompId?.get(comp.id);
         const pricePerSqft =
           comp.sqft && comp.soldPrice ? comp.soldPrice / comp.sqft : null;
         return { r, comp, pricePerSqft };
       })
-      .filter(
-        (row): row is NonNullable<typeof row> => row !== null,
-      )
       .sort((a, b) => {
         const dir = sortDir === 'asc' ? 1 : -1;
         const av = sortValue(a, sortKey);
@@ -84,7 +86,7 @@ export default function CuratedCompsTable({
         }
         return String(av).localeCompare(String(bv)) * dir;
       });
-  }, [rankings, compById, sortKey, sortDir]);
+  }, [comps, rankingByCompId, sortKey, sortDir]);
 
   const headerClick = (k: SortKey) => {
     if (sortKey === k) {
@@ -101,14 +103,16 @@ export default function CuratedCompsTable({
         <thead className="bg-gray-50 dark:bg-gray-900/50 text-gray-600 dark:text-gray-400">
           <tr>
             <Th width="w-8" />
-            <Th
-              label="#"
-              sortKey="rank"
-              activeKey={sortKey}
-              dir={sortDir}
-              onClick={() => headerClick('rank')}
-              align="right"
-            />
+            {hasAi && (
+              <Th
+                label="#"
+                sortKey="rank"
+                activeKey={sortKey}
+                dir={sortDir}
+                onClick={() => headerClick('rank')}
+                align="right"
+              />
+            )}
             <Th width="w-12" />
             <Th
               label="Address"
@@ -172,18 +176,18 @@ export default function CuratedCompsTable({
               dir={sortDir}
               onClick={() => headerClick('soldDate')}
             />
-            <Th label="AI" />
-            <Th label="Reasoning" />
+            {hasAi && <Th label="AI" />}
+            {hasAi && <Th label="Reasoning" />}
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
           {rows.map(({ r, comp, pricePerSqft }) => {
-            const isSelected = !!cardSelections[r.candidateId];
-            const isExcluded = r.inclusion === 'recommend_exclude';
-            const pill = INCLUSION_PILL[r.inclusion];
+            const isSelected = !!cardSelections[comp.id];
+            const isExcluded = r?.inclusion === 'recommend_exclude';
+            const pill = r ? INCLUSION_PILL[r.inclusion] : null;
             return (
               <tr
-                key={r.candidateId}
+                key={comp.id}
                 className={`bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800/50 ${
                   isExcluded ? 'opacity-70' : ''
                 } ${isSelected ? 'ring-1 ring-emerald-300 dark:ring-emerald-800' : ''}`}
@@ -192,14 +196,16 @@ export default function CuratedCompsTable({
                   <input
                     type="checkbox"
                     checked={isSelected}
-                    onChange={() => onToggle(r.candidateId)}
+                    onChange={() => onToggle(comp.id)}
                     className="accent-emerald-600 cursor-pointer"
                     aria-label={`Toggle ${comp.address}`}
                   />
                 </td>
-                <td className="px-2 py-2 text-right tabular-nums text-gray-600 dark:text-gray-400">
-                  {r.rank}
-                </td>
+                {hasAi && (
+                  <td className="px-2 py-2 text-right tabular-nums text-gray-600 dark:text-gray-400">
+                    {r?.rank ?? '—'}
+                  </td>
+                )}
                 <td className="px-1 py-1 w-12">
                   {comp.photoUrl ? (
                     <img
@@ -219,7 +225,7 @@ export default function CuratedCompsTable({
                 <td className="px-2 py-2 max-w-[200px]">
                   <button
                     type="button"
-                    onClick={() => onAddressClick?.(r.candidateId)}
+                    onClick={() => onAddressClick?.(comp.id)}
                     className="text-left text-gray-800 dark:text-gray-200 hover:text-blue-600 dark:hover:text-blue-400 truncate w-full"
                     title={comp.address}
                   >
@@ -247,18 +253,26 @@ export default function CuratedCompsTable({
                 <td className="px-2 py-2 text-gray-600 dark:text-gray-400">
                   {formatDate(comp.soldDate)}
                 </td>
-                <td className="px-2 py-2">
-                  <span
-                    className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${pill.cls}`}
-                  >
-                    {pill.label}
-                  </span>
-                </td>
-                <td className="px-2 py-2 text-gray-600 dark:text-gray-400 max-w-[280px]">
-                  <span className="line-clamp-2" title={r.reasoning}>
-                    {r.briefReasoning}
-                  </span>
-                </td>
+                {hasAi && (
+                  <td className="px-2 py-2">
+                    {pill && (
+                      <span
+                        className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${pill.cls}`}
+                      >
+                        {pill.label}
+                      </span>
+                    )}
+                  </td>
+                )}
+                {hasAi && (
+                  <td className="px-2 py-2 text-gray-600 dark:text-gray-400 max-w-[280px]">
+                    {r && (
+                      <span className="line-clamp-2" title={r.reasoning}>
+                        {r.briefReasoning}
+                      </span>
+                    )}
+                  </td>
+                )}
               </tr>
             );
           })}
@@ -329,12 +343,12 @@ function Th({
 }
 
 function sortValue(
-  row: { r: CurationRanking; comp: CuratedCompCardComp; pricePerSqft: number | null },
+  row: { r: CurationRanking | undefined; comp: CuratedCompCardComp; pricePerSqft: number | null },
   key: SortKey,
 ): number | string | null {
   switch (key) {
     case 'rank':
-      return row.r.rank;
+      return row.r?.rank ?? null;
     case 'address':
       return row.comp.address;
     case 'distance':

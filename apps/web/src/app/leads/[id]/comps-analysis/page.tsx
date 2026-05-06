@@ -12,9 +12,9 @@ import ShareDealModal from '@/components/ShareDealModal';
 import CompRow from '@/components/CompRow';
 import SubjectPropertyCard from '@/components/SubjectPropertyCard';
 import CompsToolbar from '@/components/CompsToolbar';
-import CurationPanel from '@/components/aiCompCuration/CurationPanel';
 import CurationErrorBoundary from '@/components/aiCompCuration/CurationErrorBoundary';
-import SubjectStrip from '@/components/aiCompCuration/SubjectStrip';
+import SubjectPropertySection from '@/components/aiCompCuration/SubjectPropertySection';
+import ComparablePropertiesSection from '@/components/aiCompCuration/ComparablePropertiesSection';
 import { isAiCompCurationEnabled } from '@/lib/flags';
 import type {
   AiCurationDecision,
@@ -243,6 +243,28 @@ export default function CompsAnalysisPage() {
   useEffect(() => {
     loadData();
   }, [leadId]);
+
+  // Auto-load comps on Comps tab entry when the pool is empty.
+  // Replaces the "Find Comps" button gate from earlier iterations.
+  // Provider cache layer (24h BatchData / REAPI logic) handles
+  // freshness — this just kicks the initial fetch.
+  const autoFetchedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!aiCurationFlag) return;
+    if (activeSection !== 'comps') return;
+    if (loading || !lead) return;
+    if (fetchingComps) return;
+    // Already fetched this lead in this session — don't refetch.
+    if (autoFetchedRef.current === leadId) return;
+    const compCount = analysis?.comps?.length ?? 0;
+    if (compCount > 0) {
+      autoFetchedRef.current = leadId;
+      return;
+    }
+    autoFetchedRef.current = leadId;
+    void handleFindComps(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSection, loading, lead, leadId, analysis?.comps?.length]);
 
   const loadData = async () => {
     try {
@@ -812,17 +834,24 @@ export default function CompsAnalysisPage() {
       {/* Unified Tab Nav */}
       <LeadTabNav leadId={leadId} activeTab={activeSection} />
 
-      {/* ═══════════════ COMPS SECTION — restructured under AI flag ═══════════════ */}
+      {/* ═══════════════ COMPS SECTION — simplified under AI flag (Phase A.7) ═══════════════ */}
       {activeSection === 'comps' && aiCurationFlag && lead && (
         <div className="max-w-screen-2xl mx-auto">
-          {/* Subject anchor strip — sticky on lg+ */}
-          <SubjectStrip
+          {/* New Subject Property section — hero photo + full data grid */}
+          <SubjectPropertySection
             lead={lead as any}
-            taxesAnnual={lead.taxAssessedValue ? lead.taxAssessedValue * 0.0125 : null}
+            onLeadRefresh={async () => {
+              try {
+                const lr = await leadsAPI.get(leadId);
+                setLead(lr.data);
+              } catch (err) {
+                console.error('Failed to refresh lead after Street View fetch:', err);
+              }
+            }}
           />
 
-          <div className="px-3 sm:px-4 lg:px-6 py-4">
-            {comparisonMode ? (
+          {comparisonMode ? (
+            <div className="px-3 sm:px-4 lg:px-6 py-4">
               <ProviderComparisonView
                 comps={comparisonComps}
                 lead={lead}
@@ -842,81 +871,72 @@ export default function CompsAnalysisPage() {
                 }}
                 compIndexMap={compIndexMap}
               />
-            ) : allComps.length === 0 ? (
-              <div className="text-center py-16 text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700">
-                <div className="text-5xl mb-3">&#127968;</div>
-                <p className="font-medium text-lg">No comparables yet</p>
-                <p className="text-sm mt-1 mb-4">
-                  Open Filters &amp; Settings to refresh comps from REAPI or BatchData.
-                </p>
-                <button
-                  onClick={() => handleFindComps(false)}
-                  disabled={fetchingComps}
-                  className="btn btn-primary"
-                >
-                  {fetchingComps ? `Fetching from ${compsSource === 'batchdata' ? 'BatchData' : 'REAPI'}...` : 'Find Comps'}
-                </button>
-              </div>
-            ) : (
-              <CurationErrorBoundary>
-                <CurationPanel
-                  leadId={leadId}
-                  analysisId={analysis?.id ?? null}
-                  comps={allComps as any}
-                  subject={{
-                    bedrooms: lead.bedrooms,
-                    bathrooms: lead.bathrooms,
-                    sqft: lead.sqft,
-                  }}
-                  mapLead={lead as any}
-                  filters={{
-                    compsSource,
-                    batchDataEnabled: BATCHDATA_ENABLED,
-                    filterMonths: analysis?.timeFrameMonths ?? 12,
-                    filterDistance: analysis?.maxDistance ?? 1,
-                    sortField,
-                    sortDir,
-                    fetchingComps,
-                    onSetCompsSource: setCompsSource,
-                    onCompareProviders: handleCompareProviders,
-                    onSetFilterMonths: async (months) => {
-                      if (!analysis) return;
-                      try {
-                        await compAnalysisAPI.applyFilters(leadId, analysis.id, { timeFrameMonths: months });
-                        await refreshAnalysis();
-                      } catch (err) {
-                        console.error('Failed to apply age filter:', err);
-                      }
-                    },
-                    onSetFilterDistance: async (miles) => {
-                      if (!analysis) return;
-                      try {
-                        await compAnalysisAPI.applyFilters(leadId, analysis.id, { maxDistance: miles });
-                        await refreshAnalysis();
-                      } catch (err) {
-                        console.error('Failed to apply distance filter:', err);
-                      }
-                    },
-                    onSort: handleSort,
-                    onSelectAll: async (selected) => {
-                      if (!analysis) return;
-                      await compAnalysisAPI.selectAll(leadId, analysis.id, selected);
+            </div>
+          ) : (
+            <CurationErrorBoundary>
+              <ComparablePropertiesSection
+                leadId={leadId}
+                analysisId={analysis?.id ?? null}
+                comps={allComps as any}
+                subject={{
+                  bedrooms: lead.bedrooms,
+                  bathrooms: lead.bathrooms,
+                  sqft: lead.sqft,
+                }}
+                mapLead={lead as any}
+                selectedCompIds={
+                  new Set(allComps.filter((c) => c.selected).map((c) => c.id))
+                }
+                onToggleCompSelection={handleToggleComp}
+                filters={{
+                  compsSource,
+                  batchDataEnabled: BATCHDATA_ENABLED,
+                  filterMonths: analysis?.timeFrameMonths ?? 12,
+                  filterDistance: analysis?.maxDistance ?? 1,
+                  sortField,
+                  sortDir,
+                  fetchingComps,
+                  onSetCompsSource: setCompsSource,
+                  onCompareProviders: handleCompareProviders,
+                  onSetFilterMonths: async (months) => {
+                    if (!analysis) return;
+                    try {
+                      await compAnalysisAPI.applyFilters(leadId, analysis.id, { timeFrameMonths: months });
                       await refreshAnalysis();
-                    },
-                    onRefreshComps: () => handleFindComps(true),
-                  }}
-                  onResultChange={setAiCurationResult}
-                  onCurationApplied={() => {
-                    void refreshAnalysis();
-                  }}
-                  onAddManualComp={() => setShowAddComp(true)}
-                />
-              </CurationErrorBoundary>
-            )}
+                    } catch (err) {
+                      console.error('Failed to apply age filter:', err);
+                    }
+                  },
+                  onSetFilterDistance: async (miles) => {
+                    if (!analysis) return;
+                    try {
+                      await compAnalysisAPI.applyFilters(leadId, analysis.id, { maxDistance: miles });
+                      await refreshAnalysis();
+                    } catch (err) {
+                      console.error('Failed to apply distance filter:', err);
+                    }
+                  },
+                  onSort: handleSort,
+                  onSelectAll: async (selected) => {
+                    if (!analysis) return;
+                    await compAnalysisAPI.selectAll(leadId, analysis.id, selected);
+                    await refreshAnalysis();
+                  },
+                  onRefreshComps: () => handleFindComps(true),
+                }}
+                onResultChange={setAiCurationResult}
+                onCurationApplied={() => {
+                  void refreshAnalysis();
+                }}
+                onAddManualComp={() => setShowAddComp(true)}
+              />
+            </CurationErrorBoundary>
+          )}
 
-            {/* ARV calculation button — kept as a separate row below the curation panel */}
-            {!comparisonMode && allComps.length >= 1 && (
-              <div className="pt-4 flex items-center gap-3">
+          {/* ARV calculation row — kept as a separate row below the comps section */}
+          {!comparisonMode && allComps.length >= 1 && (
+            <div className="px-3 sm:px-4 lg:px-6 pb-6">
+              <div className="flex items-center gap-3">
                 <button
                   onClick={handleAiAdjustComps}
                   disabled={aiAdjusting || selectedComps.length === 0}
@@ -932,8 +952,8 @@ export default function CompsAnalysisPage() {
                   )}
                 </button>
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -1042,40 +1062,6 @@ export default function CompsAnalysisPage() {
                 onAddManual={() => setShowAddComp(true)}
               />
             </div>
-
-            {/* AI curation panel */}
-            {aiCurationFlag && lead && (
-              <div className="px-3 pt-3">
-                <CurationErrorBoundary>
-                  <CurationPanel
-                    leadId={leadId}
-                    analysisId={analysis?.id ?? null}
-                    comps={allComps as any}
-                    subject={{
-                      bedrooms: lead.bedrooms,
-                      bathrooms: lead.bathrooms,
-                      sqft: lead.sqft,
-                    }}
-                    onResultChange={setAiCurationResult}
-                    onCurationApplied={() => {
-                      // Re-load comps + analysis so selection state and ARV reflect the bulk pick.
-                      void refreshAnalysis();
-                    }}
-                    onAddManualComp={() => setShowAddComp(true)}
-                    onScrollToComp={(compId) => {
-                      const el = compRowRefs.current[compId];
-                      if (el) {
-                        el.scrollIntoView({
-                          behavior: 'smooth',
-                          block: 'center',
-                        });
-                        setHoveredCompId(compId);
-                      }
-                    }}
-                  />
-                </CurationErrorBoundary>
-              </div>
-            )}
 
             {/* Comp rows */}
             <div className="flex-1 p-3 space-y-1.5">
