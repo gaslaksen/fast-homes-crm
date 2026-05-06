@@ -233,6 +233,7 @@ export class BatchDataCompService {
             correlation,
             selected: true,
             source: 'batchdata',
+            apn: p.legal?.apn ?? null,
             features: {
               subdivision: p.legal?.subdivisionName ?? null,
               avm: p.valuation?.estimatedValue ?? null,
@@ -240,6 +241,8 @@ export class BatchDataCompService {
               avmHigh: p.valuation?.estimatedValueHigh ?? null,
               saleType: p.sale?.lastSale?.saleType ?? null,
               documentType: p.sale?.lastSale?.documentType ?? null,
+              // BatchData responses do not include photo URLs; field left empty.
+              photoUrls: [] as string[],
             },
           },
         });

@@ -21,6 +21,9 @@ export interface CurationRanking {
   relevanceScore: number;
   inclusion: Inclusion;
   reasoning: string;
+  // ≤120 char headline for the comp card. AI-generated when prompt
+  // v1.1.0+; backfilled from `reasoning` first sentence when missing.
+  briefReasoning: string;
   flags: string[];
   adjustmentNotes?: string;
   externalLinks: ExternalLinks;
@@ -229,18 +232,32 @@ function parseRankings(
       streetView:
         typeof linksRaw?.streetView === 'string' ? linksRaw.streetView : undefined,
     };
+    const briefReasoning = synthesizeBrief(r.briefReasoning, reasoning);
     out.push({
       candidateId: r.candidateId,
       rank,
       relevanceScore,
       inclusion,
       reasoning,
+      briefReasoning,
       flags,
       adjustmentNotes,
       externalLinks,
     });
   }
   return { ok: true, value: out };
+}
+
+// Use AI-supplied brief when present; otherwise synthesize from the
+// first sentence of `reasoning`, capped at 200 chars. Cards are visually
+// fine with up to ~200 chars but ChatARV-style aims for ~120.
+function synthesizeBrief(raw: unknown, fullReasoning: string): string {
+  if (typeof raw === 'string' && raw.trim().length > 0) {
+    return raw.trim().slice(0, 200);
+  }
+  const firstSentence =
+    fullReasoning.match(/^[^.!?]+[.!?]/)?.[0] ?? fullReasoning;
+  return firstSentence.trim().slice(0, 200);
 }
 
 function bestEffortExclusions(v: unknown): CurationExclusion[] {

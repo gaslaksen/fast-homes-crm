@@ -1,11 +1,15 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   runCuration,
   getLatestCuration,
   bulkSelectComps,
 } from '@/lib/aiCompCuration/client';
+import {
+  readCurationView,
+  writeCurationView,
+} from '@/lib/aiCompCuration/persistence';
 import type {
   CurationResult,
   HardConstraints,
@@ -15,23 +19,37 @@ import type {
 } from '@/lib/aiCompCuration/types';
 import CurationProgressDrawer from './CurationProgressDrawer';
 import CurationExpansionNarrative from './CurationExpansionNarrative';
-import CurationReasoningCard from './CurationReasoningCard';
 import CurationEmptyState from './CurationEmptyState';
+import CuratedCompCard, {
+  type CuratedCompCardComp,
+} from './CuratedCompCard';
+import SummaryHeader from './SummaryHeader';
+import ViewToggle, { type CurationView } from './ViewToggle';
+import StaleBanner from './StaleBanner';
+import ShowLessRelevantToggle from './ShowLessRelevantToggle';
+import MarketObservations from './MarketObservations';
+import ActionBar from './ActionBar';
 
 interface Props {
   leadId: string;
   analysisId: string | null;
-  comps: Array<{ id: string; address: string }>;
+  comps: CuratedCompCardComp[];
+  subject: { bedrooms?: number | null; bathrooms?: number | null; sqft?: number | null };
   onCurationApplied?: () => void;
   onResultChange?: (result: CurationResult | null) => void;
+  onAddManualComp?: () => void;
+  onScrollToComp?: (compId: string) => void;
 }
 
 export default function CurationPanel({
   leadId,
   analysisId,
   comps,
+  subject,
   onCurationApplied,
   onResultChange,
+  onAddManualComp,
+  onScrollToComp,
 }: Props) {
   const [mode, setMode] = useState<ValuationMode>('ARV_RENOVATED');
   const [maxDistance, setMaxDistance] = useState<'auto' | number>('auto');
@@ -39,13 +57,30 @@ export default function CurationPanel({
   const [running, setRunning] = useState(false);
   const [events, setEvents] = useState<StepEvent[]>([]);
   const [result, setResult] = useState<CurationResult | null>(null);
-  const [error, setError] = useState<{
-    code: string;
-    message: string;
+  const [error, setError] = useState<{ code: string; message: string } | null>(
+    null,
+  );
+  const [cancelHandle, setCancelHandle] = useState<{
+    cancel: () => void;
   } | null>(null);
-  const [cancelHandle, setCancelHandle] = useState<{ cancel: () => void } | null>(null);
   const [cachedFromMs, setCachedFromMs] = useState<number | null>(null);
   const [picking, setPicking] = useState(false);
+
+  const [view, setView] = useState<CurationView>('curated');
+  const [expandedLessRelevant, setExpandedLessRelevant] = useState(false);
+  const [cardSelections, setCardSelections] = useState<Record<string, boolean>>(
+    {},
+  );
+
+  // Load persisted view preference once on mount.
+  useEffect(() => {
+    setView(readCurationView());
+  }, []);
+
+  const persistView = (v: CurationView) => {
+    setView(v);
+    writeCurationView(v);
+  };
 
   const input: RunCurationInput = {
     valuationMode: mode,
@@ -78,6 +113,20 @@ export default function CurationPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [leadId, mode, maxDistance, JSON.stringify(constraints)]);
 
+  // Reset card selections to match AI recommendations whenever a new
+  // result lands. User can override per-card before Pick for me.
+  useEffect(() => {
+    if (!result) {
+      setCardSelections({});
+      return;
+    }
+    const next: Record<string, boolean> = {};
+    for (const r of result.rankings) {
+      next[r.candidateId] = r.inclusion === 'recommend_include';
+    }
+    setCardSelections(next);
+  }, [result]);
+
   const start = (force: boolean) => {
     setRunning(true);
     setError(null);
@@ -102,11 +151,7 @@ export default function CurationPanel({
       })
       .catch((err) => {
         const code = (err as any)?.code ?? 'NETWORK';
-        if (code === 'TYPE_REQUIRED') {
-          setError({ code, message: err.message });
-        } else if (code === 'AI_PARSE_FAILED') {
-          setError({ code, message: err.message });
-        } else if (err.message !== 'cancelled') {
+        if (err.message !== 'cancelled') {
           setError({ code, message: err.message });
         }
       })
@@ -125,9 +170,11 @@ export default function CurationPanel({
     if (!result || !analysisId) return;
     setPicking(true);
     try {
-      const include = result.rankings
-        .filter((r) => r.inclusion === 'recommend_include')
-        .map((r) => r.candidateId);
+      // Use the user's per-card selections (defaulted from AI recommendations
+      // but overridable via card checkbox).
+      const include = Object.entries(cardSelections)
+        .filter(([, v]) => v)
+        .map(([id]) => id);
       await bulkSelectComps(analysisId, include);
       onCurationApplied?.();
     } finally {
@@ -135,10 +182,44 @@ export default function CurationPanel({
     }
   };
 
-  const compById = new Map(comps.map((c) => [c.id, c]));
-  const orderedRankings = result
-    ? [...result.rankings].sort((a, b) => a.rank - b.rank)
-    : [];
+  const compById = useMemo(
+    () => new Map(comps.map((c) => [c.id, c])),
+    [comps],
+  );
+  const orderedRankings = useMemo(
+    () =>
+      result
+        ? [...result.rankings].sort((a, b) => a.rank - b.rank)
+        : [],
+    [result],
+  );
+  const includedRankings = orderedRankings.filter(
+    (r) => r.inclusion === 'recommend_include',
+  );
+  const borderlineRankings = orderedRankings.filter(
+    (r) => r.inclusion === 'borderline',
+  );
+  const excludedRankings = orderedRankings.filter(
+    (r) => r.inclusion === 'recommend_exclude',
+  );
+  const lessRelevantRankings = [...borderlineRankings, ...excludedRankings];
+
+  // "Stale" detection: when the current comp pool no longer matches what
+  // the AI ranked. Compare sorted IDs. The cache key already invalidates
+  // the saved row when the pool changes, so this only matters mid-session
+  // (provider toggle, manual add) before the cache effect re-fires.
+  const isStale = useMemo(() => {
+    if (!result) return false;
+    const ranked = orderedRankings.map((r) => r.candidateId).sort();
+    const current = comps.map((c) => c.id).sort();
+    if (ranked.length !== current.length) return true;
+    for (let i = 0; i < ranked.length; i++) {
+      if (ranked[i] !== current[i]) return true;
+    }
+    return false;
+  }, [result, orderedRankings, comps]);
+
+  const selectedCount = Object.values(cardSelections).filter(Boolean).length;
 
   return (
     <div className="space-y-3">
@@ -174,12 +255,15 @@ export default function CurationPanel({
           )}
         </div>
         <p className="mt-2 text-[10px] text-gray-500 dark:text-gray-500">
-          AI will rank these comps by relevance and explain its reasoning. You stay in control of the final selection.
+          AI will rank these comps by relevance and explain its reasoning. You
+          stay in control of the final selection.
         </p>
       </div>
 
       {/* Progress drawer while running */}
-      {running && <CurationProgressDrawer events={events} isRunning={running} />}
+      {running && (
+        <CurationProgressDrawer events={events} isRunning={running} />
+      )}
 
       {/* Error states */}
       {!running && error && (
@@ -196,133 +280,219 @@ export default function CurationPanel({
         />
       )}
 
-      {/* Idle empty state when no result + no error */}
+      {/* Idle states */}
       {!running && !result && !error && comps.length === 0 && (
         <CurationEmptyState variant="zero_candidates" />
+      )}
+      {!running && !result && !error && comps.length > 0 && (
+        <CurationEmptyState variant="idle" />
       )}
 
       {/* Results */}
       {!running && result && (
         <div className="space-y-3">
+          <SummaryHeader
+            result={result}
+            cachedAtMs={cachedFromMs}
+            onRerun={() => start(true)}
+          />
+
           <CurationExpansionNarrative expansion={result.searchExpansion} />
 
-          <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-3 bg-white dark:bg-gray-900">
-            <div className="flex items-start justify-between gap-3 mb-2">
-              <div className="flex-1">
-                <div className="flex items-center gap-2 mb-1">
-                  <span
-                    className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
-                      result.valuationMode === 'ARV_RENOVATED'
-                        ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'
-                        : 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400'
-                    }`}
-                  >
-                    {result.valuationMode === 'ARV_RENOVATED' ? 'ARV Mode' : 'As-Is Mode'}
-                  </span>
-                  <span className="text-[10px] text-gray-500 dark:text-gray-400">
-                    Recommended top {result.recommendedTopCount}
-                  </span>
-                  {cachedFromMs && (
-                    <span className="text-[10px] text-gray-400 dark:text-gray-500">
-                      from cache · {humanAge(cachedFromMs)}
-                    </span>
-                  )}
-                </div>
-                <p className="text-xs text-gray-700 dark:text-gray-300 leading-relaxed">
-                  {result.summary}
-                </p>
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <button
-                  type="button"
-                  disabled={!analysisId || picking}
-                  onClick={pickForMe}
-                  className="text-xs px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50"
-                  title="Auto-check the AI's recommended-include comps in the list below"
-                >
-                  {picking ? 'Applying…' : 'Pick for me'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => start(true)}
-                  className="text-xs px-3 py-1.5 rounded text-gray-600 dark:text-gray-400 hover:underline"
-                >
-                  Re-run
-                </button>
-              </div>
-            </div>
-          </div>
+          {isStale && <StaleBanner onRerun={() => start(true)} />}
 
-          {result.marketObservations.length > 0 && (
-            <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-3 bg-gray-50 dark:bg-gray-900/50">
-              <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                Market observations
-              </div>
-              <ul className="text-xs text-gray-600 dark:text-gray-400 list-disc pl-4 space-y-0.5">
-                {result.marketObservations.map((o, i) => (
-                  <li key={i}>{o}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {(result.excludedDueToTypeMismatch.length > 0 ||
-            result.excludedDueToConstraints.length > 0) && (
-            <details className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
-              <summary className="cursor-pointer p-3 text-xs font-semibold text-gray-700 dark:text-gray-300">
-                Excluded ({result.excludedDueToTypeMismatch.length +
-                  result.excludedDueToConstraints.length})
-              </summary>
-              <div className="p-3 pt-0 space-y-2 text-xs">
-                {result.excludedDueToTypeMismatch.length > 0 && (
-                  <div>
-                    <div className="font-medium text-gray-600 dark:text-gray-400 mb-1">
-                      Type mismatches
-                    </div>
-                    <ul className="list-disc pl-4 text-gray-600 dark:text-gray-400">
-                      {result.excludedDueToTypeMismatch.map((e) => (
-                        <li key={e.candidateId}>
-                          {compById.get(e.candidateId)?.address ?? e.candidateId}
-                          <span className="text-gray-400"> — {e.reason}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-                {result.excludedDueToConstraints.length > 0 && (
-                  <div>
-                    <div className="font-medium text-gray-600 dark:text-gray-400 mb-1">
-                      Constraint exclusions
-                    </div>
-                    <ul className="list-disc pl-4 text-gray-600 dark:text-gray-400">
-                      {result.excludedDueToConstraints.map((e) => (
-                        <li key={e.candidateId}>
-                          {compById.get(e.candidateId)?.address ?? e.candidateId}
-                          <span className="text-gray-400"> — {e.reason}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </div>
-            </details>
-          )}
-
-          <div className="space-y-2">
-            <div className="text-xs font-semibold text-gray-700 dark:text-gray-300">
-              Ranked comps ({orderedRankings.length})
-            </div>
-            {orderedRankings.map((r) => (
-              <CurationReasoningCard
-                key={r.candidateId}
-                ranking={r}
-                address={compById.get(r.candidateId)?.address}
+          {includedRankings.length === 0 ? (
+            <CurationEmptyState
+              variant="no_curated"
+              message={result.summary}
+              onRetry={() => start(true)}
+              onShowAll={() => persistView('all')}
+            />
+          ) : (
+            <>
+              <ViewToggle
+                value={view}
+                onChange={persistView}
+                curatedCount={includedRankings.length}
+                totalCount={orderedRankings.length}
+                selectedCount={
+                  view === 'curated'
+                    ? includedRankings.filter(
+                        (r) => cardSelections[r.candidateId],
+                      ).length
+                    : selectedCount
+                }
+                selectedTotal={
+                  view === 'curated'
+                    ? includedRankings.length
+                    : orderedRankings.length
+                }
               />
-            ))}
-          </div>
+
+              {/* Comp grid */}
+              <CompGrid
+                rankings={
+                  view === 'curated' ? includedRankings : orderedRankings
+                }
+                compById={compById}
+                subject={subject}
+                cardSelections={cardSelections}
+                onToggle={(id) =>
+                  setCardSelections((prev) => ({ ...prev, [id]: !prev[id] }))
+                }
+                onAddressClick={onScrollToComp}
+              />
+
+              {/* "Show less relevant" expansion (curated view only) */}
+              {view === 'curated' && (
+                <>
+                  <ShowLessRelevantToggle
+                    borderlineCount={borderlineRankings.length}
+                    excludedCount={excludedRankings.length}
+                    expanded={expandedLessRelevant}
+                    onToggle={() => setExpandedLessRelevant((v) => !v)}
+                  />
+                  {expandedLessRelevant && lessRelevantRankings.length > 0 && (
+                    <CompGrid
+                      rankings={lessRelevantRankings}
+                      compById={compById}
+                      subject={subject}
+                      cardSelections={cardSelections}
+                      onToggle={(id) =>
+                        setCardSelections((prev) => ({
+                          ...prev,
+                          [id]: !prev[id],
+                        }))
+                      }
+                      onAddressClick={onScrollToComp}
+                    />
+                  )}
+                </>
+              )}
+
+              {selectedCount === 0 && (
+                <div className="rounded-md border border-yellow-300 dark:border-yellow-800 bg-yellow-50 dark:bg-yellow-900/20 p-2.5 text-xs text-yellow-900 dark:text-yellow-200">
+                  No comps selected. Use &quot;Pick for me&quot; to restore the
+                  AI&apos;s recommendations.
+                </div>
+              )}
+            </>
+          )}
+
+          <MarketObservations observations={result.marketObservations} />
+
+          <ExclusionsCollapsible result={result} compById={compById} />
+
+          <ActionBar
+            canPick={!!analysisId && includedRankings.length > 0}
+            picking={picking}
+            onPickForMe={pickForMe}
+            onAddManual={onAddManualComp}
+            onRerunWithDifferentSettings={() => {
+              // Collapse results and let the user adjust input controls.
+              setResult(null);
+              onResultChange?.(null);
+              setCachedFromMs(null);
+            }}
+          />
         </div>
       )}
     </div>
+  );
+}
+
+// ── Local subcomponents ─────────────────────────────────────────────────
+
+function CompGrid({
+  rankings,
+  compById,
+  subject,
+  cardSelections,
+  onToggle,
+  onAddressClick,
+}: {
+  rankings: ReturnType<
+    NonNullable<CurationResult>['rankings']['filter']
+  > extends infer T
+    ? T
+    : never;
+  compById: Map<string, CuratedCompCardComp>;
+  subject: Props['subject'];
+  cardSelections: Record<string, boolean>;
+  onToggle: (id: string) => void;
+  onAddressClick?: (id: string) => void;
+}) {
+  return (
+    <div className="grid gap-3 grid-cols-1 md:grid-cols-2 xl:grid-cols-3">
+      {(rankings as any[]).map((r: any, i: number) => {
+        const comp = compById.get(r.candidateId);
+        if (!comp) return null;
+        return (
+          <CuratedCompCard
+            key={r.candidateId}
+            comp={comp}
+            ranking={r}
+            subject={subject}
+            selected={!!cardSelections[r.candidateId]}
+            onToggle={() => onToggle(r.candidateId)}
+            onAddressClick={onAddressClick}
+            index={i}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function ExclusionsCollapsible({
+  result,
+  compById,
+}: {
+  result: CurationResult;
+  compById: Map<string, CuratedCompCardComp>;
+}) {
+  const total =
+    result.excludedDueToTypeMismatch.length +
+    result.excludedDueToConstraints.length;
+  if (total === 0) return null;
+  return (
+    <details className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
+      <summary className="cursor-pointer p-3 text-xs font-semibold text-gray-700 dark:text-gray-300">
+        Pre-AI exclusions ({total})
+      </summary>
+      <div className="p-3 pt-0 space-y-2 text-xs">
+        {result.excludedDueToTypeMismatch.length > 0 && (
+          <div>
+            <div className="font-medium text-gray-600 dark:text-gray-400 mb-1">
+              Type mismatches
+            </div>
+            <ul className="list-disc pl-4 text-gray-600 dark:text-gray-400">
+              {result.excludedDueToTypeMismatch.map((e) => (
+                <li key={e.candidateId}>
+                  {compById.get(e.candidateId)?.address ?? e.candidateId}
+                  <span className="text-gray-400"> — {e.reason}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {result.excludedDueToConstraints.length > 0 && (
+          <div>
+            <div className="font-medium text-gray-600 dark:text-gray-400 mb-1">
+              Constraint exclusions
+            </div>
+            <ul className="list-disc pl-4 text-gray-600 dark:text-gray-400">
+              {result.excludedDueToConstraints.map((e) => (
+                <li key={e.candidateId}>
+                  {compById.get(e.candidateId)?.address ?? e.candidateId}
+                  <span className="text-gray-400"> — {e.reason}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    </details>
   );
 }
 
@@ -377,7 +547,10 @@ function DistancePicker({
       title="AI determines optimal radius based on market density and inventory; expands automatically when needed"
     >
       {options.map((o) => (
-        <option key={String(o)} value={typeof o === 'number' ? String(o) : 'auto'}>
+        <option
+          key={String(o)}
+          value={typeof o === 'number' ? String(o) : 'auto'}
+        >
           {o === 'auto' ? 'Auto distance' : `${o} mi`}
         </option>
       ))}
@@ -430,14 +603,4 @@ function ConstraintChips({
       {chip('Has pool', 'hasPool')}
     </div>
   );
-}
-
-function humanAge(ms: number): string {
-  const diff = Date.now() - ms;
-  const min = Math.floor(diff / 60000);
-  if (min < 1) return 'just now';
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  return `${Math.floor(hr / 24)}d ago`;
 }

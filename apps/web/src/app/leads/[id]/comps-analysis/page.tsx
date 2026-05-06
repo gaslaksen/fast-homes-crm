@@ -924,11 +924,27 @@ export default function CompsAnalysisPage() {
                   <CurationPanel
                     leadId={leadId}
                     analysisId={analysis?.id ?? null}
-                    comps={allComps.map((c) => ({ id: c.id, address: c.address }))}
+                    comps={allComps as any}
+                    subject={{
+                      bedrooms: lead.bedrooms,
+                      bathrooms: lead.bathrooms,
+                      sqft: lead.sqft,
+                    }}
                     onResultChange={setAiCurationResult}
                     onCurationApplied={() => {
                       // Re-load comps + analysis so selection state and ARV reflect the bulk pick.
                       void refreshAnalysis();
+                    }}
+                    onAddManualComp={() => setShowAddComp(true)}
+                    onScrollToComp={(compId) => {
+                      const el = compRowRefs.current[compId];
+                      if (el) {
+                        el.scrollIntoView({
+                          behavior: 'smooth',
+                          block: 'center',
+                        });
+                        setHoveredCompId(compId);
+                      }
                     }}
                   />
                 </CurationErrorBoundary>

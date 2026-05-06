@@ -5,6 +5,7 @@ import type { CurationResult } from './curation-result';
 
 export type StepName =
   | 'load_subject'
+  | 'dedup'
   | 'classify_type'
   | 'filter_type_mismatches'
   | 'filter_constraints'

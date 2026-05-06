@@ -288,6 +288,7 @@ model Comp {
   schoolDistrict  String?
   photoUrl        String?
   sourceUrl       String?
+  apn             String?
   source          String        @default("manual") // 'manual' | 'reapi' | 'batchdata' | 'chatarv' | 'placeholder'
   correlation     Float?
   latitude        Float?
@@ -956,6 +957,9 @@ model AiCompCuration {
   isValidationRun        Boolean  @default(false)
   validationPropertyId   String?
   cacheKey               String
+  rawCandidateCount      Int?
+  uniqueCandidateCount   Int?
+  dedupMetadata          Json?
   lead                   Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
   user                   User     @relation(fields: [userId], references: [id])
 

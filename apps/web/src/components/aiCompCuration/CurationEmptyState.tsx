@@ -1,10 +1,17 @@
 'use client';
 
 interface Props {
-  variant: 'idle' | 'type_required' | 'zero_candidates' | 'network_error' | 'parse_error';
+  variant:
+    | 'idle'
+    | 'type_required'
+    | 'zero_candidates'
+    | 'no_curated'
+    | 'network_error'
+    | 'parse_error';
   message?: string;
   onRetry?: () => void;
   onSetType?: () => void;
+  onShowAll?: () => void;
 }
 
 const COPY: Record<Props['variant'], { title: string; body: string }> = {
@@ -23,6 +30,11 @@ const COPY: Record<Props['variant'], { title: string; body: string }> = {
     body:
       "There are no comps in this lead's pool yet. Fetch comps from REAPI or BatchData first, then run curation.",
   },
+  no_curated: {
+    title: 'No strong comps found in this market',
+    body:
+      "The AI couldn't confidently recommend any comps for this property. The candidate pool may be too thin or too varied for a curated selection. Manual review recommended.",
+  },
   network_error: {
     title: 'Curation failed',
     body:
@@ -40,6 +52,7 @@ export default function CurationEmptyState({
   message,
   onRetry,
   onSetType,
+  onShowAll,
 }: Props) {
   const copy = COPY[variant];
   return (
@@ -68,6 +81,28 @@ export default function CurationEmptyState({
           >
             Retry
           </button>
+        )}
+        {variant === 'no_curated' && (
+          <>
+            {onShowAll && (
+              <button
+                type="button"
+                onClick={onShowAll}
+                className="text-xs px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                Show all ranked comps
+              </button>
+            )}
+            {onRetry && (
+              <button
+                type="button"
+                onClick={onRetry}
+                className="text-xs px-3 py-1.5 rounded bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-800 dark:text-gray-200"
+              >
+                Re-run with different settings
+              </button>
+            )}
+          </>
         )}
       </div>
     </div>

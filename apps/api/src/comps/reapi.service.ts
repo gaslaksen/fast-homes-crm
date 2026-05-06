@@ -1030,6 +1030,17 @@ export class ReapiService {
         features.listingUrl = ml.url;
       }
 
+      // Capture the full photo list (REAPI MLS only) so the AI prompt
+      // can attach 1-2 photos per comp instead of only the primary.
+      // Prefer midRes (~900px) — sufficient for AI vision, smaller payload.
+      const photoUrls: string[] =
+        method === 'mls'
+          ? (mlsRaw?.listing?.media?.photosList ?? [])
+              .map((p) => p?.midRes ?? p?.highRes ?? p?.lowRes)
+              .filter((u): u is string => typeof u === 'string' && u.length > 0)
+          : [];
+      features.photoUrls = photoUrls;
+
       try {
         await this.prisma.comp.create({
           data: {

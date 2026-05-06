@@ -150,4 +150,43 @@ describe('parseCurationResult', () => {
       expect(out.value.excludedDueToConstraints[0].reason).toBe('renovatedOnly');
     }
   });
+
+  it('uses AI-supplied briefReasoning when present', () => {
+    const raw: any = {
+      ...validBase(),
+      rankings: [{ ...validRanking, briefReasoning: 'Same era, lot 70% smaller.' }],
+    };
+    const out = parseCurationResult(raw);
+    expect(out.ok).toBe(true);
+    if (out.ok) expect(out.value.rankings[0].briefReasoning).toBe('Same era, lot 70% smaller.');
+  });
+
+  it('synthesizes briefReasoning from first sentence of reasoning when missing', () => {
+    const raw: any = {
+      ...validBase(),
+      rankings: [
+        {
+          ...validRanking,
+          reasoning: 'Same street and era. Lot is 70% smaller than subject which matters for valuation.',
+          // briefReasoning intentionally omitted
+        },
+      ],
+    };
+    const out = parseCurationResult(raw);
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      expect(out.value.rankings[0].briefReasoning).toBe('Same street and era.');
+    }
+  });
+
+  it('caps briefReasoning at 200 chars', () => {
+    const long = 'x'.repeat(400);
+    const raw: any = {
+      ...validBase(),
+      rankings: [{ ...validRanking, briefReasoning: long }],
+    };
+    const out = parseCurationResult(raw);
+    expect(out.ok).toBe(true);
+    if (out.ok) expect(out.value.rankings[0].briefReasoning.length).toBeLessThanOrEqual(200);
+  });
 });

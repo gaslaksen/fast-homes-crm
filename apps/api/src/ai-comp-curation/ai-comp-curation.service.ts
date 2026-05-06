@@ -26,6 +26,7 @@ import {
   CandidatePhotoSource,
 } from './utils/photo-budget';
 import { fetchAndResize } from './utils/image-fetch';
+import { dedupCandidates } from './utils/dedup';
 import {
   PROMPT_V1,
   PromptCandidate,
@@ -44,10 +45,12 @@ const MODEL = 'claude-sonnet-4-6';
 // reserving so much capacity that the model slows down.
 const MAX_TOKENS = 16000;
 const TARGET_SURVIVOR_COUNT = 6;
-// Photo budget tuned down from 30. Each image is ~1-2k input tokens at
-// 768px and shapes the bulk of latency + cost. 12 is plenty to give the
-// AI visual signal on the most uncertain candidates.
-const PHOTO_BUDGET = 12;
+// Photo budget. Restored to 30 from the perf-optimized 12 now that
+// photos actually flow end-to-end (Phase A.5 fixed the persistence
+// gap on REAPI MLS multi-photo + BatchData APN). 30 lets the round-
+// robin allocator give 1-2 photos to roughly every candidate at a
+// typical pool size of 15-25 unique comps after dedup.
+const PHOTO_BUDGET = 30;
 
 export interface RunCurationInput {
   leadId: string;
@@ -202,14 +205,56 @@ export class AiCompCurationService {
       return;
     }
     const analysis = (lead as any).compAnalyses?.[0] ?? null;
-    const allComps = await this.prisma.comp.findMany({
+    const rawComps = await this.prisma.comp.findMany({
       where: { leadId: input.leadId, ...(analysis ? { analysisId: analysis.id } : {}) },
       orderBy: { distance: 'asc' },
     });
     emit('load_subject', 'done', {
-      compCount: allComps.length,
+      compCount: rawComps.length,
       analysisId: analysis?.id,
     });
+
+    // 1.5. Dedup. Collapse duplicates from cross-provider overlap so the
+    // AI doesn't burn tokens reasoning over the same property twice.
+    // Tags canonical rows with features.dedup; downstream steps treat
+    // survivors as if they were the original pool.
+    emit('dedup', 'start');
+    const dedupResult = dedupCandidates(
+      rawComps.map((c) => ({
+        id: c.id,
+        address: c.address,
+        apn: (c as any).apn ?? null,
+        latitude: c.latitude,
+        longitude: c.longitude,
+        bedrooms: c.bedrooms,
+        bathrooms: c.bathrooms,
+        sqft: c.sqft,
+        source: c.source,
+        photoUrl: c.photoUrl,
+        features: c.features as Record<string, unknown> | null,
+        soldDate: c.soldDate,
+      })),
+    );
+    // Build a lookup of the survivor IDs to filter rawComps. Carry the
+    // dedup-tagged features back onto the kept rows so downstream code
+    // (photo extraction, AI prompt) sees the corroboration metadata.
+    const survivorById = new Map(dedupResult.survivors.map((s) => [s.id, s]));
+    const allComps = rawComps
+      .filter((c) => survivorById.has(c.id))
+      .map((c) => ({
+        ...c,
+        features: survivorById.get(c.id)!.features as any,
+      }));
+    emit('dedup', 'done', {
+      raw: dedupResult.rawCount,
+      unique: dedupResult.uniqueCount,
+      removed: dedupResult.removedCount,
+      corroborated: dedupResult.corroboratedCount,
+    });
+    this.logger.log(
+      `dedup raw=${dedupResult.rawCount} unique=${dedupResult.uniqueCount} ` +
+        `removed=${dedupResult.removedCount} corroborated=${dedupResult.corroboratedCount}`,
+    );
 
     // 2. Classify subject type.
     emit('classify_type', 'start');
@@ -353,18 +398,38 @@ export class AiCompCurationService {
     // 8. Photo budget.
     emit('photo_budget', 'start');
     const subjectPhotos = extractSubjectPhotos(lead);
-    const candidatePhotos: CandidatePhotoSource[] = constraintFiltered.map((c) => ({
-      candidateId: c.id,
-      photoUrls: c.photoUrl ? [c.photoUrl] : [],
-      uncertainty: uncertaintyScore(c, lead),
-      distance: c.distance,
-    }));
+    const candidatePhotos: CandidatePhotoSource[] = constraintFiltered.map((c) => {
+      const featurePhotos =
+        ((c.features as any)?.photoUrls as string[] | undefined) ?? null;
+      const urls =
+        Array.isArray(featurePhotos) && featurePhotos.length > 0
+          ? featurePhotos
+          : c.photoUrl
+            ? [c.photoUrl]
+            : [];
+      return {
+        candidateId: c.id,
+        photoUrls: urls,
+        uncertainty: uncertaintyScore(c, lead),
+        distance: c.distance,
+      };
+    });
+    const candidatesWithAnyPhoto = candidatePhotos.filter(
+      (c) => c.photoUrls.length > 0,
+    ).length;
+    this.logger.log(
+      `photo_budget: subjectPhotos=${subjectPhotos.length}, ` +
+        `candidatesWithPhotos=${candidatesWithAnyPhoto}/${candidatePhotos.length}, ` +
+        `totalUrls=${candidatePhotos.reduce((s, c) => s + c.photoUrls.length, 0)}`,
+    );
     const allocations = selectPhotoBudget(subjectPhotos, candidatePhotos, {
       total: PHOTO_BUDGET,
     });
     emit('photo_budget', 'done', {
       subjectPhotosTaken: allocations.filter((a) => a.compId === null).length,
       candidatePhotosTaken: allocations.filter((a) => a.compId !== null).length,
+      candidatesWithPhotos: candidatesWithAnyPhoto,
+      totalCandidates: candidatePhotos.length,
     });
 
     // 9. Fetch + resize images in parallel; degrade individual failures.
@@ -379,9 +444,25 @@ export class AiCompCurationService {
       allocation: (typeof allocations)[number];
       image: Awaited<ReturnType<typeof fetchAndResize>>;
     }> = [];
+    const failureReasons: string[] = [];
     for (const r of fetched) {
-      if (r.status === 'fulfilled') successfulImages.push(r.value);
+      if (r.status === 'fulfilled') {
+        successfulImages.push(r.value);
+      } else {
+        failureReasons.push(
+          (r.reason as Error)?.message ?? String(r.reason),
+        );
+      }
     }
+    if (failureReasons.length > 0) {
+      this.logger.warn(
+        `fetch_resize: ${failureReasons.length} of ${allocations.length} image fetches failed. ` +
+          `First reason: ${failureReasons[0].slice(0, 200)}`,
+      );
+    }
+    this.logger.log(
+      `image content blocks ready: ${successfulImages.length} of ${allocations.length} requested`,
+    );
     emit('fetch_resize', 'done', {
       requested: allocations.length,
       succeeded: successfulImages.length,
@@ -525,6 +606,7 @@ export class AiCompCurationService {
             relevanceScore: 0,
             inclusion: 'borderline',
             reasoning: 'AI did not rank this candidate.',
+            briefReasoning: 'Unranked by AI.',
             flags: ['unranked_by_ai'],
             externalLinks: cand
               ? buildExternalLinks({ address: cand.address, city: null, state: null, zip: null })
@@ -571,6 +653,13 @@ export class AiCompCurationService {
         isValidationRun: !!input.isValidationRun,
         validationPropertyId: input.validationPropertyId ?? null,
         cacheKey,
+        rawCandidateCount: dedupResult.rawCount,
+        uniqueCandidateCount: dedupResult.uniqueCount,
+        dedupMetadata: {
+          removedCount: dedupResult.removedCount,
+          corroboratedCount: dedupResult.corroboratedCount,
+          groups: dedupResult.groups,
+        } as any,
       },
     });
     emit('persist', 'done', { curationId: row.id });
@@ -766,6 +855,8 @@ function buildPromptCandidate(
       zip: null,
     }),
     photoLabels,
+    dedupCorroborated: !!(c.features as any)?.dedup?.corroborated,
+    dedupSources: ((c.features as any)?.dedup?.sources as string[]) ?? [],
   };
 }
 

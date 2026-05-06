@@ -21,6 +21,9 @@ export interface CurationRanking {
   relevanceScore: number;
   inclusion: Inclusion;
   reasoning: string;
+  // Headline ≤200 chars used in the comp card. Always present (server
+  // synthesizes from the first sentence of `reasoning` if the AI omits it).
+  briefReasoning: string;
   flags: string[];
   adjustmentNotes?: string;
   externalLinks: ExternalLinks;

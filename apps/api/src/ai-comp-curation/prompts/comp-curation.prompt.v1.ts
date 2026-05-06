@@ -9,7 +9,14 @@ import type {
 } from '../types/curation-result';
 import type { ExternalLinks } from '../utils/external-links';
 
-export const VERSION = 'v1.0.0';
+// v1.1.0 (2026-05-06):
+//   - new `briefReasoning` field per ranking (≤120 char headline)
+//   - candidates now carry `dedupCorroborated` and `dedupSources` so the
+//     AI can use cross-provider corroboration as a small quality signal
+//   - photo handling unchanged at the prompt level; the backend now
+//     wires multi-photo support upstream, so reasoning that references
+//     photos is more frequently grounded in real visuals
+export const VERSION = 'v1.1.0';
 
 export interface PromptSubject {
   address: string;
@@ -56,6 +63,11 @@ export interface PromptCandidate {
   source: 'reapi' | 'batchdata' | string;
   externalLinks: ExternalLinks;
   photoLabels: string[]; // labels for any images present in this prompt
+  // Cross-provider corroboration metadata from the dedup step. When
+  // `dedupCorroborated` is true, two or more providers agreed on this
+  // property — a small additional signal of data quality.
+  dedupCorroborated: boolean;
+  dedupSources: string[];
 }
 
 export interface PromptInput {
@@ -150,6 +162,7 @@ export function build(input: PromptInput): string {
     `- Per-comp reasoning must be specific (e.g. "Same street, same era, 16% larger sqft requiring -$8k size adjustment"). Generic statements like "good comp" are not acceptable.`,
     `- If type-matched candidates are insufficient (fewer than 4 viable comps), return a smaller set and recommend manual review rather than padding.`,
     `- Keep output tight. Reasoning ONE sentence per comp. summary 2-3 sentences. marketObservations max 4 bullets.`,
+    `- Each candidate carries \`dedupCorroborated\`. When true, two providers (REAPI MLS + BatchData) independently returned this property — a small additional confidence signal you may cite when relevant. Don't lean on it heavily; data agreement is not the same as data quality.`,
     ``,
     `## Output format`,
     `Respond with valid JSON only. No prose, no markdown fences, no explanation outside the JSON. Match this exact shape:`,
@@ -165,6 +178,7 @@ export function build(input: PromptInput): string {
     `      "relevanceScore": <0-100>,`,
     `      "inclusion": "recommend_include" | "recommend_exclude" | "borderline",`,
     `      "reasoning": "ONE sentence, ≤25 words, specific to this comp. Cite the actual data signal (era, size delta, distance, condition cue).",`,
+    `      "briefReasoning": "Headline ≤120 chars for the comp card. Most important point only. Prefer a quantitative phrase (e.g. 'Same era, same beds/baths. Lot 70% smaller.' or 'New construction; deduct ~$20-25K for era discount.').",`,
     `      "flags": ["pick from: distressed_sale_likely, era_mismatch, size_outlier, subtype_concern, no_photos_for_verification, renovation_likely, short_dom_full_ask"],`,
     `      "adjustmentNotes": "optional, ≤15 words"`,
     `    }`,
@@ -229,6 +243,9 @@ function formatCandidate(c: PromptCandidate): string {
       ? `  Listing description: "${truncate(c.listingDescription, 400)}"`
       : null,
     `  Source: ${c.source} | Photos: ${photos}`,
+    c.dedupCorroborated
+      ? `  dedupCorroborated: true (sources: ${c.dedupSources.join(', ')})`
+      : null,
     `  Links: Zillow=${c.externalLinks.zillow} | Realtor=${c.externalLinks.realtor} | Maps=${c.externalLinks.googleMaps}`,
   ]
     .filter(Boolean)
