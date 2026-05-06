@@ -14,6 +14,7 @@ import SubjectPropertyCard from '@/components/SubjectPropertyCard';
 import CompsToolbar from '@/components/CompsToolbar';
 import CurationPanel from '@/components/aiCompCuration/CurationPanel';
 import CurationErrorBoundary from '@/components/aiCompCuration/CurationErrorBoundary';
+import SubjectStrip from '@/components/aiCompCuration/SubjectStrip';
 import { isAiCompCurationEnabled } from '@/lib/flags';
 import type {
   AiCurationDecision,
@@ -811,8 +812,133 @@ export default function CompsAnalysisPage() {
       {/* Unified Tab Nav */}
       <LeadTabNav leadId={leadId} activeTab={activeSection} />
 
-      {/* ═══════════════ COMPS SECTION (split-pane) ═══════════════ */}
-      {activeSection === 'comps' && (
+      {/* ═══════════════ COMPS SECTION — restructured under AI flag ═══════════════ */}
+      {activeSection === 'comps' && aiCurationFlag && lead && (
+        <div className="max-w-screen-2xl mx-auto">
+          {/* Subject anchor strip — sticky on lg+ */}
+          <SubjectStrip
+            lead={lead as any}
+            taxesAnnual={lead.taxAssessedValue ? lead.taxAssessedValue * 0.0125 : null}
+          />
+
+          <div className="px-3 sm:px-4 lg:px-6 py-4">
+            {comparisonMode ? (
+              <ProviderComparisonView
+                comps={comparisonComps}
+                lead={lead}
+                hoveredCompId={hoveredCompId}
+                setHoveredCompId={setHoveredCompId}
+                onToggle={handleToggleComp}
+                onDelete={handleDeleteComp}
+                onClose={() => setComparisonMode(false)}
+                onUseProvider={async (provider) => {
+                  setCompsSource(provider);
+                  setComparisonMode(false);
+                  try {
+                    await leadsAPI.update(leadId, { compsProvider: provider } as any);
+                  } catch (err) {
+                    console.error('Failed to persist compsProvider:', err);
+                  }
+                }}
+                compIndexMap={compIndexMap}
+              />
+            ) : allComps.length === 0 ? (
+              <div className="text-center py-16 text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700">
+                <div className="text-5xl mb-3">&#127968;</div>
+                <p className="font-medium text-lg">No comparables yet</p>
+                <p className="text-sm mt-1 mb-4">
+                  Open Filters &amp; Settings to refresh comps from REAPI or BatchData.
+                </p>
+                <button
+                  onClick={() => handleFindComps(false)}
+                  disabled={fetchingComps}
+                  className="btn btn-primary"
+                >
+                  {fetchingComps ? `Fetching from ${compsSource === 'batchdata' ? 'BatchData' : 'REAPI'}...` : 'Find Comps'}
+                </button>
+              </div>
+            ) : (
+              <CurationErrorBoundary>
+                <CurationPanel
+                  leadId={leadId}
+                  analysisId={analysis?.id ?? null}
+                  comps={allComps as any}
+                  subject={{
+                    bedrooms: lead.bedrooms,
+                    bathrooms: lead.bathrooms,
+                    sqft: lead.sqft,
+                  }}
+                  mapLead={lead as any}
+                  filters={{
+                    compsSource,
+                    batchDataEnabled: BATCHDATA_ENABLED,
+                    filterMonths: analysis?.timeFrameMonths ?? 12,
+                    filterDistance: analysis?.maxDistance ?? 1,
+                    sortField,
+                    sortDir,
+                    fetchingComps,
+                    onSetCompsSource: setCompsSource,
+                    onCompareProviders: handleCompareProviders,
+                    onSetFilterMonths: async (months) => {
+                      if (!analysis) return;
+                      try {
+                        await compAnalysisAPI.applyFilters(leadId, analysis.id, { timeFrameMonths: months });
+                        await refreshAnalysis();
+                      } catch (err) {
+                        console.error('Failed to apply age filter:', err);
+                      }
+                    },
+                    onSetFilterDistance: async (miles) => {
+                      if (!analysis) return;
+                      try {
+                        await compAnalysisAPI.applyFilters(leadId, analysis.id, { maxDistance: miles });
+                        await refreshAnalysis();
+                      } catch (err) {
+                        console.error('Failed to apply distance filter:', err);
+                      }
+                    },
+                    onSort: handleSort,
+                    onSelectAll: async (selected) => {
+                      if (!analysis) return;
+                      await compAnalysisAPI.selectAll(leadId, analysis.id, selected);
+                      await refreshAnalysis();
+                    },
+                    onRefreshComps: () => handleFindComps(true),
+                  }}
+                  onResultChange={setAiCurationResult}
+                  onCurationApplied={() => {
+                    void refreshAnalysis();
+                  }}
+                  onAddManualComp={() => setShowAddComp(true)}
+                />
+              </CurationErrorBoundary>
+            )}
+
+            {/* ARV calculation button — kept as a separate row below the curation panel */}
+            {!comparisonMode && allComps.length >= 1 && (
+              <div className="pt-4 flex items-center gap-3">
+                <button
+                  onClick={handleAiAdjustComps}
+                  disabled={aiAdjusting || selectedComps.length === 0}
+                  className="btn btn-primary flex items-center gap-2"
+                >
+                  {aiAdjusting ? (
+                    <>
+                      <span className="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
+                      Calculating ARV...
+                    </>
+                  ) : (
+                    <>AI Adjust &amp; Calculate ARV</>
+                  )}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════ COMPS SECTION (legacy split-pane, flag-off) ═══════════════ */}
+      {activeSection === 'comps' && !aiCurationFlag && (
         <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex flex-col lg:flex-row lg:h-[calc(100vh-12rem)]">
           {/* ── LEFT PANE: Map + Subject Property ── */}
           <div className="lg:w-[45%] xl:w-[42%] flex flex-col border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 lg:overflow-y-auto rounded-l-lg">

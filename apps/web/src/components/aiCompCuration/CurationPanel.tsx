@@ -9,6 +9,8 @@ import {
 import {
   readCurationView,
   writeCurationView,
+  readDisplayMode,
+  writeDisplayMode,
 } from '@/lib/aiCompCuration/persistence';
 import type {
   CurationResult,
@@ -17,6 +19,7 @@ import type {
   StepEvent,
   ValuationMode,
 } from '@/lib/aiCompCuration/types';
+import type { CompsSource } from '@/components/CompsToolbar';
 import CurationProgressDrawer from './CurationProgressDrawer';
 import CurationExpansionNarrative from './CurationExpansionNarrative';
 import CurationEmptyState from './CurationEmptyState';
@@ -29,12 +32,49 @@ import StaleBanner from './StaleBanner';
 import ShowLessRelevantToggle from './ShowLessRelevantToggle';
 import MarketObservations from './MarketObservations';
 import ActionBar from './ActionBar';
+import DisplayModeToggle, { type DisplayMode } from './DisplayModeToggle';
+import FiltersDrawer from './FiltersDrawer';
+import CuratedCompsTable from './CuratedCompsTable';
+import CurationMapView from './CurationMapView';
+
+interface FiltersBundle {
+  compsSource: CompsSource;
+  batchDataEnabled?: boolean;
+  filterMonths: number;
+  filterDistance: number;
+  sortField: string;
+  sortDir: 'asc' | 'desc';
+  fetchingComps?: boolean;
+  onSetCompsSource: (source: CompsSource) => void;
+  onCompareProviders: () => void;
+  onSetFilterMonths: (m: number) => void;
+  onSetFilterDistance: (mi: number) => void;
+  onSort: (field: string) => void;
+  onSelectAll: (selected: boolean) => void;
+  onRefreshComps: () => void;
+}
+
+interface MapLeadShape {
+  propertyAddress: string;
+  propertyCity: string;
+  propertyState: string;
+  propertyZip: string;
+  bedrooms?: number | null;
+  bathrooms?: number | null;
+  sqft?: number | null;
+  latitude?: number | null;
+  longitude?: number | null;
+}
 
 interface Props {
   leadId: string;
   analysisId: string | null;
   comps: CuratedCompCardComp[];
   subject: { bedrooms?: number | null; bathrooms?: number | null; sqft?: number | null };
+  // Optional — if provided, enables the Map display mode.
+  mapLead?: MapLeadShape;
+  // Optional — if provided, enables the Filters & Settings drawer.
+  filters?: FiltersBundle;
   onCurationApplied?: () => void;
   onResultChange?: (result: CurationResult | null) => void;
   onAddManualComp?: () => void;
@@ -46,6 +86,8 @@ export default function CurationPanel({
   analysisId,
   comps,
   subject,
+  mapLead,
+  filters,
   onCurationApplied,
   onResultChange,
   onAddManualComp,
@@ -67,19 +109,26 @@ export default function CurationPanel({
   const [picking, setPicking] = useState(false);
 
   const [view, setView] = useState<CurationView>('curated');
+  const [displayMode, setDisplayMode] = useState<DisplayMode>('cards');
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [expandedLessRelevant, setExpandedLessRelevant] = useState(false);
   const [cardSelections, setCardSelections] = useState<Record<string, boolean>>(
     {},
   );
 
-  // Load persisted view preference once on mount.
+  // Load persisted view + display-mode preferences once on mount.
   useEffect(() => {
     setView(readCurationView());
+    setDisplayMode(readDisplayMode());
   }, []);
 
   const persistView = (v: CurationView) => {
     setView(v);
     writeCurationView(v);
+  };
+  const persistDisplayMode = (m: DisplayMode) => {
+    setDisplayMode(m);
+    writeDisplayMode(m);
   };
 
   const input: RunCurationInput = {
@@ -290,11 +339,12 @@ export default function CurationPanel({
 
       {/* Results */}
       {!running && result && (
-        <div className="space-y-3">
+        <div className="space-y-3 pb-20">
           <SummaryHeader
             result={result}
             cachedAtMs={cachedFromMs}
             onRerun={() => start(true)}
+            onOpenFilters={filters ? () => setFiltersOpen(true) : undefined}
           />
 
           <CurationExpansionNarrative expansion={result.searchExpansion} />
@@ -310,64 +360,119 @@ export default function CurationPanel({
             />
           ) : (
             <>
-              <ViewToggle
-                value={view}
-                onChange={persistView}
-                curatedCount={includedRankings.length}
-                totalCount={orderedRankings.length}
-                selectedCount={
-                  view === 'curated'
-                    ? includedRankings.filter(
-                        (r) => cardSelections[r.candidateId],
-                      ).length
-                    : selectedCount
-                }
-                selectedTotal={
-                  view === 'curated'
-                    ? includedRankings.length
-                    : orderedRankings.length
-                }
-              />
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <ViewToggle
+                  value={view}
+                  onChange={persistView}
+                  curatedCount={includedRankings.length}
+                  totalCount={orderedRankings.length}
+                  selectedCount={
+                    view === 'curated'
+                      ? includedRankings.filter(
+                          (r) => cardSelections[r.candidateId],
+                        ).length
+                      : selectedCount
+                  }
+                  selectedTotal={
+                    view === 'curated'
+                      ? includedRankings.length
+                      : orderedRankings.length
+                  }
+                />
+                <DisplayModeToggle
+                  value={displayMode}
+                  onChange={persistDisplayMode}
+                />
+              </div>
 
-              {/* Comp grid */}
-              <CompGrid
-                rankings={
-                  view === 'curated' ? includedRankings : orderedRankings
-                }
-                compById={compById}
-                subject={subject}
-                cardSelections={cardSelections}
-                onToggle={(id) =>
-                  setCardSelections((prev) => ({ ...prev, [id]: !prev[id] }))
-                }
-                onAddressClick={onScrollToComp}
-              />
+              {/* Display mode-driven content */}
+              {(() => {
+                // The "main" rankings respect Curated vs All-Ranked view.
+                // Cards mode keeps the historical split: curated grid
+                // above, less-relevant expansion below. Table and Map
+                // append less-relevant inline when expanded.
+                const mainRankings =
+                  view === 'curated' ? includedRankings : orderedRankings;
+                const expandedLess =
+                  view === 'curated' && expandedLessRelevant
+                    ? lessRelevantRankings
+                    : [];
+                const onToggle = (id: string) =>
+                  setCardSelections((prev) => ({ ...prev, [id]: !prev[id] }));
 
-              {/* "Show less relevant" expansion (curated view only) */}
-              {view === 'curated' && (
-                <>
-                  <ShowLessRelevantToggle
-                    borderlineCount={borderlineRankings.length}
-                    excludedCount={excludedRankings.length}
-                    expanded={expandedLessRelevant}
-                    onToggle={() => setExpandedLessRelevant((v) => !v)}
-                  />
-                  {expandedLessRelevant && lessRelevantRankings.length > 0 && (
-                    <CompGrid
-                      rankings={lessRelevantRankings}
+                if (displayMode === 'table') {
+                  const tableRankings =
+                    view === 'curated'
+                      ? expandedLessRelevant
+                        ? [...includedRankings, ...lessRelevantRankings]
+                        : includedRankings
+                      : orderedRankings;
+                  return (
+                    <CuratedCompsTable
+                      rankings={tableRankings}
                       compById={compById}
                       subject={subject}
                       cardSelections={cardSelections}
-                      onToggle={(id) =>
-                        setCardSelections((prev) => ({
-                          ...prev,
-                          [id]: !prev[id],
-                        }))
-                      }
+                      onToggle={onToggle}
                       onAddressClick={onScrollToComp}
                     />
-                  )}
-                </>
+                  );
+                }
+
+                if (displayMode === 'map' && mapLead) {
+                  const mapRankings =
+                    view === 'curated'
+                      ? expandedLessRelevant
+                        ? [...includedRankings, ...lessRelevantRankings]
+                        : includedRankings
+                      : orderedRankings;
+                  return (
+                    <CurationMapView
+                      lead={mapLead}
+                      rankings={mapRankings}
+                      compById={compById}
+                      subject={subject}
+                      cardSelections={cardSelections}
+                      onToggle={onToggle}
+                      onAddressClick={onScrollToComp}
+                    />
+                  );
+                }
+
+                // Cards mode (default) — curated grid + optional less-
+                // relevant grid below.
+                return (
+                  <>
+                    <CompGrid
+                      rankings={mainRankings}
+                      compById={compById}
+                      subject={subject}
+                      cardSelections={cardSelections}
+                      onToggle={onToggle}
+                      onAddressClick={onScrollToComp}
+                    />
+                    {expandedLess.length > 0 && (
+                      <CompGrid
+                        rankings={expandedLess}
+                        compById={compById}
+                        subject={subject}
+                        cardSelections={cardSelections}
+                        onToggle={onToggle}
+                        onAddressClick={onScrollToComp}
+                      />
+                    )}
+                  </>
+                );
+              })()}
+
+              {/* "Show less relevant" toggle — applies in curated view across all display modes */}
+              {view === 'curated' && (
+                <ShowLessRelevantToggle
+                  borderlineCount={borderlineRankings.length}
+                  excludedCount={excludedRankings.length}
+                  expanded={expandedLessRelevant}
+                  onToggle={() => setExpandedLessRelevant((v) => !v)}
+                />
               )}
 
               {selectedCount === 0 && (
@@ -382,20 +487,63 @@ export default function CurationPanel({
           <MarketObservations observations={result.marketObservations} />
 
           <ExclusionsCollapsible result={result} compById={compById} />
-
-          <ActionBar
-            canPick={!!analysisId && includedRankings.length > 0}
-            picking={picking}
-            onPickForMe={pickForMe}
-            onAddManual={onAddManualComp}
-            onRerunWithDifferentSettings={() => {
-              // Collapse results and let the user adjust input controls.
-              setResult(null);
-              onResultChange?.(null);
-              setCachedFromMs(null);
-            }}
-          />
         </div>
+      )}
+
+      {/* Sticky action bar — pinned to viewport bottom. Only visible
+          while a curation result is loaded so the bar doesn't appear
+          before the user has anything to act on. The page content
+          gets pb-20 above to avoid being covered. */}
+      {!running && result && includedRankings.length > 0 && (
+        <div
+          className="fixed bottom-0 left-0 right-0 z-30 border-t border-gray-200 dark:border-gray-700 bg-white/95 dark:bg-gray-900/95 backdrop-blur"
+          role="region"
+          aria-label="Curation actions"
+        >
+          <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 py-2">
+            <ActionBar
+              canPick={!!analysisId && includedRankings.length > 0}
+              picking={picking}
+              onPickForMe={pickForMe}
+              onAddManual={onAddManualComp}
+              onRerunWithDifferentSettings={() => {
+                // Collapse results and let the user adjust input controls.
+                setResult(null);
+                onResultChange?.(null);
+                setCachedFromMs(null);
+              }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Filters & Settings drawer */}
+      {filters && (
+        <FiltersDrawer
+          open={filtersOpen}
+          onClose={() => setFiltersOpen(false)}
+          compsSource={filters.compsSource}
+          batchDataEnabled={filters.batchDataEnabled}
+          onSetCompsSource={filters.onSetCompsSource}
+          onCompareProviders={() => {
+            setFiltersOpen(false);
+            filters.onCompareProviders();
+          }}
+          filterMonths={filters.filterMonths}
+          filterDistance={filters.filterDistance}
+          onSetFilterMonths={filters.onSetFilterMonths}
+          onSetFilterDistance={filters.onSetFilterDistance}
+          sortField={filters.sortField}
+          sortDir={filters.sortDir}
+          onSort={filters.onSort}
+          onSelectAll={filters.onSelectAll}
+          onRefreshComps={filters.onRefreshComps}
+          onAddManual={() => {
+            setFiltersOpen(false);
+            onAddManualComp?.();
+          }}
+          fetchingComps={filters.fetchingComps}
+        />
       )}
     </div>
   );
@@ -423,7 +571,7 @@ function CompGrid({
   onAddressClick?: (id: string) => void;
 }) {
   return (
-    <div className="grid gap-3 grid-cols-1 md:grid-cols-2 xl:grid-cols-3">
+    <div className="grid gap-3 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
       {(rankings as any[]).map((r: any, i: number) => {
         const comp = compById.get(r.candidateId);
         if (!comp) return null;
