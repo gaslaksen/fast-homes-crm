@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { photosAPI } from '@/lib/api';
+import LightboxOverlay from '@/components/LightboxOverlay';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
@@ -73,23 +74,6 @@ export default function HeroPhotoCarousel({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [leadId, photos.length]);
-
-  const handleKeyDown = useCallback(
-    (e: KeyboardEvent) => {
-      if (lightboxIndex === null) return;
-      if (e.key === 'Escape') setLightboxIndex(null);
-      if (e.key === 'ArrowLeft' && lightboxIndex > 0) setLightboxIndex(lightboxIndex - 1);
-      if (e.key === 'ArrowRight' && lightboxIndex < photos.length - 1) setLightboxIndex(lightboxIndex + 1);
-    },
-    [lightboxIndex, photos.length],
-  );
-
-  useEffect(() => {
-    if (lightboxIndex !== null) {
-      window.addEventListener('keydown', handleKeyDown);
-      return () => window.removeEventListener('keydown', handleKeyDown);
-    }
-  }, [lightboxIndex, handleKeyDown]);
 
   const heroPhoto = photos[heroIndex];
 
@@ -169,66 +153,12 @@ export default function HeroPhotoCarousel({
         </div>
       )}
 
-      {/* Lightbox */}
-      {lightboxIndex !== null && photos[lightboxIndex] && (
-        <div
-          className="fixed inset-0 z-50 bg-black/85 flex items-center justify-center"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Photo lightbox"
-          onClick={() => setLightboxIndex(null)}
-        >
-          <button
-            type="button"
-            className="absolute top-4 right-4 text-white/80 hover:text-white z-10"
-            onClick={() => setLightboxIndex(null)}
-            aria-label="Close lightbox"
-          >
-            <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-          <div className="absolute top-4 left-4 text-white/80 text-sm">
-            {lightboxIndex + 1} of {photos.length}
-          </div>
-          {lightboxIndex > 0 && (
-            <button
-              type="button"
-              className="absolute left-4 top-1/2 -translate-y-1/2 text-white/80 hover:text-white z-10"
-              onClick={(e) => {
-                e.stopPropagation();
-                setLightboxIndex(lightboxIndex - 1);
-              }}
-              aria-label="Previous photo"
-            >
-              <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-              </svg>
-            </button>
-          )}
-          <img
-            src={resolveUrl(photos[lightboxIndex].url)}
-            alt={photos[lightboxIndex].caption || `Photo ${lightboxIndex + 1}`}
-            className="max-h-[85vh] max-w-[90vw] object-contain"
-            onClick={(e) => e.stopPropagation()}
-          />
-          {lightboxIndex < photos.length - 1 && (
-            <button
-              type="button"
-              className="absolute right-4 top-1/2 -translate-y-1/2 text-white/80 hover:text-white z-10"
-              onClick={(e) => {
-                e.stopPropagation();
-                setLightboxIndex(lightboxIndex + 1);
-              }}
-              aria-label="Next photo"
-            >
-              <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-              </svg>
-            </button>
-          )}
-        </div>
-      )}
+      <LightboxOverlay
+        photos={photos}
+        index={lightboxIndex}
+        onClose={() => setLightboxIndex(null)}
+        onIndexChange={setLightboxIndex}
+      />
     </div>
   );
 }

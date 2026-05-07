@@ -319,6 +319,155 @@ export class CompsService {
   // shared with comp-analysis.service. Reference them directly below.
 
   /**
+   * Fetch full MLS detail for a comp's listing and return a normalized
+   * timeline of events. Backs the Comp Drill-in modal's Price History
+   * tab. Caches the result on `comp.features.mlsDetailCache` for 24h
+   * to avoid burning a paid REAPI call on every modal open.
+   *
+   * Returns `{ events, cachedAt, source: 'cache'|'fresh'|'unavailable' }`.
+   * - `unavailable` when the comp isn't an MLS comp or has no MLS#.
+   * - Listed + Sold from the persisted Comp row are always merged with
+   *   the fetched mlsHistory so the timeline never falls below 2
+   *   events for a sold MLS comp.
+   */
+  async getCompMlsDetail(compId: string): Promise<{
+    events: Array<{
+      type: string;
+      date: string;
+      price: number | null;
+      source: string | null;
+      daysOnMarket: number | null;
+      agentName?: string;
+      agentOffice?: string;
+    }>;
+    cachedAt: string | null;
+    source: 'cache' | 'fresh' | 'unavailable';
+    boardCode?: string | null;
+    listingUrl?: string | null;
+  }> {
+    const comp = await this.prisma.comp.findUnique({ where: { id: compId } });
+    if (!comp) throw new Error(`Comp ${compId} not found`);
+    if (comp.source !== 'reapi') {
+      return { events: [], cachedAt: null, source: 'unavailable' };
+    }
+    const features = (comp.features as Record<string, unknown> | null) ?? {};
+    const mlsNumber = features.mlsNumber as string | undefined;
+    const cached = features.mlsDetailCache as
+      | { fetchedAt: string; data: any }
+      | undefined;
+    const cacheTtlMs = 24 * 60 * 60 * 1000;
+    if (
+      cached?.fetchedAt &&
+      Date.now() - new Date(cached.fetchedAt).getTime() < cacheTtlMs
+    ) {
+      return {
+        events: this.buildTimeline(comp, cached.data),
+        cachedAt: cached.fetchedAt,
+        source: 'cache',
+        boardCode: (features.mlsBoardCode as string) ?? null,
+        listingUrl: (features.listingUrl as string) ?? comp.sourceUrl ?? null,
+      };
+    }
+    if (!mlsNumber && !comp.address) {
+      return { events: this.buildTimeline(comp, null), cachedAt: null, source: 'unavailable' };
+    }
+
+    // REAPI's MLSDetail looks up by address (most reliable across boards).
+    const detail = await this.reapiService.getMlsDetail(comp.address);
+    const fetchedAt = new Date().toISOString();
+
+    if (detail) {
+      const updated = {
+        ...features,
+        mlsDetailCache: { fetchedAt, data: detail },
+      };
+      await this.prisma.comp.update({
+        where: { id: compId },
+        data: { features: updated as any },
+      });
+    }
+    return {
+      events: this.buildTimeline(comp, detail),
+      cachedAt: detail ? fetchedAt : null,
+      source: detail ? 'fresh' : 'unavailable',
+      boardCode: (features.mlsBoardCode as string) ?? null,
+      listingUrl: (features.listingUrl as string) ?? comp.sourceUrl ?? null,
+    };
+  }
+
+  // Normalize REAPI mlsHistory entries + fall back to stored Listed/Sold
+  // when the detail call returned nothing. Sorted newest-first.
+  private buildTimeline(comp: any, detail: any) {
+    const events: Array<{
+      type: string;
+      date: string;
+      price: number | null;
+      source: string | null;
+      daysOnMarket: number | null;
+      agentName?: string;
+      agentOffice?: string;
+    }> = [];
+
+    const features = (comp.features as Record<string, unknown> | null) ?? {};
+    const board = (features.mlsBoardCode as string | undefined) ?? null;
+
+    // Always seed with stored Sold + Listed events so the timeline is
+    // never empty for a successfully-persisted MLS comp.
+    if (comp.soldDate && comp.soldPrice) {
+      events.push({
+        type: 'Sold',
+        date: new Date(comp.soldDate).toISOString(),
+        price: Math.round(comp.soldPrice),
+        source: board,
+        daysOnMarket: comp.daysOnMarket ?? null,
+      });
+    }
+    const listDateRaw = features.listDate as string | undefined;
+    const listPriceRaw = features.listPrice as number | undefined;
+    if (listDateRaw && listDateRaw !== (comp.soldDate as any)) {
+      events.push({
+        type: 'Listed',
+        date: new Date(listDateRaw).toISOString(),
+        price: typeof listPriceRaw === 'number' ? listPriceRaw : null,
+        source: board,
+        daysOnMarket: null,
+      });
+    }
+
+    // Layer in REAPI mlsHistory when available.
+    const history: any[] = Array.isArray(detail?.mlsHistory) ? detail.mlsHistory : [];
+    for (const h of history) {
+      if (!h?.statusDate) continue;
+      const priceNum =
+        typeof h.price === 'number'
+          ? h.price
+          : typeof h.price === 'string'
+            ? Number(h.price.replace(/[$,]/g, '')) || null
+            : null;
+      events.push({
+        type: normalizeStatus(h.status),
+        date: new Date(h.statusDate).toISOString(),
+        price: priceNum,
+        source: board,
+        daysOnMarket: typeof h.daysOnMarket === 'number' ? h.daysOnMarket : null,
+        agentName: h.agentName,
+        agentOffice: h.agentOffice,
+      });
+    }
+
+    // Dedup by (date, type, price) and sort newest-first.
+    const seen = new Set<string>();
+    const deduped = events.filter((e) => {
+      const key = `${e.date.slice(0, 10)}|${e.type}|${e.price ?? ''}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    deduped.sort((a, b) => b.date.localeCompare(a.date));
+    return deduped;
+  }
+
+  /**
    * Recalculate similarity scores for all comps of a lead
    */
   async recalculateSimilarityScores(leadId: string) {
@@ -556,4 +705,19 @@ export class CompsService {
       source,
     };
   }
+}
+
+// REAPI status strings vary by board; normalize to a small enum the
+// UI can color/label consistently.
+function normalizeStatus(raw: unknown): string {
+  if (typeof raw !== 'string' || !raw.trim()) return 'Unknown';
+  const k = raw.trim().toLowerCase();
+  if (k === 'active' || k === 'listed' || k.includes('for sale')) return 'Listed';
+  if (k === 'sold' || k === 'closed') return 'Sold';
+  if (k === 'pending' || k.includes('contingent')) return 'Pending';
+  if (k.includes('removed') || k === 'withdrawn' || k === 'cancelled' || k === 'canceled' || k === 'expired') return 'Removed';
+  if (k.includes('price') && k.includes('change')) return 'Price Change';
+  if (k.includes('price reduce') || k.includes('reduced')) return 'Price Change';
+  // Capitalize first letter as a fallback.
+  return raw.charAt(0).toUpperCase() + raw.slice(1);
 }

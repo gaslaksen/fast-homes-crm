@@ -30,6 +30,8 @@ import FiltersDrawer from './FiltersDrawer';
 import CuratedCompsTable from './CuratedCompsTable';
 import CurationMapView from './CurationMapView';
 import AIPicksBanner from './AIPicksBanner';
+import CompDrillInModal from './CompDrillInModal';
+import { isCompDrillInEnabled } from '@/lib/flags';
 
 // Defaults for the simplified "Pick for me" entry point. The legacy
 // input controls (mode/distance/constraints) are removed in this layout
@@ -115,6 +117,15 @@ export default function ComparablePropertiesSection({
   const [displayMode, setDisplayMode] = useState<DisplayMode>('cards');
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [expandedLessRelevant, setExpandedLessRelevant] = useState(false);
+
+  // Phase B: drill-in modal entry points (cards photo click,
+  // table/map address click). Behind a flag so flag-off behavior is
+  // unchanged (cards inert, table/map address click scrolls to comp).
+  const drillInEnabled = isCompDrillInEnabled();
+  const [drillInCompId, setDrillInCompId] = useState<string | null>(null);
+  const openDrillIn = drillInEnabled
+    ? (compId: string) => setDrillInCompId(compId)
+    : undefined;
 
   // Load persisted display mode preference once.
   useEffect(() => {
@@ -412,6 +423,7 @@ export default function ComparablePropertiesSection({
                 selectedCompIds={selectedCompIds}
                 onToggle={handleToggle}
                 onAddressClick={onScrollToComp}
+                onPhotoClick={openDrillIn}
               />
             )}
             {displayMode === 'table' && (
@@ -423,7 +435,7 @@ export default function ComparablePropertiesSection({
                   visibleComps.map((c) => [c.id, selectedCompIds.has(c.id)]),
                 )}
                 onToggle={handleToggle}
-                onAddressClick={onScrollToComp}
+                onAddressClick={drillInEnabled ? openDrillIn : onScrollToComp}
               />
             )}
             {displayMode === 'map' && (
@@ -436,7 +448,7 @@ export default function ComparablePropertiesSection({
                   visibleComps.map((c) => [c.id, selectedCompIds.has(c.id)]),
                 )}
                 onToggle={handleToggle}
-                onAddressClick={onScrollToComp}
+                onAddressClick={drillInEnabled ? openDrillIn : onScrollToComp}
               />
             )}
 
@@ -478,6 +490,25 @@ export default function ComparablePropertiesSection({
           }}
           fetchingComps={filters.fetchingComps}
         />
+
+        {/* Phase B drill-in modal (gated). Looks up against the full
+            `comps` array — not `visibleComps` — so a stale handle still
+            resolves even when the AI less-relevant filter has hidden
+            the underlying card. */}
+        {drillInEnabled && drillInCompId && (() => {
+          const drillComp = comps.find((c) => c.id === drillInCompId);
+          if (!drillComp) return null;
+          return (
+            <CompDrillInModal
+              leadId={leadId}
+              comp={drillComp}
+              ranking={rankingByCompId?.get(drillInCompId)}
+              selected={selectedCompIds.has(drillInCompId)}
+              onToggle={() => onToggleCompSelection(drillInCompId)}
+              onClose={() => setDrillInCompId(null)}
+            />
+          );
+        })()}
       </div>
     </section>
   );
@@ -492,6 +523,7 @@ function CardsGrid({
   selectedCompIds,
   onToggle,
   onAddressClick,
+  onPhotoClick,
 }: {
   comps: CuratedCompCardComp[];
   rankingByCompId: Map<string, any> | undefined;
@@ -499,6 +531,7 @@ function CardsGrid({
   selectedCompIds: Set<string>;
   onToggle: (id: string) => void;
   onAddressClick?: (id: string) => void;
+  onPhotoClick?: (id: string) => void;
 }) {
   return (
     <div className="grid gap-3 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -513,6 +546,7 @@ function CardsGrid({
             selected={selectedCompIds.has(comp.id)}
             onToggle={() => onToggle(comp.id)}
             onAddressClick={onAddressClick}
+            onPhotoClick={onPhotoClick}
             index={i}
           />
         );

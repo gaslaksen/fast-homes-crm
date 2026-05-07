@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import LightboxOverlay from './LightboxOverlay';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
@@ -112,27 +113,16 @@ export default function PhotoGallery({
   const goPrev = () => setHeroIndex((i) => (i - 1 + photos.length) % photos.length);
   const goNext = () => setHeroIndex((i) => (i + 1) % photos.length);
 
-  // Lightbox keyboard navigation
-  const handleKeyDown = useCallback(
-    (e: KeyboardEvent) => {
-      if (lightboxIndex === null) return;
-      if (e.key === 'Escape') setLightboxIndex(null);
-      if (e.key === 'ArrowRight') setLightboxIndex((i) => (i !== null && i < photos.length - 1 ? i + 1 : i));
-      if (e.key === 'ArrowLeft') setLightboxIndex((i) => (i !== null && i > 0 ? i - 1 : i));
-    },
-    [lightboxIndex, photos.length],
-  );
-
+  // Body-scroll lock while lightbox open. (Keyboard nav handled by
+  // the shared LightboxOverlay component.)
   useEffect(() => {
     if (lightboxIndex !== null) {
-      document.addEventListener('keydown', handleKeyDown);
       document.body.style.overflow = 'hidden';
       return () => {
-        document.removeEventListener('keydown', handleKeyDown);
         document.body.style.overflow = '';
       };
     }
-  }, [lightboxIndex, handleKeyDown]);
+  }, [lightboxIndex]);
 
   return (
     <div>
@@ -304,65 +294,13 @@ export default function PhotoGallery({
         </>
       )}
 
-      {/* Lightbox */}
-      {lightboxIndex !== null && photos[lightboxIndex] && (
-        <div
-          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center"
-          onClick={() => setLightboxIndex(null)}
-        >
-          {/* Close button */}
-          <button
-            className="absolute top-4 right-4 text-white/80 hover:text-white z-10"
-            onClick={() => setLightboxIndex(null)}
-          >
-            <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-
-          {/* Counter + source */}
-          <div className="absolute top-4 left-4 text-white/80 text-sm">
-            {lightboxIndex + 1} of {photos.length}
-            {photos[lightboxIndex].source && (
-              <span className="ml-2 px-2 py-0.5 rounded bg-white/20 text-xs">
-                {sourceLabel(photos[lightboxIndex].source)}
-              </span>
-            )}
-          </div>
-
-          {/* Previous */}
-          {lightboxIndex > 0 && (
-            <button
-              className="absolute left-4 top-1/2 -translate-y-1/2 text-white/80 hover:text-white"
-              onClick={(e) => { e.stopPropagation(); setLightboxIndex(lightboxIndex - 1); }}
-            >
-              <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-              </svg>
-            </button>
-          )}
-
-          {/* Image */}
-          <img
-            src={resolveUrl(photos[lightboxIndex].url)}
-            alt={photos[lightboxIndex].caption || `Photo ${lightboxIndex + 1}`}
-            className="max-h-[85vh] max-w-[90vw] object-contain"
-            onClick={(e) => e.stopPropagation()}
-          />
-
-          {/* Next */}
-          {lightboxIndex < photos.length - 1 && (
-            <button
-              className="absolute right-4 top-1/2 -translate-y-1/2 text-white/80 hover:text-white"
-              onClick={(e) => { e.stopPropagation(); setLightboxIndex(lightboxIndex + 1); }}
-            >
-              <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-              </svg>
-            </button>
-          )}
-        </div>
-      )}
+      <LightboxOverlay
+        photos={photos}
+        index={lightboxIndex}
+        onClose={() => setLightboxIndex(null)}
+        onIndexChange={setLightboxIndex}
+        formatSource={sourceLabel}
+      />
     </div>
   );
 }

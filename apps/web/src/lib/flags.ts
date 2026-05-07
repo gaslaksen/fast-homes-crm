@@ -12,3 +12,6 @@ export const isDealsView = (): boolean =>
 
 export const isAiCompCurationEnabled = (): boolean =>
   process.env.NEXT_PUBLIC_AI_COMP_CURATION === 'true';
+
+export const isCompDrillInEnabled = (): boolean =>
+  process.env.NEXT_PUBLIC_COMP_DRILL_IN === 'true';
