@@ -140,6 +140,10 @@ export const compsAPI = {
   list: (leadId: string) => api.get(`/leads/${leadId}/comps`),
   toggleComp: (leadId: string, compId: string) =>
     api.post(`/leads/${leadId}/comps/${compId}/toggle`),
+  // Phase B: Comp Drill-in modal — fetches REAPI MLSDetail for the
+  // comp (cached 24h server-side). Returns normalized event timeline.
+  mlsDetail: (leadId: string, compId: string) =>
+    api.get(`/leads/${leadId}/comps/${compId}/mls-detail`),
   autoSelect: (leadId: string, minSimilarity: number, maxDistance: number) =>
     api.post(`/leads/${leadId}/comps/auto-select`, { minSimilarity, maxDistance }),
 };

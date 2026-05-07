@@ -22,6 +22,7 @@ export interface CuratedCompCardComp {
   isRenovated?: boolean | null;
   source?: string | null;
   photoUrl?: string | null;
+  propertyType?: string | null;
   features?: any;
 }
 
@@ -41,6 +42,10 @@ interface Props {
   selected: boolean;
   onToggle: () => void;
   onAddressClick?: (compId: string) => void;
+  // Phase B: when provided, photo becomes clickable and invokes this
+  // callback (used to open the Comp Drill-in modal). When absent,
+  // photo is purely visual.
+  onPhotoClick?: (compId: string) => void;
   // For staggered fade-in. Pass the index in the visible-cards list.
   index?: number;
   // Compact variant for the Map view's right panel — smaller photo,
@@ -76,6 +81,7 @@ export default function CuratedCompCard({
   selected,
   onToggle,
   onAddressClick,
+  onPhotoClick,
   index = 0,
   compact = false,
 }: Props) {
@@ -101,9 +107,25 @@ export default function CuratedCompCard({
         animationDelay,
       }}
     >
-      {/* Photo header — compact mode uses 16:9 to keep the card short */}
+      {/* Photo header — compact mode uses 16:9 to keep the card short.
+          When onPhotoClick is wired (Phase B drill-in), the area is
+          clickable; otherwise it's purely visual. */}
       <div
-        className={`relative ${compact ? 'aspect-[16/9]' : 'aspect-[4/3]'} bg-gray-100 dark:bg-gray-800 overflow-hidden`}
+        className={`relative ${compact ? 'aspect-[16/9]' : 'aspect-[4/3]'} bg-gray-100 dark:bg-gray-800 overflow-hidden ${onPhotoClick ? 'cursor-zoom-in' : ''}`}
+        onClick={onPhotoClick ? () => onPhotoClick(comp.id) : undefined}
+        role={onPhotoClick ? 'button' : undefined}
+        tabIndex={onPhotoClick ? 0 : undefined}
+        onKeyDown={
+          onPhotoClick
+            ? (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onPhotoClick(comp.id);
+                }
+              }
+            : undefined
+        }
+        aria-label={onPhotoClick ? `Open details for ${comp.address}` : undefined}
       >
         {photo ? (
           <img
@@ -151,10 +173,12 @@ export default function CuratedCompCard({
           )}
         </div>
 
-        {/* Top-right: selection checkbox */}
+        {/* Top-right: selection checkbox. Stop click propagation so
+            toggling doesn't also fire the photo's onPhotoClick. */}
         <label
           className="absolute top-2 right-2 cursor-pointer select-none"
           aria-label={`${selected ? 'Deselect' : 'Select'} ${comp.address}`}
+          onClick={(e) => e.stopPropagation()}
         >
           <input
             type="checkbox"

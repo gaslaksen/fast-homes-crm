@@ -108,6 +108,14 @@ export class CompsController {
     return this.compsService.toggleCompSelection(compId);
   }
 
+  // Comp Drill-in modal: full MLS detail with normalized event timeline.
+  // Cached per-comp on features.mlsDetailCache for 24h to avoid burning
+  // a paid REAPI call on every modal open.
+  @Get(':compId/mls-detail')
+  async getCompMlsDetail(@Param('compId') compId: string) {
+    return this.compsService.getCompMlsDetail(compId);
+  }
+
   @Post('auto-select')
   async autoSelectComps(
     @Param('leadId') leadId: string,
