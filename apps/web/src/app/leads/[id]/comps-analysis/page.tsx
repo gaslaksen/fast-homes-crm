@@ -4,7 +4,10 @@ import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
-import { leadsAPI, compsAPI, compAnalysisAPI, photosAPI } from '@/lib/api';
+import { leadsAPI, compsAPI, compAnalysisAPI, photosAPI, arvCalculationAPI } from '@/lib/api';
+import ArvResultStrip, { type StripState } from '@/components/aiArvCalculation/ArvResultStrip';
+import ArvCalculationDrawer from '@/components/aiArvCalculation/ArvCalculationDrawer';
+import type { AIArvCalculationResult, ValuationMode } from '@/lib/aiArvCalculation/types';
 import AppShell from '@/components/AppShell';
 import LeadTabNav, { COMPS_TABS, DETAIL_TABS } from '@/components/LeadTabNav';
 import LeadDetailHeader from '@/components/leadDetailV2/LeadDetailHeader';
@@ -154,15 +157,28 @@ export default function CompsAnalysisPage() {
   const searchParams = useSearchParams();
   const leadId = params.id as string;
 
-  // Derive active tab from URL; redirect detail-page tabs back
-  const rawTab = searchParams.get('tab') || 'comps';
-  const activeSection = COMPS_TABS.includes(rawTab as any) ? rawTab : 'comps';
+  // Derive active tab from URL; redirect old tabs and detail-page tabs.
+  const rawTab = searchParams.get('tab') || 'valuation';
+  // Build 016: legacy ?tab=comps and ?tab=arv both map to ?tab=valuation.
+  const isLegacyValuationTab = rawTab === 'comps' || rawTab === 'arv';
+  const activeSection = isLegacyValuationTab
+    ? 'valuation'
+    : COMPS_TABS.includes(rawTab as any)
+      ? rawTab
+      : 'valuation';
 
   useEffect(() => {
+    if (isLegacyValuationTab) {
+      router.replace(
+        `/leads/${leadId}/comps-analysis?tab=valuation`,
+        { scroll: false },
+      );
+      return;
+    }
     if (rawTab && DETAIL_TABS.includes(rawTab as any)) {
       router.replace(`/leads/${leadId}?tab=${rawTab}`);
     }
-  }, [rawTab, leadId, router]);
+  }, [rawTab, leadId, router, isLegacyValuationTab]);
 
   const [lead, setLead] = useState<Lead | null>(null);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
@@ -186,6 +202,14 @@ export default function CompsAnalysisPage() {
     return out;
   }, [aiCurationResult]);
   const aiCurationFlag = isAiCompCurationEnabled();
+
+  // ── ARV calculation state (Build 016) ─────────────────────────────────
+  const [arvResult, setArvResult] = useState<AIArvCalculationResult | null>(null);
+  const [arvHistory, setArvHistory] = useState<AIArvCalculationResult[]>([]);
+  const [arvHistoryLoading, setArvHistoryLoading] = useState(false);
+  const [arvCalculating, setArvCalculating] = useState(false);
+  const [arvError, setArvError] = useState<string | null>(null);
+  const [valuationMode, setValuationMode] = useState<ValuationMode>('ARV_RENOVATED');
   // Raw comps for the lead, unfiltered by analysis source. Populated when
   // entering comparison mode so the side-by-side view sees both providers'
   // rows even though importExistingComps filters the analysis to one source.
@@ -226,13 +250,10 @@ export default function CompsAnalysisPage() {
 
   // Processing states
   const [calculating, setCalculating] = useState(false);
-  const [aiAdjusting, setAiAdjusting] = useState(false);
-  const [saving, setSaving] = useState(false);
   const [savingDealNumbers, setSavingDealNumbers] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
   const [dealNumbersSaved, setDealNumbersSaved] = useState(false);
   const [generatingAi, setGeneratingAi] = useState(false);
-  const [generatingAssessment, setGeneratingAssessment] = useState(false);
   const [generatingDealIntel, setGeneratingDealIntel] = useState(false);
   const [analyzingPhotos, setAnalyzingPhotos] = useState(false);
   const [selectedPhotos, setSelectedPhotos] = useState<File[]>([]);
@@ -252,7 +273,7 @@ export default function CompsAnalysisPage() {
   const autoFetchedRef = useRef<string | null>(null);
   useEffect(() => {
     if (!aiCurationFlag) return;
-    if (activeSection !== 'comps') return;
+    if (activeSection !== 'valuation') return;
     if (loading || !lead) return;
     if (fetchingComps) return;
     // Already fetched this lead in this session — don't refetch.
@@ -326,6 +347,70 @@ export default function CompsAnalysisPage() {
     // Prefer lead-level saved ARV; only fall back to comp analysis estimate
     setDealArv((lead as any)?.arv || res.data.arvEstimate || dealArv);
   }, [analysis, leadId, dealArv, lead]);
+
+  // Load latest persisted ARV calc whenever the lead changes.
+  useEffect(() => {
+    let cancelled = false;
+    if (!leadId) return;
+    void (async () => {
+      try {
+        const res = await arvCalculationAPI.getLatest(leadId);
+        if (!cancelled) setArvResult(res.data?.result ?? null);
+      } catch (err) {
+        if (!cancelled) setArvResult(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [leadId]);
+
+  // Lazy-load history once when first viewing the valuation tab.
+  const fetchArvHistory = useCallback(async () => {
+    if (!leadId) return;
+    setArvHistoryLoading(true);
+    try {
+      const res = await arvCalculationAPI.getHistory(leadId, 10);
+      setArvHistory(res.data?.items ?? []);
+    } catch {
+      setArvHistory([]);
+    } finally {
+      setArvHistoryLoading(false);
+    }
+  }, [leadId]);
+  useEffect(() => {
+    if (activeSection === 'valuation') {
+      void fetchArvHistory();
+    }
+  }, [activeSection, fetchArvHistory, arvResult?.computedAt]);
+
+  // Trigger an ARV calculation. Reads from currently-selected comps.
+  const handleCalculateArv = useCallback(async () => {
+    if (!leadId) return;
+    setArvCalculating(true);
+    setArvError(null);
+    try {
+      const res = await arvCalculationAPI.calculate(leadId, {
+        mode: valuationMode,
+      });
+      setArvResult(res.data?.result ?? null);
+      // Refresh lead so canonical lead.arv updates.
+      try {
+        const lr = await leadsAPI.get(leadId);
+        setLead(lr.data);
+      } catch {
+        /* non-fatal */
+      }
+    } catch (err: any) {
+      const msg =
+        err?.response?.data?.message ||
+        err?.message ||
+        'ARV calculation failed';
+      setArvError(typeof msg === 'string' ? msg : 'ARV calculation failed');
+    } finally {
+      setArvCalculating(false);
+    }
+  }, [leadId, valuationMode]);
 
   // ─── Find Comps (provider chosen by compsSource toggle) ─────────────────────
   const handleFindComps = async (forceRefresh = false) => {
@@ -455,24 +540,6 @@ export default function CompsAnalysisPage() {
     }
   };
 
-  // ─── Calculate ────────────────────────────────────────────────────────────
-  const handleCalculate = async () => {
-    if (!analysis) return;
-    setCalculating(true);
-    try {
-      await compAnalysisAPI.calculateAdjustments(leadId, analysis.id);
-      const arvRes = await compAnalysisAPI.calculateArv(leadId, analysis.id, 'weighted');
-      setDealArv(arvRes.data.arv || 0);
-      await refreshAnalysis();
-      router.replace(`/leads/${leadId}/comps-analysis?tab=arv`, { scroll: false });
-    } catch (error) {
-      console.error('Calculation failed:', error);
-      alert('Calculation failed');
-    } finally {
-      setCalculating(false);
-    }
-  };
-
   // ─── AI Summary ───────────────────────────────────────────────────────────
   const handleAiSummary = async () => {
     if (!analysis) return;
@@ -486,39 +553,9 @@ export default function CompsAnalysisPage() {
       setGeneratingAi(false);
     }
   };
-
-  // ─── AI Adjust & Calculate ARV ──────────────────────────────────────────
-  // aiAdjustComps on the backend stores ai* fields and blends with comparableSalesValue
-  // into the final arvEstimate. No second calculateArv call needed.
-  const handleAiAdjustComps = async () => {
-    if (!analysis) return;
-    setAiAdjusting(true);
-    try {
-      await compAnalysisAPI.aiAdjustComps(leadId, analysis.id);
-      await refreshAnalysis();
-      router.replace(`/leads/${leadId}/comps-analysis?tab=arv`, { scroll: false });
-    } catch (error) {
-      console.error('AI adjustment failed:', error);
-      alert('AI adjustment failed — please try again');
-    } finally {
-      setAiAdjusting(false);
-    }
-  };
-
-  // ─── AI Assessment ────────────────────────────────────────────────────────
-  const handleGenerateAssessment = async () => {
-    if (!analysis) return;
-    setGeneratingAssessment(true);
-    try {
-      await compAnalysisAPI.generateAssessment(leadId, analysis.id);
-      await refreshAnalysis();
-    } catch (error) {
-      console.error('Assessment generation failed:', error);
-      alert('Failed to generate assessment');
-    } finally {
-      setGeneratingAssessment(false);
-    }
-  };
+  // calculateArv / aiAdjustComps / generateAssessment removed in Build 016.
+  // ARV is now calculated by AiArvCalculationService — see ArvResultStrip
+  // mounted inside SubjectPropertySection on the Valuation tab.
 
   // ─── Deal Intelligence ──────────────────────────────────────────────────────
   const handleGenerateDealIntelligence = async () => {
@@ -690,21 +727,8 @@ export default function CompsAnalysisPage() {
     );
   };
 
-  // ─── Save to Lead ────────────────────────────────────────────────────────
-  const handleSaveToLead = async () => {
-    if (!analysis) return;
-    setSaving(true);
-    try {
-      await compAnalysisAPI.saveToLead(leadId, analysis.id);
-      alert('Analysis saved to lead! ARV and confidence updated.');
-      router.push(`/leads/${leadId}`);
-    } catch (error) {
-      console.error('Save failed:', error);
-      alert('Failed to save to lead');
-    } finally {
-      setSaving(false);
-    }
-  };
+  // saveToLead handler removed in Build 016 — ARV is now persisted
+  // implicitly inside AiArvCalculationService on each successful calc.
 
   const handleSaveDealNumbers = async () => {
     setSavingDealNumbers(true);
@@ -780,6 +804,20 @@ export default function CompsAnalysisPage() {
   const allComps = analysis?.comps || [];
   const selectedComps = allComps.filter((c) => c.selected);
 
+  // ARV strip state derivation: pre-calc / post-calc / stale / calculating
+  const arvStripState: StripState = (() => {
+    if (arvCalculating) return 'calculating';
+    if (!arvResult) return 'pre-calc';
+    const prevSet = new Set(arvResult.selectedCompIds || []);
+    const currentIds = selectedComps.map((c) => c.id);
+    const sameSet =
+      currentIds.length === prevSet.size &&
+      currentIds.every((id) => prevSet.has(id)) &&
+      arvResult.mode === valuationMode;
+    return sameSet ? 'post-calc' : 'stale';
+  })();
+  const reapiAvm = (lead as any)?.reapiEstimatedValue ?? null;
+
   // Sort comps
   const sortedComps = [...allComps].sort((a, b) => {
     let aVal: any, bVal: any;
@@ -835,10 +873,10 @@ export default function CompsAnalysisPage() {
       {/* Unified Tab Nav */}
       <LeadTabNav leadId={leadId} activeTab={activeSection} />
 
-      {/* ═══════════════ COMPS SECTION — simplified under AI flag (Phase A.7) ═══════════════ */}
-      {activeSection === 'comps' && aiCurationFlag && lead && (
+      {/* ═══════════════ VALUATION SECTION — Build 016: comps + ARV unified ═══════════════ */}
+      {activeSection === 'valuation' && aiCurationFlag && lead && (
         <div className="max-w-screen-2xl mx-auto">
-          {/* New Subject Property section — hero photo + full data grid */}
+          {/* Subject Property — hero photo + full data grid + ARV strip */}
           <SubjectPropertySection
             lead={lead as any}
             onLeadRefresh={async () => {
@@ -849,6 +887,17 @@ export default function CompsAnalysisPage() {
                 console.error('Failed to refresh lead after Street View fetch:', err);
               }
             }}
+            arvStripSlot={
+              <ArvResultStrip
+                state={arvStripState}
+                result={arvResult}
+                reapiAvm={reapiAvm}
+                mode={valuationMode}
+                onCalculate={handleCalculateArv}
+                selectedCount={selectedComps.length}
+                errorMessage={arvError}
+              />
+            }
           />
 
           {comparisonMode ? (
@@ -941,32 +990,25 @@ export default function CompsAnalysisPage() {
             </CurationErrorBoundary>
           )}
 
-          {/* ARV calculation row — kept as a separate row below the comps section */}
-          {!comparisonMode && allComps.length >= 1 && (
-            <div className="px-3 sm:px-4 lg:px-6 pb-6">
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={handleAiAdjustComps}
-                  disabled={aiAdjusting || selectedComps.length === 0}
-                  className="btn btn-primary flex items-center gap-2"
-                >
-                  {aiAdjusting ? (
-                    <>
-                      <span className="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
-                      Calculating ARV...
-                    </>
-                  ) : (
-                    <>AI Adjust &amp; Calculate ARV</>
-                  )}
-                </button>
-              </div>
-            </div>
-          )}
+          {/* Build 016: the legacy "AI Adjust & Calculate ARV" button is
+              gone. ARV is now triggered from the Calculate / Recalculate
+              button on the ArvResultStrip inside SubjectPropertySection. */}
+
+          {/* ARV calculation details — collapsed-by-default drawer below
+              the comp grid. Per-comp adjustments, method, factors, risks,
+              stats, history. */}
+          <div className="px-3 sm:px-4 lg:px-6 pb-6">
+            <ArvCalculationDrawer
+              result={arvResult}
+              history={arvHistory}
+              historyLoading={arvHistoryLoading}
+            />
+          </div>
         </div>
       )}
 
       {/* ═══════════════ COMPS SECTION (legacy split-pane, flag-off) ═══════════════ */}
-      {activeSection === 'comps' && !aiCurationFlag && (
+      {activeSection === 'valuation' && !aiCurationFlag && (
         <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex flex-col lg:flex-row lg:h-[calc(100vh-12rem)]">
           {/* ── LEFT PANE: Map + Subject Property ── */}
           <div className="lg:w-[45%] xl:w-[42%] flex flex-col border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 lg:overflow-y-auto rounded-l-lg">
@@ -1128,25 +1170,9 @@ export default function CompsAnalysisPage() {
                 ))
               )}
 
-              {/* Calculate ARV button */}
-              {allComps.length >= 1 && (
-                <div className="pt-3 pb-2 flex items-center gap-3">
-                  <button
-                    onClick={handleAiAdjustComps}
-                    disabled={aiAdjusting || selectedComps.length === 0}
-                    className="btn btn-primary flex items-center gap-2"
-                  >
-                    {aiAdjusting ? (
-                      <>
-                        <span className="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
-                        Calculating ARV...
-                      </>
-                    ) : (
-                      <>AI Adjust &amp; Calculate ARV</>
-                    )}
-                  </button>
-                </div>
-              )}
+              {/* Build 016: ARV is calculated from the strip on this same
+                  Valuation tab, not from a button at the bottom of the
+                  legacy comps view. */}
             </div>
           </div>
         </div>
@@ -1271,483 +1297,6 @@ export default function CompsAnalysisPage() {
 
       <main className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
 
-        {/* ═══════════════ ARV SECTION ═══════════════ */}
-        {activeSection === 'arv' && (
-          <div className="space-y-6">
-            {/* AI Summary */}
-            {analysis?.aiSummary && (
-              <div className="card bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800">
-                <div className="flex items-start gap-3">
-                  <div className="text-2xl">&#129302;</div>
-                  <div className="flex-1">
-                    <div className="flex items-center justify-between mb-1">
-                      <h3 className="text-sm font-semibold text-blue-900 dark:text-blue-300">AI Analysis Summary</h3>
-                      {analysis.confidenceScore > 0 && (
-                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                          analysis.confidenceScore >= 80 ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' :
-                          analysis.confidenceScore >= 60 ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400' :
-                          'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'
-                        }`}>
-                          {analysis.confidenceScore}% confidence
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-sm text-blue-800 dark:text-blue-400">{analysis.aiSummary}</p>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* AI Property Assessment */}
-            <div className="card border border-indigo-200 dark:border-indigo-800">
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2">
-                  <h3 className="font-bold text-gray-900 dark:text-gray-100">AI Property Assessment</h3>
-                  {(analysis as any)?.aiAssessment && (
-                    <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 font-medium">Generated</span>
-                  )}
-                </div>
-                <button
-                  onClick={handleGenerateAssessment}
-                  disabled={generatingAssessment || !analysis || allComps.length === 0}
-                  className="btn btn-sm bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
-                >
-                  {generatingAssessment ? (
-                    <span className="flex items-center gap-2">
-                      <span className="animate-spin inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full" />
-                      Generating...
-                    </span>
-                  ) : (analysis as any)?.aiAssessment ? 'Regenerate' : 'Generate Assessment'}
-                </button>
-              </div>
-              {(() => {
-                const raw = (analysis as any)?.aiAssessment;
-                if (!raw) {
-                  return (
-                    <p className="text-sm text-gray-500 dark:text-gray-400 italic">
-                      {allComps.length === 0
-                        ? 'Fetch comps first, then generate a detailed wholesaler assessment.'
-                        : 'Click Generate Assessment for a detailed analysis of ARV confidence, market conditions, red flags, and deal viability.'}
-                    </p>
-                  );
-                }
-                // Try to parse as structured JSON (from aiAdjustComps)
-                let parsed: any = null;
-                try {
-                  const stripped = raw.replace(/^```[\w]*\s*/m, '').replace(/\s*```$/m, '').trim();
-                  const m = stripped.match(/\{[\s\S]*/);
-                  if (m) {
-                    // Repair truncated JSON
-                    let j = m[0];
-                    let opens = 0, arrOpens = 0, inStr = false, esc = false;
-                    for (const ch of j) {
-                      if (esc) { esc = false; continue; }
-                      if (ch === '\\') { esc = true; continue; }
-                      if (ch === '"' && !inStr) { inStr = true; continue; }
-                      if (ch === '"' && inStr) { inStr = false; continue; }
-                      if (!inStr) {
-                        if (ch === '{') opens++;
-                        else if (ch === '}') opens--;
-                        else if (ch === '[') arrOpens++;
-                        else if (ch === ']') arrOpens--;
-                      }
-                    }
-                    if (inStr) j += '"';
-                    j += ']'.repeat(Math.max(0, arrOpens)) + '}'.repeat(Math.max(0, opens));
-                    parsed = JSON.parse(j);
-                  }
-                } catch {}
-
-                if (parsed) {
-                  // Structured visual render
-                  return (
-                    <div className="space-y-4">
-                      {/* Wholesaler note */}
-                      {parsed.wholesalerNote && (
-                        <div className="bg-indigo-50 dark:bg-indigo-950 border border-indigo-200 dark:border-indigo-800 rounded-xl p-4">
-                          <div className="text-xs font-semibold text-indigo-700 dark:text-indigo-400 uppercase tracking-wide mb-1">💡 Wholesaler Take</div>
-                          <p className="text-sm text-indigo-900 dark:text-indigo-200 leading-relaxed">{parsed.wholesalerNote}</p>
-                        </div>
-                      )}
-                      {/* Method */}
-                      {parsed.method && (
-                        <div className="bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 rounded-xl p-3">
-                          <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">📐 Valuation Method</div>
-                          <p className="text-sm text-gray-700 dark:text-gray-300">{parsed.method}</p>
-                        </div>
-                      )}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        {/* Key Factors */}
-                        {parsed.keyFactors?.length > 0 && (
-                          <div className="bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-xl p-4">
-                            <div className="text-xs font-semibold text-blue-700 dark:text-blue-400 uppercase tracking-wide mb-2">🔑 Key Factors</div>
-                            <ul className="space-y-1.5">
-                              {parsed.keyFactors.map((f: string, i: number) => (
-                                <li key={i} className="text-sm text-blue-900 dark:text-blue-200 flex gap-2">
-                                  <span className="text-blue-400 shrink-0 mt-0.5">•</span>
-                                  <span>{f}</span>
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        )}
-                        {/* Risks */}
-                        {parsed.risks?.length > 0 && (
-                          <div className="bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-xl p-4">
-                            <div className="text-xs font-semibold text-red-700 dark:text-red-400 uppercase tracking-wide mb-2">⚠️ Risks</div>
-                            <ul className="space-y-1.5">
-                              {parsed.risks.map((r: string, i: number) => (
-                                <li key={i} className="text-sm text-red-900 dark:text-red-200 flex gap-2">
-                                  <span className="text-red-400 shrink-0 mt-0.5">•</span>
-                                  <span>{r}</span>
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                }
-
-                // Fallback: prose text render
-                return (
-                  <div className="prose prose-sm max-w-none text-gray-800 dark:text-gray-200 bg-indigo-50 dark:bg-indigo-950 rounded-lg p-4 text-sm leading-relaxed">
-                    {raw.split('\n').map((line: string, i: number) => {
-                      if (line.startsWith('**') && line.endsWith('**')) {
-                        return <p key={i} className="font-bold text-indigo-900 dark:text-indigo-200 mt-3 mb-1">{line.replace(/\*\*/g, '')}</p>;
-                      }
-                      return <p key={i} className={line === '' ? 'mb-2' : 'mb-0.5'}>{line}</p>;
-                    })}
-                  </div>
-                );
-              })()}
-            </div>
-
-            {/* Quick Stats if no full analysis calculated yet */}
-            {!analysis?.arvEstimate && selectedComps.length > 0 && (
-              <div className="card bg-yellow-50 dark:bg-yellow-950 border border-yellow-200 dark:border-yellow-800">
-                <div className="flex items-center gap-3">
-                  <div className="text-xl">&#9888;&#65039;</div>
-                  <div>
-                    <p className="text-sm font-medium text-yellow-800 dark:text-yellow-400">ARV not calculated yet</p>
-                    <p className="text-xs text-yellow-700 dark:text-yellow-400 mt-0.5">
-                      Go to the Comps tab and click &quot;Calculate ARV&quot; to run adjustments and generate the ARV.
-                      Quick estimate from {selectedComps.length} comps: <strong>${avgPrice.toLocaleString()}</strong> avg sale price
-                      {avgPricePerSqft > 0 && <span> (${avgPricePerSqft}/sqft)</span>}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* ARV Report */}
-            {analysis && (
-              <div className="card">
-                <div className="flex items-center justify-between mb-5">
-                  <h2 className="text-lg font-bold">ARV Report</h2>
-                  {analysis.arvMethod && (
-                    <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 capitalize">
-                      {analysis.arvMethod === 'weighted' ? '✨ AI-weighted' : analysis.arvMethod} method
-                    </span>
-                  )}
-                </div>
-
-                {/* ── PRIMARY: AI Estimated ARV hero card ── */}
-                {analysis.arvEstimate && (
-                  <div className="bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-950 dark:to-emerald-950 border-2 border-green-300 dark:border-green-800 rounded-2xl p-6 mb-5">
-                    <div className="flex items-end justify-between flex-wrap gap-4">
-                      <div>
-                        <div className="text-xs font-semibold text-green-700 dark:text-green-400 uppercase tracking-wide mb-1">
-                          {(analysis as any).aiArvEstimate ? 'AI-Adjusted ARV' : 'Comparable Sales ARV'}
-                        </div>
-                        <div className="text-5xl font-bold text-green-700 dark:text-green-400">${analysis.arvEstimate.toLocaleString()}</div>
-                        <div className="text-sm text-green-600 dark:text-green-400 mt-2">
-                          {(analysis as any).aiArvEstimate
-                            ? `Claude analysis of ${selectedComps.length} selected comp${selectedComps.length !== 1 ? 's' : ''}`
-                            : `Weighted average of ${selectedComps.length} selected comp${selectedComps.length !== 1 ? 's' : ''}`}
-                          {analysis.arvLow && analysis.arvHigh && (
-                            <span className="ml-2 text-green-500 dark:text-green-400">
-                              Range: ${analysis.arvLow.toLocaleString()} – ${analysis.arvHigh.toLocaleString()}
-                            </span>
-                          )}
-                        </div>
-                        {analysis.avgAdjustment ? (
-                          <div className={`text-xs mt-1 ${(analysis.avgAdjustment || 0) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                            {(analysis.avgAdjustment || 0) >= 0 ? '+' : ''}${(analysis.avgAdjustment || 0).toLocaleString()} avg AI adjustment per comp
-                          </div>
-                        ) : null}
-                      </div>
-                      <div className="flex flex-col items-end gap-2">
-                        <DonutStat
-                          value={analysis.confidenceScore || 0}
-                          max={100}
-                          label="Confidence"
-                          color={(analysis.confidenceScore || 0) >= 80 ? '#10b981' : (analysis.confidenceScore || 0) >= 60 ? '#f59e0b' : '#ef4444'}
-                          size={80}
-                        />
-                        {analysis.confidenceTier && (
-                          <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${
-                            analysis.confidenceTier === 'High' ? 'bg-green-200 dark:bg-green-900/30 text-green-800 dark:text-green-400' :
-                            analysis.confidenceTier === 'Medium' ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-400' :
-                            'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'
-                          }`}>
-                            {analysis.confidenceTier} Confidence
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* ── Comparable Sales ($/sqft reference only — AI ARV is in the hero above) ── */}
-                {analysis.comparableSalesValue && (
-                  <div className="bg-gradient-to-r from-purple-50 to-indigo-50 dark:from-purple-950 dark:to-indigo-950 border border-purple-200 dark:border-purple-800 rounded-2xl p-5 mb-5">
-                    <h3 className="text-sm font-bold text-purple-900 dark:text-purple-200 uppercase tracking-wide mb-4">Comparable Sales</h3>
-                    <div className="grid grid-cols-12 gap-2 py-2 items-center">
-                      <div className="col-span-6 text-sm text-purple-900 dark:text-purple-200 font-medium">${Math.round(analysis.comparableSalesValue).toLocaleString()}</div>
-                      <div className="col-span-6 text-right text-xs text-purple-500 dark:text-purple-400">
-                        <span className="font-semibold text-purple-700 dark:text-purple-400">${analysis.pricePerSqft || '—'}</span>/sqft avg
-                        {' · '}<span className="font-semibold text-purple-700 dark:text-purple-400">${(analysis as any).medianPricePerSqft || '—'}</span>/sqft median
-                        {' · '}<span className="font-semibold text-purple-700 dark:text-purple-400">
-                          {(lead as any)?.sqftOverride
-                            ? `${(lead as any).sqftOverride.toLocaleString()} (override)`
-                            : (lead?.sqft?.toLocaleString() || '—')}
-                        </span> sqft
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* REAPI subject AVM strip (Low / Medium / High from v3/PropertyComps) */}
-                {(lead as any)?.reapiEstimatedValue && (
-                  <div className="mb-5 rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950 px-4 py-3">
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-400 uppercase tracking-wide">REAPI Independent Valuation</span>
-                      {(lead as any)?.reapiEnrichedAt && (
-                        <span className="text-xs text-emerald-600 dark:text-emerald-400">updated {new Date((lead as any).reapiEnrichedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
-                      )}
-                      {(lead as any)?.reapiEstimatedValue && analysis?.arvEstimate && (() => {
-                        const reapiAvm = (lead as any).reapiEstimatedValue;
-                        const delta = Math.abs(reapiAvm - analysis.arvEstimate) / analysis.arvEstimate;
-                        if (delta > 0.15) return <span className="text-xs px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 font-medium">⚠️ {Math.round(delta * 100)}% divergence from comps</span>;
-                        if (delta <= 0.05) return <span className="text-xs px-1.5 py-0.5 rounded bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 font-medium">✓ Confirms comps ARV</span>;
-                        return <span className="text-xs px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400">{Math.round(delta * 100)}% difference</span>;
-                      })()}
-                    </div>
-                    <div className="grid grid-cols-3 gap-3 text-center">
-                      <div className="bg-orange-50 dark:bg-orange-950 rounded-lg p-2 border border-orange-200 dark:border-orange-800">
-                        <div className="text-xs text-orange-700 dark:text-orange-400 font-medium mb-0.5">Low</div>
-                        <div className="text-base font-bold text-orange-700 dark:text-orange-400">{(lead as any)?.reapiEstimatedValueLow ? `$${Math.round((lead as any).reapiEstimatedValueLow).toLocaleString()}` : '—'}</div>
-                      </div>
-                      <div className="bg-emerald-100 dark:bg-emerald-900 rounded-lg p-2 border border-emerald-300 dark:border-emerald-700 ring-1 ring-emerald-400">
-                        <div className="text-xs text-emerald-700 dark:text-emerald-400 font-medium mb-0.5">AVM (Medium)</div>
-                        <div className="text-base font-bold text-emerald-700 dark:text-emerald-400">${Math.round((lead as any).reapiEstimatedValue).toLocaleString()}</div>
-                      </div>
-                      <div className="bg-green-50 dark:bg-green-950 rounded-lg p-2 border border-green-200 dark:border-green-800">
-                        <div className="text-xs text-green-700 dark:text-green-400 font-medium mb-0.5">High</div>
-                        <div className="text-base font-bold text-green-700 dark:text-green-400">{(lead as any)?.reapiEstimatedValueHigh ? `$${Math.round((lead as any).reapiEstimatedValueHigh).toLocaleString()}` : '—'}</div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Stats Grid */}
-                <div className="grid grid-cols-3 md:grid-cols-6 gap-3 mb-6">
-                  <StatBox label="Comps Used" value={selectedComps.length.toString()} />
-                  <StatBox label="Avg Sq Ft" value={
-                    selectedComps.length > 0
-                      ? Math.round(selectedComps.reduce((s, c) => s + (c.sqft || 0), 0) / selectedComps.length).toLocaleString()
-                      : '—'
-                  } />
-                  <StatBox label="Avg Distance" value={
-                    selectedComps.length > 0
-                      ? (selectedComps.reduce((s, c) => s + c.distance, 0) / selectedComps.length).toFixed(1) + ' mi'
-                      : '—'
-                  } />
-                  <StatBox label="Avg DOM" value={
-                    selectedComps.filter((c) => c.daysOnMarket).length > 0
-                      ? Math.round(selectedComps.reduce((s, c) => s + (c.daysOnMarket || 0), 0) / selectedComps.filter((c) => c.daysOnMarket).length).toString()
-                      : '—'
-                  } />
-                  <StatBox label="Avg $/Sqft" value={avgPricePerSqft > 0 ? `$${avgPricePerSqft}` : '—'} />
-                  <StatBox label="Avg Months Ago" value={
-                    selectedComps.length > 0
-                      ? (selectedComps.reduce((s, c) => {
-                          return s + (Date.now() - new Date(c.soldDate).getTime()) / (30 * 24 * 60 * 60 * 1000);
-                        }, 0) / selectedComps.length).toFixed(1)
-                      : '—'
-                  } />
-                </div>
-
-                {/* Cost approach is shown in the Valuation Breakdown footer above — no extra card needed */}
-              </div>
-            )}
-
-            {/* Comparable Properties Table — sits directly under the ARV Report */}
-            {selectedComps.length > 0 && (
-              <div className="card overflow-x-auto">
-                <h2 className="text-lg font-bold mb-4">Comparable Properties Table</h2>
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b text-left">
-                      <th className="pb-2 pr-3 font-medium text-gray-600 dark:text-gray-400">Address</th>
-                      <th className="pb-2 pr-3 font-medium text-gray-600 dark:text-gray-400">Source</th>
-                      <th className="pb-2 pr-3 font-medium text-gray-600 dark:text-gray-400">Sale Type</th>
-                      <th className="pb-2 pr-3 font-medium text-gray-600 dark:text-gray-400">Sale Price</th>
-                      <th className="pb-2 pr-3 font-medium text-gray-600 dark:text-gray-400">Adj. Price</th>
-                      <th className="pb-2 pr-3 font-medium text-gray-600 dark:text-gray-400">Sale Date</th>
-                      <th className="pb-2 pr-3 font-medium text-gray-600 dark:text-gray-400">Sq Ft</th>
-                      <th className="pb-2 pr-3 font-medium text-gray-600 dark:text-gray-400">$/SqFt</th>
-                      <th className="pb-2 pr-3 font-medium text-gray-600 dark:text-gray-400">Beds</th>
-                      <th className="pb-2 pr-3 font-medium text-gray-600 dark:text-gray-400">Baths</th>
-                      <th className="pb-2 pr-3 font-medium text-gray-600 dark:text-gray-400">Year</th>
-                      <th className="pb-2 pr-3 font-medium text-gray-600 dark:text-gray-400">Dist</th>
-                      <th className="pb-2 font-medium text-gray-600 dark:text-gray-400">Corr</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {selectedComps.map((comp) => (
-                      <tr key={comp.id} className="border-b border-gray-100 dark:border-gray-800">
-                        <td className="py-2 pr-3 font-medium max-w-[200px] truncate">
-                          <div className="flex items-center gap-1.5">
-                            <span className="truncate">{comp.address}</span>
-                            {(comp.features as any)?.method === 'mls' && (
-                              <span
-                                className="shrink-0 text-[10px] px-1 py-0.5 rounded bg-cyan-100 dark:bg-cyan-900/30 text-cyan-700 dark:text-cyan-400 font-medium"
-                                title={`MLS data${(comp.features as any)?.mlsNumber ? ` · #${(comp.features as any).mlsNumber}` : ''}`}
-                              >
-                                MLS
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="py-2 pr-3">
-                          <SourceBadge source={comp.source} />
-                        </td>
-                        <td className="py-2 pr-3">
-                          {(comp.features as any)?.isDistressedSale ? (
-                            <span className="text-xs px-1.5 py-0.5 rounded bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 font-medium">
-                              {(comp.features as any)?.saleTransType || 'Distressed'}
-                            </span>
-                          ) : (
-                            <span className="text-xs text-gray-500">Arms-length</span>
-                          )}
-                        </td>
-                        <td className="py-2 pr-3">${comp.soldPrice.toLocaleString()}</td>
-                        <td className="py-2 pr-3 font-medium">${(comp.adjustedPrice || comp.soldPrice).toLocaleString()}</td>
-                        <td className="py-2 pr-3">{new Date(comp.soldDate).toLocaleDateString()}</td>
-                        <td className="py-2 pr-3">{comp.sqft?.toLocaleString() || '—'}</td>
-                        <td className="py-2 pr-3">{comp.sqft ? `$${Math.round((comp.adjustedPrice || comp.soldPrice) / comp.sqft)}` : '—'}</td>
-                        <td className="py-2 pr-3">{comp.bedrooms || '—'}</td>
-                        <td className="py-2 pr-3">{comp.bathrooms || '—'}</td>
-                        <td className="py-2 pr-3">{comp.yearBuilt || '—'}</td>
-                        <td className="py-2 pr-3">{comp.distance.toFixed(1)} mi</td>
-                        <td className="py-2">
-                          {comp.correlation ? `${(comp.correlation * 100).toFixed(0)}%` : '—'}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
-            {/* Adjustments Detail — moved below the comps table */}
-            {analysis && selectedComps.length > 0 && (
-              <div className="card">
-                <div className="flex justify-between items-center mb-4">
-                  <h2 className="text-lg font-bold">Adjustments</h2>
-                  <div className="flex items-center gap-3">
-                    {/* Exclude distressed comps toggle */}
-                    {allComps.some(c => (c.features as any)?.isDistressedSale) && (
-                      <label className="flex items-center gap-1.5 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={(analysis.adjustmentConfig as any)?.excludeDistressedComps || false}
-                          onChange={async (e) => {
-                            const exclude = e.target.checked;
-                            try {
-                              const currentConfig = (analysis.adjustmentConfig || {}) as Record<string, any>;
-                              await compAnalysisAPI.update(leadId, analysis.id, {
-                                adjustmentConfig: { ...currentConfig, excludeDistressedComps: exclude },
-                              });
-                              await compAnalysisAPI.calculateArv(leadId, analysis.id, 'weighted');
-                              await refreshAnalysis();
-                            } catch (err) {
-                              console.error('Failed to toggle distress exclusion:', err);
-                            }
-                          }}
-                          className="h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-red-600"
-                        />
-                        <span className="text-xs text-red-600 dark:text-red-400 font-medium">Exclude distressed</span>
-                      </label>
-                    )}
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                      analysis.adjustmentsEnabled ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400'
-                    }`}>
-                      {analysis.adjustmentsEnabled ? 'Applied' : 'Not applied'}
-                    </span>
-                  </div>
-                </div>
-                <div className="space-y-3">
-                  {selectedComps.map((comp) => (
-                    <div key={comp.id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-950 rounded-lg">
-                      <div className="flex-1">
-                        <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{comp.address}</div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                          {comp.adjustmentNotes?.split('\n').join(' | ') || 'No adjustments'}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-4 text-right">
-                        <div>
-                          <div className="text-xs text-gray-500 dark:text-gray-400">Original</div>
-                          <div className="text-sm font-medium">${comp.soldPrice.toLocaleString()}</div>
-                        </div>
-                        <div className="text-lg text-gray-400 dark:text-gray-500">&rarr;</div>
-                        <div>
-                          <div className="text-xs text-gray-500 dark:text-gray-400">Adjusted</div>
-                          <div className="text-sm font-bold">
-                            ${(comp.adjustedPrice || comp.soldPrice).toLocaleString()}
-                          </div>
-                        </div>
-                        <div className={`text-sm font-medium min-w-[80px] text-right ${
-                          (comp.adjustmentAmount || 0) >= 0 ? 'text-green-600' : 'text-red-600'
-                        }`}>
-                          {(comp.adjustmentAmount || 0) >= 0 ? '+' : ''}${(comp.adjustmentAmount || 0).toLocaleString()}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                  {selectedComps.length > 0 && (
-                    <div className="flex justify-end p-3 bg-primary-50 rounded-lg border border-primary-200">
-                      <div className="text-sm">
-                        <span className="text-gray-600 dark:text-gray-400">Average Adjustment: </span>
-                        <span className={`font-bold ${
-                          (analysis.avgAdjustment || 0) >= 0 ? 'text-green-600' : 'text-red-600'
-                        }`}>
-                          {(analysis.avgAdjustment || 0) >= 0 ? '+' : ''}${(analysis.avgAdjustment || 0).toLocaleString()}
-                        </span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Save Button */}
-            <div className="flex gap-3">
-              <button
-                onClick={handleSaveToLead}
-                disabled={saving || (!analysis?.arvEstimate && !lead.arv)}
-                className="btn btn-primary"
-              >
-                {saving ? 'Saving...' : 'Save ARV to Lead'}
-              </button>
-
-            </div>
-          </div>
-        )}
 
         {/* ═══════════════ DEAL ANALYSIS SECTION ═══════════════ */}
         {activeSection === 'deal-analysis' && (

@@ -192,7 +192,7 @@ export default function LeadRow({
           value={lead.arv}
           formatted={formatK(lead.arv)}
           cta="+ ARV"
-          href={`/leads/${lead.id}/comps-analysis?tab=arv`}
+          href={`/leads/${lead.id}/comps-analysis?tab=valuation`}
         />
       </div>
 

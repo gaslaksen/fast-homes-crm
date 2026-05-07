@@ -169,20 +169,14 @@ export const compAnalysisAPI = {
     api.post(`/leads/${leadId}/comp-analysis/${analysisId}/comps/select-all`, { selected, source }),
   calculateAdjustments: (leadId: string, analysisId: string, config?: any) =>
     api.post(`/leads/${leadId}/comp-analysis/${analysisId}/calculate-adjustments`, { config }),
-  calculateArv: (leadId: string, analysisId: string, method?: string) =>
-    api.post(`/leads/${leadId}/comp-analysis/${analysisId}/calculate-arv`, { method }),
-  aiAdjustComps: (leadId: string, analysisId: string) =>
-    api.post(`/leads/${leadId}/comp-analysis/${analysisId}/ai-adjust-comps`),
+  // calculateArv, aiAdjustComps, saveToLead, generateAssessment removed in
+  // Build 016. ARV now lives in arvCalculationAPI below.
   aiSummary: (leadId: string, analysisId: string) =>
     api.post(`/leads/${leadId}/comp-analysis/${analysisId}/ai-summary`),
   estimateRepairs: (leadId: string, analysisId: string, data: any) =>
     api.post(`/leads/${leadId}/comp-analysis/${analysisId}/estimate-repairs`, data),
   calculateDeal: (leadId: string, analysisId: string, data: any) =>
     api.post(`/leads/${leadId}/comp-analysis/${analysisId}/calculate-deal`, data),
-  saveToLead: (leadId: string, analysisId: string) =>
-    api.post(`/leads/${leadId}/comp-analysis/${analysisId}/save-to-lead`),
-  generateAssessment: (leadId: string, analysisId: string) =>
-    api.post(`/leads/${leadId}/comp-analysis/${analysisId}/assessment`),
   dealIntelligence: (leadId: string, analysisId: string) =>
     api.post(`/leads/${leadId}/comp-analysis/${analysisId}/deal-intelligence`),
   applyFilters: (leadId: string, analysisId: string, data: { maxDistance?: number; timeFrameMonths?: number }) =>
@@ -193,6 +187,22 @@ export const compAnalysisAPI = {
     }),
   analyzeLeadPhotos: (leadId: string, analysisId: string, photoIds: string[]) =>
     api.post(`/leads/${leadId}/comp-analysis/${analysisId}/analyze-lead-photos`, { photoIds }),
+};
+
+// AI ARV Calculation API (Build 016)
+export const arvCalculationAPI = {
+  // Run a fresh ARV calculation. Returns { result } where result is the
+  // full AIArvCalculationResult shape. Set forceRefresh: true to bypass
+  // the input-hash cache.
+  calculate: (
+    leadId: string,
+    body: { mode: 'ARV_RENOVATED' | 'AS_IS'; forceRefresh?: boolean },
+  ) => api.post(`/leads/${leadId}/arv-calculation`, body),
+  // Latest persisted calculation (the one currently set as lead.arv).
+  getLatest: (leadId: string) => api.get(`/leads/${leadId}/arv-calculation`),
+  // Calculation history, newest first.
+  getHistory: (leadId: string, limit = 20) =>
+    api.get(`/leads/${leadId}/arv-calculation/history`, { params: { limit } }),
 };
 
 // Dashboard API

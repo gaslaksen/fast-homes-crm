@@ -5,8 +5,7 @@ import { useSearchParams } from 'next/navigation';
 
 const TABS = [
   { key: 'overview',       label: 'Overview',        page: 'detail' },
-  { key: 'comps',          label: 'Comps',           page: 'comps-analysis' },
-  { key: 'arv',            label: 'ARV',             page: 'comps-analysis' },
+  { key: 'valuation',      label: 'Valuation',       page: 'comps-analysis' },
   { key: 'repairs',        label: 'Repairs',         page: 'comps-analysis' },
   { key: 'deal-analysis',  label: 'Deal Analysis',   page: 'comps-analysis' },
   { key: 'deal-intel',     label: 'Deal Intel',      page: 'comps-analysis' },
@@ -18,7 +17,7 @@ const TABS = [
 export type LeadTab = (typeof TABS)[number]['key'];
 
 export const DETAIL_TABS: LeadTab[] = ['overview', 'disposition', 'communications', 'activity'];
-export const COMPS_TABS: LeadTab[] = ['comps', 'arv', 'repairs', 'deal-analysis', 'deal-intel'];
+export const COMPS_TABS: LeadTab[] = ['valuation', 'repairs', 'deal-analysis', 'deal-intel'];
 
 interface LeadTabNavProps {
   leadId: string;

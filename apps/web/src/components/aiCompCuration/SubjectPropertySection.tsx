@@ -36,9 +36,16 @@ export interface SubjectPropertySectionLead {
 interface Props {
   lead: SubjectPropertySectionLead;
   onLeadRefresh?: () => void;
+  // Optional render slot — when provided, replaces the bare REAPI ARV strip
+  // with the Build-016 ArvResultStrip (Dealcore ARV + REAPI reference).
+  arvStripSlot?: React.ReactNode;
 }
 
-export default function SubjectPropertySection({ lead, onLeadRefresh }: Props) {
+export default function SubjectPropertySection({
+  lead,
+  onLeadRefresh,
+  arvStripSlot,
+}: Props) {
   const photos = Array.isArray(lead.photos) ? lead.photos : [];
 
   const links = buildExternalLinks({
@@ -96,27 +103,31 @@ export default function SubjectPropertySection({ lead, onLeadRefresh }: Props) {
               {addressFull || lead.propertyAddress || 'Unknown address'}
             </div>
 
-            {/* REAPI ARV reference row — when available, surface the
-                provider's estimated value so users have a baseline
-                before comp adjustments. */}
-            {(lead.arv || lead.arvLow || lead.arvHigh) && (
-              <div className="grid grid-cols-3 gap-x-4 gap-y-2 rounded-md border border-blue-200 dark:border-blue-900 bg-blue-50/60 dark:bg-blue-900/15 px-3 py-2">
-                <Field
-                  label="REAPI ARV"
-                  value={(lead.arv as number | undefined) ?? null}
-                  format={formatMoney}
-                />
-                <Field
-                  label="ARV low"
-                  value={(lead.arvLow as number | undefined) ?? null}
-                  format={formatMoney}
-                />
-                <Field
-                  label="ARV high"
-                  value={(lead.arvHigh as number | undefined) ?? null}
-                  format={formatMoney}
-                />
-              </div>
+            {/* Valuation strip slot — Build 016 ArvResultStrip when supplied
+                (the Valuation tab passes it). Falls back to a simple REAPI
+                reference row when no slot is given. */}
+            {arvStripSlot ? (
+              arvStripSlot
+            ) : (
+              (lead.arv || lead.arvLow || lead.arvHigh) && (
+                <div className="grid grid-cols-3 gap-x-4 gap-y-2 rounded-md border border-blue-200 dark:border-blue-900 bg-blue-50/60 dark:bg-blue-900/15 px-3 py-2">
+                  <Field
+                    label="REAPI ARV"
+                    value={(lead.arv as number | undefined) ?? null}
+                    format={formatMoney}
+                  />
+                  <Field
+                    label="ARV low"
+                    value={(lead.arvLow as number | undefined) ?? null}
+                    format={formatMoney}
+                  />
+                  <Field
+                    label="ARV high"
+                    value={(lead.arvHigh as number | undefined) ?? null}
+                    format={formatMoney}
+                  />
+                </div>
+              )
             )}
 
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-3">

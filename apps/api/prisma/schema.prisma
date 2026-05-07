@@ -94,6 +94,9 @@ model Lead {
   arv               Float?
   arvConfidence     Float?
   lastCompsDate     DateTime?
+  currentArvCalculationId String?
+  currentArvCalculation   AiArvCalculation? @relation("LeadCurrentArvCalculation", fields: [currentArvCalculationId], references: [id], onUpdate: NoAction, onDelete: SetNull)
+  currentArvUpdatedAt     DateTime?
   compsProvider     String?  @default("reapi") // 'reapi' | 'batchdata' | 'auto' — last-used comp provider per lead
   repairCosts       Float?   // Deal-level repair cost override
   assignmentFee     Float?   // Deal-level assignment fee override
@@ -231,6 +234,7 @@ model Lead {
   dispositionCosts    DispositionCost[]
   finalSale           FinalSale?
   aiCompCurations     AiCompCuration[]
+  aiArvCalculations   AiArvCalculation[] @relation("LeadAiArvCalculations")
 
   @@index([organizationId, tier])
   @@index([organizationId, status])
@@ -966,4 +970,32 @@ model AiCompCuration {
   @@index([leadId, createdAt])
   @@index([cacheKey])
   @@map("ai_comp_curations")
+}
+
+model AiArvCalculation {
+  id                String    @id @default(cuid())
+  leadId            String
+  lead              Lead      @relation("LeadAiArvCalculations", fields: [leadId], references: [id], onDelete: Cascade)
+  curationId        String?
+  inputHash         String
+  mode              String    // "ARV_RENOVATED" | "AS_IS"
+  arv               Float
+  arvLow            Float?
+  arvHigh           Float?
+  pricePerSqft      Float?
+  confidence        Int
+  confidenceLabel   String    // "LOW" | "MEDIUM" | "HIGH"
+  resultJson        Json
+  selectedCompIds   String[]
+  reapiAvmAtCalc    Float?
+  modelUsed         String?
+  promptVersion     String?
+  computedAt        DateTime  @default(now())
+  computedByUserId  String?
+
+  currentForLeads   Lead[]    @relation("LeadCurrentArvCalculation")
+
+  @@index([leadId, computedAt(sort: Desc)])
+  @@index([leadId, inputHash])
+  @@map("ai_arv_calculations")
 }

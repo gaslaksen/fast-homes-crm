@@ -26,6 +26,7 @@ import { ActionsModule } from './actions/actions.module';
 import { DispositionModule } from './disposition/disposition.module';
 import { DealsModule } from './deals/deals.module';
 import { AiCompCurationModule } from './ai-comp-curation/ai-comp-curation.module';
+import { AiArvCalculationModule } from './ai-arv-calculation/ai-arv-calculation.module';
 
 @Module({
   imports: [
@@ -58,6 +59,7 @@ import { AiCompCurationModule } from './ai-comp-curation/ai-comp-curation.module
     DispositionModule,
     DealsModule,
     AiCompCurationModule,
+    AiArvCalculationModule,
   ],
 })
 export class AppModule {}

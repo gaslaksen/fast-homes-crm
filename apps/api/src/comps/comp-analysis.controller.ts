@@ -84,18 +84,8 @@ export class CompAnalysisController {
     return this.compAnalysisService.calculateAdjustments(analysisId, body.config);
   }
 
-  @Post(':analysisId/ai-adjust-comps')
-  async aiAdjustComps(@Param('analysisId') analysisId: string) {
-    return this.compAnalysisService.aiAdjustComps(analysisId);
-  }
-
-  @Post(':analysisId/calculate-arv')
-  async calculateArv(
-    @Param('analysisId') analysisId: string,
-    @Body() body: { method?: string },
-  ) {
-    return this.compAnalysisService.calculateArv(analysisId, body.method);
-  }
+  // Legacy ARV endpoints removed in Build 016 (Valuation tab consolidation).
+  // ARV is now produced by AiArvCalculationService at POST /leads/:id/arv-calculation.
 
   @Post(':analysisId/ai-summary')
   async generateAiSummary(@Param('analysisId') analysisId: string) {
@@ -130,16 +120,9 @@ export class CompAnalysisController {
     return this.compAnalysisService.calculateDeal(analysisId, body);
   }
 
-  @Post(':analysisId/save-to-lead')
-  async saveToLead(@Param('analysisId') analysisId: string) {
-    return this.compAnalysisService.saveToLead(analysisId);
-  }
-
-  @Post(':analysisId/assessment')
-  async generateAssessment(@Param('analysisId') analysisId: string) {
-    const assessment = await this.compAnalysisService.generateAssessment(analysisId);
-    return { assessment };
-  }
+  // save-to-lead and assessment endpoints removed in Build 016.
+  // ARV persists implicitly on each calculation; "Wholesaler Take" relocates
+  // to the Strategy tab in a later phase.
 
   @Post(':analysisId/analyze-photos')
   @UseInterceptors(FilesInterceptor('photos', 30, { storage: memoryStorage() }))
@@ -173,8 +156,8 @@ export class CompAnalysisController {
   }
 
   // PropGPT endpoint removed — REAPI's PropGPT is a property-search frontend
-  // (natural language → PropertySearch), not an analysis chatbot. DealCore's
-  // aiAdjustComps is the single source of AI ARV for this codebase.
+  // (natural language → PropertySearch), not an analysis chatbot. AI ARV
+  // now lives in AiArvCalculationModule at POST /leads/:id/arv-calculation.
 
   @Post(':analysisId/apply-filters')
   async applyFilters(

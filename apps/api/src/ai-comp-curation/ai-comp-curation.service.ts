@@ -153,8 +153,9 @@ export class AiCompCurationService {
         data: { selected: true },
       }),
     ]);
-    // Recalculate ARV from the new selection.
-    await this.comps.recalculateArv(analysis.leadId);
+    // ARV is NOT auto-recalculated on bulk-select (Build 016). The Valuation
+    // tab strip enters a stale state and prompts the user to recalculate
+    // explicitly via AiArvCalculationService.
     return { ok: true, leadId: analysis.leadId, includedCount: includeIds.length };
   }
 

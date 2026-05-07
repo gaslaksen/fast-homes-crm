@@ -524,9 +524,8 @@ export class CompsService {
       data: { selected: newSelected },
     });
 
-    // Recalculate ARV from selected comps (dedups internally)
-    await this.recalculateArv(comp.leadId);
-
+    // ARV is no longer auto-recomputed on toggle (Build 016). The Valuation
+    // tab's strip enters a stale state and prompts the user to recalculate.
     return { ...comp, selected: newSelected };
   }
 
@@ -555,40 +554,13 @@ export class CompsService {
       }
     }
 
-    await this.recalculateArv(leadId);
-
+    // ARV no longer auto-recomputed on bulk select (Build 016). The strip
+    // goes stale and the user clicks Recalculate explicitly.
     return this.getComps(leadId);
   }
 
-  /**
-   * Recalculate ARV from selected comps only.
-   *
-   * Dedups before averaging — when REAPI MLS and BatchData both
-   * persist the same property, ARV would otherwise count it twice.
-   * We average over canonical-only survivors so each property
-   * contributes to ARV exactly once regardless of how many provider
-   * rows back it.
-   */
-  async recalculateArv(leadId: string) {
-    const selectedComps = await this.prisma.comp.findMany({
-      where: { leadId, selected: true, analysisId: null },
-    });
-
-    if (selectedComps.length === 0) return;
-
-    const survivors = dedupCompList(selectedComps);
-    if (survivors.length === 0) return;
-
-    const totalPrice = survivors.reduce((sum, c) => sum + c.soldPrice, 0);
-    const arv = Math.round(totalPrice / survivors.length);
-
-    await this.prisma.lead.update({
-      where: { id: leadId },
-      data: { arv },
-    });
-
-    return arv;
-  }
+  // recalculateArv removed in Build 016. ARV is produced by
+  // AiArvCalculationService at POST /leads/:id/arv-calculation.
 
   /**
    * Calculate similarity score between subject property and a comp (0-100)
