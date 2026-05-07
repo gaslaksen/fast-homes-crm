@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ReapiService } from './reapi.service';
 import { dedupCompList } from './comp-dedup';
 import Anthropic from '@anthropic-ai/sdk';
+import axios from 'axios';
 
 interface AdjustmentConfig {
   pricePerSqft: number;
@@ -1605,25 +1606,48 @@ Use Midwest/rural Ohio pricing. Be specific about what you see — don't general
       throw new Error('No matching photos found for analysis');
     }
 
-    // Convert base64 data URIs back to Multer-like objects for analyzePhotos()
-    const multerFiles: Express.Multer.File[] = selected.slice(0, 30).map((p: any, i: number) => {
-      let buffer: Buffer;
-      if (typeof p.url === 'string' && p.url.startsWith('data:')) {
-        const base64Data = p.url.split(',')[1];
-        buffer = Buffer.from(base64Data, 'base64');
-      } else {
-        throw new Error(`Photo ${p.id} is not a base64 data URI`);
-      }
+    // Convert each saved photo (base64 data URI OR remote http(s) URL — MLS
+    // photos from REAPI are stored as URL pointers) into a Multer-like object
+    // for analyzePhotos(). Skip photos we can't load rather than failing the
+    // whole batch — MLS URLs may have rotated since enrichment.
+    const loaded = await Promise.all(
+      selected.slice(0, 30).map(async (p: any, i: number): Promise<Express.Multer.File | null> => {
+        try {
+          let buffer: Buffer;
+          if (typeof p.url === 'string' && p.url.startsWith('data:')) {
+            const base64Data = p.url.split(',')[1];
+            buffer = Buffer.from(base64Data, 'base64');
+          } else if (typeof p.url === 'string' && /^https?:\/\//i.test(p.url)) {
+            const response = await axios.get(p.url, {
+              responseType: 'arraybuffer',
+              timeout: 15000,
+              maxContentLength: 10 * 1024 * 1024,
+            });
+            buffer = Buffer.from(response.data);
+          } else {
+            this.logger.warn(`Photo ${p.id} has unsupported url format — skipping`);
+            return null;
+          }
 
-      return {
-        fieldname: 'photos',
-        originalname: `lead-photo-${i}.jpg`,
-        encoding: '7bit',
-        mimetype: 'image/jpeg',
-        buffer,
-        size: buffer.length,
-      } as Express.Multer.File;
-    });
+          return {
+            fieldname: 'photos',
+            originalname: `lead-photo-${i}.jpg`,
+            encoding: '7bit',
+            mimetype: 'image/jpeg',
+            buffer,
+            size: buffer.length,
+          } as Express.Multer.File;
+        } catch (err: any) {
+          this.logger.warn(`Failed to load photo ${p.id} (${p.url?.slice(0, 80)}): ${err.message}`);
+          return null;
+        }
+      }),
+    );
+    const multerFiles = loaded.filter((f): f is Express.Multer.File => f !== null);
+
+    if (multerFiles.length === 0) {
+      throw new Error('All selected photos failed to load');
+    }
 
     this.logger.log(`Analyzing ${multerFiles.length} lead photos for lead ${leadId}`);
     return this.analyzePhotos(analysisId, multerFiles);
