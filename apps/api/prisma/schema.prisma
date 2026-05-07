@@ -185,6 +185,11 @@ model Lead {
   campChallengeComplete Boolean @default(false)
   campAuthorityComplete Boolean @default(false)
 
+  // Set when the AI sends the deal-fit expectations message (60-70% of ARV
+  // explanation, manufactured/leased-land fit talk). Used to gate the post-CAMP
+  // closing handoff so we don't wrap up before expectations are surfaced.
+  expectationsSetAt     DateTime?
+
   // Deal tier: 1 = contract now, 2 = opportunity, 3 = dead/no go
   tier                  Int?
 

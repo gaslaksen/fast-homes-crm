@@ -9,8 +9,9 @@ import { SellerPortalService } from '../seller-portal/seller-portal.service';
 import { SmsProvider, SmrtphoneSmsProvider, createSmsProvider } from './sms.provider';
 import { GmailService } from '../gmail/gmail.service';
 import { formatPhoneNumber, isOptOutMessage } from '@fast-homes/shared';
+import { dealFitFlags, propertyContextForPrompt } from '../leads/property-fit.util';
 
-const MAX_AUTO_RESPONSES_PER_DAY = 10;
+const MAX_AUTO_RESPONSES_PER_DAY = 20;
 const AUTO_RESPONSE_DELAY_MS = 180_000;       // 3 minutes — wait for seller to finish typing
 const DEMO_AUTO_RESPONSE_DELAY_MS = 2_000;    // 2 seconds in demo mode
 
@@ -386,40 +387,34 @@ export class MessagesService {
     const knownFields = campFields.filter(f => f.known).map(f => f.label);
 
     // ── Build rich property context so the AI can respond intelligently ────────
-    // Things the AI should know about the property that enrich the conversation
-    const propertyContextLines: string[] = [];
-    const attomAvm = (lead as any).attomAvm;
-    const arv = (lead as any).arv || (lead as any).avmExcellentHigh;
-    const beds = (lead as any).bedrooms;
-    const baths = (lead as any).bathrooms;
-    const sqft = (lead as any).sqft;
-    const yearBuilt = (lead as any).yearBuilt;
-
-    if (beds || baths || sqft) {
-      propertyContextLines.push(
-        `Property specs: ${[beds ? `${beds}bd` : '', baths ? `${baths}ba` : '', sqft ? `${sqft.toLocaleString()} sqft` : ''].filter(Boolean).join('/')}${yearBuilt ? `, built ${yearBuilt}` : ''}`
-      );
-    }
-    if (arv) {
-      propertyContextLines.push(`Estimated after-repair value (ARV): ~$${Math.round(arv).toLocaleString()} (team use only — do NOT mention this to the seller)`);
-    } else if (attomAvm) {
-      propertyContextLines.push(`Public AVM estimate: ~$${Math.round(attomAvm).toLocaleString()} (team use only — do NOT mention this to the seller)`);
-    }
+    // Pulls beds/baths/sqft/year, ARV (with ask-vs-ARV ratio), as-is/excellent
+    // range, last sale, equity, MLS history & photos, photo-based repair range,
+    // distress signals, and deal-fit concerns from the centralized helper.
+    const latestCompAnalysis = await this.prisma.compAnalysis
+      .findFirst({
+        where: { leadId },
+        orderBy: { createdAt: 'desc' },
+        select: { photoRepairLow: true, photoRepairHigh: true },
+      })
+      .catch(() => null);
+    const propertyContext = propertyContextForPrompt(lead, { latestCompAnalysis });
+    const fitFlags = dealFitFlags(lead);
 
     // MLS listing status check disabled — automated check was producing false positives
     // on nearly every lead. isActiveListing logic removed until a reliable source is found.
-    const sourceMetadata = (lead as any).sourceMetadata as Record<string, any> | null;
     const isActiveListing = false; // disabled
-
-    const propertyContext = propertyContextLines.length > 0
-      ? `\nProperty context (for your reference):\n${propertyContextLines.map(l => `  - ${l}`).join('\n')}\n`
-      : '';
 
     // ── Build the purpose string — conversational, AI decides the approach ─────
     let purpose: string;
     let portalInstruction = '';
 
-    if (campComplete) {
+    // We track whether this turn is an expectations-setting turn so the caller
+    // can stamp `lead.expectationsSetAt` only after the message actually sends.
+    const needsExpectationsTurn =
+      campComplete && fitFlags.hasOpenFitConcern && !lead.expectationsSetAt;
+    const isClosingTurn = campComplete && !needsExpectationsTurn;
+
+    if (isClosingTurn) {
       // ── Closing-message portal fallback ──────────────────────────────────
       // If the portal link was never sent during mid-conversation messages,
       // include it in the closing message so the seller still gets the link.
@@ -453,31 +448,46 @@ Your message must:
 3. Keep it warm and genuine
 4. Do NOT ask anything. Do NOT request more info. End the conversation professionally.
 5. Do NOT repeat back their price or timeline in a way that implies agreement or commitment.${portalInstruction}`;
+    } else if (needsExpectationsTurn) {
+      // CAMP is complete BUT we have a deal-fit concern (manufactured/leased
+      // land, or asking at/near ARV). Surface expectations honestly BEFORE
+      // handing off to the team. This is its own turn — autoRespond stays on,
+      // and the next inbound message will trigger the closing turn.
+      const concernsList = fitFlags.concerns.map(c => `  - ${c}`).join('\n');
+      purpose = `${propertyContext}CAMP info is gathered, but the team has flagged a deal-fit concern that should be surfaced to the seller BEFORE we wrap up.
+
+Concerns to surface honestly (in your own words, in Dax's voice):
+${concernsList}
+
+This message must:
+1. Briefly acknowledge what the seller just said.
+2. Set realistic expectations on the flagged concern. If asking-at-ARV is the issue, explain plainly that cash investors typically pay 60–70% of ARV and that may not be the right fit (do NOT quote a specific ARV number — just describe the gap). If manufactured/leased-land is the issue, be honest that those typically aren't a fit for cash buyers like us.
+3. Leave the door open. Ask one open-ended follow-up — what's driving their timeline, whether they want the team to still take a look, or whether listing might be a better path.
+4. Do NOT promise an offer. Do NOT say the team will reach out yet — that comes after they reply.
+5. Do NOT use closing language like "before I let you go" or "team will review everything".`;
     } else {
-      // CAMP not yet complete — let the AI decide what to explore next
+      // CAMP not yet complete — let the AI decide what to explore next.
 
       // ── Seller Portal URL injection ──────────────────────────────────────
-      // Once 2+ CAMP fields are known, include the portal URL so the AI can
-      // ask the seller to verify details and upload photos. Framing adapts
-      // based on whether condition is still unknown or already gathered.
-      if (
-        this.sellerPortalService &&
-        knownFields.length >= 2
-      ) {
+      // Once 3+ CAMP fields are known we offer the portal so the seller can
+      // verify details and upload photos. Tightened from 2+ to avoid sending
+      // a closing-toned message after one CAMP answer (we observed false
+      // wrap-ups when this fired with only price+timeline known).
+      if (this.sellerPortalService && knownFields.length >= 3) {
         const portalSent = await this.sellerPortalService.hasPortalLinkBeenSent(leadId);
         if (!portalSent) {
           const portalUrl = await this.sellerPortalService.getPortalUrl(leadId);
           if (portalUrl) {
             const conditionUnknown = lead.conditionLevel == null;
             const framingHint = conditionUnknown
-              ? `Frame it naturally — something like "I put together a page for your property where you can check the details we have on file and upload any photos. That really helps us get a feel for the place:\n${portalUrl}\n\nWhat kind of shape is the house in currently?"`
-              : `Frame it naturally — something like "I put together a page for your property where you can verify the details and upload any photos when you get a chance:\n${portalUrl}\n\nThat helps our team put together the best offer for you."`;
+              ? `Weave it in casually — something like "If it's easier, here's a page where you can check what we have on file and upload any photos:\n${portalUrl}\n\nWhat kind of shape is the house in currently?"`
+              : `Weave it in casually — something like "If it's easier, here's a page where you can verify the details and upload any photos:\n${portalUrl}"`;
 
             portalInstruction = `
-IMPORTANT — INCLUDE THIS LINK: You have a property portal page for this seller. Include this URL in your message: ${portalUrl}
+OPTIONAL — you may include this portal URL in your message if it fits naturally: ${portalUrl}
 ${framingHint}
-CRITICAL: Do NOT place a period, comma, or any punctuation immediately after the URL — it breaks the link on phones. End the sentence BEFORE the URL (use a colon or dash), then start the next question as a new paragraph after the URL.
-Do NOT just paste the link by itself. Weave it into your message naturally.`;
+Do NOT use closing language like "Before I let you go" or "Thanks for everything" — the conversation is still active.
+CRITICAL: Do NOT place a period, comma, or any punctuation immediately after the URL — it breaks the link on phones. End the sentence BEFORE the URL (use a colon or dash), then start the next question as a new paragraph after the URL.`;
           }
         }
       }
@@ -489,6 +499,7 @@ CAMP PROGRESS:
 
 Read the seller's last message carefully. Respond naturally to what they said.
 ${isActiveListing ? 'This property IS already listed for sale. Do not ask if they want to sell. Ask about their experience with the listing or why they are exploring a cash offer.' : ''}
+KEEP THE CONVERSATION GOING. Do NOT wrap up just because they answered one question — there are still missing topics and there's plenty more to learn. After you acknowledge what they said, take ONE of these moves: ask about a missing CAMP topic, dig deeper into something they mentioned, or use a property fact you know (listing photos, last sale year) to ask a sharper question. Vary your approach across messages.
 If the conversation naturally opens up a chance to learn about one of the missing topics, take it. But do NOT force it. It's fine to just respond to what the seller said without asking a CAMP question if the moment isn't right.
 If the seller seems frustrated, confused, sharing something personal, or asked you a direct question, address THAT first. Building rapport is more important than checking boxes.
 You decide the right approach based on the conversation flow.${portalInstruction}`.trim();
@@ -520,8 +531,10 @@ You decide the right approach based on the conversation flow.${portalInstruction
 
       const messageBody = drafts.message;
 
-      // If all CAMP is complete, shut off auto-respond
-      if (campComplete) {
+      // Only the true closing turn shuts off auto-respond. An expectations turn
+      // still leaves the door open for the seller to reply, which then triggers
+      // the closing turn on the next pass.
+      if (isClosingTurn) {
         await this.prisma.lead.update({
           where: { id: leadId },
           data: { autoRespond: false, status: 'QUALIFIED' },
@@ -534,17 +547,27 @@ You decide the right approach based on the conversation flow.${portalInstruction
       await this.sendMessage(leadId, messageBody);
       await this.incrementAutoResponseCount(leadId);
 
-      // Mark portal link as sent if we included it in this message
-      if (portalInstruction && this.sellerPortalService) {
-        this.sellerPortalService.markPortalLinkSent(leadId).catch((err) => {
-          this.logger.warn(`Failed to mark portal link sent for ${leadId}: ${err.message}`);
-        });
+      // Stamp expectations-set timestamp once the message has actually been
+      // dispatched, so a future turn knows it's safe to move to the closing.
+      if (needsExpectationsTurn) {
+        await this.prisma.lead
+          .update({ where: { id: leadId }, data: { expectationsSetAt: new Date() } })
+          .catch((err) =>
+            this.logger.warn(`Failed to stamp expectationsSetAt for ${leadId}: ${err.message}`),
+          );
+        this.logger.log(`📣 Expectations message sent for lead ${leadId} — concerns: ${fitFlags.concerns.join('; ')}`);
       }
+
+      // sendMessage() already marks the portal link as sent when the body
+      // contains the portal URL (see line ~210). Relying on that body-check
+      // also handles the case where the prompt said the link was OPTIONAL and
+      // the AI chose not to include it.
 
       // Refresh CAMP flags
       await this.scoringService.refreshCampFlags(leadId);
 
-      this.logger.log(`Auto-response sent for lead ${leadId} (CAMP: ${campComplete ? 'complete' : `missing ${missingFields.join(', ')}`})`);
+      const phase = isClosingTurn ? 'closing' : needsExpectationsTurn ? 'expectations' : `missing ${missingFields.join(', ')}`;
+      this.logger.log(`Auto-response sent for lead ${leadId} (CAMP: ${phase})`);
       return messageBody;
     } catch (error) {
       this.logger.error(`Auto-response failed for lead ${leadId}: ${error.message}`);
