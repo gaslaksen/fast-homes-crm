@@ -61,7 +61,7 @@ export default function ArvResultStrip({
           ? 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900'
           : stale
             ? 'border-amber-300 dark:border-amber-700 bg-amber-50/60 dark:bg-amber-900/15'
-            : 'border-blue-300 dark:border-blue-800 bg-blue-50/70 dark:bg-blue-900/20'
+            : 'border-primary-300 dark:border-primary-800 bg-primary-50/70 dark:bg-primary-900/20'
       }`}
     >
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-2">
@@ -130,9 +130,12 @@ export default function ArvResultStrip({
             type="button"
             onClick={onCalculate}
             disabled={selectedCount < 2 || calculating}
-            className="inline-flex items-center px-3 py-1.5 rounded-md bg-blue-600 hover:bg-blue-500 disabled:bg-gray-300 dark:disabled:bg-gray-700 text-white text-sm font-medium disabled:cursor-not-allowed"
+            className="btn btn-primary text-sm disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2"
           >
-            {calculating ? 'Calculating…' : `Calculate ARV from ${selectedCount} selected comps →`}
+            {calculating && <Spinner />}
+            {calculating
+              ? 'Calculating ARV (this can take 20–40s)…'
+              : `Calculate ARV from ${selectedCount} selected comps →`}
           </button>
         )}
         {stale && (
@@ -144,8 +147,9 @@ export default function ArvResultStrip({
               type="button"
               onClick={onCalculate}
               disabled={selectedCount < 2 || calculating}
-              className="inline-flex items-center px-3 py-1.5 rounded-md bg-amber-600 hover:bg-amber-500 disabled:bg-gray-300 text-white text-sm font-medium"
+              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-amber-600 hover:bg-amber-500 disabled:bg-gray-300 text-white text-sm font-medium"
             >
+              {calculating && <Spinner />}
               {calculating ? 'Recalculating…' : 'Recalculate'}
             </button>
           </>
@@ -160,11 +164,17 @@ export default function ArvResultStrip({
               type="button"
               onClick={onCalculate}
               disabled={calculating}
-              className="ml-auto inline-flex items-center px-3 py-1.5 rounded-md border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 text-sm font-medium text-gray-700 dark:text-gray-300"
+              className="ml-auto inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 text-sm font-medium text-gray-700 dark:text-gray-300"
             >
+              {calculating && <Spinner />}
               {calculating ? 'Recalculating…' : 'Recalculate'}
             </button>
           </>
+        )}
+        {calculating && (
+          <span className="text-[12px] text-gray-600 dark:text-gray-400">
+            Running Opus 4.7 — usually 20–40s.
+          </span>
         )}
         {errorMessage && (
           <div className="text-sm text-rose-700 dark:text-rose-400">
@@ -180,6 +190,15 @@ export default function ArvResultStrip({
         </div>
       )}
     </div>
+  );
+}
+
+function Spinner() {
+  return (
+    <span
+      className="inline-block w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin"
+      aria-label="Loading"
+    />
   );
 }
 
@@ -200,7 +219,7 @@ function Cell({
       <div
         className={`truncate ${
           emphasis
-            ? 'text-xl font-semibold text-blue-700 dark:text-blue-300'
+            ? 'text-xl font-semibold text-primary-700 dark:text-primary-300'
             : 'text-sm font-medium text-gray-800 dark:text-gray-200'
         }`}
       >

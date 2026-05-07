@@ -80,8 +80,16 @@ export class AiArvCalculationService {
     mode: ValuationMode;
     userId?: string;
     forceRefresh?: boolean;
+    // Optional explicit list of comp IDs to use. When provided the backend
+    // only loads these (verifying each belongs to the lead). Without it,
+    // we fall back to "all comps with selected=true on this lead" — but
+    // that path can over-count when REAPI + BatchData have duplicate rows
+    // for the same property and both are flagged selected. Frontends that
+    // dedupe their comp display should pass their deduped IDs here.
+    selectedCompIds?: string[];
   }): Promise<AIArvCalculationResult> {
-    const { leadId, mode, userId, forceRefresh = false } = params;
+    const { leadId, mode, userId, forceRefresh = false, selectedCompIds } =
+      params;
     const lead = await this.prisma.lead.findUnique({
       where: { id: leadId },
       select: {
@@ -102,11 +110,25 @@ export class AiArvCalculationService {
     });
     if (!lead) throw new NotFoundException(`Lead ${leadId} not found`);
 
-    // Load currently-selected comps for this lead.
-    const compRows = await this.prisma.comp.findMany({
-      where: { leadId, selected: true },
-      orderBy: { soldDate: 'desc' },
-    });
+    // Load comps. When the caller passes explicit IDs we honor that exact
+    // set (after verifying lead ownership). Otherwise we fall back to all
+    // selected comps on the lead — see the contract note above.
+    const compRows = selectedCompIds && selectedCompIds.length > 0
+      ? await this.prisma.comp.findMany({
+          where: { id: { in: selectedCompIds }, leadId },
+          orderBy: { soldDate: 'desc' },
+        })
+      : await this.prisma.comp.findMany({
+          where: { leadId, selected: true },
+          orderBy: { soldDate: 'desc' },
+        });
+    if (selectedCompIds && compRows.length !== selectedCompIds.length) {
+      const found = new Set(compRows.map((r) => r.id));
+      const missing = selectedCompIds.filter((id) => !found.has(id));
+      throw new BadRequestException(
+        `Some comp IDs do not belong to lead ${leadId}: ${missing.join(', ')}`,
+      );
+    }
     if (compRows.length < 2) {
       throw new BadRequestException(
         `ARV calculation requires at least 2 selected comps; found ${compRows.length}`,

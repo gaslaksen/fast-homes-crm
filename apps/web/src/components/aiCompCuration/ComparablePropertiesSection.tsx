@@ -117,6 +117,10 @@ export default function ComparablePropertiesSection({
   const [displayMode, setDisplayMode] = useState<DisplayMode>('cards');
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [expandedLessRelevant, setExpandedLessRelevant] = useState(false);
+  // Show only the comps the user has selected (toggle in the header).
+  // Useful post-ARV-calc when the relevant set is narrowed down and the
+  // unselected ones are just visual noise.
+  const [showSelectedOnly, setShowSelectedOnly] = useState(false);
 
   // Phase B: drill-in modal entry points (cards photo click,
   // table/map address click). Behind a flag so flag-off behavior is
@@ -266,13 +270,26 @@ export default function ComparablePropertiesSection({
   //   - AI ran, less-relevant expanded: included + borderline + excluded
   //   - Table mode: always show all comps (table is for exhaustive review)
   const visibleComps = useMemo(() => {
-    if (displayMode === 'table' || !rankingByCompId) return comps;
-    if (expandedLessRelevant) return comps;
-    return comps.filter((c) => {
-      const r = rankingByCompId.get(c.id);
-      return r ? r.inclusion === 'recommend_include' : false;
-    });
-  }, [comps, rankingByCompId, displayMode, expandedLessRelevant]);
+    let pool: typeof comps;
+    if (displayMode === 'table' || !rankingByCompId) pool = comps;
+    else if (expandedLessRelevant) pool = comps;
+    else
+      pool = comps.filter((c) => {
+        const r = rankingByCompId.get(c.id);
+        return r ? r.inclusion === 'recommend_include' : false;
+      });
+    if (showSelectedOnly) {
+      return pool.filter((c) => selectedCompIds.has(c.id));
+    }
+    return pool;
+  }, [
+    comps,
+    rankingByCompId,
+    displayMode,
+    expandedLessRelevant,
+    showSelectedOnly,
+    selectedCompIds,
+  ]);
 
   const visibleSelectedCount = useMemo(
     () => visibleComps.filter((c) => selectedCompIds.has(c.id)).length,
@@ -325,6 +342,26 @@ export default function ComparablePropertiesSection({
           <span className="text-xs text-gray-600 dark:text-gray-400">
             {visibleSelectedCount} of {visibleComps.length} selected
           </span>
+
+          {selectedCompIds.size > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowSelectedOnly((v) => !v)}
+              className={`text-xs px-2.5 py-1.5 rounded border inline-flex items-center gap-1.5 transition-colors ${
+                showSelectedOnly
+                  ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
+                  : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
+              }`}
+              aria-pressed={showSelectedOnly}
+              title={
+                showSelectedOnly
+                  ? 'Show all comps'
+                  : 'Hide non-selected comps'
+              }
+            >
+              {showSelectedOnly ? '✓ Selected only' : 'Show selected only'}
+            </button>
+          )}
 
           <div className="ml-auto flex items-center gap-2">
             <DisplayModeToggle value={displayMode} onChange={persistDisplayMode} />

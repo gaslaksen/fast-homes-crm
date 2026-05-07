@@ -196,7 +196,11 @@ export const arvCalculationAPI = {
   // the input-hash cache.
   calculate: (
     leadId: string,
-    body: { mode: 'ARV_RENOVATED' | 'AS_IS'; forceRefresh?: boolean },
+    body: {
+      mode: 'ARV_RENOVATED' | 'AS_IS';
+      forceRefresh?: boolean;
+      selectedCompIds?: string[];
+    },
   ) => api.post(`/leads/${leadId}/arv-calculation`, body),
   // Latest persisted calculation (the one currently set as lead.arv).
   getLatest: (leadId: string) => api.get(`/leads/${leadId}/arv-calculation`),

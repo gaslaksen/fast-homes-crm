@@ -22,6 +22,7 @@ interface DecodedToken {
 interface CalculateBody {
   mode?: string;
   forceRefresh?: boolean;
+  selectedCompIds?: string[];
 }
 
 @Controller()
@@ -71,6 +72,11 @@ export class AiArvCalculationController {
       mode,
       userId,
       forceRefresh: body?.forceRefresh === true,
+      selectedCompIds: Array.isArray(body?.selectedCompIds)
+        ? body!.selectedCompIds.filter(
+            (s): s is string => typeof s === 'string' && s.length > 0,
+          )
+        : undefined,
     });
     return { result };
   }

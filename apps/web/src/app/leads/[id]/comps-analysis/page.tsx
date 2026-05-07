@@ -384,17 +384,27 @@ export default function CompsAnalysisPage() {
     }
   }, [activeSection, fetchArvHistory, arvResult?.computedAt]);
 
-  // Trigger an ARV calculation. Reads from currently-selected comps.
+  // Trigger an ARV calculation. Pass exact selected comp IDs so the
+  // backend uses the same set the user sees on screen (the analysis is
+  // already deduped client-side; the backend would otherwise re-include
+  // any duplicate provider rows that share the same canonical address).
   const handleCalculateArv = useCallback(async () => {
     if (!leadId) return;
+    const ids = (analysis?.comps || [])
+      .filter((c) => c.selected)
+      .map((c) => c.id);
+    if (ids.length < 2) {
+      setArvError('Select at least 2 comps before calculating ARV.');
+      return;
+    }
     setArvCalculating(true);
     setArvError(null);
     try {
       const res = await arvCalculationAPI.calculate(leadId, {
         mode: valuationMode,
+        selectedCompIds: ids,
       });
       setArvResult(res.data?.result ?? null);
-      // Refresh lead so canonical lead.arv updates.
       try {
         const lr = await leadsAPI.get(leadId);
         setLead(lr.data);
@@ -410,7 +420,7 @@ export default function CompsAnalysisPage() {
     } finally {
       setArvCalculating(false);
     }
-  }, [leadId, valuationMode]);
+  }, [leadId, valuationMode, analysis]);
 
   // ─── Find Comps (provider chosen by compsSource toggle) ─────────────────────
   const handleFindComps = async (forceRefresh = false) => {
@@ -900,6 +910,19 @@ export default function CompsAnalysisPage() {
             }
           />
 
+          {/* Drawer sits between subject + comp grid when a result exists.
+              Auto-expands on first calc; tabs cover adjustments / method /
+              stats / history. */}
+          {arvResult && (
+            <div className="px-3 sm:px-4 lg:px-6 pt-4">
+              <ArvCalculationDrawer
+                result={arvResult}
+                history={arvHistory}
+                historyLoading={arvHistoryLoading}
+              />
+            </div>
+          )}
+
           {comparisonMode ? (
             <div className="px-3 sm:px-4 lg:px-6 py-4">
               <ProviderComparisonView
@@ -994,16 +1017,18 @@ export default function CompsAnalysisPage() {
               gone. ARV is now triggered from the Calculate / Recalculate
               button on the ArvResultStrip inside SubjectPropertySection. */}
 
-          {/* ARV calculation details — collapsed-by-default drawer below
-              the comp grid. Per-comp adjustments, method, factors, risks,
-              stats, history. */}
-          <div className="px-3 sm:px-4 lg:px-6 pb-6">
-            <ArvCalculationDrawer
-              result={arvResult}
-              history={arvHistory}
-              historyLoading={arvHistoryLoading}
-            />
-          </div>
+          {/* If no result yet, mount the drawer at the bottom (collapsed)
+              as a placeholder hint. After first calc the drawer at the
+              top — placed between subject and comp grid — takes over. */}
+          {!arvResult && (
+            <div className="px-3 sm:px-4 lg:px-6 pb-6">
+              <ArvCalculationDrawer
+                result={null}
+                history={arvHistory}
+                historyLoading={arvHistoryLoading}
+              />
+            </div>
+          )}
         </div>
       )}
 

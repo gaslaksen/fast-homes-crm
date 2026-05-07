@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { AIArvCalculationResult } from '@/lib/aiArvCalculation/types';
 import ArvAdjustmentsTable from './ArvAdjustmentsTable';
 import ArvCalculationHistory from './ArvCalculationHistory';
@@ -20,6 +20,17 @@ export default function ArvCalculationDrawer({
 }: Props) {
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<Tab>('adjustments');
+
+  // Auto-expand the first time a result lands (or when an existing
+  // result is replaced with a new computation). The user manually
+  // toggles after that — we don't override their close.
+  const [lastComputedAt, setLastComputedAt] = useState<string | null>(null);
+  useEffect(() => {
+    if (result && result.computedAt !== lastComputedAt) {
+      setOpen(true);
+      setLastComputedAt(result.computedAt);
+    }
+  }, [result, lastComputedAt]);
 
   return (
     <section className="rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
