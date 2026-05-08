@@ -209,6 +209,23 @@ export const arvCalculationAPI = {
     api.get(`/leads/${leadId}/arv-calculation/history`, { params: { limit } }),
 };
 
+// Phase D: Deal Math (replaces Repairs + Deal Analysis tabs)
+export const dealMathAPI = {
+  get: (leadId: string) => api.get(`/leads/${leadId}/deal-math`),
+  setStrategy: (leadId: string, strategy: string | null) =>
+    api.patch(`/leads/${leadId}/deal-math/strategy`, { strategy }),
+  setInputs: (leadId: string, strategy: string, patch: Record<string, unknown>) =>
+    api.patch(`/leads/${leadId}/deal-math/inputs`, { strategy, patch }),
+  setRepairEstimate: (
+    leadId: string,
+    body: {
+      value: number | null;
+      method: 'PHOTO_ANALYSIS' | 'QUICK_SQFT' | 'MANUAL_BUILDER' | 'AI_TEXT' | 'MANUAL_OVERRIDE';
+      metadata?: Record<string, unknown> | null;
+    },
+  ) => api.patch(`/leads/${leadId}/deal-math/repair-estimate`, body),
+};
+
 // Dashboard API
 export const dashboardAPI = {
   stats: () => api.get('/dashboard/stats'),

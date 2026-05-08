@@ -10,8 +10,8 @@ import ArvCalculationDrawer from '@/components/aiArvCalculation/ArvCalculationDr
 import type { AIArvCalculationResult, ValuationMode } from '@/lib/aiArvCalculation/types';
 import AppShell from '@/components/AppShell';
 import LeadTabNav, { COMPS_TABS, DETAIL_TABS } from '@/components/LeadTabNav';
+import DealMathPanel from './deal-math/DealMathPanel';
 import LeadDetailHeader from '@/components/leadDetailV2/LeadDetailHeader';
-import ShareDealModal from '@/components/ShareDealModal';
 import CompRow from '@/components/CompRow';
 import SubjectPropertyCard from '@/components/SubjectPropertyCard';
 import CompsToolbar from '@/components/CompsToolbar';
@@ -143,13 +143,6 @@ interface Analysis {
   lead: Lead;
 }
 
-const REPAIR_ITEMS = [
-  'Full gut', 'Roof', 'Kitchen', 'Bathrooms', 'Windows', 'Landscaping',
-  'Exterior Painting', 'Drywall', 'Interior painting', 'Flooring', 'Driveway', 'HVAC',
-];
-
-const MAO_OPTIONS = [60, 65, 70, 75, 80, 85, 90];
-
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function CompsAnalysisPage() {
   const params = useParams();
@@ -161,11 +154,15 @@ export default function CompsAnalysisPage() {
   const rawTab = searchParams.get('tab') || 'valuation';
   // Build 016: legacy ?tab=comps and ?tab=arv both map to ?tab=valuation.
   const isLegacyValuationTab = rawTab === 'comps' || rawTab === 'arv';
+  // Phase D: legacy ?tab=repairs and ?tab=deal-analysis both map to ?tab=deal-math.
+  const isLegacyDealMathTab = rawTab === 'repairs' || rawTab === 'deal-analysis';
   const activeSection = isLegacyValuationTab
     ? 'valuation'
-    : COMPS_TABS.includes(rawTab as any)
-      ? rawTab
-      : 'valuation';
+    : isLegacyDealMathTab
+      ? 'deal-math'
+      : COMPS_TABS.includes(rawTab as any)
+        ? rawTab
+        : 'valuation';
 
   useEffect(() => {
     if (isLegacyValuationTab) {
@@ -175,10 +172,17 @@ export default function CompsAnalysisPage() {
       );
       return;
     }
+    if (isLegacyDealMathTab) {
+      router.replace(
+        `/leads/${leadId}/comps-analysis?tab=deal-math`,
+        { scroll: false },
+      );
+      return;
+    }
     if (rawTab && DETAIL_TABS.includes(rawTab as any)) {
       router.replace(`/leads/${leadId}?tab=${rawTab}`);
     }
-  }, [rawTab, leadId, router, isLegacyValuationTab]);
+  }, [rawTab, leadId, router, isLegacyValuationTab, isLegacyDealMathTab]);
 
   const [lead, setLead] = useState<Lead | null>(null);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
@@ -236,31 +240,8 @@ export default function CompsAnalysisPage() {
     isRenovated: false, propertyType: '', notes: '',
   });
 
-  // Deal calculator state
-  const [dealArv, setDealArv] = useState(0);
-  const [repairCosts, setRepairCosts] = useState(0);
-  const [assignmentFee, setAssignmentFee] = useState(0);
-  const [maoPercent, setMaoPercent] = useState(70);
-  const [dealType, setDealType] = useState<string>('wholesale');
-
-  // Repair estimator
-  const [repairLevel, setRepairLevel] = useState('flip');
-  const [selectedRepairs, setSelectedRepairs] = useState<string[]>([]);
-  const [repairDescription, setRepairDescription] = useState('');
-
-  // Processing states
-  const [calculating, setCalculating] = useState(false);
-  const [savingDealNumbers, setSavingDealNumbers] = useState(false);
-  const [showShareModal, setShowShareModal] = useState(false);
-  const [dealNumbersSaved, setDealNumbersSaved] = useState(false);
-  const [generatingAi, setGeneratingAi] = useState(false);
+  // Processing states still used by deal-intel branch.
   const [generatingDealIntel, setGeneratingDealIntel] = useState(false);
-  const [analyzingPhotos, setAnalyzingPhotos] = useState(false);
-  const [selectedPhotos, setSelectedPhotos] = useState<File[]>([]);
-  const [photoThumbnails, setPhotoThumbnails] = useState<{file: File; url: string; status: 'ready'|'uploading'|'done'}[]>([]);
-  const [selectedLeadPhotoIds, setSelectedLeadPhotoIds] = useState<Set<string>>(new Set());
-  const [analyzingLeadPhotos, setAnalyzingLeadPhotos] = useState(false);
-  const [isDragging, setIsDragging] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -301,26 +282,9 @@ export default function CompsAnalysisPage() {
       // Check for existing analyses
       const analyses = await compAnalysisAPI.list(leadId);
       if (analyses.data?.length > 0) {
-        // Load most recent
         const latest = analyses.data[0];
         const full = await compAnalysisAPI.get(leadId, latest.id);
         setAnalysis(full.data);
-        // Lead-level saved values take priority over CompAnalysis values
-        const savedArv = (leadRes.data as any).arv;
-        const savedRepairs = (leadRes.data as any).repairCosts;
-        const savedFee = (leadRes.data as any).assignmentFee;
-        const savedMao = (leadRes.data as any).maoPercent;
-        setDealArv(savedArv || full.data.arvEstimate || full.data.lead?.arv || 0);
-        setRepairCosts(savedRepairs ?? full.data.repairCosts ?? 0);
-        // Use lead-level fee if saved; never pull CompAnalysis default (it's always 15000)
-        setAssignmentFee(savedFee ?? 0);
-        // Use saved MAO% if present; otherwise default to 70 (ignore sellerMotivationMaoPercent — that's AI-inferred, not user-set)
-        setMaoPercent(savedMao ?? 70);
-        setRepairLevel(full.data.repairFinishLevel || 'flip');
-        setSelectedRepairs(full.data.repairItems || []);
-        // Set deal type from contract exitStrategy or comp analysis dealType
-        const contractExitStrategy = (leadRes.data as any).contract?.exitStrategy;
-        setDealType(contractExitStrategy ?? full.data.dealType ?? 'wholesale');
       } else {
         // Auto-create analysis importing existing comps
         const existingComps = await compsAPI.list(leadId);
@@ -330,7 +294,6 @@ export default function CompsAnalysisPage() {
           });
           const full = await compAnalysisAPI.get(leadId, res.data.id);
           setAnalysis(full.data);
-          setDealArv((leadRes.data as any).arv || full.data.arvEstimate || leadRes.data.arv || 0);
         }
       }
     } catch (error) {
@@ -344,9 +307,7 @@ export default function CompsAnalysisPage() {
     if (!analysis) return;
     const res = await compAnalysisAPI.get(leadId, analysis.id);
     setAnalysis(res.data);
-    // Prefer lead-level saved ARV; only fall back to comp analysis estimate
-    setDealArv((lead as any)?.arv || res.data.arvEstimate || dealArv);
-  }, [analysis, leadId, dealArv, lead]);
+  }, [analysis, leadId]);
 
   // Load latest persisted ARV calc whenever the lead changes.
   useEffect(() => {
@@ -439,9 +400,6 @@ export default function CompsAnalysisPage() {
       });
       const full = await compAnalysisAPI.get(leadId, res.data.id);
       setAnalysis(full.data);
-      // Preserve any user-saved ARV; only update if the lead has no saved ARV yet
-      const savedLeadArv = (leadRes.data as any).arv;
-      setDealArv(savedLeadArv || full.data.arvEstimate || result.data.arv || 0);
       router.replace(`/leads/${leadId}/comps-analysis?tab=comps`, { scroll: false });
 
       // If REAPI returned 0 comps, tell the user clearly.
@@ -550,19 +508,6 @@ export default function CompsAnalysisPage() {
     }
   };
 
-  // ─── AI Summary ───────────────────────────────────────────────────────────
-  const handleAiSummary = async () => {
-    if (!analysis) return;
-    setGeneratingAi(true);
-    try {
-      await compAnalysisAPI.aiSummary(leadId, analysis.id);
-      await refreshAnalysis();
-    } catch (error) {
-      console.error('AI summary failed:', error);
-    } finally {
-      setGeneratingAi(false);
-    }
-  };
   // calculateArv / aiAdjustComps / generateAssessment removed in Build 016.
   // ARV is now calculated by AiArvCalculationService — see ArvResultStrip
   // mounted inside SubjectPropertySection on the Valuation tab.
@@ -583,194 +528,8 @@ export default function CompsAnalysisPage() {
     }
   };
 
-  // ─── Photo Analysis ───────────────────────────────────────────────────────
-  const addPhotos = (files: File[]) => {
-    const newFiles = files.slice(0, Math.max(0, 30 - selectedPhotos.length));
-    const newThumbs = newFiles.map(f => ({
-      file: f,
-      url: URL.createObjectURL(f),
-      status: 'ready' as const,
-    }));
-    setSelectedPhotos(prev => [...prev, ...newFiles]);
-    setPhotoThumbnails(prev => [...prev, ...newThumbs]);
-  };
-
-  const removePhoto = (idx: number) => {
-    setSelectedPhotos(prev => prev.filter((_, i) => i !== idx));
-    setPhotoThumbnails(prev => {
-      URL.revokeObjectURL(prev[idx]?.url);
-      return prev.filter((_, i) => i !== idx);
-    });
-  };
-
-  const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    addPhotos(Array.from(e.target.files || []));
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
-    addPhotos(Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/')));
-  };
-
-  /** Compress a photo to max 1200px wide and 85% JPEG quality before sending to the API.
-   *  Raw phone photos are 2–5MB each; this brings them to ~150–300KB, well within Anthropic limits. */
-  const compressPhoto = (file: File): Promise<File> =>
-    new Promise((resolve) => {
-      const img = new window.Image();
-      const url = URL.createObjectURL(file);
-      img.onload = () => {
-        URL.revokeObjectURL(url);
-        const MAX_DIM = 1200;
-        const scale = Math.min(1, MAX_DIM / Math.max(img.width, img.height));
-        const w = Math.round(img.width * scale);
-        const h = Math.round(img.height * scale);
-        const canvas = document.createElement('canvas');
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext('2d')!;
-        ctx.drawImage(img, 0, 0, w, h);
-        canvas.toBlob(
-          (blob) => resolve(blob ? new File([blob], file.name, { type: 'image/jpeg' }) : file),
-          'image/jpeg',
-          0.85,
-        );
-      };
-      img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
-      img.src = url;
-    });
-
-  const handleAnalyzePhotos = async () => {
-    if (!analysis || selectedPhotos.length === 0) return;
-    setAnalyzingPhotos(true);
-    setPhotoThumbnails(prev => prev.map(t => ({ ...t, status: 'uploading' as const })));
-    try {
-      // Compress all photos — keeps each under ~300KB
-      const compressed = await Promise.all(selectedPhotos.map(compressPhoto));
-
-      // Backend Multer limit is now 30.
-      const BACKEND_LIMIT = 30;
-      const toSend = compressed.slice(0, BACKEND_LIMIT);
-
-      const formData = new FormData();
-      toSend.forEach((photo) => formData.append('photos', photo));
-
-      // Persist originals to lead gallery in parallel
-      photosAPI.uploadMultiple(leadId, selectedPhotos).catch(() => {});
-
-      const res = await compAnalysisAPI.analyzePhotos(leadId, analysis.id, formData);
-      if (res.data.repairLow) setRepairCosts(Math.round((res.data.repairLow + res.data.repairHigh) / 2));
-      setPhotoThumbnails(prev => prev.map(t => ({ ...t, status: 'done' as const })));
-      await refreshAnalysis();
-    } catch (error: any) {
-      console.error('Photo analysis failed:', error);
-      const msg = error?.response?.data?.message || error?.message || 'Unknown error';
-      alert(`Photo analysis failed: ${msg}\n\nTry reducing to 10–15 photos if the issue persists.`);
-      setPhotoThumbnails(prev => prev.map(t => ({ ...t, status: 'ready' as const })));
-    } finally {
-      setAnalyzingPhotos(false);
-    }
-  };
-
-  const toggleLeadPhoto = (photoId: string) => {
-    setSelectedLeadPhotoIds(prev => {
-      const next = new Set(prev);
-      if (next.has(photoId)) next.delete(photoId);
-      else if (next.size < 30) next.add(photoId);
-      return next;
-    });
-  };
-
-  const selectAllLeadPhotos = () => {
-    const photos = (lead?.photos as any[]) || [];
-    if (selectedLeadPhotoIds.size === photos.length) {
-      setSelectedLeadPhotoIds(new Set());
-    } else {
-      setSelectedLeadPhotoIds(new Set(photos.slice(0, 30).map((p: any) => p.id)));
-    }
-  };
-
-  const handleAnalyzeLeadPhotos = async () => {
-    if (!analysis || selectedLeadPhotoIds.size === 0) return;
-    setAnalyzingLeadPhotos(true);
-    try {
-      const res = await compAnalysisAPI.analyzeLeadPhotos(leadId, analysis.id, Array.from(selectedLeadPhotoIds));
-      if (res.data.repairLow) setRepairCosts(Math.round((res.data.repairLow + res.data.repairHigh) / 2));
-      setSelectedLeadPhotoIds(new Set());
-      await refreshAnalysis();
-    } catch (error: any) {
-      const msg = error?.response?.data?.message || error?.message || 'Unknown error';
-      alert(`Photo analysis failed: ${msg}`);
-    } finally {
-      setAnalyzingLeadPhotos(false);
-    }
-  };
-
-  // ─── Deal Calculator ─────────────────────────────────────────────────────
-  const mao = Math.round((dealArv * maoPercent / 100) - repairCosts - assignmentFee);
-  const initialOffer = Math.round(mao * 0.95);
-  const salePrice = Math.round(mao + assignmentFee);
-
-  // ─── Repair Estimator ────────────────────────────────────────────────────
-  const handleEstimateRepairs = async () => {
-    if (!analysis) return;
-    setCalculating(true);
-    try {
-      const res = await compAnalysisAPI.estimateRepairs(leadId, analysis.id, {
-        finishLevel: repairLevel,
-        description: repairDescription || undefined,
-        repairItems: selectedRepairs.length > 0 ? selectedRepairs : undefined,
-        sqft: lead?.sqft,
-      });
-      setRepairCosts(res.data.totalCost || 0);
-      await refreshAnalysis();
-    } catch (error) {
-      console.error('Repair estimate failed:', error);
-    } finally {
-      setCalculating(false);
-    }
-  };
-
-  const toggleRepairItem = (item: string) => {
-    setSelectedRepairs((prev) =>
-      prev.includes(item) ? prev.filter((i) => i !== item) : [...prev, item]
-    );
-  };
-
   // saveToLead handler removed in Build 016 — ARV is now persisted
   // implicitly inside AiArvCalculationService on each successful calc.
-
-  const handleSaveDealNumbers = async () => {
-    setSavingDealNumbers(true);
-    setDealNumbersSaved(false);
-    try {
-      await leadsAPI.update(leadId, {
-        arv: dealArv || undefined,
-        repairCosts: repairCosts || undefined,
-        assignmentFee: assignmentFee || undefined,
-        maoPercent: maoPercent || undefined,
-      });
-
-      // exitStrategy lives on Contract, not Lead — save separately
-      // Use dispoAPI to upsert the contract with the new exitStrategy
-      try {
-        const { dispoAPI } = await import('@/lib/api');
-        await dispoAPI.upsertContract(leadId, { exitStrategy: dealType });
-      } catch {
-        // Non-fatal: contract might not exist yet; ignore
-      }
-
-      const lr = await leadsAPI.get(leadId);
-      setLead(lr.data);
-      setDealNumbersSaved(true);
-      setTimeout(() => setDealNumbersSaved(false), 4000);
-    } catch (error) {
-      console.error('Failed to save deal numbers:', error);
-      alert('Failed to save deal numbers');
-    } finally {
-      setSavingDealNumbers(false);
-    }
-  };
 
   // ─── Sorting ──────────────────────────────────────────────────────────────
   const handleSort = (field: string) => {
@@ -1323,269 +1082,6 @@ export default function CompsAnalysisPage() {
       <main className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
 
 
-        {/* ═══════════════ DEAL ANALYSIS SECTION ═══════════════ */}
-        {activeSection === 'deal-analysis' && (
-          <>
-          <div className="space-y-6">
-            <div className="card">
-              <div className="flex items-center gap-3 mb-6">
-                <h2 className="text-lg font-bold">Deal Analysis</h2>
-                <select
-                  value={dealType}
-                  onChange={(e) => setDealType(e.target.value)}
-                  className="text-sm border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-1.5 dark:bg-gray-800 dark:text-gray-200"
-                >
-                  <option value="wholesale">Wholesale</option>
-                  <option value="novation">Novation</option>
-                  <option value="flip">Fix &amp; Flip</option>
-                  <option value="wholetail">Wholetail</option>
-                  <option value="subject_to">Subject-To</option>
-                  <option value="creative">Creative Finance</option>
-                  <option value="joint_venture">Joint Venture</option>
-                  <option value="concierge_listing">Concierge Listing</option>
-                </select>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Inputs */}
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">After Repair Value (ARV)</label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 dark:text-gray-400">$</span>
-                      <input
-                        type="number"
-                        value={dealArv || ''}
-                        onChange={(e) => setDealArv(parseFloat(e.target.value) || 0)}
-                        className="input pl-7"
-                      />
-                    </div>
-                    {analysis?.arvEstimate && dealArv !== analysis.arvEstimate && (
-                      <button
-                        onClick={() => setDealArv(analysis.arvEstimate || 0)}
-                        className="text-xs text-primary-600 mt-1 hover:underline"
-                      >
-                        Reset to calculated ARV (${analysis.arvEstimate.toLocaleString()})
-                      </button>
-                    )}
-                    {!analysis?.arvEstimate && lead.arv && dealArv !== lead.arv && (
-                      <button
-                        onClick={() => setDealArv(lead.arv || 0)}
-                        className="text-xs text-primary-600 mt-1 hover:underline"
-                      >
-                        Use lead ARV (${lead.arv.toLocaleString()})
-                      </button>
-                    )}
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Estimated Repair Costs</label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 dark:text-gray-400">$</span>
-                      <input
-                        type="number"
-                        value={repairCosts || ''}
-                        onChange={(e) => setRepairCosts(parseFloat(e.target.value) || 0)}
-                        className="input pl-7"
-                      />
-                    </div>
-                    <div className="flex gap-2 mt-2">
-                      {[
-                        { label: '$20/sqft', rate: 20 },
-                        { label: '$50/sqft', rate: 50 },
-                        { label: '$100/sqft', rate: 100 },
-                      ].map((opt) => (
-                        <button
-                          key={opt.rate}
-                          onClick={() => setRepairCosts((lead?.sqft || 1500) * opt.rate)}
-                          className="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:bg-gray-800 dark:hover:bg-gray-700"
-                        >
-                          {opt.label}
-                        </button>
-                      ))}
-                    </div>
-                    {(analysis?.repairCostLow != null || analysis?.repairCostHigh != null) && (
-                      <div className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-                        Range: ${(analysis?.repairCostLow || 0).toLocaleString()} – ${(analysis?.repairCostHigh || 0).toLocaleString()}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Assignment Fee — only for wholesale / joint_venture */}
-                  {(dealType === 'wholesale' || dealType === 'joint_venture') && (
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                        {dealType === 'joint_venture' ? 'JV Assignment Fee' : 'Wholesale Assignment Fee'}
-                      </label>
-                      <div className="relative">
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 dark:text-gray-400">$</span>
-                        <input
-                          type="number"
-                          value={assignmentFee || ''}
-                          onChange={(e) => setAssignmentFee(parseFloat(e.target.value) || 0)}
-                          className="input pl-7"
-                        />
-                      </div>
-                    </div>
-                  )}
-
-                  {/* MAO % — only for wholesale / joint_venture */}
-                  {(dealType === 'wholesale' || dealType === 'joint_venture') && (
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                        Maximum Allowable Offer %
-                        {selectedComps.length > 0 && (
-                          <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-400 font-medium">
-                            Suggested: {avgPricePerSqft > 100 ? '70' : '65'}%
-                          </span>
-                        )}
-                      </label>
-                      <div className="flex flex-wrap gap-2">
-                        {MAO_OPTIONS.map((pct) => (
-                          <button
-                            key={pct}
-                            onClick={() => setMaoPercent(pct)}
-                            className={`px-3 py-1.5 rounded text-sm font-medium border transition-colors ${
-                              maoPercent === pct
-                                ? 'bg-primary-600 text-white border-primary-600'
-                                : 'bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800'
-                            }`}
-                          >
-                            {pct}%
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* Results — right column */}
-                <div className="space-y-4">
-                  {/* Initial Offer to Seller — always shown */}
-                  <div className="bg-gray-50 dark:bg-gray-950 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
-                    <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">Initial Offer to Seller</div>
-                    <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-                      {dealArv > 0 ? `$${Math.max(initialOffer, 0).toLocaleString()}` : '$—'}
-                    </div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">5% under max allowable offer</div>
-                  </div>
-
-                  {/* MAO — only for wholesale / joint_venture */}
-                  {(dealType === 'wholesale' || dealType === 'joint_venture') && (
-                    <div className="bg-primary-50 rounded-lg p-4 border border-primary-200">
-                      <div className="text-xs text-primary-700 mb-1">Maximum Allowable Offer</div>
-                      <div className="text-2xl font-bold text-primary-800">
-                        {dealArv > 0 ? `$${Math.max(mao, 0).toLocaleString()}` : '$—'}
-                      </div>
-                      <div className="text-xs text-primary-600 mt-1">
-                        {maoPercent}% of ARV minus repairs &amp; fee
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Sale Price / Projected Profit card — changes by deal type */}
-                  {(dealType === 'wholesale' || dealType === 'joint_venture') ? (
-                    <div className="bg-green-50 dark:bg-green-950 rounded-lg p-4 border border-green-200 dark:border-green-800">
-                      <div className="text-xs text-green-700 dark:text-green-400 mb-1">Your Sale Price to Buyer</div>
-                      <div className="text-2xl font-bold text-green-800 dark:text-green-400">
-                        {dealArv > 0 ? `$${Math.max(salePrice, 0).toLocaleString()}` : '$—'}
-                      </div>
-                      <div className="text-xs text-green-600 mt-1">
-                        MAO + assignment fee
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="bg-green-50 dark:bg-green-950 rounded-lg p-4 border border-green-200 dark:border-green-800">
-                      <div className="text-xs text-green-700 dark:text-green-400 mb-1">Estimated Net Profit</div>
-                      <div className="text-2xl font-bold text-green-800 dark:text-green-400">
-                        {dealArv > 0
-                          ? `$${Math.max(Math.round(dealArv - repairCosts - dealArv * 0.10), 0).toLocaleString()}`
-                          : '$—'}
-                      </div>
-                      <div className="text-xs text-green-600 mt-1">
-                        ARV − repairs − ~10% transaction costs (estimate)
-                      </div>
-                    </div>
-                  )}
-
-                  {dealArv > 0 && (dealType === 'wholesale' || dealType === 'joint_venture') && (
-                    <div className="bg-yellow-50 dark:bg-yellow-950 rounded-lg p-3 border border-yellow-200 dark:border-yellow-800">
-                      <div className="text-xs text-yellow-800 dark:text-yellow-400">
-                        <strong>Spread:</strong> ${assignmentFee.toLocaleString()} assignment fee
-                        {lead?.askingPrice && mao > 0 ? (
-                          <span> | Asking is {((lead.askingPrice / dealArv) * 100).toFixed(0)}% of ARV
-                            {lead.askingPrice <= mao ? (
-                              <span className="text-green-700 dark:text-green-400 font-medium"> — Below MAO!</span>
-                            ) : (
-                              <span className="text-red-700 dark:text-red-400 font-medium"> — Above MAO by ${(lead.askingPrice - mao).toLocaleString()}</span>
-                            )}
-                          </span>
-                        ) : null}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Negotiation Range */}
-                  {(analysis?.negotiationRangeLow || analysis?.negotiationRangeHigh) && (
-                    <div className="pt-3 border-t border-gray-100 dark:border-gray-800">
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-gray-600 dark:text-gray-400 font-medium">Negotiation Range</span>
-                        <span className="font-bold text-blue-700 dark:text-blue-400">
-                          ${(analysis.negotiationRangeLow || 0).toLocaleString()} – ${(analysis.negotiationRangeHigh || 0).toLocaleString()}
-                        </span>
-                      </div>
-                      <div className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">90% to 102% of MAO — your offer window</div>
-                    </div>
-                  )}
-
-                  {/* Seller Motivation Tier */}
-                  {analysis?.sellerMotivationTier && (
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="text-gray-600 dark:text-gray-400">Seller Motivation</span>
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
-                        analysis.sellerMotivationTier === 'foreclosure' ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400' :
-                        analysis.sellerMotivationTier === 'severe_distress' ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400' :
-                        analysis.sellerMotivationTier === 'distressed' ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400' :
-                        analysis.sellerMotivationTier === 'minor_distress' ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400' :
-                        'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'
-                      }`}>
-                        {analysis.sellerMotivationTier.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
-                      </span>
-                    </div>
-                  )}
-                </div>
-
-                {/* Save Deal Numbers — full width below both columns */}
-                <div className="md:col-span-2 flex items-center gap-3 pt-3 border-t border-gray-100 dark:border-gray-800">
-                  <button
-                    onClick={handleSaveDealNumbers}
-                    disabled={savingDealNumbers}
-                    className="btn btn-primary btn-sm"
-                  >
-                    {savingDealNumbers ? 'Saving...' : 'Save Deal Numbers'}
-                  </button>
-                  <button
-                    onClick={() => setShowShareModal(true)}
-                    className="btn btn-sm border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950"
-                  >
-                    Share with Partners
-                  </button>
-                  {dealNumbersSaved ? (
-                    <span className="text-sm text-green-600 font-medium">✓ Saved — reflected on overview &amp; disposition pages</span>
-                  ) : (
-                    <span className="text-xs text-gray-400 dark:text-gray-500">Save to persist these numbers to the lead, overview, and disposition page</span>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-6 text-center">
-            <Link href={`/leads/${leadId}/comps-analysis?tab=deal-intel`} className="btn btn-primary">View Deal Intelligence</Link>
-          </div>
-          </>
-        )}
-
         {/* ═══════════════ DEAL INTEL SECTION ═══════════════ */}
         {activeSection === 'deal-intel' && (
           <div className="space-y-6">
@@ -1903,497 +1399,6 @@ export default function CompsAnalysisPage() {
           </div>
         )}
 
-        {/* ═══════════════ REPAIRS SECTION ═══════════════ */}
-        {activeSection === 'repairs' && (
-          <div className="space-y-6">
-
-            {/* ── Photo Upload & AI Analysis ── */}
-            <div className="card border border-purple-200 dark:border-purple-800">
-              <div className="flex items-center gap-2 mb-4">
-                <span className="text-xl">📸</span>
-                <h2 className="text-lg font-bold">Photo Analysis</h2>
-                {(analysis as any)?.photoAnalysis && (
-                  <span className="text-xs px-2 py-0.5 rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 font-medium">Analyzed</span>
-                )}
-              </div>
-
-              {/* Drop Zone */}
-              <div
-                onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-                onDragLeave={() => setIsDragging(false)}
-                onDrop={handleDrop}
-                className={`relative border-2 border-dashed rounded-xl p-6 text-center transition-all cursor-pointer mb-4 ${
-                  isDragging ? 'border-purple-500 bg-purple-100 dark:bg-purple-900/30' : 'border-purple-300 dark:border-purple-800 bg-purple-50 dark:bg-purple-950 hover:bg-purple-100 dark:bg-purple-900/30'
-                }`}
-                onClick={() => document.getElementById('photo-upload-input')?.click()}
-              >
-                <input
-                  id="photo-upload-input"
-                  type="file"
-                  className="hidden"
-                  multiple
-                  accept="image/*"
-                  onChange={handlePhotoChange}
-                />
-                {isDragging ? (
-                  <div className="text-purple-600 font-medium">Drop photos here!</div>
-                ) : (
-                  <>
-                    <div className="text-3xl mb-2">📷</div>
-                    <p className="text-sm font-medium text-purple-700 dark:text-purple-400">Drag & drop photos here, or click to select</p>
-                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-                      {selectedPhotos.length > 0
-                        ? `${selectedPhotos.length}/30 photos added`
-                        : 'Up to 30 photos — JPG, PNG, HEIC'}
-                    </p>
-                  </>
-                )}
-              </div>
-
-              {/* Thumbnails */}
-              {photoThumbnails.length > 0 && (
-                <div className="flex flex-wrap gap-2 mb-4">
-                  {photoThumbnails.map((t, i) => (
-                    <div key={i} className="relative group">
-                      <img
-                        src={t.url}
-                        alt={`Photo ${i + 1}`}
-                        className={`w-16 h-16 object-cover rounded-lg border-2 transition-all ${
-                          t.status === 'done' ? 'border-green-400 opacity-90' :
-                          t.status === 'uploading' ? 'border-purple-400 opacity-60' :
-                          'border-gray-300 dark:border-gray-600'
-                        }`}
-                      />
-                      {t.status === 'uploading' && (
-                        <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-black/30">
-                          <span className="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
-                        </div>
-                      )}
-                      {t.status === 'done' && (
-                        <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-green-50 dark:bg-green-9500/20">
-                          <span className="text-green-600 text-lg">✓</span>
-                        </div>
-                      )}
-                      {t.status === 'ready' && (
-                        <button
-                          onClick={(e) => { e.stopPropagation(); removePhoto(i); }}
-                          className="absolute -top-1 -right-1 w-4 h-4 bg-red-50 dark:bg-red-9500 rounded-full text-white text-xs items-center justify-center hidden group-hover:flex"
-                        >×</button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Select from existing lead photos */}
-              {(() => {
-                const leadPhotos = (lead?.photos as any[]) || [];
-                if (leadPhotos.length === 0) return null;
-                return (
-                  <div className="mb-4">
-                    <div className="flex items-center justify-between mb-2">
-                      <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                        Or select from property photos ({leadPhotos.length})
-                      </p>
-                      <button
-                        onClick={selectAllLeadPhotos}
-                        className="text-xs text-purple-600 hover:text-purple-800 font-medium"
-                      >
-                        {selectedLeadPhotoIds.size === leadPhotos.length ? 'Deselect All' : 'Select All'}
-                      </button>
-                    </div>
-                    <div className="flex flex-wrap gap-2 mb-3">
-                      {leadPhotos.map((p: any) => {
-                        const isSelected = selectedLeadPhotoIds.has(p.id);
-                        return (
-                          <button
-                            key={p.id}
-                            onClick={() => toggleLeadPhoto(p.id)}
-                            className={`relative w-16 h-16 rounded-lg overflow-hidden border-2 transition-all ${
-                              isSelected
-                                ? 'border-purple-500 ring-2 ring-purple-300'
-                                : 'border-gray-200 dark:border-gray-600 hover:border-purple-300'
-                            }`}
-                          >
-                            <img
-                              src={p.thumbnailUrl || p.url}
-                              alt=""
-                              className="w-full h-full object-cover"
-                            />
-                            {isSelected && (
-                              <div className="absolute inset-0 bg-purple-500/20 flex items-center justify-center">
-                                <span className="text-white text-sm font-bold bg-purple-600 rounded-full w-5 h-5 flex items-center justify-center">✓</span>
-                              </div>
-                            )}
-                            {p.source && (
-                              <span className="absolute bottom-0 left-0 right-0 text-[9px] text-center bg-black/50 text-white py-0.5 truncate">
-                                {p.source === 'seller-portal' ? 'Seller' : p.source === 'seller-mms' ? 'MMS' : p.source === 'streetview' ? 'Street' : p.source}
-                              </span>
-                            )}
-                          </button>
-                        );
-                      })}
-                    </div>
-                    {selectedLeadPhotoIds.size > 0 && (
-                      <button
-                        onClick={handleAnalyzeLeadPhotos}
-                        disabled={analyzingLeadPhotos || !analysis}
-                        className="btn bg-purple-600 hover:bg-purple-700 text-white w-full mb-4"
-                      >
-                        {analyzingLeadPhotos ? (
-                          <span className="flex items-center justify-center gap-2">
-                            <span className="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
-                            Analyzing {selectedLeadPhotoIds.size} property photo{selectedLeadPhotoIds.size !== 1 ? 's' : ''} with AI...
-                          </span>
-                        ) : (
-                          `Analyze ${selectedLeadPhotoIds.size} Property Photo${selectedLeadPhotoIds.size !== 1 ? 's' : ''} with AI`
-                        )}
-                      </button>
-                    )}
-                  </div>
-                );
-              })()}
-
-              <button
-                onClick={handleAnalyzePhotos}
-                disabled={analyzingPhotos || selectedPhotos.length === 0 || !analysis}
-                className="btn btn-primary w-full mb-6"
-              >
-                {analyzingPhotos ? (
-                  <span className="flex items-center justify-center gap-2">
-                    <span className="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
-                    Analyzing {Math.min(selectedPhotos.length, 30)} photo{Math.min(selectedPhotos.length, 30) !== 1 ? 's' : ''} with AI...
-                  </span>
-                ) : selectedPhotos.length > 30 ? (
-                  `Analyze Top 30 of ${selectedPhotos.length} Photos with AI`
-                ) : (
-                  `Analyze ${selectedPhotos.length > 0 ? selectedPhotos.length + ' Photo' + (selectedPhotos.length !== 1 ? 's' : '') : 'Photos'} with AI`
-                )}
-              </button>
-
-              {/* ── AI Analysis Results (visual) ── */}
-              {(() => {
-                let parsed: any = null;
-                try {
-                  const raw = (analysis as any)?.photoAnalysis;
-                  if (raw) {
-                    // Strip markdown code fences if present
-                    const stripped = raw.replace(/^```[\w]*\s*/m, '').replace(/\s*```$/m, '').trim();
-                    const jsonMatch = stripped.match(/\{[\s\S]*/);
-                    if (jsonMatch) {
-                      let jsonStr = jsonMatch[0];
-                      // Repair truncated JSON: track string state to properly close
-                      let opens = 0, arrOpens = 0, inStr = false, esc = false;
-                      for (const ch of jsonStr) {
-                        if (esc) { esc = false; continue; }
-                        if (ch === '\\') { esc = true; continue; }
-                        if (ch === '"' && !inStr) { inStr = true; continue; }
-                        if (ch === '"' && inStr) { inStr = false; continue; }
-                        if (!inStr) {
-                          if (ch === '{') opens++;
-                          else if (ch === '}') opens--;
-                          else if (ch === '[') arrOpens++;
-                          else if (ch === ']') arrOpens--;
-                        }
-                      }
-                      if (inStr) jsonStr += '"'; // close open string
-                      jsonStr += ']'.repeat(Math.max(0, arrOpens)) + '}'.repeat(Math.max(0, opens));
-                      parsed = JSON.parse(jsonStr);
-                    }
-                  }
-                } catch {}
-
-                if (!parsed && !(analysis as any)?.photoAnalysis) {
-                  return (
-                    <div className="flex items-center justify-center min-h-24 bg-gray-50 dark:bg-gray-950 rounded-xl border-2 border-dashed border-gray-200 dark:border-gray-700">
-                      <p className="text-sm text-gray-400 dark:text-gray-500 text-center px-4">
-                        Upload photos and click Analyze to get a visual condition report and repair estimate
-                      </p>
-                    </div>
-                  );
-                }
-
-                if (!parsed) {
-                  // Legacy text fallback
-                  return (
-                    <div className="bg-purple-50 dark:bg-purple-950 rounded-lg p-4 border border-purple-100 max-h-72 overflow-y-auto text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
-                      {(analysis as any).photoAnalysis}
-                    </div>
-                  );
-                }
-
-                const conditionColor = (c: string) =>
-                  c === 'Good' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' :
-                  c === 'Fair' ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-400' :
-                  c === 'Poor' ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400' :
-                  c === 'Gut'  ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400' :
-                  'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400';
-
-                const urgencyIcon = (u: string) =>
-                  u === 'critical' ? '🚨' : u === 'high' ? '⚠️' : u === 'medium' ? '🔶' : '✅';
-
-                const systemIcon = (s: string) =>
-                  ({ roof: '🏠', hvac: '❄️', electrical: '⚡', plumbing: '🚰', foundation: '🪨' })[s] || '🔧';
-
-                return (
-                  <div className="space-y-5">
-                    {/* Overall summary bar */}
-                    <div className="flex items-center gap-4 bg-gray-50 dark:bg-gray-950 rounded-xl p-4 border border-gray-200 dark:border-gray-700">
-                      <div className="flex-1">
-                        <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">Overall Condition</div>
-                        <span className={`inline-block text-sm font-bold px-3 py-1 rounded-full ${conditionColor(parsed.overallCondition || 'Fair')}`}>
-                          {parsed.overallCondition || 'Fair'}
-                        </span>
-                      </div>
-                      {(parsed.repairLow || parsed.repairHigh) ? (
-                        <div className="text-right">
-                          <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">Photo Repair Estimate</div>
-                          <div className="text-xl font-bold text-purple-700 dark:text-purple-400">
-                            ${(parsed.repairLow || 0).toLocaleString()} – ${(parsed.repairHigh || 0).toLocaleString()}
-                          </div>
-                          <button
-                            onClick={() => { setRepairCosts(Math.round(((parsed.repairLow || 0) + (parsed.repairHigh || 0)) / 2)); }}
-                            className="text-xs text-purple-600 hover:underline mt-0.5 block"
-                          >
-                            Apply midpoint (${Math.round(((parsed.repairLow||0) + (parsed.repairHigh||0)) / 2).toLocaleString()}) →
-                          </button>
-                        </div>
-                      ) : null}
-                    </div>
-
-                    {/* Wholesaler notes */}
-                    {parsed.wholesalerNotes && (
-                      <div className="bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-xl p-4 text-sm text-blue-800 dark:text-blue-400">
-                        <div className="font-semibold text-blue-900 mb-1">💡 Wholesaler Take</div>
-                        {parsed.wholesalerNotes}
-                      </div>
-                    )}
-
-                    {/* Red flags */}
-                    {parsed.redFlags?.length > 0 && (
-                      <div className="bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-xl p-4">
-                        <div className="font-semibold text-red-800 dark:text-red-400 mb-2">🚨 Red Flags</div>
-                        <ul className="space-y-1">
-                          {parsed.redFlags.map((flag: string, i: number) => (
-                            <li key={i} className="text-sm text-red-700 dark:text-red-400 flex gap-2">
-                              <span>•</span><span>{flag}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-
-                    {/* Rooms grid */}
-                    {parsed.rooms?.length > 0 && (
-                      <div>
-                        <div className="text-sm font-bold text-gray-700 dark:text-gray-300 mb-3">Room-by-Room</div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          {parsed.rooms.map((room: any, i: number) => (
-                            <div key={i} className={`rounded-xl border p-3 ${
-                              room.condition === 'Gut' ? 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950' :
-                              room.condition === 'Poor' ? 'border-orange-200 dark:border-orange-800 bg-orange-50 dark:bg-orange-950' :
-                              room.condition === 'Fair' ? 'border-yellow-200 dark:border-yellow-800 bg-yellow-50 dark:bg-yellow-950' :
-                              'border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950'
-                            }`}>
-                              <div className="flex items-center justify-between mb-2">
-                                <span className="font-semibold text-sm text-gray-800 dark:text-gray-200">{urgencyIcon(room.urgency)} {room.name}</span>
-                                <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${conditionColor(room.condition)}`}>
-                                  {room.condition}
-                                </span>
-                              </div>
-                              {room.issues?.length > 0 && (
-                                <ul className="text-xs text-gray-600 dark:text-gray-400 space-y-0.5">
-                                  {room.issues.map((issue: string, j: number) => (
-                                    <li key={j} className="flex gap-1.5"><span className="text-orange-400 mt-0.5">•</span>{issue}</li>
-                                  ))}
-                                </ul>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Systems */}
-                    {parsed.systems && (
-                      <div>
-                        <div className="text-sm font-bold text-gray-700 dark:text-gray-300 mb-3">Systems</div>
-                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
-                          {Object.entries(parsed.systems).map(([key, sys]: [string, any]) => (
-                            <div key={key} className={`rounded-xl border p-3 text-center ${
-                              sys.condition === 'Poor' ? 'border-orange-200 dark:border-orange-800 bg-orange-50 dark:bg-orange-950' :
-                              sys.condition === 'Good' ? 'border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950' :
-                              'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-950'
-                            }`}>
-                              <div className="text-2xl mb-1">{systemIcon(key)}</div>
-                              <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 capitalize">{key}</div>
-                              <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${conditionColor(sys.condition || 'Unknown')}`}>
-                                {sys.condition || 'Unknown'}
-                              </span>
-                              {sys.notes && <div className="text-xs text-gray-500 dark:text-gray-400 mt-1 text-left leading-tight">{sys.notes}</div>}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Repair Items */}
-                    {parsed.repairItems?.length > 0 && (
-                      <div>
-                        <div className="text-sm font-bold text-gray-700 dark:text-gray-300 mb-3">Repair Breakdown</div>
-                        <div className="rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
-                          <table className="w-full text-sm">
-                            <thead className="bg-gray-50 dark:bg-gray-950 text-xs text-gray-500 dark:text-gray-400 uppercase">
-                              <tr>
-                                <th className="text-left px-4 py-2">Item</th>
-                                <th className="text-center px-3 py-2">Priority</th>
-                                <th className="text-right px-4 py-2">Range</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {parsed.repairItems.map((item: any, i: number) => (
-                                <tr key={i} className="border-t border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
-                                  <td className="px-4 py-2 text-gray-800 dark:text-gray-200">{item.item}</td>
-                                  <td className="px-3 py-2 text-center">
-                                    <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
-                                      item.priority === 'critical' ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400' :
-                                      item.priority === 'high' ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400' :
-                                      item.priority === 'medium' ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400' :
-                                      'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400'
-                                    }`}>{item.priority}</span>
-                                  </td>
-                                  <td className="px-4 py-2 text-right text-gray-700 dark:text-gray-300">
-                                    ${(item.estimateLow||0).toLocaleString()} – ${(item.estimateHigh||0).toLocaleString()}
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                            <tfoot className="bg-gray-50 dark:bg-gray-950 font-bold">
-                              <tr className="border-t border-gray-200 dark:border-gray-700">
-                                <td className="px-4 py-2 text-gray-800 dark:text-gray-200" colSpan={2}>Total Estimate</td>
-                                <td className="px-4 py-2 text-right text-purple-700 dark:text-purple-400">
-                                  ${(parsed.repairLow||0).toLocaleString()} – ${(parsed.repairHigh||0).toLocaleString()}
-                                </td>
-                              </tr>
-                            </tfoot>
-                          </table>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
-            </div>
-
-            {/* ── Repair Cost Estimator ── */}
-            <div className="card">
-              <h2 className="text-lg font-bold mb-4">Repair Cost Estimator</h2>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Finish Level</label>
-                    <select
-                      value={repairLevel}
-                      onChange={(e) => setRepairLevel(e.target.value)}
-                      className="input"
-                    >
-                      <option value="budget">Budget Grade</option>
-                      <option value="flip">Flip Grade</option>
-                      <option value="high-end">High-End Grade</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Quick Repair Options</label>
-                    <div className="flex flex-wrap gap-2">
-                      {REPAIR_ITEMS.map((item) => (
-                        <button
-                          key={item}
-                          onClick={() => toggleRepairItem(item)}
-                          className={`px-3 py-1.5 rounded text-sm border transition-colors ${
-                            selectedRepairs.includes(item)
-                              ? 'bg-primary-600 text-white border-primary-600'
-                              : 'bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800'
-                          }`}
-                        >
-                          {item}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Describe Repairs Needed</label>
-                    <textarea
-                      value={repairDescription}
-                      onChange={(e) => setRepairDescription(e.target.value)}
-                      placeholder={`Describe what repairs are needed at ${lead?.propertyAddress || 'this property'} and AI will estimate costs...`}
-                      className="input w-full"
-                      rows={4}
-                    />
-                  </div>
-
-                  <button
-                    onClick={handleEstimateRepairs}
-                    disabled={calculating}
-                    className="btn btn-primary"
-                  >
-                    {calculating ? 'Estimating...' : 'Estimate Repair Costs'}
-                  </button>
-                </div>
-
-                <div className="space-y-4">
-                  {/* Cost card */}
-                  <div className={`rounded-xl border-2 p-6 text-center transition-all ${
-                    repairCosts > 0 ? 'border-orange-300 dark:border-orange-800 bg-orange-50 dark:bg-orange-950' : 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-950'
-                  }`}>
-                    <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">Estimated Repair Costs</div>
-                    <div className={`text-4xl font-bold mb-1 ${repairCosts > 0 ? 'text-orange-700 dark:text-orange-400' : 'text-gray-400 dark:text-gray-500'}`}>
-                      ${repairCosts.toLocaleString()}
-                    </div>
-                    <div className="text-sm text-gray-500 dark:text-gray-400">
-                      {repairLevel.charAt(0).toUpperCase() + repairLevel.slice(1)} grade
-                      {lead?.sqft && repairCosts > 0 ? ` · $${Math.round(repairCosts / lead.sqft)}/sqft` : ''}
-                    </div>
-                    {repairCosts > 0 && (
-                      <div className="mt-3 text-xs text-orange-700 dark:text-orange-400 bg-orange-100 dark:bg-orange-900/30 rounded-lg px-3 py-2">
-                        ✓ Applied to deal calculator · ARV needed to break even: ${dealArv > 0 ? Math.round((repairCosts + assignmentFee) / (maoPercent / 100)).toLocaleString() : '—'}
-                      </div>
-                    )}
-                  </div>
-
-                  {analysis?.repairNotes && (
-                    <div className="bg-blue-50 dark:bg-blue-950 rounded-lg p-4 border border-blue-200 dark:border-blue-800">
-                      <div className="text-xs font-medium text-blue-800 dark:text-blue-400 mb-1">AI Breakdown</div>
-                      <div className="text-sm text-blue-700 dark:text-blue-400">{analysis.repairNotes}</div>
-                    </div>
-                  )}
-
-                  <div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400 mb-2 font-medium">Quick estimate by condition:</div>
-                    <div className="grid grid-cols-3 gap-2">
-                      {[
-                        { label: 'Light', sublabel: '$20/sqft', rate: 20, color: 'border-green-300 dark:border-green-800 hover:bg-green-50 dark:bg-green-950' },
-                        { label: 'Moderate', sublabel: '$50/sqft', rate: 50, color: 'border-yellow-300 dark:border-yellow-800 hover:bg-yellow-50 dark:bg-yellow-950' },
-                        { label: 'Heavy', sublabel: '$100/sqft', rate: 100, color: 'border-red-300 dark:border-red-800 hover:bg-red-50 dark:bg-red-950' },
-                      ].map((opt) => (
-                        <button
-                          key={opt.rate}
-                          onClick={() => setRepairCosts((lead?.sqft || 1500) * opt.rate)}
-                          className={`text-xs px-2 py-2 rounded-lg border text-center transition-colors bg-white dark:bg-gray-900 ${opt.color}`}
-                        >
-                          <div className="font-semibold text-gray-700 dark:text-gray-300">{opt.label}</div>
-                          <div className="text-gray-400 dark:text-gray-500">{opt.sublabel}</div>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
 
 
       </main>
@@ -2405,12 +1410,6 @@ export default function CompsAnalysisPage() {
         </div>
       )}
 
-      <ShareDealModal
-        leadId={leadId}
-        propertyAddress={lead ? `${lead.propertyAddress}, ${lead.propertyCity}` : ''}
-        isOpen={showShareModal}
-        onClose={() => setShowShareModal(false)}
-      />
     </AppShell>
   );
 }

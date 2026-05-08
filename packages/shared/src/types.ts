@@ -483,3 +483,24 @@ export interface ProfitCalcResult {
   formulaUsed: string;         // human-readable trace, e.g. "double_close: target − acq − costs"
   warnings: string[];          // ["Missing target sale price", ...]
 }
+
+// ── Phase D: Deal Math ─────────────────────────────────────────────────────
+// `RepairEstimateMethod` is the provenance label persisted on
+// Lead.currentRepairEstimateMethod and surfaced in the UI.
+export type RepairEstimateMethod =
+  | 'PHOTO_ANALYSIS'
+  | 'QUICK_SQFT'
+  | 'MANUAL_BUILDER'
+  | 'AI_TEXT'
+  | 'MANUAL_OVERRIDE';
+
+// `currentDealNumbers` shape on the Lead record. Phase E reads this without
+// recomputing.
+export interface DealMathSnapshot {
+  strategy: ExitStrategy;
+  arv: number | null;
+  repairEstimate: number | null;
+  inputs: Record<string, number | string | null>;
+  outputs: Record<string, number | null>;
+  computedAt: string; // ISO
+}

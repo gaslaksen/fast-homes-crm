@@ -1,8 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReapiService } from './reapi.service';
 import { dedupCompList } from './comp-dedup';
+import { DealMathService } from '../leads/deal-math/deal-math.service';
 import Anthropic from '@anthropic-ai/sdk';
 import axios from 'axios';
 import { sanitizeOutboundSmsBody, deepSanitizeAiStrings } from '../webhooks/sms-body-normalize.util';
@@ -65,6 +66,8 @@ export class CompAnalysisService {
     private prisma: PrismaService,
     private config: ConfigService,
     private reapiService: ReapiService,
+    @Inject(forwardRef(() => DealMathService))
+    private dealMathService: DealMathService,
   ) {
     const apiKey = this.config.get<string>('ANTHROPIC_API_KEY');
     if (apiKey) {
@@ -859,6 +862,26 @@ Respond with ONLY a JSON object: { "estimate": <number>, "breakdown": "<concise 
       },
     });
 
+    // Phase D: mirror canonical estimate up to Lead. AI text estimate is the
+    // path when a description is present; manual builder otherwise.
+    const analysisRow = await this.prisma.compAnalysis.findUnique({
+      where: { id: analysisId },
+      select: { leadId: true },
+    });
+    if (analysisRow?.leadId) {
+      const method = data.description ? 'AI_TEXT' : 'MANUAL_BUILDER';
+      await this.dealMathService.setRepairEstimate(analysisRow.leadId, {
+        value: totalCost,
+        method,
+        metadata: {
+          finishLevel: level,
+          items: data.repairItems ?? [],
+          description: data.description ?? null,
+          breakdown: aiEstimate,
+        },
+      });
+    }
+
     return { totalCost, breakdown: aiEstimate };
   }
 
@@ -1048,6 +1071,35 @@ Use Midwest/rural Ohio pricing. Be specific about what you see — don't general
           repairCosts: repairLow && repairHigh ? Math.round((repairLow + repairHigh) / 2) : undefined,
         },
       });
+
+      // Phase D: append a photo_analysis_results row + mirror canonical
+      // estimate to Lead. The drawer reads the most recent row for the lead.
+      if (lead?.id) {
+        const midpoint = repairLow && repairHigh ? Math.round((repairLow + repairHigh) / 2) : null;
+        const resultJson = assessmentIsJson && parsed ? deepSanitizeAiStrings(parsed) : { rawText: cleanAssessment };
+        const photoRow = await this.prisma.photoAnalysisResult.create({
+          data: {
+            leadId: lead.id,
+            resultJson,
+            rangeLow: repairLow || null,
+            rangeHigh: repairHigh || null,
+            midpoint,
+            photosAnalyzed: photos.length,
+          },
+        });
+        if (midpoint != null) {
+          await this.dealMathService.setRepairEstimate(lead.id, {
+            value: midpoint,
+            method: 'PHOTO_ANALYSIS',
+            metadata: {
+              photoAnalysisResultId: photoRow.id,
+              rangeLow: repairLow,
+              rangeHigh: repairHigh,
+              photosAnalyzed: photos.length,
+            },
+          });
+        }
+      }
 
       return { assessment: cleanAssessment, repairLow, repairHigh };
     } catch (error) {
