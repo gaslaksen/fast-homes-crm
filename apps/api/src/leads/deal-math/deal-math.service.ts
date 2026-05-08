@@ -8,7 +8,7 @@ import {
   STRATEGY_KEYS,
 } from './strategy-config';
 
-// Phase D — single entry point for everything that mutates Lead-level Deal
+// Phase D - single entry point for everything that mutates Lead-level Deal
 // Math state (strategy / repair estimate / strategy inputs). Every mutator
 // triggers a recompute + persist of `currentDealNumbers` so Phase E can read
 // without recomputing.
@@ -213,7 +213,7 @@ export class DealMathService {
 
     const strategy = lead.dispositionStrategy as DealMathStrategyKey | null;
     if (!strategy || !VALID_STRATEGIES.has(strategy)) {
-      // No strategy selected — clear computed numbers.
+      // No strategy selected - clear computed numbers.
       await this.prisma.lead.update({
         where: { id: leadId },
         data: { currentDealNumbers: null, currentDealNumbersUpdatedAt: null },
@@ -285,11 +285,14 @@ export function computeOutputs(args: ComputeArgs): Record<string, number | null>
       const maoPct = numOr(inputs.maoPercent, 70) / 100;
       const mao = arv != null ? Math.round(arv * maoPct - r - fee) : null;
       const initialOffer = mao != null ? Math.round(mao * 0.95) : null;
+      // Sale price to end buyer = MAO + assignment fee (matches legacy
+      // calculateDeal at comp-analysis.service.ts:892).
+      const salePrice = mao != null ? mao + fee : null;
       return {
         assignmentFee: fee,
         mao,
         initialOffer,
-        salePrice: mao,
+        salePrice,
         spread: mao != null && args.askingPrice != null ? mao - args.askingPrice : null,
       };
     }

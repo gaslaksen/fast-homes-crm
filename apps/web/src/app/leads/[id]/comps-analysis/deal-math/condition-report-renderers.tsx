@@ -2,7 +2,7 @@
 
 // Phase D: shared condition-report rendering. The drawer + (until step 15)
 // the legacy Repairs panel both render this. Wholesaler Take is intentionally
-// NOT rendered here — that narrative is wholesale-specific and Phase E will
+// NOT rendered here - that narrative is wholesale-specific and Phase E will
 // replace it with strategy-aware copy.
 
 interface RoomReport {
@@ -65,7 +65,7 @@ export function ConditionReportContent({ report }: { report: ParsedConditionRepo
           <div className="text-right">
             <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">Photo Repair Estimate</div>
             <div className="text-xl font-bold text-purple-700 dark:text-purple-400">
-              ${(report.repairLow || 0).toLocaleString()} – ${(report.repairHigh || 0).toLocaleString()}
+              ${(report.repairLow || 0).toLocaleString()} - ${(report.repairHigh || 0).toLocaleString()}
             </div>
           </div>
         )}
@@ -167,7 +167,7 @@ export function ConditionReportContent({ report }: { report: ParsedConditionRepo
                       }`}>{item.priority}</span>
                     </td>
                     <td className="px-4 py-2 text-right text-gray-700 dark:text-gray-300">
-                      ${(item.estimateLow || 0).toLocaleString()} – ${(item.estimateHigh || 0).toLocaleString()}
+                      ${(item.estimateLow || 0).toLocaleString()} - ${(item.estimateHigh || 0).toLocaleString()}
                     </td>
                   </tr>
                 ))}
@@ -177,7 +177,7 @@ export function ConditionReportContent({ report }: { report: ParsedConditionRepo
                   <tr className="border-t border-gray-200 dark:border-gray-700">
                     <td className="px-4 py-2 text-gray-800 dark:text-gray-200" colSpan={2}>Total Estimate</td>
                     <td className="px-4 py-2 text-right text-purple-700 dark:text-purple-400">
-                      ${(report.repairLow || 0).toLocaleString()} – ${(report.repairHigh || 0).toLocaleString()}
+                      ${(report.repairLow || 0).toLocaleString()} - ${(report.repairHigh || 0).toLocaleString()}
                     </td>
                   </tr>
                 </tfoot>

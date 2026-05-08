@@ -233,7 +233,7 @@ export default function DealMathPanel({ leadId, analysisId, sqft, arvCalculation
       case 'PHOTO_ANALYSIS': {
         const meta = state.repairMetadata ?? {};
         const range = meta.rangeLow != null && meta.rangeHigh != null
-          ? ` · range ${formatCurrency(meta.rangeLow as number)}–${formatCurrency(meta.rangeHigh as number)}`
+          ? ` · range ${formatCurrency(meta.rangeLow as number)}-${formatCurrency(meta.rangeHigh as number)}`
           : '';
         const photos = meta.photosAnalyzed ? ` · ${meta.photosAnalyzed} photos` : '';
         return `Photo analysis${range}${photos}`;
@@ -252,7 +252,7 @@ export default function DealMathPanel({ leadId, analysisId, sqft, arvCalculation
       case 'MANUAL_OVERRIDE':
         return 'Manual override';
       default:
-        return 'No estimate yet — pick a method';
+        return 'No estimate yet - pick a method';
     }
   })();
 
@@ -297,7 +297,7 @@ export default function DealMathPanel({ leadId, analysisId, sqft, arvCalculation
                 <div>
                   <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">ARV</div>
                   <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-                    {state.arv != null ? formatCurrency(state.arv) : '—'}
+                    {state.arv != null ? formatCurrency(state.arv) : '-'}
                   </div>
                   <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                     {state.arv != null ? (
@@ -325,7 +325,7 @@ export default function DealMathPanel({ leadId, analysisId, sqft, arvCalculation
                 <div className="flex-1">
                   <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Repair Estimate</div>
                   <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-                    {state.repairEstimate != null ? formatCurrency(state.repairEstimate) : '—'}
+                    {state.repairEstimate != null ? formatCurrency(state.repairEstimate) : '-'}
                   </div>
                   <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">{provenanceLine}</div>
                 </div>
@@ -567,7 +567,7 @@ function RepairMethodPicker(props: {
               Analyzed {new Date(photo.analyzedAt).toLocaleDateString()}
               {photo.photosAnalyzed != null ? ` · ${photo.photosAnalyzed} photos` : ''}
               {photo.rangeLow != null && photo.rangeHigh != null
-                ? ` · ${formatCurrency(photo.rangeLow)}–${formatCurrency(photo.rangeHigh)}`
+                ? ` · ${formatCurrency(photo.rangeLow)}-${formatCurrency(photo.rangeHigh)}`
                 : ''}
             </div>
             <div className="flex flex-wrap gap-2">
@@ -757,10 +757,10 @@ function SpreadCallout({ state }: { state: DealMathState }) {
         const askingPctOfArv = ((asking / arv) * 100).toFixed(0);
         if (asking <= mao) {
           tone = 'good';
-          message = `Asking is ${askingPctOfArv}% of ARV — Below MAO!`;
+          message = `Asking is ${askingPctOfArv}% of ARV - Below MAO!`;
         } else {
           tone = 'bad';
-          message = `Asking is ${askingPctOfArv}% of ARV — Above MAO by ${formatCurrency(asking - mao)}`;
+          message = `Asking is ${askingPctOfArv}% of ARV - Above MAO by ${formatCurrency(asking - mao)}`;
         }
       }
       break;
@@ -784,7 +784,7 @@ function SpreadCallout({ state }: { state: DealMathState }) {
           message = `ROI ${Math.round(roi)}% over hold meets target (${target}%)`;
         } else {
           tone = 'warn';
-          message = `ROI ${Math.round(roi)}% — below ${target}% target`;
+          message = `ROI ${Math.round(roi)}% - below ${target}% target`;
         }
       }
       break;
@@ -795,7 +795,7 @@ function SpreadCallout({ state }: { state: DealMathState }) {
         tone = profit > 0 ? 'good' : 'bad';
         message = profit > 0
           ? `Projected profit ${formatCurrency(profit)}`
-          : 'Projects a loss — review costs and exit price';
+          : 'Projects a loss - review costs and exit price';
       }
       break;
     }
@@ -807,7 +807,7 @@ function SpreadCallout({ state }: { state: DealMathState }) {
           message = `Cap rate ${cap.toFixed(1)}% meets ${target}% target`;
         } else {
           tone = 'warn';
-          message = `Cap rate ${cap.toFixed(1)}% — below ${target}% target`;
+          message = `Cap rate ${cap.toFixed(1)}% - below ${target}% target`;
         }
       }
       break;

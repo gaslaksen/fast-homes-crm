@@ -231,12 +231,12 @@ export const STRATEGY_KEYS: DealMathStrategyKey[] = [
 ];
 
 export function formatCurrency(n: number | null | undefined): string {
-  if (n == null || !isFinite(n)) return '—';
+  if (n == null || !isFinite(n)) return '-';
   return `$${Math.round(n).toLocaleString('en-US')}`;
 }
 
 export function formatOutput(value: number | null, format: OutputFormat): string {
-  if (value == null || !isFinite(value)) return '—';
+  if (value == null || !isFinite(value)) return '-';
   switch (format) {
     case 'currency':
       return formatCurrency(value);

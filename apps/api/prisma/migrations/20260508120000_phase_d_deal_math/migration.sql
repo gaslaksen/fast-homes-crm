@@ -1,4 +1,4 @@
--- Phase D — Deal Math tab consolidation
+-- Phase D - Deal Math tab consolidation
 -- Adds canonical Lead-level fields for strategy, repair estimate, strategy
 -- inputs, and computed deal numbers; introduces a new photo_analysis_results
 -- table for append-on-reanalyze condition reports.

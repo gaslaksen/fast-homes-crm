@@ -4,7 +4,7 @@ import { ExitStrategy } from '@fast-homes/shared';
 //
 // One source of truth for which inputs render in the left column, which
 // output cards render in the right column, and how the spread/sanity callout
-// reads. The UI iterates this config — there are no `if (strategy === 'wholesale')`
+// reads. The UI iterates this config - there are no `if (strategy === 'wholesale')`
 // branches in components. Adding a 10th strategy means adding a 10th entry here.
 //
 // Math derivations live in profit-calculation.service.ts and are wired through
@@ -78,7 +78,7 @@ const MAO_CHIPS = [60, 65, 70, 75, 80, 85, 90].map((p) => ({
 
 const formatCurrency = (n: number | null): string =>
   n == null || !isFinite(n)
-    ? '—'
+    ? '-'
     : `$${Math.round(n).toLocaleString('en-US')}`;
 
 // Helper used by several strategies' spread callouts to compare asking to MAO.
@@ -91,13 +91,13 @@ const askingVsMao = (
   if (ctx.askingPrice <= mao) {
     return {
       tone: 'good',
-      message: `Asking is ${askingPctOfArv}% of ARV — Below MAO!`,
+      message: `Asking is ${askingPctOfArv}% of ARV - Below MAO!`,
     };
   }
   const delta = ctx.askingPrice - mao;
   return {
     tone: 'bad',
-    message: `Asking is ${askingPctOfArv}% of ARV — Above MAO by ${formatCurrency(delta)}`,
+    message: `Asking is ${askingPctOfArv}% of ARV - Above MAO by ${formatCurrency(delta)}`,
   };
 };
 
@@ -273,7 +273,7 @@ export const STRATEGY_CONFIGS: Record<DealMathStrategyKey, StrategyConfig> = {
       }
       return {
         tone: 'warn',
-        message: `ROI ${roi.toFixed(0)}% — below ${targetPct}% target`,
+        message: `ROI ${roi.toFixed(0)}% - below ${targetPct}% target`,
       };
     },
   },
@@ -356,7 +356,7 @@ export const STRATEGY_CONFIGS: Record<DealMathStrategyKey, StrategyConfig> = {
           message: `Projected profit ${formatCurrency(outputs.estimatedProfit)} from sub-to exit`,
         };
       }
-      return { tone: 'bad', message: `Sub-to projects a loss — review costs and exit price` };
+      return { tone: 'bad', message: `Sub-to projects a loss - review costs and exit price` };
     },
   },
 
@@ -367,7 +367,7 @@ export const STRATEGY_CONFIGS: Record<DealMathStrategyKey, StrategyConfig> = {
   other: {
     key: 'other',
     label: 'Creative / Other',
-    tagline: 'Custom terms — owner finance, seller carry, lease option, etc.',
+    tagline: 'Custom terms - owner finance, seller carry, lease option, etc.',
     inputs: [
       { key: 'targetSalePrice', label: 'Exit Sale Price', type: 'currency' },
       { key: 'acquisitionPrice', label: 'Acquisition Price', type: 'currency' },
@@ -385,7 +385,7 @@ export const STRATEGY_CONFIGS: Record<DealMathStrategyKey, StrategyConfig> = {
   },
 
   // ── DOUBLE CLOSE (Wholetail-style) ──────────────────────────────────────
-  // Closest match to the build prompt's "Wholetail" — we acquire briefly,
+  // Closest match to the build prompt's "Wholetail" - we acquire briefly,
   // then resell with light cleanup.
   double_close: {
     key: 'double_close',
@@ -431,7 +431,7 @@ export const STRATEGY_CONFIGS: Record<DealMathStrategyKey, StrategyConfig> = {
       if (cap >= target) {
         return { tone: 'good', message: `Cap rate ${cap.toFixed(1)}% meets ${target}% target` };
       }
-      return { tone: 'warn', message: `Cap rate ${cap.toFixed(1)}% — below ${target}% target` };
+      return { tone: 'warn', message: `Cap rate ${cap.toFixed(1)}% - below ${target}% target` };
     },
   },
 
