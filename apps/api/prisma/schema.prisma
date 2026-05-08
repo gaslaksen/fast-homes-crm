@@ -102,6 +102,21 @@ model Lead {
   assignmentFee     Float?   // Deal-level assignment fee override
   maoPercent        Float?   // MAO % override (default 70)
 
+  // ── Phase D: Deal Math canonical fields ──────────────────────────────────
+  // Single source of truth for the active strategy + repair estimate +
+  // strategy-specific inputs + computed deal numbers. Reads from these,
+  // not from CompAnalysis. CompAnalysis fields are deprecated for new writes.
+  dispositionStrategy        String?   // wholesale | novation | sub_to | double_close | fix_flip | concierge_listing | hold_rental | jv | other
+  currentRepairEstimate      Float?
+  currentRepairEstimateMethod String?  // PHOTO_ANALYSIS | QUICK_SQFT | MANUAL_BUILDER | AI_TEXT | MANUAL_OVERRIDE
+  currentRepairEstimateMetadata Json?  // method-specific context (photo range, sqft tier, builder selections, AI prompt)
+  currentRepairEstimateUpdatedAt DateTime?
+  dealMathInputs             Json?     @default("{}") // { [strategy]: { [field]: value } }
+  currentDealNumbers         Json?     // { strategy, arv, repairEstimate, inputs, outputs, computedAt }
+  currentDealNumbersUpdatedAt DateTime?
+
+  photoAnalysisResults       PhotoAnalysisResult[]
+
   // ── ATTOM enrichment (written by Deal Search flow) ───────────────────────
   attomId              String?   // ATTOM property ID for lookups
   attomEnrichedAt      DateTime? // when ATTOM data was last fetched
@@ -406,6 +421,26 @@ model CompAnalysis {
   updatedAt         DateTime @updatedAt
 
   @@map("comp_analyses")
+}
+
+// Phase D: persisted condition reports from photo analysis runs.
+// Append-on-reanalyze; the Deal Math drawer reads the most recent row
+// (by analyzedAt DESC) and renders rooms/systems/redFlags/repairItems.
+// Decoupled from the lead's currentRepairEstimateMethod so the user can
+// switch to manual or AI methods while still viewing the latest report.
+model PhotoAnalysisResult {
+  id              String   @id @default(cuid())
+  leadId          String
+  lead            Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  resultJson      Json     // full condition report: rooms, systems, redFlags, repairItems, wholesalerNotes, overallCondition
+  rangeLow        Float?
+  rangeHigh       Float?
+  midpoint        Float?
+  photosAnalyzed  Int?
+  analyzedAt      DateTime @default(now())
+
+  @@index([leadId, analyzedAt(sort: Desc)])
+  @@map("photo_analysis_results")
 }
 
 model Task {

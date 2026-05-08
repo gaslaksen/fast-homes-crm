@@ -4,6 +4,8 @@ import { LeadsService } from './leads.service';
 import { LeadImportService } from './lead-import.service';
 import { AiInsightService } from './ai-insight.service';
 import { ProfitCalculationService } from './profit-calculation.service';
+import { DealMathService } from './deal-math/deal-math.service';
+import { DealMathController } from './deal-math/deal-math.controller';
 import { ScoringModule } from '../scoring/scoring.module';
 import { MessagesModule } from '../messages/messages.module';
 import { PhotosModule } from '../photos/photos.module';
@@ -14,9 +16,9 @@ import { CampaignsModule } from '../campaigns/campaigns.module';
 import { SellerPortalModule } from '../seller-portal/seller-portal.module';
 
 @Module({
-  imports: [ScoringModule, forwardRef(() => MessagesModule), PhotosModule, CompsModule, PipelineModule, forwardRef(() => DripModule), forwardRef(() => CampaignsModule), SellerPortalModule],
-  controllers: [LeadsController, TasksController],
-  providers: [LeadsService, LeadImportService, AiInsightService, ProfitCalculationService],
-  exports: [LeadsService, AiInsightService, ProfitCalculationService],
+  imports: [ScoringModule, forwardRef(() => MessagesModule), PhotosModule, forwardRef(() => CompsModule), PipelineModule, forwardRef(() => DripModule), forwardRef(() => CampaignsModule), SellerPortalModule],
+  controllers: [LeadsController, TasksController, DealMathController],
+  providers: [LeadsService, LeadImportService, AiInsightService, ProfitCalculationService, DealMathService],
+  exports: [LeadsService, AiInsightService, ProfitCalculationService, DealMathService],
 })
 export class LeadsModule {}
