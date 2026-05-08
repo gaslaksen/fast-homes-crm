@@ -18,6 +18,7 @@ import {
 } from './types/arv-result';
 import { buildPrompt, PROMPT_VERSION } from './prompts/arv-calculation.prompt.v1';
 import { computeStats } from './utils/arv-stats';
+import { deepSanitizeAiStrings } from '../webhooks/sms-body-normalize.util';
 import { computeConfidence } from './utils/confidence';
 import { computeInputHash } from './utils/input-hash';
 import { extractLargestJsonObject } from './utils/extract-json';
@@ -221,7 +222,10 @@ export class AiArvCalculationService {
 
     let raw: RawAiArvResponse;
     try {
-      const parsed = JSON.parse(jsonText);
+      // Deep-sanitize every string field after parsing so reasoning, notes,
+      // adjustment narratives etc. never carry em/en dashes or smart Unicode.
+      // Hard rule across Dealcore: no AI text uses dashes of any kind.
+      const parsed = deepSanitizeAiStrings(JSON.parse(jsonText));
       const outcome = parseRawAiArv(parsed);
       if (outcome.ok === false) {
         this.logger.warn(`AI ARV parse failed: ${outcome.reason}`);

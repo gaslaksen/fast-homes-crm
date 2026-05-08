@@ -5,6 +5,7 @@ import { ReapiService } from './reapi.service';
 import { dedupCompList } from './comp-dedup';
 import Anthropic from '@anthropic-ai/sdk';
 import axios from 'axios';
+import { sanitizeOutboundSmsBody, deepSanitizeAiStrings } from '../webhooks/sms-body-normalize.util';
 
 interface AdjustmentConfig {
   pricePerSqft: number;
@@ -753,7 +754,9 @@ Be direct and practical — this is for a wholesaler deciding whether to pursue 
         max_tokens: 400,
         messages: [{ role: 'user', content: prompt }],
       });
-      const summary = (response.content[0] as any)?.text || 'Unable to generate summary.';
+      const rawSummary = (response.content[0] as any)?.text || 'Unable to generate summary.';
+      // Strip dashes / smart Unicode (hard rule across Dealcore).
+      const summary = sanitizeOutboundSmsBody(rawSummary);
 
       await this.prisma.compAnalysis.update({
         where: { id: analysisId },
@@ -838,7 +841,8 @@ Respond with ONLY a JSON object: { "estimate": <number>, "breakdown": "<concise 
         if (match) {
           const parsed = JSON.parse(match[0]);
           if (parsed.estimate) totalCost = parsed.estimate;
-          aiEstimate = parsed.breakdown || null;
+          // Strip dashes / smart Unicode (hard rule).
+          aiEstimate = parsed.breakdown ? sanitizeOutboundSmsBody(parsed.breakdown) : null;
         }
       } catch (e) {
         this.logger.error('AI repair estimate failed:', e);
@@ -1000,6 +1004,7 @@ Use Midwest/rural Ohio pricing. Be specific about what you see — don't general
       let repairHigh = 0;
       let assessment = fullText;
 
+      let assessmentIsJson = false;
       try {
         // Strip markdown code fences if present (```json ... ```)
         const stripped = fullText.replace(/^```[\w]*\s*/m, '').replace(/\s*```$/m, '').trim();
@@ -1009,7 +1014,12 @@ Use Midwest/rural Ohio pricing. Be specific about what you see — don't general
           parsed = JSON.parse(jsonMatch[0]);
           repairLow = parsed.repairLow || 0;
           repairHigh = parsed.repairHigh || 0;
-          assessment = JSON.stringify(parsed); // Store full structured data
+          // Deep-sanitize string fields inside the parsed structure BEFORE
+          // re-stringifying. Doing it post-parse avoids breaking JSON syntax
+          // that a pre-parse smart-quote swap would cause.
+          const sanitizedParsed = deepSanitizeAiStrings(parsed);
+          assessment = JSON.stringify(sanitizedParsed);
+          assessmentIsJson = true;
         }
       } catch (parseErr) {
         // Fallback: try old-style REPAIR_LOW/HIGH parsing
@@ -1024,17 +1034,22 @@ Use Midwest/rural Ohio pricing. Be specific about what you see — don't general
           .trim();
       }
 
+      // For the raw-text fallback path the assessment is plain prose — safe
+      // to sanitize directly. For the JSON path we already deep-sanitized
+      // string fields above, so the stringified JSON has no smart Unicode.
+      const cleanAssessment = assessmentIsJson ? assessment : sanitizeOutboundSmsBody(assessment);
+
       await this.prisma.compAnalysis.update({
         where: { id: analysisId },
         data: {
-          photoAnalysis: assessment,
+          photoAnalysis: cleanAssessment,
           photoRepairLow: repairLow || null,
           photoRepairHigh: repairHigh || null,
           repairCosts: repairLow && repairHigh ? Math.round((repairLow + repairHigh) / 2) : undefined,
         },
       });
 
-      return { assessment, repairLow, repairHigh };
+      return { assessment: cleanAssessment, repairLow, repairHigh };
     } catch (error) {
       this.logger.error('Photo analysis failed:', error);
       throw new Error(`Photo analysis failed: ${(error as any).message}`);
@@ -1411,17 +1426,25 @@ Now think through this deal systematically. Respond ONLY with a valid JSON objec
 
       const raw = (response.content[0] as any)?.text || '';
       let output = raw;
+      let outputIsJson = false;
 
-      // Parse and validate JSON
+      // Parse, deep-sanitize string fields, then re-stringify so the stored
+      // dealIntelligence JSON never contains em/en dashes or smart Unicode.
       try {
         const stripped = raw.replace(/^```[\w]*\s*/m, '').replace(/\s*```$/m, '').trim();
         const m = stripped.match(/\{[\s\S]*\}/);
         if (m) {
-          JSON.parse(m[0]); // validate
-          output = m[0];
+          const parsed = deepSanitizeAiStrings(JSON.parse(m[0]));
+          output = JSON.stringify(parsed);
+          outputIsJson = true;
         }
       } catch (e) {
-        this.logger.warn(`Deal intelligence JSON parse failed for ${analysisId} — storing raw`);
+        this.logger.warn(`Deal intelligence JSON parse failed for ${analysisId}, storing raw`);
+      }
+
+      // For the raw-fallback path (couldn't parse JSON), sanitize the prose.
+      if (!outputIsJson) {
+        output = sanitizeOutboundSmsBody(output);
       }
 
       await this.prisma.compAnalysis.update({

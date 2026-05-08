@@ -5,6 +5,7 @@ import { VapiService } from '../vapi/vapi.service';
 import { ScoringService } from '../scoring/scoring.service';
 import { formatPhoneNumber } from '@fast-homes/shared';
 import Anthropic from '@anthropic-ai/sdk';
+import { sanitizeOutboundSmsBody } from '../webhooks/sms-body-normalize.util';
 
 const DEFAULT_CALL_DELAY_MS = 120_000; // 2 minutes
 
@@ -370,6 +371,15 @@ ${transcript}`,
       const text = response.content[0]?.type === 'text' ? response.content[0].text : '';
       const cleaned = text.replace(/```json\n?|\n?```/g, '').trim();
       const extracted = JSON.parse(cleaned);
+
+      // Strip dashes / smart Unicode from any free-text fields. Hard rule
+      // across Dealcore: no AI-generated text uses em or en dashes.
+      if (typeof extracted.motivationSummary === 'string') {
+        extracted.motivationSummary = sanitizeOutboundSmsBody(extracted.motivationSummary);
+      }
+      if (typeof extracted.conditionNotes === 'string') {
+        extracted.conditionNotes = sanitizeOutboundSmsBody(extracted.conditionNotes);
+      }
 
       this.logger.log(`SmrtPhone transcript extraction: ${JSON.stringify(extracted)}`);
 

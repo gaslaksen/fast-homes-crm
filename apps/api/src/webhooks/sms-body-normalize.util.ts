@@ -34,6 +34,32 @@ export function sanitizeOutboundSmsBody(input: string): string {
 }
 
 /**
+ * Recursively walk any JSON-serialisable value and apply
+ * sanitizeOutboundSmsBody() to every string. Use when you have already
+ * JSON.parsed a model response and want to scrub dashes/smart-quotes/
+ * ellipses from every string field without risking JSON-syntax
+ * corruption (which a pre-parse swap would cause if smart quotes
+ * appeared inside string values). Returns a NEW object, does not
+ * mutate input.
+ */
+export function deepSanitizeAiStrings<T>(value: T): T {
+  if (typeof value === 'string') {
+    return sanitizeOutboundSmsBody(value) as unknown as T;
+  }
+  if (Array.isArray(value)) {
+    return value.map((v) => deepSanitizeAiStrings(v)) as unknown as T;
+  }
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = deepSanitizeAiStrings(v);
+    }
+    return out as unknown as T;
+  }
+  return value;
+}
+
+/**
  * Normalize an SMS body for app-originated match comparison in the
  * SmrtPhone smsOutgoing webhook. SmrtPhone (and the underlying SMS
  * carriers) replace several Unicode characters with their ASCII

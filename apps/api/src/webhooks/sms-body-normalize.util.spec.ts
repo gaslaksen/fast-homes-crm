@@ -1,7 +1,47 @@
 import {
   normalizeSmsBodyForCompare,
   sanitizeOutboundSmsBody,
+  deepSanitizeAiStrings,
 } from './sms-body-normalize.util';
+
+describe('deepSanitizeAiStrings', () => {
+  it('returns primitives unchanged', () => {
+    expect(deepSanitizeAiStrings(42)).toBe(42);
+    expect(deepSanitizeAiStrings(null)).toBeNull();
+    expect(deepSanitizeAiStrings(true)).toBe(true);
+  });
+
+  it('sanitizes a top-level string', () => {
+    expect(deepSanitizeAiStrings('a — b')).toBe('a - b');
+  });
+
+  it('walks nested objects and arrays', () => {
+    const input = {
+      summary: 'Hot lead — asking 55% of ARV',
+      adjustments: [
+        { type: 'condition', reasoning: 'gut rehab — flooring "bad"' },
+        { type: 'sqft', reasoning: 'larger – +$5k' },
+      ],
+      meta: { notes: 'don’t forget…' },
+    };
+    const out = deepSanitizeAiStrings(input);
+    expect(out.summary).toBe('Hot lead - asking 55% of ARV');
+    expect(out.adjustments[0].reasoning).toBe('gut rehab - flooring "bad"');
+    expect(out.adjustments[1].reasoning).toBe('larger - +$5k');
+    expect(out.meta.notes).toBe("don't forget...");
+  });
+
+  it('does not mutate the input', () => {
+    const input = { x: 'a — b' };
+    const before = JSON.stringify(input);
+    deepSanitizeAiStrings(input);
+    expect(JSON.stringify(input)).toBe(before);
+  });
+
+  it('handles arrays of primitives', () => {
+    expect(deepSanitizeAiStrings(['—', '–', 'ok'])).toEqual(['-', '-', 'ok']);
+  });
+});
 
 describe('sanitizeOutboundSmsBody', () => {
   it('returns empty string for empty/null input', () => {

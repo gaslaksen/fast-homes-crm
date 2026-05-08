@@ -4,6 +4,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { PrismaService } from '../prisma/prisma.service';
 import { DripService } from '../drip/drip.service';
 import { CampaignEnrollmentService } from '../campaigns/campaign-enrollment.service';
+import { sanitizeOutboundSmsBody } from '../webhooks/sms-body-normalize.util';
 
 const TERMINAL_STATUSES_FOR_REMOVAL = ['DEAD', 'SOLD', 'SOLD_LOSS', 'HELD_LONG_TERM', 'CANCELLED', 'CLOSED_LOST', 'OPTED_OUT'];
 
@@ -319,6 +320,15 @@ Respond ONLY with valid JSON (no markdown):
         message.content[0].type === 'text' ? message.content[0].text : '';
       const insights = JSON.parse(responseText);
 
+      // Strip dashes / smart Unicode from any operator-facing strings.
+      // Hard rule: no AI text in Dealcore uses em or en dashes.
+      if (typeof insights.summary === 'string') {
+        insights.summary = sanitizeOutboundSmsBody(insights.summary);
+      }
+      if (typeof insights.recommendation === 'string') {
+        insights.recommendation = sanitizeOutboundSmsBody(insights.recommendation);
+      }
+
       console.log('✅ AI insights generated successfully');
       return insights;
     } catch (error) {
@@ -370,13 +380,15 @@ Respond with ONE sentence only, no preamble.`;
         messages: [{ role: 'user', content: prompt }],
       });
 
-      const recommendation =
+      const recommendationRaw =
         message.content[0].type === 'text' ? message.content[0].text : '';
+      // Strip dashes / smart Unicode (hard rule).
+      const recommendation = sanitizeOutboundSmsBody(recommendationRaw.trim());
 
       await this.prisma.lead.update({
         where: { id: leadId },
         data: {
-          aiRecommendation: recommendation.trim(),
+          aiRecommendation: recommendation,
         },
       });
 

@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import Anthropic from '@anthropic-ai/sdk';
 import { createHash } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { sanitizeOutboundSmsBody } from '../webhooks/sms-body-normalize.util';
 
 @Injectable()
 export class AiInsightService {
@@ -107,7 +108,7 @@ Lead context:
 - Touches: ${lead.touchCount ?? 0}
 - Auto-respond: ${lead.autoRespond ? 'on' : 'off'}
 
-Write ONE short sentence (max 25 words) that captures the current lead state and the next action the agent should take. No preamble. No bullet points. Example tone: "Hot lead — asking is 55% of ARV, ready for an offer at MAO." or "CAMP incomplete — need seller's timeline before offering."`;
+Write ONE short sentence (max 25 words) that captures the current lead state and the next action the agent should take. No preamble. No bullet points. NEVER use em dashes (—) or en dashes (–); use a regular hyphen (-), a comma, or split the sentence. Example tone: "Hot lead, asking is 55% of ARV, ready for an offer at MAO." or "CAMP incomplete, need seller's timeline before offering."`;
 
     try {
       const response = await this.anthropic.messages.create({
@@ -118,7 +119,9 @@ Write ONE short sentence (max 25 words) that captures the current lead state and
       });
       const text = (response.content[0] as any)?.text?.trim();
       if (!text) return null;
-      return text.replace(/^["']|["']$/g, '').trim();
+      // Strip em/en dashes and other Unicode "smart" chars before storage.
+      // Hard rule: no AI-generated text in Dealcore uses dashes of any kind.
+      return sanitizeOutboundSmsBody(text.replace(/^["']|["']$/g, '').trim());
     } catch (error: any) {
       this.logger.error(`Insight generation failed for lead ${lead.id}: ${error.message}`);
       return null;
