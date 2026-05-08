@@ -1089,6 +1089,7 @@ export default function CompsAnalysisPage() {
             analysisId={analysis?.id ?? null}
             sqft={(lead as any)?.sqftOverride || lead?.sqft || null}
             arvCalculationMode={null}
+            leadPhotos={(lead?.photos as any[]) || []}
           />
         )}
 

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { dealMathAPI, compAnalysisAPI } from '@/lib/api';
+import { dealMathAPI, compAnalysisAPI, photosAPI } from '@/lib/api';
 import {
   DealMathStrategyKey,
   STRATEGY_CONFIGS,
@@ -43,6 +43,8 @@ interface Props {
   /** Sqft used for quick-sqft chips (lead.sqftOverride || lead.sqft). */
   sqft: number | null;
   arvCalculationMode: 'ARV_RENOVATED' | 'AS_IS' | null;
+  /** Photos already on the lead (MLS, seller portal, MMS, streetview). Selectable for AI analysis. */
+  leadPhotos: Array<{ id: string; url?: string; thumbnailUrl?: string; source?: string }>;
 }
 
 const REPAIR_ITEMS = [
@@ -50,7 +52,15 @@ const REPAIR_ITEMS = [
   'Exterior Painting', 'Drywall', 'Interior painting', 'Flooring', 'Driveway', 'HVAC',
 ];
 
-export default function DealMathPanel({ leadId, analysisId, sqft, arvCalculationMode }: Props) {
+const BACKEND_PHOTO_LIMIT = 30;
+
+interface PhotoThumbnail {
+  file: File;
+  url: string;
+  status: 'ready' | 'uploading' | 'done';
+}
+
+export default function DealMathPanel({ leadId, analysisId, sqft, arvCalculationMode, leadPhotos }: Props) {
   const [state, setState] = useState<DealMathState | null>(null);
   const [loading, setLoading] = useState(true);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -60,6 +70,14 @@ export default function DealMathPanel({ leadId, analysisId, sqft, arvCalculation
   const [manualBuilderItems, setManualBuilderItems] = useState<string[]>([]);
   const [aiDescription, setAiDescription] = useState('');
   const [submitting, setSubmitting] = useState<string | null>(null);
+
+  // Photo analysis upload UI state. `expandUploadUI` lets the user re-analyze
+  // even when a saved photo analysis already exists (Re-analyze button).
+  const [selectedPhotos, setSelectedPhotos] = useState<File[]>([]);
+  const [photoThumbnails, setPhotoThumbnails] = useState<PhotoThumbnail[]>([]);
+  const [selectedLeadPhotoIds, setSelectedLeadPhotoIds] = useState<Set<string>>(new Set());
+  const [isDragging, setIsDragging] = useState(false);
+  const [expandUploadUI, setExpandUploadUI] = useState(false);
 
   const refresh = useCallback(async () => {
     const res = await dealMathAPI.get(leadId);
@@ -228,6 +246,129 @@ export default function DealMathPanel({ leadId, analysisId, sqft, arvCalculation
     }
   };
 
+  // ── Photo upload + AI analysis ─────────────────────────────────────────
+  // Compress to max 1200px wide, 85% JPEG quality. Raw phone photos are 2-5MB
+  // each; this brings them to ~150-300KB to stay within Anthropic limits.
+  const compressPhoto = (file: File): Promise<File> =>
+    new Promise((resolve) => {
+      const img = new window.Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        const MAX_DIM = 1200;
+        const scale = Math.min(1, MAX_DIM / Math.max(img.width, img.height));
+        const w = Math.round(img.width * scale);
+        const h = Math.round(img.height * scale);
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d')!;
+        ctx.drawImage(img, 0, 0, w, h);
+        canvas.toBlob(
+          (blob) => resolve(blob ? new File([blob], file.name, { type: 'image/jpeg' }) : file),
+          'image/jpeg',
+          0.85,
+        );
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
+      img.src = url;
+    });
+
+  const addPhotos = (files: File[]) => {
+    const remainingSlots = Math.max(0, BACKEND_PHOTO_LIMIT - selectedPhotos.length);
+    const newFiles = files.slice(0, remainingSlots);
+    const newThumbs: PhotoThumbnail[] = newFiles.map((f) => ({
+      file: f,
+      url: URL.createObjectURL(f),
+      status: 'ready',
+    }));
+    setSelectedPhotos((prev) => [...prev, ...newFiles]);
+    setPhotoThumbnails((prev) => [...prev, ...newThumbs]);
+  };
+
+  const removeSelectedPhoto = (idx: number) => {
+    setSelectedPhotos((prev) => prev.filter((_, i) => i !== idx));
+    setPhotoThumbnails((prev) => {
+      URL.revokeObjectURL(prev[idx]?.url);
+      return prev.filter((_, i) => i !== idx);
+    });
+  };
+
+  const handlePhotoFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    addPhotos(Array.from(e.target.files || []));
+    e.target.value = '';
+  };
+
+  const handlePhotoDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    addPhotos(Array.from(e.dataTransfer.files).filter((f) => f.type.startsWith('image/')));
+  };
+
+  const toggleLeadPhoto = (photoId: string) => {
+    setSelectedLeadPhotoIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(photoId)) next.delete(photoId);
+      else if (next.size < BACKEND_PHOTO_LIMIT) next.add(photoId);
+      return next;
+    });
+  };
+
+  const selectAllLeadPhotos = () => {
+    if (selectedLeadPhotoIds.size === leadPhotos.length) {
+      setSelectedLeadPhotoIds(new Set());
+    } else {
+      setSelectedLeadPhotoIds(new Set(leadPhotos.slice(0, BACKEND_PHOTO_LIMIT).map((p) => p.id)));
+    }
+  };
+
+  const handleAnalyzeUploaded = async () => {
+    if (!analysisId || selectedPhotos.length === 0) return;
+    setSubmitting('analyze-uploaded');
+    setPhotoThumbnails((prev) => prev.map((t) => ({ ...t, status: 'uploading' })));
+    try {
+      const compressed = await Promise.all(selectedPhotos.map(compressPhoto));
+      const toSend = compressed.slice(0, BACKEND_PHOTO_LIMIT);
+      const formData = new FormData();
+      toSend.forEach((photo) => formData.append('photos', photo));
+      // Persist originals to lead gallery in parallel - non-blocking.
+      photosAPI.uploadMultiple(leadId, selectedPhotos).catch(() => {});
+      await compAnalysisAPI.analyzePhotos(leadId, analysisId, formData);
+      // Backend mirrors midpoint to Lead via DealMathService; refresh to pick it up.
+      await refresh();
+      setSelectedPhotos([]);
+      setPhotoThumbnails((prev) => {
+        prev.forEach((t) => URL.revokeObjectURL(t.url));
+        return [];
+      });
+      setExpandUploadUI(false);
+      setPickerOpen(false);
+    } catch (err: any) {
+      const msg = err?.response?.data?.message || err?.message || 'Unknown error';
+      alert(`Photo analysis failed: ${msg}\n\nTry reducing to 10-15 photos if the issue persists.`);
+      setPhotoThumbnails((prev) => prev.map((t) => ({ ...t, status: 'ready' })));
+    } finally {
+      setSubmitting(null);
+    }
+  };
+
+  const handleAnalyzeLeadPhotos = async () => {
+    if (!analysisId || selectedLeadPhotoIds.size === 0) return;
+    setSubmitting('analyze-lead-photos');
+    try {
+      await compAnalysisAPI.analyzeLeadPhotos(leadId, analysisId, Array.from(selectedLeadPhotoIds));
+      await refresh();
+      setSelectedLeadPhotoIds(new Set());
+      setExpandUploadUI(false);
+      setPickerOpen(false);
+    } catch (err: any) {
+      const msg = err?.response?.data?.message || err?.message || 'Unknown error';
+      alert(`Photo analysis failed: ${msg}`);
+    } finally {
+      setSubmitting(null);
+    }
+  };
+
   const provenanceLine = (() => {
     switch (state.repairMethod) {
       case 'PHOTO_ANALYSIS': {
@@ -351,6 +492,21 @@ export default function DealMathPanel({ leadId, analysisId, sqft, arvCalculation
                   state={state}
                   sqft={sqft}
                   analysisId={analysisId}
+                  leadPhotos={leadPhotos}
+                  selectedPhotos={selectedPhotos}
+                  photoThumbnails={photoThumbnails}
+                  selectedLeadPhotoIds={selectedLeadPhotoIds}
+                  isDragging={isDragging}
+                  setIsDragging={setIsDragging}
+                  expandUploadUI={expandUploadUI}
+                  setExpandUploadUI={setExpandUploadUI}
+                  onPhotoFileChange={handlePhotoFileChange}
+                  onPhotoDrop={handlePhotoDrop}
+                  onRemoveSelectedPhoto={removeSelectedPhoto}
+                  onToggleLeadPhoto={toggleLeadPhoto}
+                  onSelectAllLeadPhotos={selectAllLeadPhotos}
+                  onAnalyzeUploaded={handleAnalyzeUploaded}
+                  onAnalyzeLeadPhotos={handleAnalyzeLeadPhotos}
                   manualBuilderLevel={manualBuilderLevel}
                   setManualBuilderLevel={setManualBuilderLevel}
                   manualBuilderItems={manualBuilderItems}
@@ -529,6 +685,21 @@ function RepairMethodPicker(props: {
   state: DealMathState;
   sqft: number | null;
   analysisId: string | null;
+  leadPhotos: Array<{ id: string; url?: string; thumbnailUrl?: string; source?: string }>;
+  selectedPhotos: File[];
+  photoThumbnails: PhotoThumbnail[];
+  selectedLeadPhotoIds: Set<string>;
+  isDragging: boolean;
+  setIsDragging: (v: boolean) => void;
+  expandUploadUI: boolean;
+  setExpandUploadUI: (v: boolean) => void;
+  onPhotoFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onPhotoDrop: (e: React.DragEvent) => void;
+  onRemoveSelectedPhoto: (idx: number) => void;
+  onToggleLeadPhoto: (id: string) => void;
+  onSelectAllLeadPhotos: () => void;
+  onAnalyzeUploaded: () => void;
+  onAnalyzeLeadPhotos: () => void;
   manualBuilderLevel: string;
   setManualBuilderLevel: (v: string) => void;
   manualBuilderItems: string[];
@@ -546,8 +717,13 @@ function RepairMethodPicker(props: {
   onAiText: () => void;
   onManualOverride: () => void;
 }) {
-  const { state, sqft, analysisId, submitting } = props;
+  const {
+    state, sqft, analysisId, submitting,
+    leadPhotos, selectedPhotos, photoThumbnails, selectedLeadPhotoIds,
+    isDragging, setIsDragging, expandUploadUI, setExpandUploadUI,
+  } = props;
   const photo = state.latestPhotoAnalysis;
+  const showUploadUI = !photo || expandUploadUI;
   const toggleItem = (item: string) => {
     if (props.manualBuilderItems.includes(item)) {
       props.setManualBuilderItems(props.manualBuilderItems.filter((i) => i !== item));
@@ -560,8 +736,19 @@ function RepairMethodPicker(props: {
     <div className="mt-4 space-y-4 border-t border-gray-200 dark:border-gray-700 pt-4">
       {/* Photo analysis */}
       <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-4">
-        <div className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Photo analysis</div>
-        {photo ? (
+        <div className="flex items-center justify-between mb-2">
+          <div className="text-sm font-semibold text-gray-700 dark:text-gray-300">Photo analysis</div>
+          {photo && expandUploadUI && (
+            <button
+              onClick={() => setExpandUploadUI(false)}
+              className="text-xs text-gray-500 dark:text-gray-400 hover:underline"
+            >
+              Cancel re-analyze
+            </button>
+          )}
+        </div>
+
+        {photo && !expandUploadUI && (
           <div>
             <div className="text-xs text-gray-500 dark:text-gray-400 mb-2">
               Analyzed {new Date(photo.analyzedAt).toLocaleDateString()}
@@ -570,7 +757,7 @@ function RepairMethodPicker(props: {
                 ? ` · ${formatCurrency(photo.rangeLow)}-${formatCurrency(photo.rangeHigh)}`
                 : ''}
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2 mb-2">
               {photo.midpoint != null && (
                 <button
                   onClick={props.onApplyMidpoint}
@@ -599,11 +786,162 @@ function RepairMethodPicker(props: {
                 </button>
               )}
             </div>
+            <button
+              onClick={() => setExpandUploadUI(true)}
+              className="text-xs text-purple-600 dark:text-purple-400 hover:underline"
+            >
+              Re-analyze with new photos
+            </button>
           </div>
-        ) : (
-          <p className="text-xs text-gray-500 dark:text-gray-400">
-            No photo analysis yet. Run one on the Valuation tab to generate a condition-based estimate.
-          </p>
+        )}
+
+        {showUploadUI && (
+          <div className="space-y-3">
+            {!analysisId && (
+              <p className="text-xs text-gray-400 dark:text-gray-500">
+                Need a comp analysis to use photo analysis. Open the Valuation tab and pull comps first.
+              </p>
+            )}
+
+            {/* Drag-and-drop / file picker */}
+            <label
+              onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+              onDragLeave={() => setIsDragging(false)}
+              onDrop={props.onPhotoDrop}
+              className={`block rounded-xl border-2 border-dashed p-5 text-center cursor-pointer transition-colors ${
+                isDragging
+                  ? 'border-purple-400 bg-purple-50 dark:bg-purple-950'
+                  : 'border-gray-300 dark:border-gray-600 hover:border-purple-300'
+              } ${!analysisId ? 'opacity-50 cursor-not-allowed' : ''}`}
+            >
+              <input
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={props.onPhotoFileChange}
+                disabled={!analysisId}
+                className="hidden"
+              />
+              <div className="text-sm text-gray-600 dark:text-gray-400">
+                Drop photos here or click to choose. Up to {BACKEND_PHOTO_LIMIT} per analysis.
+              </div>
+              {selectedPhotos.length > 0 && (
+                <div className="text-xs text-purple-600 dark:text-purple-400 mt-1">
+                  {selectedPhotos.length} selected
+                </div>
+              )}
+            </label>
+
+            {/* Selected upload thumbnails */}
+            {photoThumbnails.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {photoThumbnails.map((t, i) => (
+                  <div
+                    key={t.url}
+                    className="relative w-16 h-16 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-600 group"
+                  >
+                    <img src={t.url} alt="" className="w-full h-full object-cover" />
+                    {t.status === 'uploading' && (
+                      <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                        <span className="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
+                      </div>
+                    )}
+                    <button
+                      onClick={(e) => { e.preventDefault(); props.onRemoveSelectedPhoto(i); }}
+                      className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full text-white text-xs items-center justify-center hidden group-hover:flex"
+                    >
+                      x
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {selectedPhotos.length > 0 && (
+              <button
+                onClick={props.onAnalyzeUploaded}
+                disabled={!analysisId || submitting === 'analyze-uploaded'}
+                className="btn btn-sm bg-purple-600 hover:bg-purple-700 text-white w-full"
+              >
+                {submitting === 'analyze-uploaded' ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <span className="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
+                    Analyzing {Math.min(selectedPhotos.length, BACKEND_PHOTO_LIMIT)} photo{Math.min(selectedPhotos.length, BACKEND_PHOTO_LIMIT) !== 1 ? 's' : ''} with AI...
+                  </span>
+                ) : (
+                  `Analyze ${Math.min(selectedPhotos.length, BACKEND_PHOTO_LIMIT)} uploaded photo${Math.min(selectedPhotos.length, BACKEND_PHOTO_LIMIT) !== 1 ? 's' : ''} with AI`
+                )}
+              </button>
+            )}
+
+            {/* Existing lead photos (MLS, seller portal, MMS, streetview) */}
+            {leadPhotos.length > 0 && (
+              <div className="border-t border-gray-200 dark:border-gray-700 pt-3">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                    Or select from property photos ({leadPhotos.length})
+                  </div>
+                  <button
+                    onClick={props.onSelectAllLeadPhotos}
+                    className="text-xs text-purple-600 hover:text-purple-800 font-medium"
+                  >
+                    {selectedLeadPhotoIds.size === leadPhotos.length ? 'Deselect all' : 'Select all'}
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {leadPhotos.map((p) => {
+                    const isSelected = selectedLeadPhotoIds.has(p.id);
+                    return (
+                      <button
+                        key={p.id}
+                        onClick={() => props.onToggleLeadPhoto(p.id)}
+                        className={`relative w-16 h-16 rounded-lg overflow-hidden border-2 transition-all ${
+                          isSelected
+                            ? 'border-purple-500 ring-2 ring-purple-300'
+                            : 'border-gray-200 dark:border-gray-600 hover:border-purple-300'
+                        }`}
+                      >
+                        <img
+                          src={p.thumbnailUrl || p.url}
+                          alt=""
+                          className="w-full h-full object-cover"
+                        />
+                        {isSelected && (
+                          <div className="absolute inset-0 bg-purple-500/20 flex items-center justify-center">
+                            <span className="text-white text-xs font-bold bg-purple-600 rounded-full w-5 h-5 flex items-center justify-center">✓</span>
+                          </div>
+                        )}
+                        {p.source && (
+                          <span className="absolute bottom-0 left-0 right-0 text-[9px] text-center bg-black/50 text-white py-0.5 truncate">
+                            {p.source === 'seller-portal' ? 'Seller'
+                              : p.source === 'seller-mms' ? 'MMS'
+                                : p.source === 'streetview' ? 'Street'
+                                  : p.source}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+                {selectedLeadPhotoIds.size > 0 && (
+                  <button
+                    onClick={props.onAnalyzeLeadPhotos}
+                    disabled={!analysisId || submitting === 'analyze-lead-photos'}
+                    className="btn btn-sm bg-purple-600 hover:bg-purple-700 text-white w-full mt-3"
+                  >
+                    {submitting === 'analyze-lead-photos' ? (
+                      <span className="flex items-center justify-center gap-2">
+                        <span className="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
+                        Analyzing {selectedLeadPhotoIds.size} property photo{selectedLeadPhotoIds.size !== 1 ? 's' : ''} with AI...
+                      </span>
+                    ) : (
+                      `Analyze ${selectedLeadPhotoIds.size} property photo${selectedLeadPhotoIds.size !== 1 ? 's' : ''} with AI`
+                    )}
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
         )}
       </div>
 
