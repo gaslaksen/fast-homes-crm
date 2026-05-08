@@ -1082,6 +1082,16 @@ export default function CompsAnalysisPage() {
       <main className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
 
 
+        {/* ═══════════════ DEAL MATH (Phase D) ═══════════════ */}
+        {activeSection === 'deal-math' && (
+          <DealMathPanel
+            leadId={leadId}
+            analysisId={analysis?.id ?? null}
+            sqft={(lead as any)?.sqftOverride || lead?.sqft || null}
+            arvCalculationMode={null}
+          />
+        )}
+
         {/* ═══════════════ DEAL INTEL SECTION ═══════════════ */}
         {activeSection === 'deal-intel' && (
           <div className="space-y-6">
