@@ -7,6 +7,7 @@ import { DripService } from '../drip/drip.service';
 import { CallsService } from '../calls/calls.service';
 import { PhotosService } from '../photos/photos.service';
 import { CompAnalysisService } from '../comps/comp-analysis.service';
+import { CampaignEnrollmentService } from '../campaigns/campaign-enrollment.service';
 import { SlackLeadService } from './slack-lead.service';
 import { InvestorFuseService } from './investorfuse.service';
 import { formatPhoneNumber, LeadSource } from '@fast-homes/shared';
@@ -24,6 +25,7 @@ export class WebhooksController {
     private callsService: CallsService,
     private photosService: PhotosService,
     private compAnalysisService: CompAnalysisService,
+    private campaignEnrollmentService: CampaignEnrollmentService,
     private slackLeadService: SlackLeadService,
     private investorFuseService: InvestorFuseService,
   ) {}
@@ -616,11 +618,27 @@ export class WebhooksController {
           // { phone, event }
           const phone = formatPhoneNumber(body.phone || '');
           if (phone) {
+            const affected = await this.leadsService['prisma'].lead.findMany({
+              where: { sellerPhone: phone },
+              select: { id: true },
+            });
             await this.leadsService['prisma'].lead.updateMany({
               where: { sellerPhone: phone },
               data: { doNotContact: true, status: 'DNC' },
             });
-            console.log(`🚫 DNC: ${phone}`);
+            for (const lead of affected) {
+              try {
+                await this.campaignEnrollmentService.removeAllActive(lead.id);
+              } catch (err: any) {
+                this.logger.error(`Failed to remove campaign enrollments for lead ${lead.id}: ${err.message}`);
+              }
+              try {
+                await this.dripService.cancelByLeadId(lead.id, 'DNC webhook');
+              } catch {
+                // Drip may not exist - fine
+              }
+            }
+            console.log(`🚫 DNC: ${phone} (cleaned ${affected.length} lead(s))`);
           }
           return { success: true };
         }
@@ -630,11 +648,27 @@ export class WebhooksController {
           // { phone, timestamp, userId, source, event }
           const phone = formatPhoneNumber(body.phone || '');
           if (phone) {
+            const affected = await this.leadsService['prisma'].lead.findMany({
+              where: { sellerPhone: phone },
+              select: { id: true },
+            });
             await this.leadsService['prisma'].lead.updateMany({
               where: { sellerPhone: phone },
               data: { doNotContact: true, unsubscribedAt: new Date() },
             });
-            console.log(`🚫 DNT (STOP): ${phone} — source: ${body.source}`);
+            for (const lead of affected) {
+              try {
+                await this.campaignEnrollmentService.removeAllActive(lead.id);
+              } catch (err: any) {
+                this.logger.error(`Failed to remove campaign enrollments for lead ${lead.id}: ${err.message}`);
+              }
+              try {
+                await this.dripService.cancelByLeadId(lead.id, 'DNT (STOP) webhook');
+              } catch {
+                // Drip may not exist - fine
+              }
+            }
+            console.log(`🚫 DNT (STOP): ${phone} — source: ${body.source} (cleaned ${affected.length} lead(s))`);
           }
           return { success: true };
         }

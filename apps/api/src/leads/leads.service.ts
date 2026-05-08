@@ -1115,10 +1115,39 @@ export class LeadsService {
    * Bulk update lead status
    */
   async bulkUpdateStatus(ids: string[], status: LeadStatus): Promise<{ updated: number }> {
+    const TERMINAL_STATUSES = ['DEAD', 'SOLD_LOSS', 'HELD_LONG_TERM', 'CANCELLED', 'CLOSED_LOST', 'OPTED_OUT', 'DNC'];
+
+    const existing = await this.prisma.lead.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, status: true },
+    });
+
     const result = await this.prisma.lead.updateMany({
       where: { id: { in: ids } },
       data: { status },
     });
+
+    if (TERMINAL_STATUSES.includes(status)) {
+      const transitioning = existing.filter((l) => l.status !== status);
+      let cleaned = 0;
+      for (const lead of transitioning) {
+        try {
+          await this.campaignEnrollmentService.removeAllActive(lead.id);
+        } catch (err: any) {
+          this.logger.error(`Failed to remove campaign enrollments for lead ${lead.id}: ${err.message}`);
+        }
+        try {
+          await this.dripService.cancelByLeadId(lead.id, `Lead status changed to ${status}`);
+        } catch {
+          // Drip may not exist - fine
+        }
+        cleaned++;
+      }
+      if (cleaned > 0) {
+        this.logger.log(`🗑️ Bulk status -> ${status}: cleaned outreach for ${cleaned} lead(s)`);
+      }
+    }
+
     return { updated: result.count };
   }
 

@@ -8,9 +8,10 @@ import { DripModule } from '../drip/drip.module';
 import { CompsModule } from '../comps/comps.module';
 import { CallsModule } from '../calls/calls.module';
 import { PhotosModule } from '../photos/photos.module';
+import { CampaignsModule } from '../campaigns/campaigns.module';
 
 @Module({
-  imports: [LeadsModule, MessagesModule, DripModule, CompsModule, CallsModule, PhotosModule],
+  imports: [LeadsModule, MessagesModule, DripModule, CompsModule, CallsModule, PhotosModule, CampaignsModule],
   controllers: [WebhooksController],
   providers: [SlackLeadService, InvestorFuseService],
 })

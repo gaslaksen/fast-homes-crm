@@ -131,11 +131,12 @@ export class CampaignEnrollmentService {
   }
 
   /**
-   * Remove all active/paused enrollments for a lead (e.g., when lead marked DEAD).
+   * Remove all non-terminal enrollments for a lead (e.g., when lead marked DEAD).
+   * Sweeps ACTIVE, PAUSED, and REPLIED so a dead lead never lingers on the campaign roster.
    */
   async removeAllActive(leadId: string) {
     const result = await this.prisma.campaignEnrollment.updateMany({
-      where: { leadId, status: { in: ['ACTIVE', 'PAUSED'] } },
+      where: { leadId, status: { notIn: ['REMOVED', 'COMPLETED', 'OPTED_OUT'] } },
       data: { status: 'REMOVED' },
     });
     if (result.count > 0) {
