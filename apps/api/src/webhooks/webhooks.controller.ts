@@ -11,6 +11,7 @@ import { SlackLeadService } from './slack-lead.service';
 import { InvestorFuseService } from './investorfuse.service';
 import { formatPhoneNumber, LeadSource } from '@fast-homes/shared';
 import { normalizeLeadAddressAsync } from './address-parser';
+import { normalizeSmsBodyForCompare } from './sms-body-normalize.util';
 
 @Controller('webhooks')
 export class WebhooksController {
@@ -510,25 +511,38 @@ export class WebhooksController {
           // Use createdAt (auto-set by Prisma) instead of sentAt for the time window.
           // PENDING records have sentAt=NULL because it's only set after the SMS API
           // responds, but the webhook can arrive before that update completes.
+          //
+          // Match in JS, not Prisma WHERE — SmrtPhone/the carrier normalizes
+          // em dashes, smart quotes, ellipses, etc. before delivery, so a raw
+          // string equality on the DB body silently fails when the AI used
+          // any of those characters. Pull recent outbound messages and match
+          // on a normalized form (see normalizeSmsBodyForCompare).
           const recentCutoff = new Date(Date.now() - 10 * 60 * 1000); // 10 minutes ago
-          const existingByContent = !existingMsg
-            ? await this.leadsService['prisma'].message.findFirst({
+          const normalizedCore = normalizeSmsBodyForCompare(coreBody);
+          const normalizedFull = normalizeSmsBodyForCompare(msgBody);
+          const recentOutbound = !existingMsg
+            ? await this.leadsService['prisma'].message.findMany({
                 where: {
                   leadId: outboundLead.id,
                   direction: 'OUTBOUND',
                   createdAt: { gte: recentCutoff },
-                  OR: [
-                    { body: coreBody },
-                    { body: msgBody },
-                    // Fallback: match if our stored body starts with the first 80 chars
-                    // (handles edge cases where footer format varies)
-                    ...(coreBody.length >= 80
-                      ? [{ body: { startsWith: coreBody.substring(0, 80) } }]
-                      : []),
-                  ],
                 },
+                orderBy: { createdAt: 'desc' },
+                take: 20,
               })
-            : null;
+            : [];
+          const existingByContent =
+            recentOutbound.find((m) => {
+              const stored = normalizeSmsBodyForCompare(m.body || '');
+              if (!stored) return false;
+              if (stored === normalizedCore || stored === normalizedFull) return true;
+              // Fallback: stored body starts with the first 80 normalized chars of
+              // the webhook body (handles compliance-footer format drift).
+              if (normalizedCore.length >= 80 && stored.startsWith(normalizedCore.slice(0, 80))) {
+                return true;
+              }
+              return false;
+            }) ?? null;
 
           if (!existingMsg && !existingByContent) {
             console.log(`⚠️  ${event}: no app-originated match for lead ${outboundLead.id} — smsId=${outSmsId}, coreBody="${coreBody.substring(0, 60)}…", cutoff=${recentCutoff.toISOString()}`);

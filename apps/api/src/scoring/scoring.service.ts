@@ -4,6 +4,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { ScoringInput, ScoringResult, AIExtractionResult } from '@fast-homes/shared';
 import { calculateScoreBand, calculateABCDFit } from '@fast-homes/shared';
 import { PrismaService } from '../prisma/prisma.service';
+import { sanitizeOutboundSmsBody } from '../webhooks/sms-body-normalize.util';
 
 @Injectable()
 export class ScoringService {
@@ -606,6 +607,16 @@ Return ONLY a JSON object:
       // Strip markdown code fences if model adds them
       const cleaned = content.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
       const drafts = JSON.parse(cleaned);
+
+      // Hard guarantee that em dashes, smart quotes, and similar Unicode
+      // characters never reach the seller — the prompt forbids them but the
+      // model still slips occasionally. Stripping here also keeps the stored
+      // body byte-equal to what SmrtPhone delivers, so the smsOutgoing
+      // webhook matcher never misclassifies our own message as a manual
+      // reply (Meghan Kinee thread, 2026-05-08).
+      if (drafts && typeof drafts.message === 'string') {
+        drafts.message = sanitizeOutboundSmsBody(drafts.message);
+      }
       return drafts;
     } catch (error) {
       this.logger.error('AI draft generation failed:', error.message);
