@@ -1,12 +1,22 @@
-import type { ExitStrategy } from '@fast-homes/shared';
-
 // Mirror of apps/api/src/leads/deal-math/strategy-config.ts. The FE needs the
 // same shape to render inputs/outputs without an extra API call. Backend is
 // the canonical source for compute; this file defines the *rendering* schema.
 //
-// Keep in sync. If the build prompt becomes a recurring need, lift to packages/shared.
+// ExitStrategy is duplicated locally rather than imported from
+// @fast-homes/shared because the shared package has no built dist/ output at
+// Vercel build time. Other web files (e.g. dispoV2/types.ts) also re-declare
+// it for the same reason. Keep in sync with packages/shared/src/types.ts:411.
 
-export type DealMathStrategyKey = ExitStrategy;
+export type DealMathStrategyKey =
+  | 'wholesale'
+  | 'novation'
+  | 'double_close'
+  | 'fix_flip'
+  | 'concierge_listing'
+  | 'hold_rental'
+  | 'jv'
+  | 'sub_to'
+  | 'other';
 
 export type StrategyInputType =
   | 'currency'
