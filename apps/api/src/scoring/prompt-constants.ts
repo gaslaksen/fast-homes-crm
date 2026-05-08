@@ -164,6 +164,11 @@ INBOUND: It's in a park, lot rent is 650.
 OUTBOUND: Appreciate you being straight with me. Honestly, lease-land manufactureds aren't something cash buyers like us pick up - financing usually doesn't work. The folks who do buy these are typically other park residents or specialty MH lenders. I don't want to lead you on. If it'd help, I can still pass your info to the team and they can confirm, but you'll likely get further with a park manager or a manufactured-home specialist. Want me to do that or call it here?
 [Notice: Dax surfaced the fit problem honestly, explained why, suggested better-suited buyers, and let the seller decide.]
 
+EXAMPLE 8a - Recent purchase + thin equity + ask near ARV (the math doesn't work):
+INBOUND: Yes I am looking to sell. Around $300k, just beginning the process so not in a rush but could also close fast as well
+OUTBOUND: Hey Meghan, we just want to be upfront with you. Unfortunately with a newer house like this where you are looking to get almost full retail it wouldn't work for an investor. We typically buy properties for 60 to 70 cents on the dollar. Your best bet in this situation would be to work with a realtor if you are looking to get retail price. Happy to still pass along to the team if you want them to take a look, just let me know.
+[Notice: Dax surfaced the deal-fit issue in the SECOND message, not the fifth. He didn't keep gathering condition/ownership info first. He explained the 60-70% rule plainly, suggested a realtor as a better path, and left the door open. He did NOT quote their specific ARV or mortgage balance.]
+
 EXAMPLE 8 - Using listing photos to ask a better condition question:
 INBOUND: Yeah we're definitely thinking about selling.
 OUTBOUND: Cool. So I can see the listing photos from when the place was on the market a few years back - looked like a really nice setup, the kitchen had that big island. Has anything changed since then or is it pretty much the same as those photos?

@@ -410,8 +410,24 @@ export class MessagesService {
 
     // We track whether this turn is an expectations-setting turn so the caller
     // can stamp `lead.expectationsSetAt` only after the message actually sends.
+    //
+    // Two ways an expectations turn can fire:
+    //  1. CAMP complete + ANY fit concern unresolved (the standard path).
+    //  2. EARLY money-killer: the asking price is known and the deal
+    //     mathematically cannot pencil (ask >= ARV, mortgage > MAO, or a
+    //     recent at-market purchase + high ask). In that case there's no
+    //     point gathering ownership/condition first — the seller deserves
+    //     a transparent expectations conversation NOW. (Meghan Kinee thread,
+    //     2026-05-08: bought 2024 for $309k, owes $304k on FHA, asking $300k,
+    //     ARV ~$288k — there was no math that worked, but the AI was still
+    //     plodding through CAMP.)
+    const earlyMoneyKiller =
+      !lead.expectationsSetAt &&
+      lead.askingPrice != null &&
+      fitFlags.dealCannotPencil;
     const needsExpectationsTurn =
-      campComplete && fitFlags.hasOpenFitConcern && !lead.expectationsSetAt;
+      !lead.expectationsSetAt &&
+      ((campComplete && fitFlags.hasOpenFitConcern) || earlyMoneyKiller);
     const isClosingTurn = campComplete && !needsExpectationsTurn;
 
     if (isClosingTurn) {
@@ -449,22 +465,29 @@ Your message must:
 4. Do NOT ask anything. Do NOT request more info. End the conversation professionally.
 5. Do NOT repeat back their price or timeline in a way that implies agreement or commitment.${portalInstruction}`;
     } else if (needsExpectationsTurn) {
-      // CAMP is complete BUT we have a deal-fit concern (manufactured/leased
-      // land, or asking at/near ARV). Surface expectations honestly BEFORE
-      // handing off to the team. This is its own turn — autoRespond stays on,
-      // and the next inbound message will trigger the closing turn.
+      // The team has flagged a deal-fit concern that needs to be surfaced
+      // honestly before we wrap up. This is its own turn — autoRespond stays
+      // on, and the next inbound message will trigger the closing turn.
       const concernsList = fitFlags.concerns.map(c => `  - ${c}`).join('\n');
-      purpose = `${propertyContext}CAMP info is gathered, but the team has flagged a deal-fit concern that should be surfaced to the seller BEFORE we wrap up.
+      const moneyKillerNote = earlyMoneyKiller
+        ? `\nThis is being surfaced EARLY (without waiting for the rest of CAMP) because the math fundamentally does not work — there's no point asking more questions before being honest with the seller about the fit.`
+        : '';
+      purpose = `${propertyContext}DEAL-FIT EXPECTATIONS TURN — surface the flagged concern(s) to the seller before we wrap up.${moneyKillerNote}
 
 Concerns to surface honestly (in your own words, in Dax's voice):
 ${concernsList}
 
 This message must:
 1. Briefly acknowledge what the seller just said.
-2. Set realistic expectations on the flagged concern. If asking-at-ARV is the issue, explain plainly that cash investors typically pay 60–70% of ARV and that may not be the right fit (do NOT quote a specific ARV number — just describe the gap). If manufactured/leased-land is the issue, be honest that those typically aren't a fit for cash buyers like us.
+2. Set realistic expectations on the flagged concern(s):
+   - If ask-at-or-above-ARV: explain plainly that cash investors typically pay 60-70% of ARV (after-repair value), so paying near retail is not how the cash-offer model works. Don't quote a specific ARV number to them. Suggest listing with a realtor may be a better path.
+   - If mortgage-exceeds-MAO: gently note that, given what cash investors typically offer (60-70% of ARV), our offer would not cover their loan payoff, so they'd likely have to bring money to the table at closing. That usually means listing on the open market is a better fit. Do NOT mention you know their specific mortgage balance — just describe the gap honestly.
+   - If recent-purchase-no-equity: acknowledge that buying recently at near-current value leaves very thin equity, which makes a cash investor offer hard to pencil. Don't quote their purchase price unless they bring it up.
+   - If manufactured/leased-land: be straight that those typically aren't a fit for cash buyers like us.
 3. Leave the door open. Ask one open-ended follow-up — what's driving their timeline, whether they want the team to still take a look, or whether listing might be a better path.
 4. Do NOT promise an offer. Do NOT say the team will reach out yet — that comes after they reply.
-5. Do NOT use closing language like "before I let you go" or "team will review everything".`;
+5. Do NOT use closing language like "before I let you go" or "team will review everything".
+6. Do NOT recite numbers from the PROPERTY FACTS block back to the seller (ARV, mortgage balance, last sale price). Use them to inform what you say, but speak in plain language.`;
     } else {
       // CAMP not yet complete — let the AI decide what to explore next.
 

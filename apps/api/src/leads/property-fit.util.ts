@@ -13,7 +13,23 @@ export interface DealFitFlags {
   askVsArvPct: number | null; // e.g. 0.92 for asking-at-92%-of-ARV
   askIsHighVsArv: boolean; // ≥ 0.85
   askIsAtOrAboveArv: boolean; // ≥ 0.95
-  hasOpenFitConcern: boolean; // any of the above worth surfacing to seller
+  /** Estimated total mortgage debt across all liens (from REAPI mortgage data). */
+  mortgageBalance: number | null;
+  /** mortgageBalance / arv. */
+  mortgageVsArvPct: number | null;
+  /** Mortgage balance exceeds a typical investor MAO (≥ 70% of ARV). */
+  mortgageExceedsMao: boolean;
+  /** Last sale within ~24 months. */
+  boughtRecently: boolean;
+  /** Bought recently AND paid at-or-near current ARV (≥ 85%) — thin/no equity. */
+  recentPurchaseNoEquity: boolean;
+  /**
+   * Hard money-killers — surface expectations IMMEDIATELY once asking price
+   * is known, even if other CAMP fields aren't. Includes: ask at-or-above
+   * ARV, mortgage exceeds MAO, or recent-no-equity + high ask.
+   */
+  dealCannotPencil: boolean;
+  hasOpenFitConcern: boolean; // any concern worth surfacing to seller
   /** Human-readable concern strings the AI prompt can reference. */
   concerns: string[];
 }
@@ -60,6 +76,43 @@ function isLeasedLand(lead: any): boolean {
   return candidates.some(c => LEASED_RE.test(c));
 }
 
+/**
+ * Estimate total current mortgage debt from REAPI's stored mortgageData.
+ * Shape (from reapi.service.mapMortgages): { firstConcurrent: { amount, ... },
+ * secondConcurrent: { amount, ... } | undefined }. Returns the sum of both
+ * `amount` fields (original loan amounts) when present.
+ *
+ * Caveat: `amount` is the ORIGINAL loan amount, not the current balance. For
+ * recent purchases (last few years) the current balance is essentially the
+ * same as origination, which is the case we most need to flag. For older
+ * mortgages this overestimates debt — that's an acceptable bias since it
+ * makes us MORE cautious about deal fit, not less.
+ */
+function totalMortgageBalance(lead: any): number | null {
+  const md = lead?.reapiMortgageData;
+  if (!md || typeof md !== 'object') return null;
+  const first = Number(md?.firstConcurrent?.amount);
+  const second = Number(md?.secondConcurrent?.amount);
+  let sum = 0;
+  let any = false;
+  if (Number.isFinite(first) && first > 0) {
+    sum += first;
+    any = true;
+  }
+  if (Number.isFinite(second) && second > 0) {
+    sum += second;
+    any = true;
+  }
+  return any ? sum : null;
+}
+
+function monthsSince(date: Date | null, now: Date): number | null {
+  if (!date) return null;
+  const ms = now.getTime() - date.getTime();
+  if (!Number.isFinite(ms) || ms < 0) return null;
+  return Math.floor(ms / (30.4375 * 24 * 60 * 60 * 1000));
+}
+
 function pickArv(lead: any): number | null {
   const arv = Number(lead?.arv);
   if (Number.isFinite(arv) && arv > 0) return arv;
@@ -82,6 +135,28 @@ export function dealFitFlags(lead: any): DealFitFlags {
   const askHigh = ratio != null && ratio >= 0.85;
   const askAtOrAbove = ratio != null && ratio >= 0.95;
 
+  // Mortgage / equity signals
+  const mortgageBal = totalMortgageBalance(lead);
+  const mortgageVsArv = arv && mortgageBal ? mortgageBal / arv : null;
+  // Investor MAO is roughly 70% of ARV. If the mortgage payoff alone exceeds
+  // that, our offer mathematically can't cover the loan — the deal is dead.
+  const mortgageExceedsMao = mortgageVsArv != null && mortgageVsArv >= 0.70;
+
+  // Recent purchase + thin/no equity — they paid at-or-near today's ARV.
+  const lastSaleDate = lead?.lastSaleDate ? new Date(lead.lastSaleDate) : null;
+  const lastSaleMonths = monthsSince(lastSaleDate, new Date());
+  const lastSalePrice = Number(lead?.lastSalePrice);
+  const boughtRecently = lastSaleMonths != null && lastSaleMonths <= 24;
+  const recentPurchaseNoEquity =
+    boughtRecently &&
+    arv != null &&
+    Number.isFinite(lastSalePrice) &&
+    lastSalePrice > 0 &&
+    lastSalePrice >= arv * 0.85;
+
+  const dealCannotPencil =
+    askAtOrAbove || mortgageExceedsMao || (recentPurchaseNoEquity && askHigh);
+
   const concerns: string[] = [];
   if (isMfr) {
     concerns.push(
@@ -94,11 +169,22 @@ export function dealFitFlags(lead: any): DealFitFlags {
   }
   if (askAtOrAbove) {
     concerns.push(
-      `asking price is at or above the estimated ARV (~${Math.round((ratio as number) * 100)}% of ARV) — investors target 60–70% of ARV, so this is likely not a fit on price`,
+      `asking price is at or above the estimated ARV (~${Math.round((ratio as number) * 100)}% of ARV) — investors target 60-70% of ARV, so this is likely not a fit on price`,
     );
   } else if (askHigh) {
     concerns.push(
-      `asking price is ~${Math.round((ratio as number) * 100)}% of ARV — investors typically target 60–70% of ARV, so price expectations may need to be reset`,
+      `asking price is ~${Math.round((ratio as number) * 100)}% of ARV — investors typically target 60-70% of ARV, so price expectations may need to be reset`,
+    );
+  }
+  if (mortgageExceedsMao && mortgageBal && arv) {
+    concerns.push(
+      `estimated mortgage debt (~${fmtMoney(mortgageBal)}) is ${Math.round(mortgageVsArv as number * 100)}% of ARV — an investor offer at 60-70% of ARV would not cover the loan payoff, so the seller would likely have to bring money to the table`,
+    );
+  }
+  if (recentPurchaseNoEquity && lastSalePrice && arv) {
+    const yrs = lastSaleMonths != null ? Math.max(1, Math.round(lastSaleMonths / 12)) : null;
+    concerns.push(
+      `seller bought ${yrs ? `~${yrs}yr ago` : 'recently'} for ${fmtMoney(lastSalePrice)} (${Math.round((lastSalePrice / arv) * 100)}% of current ARV) — very thin equity, hard for an investor purchase to pencil`,
     );
   }
 
@@ -108,6 +194,12 @@ export function dealFitFlags(lead: any): DealFitFlags {
     askVsArvPct: ratio,
     askIsHighVsArv: askHigh,
     askIsAtOrAboveArv: askAtOrAbove,
+    mortgageBalance: mortgageBal,
+    mortgageVsArvPct: mortgageVsArv,
+    mortgageExceedsMao,
+    boughtRecently,
+    recentPurchaseNoEquity,
+    dealCannotPencil,
     hasOpenFitConcern: concerns.length > 0,
     concerns,
   };
@@ -210,6 +302,16 @@ export function propertyContextForPrompt(
   const equity = Number(lead.reapiEquity);
   if (Number.isFinite(equity) && equity > 0) {
     lines.push(`- Estimated equity: ~${fmtMoney(equity)}`);
+  }
+
+  // Mortgage debt — use the same flag-derived total so the prompt and the
+  // concerns list stay aligned. Show the % of ARV when both are known.
+  if (flags.mortgageBalance != null && flags.mortgageBalance > 0) {
+    const pctStr =
+      flags.mortgageVsArvPct != null
+        ? ` (${Math.round(flags.mortgageVsArvPct * 100)}% of ARV)`
+        : '';
+    lines.push(`- Mortgage debt (estimated): ~${fmtMoney(flags.mortgageBalance)}${pctStr}`);
   }
 
   // MLS history

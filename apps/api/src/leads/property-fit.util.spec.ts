@@ -101,6 +101,90 @@ describe('dealFitFlags', () => {
     const flags = dealFitFlags(null);
     expect(flags.hasOpenFitConcern).toBe(false);
     expect(flags.concerns).toEqual([]);
+    expect(flags.dealCannotPencil).toBe(false);
+  });
+
+  it('flags mortgageExceedsMao when total mortgage > 70% of ARV', () => {
+    const flags = dealFitFlags({
+      arv: 288_000,
+      reapiMortgageData: { firstConcurrent: { amount: 304_000 } },
+    });
+    expect(flags.mortgageBalance).toBe(304_000);
+    expect(flags.mortgageVsArvPct).toBeCloseTo(1.056, 2);
+    expect(flags.mortgageExceedsMao).toBe(true);
+    expect(flags.dealCannotPencil).toBe(true);
+    expect(flags.concerns.some(c => /mortgage debt/i.test(c))).toBe(true);
+  });
+
+  it('sums first + second mortgage when both present', () => {
+    const flags = dealFitFlags({
+      arv: 400_000,
+      reapiMortgageData: {
+        firstConcurrent: { amount: 200_000 },
+        secondConcurrent: { amount: 50_000 },
+      },
+    });
+    expect(flags.mortgageBalance).toBe(250_000);
+    expect(flags.mortgageVsArvPct).toBeCloseTo(0.625, 2);
+    expect(flags.mortgageExceedsMao).toBe(false);
+  });
+
+  it('flags recentPurchaseNoEquity when bought within 24mo at >= 85% of ARV', () => {
+    const sevenMonthsAgo = new Date();
+    sevenMonthsAgo.setMonth(sevenMonthsAgo.getMonth() - 7);
+    const flags = dealFitFlags({
+      arv: 288_000,
+      lastSalePrice: 309_600,
+      lastSaleDate: sevenMonthsAgo.toISOString(),
+      askingPrice: 300_000,
+    });
+    expect(flags.boughtRecently).toBe(true);
+    expect(flags.recentPurchaseNoEquity).toBe(true);
+    expect(flags.concerns.some(c => /thin equity/i.test(c))).toBe(true);
+    expect(flags.dealCannotPencil).toBe(true);
+  });
+
+  it('does not flag recentPurchase when last sale was years ago', () => {
+    const eightYearsAgo = new Date();
+    eightYearsAgo.setFullYear(eightYearsAgo.getFullYear() - 8);
+    const flags = dealFitFlags({
+      arv: 400_000,
+      lastSalePrice: 380_000,
+      lastSaleDate: eightYearsAgo.toISOString(),
+    });
+    expect(flags.boughtRecently).toBe(false);
+    expect(flags.recentPurchaseNoEquity).toBe(false);
+  });
+
+  it('Meghan Kinee scenario: all three money-killers fire and dealCannotPencil is true', () => {
+    const sevenMonthsAgo = new Date();
+    sevenMonthsAgo.setMonth(sevenMonthsAgo.getMonth() - 7);
+    const flags = dealFitFlags({
+      arv: 287_806,
+      askingPrice: 300_000,
+      lastSalePrice: 309_600,
+      lastSaleDate: sevenMonthsAgo.toISOString(),
+      reapiMortgageData: { firstConcurrent: { amount: 303_989 } },
+    });
+    expect(flags.askIsAtOrAboveArv).toBe(true);
+    expect(flags.mortgageExceedsMao).toBe(true);
+    expect(flags.recentPurchaseNoEquity).toBe(true);
+    expect(flags.dealCannotPencil).toBe(true);
+    expect(flags.concerns.some(c => /at or above the estimated ARV/i.test(c))).toBe(true);
+    expect(flags.concerns.some(c => /mortgage debt/i.test(c))).toBe(true);
+    expect(flags.concerns.some(c => /thin equity/i.test(c))).toBe(true);
+  });
+
+  it('does not set dealCannotPencil for clean SFR with healthy spread', () => {
+    const flags = dealFitFlags({
+      arv: 400_000,
+      askingPrice: 250_000,
+      lastSalePrice: 180_000,
+      lastSaleDate: new Date(2014, 0, 1).toISOString(),
+      reapiMortgageData: { firstConcurrent: { amount: 120_000 } },
+    });
+    expect(flags.dealCannotPencil).toBe(false);
+    expect(flags.hasOpenFitConcern).toBe(false);
   });
 });
 
@@ -182,5 +266,13 @@ describe('propertyContextForPrompt', () => {
     expect(out).toMatch(/Deal-fit concerns to surface:/);
     expect(out).toMatch(/manufactured\/mobile home/i);
     expect(out).toMatch(/at or above the estimated ARV/);
+  });
+
+  it('emits a mortgage-debt line with % of ARV', () => {
+    const out = propertyContextForPrompt({
+      arv: 400_000,
+      reapiMortgageData: { firstConcurrent: { amount: 250_000 } },
+    });
+    expect(out).toMatch(/Mortgage debt \(estimated\): ~\$250,000 \(63% of ARV\)/);
   });
 });
