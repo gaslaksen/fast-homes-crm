@@ -17,6 +17,7 @@ import {
   ReapiMlsDetailData,
 } from './reapi.types';
 import { computeSimilarityScore, haversineMiles } from './comp-similarity';
+import { CompParent, compParentCreate, compParentWhere, isLeadParent, parentLabel } from './comp-parent';
 
 const REAPI_BASE_URL = 'https://api.realestateapi.com';
 const CACHE_TTL_HOURS = 24;
@@ -873,20 +874,52 @@ export class ReapiService {
       maxResults?: number;
     },
   ): Promise<{ arv: number; arvLow?: number; arvHigh?: number; confidence: number; compsCount: number; source: string }> {
+    return this.fetchAndSaveCompsForParent({ kind: 'lead', leadId }, address, opts);
+  }
+
+  /**
+   * Parent-agnostic variant — drives both the standard lead flow and the
+   * ad-hoc PropertyLookup flow. Side-effects that write back to the Lead
+   * (arv, lastCompsDate, reapiEstimatedValue*) are skipped when the parent
+   * is a PropertyLookup.
+   */
+  async fetchAndSaveCompsForParent(
+    parent: CompParent,
+    address: EnrichAddress,
+    opts?: {
+      forceRefresh?: boolean;
+      maxRadiusMiles?: number;
+      maxDaysBack?: number;
+      maxResults?: number;
+      subjectOverride?: {
+        bedrooms?: number | null;
+        bathrooms?: number | null;
+        sqft?: number | null;
+        sqftOverride?: number | null;
+        propertyType?: string | null;
+        latitude?: number | null;
+        longitude?: number | null;
+      };
+    },
+  ): Promise<{ arv: number; arvLow?: number; arvHigh?: number; confidence: number; compsCount: number; source: string }> {
     const full = this.formatAddress(address);
     const radius = opts?.maxRadiusMiles ?? 1;
     const daysBack = opts?.maxDaysBack ?? 365;    // ~12 months
     const maxResults = opts?.maxResults ?? 25;
 
-    // Load the subject lead's basic features for correlation scoring AND
-    // lat/lng for the MLS Search geo lookup (more precise than address string).
-    const subject = await this.prisma.lead.findUnique({
-      where: { id: leadId },
-      select: {
-        bedrooms: true, bathrooms: true, sqft: true, sqftOverride: true,
-        propertyType: true, latitude: true, longitude: true,
-      },
-    });
+    // Load the subject's basic features for correlation scoring AND lat/lng
+    // for the MLS Search geo lookup. For lead parents, pull from the Lead row;
+    // for ad-hoc lookups, use the override the caller passes in (sourced from
+    // the PropertyLookup record).
+    const subject = isLeadParent(parent)
+      ? await this.prisma.lead.findUnique({
+          where: { id: parent.leadId },
+          select: {
+            bedrooms: true, bathrooms: true, sqft: true, sqftOverride: true,
+            propertyType: true, latitude: true, longitude: true,
+          },
+        })
+      : (opts?.subjectOverride ?? null);
     const subjectSqftForScore = subject?.sqftOverride ?? subject?.sqft ?? null;
 
     // Default pull is tight on purpose — 1mi / 12mo / 25 records to match
@@ -950,7 +983,7 @@ export class ReapiService {
     }
 
     await this.prisma.comp.deleteMany({
-      where: { leadId, source: 'reapi', analysisId: null },
+      where: { ...compParentWhere(parent), source: 'reapi', analysisId: null },
     });
 
     // Minimal filters — we only discard records that are literally unusable.
@@ -1075,7 +1108,7 @@ export class ReapiService {
       try {
         await this.prisma.comp.create({
           data: {
-            leadId,
+            ...compParentCreate(parent),
             address: compAddress,
             distance,
             soldPrice,
@@ -1131,7 +1164,7 @@ export class ReapiService {
 
     if (!arv) {
       const savedComps = await this.prisma.comp.findMany({
-        where: { leadId, source: 'reapi', analysisId: null },
+        where: { ...compParentWhere(parent), source: 'reapi', analysisId: null },
       });
       if (savedComps.length > 0) {
         const prices = savedComps.map((c) => c.soldPrice).sort((a, b) => a - b);
@@ -1151,18 +1184,20 @@ export class ReapiService {
       confidence = Math.max(40, Math.min(95, Math.round(55 + saved * 1.2 + disclosedRatio * 15 + mlsBonus)));
     }
 
-    await this.prisma.lead.update({
-      where: { id: leadId },
-      data: {
-        arv: Math.round(arv) || undefined,
-        arvConfidence: confidence || undefined,
-        lastCompsDate: new Date(),
-        // Also update the REAPI AVM columns so the Overview tab reflects them
-        reapiEstimatedValue: arv || undefined,
-        reapiEstimatedValueLow: arvLow || undefined,
-        reapiEstimatedValueHigh: arvHigh || undefined,
-      },
-    });
+    if (isLeadParent(parent)) {
+      await this.prisma.lead.update({
+        where: { id: parent.leadId },
+        data: {
+          arv: Math.round(arv) || undefined,
+          arvConfidence: confidence || undefined,
+          lastCompsDate: new Date(),
+          // Also update the REAPI AVM columns so the Overview tab reflects them
+          reapiEstimatedValue: arv || undefined,
+          reapiEstimatedValueLow: arvLow || undefined,
+          reapiEstimatedValueHigh: arvHigh || undefined,
+        },
+      });
+    }
 
     const parts: string[] = [];
     if (mlsCount > 0) parts.push(`${mlsCount} MLS`);

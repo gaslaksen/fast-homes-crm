@@ -7,6 +7,55 @@ import { DealMathService } from '../leads/deal-math/deal-math.service';
 import Anthropic from '@anthropic-ai/sdk';
 import axios from 'axios';
 import { sanitizeOutboundSmsBody, deepSanitizeAiStrings } from '../webhooks/sms-body-normalize.util';
+import { CompParent, compParentCreate, compParentWhere, isLeadParent } from './comp-parent';
+
+// Lead-shaped subject the AI prompts and adjustment engine read from. When the
+// analysis is owned by a PropertyLookup, the lookup fields are mapped onto the
+// same shape and ATTOM-only / Lead-only fields default to null. Existing
+// downstream code already null-checks these so the prompts gracefully degrade.
+type SubjectProperty = {
+  id: string | null;
+  propertyAddress: string;
+  propertyCity: string | null;
+  propertyState: string | null;
+  propertyZip: string | null;
+  bedrooms: number | null;
+  bathrooms: number | null;
+  sqft: number | null;
+  sqftOverride: number | null;
+  yearBuilt: number | null;
+  lotSize: number | null;
+  propertyType: string | null;
+  conditionLevel: string | null;
+  askingPrice: number | null;
+  arv: number | null;
+  latitude: number | null;
+  longitude: number | null;
+  // ATTOM / REAPI enrichment fields — always null for ad-hoc lookups in v1.
+  attomId: string | null;
+  attomEnrichedAt: Date | null;
+  attomAvm: number | null;
+  attomAvmLow: number | null;
+  attomAvmHigh: number | null;
+  avmPoorHigh: number | null;
+  avmExcellentHigh: number | null;
+  propertyCondition: string | null;
+  propertyQuality: string | null;
+  wallType: string | null;
+  stories: number | null;
+  basementSqft: number | null;
+  effectiveYearBuilt: number | null;
+  subdivision: string | null;
+  annualTaxAmount: number | null;
+  taxAssessedValue: number | null;
+  marketAssessedValue: number | null;
+  lastSaleDate: Date | null;
+  lastSalePrice: number | null;
+  reapiSaleHistory: unknown;
+  sellerFirstName: string | null;
+  sellerLastName: string | null;
+  sellerMotivation: string | null;
+};
 
 interface AdjustmentConfig {
   pricePerSqft: number;
@@ -96,9 +145,30 @@ export class CompAnalysisService {
     selectedCompIds?: string[];
     sourceFilter?: string;  // only import comps from this source (e.g. 'attom')
   }) {
+    return this.createAnalysisForParent({ kind: 'lead', leadId }, params);
+  }
+
+  /**
+   * Parent-agnostic create. Lead-based analyses can import pre-existing comps
+   * from the lead's comp pool; PropertyLookup-based (ad-hoc) analyses start
+   * empty and rely on a subsequent fetchComps call to populate.
+   */
+  async createAnalysisForParent(
+    parent: CompParent,
+    params: {
+      mode?: string;
+      maxDistance?: number;
+      timeFrameMonths?: number;
+      propertyStatus?: string[];
+      propertyType?: string;
+      importExistingComps?: boolean;
+      selectedCompIds?: string[];
+      sourceFilter?: string;
+    },
+  ) {
     const analysis = await this.prisma.compAnalysis.create({
       data: {
-        leadId,
+        ...compParentCreate(parent),
         mode: params.mode || 'ARV',
         maxDistance: params.maxDistance || 3,
         timeFrameMonths: params.timeFrameMonths || 12,
@@ -107,16 +177,14 @@ export class CompAnalysisService {
       },
     });
 
-    // Import specific selected comps or all existing comps
-    let importedCount = 0;
-    if (params.selectedCompIds && params.selectedCompIds.length > 0) {
-      importedCount = await this.importSelectedComps(analysis.id, leadId, params.selectedCompIds);
-    } else if (params.importExistingComps !== false) {
-      importedCount = await this.importExistingComps(analysis.id, leadId, params.sourceFilter);
+    // Only the lead-based flow has a pre-existing comp pool to import from.
+    if (isLeadParent(parent)) {
+      if (params.selectedCompIds && params.selectedCompIds.length > 0) {
+        await this.importSelectedComps(analysis.id, parent.leadId, params.selectedCompIds);
+      } else if (params.importExistingComps !== false) {
+        await this.importExistingComps(analysis.id, parent.leadId, params.sourceFilter);
+      }
     }
-
-    // No auto ARV calculation here. ARV runs explicitly via the Valuation
-    // tab's Calculate / Recalculate button (AiArvCalculationService).
 
     return analysis;
   }
@@ -338,6 +406,11 @@ export class CompAnalysisService {
             askingPrice: true,
             arv: true,
             conditionLevel: true,
+            latitude: true,
+            longitude: true,
+            sellerFirstName: true,
+            sellerLastName: true,
+            sellerMotivation: true,
             // ATTOM enrichment (written by Deal Search flow)
             attomId: true,
             attomEnrichedAt: true,
@@ -361,18 +434,101 @@ export class CompAnalysisService {
             reapiSaleHistory: true,
           },
         },
+        propertyLookup: true,
       },
     });
     if (!analysis) return null;
+
+    // Synthesize a Lead-shaped `lead` field for downstream consumers when the
+    // parent is a PropertyLookup. Lets the AI prompts and adjustment engine
+    // stay parent-agnostic without a parallel set of code paths.
+    const subject = this.buildSubjectFromAnalysis(analysis as any);
+
     return {
       ...analysis,
+      lead: subject,
       comps: dedupCompList(analysis.comps as any[]),
     };
+  }
+
+  /**
+   * Build the unified subject object from a CompAnalysis that has both `lead`
+   * and `propertyLookup` relations loaded. Returns null if neither parent is
+   * present (orphaned row — shouldn't happen given the DB CHECK constraint).
+   */
+  private buildSubjectFromAnalysis(
+    analysis: { lead?: any | null; propertyLookup?: any | null },
+  ): SubjectProperty | null {
+    if (analysis.lead) {
+      // Already shaped correctly — just fill in any optional fields that
+      // newer Lead selects might miss.
+      return {
+        ...analysis.lead,
+        // Defensive defaults in case a partial select was used somewhere.
+        sellerFirstName: analysis.lead.sellerFirstName ?? null,
+        sellerLastName: analysis.lead.sellerLastName ?? null,
+        sellerMotivation: analysis.lead.sellerMotivation ?? null,
+      };
+    }
+    if (analysis.propertyLookup) {
+      const pl = analysis.propertyLookup;
+      return {
+        id: pl.id,
+        propertyAddress: pl.address,
+        propertyCity: pl.city ?? null,
+        propertyState: pl.state ?? null,
+        propertyZip: pl.zip ?? null,
+        bedrooms: pl.bedrooms ?? null,
+        bathrooms: pl.bathrooms ?? null,
+        sqft: pl.sqft ?? null,
+        sqftOverride: null,
+        yearBuilt: pl.yearBuilt ?? null,
+        lotSize: pl.lotSize ?? null,
+        propertyType: pl.propertyType ?? null,
+        conditionLevel: null,
+        askingPrice: null,
+        arv: null,
+        latitude: pl.latitude ?? null,
+        longitude: pl.longitude ?? null,
+        attomId: null,
+        attomEnrichedAt: null,
+        attomAvm: null,
+        attomAvmLow: null,
+        attomAvmHigh: null,
+        avmPoorHigh: null,
+        avmExcellentHigh: null,
+        propertyCondition: null,
+        propertyQuality: null,
+        wallType: null,
+        stories: null,
+        basementSqft: null,
+        effectiveYearBuilt: null,
+        subdivision: null,
+        annualTaxAmount: null,
+        taxAssessedValue: null,
+        marketAssessedValue: null,
+        lastSaleDate: null,
+        lastSalePrice: null,
+        reapiSaleHistory: null,
+        sellerFirstName: null,
+        sellerLastName: null,
+        sellerMotivation: null,
+      };
+    }
+    return null;
   }
 
   async getAnalysesForLead(leadId: string) {
     return this.prisma.compAnalysis.findMany({
       where: { leadId },
+      include: { comps: { where: { selected: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async getAnalysesForLookup(lookupId: string) {
+    return this.prisma.compAnalysis.findMany({
+      where: { propertyLookupId: lookupId },
       include: { comps: { where: { selected: true } } },
       orderBy: { createdAt: 'desc' },
     });
@@ -399,9 +555,37 @@ export class CompAnalysisService {
     sourceUrl?: string;
     notes?: string;
   }) {
+    return this.addCompForParent(analysisId, { kind: 'lead', leadId }, data);
+  }
+
+  async addCompForParent(
+    analysisId: string,
+    parent: CompParent,
+    data: {
+      address: string;
+      distance: number;
+      soldPrice: number;
+      soldDate: string;
+      daysOnMarket?: number;
+      bedrooms?: number;
+      bathrooms?: number;
+      sqft?: number;
+      lotSize?: number;
+      yearBuilt?: number;
+      hasPool?: boolean;
+      hasGarage?: boolean;
+      isRenovated?: boolean;
+      propertyType?: string;
+      hoaFees?: number;
+      schoolDistrict?: string;
+      photoUrl?: string;
+      sourceUrl?: string;
+      notes?: string;
+    },
+  ) {
     const comp = await this.prisma.comp.create({
       data: {
-        leadId,
+        ...compParentCreate(parent),
         analysisId,
         address: data.address,
         distance: data.distance,
@@ -467,12 +651,16 @@ export class CompAnalysisService {
             propertyAddress: true, propertyCity: true, propertyState: true,
           },
         },
+        propertyLookup: true,
       },
     });
     if (!analysisRaw) throw new Error('Analysis not found');
 
     const analysis = analysisRaw as typeof analysisRaw & { lead: any; comps: any[] };
-    const lead = analysis.lead;
+    // Parent-agnostic subject — when leadId is null this synthesizes a lead-
+    // shaped object from the PropertyLookup so the adjustment math works
+    // identically for ad-hoc analyses.
+    const lead = this.buildSubjectFromAnalysis(analysis as any) ?? analysis.lead;
     const adj = { ...DEFAULT_ADJUSTMENTS, ...config };
     const now = Date.now();
 
@@ -863,7 +1051,8 @@ Respond with ONLY a JSON object: { "estimate": <number>, "breakdown": "<concise 
     });
 
     // Phase D: mirror canonical estimate up to Lead. AI text estimate is the
-    // path when a description is present; manual builder otherwise.
+    // path when a description is present; manual builder otherwise. Skipped
+    // for ad-hoc PropertyLookup analyses — there's no Lead to mirror to.
     const analysisRow = await this.prisma.compAnalysis.findUnique({
       where: { id: analysisId },
       select: { leadId: true },
@@ -1074,12 +1263,19 @@ Use Midwest/rural Ohio pricing. Be specific about what you see — don't general
 
       // Phase D: append a photo_analysis_results row + mirror canonical
       // estimate to Lead. The drawer reads the most recent row for the lead.
-      if (lead?.id) {
+      // Skipped for ad-hoc PropertyLookup analyses — no Lead row to attach to.
+      // photo_analysis_results.leadId is NOT NULL, so the lead.id check below
+      // doubles as the ad-hoc skip.
+      const analysisParentRow = await this.prisma.compAnalysis.findUnique({
+        where: { id: analysisId },
+        select: { leadId: true },
+      });
+      if (lead?.id && analysisParentRow?.leadId) {
         const midpoint = repairLow && repairHigh ? Math.round((repairLow + repairHigh) / 2) : null;
         const resultJson = assessmentIsJson && parsed ? deepSanitizeAiStrings(parsed) : { rawText: cleanAssessment };
         const photoRow = await this.prisma.photoAnalysisResult.create({
           data: {
-            leadId: lead.id,
+            leadId: analysisParentRow.leadId,
             resultJson,
             rangeLow: repairLow || null,
             rangeHigh: repairHigh || null,
@@ -1088,7 +1284,7 @@ Use Midwest/rural Ohio pricing. Be specific about what you see — don't general
           },
         });
         if (midpoint != null) {
-          await this.dealMathService.setRepairEstimate(lead.id, {
+          await this.dealMathService.setRepairEstimate(analysisParentRow.leadId, {
             value: midpoint,
             method: 'PHOTO_ANALYSIS',
             metadata: {

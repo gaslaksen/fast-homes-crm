@@ -290,8 +290,12 @@ model Message {
 
 model Comp {
   id              String        @id @default(cuid())
-  leadId          String
-  lead            Lead          @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  // For ad-hoc analyses (no Lead), leadId is null and propertyLookupId points to
+  // the PropertyLookup parent. Exactly one of leadId / propertyLookupId is set.
+  leadId          String?
+  lead            Lead?         @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  propertyLookupId String?
+  propertyLookup   PropertyLookup? @relation(fields: [propertyLookupId], references: [id], onDelete: Cascade)
   analysisId      String?
   analysis        CompAnalysis? @relation(fields: [analysisId], references: [id], onDelete: SetNull)
   address         String
@@ -331,8 +335,12 @@ model Comp {
 
 model CompAnalysis {
   id                String   @id @default(cuid())
-  leadId            String
-  lead              Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  // For ad-hoc analyses, leadId is null and propertyLookupId is set. A DB
+  // CHECK constraint enforces exactly-one parent (see the matching migration).
+  leadId            String?
+  lead              Lead?    @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  propertyLookupId  String?
+  propertyLookup    PropertyLookup? @relation(fields: [propertyLookupId], references: [id], onDelete: Cascade)
   mode              String   @default("ARV")
   maxDistance        Float    @default(3)
   timeFrameMonths   Int      @default(12)
@@ -420,7 +428,39 @@ model CompAnalysis {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
+  @@index([leadId])
+  @@index([propertyLookupId])
   @@map("comp_analyses")
+}
+
+// Ad-hoc property analyses (no Lead). Lets the user run the comping pipeline
+// against any address and keep a searchable history of past lookups.
+model PropertyLookup {
+  id            String   @id @default(cuid())
+  address       String
+  city          String?
+  state         String?
+  zip           String?
+  propertyType  String?
+  bedrooms      Int?
+  bathrooms     Float?
+  sqft          Int?
+  yearBuilt     Int?
+  lotSize       Float?
+  latitude      Float?
+  longitude     Float?
+  notes         String?  @db.Text
+  archivedAt    DateTime?
+  lastRunAt     DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  compAnalyses  CompAnalysis[]
+  comps         Comp[]
+
+  @@index([archivedAt])
+  @@index([createdAt])
+  @@map("property_lookups")
 }
 
 // Phase D: persisted condition reports from photo analysis runs.

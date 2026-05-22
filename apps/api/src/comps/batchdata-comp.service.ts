@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { BatchDataService } from './batchdata.service';
 import { BatchDataAddress, BatchDataProperty } from './batchdata.types';
 import { computeSimilarityScore, haversineMiles } from './comp-similarity';
+import { CompParent, compParentCreate, compParentWhere, isLeadParent, parentLabel } from './comp-parent';
 
 interface FetchResult {
   arv: number;
@@ -37,6 +38,28 @@ export class BatchDataCompService {
       maxResults?: number;
     },
   ): Promise<FetchResult> {
+    return this.fetchAndSaveCompsForParent({ kind: 'lead', leadId }, address, opts);
+  }
+
+  async fetchAndSaveCompsForParent(
+    parent: CompParent,
+    address: BatchDataAddress,
+    opts?: {
+      forceRefresh?: boolean;
+      maxRadiusMiles?: number;
+      maxAgeMonths?: number;
+      maxResults?: number;
+      subjectOverride?: {
+        bedrooms?: number | null;
+        bathrooms?: number | null;
+        sqft?: number | null;
+        sqftOverride?: number | null;
+        propertyType?: string | null;
+        latitude?: number | null;
+        longitude?: number | null;
+      };
+    },
+  ): Promise<FetchResult> {
     if (!this.batchData.isConfigured) {
       return {
         arv: 0,
@@ -46,12 +69,14 @@ export class BatchDataCompService {
       };
     }
 
+    const parentWhere = compParentWhere(parent);
+
     // ── 24-hour cache ──────────────────────────────────────────────────────
     // BatchData bills per record. Skip the API call if we already have
-    // BatchData comps for this lead written within the last 24h.
+    // BatchData comps for this parent written within the last 24h.
     if (!opts?.forceRefresh) {
       const newest = await this.prisma.comp.findFirst({
-        where: { leadId, source: 'batchdata', analysisId: null },
+        where: { ...parentWhere, source: 'batchdata', analysisId: null },
         orderBy: { createdAt: 'desc' },
         select: { createdAt: true },
       });
@@ -59,7 +84,7 @@ export class BatchDataCompService {
       const cacheTtlMs = 24 * 60 * 60 * 1000;
       if (newest && cacheAgeMs < cacheTtlMs) {
         const existing = await this.prisma.comp.findMany({
-          where: { leadId, source: 'batchdata', analysisId: null },
+          where: { ...parentWhere, source: 'batchdata', analysisId: null },
           select: { soldPrice: true },
         });
         const prices = existing
@@ -71,7 +96,7 @@ export class BatchDataCompService {
           : 0;
         const hoursOld = (cacheAgeMs / (60 * 60 * 1000)).toFixed(1);
         this.logger.log(
-          `BatchData cache hit for lead ${leadId} (${hoursOld}h old, ${existing.length} comps) — skipping API call`,
+          `BatchData cache hit for ${parentLabel(parent)} (${hoursOld}h old, ${existing.length} comps) — skipping API call`,
         );
         return {
           arv,
@@ -84,18 +109,20 @@ export class BatchDataCompService {
       }
     }
 
-    const subject = await this.prisma.lead.findUnique({
-      where: { id: leadId },
-      select: {
-        bedrooms: true,
-        bathrooms: true,
-        sqft: true,
-        sqftOverride: true,
-        propertyType: true,
-        latitude: true,
-        longitude: true,
-      },
-    });
+    const subject = isLeadParent(parent)
+      ? await this.prisma.lead.findUnique({
+          where: { id: parent.leadId },
+          select: {
+            bedrooms: true,
+            bathrooms: true,
+            sqft: true,
+            sqftOverride: true,
+            propertyType: true,
+            latitude: true,
+            longitude: true,
+          },
+        })
+      : (opts?.subjectOverride ?? null);
     const subjectSqftForScore = subject?.sqftOverride ?? subject?.sqft ?? null;
 
     // Sale-recency window. Default 12 months. Caller can widen via the
@@ -144,10 +171,10 @@ export class BatchDataCompService {
       };
     }
 
-    // Drop only this lead's stale BatchData comps — leave REAPI/ATTOM/manual rows
+    // Drop only this parent's stale BatchData comps — leave REAPI/ATTOM/manual rows
     // alone so the side-by-side view can show both providers at once.
     await this.prisma.comp.deleteMany({
-      where: { leadId, source: 'batchdata', analysisId: null },
+      where: { ...parentWhere, source: 'batchdata', analysisId: null },
     });
 
     let saved = 0;
@@ -217,7 +244,7 @@ export class BatchDataCompService {
       try {
         await this.prisma.comp.create({
           data: {
-            leadId,
+            ...compParentCreate(parent),
             address: compAddress,
             distance: distance ?? 0,
             soldPrice: Math.round(soldPriceRaw),
@@ -276,7 +303,7 @@ export class BatchDataCompService {
     // surface a subject-level AVM the way REAPI does (that comes from the
     // separate Property Lookup endpoint, deferred to Phase 6).
     const savedComps = await this.prisma.comp.findMany({
-      where: { leadId, source: 'batchdata', analysisId: null },
+      where: { ...parentWhere, source: 'batchdata', analysisId: null },
       select: { soldPrice: true },
     });
     const prices = savedComps.map((c) => c.soldPrice).sort((a, b) => a - b);

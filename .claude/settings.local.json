@@ -34,7 +34,14 @@
       "Bash(pnpm --filter api exec prisma generate)",
       "Bash(pnpm --filter api exec tsc --noEmit)",
       "Bash(pnpm --filter @fast-homes/shared build)",
-      "Bash(pnpm --filter web run build)"
+      "Bash(pnpm --filter web run build)",
+      "Bash(awk 'NR>=866 && NR<=1180 && /leadId/' apps/api/src/comps/reapi.service.ts)",
+      "Bash(pnpm prisma *)",
+      "Bash(DATABASE_URL=\"postgresql://localhost/_validate\" npx prisma generate)",
+      "Bash(DATABASE_URL=\"postgresql://localhost/_validate\" ./node_modules/.bin/prisma generate)",
+      "Bash(find /Users/geoff/Developer/Dealcore/.claude/worktrees/romantic-matsumoto-d311ea -name \"prisma\" -path \"*/node_modules/.bin/*\" 2>/dev/null | head -3; echo \"---main---\"; find /Users/geoff/Developer/Dealcore -name \"prisma\" -path \"*/node_modules/.bin/*\" 2>/dev/null | head -3)",
+      "Bash(DATABASE_URL=\"postgresql://localhost/_validate\" /Users/geoff/Developer/Dealcore/apps/api/node_modules/.bin/prisma generate --schema=/Users/geoff/Developer/Dealcore/.claude/worktrees/romantic-matsumoto-d311ea/apps/api/prisma/schema.prisma)",
+      "Bash(git add *)"
     ]
   }
 }
