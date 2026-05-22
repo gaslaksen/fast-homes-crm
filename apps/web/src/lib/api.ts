@@ -472,6 +472,83 @@ export const dispositionAPI = {
   markSold: (leadId: string) => api.post(`/leads/${leadId}/mark-sold`),
 };
 
+// PropertyLookups API (ad-hoc Comps & Analysis without a Lead)
+export const propertyLookupsAPI = {
+  list: (params?: { archived?: boolean; q?: string }) =>
+    api.get('/property-lookups', { params }),
+  create: (data: {
+    address: string;
+    city?: string | null;
+    state?: string | null;
+    zip?: string | null;
+    propertyType?: string | null;
+    bedrooms?: number | null;
+    bathrooms?: number | null;
+    sqft?: number | null;
+    yearBuilt?: number | null;
+    lotSize?: number | null;
+    notes?: string | null;
+  }) => api.post('/property-lookups', data),
+  get: (id: string) => api.get(`/property-lookups/${id}`),
+  update: (id: string, data: any) => api.patch(`/property-lookups/${id}`, data),
+  remove: (id: string) => api.delete(`/property-lookups/${id}`),
+  archive: (id: string) => api.post(`/property-lookups/${id}/archive`),
+  unarchive: (id: string) => api.post(`/property-lookups/${id}/unarchive`),
+  analyze: (
+    id: string,
+    body?: {
+      preferSource?: 'reapi' | 'batchdata';
+      forceRefresh?: boolean;
+      mode?: string;
+      maxDistance?: number;
+      timeFrameMonths?: number;
+      propertyType?: string;
+    },
+  ) => api.post(`/property-lookups/${id}/analyze`, body || {}),
+  fetchComps: (
+    id: string,
+    body?: { preferSource?: 'reapi' | 'batchdata'; forceRefresh?: boolean },
+  ) => api.post(`/property-lookups/${id}/fetch-comps`, body || {}),
+
+  // Mirrored comp-analysis routes — same shape as compAnalysisAPI but scoped
+  // to a PropertyLookup parent.
+  listAnalyses: (id: string) => api.get(`/property-lookups/${id}/comp-analysis`),
+  getAnalysis: (id: string, analysisId: string) =>
+    api.get(`/property-lookups/${id}/comp-analysis/${analysisId}`),
+  createAnalysis: (id: string, body?: any) =>
+    api.post(`/property-lookups/${id}/comp-analysis`, body || {}),
+  updateAnalysis: (id: string, analysisId: string, data: any) =>
+    api.patch(`/property-lookups/${id}/comp-analysis/${analysisId}`, data),
+  toggleComp: (id: string, analysisId: string, compId: string) =>
+    api.post(`/property-lookups/${id}/comp-analysis/${analysisId}/comps/${compId}/toggle`),
+  selectAll: (id: string, analysisId: string, selected: boolean, source?: string) =>
+    api.post(`/property-lookups/${id}/comp-analysis/${analysisId}/comps/select-all`, {
+      selected,
+      source,
+    }),
+  calculateAdjustments: (id: string, analysisId: string, config?: any) =>
+    api.post(`/property-lookups/${id}/comp-analysis/${analysisId}/calculate-adjustments`, {
+      config,
+    }),
+  aiSummary: (id: string, analysisId: string) =>
+    api.post(`/property-lookups/${id}/comp-analysis/${analysisId}/ai-summary`),
+  estimateRepairs: (id: string, analysisId: string, data: any) =>
+    api.post(`/property-lookups/${id}/comp-analysis/${analysisId}/estimate-repairs`, data),
+  calculateDeal: (id: string, analysisId: string, data: any) =>
+    api.post(`/property-lookups/${id}/comp-analysis/${analysisId}/calculate-deal`, data),
+  dealIntelligence: (id: string, analysisId: string) =>
+    api.post(`/property-lookups/${id}/comp-analysis/${analysisId}/deal-intelligence`),
+  applyFilters: (
+    id: string,
+    analysisId: string,
+    data: { maxDistance?: number; timeFrameMonths?: number },
+  ) => api.post(`/property-lookups/${id}/comp-analysis/${analysisId}/apply-filters`, data),
+  analyzePhotos: (id: string, analysisId: string, formData: FormData) =>
+    api.post(`/property-lookups/${id}/comp-analysis/${analysisId}/analyze-photos`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }),
+};
+
 // Deals API (portfolio-level view of late-stage leads)
 export const dealsAPI = {
   summary: (params?: { realizedFrom?: string; realizedTo?: string }) =>

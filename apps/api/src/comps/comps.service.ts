@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ReapiService } from './reapi.service';
 import { BatchDataCompService } from './batchdata-comp.service';
 import { dedupCompList, dedupCompGroups } from './comp-dedup';
+import { CompParent } from './comp-parent';
 import axios from 'axios';
 
 interface ChatARVResponse {
@@ -103,6 +104,99 @@ export class CompsService {
 
     // Auto fallback: ChatARV → placeholder.
     return await this.fetchCompsWithFallback(leadId, address);
+  }
+
+  /**
+   * Ad-hoc variant of fetchComps that runs against a PropertyLookup instead
+   * of a Lead. REAPI and BatchData are the only supported providers — ChatARV
+   * and the placeholder generator both write back to a Lead and aren't useful
+   * for ad-hoc research. Caller picks the provider explicitly (no Lead-level
+   * `compsProvider` persistence on the lookup side; users can re-run with a
+   * different provider).
+   */
+  async fetchCompsForLookup(
+    lookupId: string,
+    options?: {
+      forceRefresh?: boolean;
+      preferSource?: 'reapi' | 'batchdata';
+    },
+  ): Promise<{
+    arv: number;
+    arvLow?: number;
+    arvHigh?: number;
+    confidence: number;
+    compsCount: number;
+    source: string;
+  }> {
+    const lookup = await this.prisma.propertyLookup.findUnique({
+      where: { id: lookupId },
+    });
+    if (!lookup) {
+      throw new Error(`PropertyLookup ${lookupId} not found`);
+    }
+    if (!lookup.city || !lookup.state || !lookup.zip) {
+      throw new Error('PropertyLookup is missing city/state/zip — required by the comps providers.');
+    }
+
+    const parent: CompParent = { kind: 'lookup', lookupId };
+    const address = {
+      street: lookup.address,
+      city: lookup.city,
+      state: lookup.state,
+      zip: lookup.zip,
+    };
+    const subjectOverride = {
+      bedrooms: lookup.bedrooms ?? null,
+      bathrooms: lookup.bathrooms ?? null,
+      sqft: lookup.sqft ?? null,
+      sqftOverride: null,
+      propertyType: lookup.propertyType ?? null,
+      latitude: lookup.latitude ?? null,
+      longitude: lookup.longitude ?? null,
+    };
+
+    // Honor the lookup's saved filters from its most recent CompAnalysis,
+    // same as the lead-side pipeline does.
+    const analysis = await this.prisma.compAnalysis.findFirst({
+      where: { propertyLookupId: lookupId },
+      orderBy: { updatedAt: 'desc' },
+      select: { maxDistance: true, timeFrameMonths: true },
+    });
+
+    const preferSource = options?.preferSource ?? 'reapi';
+    let result: Awaited<ReturnType<typeof this.reapiService.fetchAndSaveCompsForParent>>;
+    if (preferSource === 'batchdata') {
+      result = await this.batchDataCompService.fetchAndSaveCompsForParent(parent, address, {
+        forceRefresh: options?.forceRefresh,
+        maxRadiusMiles: analysis?.maxDistance ?? undefined,
+        maxAgeMonths: analysis?.timeFrameMonths ?? undefined,
+        subjectOverride,
+      });
+    } else {
+      if (!this.reapiService.isConfigured) {
+        return { arv: 0, confidence: 0, compsCount: 0, source: 'reapi (not configured)' };
+      }
+      const REAPI_MAX_RADIUS_CAP = 5;
+      const maxRadiusMiles = analysis?.maxDistance != null
+        ? Math.min(analysis.maxDistance, REAPI_MAX_RADIUS_CAP)
+        : undefined;
+      const maxDaysBack = analysis?.timeFrameMonths
+        ? Math.round(analysis.timeFrameMonths * 30.4)
+        : undefined;
+      result = await this.reapiService.fetchAndSaveCompsForParent(parent, address, {
+        forceRefresh: options?.forceRefresh,
+        maxRadiusMiles,
+        maxDaysBack,
+        subjectOverride,
+      });
+    }
+
+    await this.prisma.propertyLookup.update({
+      where: { id: lookupId },
+      data: { lastRunAt: new Date() },
+    });
+
+    return result;
   }
 
   /**
