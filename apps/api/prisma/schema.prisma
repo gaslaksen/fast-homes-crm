@@ -221,6 +221,13 @@ model Lead {
   touchCount        Int       @default(0)
   aiRecommendation  String?
 
+  // Unified inbox: denormalized last-message summary + thread state (team-level)
+  lastMessageAt        DateTime?
+  lastMessagePreview   String?
+  lastMessageDirection String?
+  threadUnread         Boolean  @default(false)
+  threadStarred        Boolean  @default(false)
+
   // Hero strip AI insight (one-line lead-state summary, cached by state fingerprint)
   aiInsight             String?
   aiInsightGeneratedAt  DateTime?
@@ -267,7 +274,19 @@ model Lead {
   @@index([organizationId, profitBucket, status])
   @@index([organizationId, soldDate])
   @@index([organizationId, stageChangedAt])
+  @@index([organizationId, lastMessageAt])
   @@map("leads")
+}
+
+model ConversationView {
+  id        String   @id @default(cuid())
+  userId    String
+  leadId    String
+  viewedAt  DateTime @default(now())
+
+  @@unique([userId, leadId])
+  @@index([userId, viewedAt])
+  @@map("conversation_views")
 }
 
 model Message {

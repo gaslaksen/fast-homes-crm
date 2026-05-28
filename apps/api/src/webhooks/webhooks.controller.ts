@@ -576,6 +576,7 @@ export class WebhooksController {
               sentAt: new Date(),
             },
           });
+          await this.messagesService.syncThreadSummary(outboundLead.id, msgBody, 'OUTBOUND');
 
           // Pause AI auto-respond — a human has stepped in
           await this.leadsService['prisma'].lead.update({

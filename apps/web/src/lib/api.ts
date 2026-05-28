@@ -127,6 +127,17 @@ export const messagesAPI = {
     api.post(`/leads/${leadId}/messages/simulate-reply`, { message }),
 };
 
+// Unified Inbox API (cross-lead message threads)
+export type InboxFilter = 'all' | 'unread' | 'starred' | 'recent';
+export const inboxAPI = {
+  threads: (params: { filter?: InboxFilter; search?: string; page?: number; limit?: number }) =>
+    api.get('/inbox/threads', { params }),
+  counts: () => api.get('/inbox/counts'),
+  markRead: (leadId: string) => api.post(`/inbox/threads/${leadId}/read`),
+  star: (leadId: string, starred: boolean) =>
+    api.post(`/inbox/threads/${leadId}/star`, { starred }),
+};
+
 // Comps API
 export type CompsSource = 'reapi' | 'batchdata' | 'auto';
 export const compsAPI = {

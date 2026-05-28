@@ -191,6 +191,7 @@ export class MessagesService {
         to,
       },
     });
+    await this.syncThreadSummary(leadId, body, 'OUTBOUND');
 
     try {
       const sent = await this.smsProvider.sendSms(to, from, body);
@@ -793,6 +794,7 @@ You decide the right approach based on the conversation flow.${portalInstruction
         sentAt: new Date(),
       },
     });
+    await this.syncThreadSummary(lead.id, body, 'INBOUND');
 
     // Log activity
     await this.prisma.activity.create({
@@ -1078,6 +1080,7 @@ You decide the right approach based on the conversation flow.${portalInstruction
         sentAt: new Date(),
       },
     });
+    await this.syncThreadSummary(leadId, body, 'INBOUND');
 
     await this.prisma.activity.create({
       data: {
@@ -1152,5 +1155,25 @@ You decide the right approach based on the conversation flow.${portalInstruction
       where: { leadId },
       orderBy: { createdAt: 'asc' },
     });
+  }
+
+  /**
+   * Keep the lead's denormalized inbox summary in sync after a message is
+   * persisted. Inbound messages mark the thread unread; outbound clears it.
+   */
+  async syncThreadSummary(leadId: string, body: string, direction: string) {
+    try {
+      await this.prisma.lead.update({
+        where: { id: leadId },
+        data: {
+          lastMessageAt: new Date(),
+          lastMessagePreview: body.slice(0, 160),
+          lastMessageDirection: direction,
+          threadUnread: direction === 'INBOUND',
+        },
+      });
+    } catch (err: any) {
+      this.logger.warn(`Failed to sync thread summary for ${leadId}: ${err.message}`);
+    }
   }
 }
