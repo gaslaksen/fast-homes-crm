@@ -1080,12 +1080,22 @@ export class LeadsService {
   /**
    * Add note to lead
    */
-  async addNote(leadId: string, content: string, userId: string) {
+  async addNote(
+    leadId: string,
+    content: string,
+    userId: string,
+    opts?: { isInternalComment?: boolean; mentions?: string[] },
+  ) {
+    const isInternalComment = !!opts?.isInternalComment;
+    const mentions = Array.isArray(opts?.mentions) ? opts!.mentions : [];
+
     const note = await this.prisma.note.create({
       data: {
         leadId,
         userId,
         content,
+        isInternalComment,
+        mentions: mentions.length ? mentions : undefined,
       },
     });
 
@@ -1093,8 +1103,8 @@ export class LeadsService {
       data: {
         leadId,
         userId,
-        type: 'NOTE_ADDED',
-        description: 'Note added',
+        type: isInternalComment ? 'INTERNAL_COMMENT' : 'NOTE_ADDED',
+        description: isInternalComment ? 'Internal comment added' : 'Note added',
       },
     });
 

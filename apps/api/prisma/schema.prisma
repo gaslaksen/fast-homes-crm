@@ -299,6 +299,7 @@ model Message {
   from        String
   to          String
   twilioSid   String?   // SmrtPhone message reference ID (not enforced unique — SmrtPhone doesn't guarantee unique IDs)
+  sentByUserId String?  // agent who manually sent an outbound text; null = AI/system/inbound
   sentAt      DateTime?
   deliveredAt DateTime?
   createdAt   DateTime  @default(now())
@@ -527,6 +528,8 @@ model Note {
   userId    String
   user      User     @relation(fields: [userId], references: [id])
   content   String
+  isInternalComment Boolean @default(false)  // true = inline team comment in the timeline
+  mentions  Json?    // array of mentioned userIds
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -676,6 +679,7 @@ model CallLog {
   recordingUrl String?
   endedReason  String?
   duration     Int?
+  initiatedByUserId String?   // user who started the call; null = AI/system
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -724,6 +728,7 @@ model Email {
   subject     String
   bodyHtml    String?  @db.Text
   bodyText    String   @db.Text
+  sentByUserId String?  // user who sent an outbound email; null = AI/system/inbound
   sentAt      DateTime
   createdAt   DateTime @default(now())
 

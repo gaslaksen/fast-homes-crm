@@ -196,6 +196,7 @@ export class GmailService {
         subject: data.subject,
         bodyHtml: data.bodyHtml || null,
         bodyText: data.bodyText,
+        sentByUserId: userId,
         sentAt: new Date(),
       },
     });
@@ -716,6 +717,7 @@ ${unsubHtml}
       bodyText: string;
       leadId?: string;
       listUnsubscribeUrl?: string;
+      sentByUserId?: string | null;
     },
   ) {
     const oauth2Client = await this.getOrgClient(orgId);
@@ -805,6 +807,7 @@ ${unsubHtml}
         subject: data.subject,
         bodyHtml: finalBodyHtml || null,
         bodyText: finalBodyText,
+        sentByUserId: data.sentByUserId ?? null,
         sentAt: new Date(),
       },
     });

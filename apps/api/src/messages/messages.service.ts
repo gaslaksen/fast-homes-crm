@@ -189,6 +189,7 @@ export class MessagesService {
         body,
         from,
         to,
+        sentByUserId: userId ?? null,
       },
     });
     await this.syncThreadSummary(leadId, body, 'OUTBOUND');

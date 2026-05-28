@@ -2,20 +2,17 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { format, formatDistanceToNowStrict } from 'date-fns';
+import { formatDistanceToNowStrict } from 'date-fns';
 import AppShell from '@/components/AppShell';
 import PropertyPhoto from '@/components/PropertyPhoto';
-import { inboxAPI, messagesAPI, type InboxFilter } from '@/lib/api';
+import CommunicationsTimeline from '@/components/communications/CommunicationsTimeline';
+import NotesPanel from '@/components/communications/NotesPanel';
+import MessageComposer from '@/components/communications/MessageComposer';
+import type { TimelineItem, NoteItem } from '@/components/communications/types';
+import { inboxAPI, leadsAPI, authAPI, gmailAPI, type InboxFilter } from '@/lib/api';
 
 const POLL_MS = 60_000;
 const PAGE_SIZE = 20;
-
-interface MessageRow {
-  id: string;
-  direction: string;
-  body: string;
-  createdAt: string;
-}
 
 interface ThreadRow {
   leadId: string;
@@ -80,15 +77,36 @@ export default function InboxPage() {
   const [loadingMore, setLoadingMore] = useState(false);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<MessageRow[]>([]);
-  const [messagesLoading, setMessagesLoading] = useState(false);
-  const [draft, setDraft] = useState('');
-  const [draftLoading, setDraftLoading] = useState(false);
-  const [sending, setSending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [timeline, setTimeline] = useState<TimelineItem[]>([]);
+  const [notes, setNotes] = useState<NoteItem[]>([]);
+  const [commLoading, setCommLoading] = useState(false);
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [teamMembers, setTeamMembers] = useState<any[]>([]);
+  const [gmailConnected, setGmailConnected] = useState(false);
 
   const threadRef = useRef<HTMLDivElement | null>(null);
   const pausePollRef = useRef(false);
+
+  useEffect(() => {
+    authAPI.getMe().then((res) => setCurrentUser(res.data)).catch(() => {});
+    authAPI.getTeam().then((res) => setTeamMembers(res.data || [])).catch(() => {});
+    gmailAPI.status().then((res) => setGmailConnected(!!res.data?.connected)).catch(() => {});
+  }, []);
+
+  const loadCommunications = useCallback((leadId: string) => {
+    setCommLoading(true);
+    return leadsAPI
+      .communications(leadId)
+      .then((res) => {
+        setTimeline(res.data?.timeline || []);
+        setNotes(res.data?.notes || []);
+      })
+      .catch(() => {
+        setTimeline([]);
+        setNotes([]);
+      })
+      .finally(() => setCommLoading(false));
+  }, []);
 
   const selected = threads.find((t) => t.leadId === selectedId) || null;
 
@@ -127,10 +145,6 @@ export default function InboxPage() {
     },
     [],
   );
-
-  useEffect(() => {
-    pausePollRef.current = sending;
-  }, [sending]);
 
   // Reload list + counts whenever the active tab changes.
   useEffect(() => {
@@ -174,18 +188,11 @@ export default function InboxPage() {
   // Load the thread + mark it read when selection changes.
   useEffect(() => {
     if (!selectedId) {
-      setMessages([]);
-      setDraft('');
+      setTimeline([]);
+      setNotes([]);
       return;
     }
-    setMessagesLoading(true);
-    setDraft('');
-    setError(null);
-    messagesAPI
-      .list(selectedId)
-      .then((res) => setMessages(res.data || []))
-      .catch(() => setMessages([]))
-      .finally(() => setMessagesLoading(false));
+    loadCommunications(selectedId);
 
     inboxAPI
       .markRead(selectedId)
@@ -196,30 +203,16 @@ export default function InboxPage() {
         refreshCounts();
       })
       .catch(() => {});
-  }, [selectedId, refreshCounts]);
+  }, [selectedId, refreshCounts, loadCommunications]);
 
   useEffect(() => {
     if (threadRef.current) threadRef.current.scrollTop = threadRef.current.scrollHeight;
-  }, [messages]);
+  }, [timeline]);
 
   const loadMore = () => {
     const next = page + 1;
     setPage(next);
     loadThreads({ filter, page: next, append: true });
-  };
-
-  const generateDraft = async () => {
-    if (!selectedId) return;
-    setDraftLoading(true);
-    try {
-      const res = await messagesAPI.draft(selectedId);
-      const msg = (res.data as any)?.message;
-      if (typeof msg === 'string') setDraft(msg);
-    } catch {
-      // leave draft empty
-    } finally {
-      setDraftLoading(false);
-    }
   };
 
   const toggleStar = async (t: ThreadRow, e?: React.MouseEvent) => {
@@ -239,36 +232,6 @@ export default function InboxPage() {
       setThreads((prev) =>
         prev.map((x) => (x.leadId === t.leadId ? { ...x, threadStarred: !next } : x)),
       );
-    }
-  };
-
-  const handleSend = async () => {
-    if (!selectedId || !draft.trim() || sending) return;
-    setSending(true);
-    setError(null);
-    try {
-      await messagesAPI.send(selectedId, draft);
-      const res = await messagesAPI.list(selectedId);
-      setMessages(res.data || []);
-      setDraft('');
-      // Reflect the new outbound preview in the list.
-      setThreads((prev) =>
-        prev.map((t) =>
-          t.leadId === selectedId
-            ? {
-                ...t,
-                lastMessagePreview: draft.slice(0, 160),
-                lastMessageDirection: 'OUTBOUND',
-                lastMessageAt: new Date().toISOString(),
-                threadUnread: false,
-              }
-            : t,
-        ),
-      );
-    } catch (err: any) {
-      setError(err?.response?.data?.message || err.message || 'Failed to send');
-    } finally {
-      setSending(false);
     }
   };
 
@@ -444,91 +407,23 @@ export default function InboxPage() {
                   </div>
                 </header>
 
-                <div ref={threadRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
-                  {messagesLoading && (
-                    <div className="text-xs text-gray-400 animate-pulse">Loading messages…</div>
+                <div ref={threadRef} className="flex-1 overflow-y-auto px-4 py-3">
+                  {commLoading ? (
+                    <div className="text-xs text-gray-400 animate-pulse">Loading…</div>
+                  ) : (
+                    <CommunicationsTimeline items={timeline} />
                   )}
-                  {!messagesLoading && messages.length === 0 && (
-                    <div className="text-xs text-gray-400">No messages in this thread.</div>
-                  )}
-                  {messages.map((msg) => (
-                    <div
-                      key={msg.id}
-                      className={`p-3 rounded-lg max-w-[80%] ${
-                        msg.direction === 'OUTBOUND'
-                          ? 'bg-primary-50 dark:bg-primary-900/30 ml-auto'
-                          : 'bg-gray-100 dark:bg-gray-800 mr-auto'
-                      }`}
-                    >
-                      <div className="text-[10px] text-gray-500 dark:text-gray-400 mb-1 uppercase tracking-wide">
-                        {msg.direction === 'OUTBOUND' ? 'You' : 'Seller'} •{' '}
-                        {format(new Date(msg.createdAt), 'MMM d, h:mm a')}
-                      </div>
-                      <div className="text-sm text-gray-900 dark:text-gray-100 whitespace-pre-wrap">
-                        {msg.body}
-                      </div>
-                    </div>
-                  ))}
                 </div>
 
-                <div className="border-t border-gray-200 dark:border-gray-700 px-4 py-3 space-y-2">
-                  <div className="flex items-center justify-between text-xs">
-                    <div className="text-gray-400 dark:text-gray-500">
-                      Reply to {selected.sellerFirstName || 'seller'}
-                    </div>
-                    {draft.trim() ? (
-                      <div className="flex items-center gap-3 text-xs">
-                        <span className="text-teal-700 dark:text-teal-400 font-semibold">
-                          ✨ AI draft
-                        </span>
-                        <button
-                          type="button"
-                          onClick={generateDraft}
-                          disabled={draftLoading || sending}
-                          className="text-gray-500 dark:text-gray-400 hover:underline disabled:opacity-50"
-                        >
-                          Regenerate
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setDraft('')}
-                          disabled={draftLoading || sending}
-                          className="text-gray-500 dark:text-gray-400 hover:underline disabled:opacity-50"
-                        >
-                          Clear
-                        </button>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={generateDraft}
-                        disabled={draftLoading || sending}
-                        className="text-teal-700 dark:text-teal-400 hover:underline disabled:opacity-50"
-                      >
-                        {draftLoading ? 'Generating…' : '✨ Generate AI draft'}
-                      </button>
-                    )}
-                  </div>
-                  <textarea
-                    className="input w-full text-sm"
-                    rows={3}
-                    placeholder={draftLoading ? 'Generating draft…' : 'Type a reply…'}
-                    value={draft}
-                    onChange={(e) => setDraft(e.target.value)}
-                    disabled={sending}
-                  />
-                  {error && <div className="text-xs text-red-600 dark:text-red-400">{error}</div>}
-                  <div className="flex items-center justify-end">
-                    <button
-                      type="button"
-                      className="btn btn-primary btn-sm"
-                      onClick={handleSend}
-                      disabled={sending || !draft.trim()}
-                    >
-                      {sending ? 'Sending…' : 'Send'}
-                    </button>
-                  </div>
-                </div>
+                <MessageComposer
+                  leadId={selected.leadId}
+                  sellerPhone={selected.sellerPhone}
+                  sellerEmail={null}
+                  gmailConnected={gmailConnected}
+                  currentUser={currentUser}
+                  teamMembers={teamMembers}
+                  onSent={() => loadCommunications(selected.leadId)}
+                />
               </>
             ) : (
               <div className="flex-1 flex items-center justify-center text-sm text-gray-400 dark:text-gray-500">
@@ -604,6 +499,18 @@ export default function InboxPage() {
                 >
                   Open lead
                 </Link>
+
+                <div className="pt-2 border-t border-gray-100 dark:border-gray-800">
+                  <NotesPanel
+                    notes={notes}
+                    canAdd={!!currentUser}
+                    onAddNote={async (text) => {
+                      if (!currentUser) return;
+                      await leadsAPI.addNote(selected.leadId, text, currentUser.id);
+                      await loadCommunications(selected.leadId);
+                    }}
+                  />
+                </div>
               </div>
             ) : (
               <div className="p-4 text-xs text-gray-400 dark:text-gray-500">

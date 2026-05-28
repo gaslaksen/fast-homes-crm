@@ -3,6 +3,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { Response } from 'express';
 import { LeadsService } from './leads.service';
+import { CommunicationsService } from './communications.service';
 import { LeadImportService, IMPORTABLE_FIELDS } from './lead-import.service';
 import { AiInsightService } from './ai-insight.service';
 import { LeadStatus, LeadSource } from '@fast-homes/shared';
@@ -32,6 +33,7 @@ export class LeadsController {
     private leadsService: LeadsService,
     private leadImportService: LeadImportService,
     private aiInsightService: AiInsightService,
+    private communicationsService: CommunicationsService,
   ) {}
 
   private decodeToken(authHeader?: string): { userId?: string; organizationId?: string; role?: string } {
@@ -210,6 +212,11 @@ export class LeadsController {
     return this.leadsService.getLead(id);
   }
 
+  @Get(':id/communications')
+  async getCommunications(@Param('id') id: string) {
+    return this.communicationsService.getCommunications(id);
+  }
+
   @Patch(':id')
   async updateLead(@Param('id') id: string, @Body() body: any) {
     try {
@@ -269,9 +276,12 @@ export class LeadsController {
   @Post(':id/notes')
   async addNote(
     @Param('id') leadId: string,
-    @Body() body: { content: string; userId: string },
+    @Body() body: { content: string; userId: string; isInternalComment?: boolean; mentions?: string[] },
   ) {
-    return this.leadsService.addNote(leadId, body.content, body.userId);
+    return this.leadsService.addNote(leadId, body.content, body.userId, {
+      isInternalComment: body.isInternalComment,
+      mentions: body.mentions,
+    });
   }
 
   @Post(':id/send-outreach')

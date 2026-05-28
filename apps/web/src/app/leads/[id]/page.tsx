@@ -16,6 +16,10 @@ import ScheduleFollowUpModal from '@/components/ScheduleFollowUpModal';
 import LeadOverviewV2 from '@/components/leadDetailV2/LeadOverviewV2';
 import { format } from 'date-fns';
 import { formatPhoneDisplay } from '@/lib/format';
+import CommunicationsTimeline from '@/components/communications/CommunicationsTimeline';
+import NotesPanel from '@/components/communications/NotesPanel';
+import MessageComposer from '@/components/communications/MessageComposer';
+import type { TimelineItem, NoteItem } from '@/components/communications/types';
 
 const LEAD_DETAIL_V2 = process.env.NEXT_PUBLIC_LEAD_DETAIL_V2 === 'restructured';
 
@@ -132,6 +136,7 @@ export default function LeadDetailPage() {
   }, [activeTab, lead, leadId, searchParams]);
   const [messageDrafts, setMessageDrafts] = useState<any>(null);
   const [selectedDraft, setSelectedDraft] = useState('');
+  const [comms, setComms] = useState<{ timeline: TimelineItem[]; notes: NoteItem[] }>({ timeline: [], notes: [] });
   const [loading, setLoading] = useState(true);
   const [demoMode, setDemoMode] = useState(false);
   const [simulatingReply, setSimulatingReply] = useState(false);
@@ -145,20 +150,11 @@ export default function LeadDetailPage() {
   const [assignStage, setAssignStage] = useState('');
   const [assignSaving, setAssignSaving] = useState(false);
   const [currentUser, setCurrentUser] = useState<any>(null);
-  const [noteText, setNoteText] = useState('');
-  const [addingNote, setAddingNote] = useState(false);
   const [showDeadForm, setShowDeadForm] = useState(false);
   const [deadReason, setDeadReason] = useState('');
   const [markingDead, setMarkingDead] = useState(false);
   const [settingTier, setSettingTier] = useState(false);
-  const [emails, setEmails] = useState<any[]>([]);
   const [gmailConnected, setGmailConnected] = useState(false);
-  const [showComposeEmail, setShowComposeEmail] = useState(false);
-  const [emailTo, setEmailTo] = useState('');
-  const [emailSubject, setEmailSubject] = useState('');
-  const [emailBody, setEmailBody] = useState('');
-  const [sendingEmail, setSendingEmail] = useState(false);
-  const [expandedEmailId, setExpandedEmailId] = useState<string | null>(null);
   const [leadEnrollments, setLeadEnrollments] = useState<any[]>([]);
   const [availableCampaigns, setAvailableCampaigns] = useState<any[]>([]);
   const [selectedCampaignId, setSelectedCampaignId] = useState('');
@@ -182,11 +178,19 @@ export default function LeadDetailPage() {
     authAPI.getTeam().then((res) => setTeamMembers(res.data || [])).catch(() => {});
     authAPI.getMe().then((res) => setCurrentUser(res.data)).catch(() => {});
     gmailAPI.status().then((res) => setGmailConnected(res.data.connected)).catch(() => {});
-    gmailAPI.emails(leadId).then((res) => setEmails(res.data || [])).catch(() => {});
     campaignAPI.leadCampaigns(leadId).then((res) => setLeadEnrollments(res.data || [])).catch(() => {});
     campaignAPI.list().then((res) => setAvailableCampaigns(res.data || [])).catch(() => {});
     leadsAPI.getTasks(leadId).then((res) => setLeadTasks(res.data || [])).catch(() => {});
   }, [leadId]);
+
+  const loadComms = async () => {
+    try {
+      const res = await leadsAPI.communications(leadId);
+      setComms({ timeline: res.data?.timeline || [], notes: res.data?.notes || [] });
+    } catch {
+      // keep existing
+    }
+  };
 
   const loadLead = async () => {
     try {
@@ -194,6 +198,7 @@ export default function LeadDetailPage() {
       setLead(response.data);
       setAssignUserId(response.data?.assignedToUserId || '');
       setAssignStage(response.data?.assignedStage || '');
+      loadComms();
     } catch (error) {
       console.error('Failed to load lead:', error);
     } finally {
@@ -215,7 +220,7 @@ export default function LeadDetailPage() {
   const handleSendMessage = async () => {
     if (!selectedDraft.trim()) return;
     try {
-      await messagesAPI.send(leadId, selectedDraft);
+      await messagesAPI.send(leadId, selectedDraft, currentUser?.id);
       setMessageDrafts(null);
       setSelectedDraft('');
       loadLead();
@@ -347,21 +352,6 @@ export default function LeadDetailPage() {
       alert('Failed to toggle auto-respond');
     } finally {
       setTogglingAutoRespond(false);
-    }
-  };
-
-  const handleAddNote = async () => {
-    if (!noteText.trim() || !currentUser) return;
-    setAddingNote(true);
-    try {
-      await leadsAPI.addNote(leadId, noteText, currentUser.id);
-      setNoteText('');
-      loadLead();
-    } catch (error) {
-      console.error('Failed to add note:', error);
-      alert('Failed to add note');
-    } finally {
-      setAddingNote(false);
     }
   };
 
@@ -1569,167 +1559,65 @@ export default function LeadDetailPage() {
                 </div>
               )}
 
-              {/* Voice Call Section */}
+              {/* Action toolbar */}
               <div className="card">
-                <div className="flex items-center gap-2 mb-4">
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-green-600" viewBox="0 0 20 20" fill="currentColor">
-                    <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" />
-                  </svg>
-                  <h2 className="text-xl font-bold">Voice Call</h2>
-                </div>
-
-                {lead.sellerPhone && (
-                  <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
-                    {formatPhoneDisplay(lead.sellerPhone)}
-                  </p>
-                )}
-
-                {lead.doNotContact && (
-                  <div className="mb-3 px-3 py-2 rounded bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 text-sm text-red-700 dark:text-red-400">
-                    This lead is on the Do Not Contact list. Calling and texting is disabled.
-                  </div>
-                )}
-
-                <div className="flex gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  {lead.sellerPhone && (
+                    <span className="text-sm text-gray-600 dark:text-gray-400 mr-2">
+                      {formatPhoneDisplay(lead.sellerPhone)}
+                    </span>
+                  )}
                   {lead.sellerPhone && !lead.doNotContact && (
                     <a
                       href={`tel:${lead.sellerPhone}`}
-                      className="btn flex items-center gap-2"
+                      className="btn btn-sm flex items-center gap-1"
                       style={{ backgroundColor: '#16a34a', color: 'white' }}
                     >
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                        <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" />
-                      </svg>
-                      Start Call
+                      📞 Call
                     </a>
                   )}
                   <button
                     onClick={handleAiCall}
                     disabled={initiatingCall || lead.doNotContact}
-                    className="btn flex items-center gap-2"
+                    className="btn btn-sm flex items-center gap-1"
                     style={{ backgroundColor: 'white', color: '#16a34a', border: '1px solid #16a34a', opacity: initiatingCall || lead.doNotContact ? 0.5 : 1 }}
                   >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                      <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" />
-                    </svg>
-                    {initiatingCall ? 'Initiating...' : 'Start AI Call'}
+                    {initiatingCall ? 'Initiating...' : '🤖 AI Call'}
                   </button>
+                  {lead.messages?.length === 0 && !lead.doNotContact && (
+                    <button
+                      onClick={async () => {
+                        try {
+                          await leadsAPI.sendOutreach(lead.id);
+                          loadLead();
+                        } catch (e: any) {
+                          alert('Failed to send: ' + (e.response?.data?.message || e.message));
+                        }
+                      }}
+                      className="btn btn-sm text-xs border border-green-300 dark:border-green-800 text-green-700 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-950"
+                    >
+                      📤 Send Initial Text
+                    </button>
+                  )}
                 </div>
-
-                {/* Call Log History */}
-                {lead.callLogs?.length > 0 ? (
-                  <div className="mt-4 border-t border-gray-100 dark:border-gray-800 pt-4">
-                    <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Call History</h4>
-                    <div className="space-y-3">
-                      {lead.callLogs.map((log: any) => (
-                        <div key={log.id} className="bg-gray-50 dark:bg-gray-950 rounded-lg p-3 text-sm">
-                          <div className="flex justify-between items-center">
-                            <div className="flex items-center gap-2">
-                              <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                                log.type === 'smrtphone_call' ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-400' :
-                                log.type === 'smrtagent_call' ? 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-800 dark:text-indigo-400' :
-                                'bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-400'
-                              }`}>
-                                {log.type === 'smrtphone_call' ? 'SmrtPhone' : log.type === 'smrtagent_call' ? 'smrtAgent' : 'AI Call'}
-                              </span>
-                              <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                                log.status === 'completed' ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-400' :
-                                log.status === 'in-progress' ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-400' :
-                                log.status === 'ended' ? 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300' :
-                                'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-400'
-                              }`}>
-                                {log.status || 'queued'}
-                              </span>
-                              {log.duration != null && (
-                                <span className="text-gray-500 dark:text-gray-400 text-xs">
-                                  {Math.floor(log.duration / 60)}m {log.duration % 60}s
-                                </span>
-                              )}
-                            </div>
-                            <span className="text-xs text-gray-400 dark:text-gray-500">
-                              {format(new Date(log.createdAt), 'MMM d, h:mm a')}
-                            </span>
-                          </div>
-                          {log.summary && !log.transcript && (
-                            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{log.summary}</p>
-                          )}
-                          {log.transcript && (
-                            <details className="mt-2">
-                              <summary className="text-xs text-primary-600 cursor-pointer hover:text-primary-800 font-medium">
-                                View transcript &amp; summary
-                              </summary>
-                              {log.summary && (
-                                <p className="mt-1 mb-1 text-xs text-gray-600 dark:text-gray-400 font-medium">{log.summary}</p>
-                              )}
-                              <div className="mt-2 p-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap max-h-64 overflow-y-auto">
-                                {log.transcript}
-                              </div>
-                            </details>
-                          )}
-                          {log.recordingUrl && (
-                            <a href={log.recordingUrl} target="_blank" rel="noopener noreferrer" className="mt-1 text-xs text-primary-600 hover:text-primary-800 inline-flex items-center gap-1">
-                              <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" /></svg>
-                              Recording
-                            </a>
-                          )}
-                        </div>
-                      ))}
-                    </div>
+                {lead.doNotContact && (
+                  <div className="mt-3 px-3 py-2 rounded bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 text-sm text-red-700 dark:text-red-400">
+                    This lead is on the Do Not Contact list. Calling and texting is disabled.
                   </div>
-                ) : (
-                  <p className="mt-3 text-xs text-gray-400 dark:text-gray-500">No calls yet</p>
                 )}
               </div>
 
-              {/* Divider */}
-              <div className="border-t border-gray-200 dark:border-gray-700" />
-
-              {/* Text Messages Section */}
+              {/* Unified communications timeline */}
               <div className="card">
-                <div className="flex justify-between items-center mb-4">
-                  <h2 className="text-xl font-bold">Text Messages</h2>
-                  <div className="flex items-center gap-2">
-                    {lead.messages?.length === 0 && !lead.doNotContact && (
-                      <button
-                        onClick={async () => {
-                          try {
-                            await leadsAPI.sendOutreach(lead.id);
-                            loadLead();
-                          } catch (e: any) {
-                            alert('Failed to send: ' + (e.response?.data?.message || e.message));
-                          }
-                        }}
-                        className="btn btn-sm text-xs border border-green-300 dark:border-green-800 text-green-700 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-950"
-                      >
-                        📤 Send Initial Text
-                      </button>
-                    )}
-                  <button onClick={handleDraftMessage} className="btn btn-primary btn-sm">
-                    Draft Message
-                  </button>
-                  </div>
-                </div>
-                <div className="space-y-3">
-                  {lead.messages?.map((msg: any) => (
-                    <div
-                      key={msg.id}
-                      className={`p-3 rounded-lg ${
-                        msg.direction === 'OUTBOUND'
-                          ? 'bg-primary-50 dark:bg-primary-900 ml-12'
-                          : 'bg-gray-100 dark:bg-gray-800 mr-12'
-                      }`}
-                    >
-                      <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">
-                        {msg.direction} • {format(new Date(msg.createdAt), 'MMM d, h:mm a')}
-                      </div>
-                      <div className="text-sm text-gray-900 dark:text-gray-100">{msg.body}</div>
-                    </div>
-                  ))}
-                  <div ref={messagesBottomRef} />
-                </div>
+                <h2 className="text-xl font-bold mb-4">Communications</h2>
+                <CommunicationsTimeline items={comms.timeline} />
+                <div ref={messagesBottomRef} />
+              </div>
 
-                {demoMode && (
-                  <div className="mt-6 p-4 border-2 border-dashed border-amber-300 dark:border-amber-800 rounded-lg bg-amber-50 dark:bg-amber-950">
+              {/* Demo: simulate an inbound seller reply */}
+              {demoMode && (
+                <div className="card">
+                  <div className="p-4 border-2 border-dashed border-amber-300 dark:border-amber-800 rounded-lg bg-amber-50 dark:bg-amber-950">
                     <h4 className="text-sm font-semibold text-amber-800 dark:text-amber-400 mb-2">Simulate Seller Reply (Demo)</h4>
                     <div className="flex flex-wrap gap-2 mb-3">
                       {[
@@ -1776,262 +1664,38 @@ export default function LeadDetailPage() {
                       {simulatingReply ? 'Sending...' : 'Simulate Reply'}
                     </button>
                   </div>
-                )}
-              </div>
-
-              {/* Divider */}
-              <div className="border-t border-gray-200 dark:border-gray-700" />
-
-              {/* Email Section */}
-              <div className="card">
-                <div className="flex justify-between items-center mb-4">
-                  <div className="flex items-center gap-2">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-600" viewBox="0 0 20 20" fill="currentColor">
-                      <path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z" />
-                      <path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z" />
-                    </svg>
-                    <h2 className="text-xl font-bold">Emails</h2>
-                  </div>
-                  {gmailConnected && (
-                    <button
-                      onClick={() => {
-                        setEmailTo(lead.sellerEmail || '');
-                        setEmailSubject('');
-                        setEmailBody('');
-                        setShowComposeEmail(true);
-                      }}
-                      className="btn btn-primary btn-sm"
-                    >
-                      Compose Email
-                    </button>
-                  )}
                 </div>
+              )}
 
-                {!gmailConnected ? (
-                  <div className="p-4 rounded-lg bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 text-sm text-blue-700 dark:text-blue-400 flex items-center justify-between">
-                    <span>Connect Gmail in Settings to send and view emails</span>
-                    <Link href="/settings/profile" className="font-medium hover:underline">
-                      Connect Gmail
-                    </Link>
-                  </div>
-                ) : (
-                  <>
-                    {/* Compose form */}
-                    {showComposeEmail && (
-                      <div className="mb-4 p-4 border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-950 space-y-3">
-                        <div>
-                          <label className="block text-xs font-medium text-gray-500 mb-1">To</label>
-                          <input
-                            type="email"
-                            value={emailTo}
-                            onChange={(e) => setEmailTo(e.target.value)}
-                            className="input w-full"
-                            placeholder="recipient@example.com"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-medium text-gray-500 mb-1">Subject</label>
-                          <input
-                            type="text"
-                            value={emailSubject}
-                            onChange={(e) => setEmailSubject(e.target.value)}
-                            className="input w-full"
-                            placeholder="Subject line"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-medium text-gray-500 mb-1">Message</label>
-                          <textarea
-                            value={emailBody}
-                            onChange={(e) => setEmailBody(e.target.value)}
-                            className="input w-full"
-                            rows={5}
-                            placeholder="Type your message..."
-                          />
-                        </div>
-                        <div className="flex gap-2">
-                          <button
-                            onClick={async () => {
-                              if (!emailTo.trim() || !emailSubject.trim() || !emailBody.trim()) return;
-                              setSendingEmail(true);
-                              try {
-                                await gmailAPI.orgSend({
-                                  leadId,
-                                  to: emailTo,
-                                  subject: emailSubject,
-                                  bodyText: emailBody,
-                                });
-                                setShowComposeEmail(false);
-                                setEmailTo('');
-                                setEmailSubject('');
-                                setEmailBody('');
-                                // Refresh emails
-                                const res = await gmailAPI.emails(leadId);
-                                setEmails(res.data || []);
-                              } catch (error: any) {
-                                console.error('Failed to send email:', error);
-                                const msg = error?.response?.data?.message || error?.message || 'Unknown error';
-                                alert('Failed to send email: ' + msg);
-                              } finally {
-                                setSendingEmail(false);
-                              }
-                            }}
-                            disabled={sendingEmail || !emailTo.trim() || !emailSubject.trim() || !emailBody.trim()}
-                            className="btn btn-primary btn-sm"
-                          >
-                            {sendingEmail ? 'Sending...' : 'Send Email'}
-                          </button>
-                          <button
-                            onClick={() => setShowComposeEmail(false)}
-                            className="btn btn-secondary btn-sm"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Email thread */}
-                    {emails.length > 0 ? (
-                      <div className="space-y-3">
-                        {emails.map((email: any) => (
-                          <div
-                            key={email.id}
-                            className={`p-3 rounded-lg cursor-pointer transition-colors ${
-                              email.direction === 'outbound'
-                                ? 'bg-primary-50 dark:bg-primary-900 ml-8 hover:bg-primary-100 dark:hover:bg-primary-800'
-                                : 'bg-gray-100 dark:bg-gray-800 mr-8 hover:bg-gray-200 dark:hover:bg-gray-700'
-                            }`}
-                            onClick={() => setExpandedEmailId(expandedEmailId === email.id ? null : email.id)}
-                          >
-                            <div className="flex justify-between items-start mb-1">
-                              <div className="text-xs text-gray-500 dark:text-gray-400">
-                                <span className={`font-medium ${email.direction === 'outbound' ? 'text-primary-700 dark:text-primary-300' : 'text-gray-700 dark:text-gray-300'}`}>
-                                  {email.direction === 'outbound' ? 'Sent' : 'Received'}
-                                </span>
-                                {' · '}
-                                {email.direction === 'outbound' ? `To: ${email.toAddress}` : `From: ${email.fromAddress}`}
-                              </div>
-                              <span className="text-xs text-gray-400 dark:text-gray-500">
-                                {format(new Date(email.sentAt), 'MMM d, h:mm a')}
-                              </span>
-                            </div>
-                            <div className="text-sm font-medium text-gray-800 dark:text-gray-100 mb-1">{email.subject}</div>
-                            {expandedEmailId === email.id ? (
-                              <div className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
-                                {email.bodyText}
-                              </div>
-                            ) : (
-                              <div className="text-sm text-gray-500 dark:text-gray-400 truncate">
-                                {email.bodyText?.substring(0, 120)}
-                                {email.bodyText?.length > 120 ? '...' : ''}
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="text-sm text-gray-400 dark:text-gray-500 text-center py-4">
-                        No emails for this lead yet. Click "Compose Email" to send one, or sync your inbox in Settings.
-                      </p>
-                    )}
-                  </>
-                )}
+              {/* Unified composer: SMS / Email / Internal Comment */}
+              <div className="card p-0 overflow-hidden">
+                <MessageComposer
+                  leadId={leadId}
+                  sellerPhone={lead.sellerPhone}
+                  sellerEmail={lead.sellerEmail}
+                  gmailConnected={gmailConnected}
+                  currentUser={currentUser}
+                  teamMembers={teamMembers}
+                  doNotContact={lead.doNotContact}
+                  seedBody={selectedDraft}
+                  onSent={loadLead}
+                />
               </div>
             </div>
 
-            {messageDrafts && (
+            {/* Right column: notes + AI call summaries */}
+            <div className="space-y-6">
               <div className="card">
-                <h3 className="text-lg font-bold mb-4">AI Draft</h3>
-                <div className="p-3 rounded border border-primary-500 bg-primary-50 dark:bg-primary-900">
-                  <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">AI Message</div>
-                  <div className="text-sm text-gray-900 dark:text-gray-100">{messageDrafts.message}</div>
-                </div>
-                {LEAD_DETAIL_V2 && (
-                  <div className="mt-2 text-[11px] font-semibold text-blue-600 dark:text-blue-400 flex items-center gap-2">
-                    <span>✨ AI draft</span>
-                    <button onClick={handleDraftMessage} className="text-[11px] text-gray-500 dark:text-gray-400 hover:underline">Regenerate</button>
-                    <button onClick={() => { setMessageDrafts(null); setSelectedDraft(''); }} className="text-[11px] text-gray-500 dark:text-gray-400 hover:underline">Clear</button>
-                  </div>
-                )}
-                <textarea
-                  ref={composerRef}
-                  value={selectedDraft}
-                  onChange={(e) => setSelectedDraft(e.target.value)}
-                  className="input mt-4"
-                  rows={4}
-                  placeholder="Edit message..."
+                <NotesPanel
+                  notes={comms.notes}
+                  canAdd={!!currentUser}
+                  onAddNote={async (text) => {
+                    if (!currentUser) return;
+                    await leadsAPI.addNote(leadId, text, currentUser.id);
+                    await loadComms();
+                  }}
                 />
-                <div className="flex gap-2 mt-4">
-                  <button onClick={handleSendMessage} className="btn btn-primary flex-1">
-                    Send
-                  </button>
-                  <button
-                    onClick={() => {
-                      setMessageDrafts(null);
-                      setSelectedDraft('');
-                    }}
-                    className="btn btn-secondary"
-                  >
-                    Cancel
-                  </button>
-                </div>
               </div>
-            )}
-
-            {/* Notes Section (merged into Communications) */}
-            <div className="lg:col-span-2 space-y-6 mt-6 border-t border-gray-200 dark:border-gray-700 pt-6">
-              {/* Add Note Form */}
-              <div className="card">
-                <h2 className="text-xl font-bold mb-4">Notes</h2>
-                <textarea
-                  value={noteText}
-                  onChange={(e) => setNoteText(e.target.value)}
-                  placeholder="Add a conversation note, follow-up detail, or anything relevant about this lead..."
-                  className="input w-full mb-3"
-                  rows={3}
-                />
-                <button
-                  onClick={handleAddNote}
-                  disabled={addingNote || !noteText.trim() || !currentUser}
-                  className="btn btn-primary btn-sm"
-                >
-                  {addingNote ? 'Saving...' : 'Save Note'}
-                </button>
-                {!currentUser && (
-                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">Loading user info...</p>
-                )}
-              </div>
-
-              {/* Notes List */}
-              {lead.notes?.length > 0 ? (
-                <div className="card">
-                  <h3 className="text-lg font-bold mb-4">Notes ({lead.notes.length})</h3>
-                  <div className="space-y-4">
-                    {lead.notes.map((note: any) => (
-                      <div key={note.id} className={`p-4 rounded-lg border ${note.content?.startsWith('[Dead]') ? 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950' : 'border-blue-100 dark:border-blue-800 bg-blue-50 dark:bg-blue-950'}`}>
-                        <div className="flex justify-between items-start mb-2">
-                          <span className={`text-xs font-semibold ${note.content?.startsWith('[Dead]') ? 'text-red-700 dark:text-red-400' : 'text-blue-700 dark:text-blue-400'}`}>
-                            {note.content?.startsWith('[Dead]') ? '💀 ' : '📝 '}
-                            {note.user ? `${note.user.firstName} ${note.user.lastName}` : '🤖 AI'}
-                          </span>
-                          <span className="text-xs text-gray-400 dark:text-gray-500">
-                            {format(new Date(note.createdAt), 'MMM d, yyyy h:mm a')}
-                          </span>
-                        </div>
-                        <div className="text-sm text-gray-800 whitespace-pre-wrap">
-                          {note.content?.startsWith('[Dead] ') ? note.content.slice(7) : note.content}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <div className="card text-center py-8 text-gray-400 dark:text-gray-500">
-                  <div className="text-3xl mb-2">📝</div>
-                  <p className="text-sm">No notes yet. Add your first note above.</p>
-                </div>
-              )}
             </div>
           </div>
         )}

@@ -213,7 +213,7 @@ export class GmailController {
     const decoded = this.getUser(authHeader);
     const orgId = await this.resolveOrgId(decoded);
     try {
-      return await this.gmailService.sendOrgEmail(orgId, body);
+      return await this.gmailService.sendOrgEmail(orgId, { ...body, sentByUserId: decoded.userId ?? null });
     } catch (e: any) {
       const detail = e?.response?.data || e?.message || String(e);
       console.error('[gmail/org-send] ERROR:', JSON.stringify(detail), e?.stack);

@@ -1,6 +1,7 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { LeadsController, TasksController } from './leads.controller';
 import { LeadsService } from './leads.service';
+import { CommunicationsService } from './communications.service';
 import { LeadImportService } from './lead-import.service';
 import { AiInsightService } from './ai-insight.service';
 import { ProfitCalculationService } from './profit-calculation.service';
@@ -18,7 +19,7 @@ import { SellerPortalModule } from '../seller-portal/seller-portal.module';
 @Module({
   imports: [ScoringModule, forwardRef(() => MessagesModule), PhotosModule, forwardRef(() => CompsModule), PipelineModule, forwardRef(() => DripModule), forwardRef(() => CampaignsModule), SellerPortalModule],
   controllers: [LeadsController, TasksController, DealMathController],
-  providers: [LeadsService, LeadImportService, AiInsightService, ProfitCalculationService, DealMathService],
+  providers: [LeadsService, CommunicationsService, LeadImportService, AiInsightService, ProfitCalculationService, DealMathService],
   exports: [LeadsService, AiInsightService, ProfitCalculationService, DealMathService],
 })
 export class LeadsModule {}

@@ -67,8 +67,12 @@ export const leadsAPI = {
   update: (id: string, data: any) => api.patch(`/leads/${id}`, data),
   getTasks: (id: string) => api.get(`/leads/${id}/tasks`),
   createTask: (id: string, data: any) => api.post(`/leads/${id}/tasks`, data),
-  addNote: (id: string, content: string, userId: string) =>
-    api.post(`/leads/${id}/notes`, { content, userId }),
+  addNote: (
+    id: string,
+    content: string,
+    userId: string,
+    opts?: { isInternalComment?: boolean; mentions?: string[] },
+  ) => api.post(`/leads/${id}/notes`, { content, userId, ...opts }),
   upsertContract: (id: string, data: any) => api.post(`/leads/${id}/contract`, data),
   toggleAutoRespond: (id: string, autoRespond: boolean) =>
     api.patch(`/leads/${id}/auto-respond`, { autoRespond }),
@@ -112,6 +116,7 @@ export const leadsAPI = {
   dismissAlert: (id: string, ruleId: string, fingerprint: string) =>
     api.post(`/leads/${id}/alert-dismissals`, { ruleId, fingerprint }),
   cancelDrip: (id: string, reason?: string) => api.post(`/leads/${id}/drip/cancel`, { reason }),
+  communications: (id: string) => api.get(`/leads/${id}/communications`),
 };
 
 // Messages API
