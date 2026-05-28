@@ -171,6 +171,14 @@ export default function LeadDetailPage() {
   const portalLinkIntentApplied = useRef(false);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const messagesBottomRef = useRef<HTMLDivElement | null>(null);
+  const timelineScrollRef = useRef<HTMLDivElement | null>(null);
+
+  // Keep the communications timeline pinned to the latest message.
+  useEffect(() => {
+    if (timelineScrollRef.current) {
+      timelineScrollRef.current.scrollTop = timelineScrollRef.current.scrollHeight;
+    }
+  }, [comms.timeline, activeTab]);
 
   useEffect(() => {
     loadLead();
@@ -1539,12 +1547,12 @@ export default function LeadDetailPage() {
 
         {/* Communications Tab */}
         {activeTab === 'communications' && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-2 space-y-6">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:h-[calc(100vh-12rem)]">
+            <div className="lg:col-span-2 flex flex-col gap-4 lg:min-h-0">
 
               {/* AI paused banner — shown when a human has stepped in */}
               {!lead.autoRespond && !lead.doNotContact && lead.status !== 'DEAD' && (
-                <div className="flex items-center justify-between gap-4 px-4 py-3 rounded-lg border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950">
+                <div className="shrink-0 flex items-center justify-between gap-4 px-4 py-3 rounded-lg border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950">
                   <div className="flex items-center gap-2 text-amber-800 dark:text-amber-400 text-sm">
                     <span className="text-base">🤚</span>
                     <span><strong>AI paused</strong> — you stepped in manually. The AI will not auto-respond until you resume it.</span>
@@ -1560,7 +1568,7 @@ export default function LeadDetailPage() {
               )}
 
               {/* Action toolbar */}
-              <div className="card">
+              <div className="card shrink-0">
                 <div className="flex flex-wrap items-center gap-2">
                   {lead.sellerPhone && (
                     <span className="text-sm text-gray-600 dark:text-gray-400 mr-2">
@@ -1607,16 +1615,18 @@ export default function LeadDetailPage() {
                 )}
               </div>
 
-              {/* Unified communications timeline */}
-              <div className="card">
-                <h2 className="text-xl font-bold mb-4">Communications</h2>
-                <CommunicationsTimeline items={comms.timeline} />
-                <div ref={messagesBottomRef} />
+              {/* Unified communications timeline (scrolls internally) */}
+              <div className="card flex flex-col lg:flex-1 lg:min-h-0 overflow-hidden">
+                <h2 className="text-xl font-bold mb-4 shrink-0">Communications</h2>
+                <div ref={timelineScrollRef} className="flex-1 lg:min-h-0 overflow-y-auto">
+                  <CommunicationsTimeline items={comms.timeline} />
+                  <div ref={messagesBottomRef} />
+                </div>
               </div>
 
               {/* Demo: simulate an inbound seller reply */}
               {demoMode && (
-                <div className="card">
+                <div className="card shrink-0">
                   <div className="p-4 border-2 border-dashed border-amber-300 dark:border-amber-800 rounded-lg bg-amber-50 dark:bg-amber-950">
                     <h4 className="text-sm font-semibold text-amber-800 dark:text-amber-400 mb-2">Simulate Seller Reply (Demo)</h4>
                     <div className="flex flex-wrap gap-2 mb-3">
@@ -1668,7 +1678,7 @@ export default function LeadDetailPage() {
               )}
 
               {/* Unified composer: SMS / Email / Internal Comment */}
-              <div className="card p-0 overflow-hidden">
+              <div className="card p-0 overflow-hidden shrink-0">
                 <MessageComposer
                   leadId={leadId}
                   sellerPhone={lead.sellerPhone}
@@ -1683,9 +1693,9 @@ export default function LeadDetailPage() {
               </div>
             </div>
 
-            {/* Right column: notes + AI call summaries */}
-            <div className="space-y-6">
-              <div className="card">
+            {/* Right column: notes + AI call summaries (scrolls internally) */}
+            <div className="flex flex-col lg:min-h-0">
+              <div className="card lg:flex-1 lg:min-h-0 overflow-y-auto">
                 <NotesPanel
                   notes={comms.notes}
                   canAdd={!!currentUser}
