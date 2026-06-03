@@ -44,11 +44,27 @@
       "Bash(git add *)",
       "Bash(git commit -m ' *)",
       "Bash(git push *)",
+      "Bash(git pull *)",
+      "Bash(git stash *)",
       "Bash(DATABASE_URL=\"postgresql://geoff@localhost:5432/fast_homes_crm\" /Users/geoff/Developer/Dealcore/apps/api/node_modules/.bin/prisma migrate status --schema=/Users/geoff/Developer/Dealcore/.claude/worktrees/romantic-matsumoto-d311ea/apps/api/prisma/schema.prisma)",
       "Bash(gh pr create --title 'feat\\(comps\\): ad-hoc property lookups \\(Phase 1+2 backend\\)' --body ' *)",
       "Bash(awk '/export const compAnalysisAPI/,/^};$/' apps/web/src/lib/api.ts)",
       "Bash(mkdir -p apps/web/src/app/comps-analysis/\\\\[lookupId\\\\])",
-      "Bash(pnpm --filter web build)"
+      "Bash(pnpm --filter web build)",
+      "Bash(pnpm --filter @fast-homes/api exec tsc --noEmit)",
+      "Bash(pnpm --filter @fast-homes/api build)",
+      "Bash(pnpm --filter @fast-homes/api run build)",
+      "Bash(pnpm --filter @fast-homes/web exec tsc --noEmit)",
+      "Bash(pnpm -C apps/api exec tsc --noEmit)",
+      "Bash(pnpm --filter @dealcore/api exec tsc --noEmit -p tsconfig.json)",
+      "Bash(pnpm exec *)",
+      "Bash(npx --no-install tsx -e ' *)",
+      "Bash(npx tsc *)",
+      "Bash(createdb fast_homes_crm_shadow)",
+      "Bash(echo \"API exit: $?\")",
+      "Bash(echo \"Web exit: $?\")",
+      "Skill(schedule)",
+      "Skill(schedule:*)"
     ]
   }
 }
