@@ -29,6 +29,7 @@ import { AiCompCurationModule } from './ai-comp-curation/ai-comp-curation.module
 import { AiArvCalculationModule } from './ai-arv-calculation/ai-arv-calculation.module';
 import { PropertyLookupsModule } from './property-lookups/property-lookups.module';
 import { InboxModule } from './inbox/inbox.module';
+import { ExternalConversationsModule } from './external-conversations/external-conversations.module';
 
 @Module({
   imports: [
@@ -64,6 +65,7 @@ import { InboxModule } from './inbox/inbox.module';
     AiArvCalculationModule,
     PropertyLookupsModule,
     InboxModule,
+    ExternalConversationsModule,
   ],
 })
 export class AppModule {}

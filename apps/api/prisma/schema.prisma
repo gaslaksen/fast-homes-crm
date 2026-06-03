@@ -610,6 +610,43 @@ model AiPrompt {
   @@map("ai_prompts")
 }
 
+// External conversations driven by partners (e.g. Closercontrol). These records
+// are completely isolated from the Lead model and its automation. Dealcore only
+// generates responses and extracts CAMP data; the partner owns sending,
+// scheduling, opt-outs, pipeline, and everything else.
+model ExternalConversation {
+  id                String                        @id @default(cuid())
+  partnerKey        String                        // which partner owns this (e.g. "closercontrol")
+  externalId        String                        // partner's own conversation/lead ID
+  sellerFirstName   String?
+  sellerPhone       String?                       // optional, for debugging only — partner is source of truth
+  extractedFields   Json                          @default("{}")
+  campScore         Int?
+  campBand          String?
+  messageCount      Int                           @default(0)
+  lastInboundAt     DateTime?
+  lastOutboundAt    DateTime?
+  createdAt         DateTime                      @default(now())
+  updatedAt         DateTime                      @updatedAt
+  messages          ExternalConversationMessage[]
+
+  @@unique([partnerKey, externalId])
+  @@map("external_conversations")
+}
+
+model ExternalConversationMessage {
+  id              String                @id @default(cuid())
+  conversationId  String
+  conversation    ExternalConversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  direction       String                // "INBOUND" | "OUTBOUND"
+  body            String                @db.Text
+  sentAt          DateTime
+  createdAt       DateTime              @default(now())
+
+  @@index([conversationId, sentAt])
+  @@map("external_conversation_messages")
+}
+
 model Contract {
   id                   String    @id @default(cuid())
   leadId               String    @unique

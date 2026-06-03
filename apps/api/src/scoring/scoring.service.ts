@@ -625,6 +625,154 @@ Return ONLY a JSON object:
   }
 
   /**
+   * Stateless variant of the conversational auto-response used by external
+   * partners (e.g. Closercontrol). Same persona, same few-shot examples, same
+   * CAMP-aware prompting as Dealcore's native auto-response — minus the
+   * property-context branches (ARV, mortgage, last sale) and minus any DB
+   * writes.
+   *
+   * Takes a full context object instead of a Lead row, so it can be called
+   * from anywhere without touching the Lead model or its automation.
+   */
+  async generateExternalResponse(input: {
+    sellerFirstName: string;
+    conversationHistory: { direction: 'INBOUND' | 'OUTBOUND'; body: string }[];
+    knownFields: {
+      timeline?: number | null;
+      askingPrice?: number | null;
+      conditionLevel?: string | null;
+      ownershipStatus?: string | null;
+    };
+    justExtracted?: Record<string, any>;
+  }): Promise<{ message: string; campComplete: boolean; missingFields: string[] }> {
+    const { sellerFirstName, conversationHistory, knownFields, justExtracted } = input;
+
+    // ── Determine CAMP progress ────────────────────────────────────────────
+    const campFields = [
+      { field: 'timeline',        label: 'Timeline/Priority',     known: knownFields.timeline != null },
+      { field: 'askingPrice',     label: 'Asking Price',          known: knownFields.askingPrice != null },
+      { field: 'conditionLevel',  label: 'Property Condition',    known: knownFields.conditionLevel != null },
+      { field: 'ownershipStatus', label: 'Ownership/Authority',   known: knownFields.ownershipStatus != null },
+    ];
+    const campComplete = campFields.every((f) => f.known);
+    const knownLabels   = campFields.filter((f) =>  f.known).map((f) => f.label);
+    const missingLabels = campFields.filter((f) => !f.known).map((f) => f.label);
+
+    // ── Build "just extracted" summary so the AI can acknowledge naturally ─
+    const justExtractedDescriptions: string[] = [];
+    if (justExtracted) {
+      if (justExtracted.asking_price != null) {
+        if (justExtracted.asking_price_high) {
+          const lo = Number(justExtracted.asking_price).toLocaleString();
+          const hi = Number(justExtracted.asking_price_high).toLocaleString();
+          justExtractedDescriptions.push(`their asking price range is $${lo}-$${hi}`);
+        } else {
+          justExtractedDescriptions.push(`their asking price is $${Number(justExtracted.asking_price).toLocaleString()}`);
+        }
+      } else if (justExtracted.asking_price_raw) {
+        justExtractedDescriptions.push(`they mentioned a price of "${justExtracted.asking_price_raw}" (treat this as their ballpark)`);
+      }
+      if (justExtracted.timeline_days != null) {
+        const d = justExtracted.timeline_days;
+        const label = d <= 14 ? 'they want to move urgently / as soon as possible'
+          : d <= 30 ? 'they want to move quickly, within about a month'
+          : d <= 90 ? 'they have a moderate timeline of a couple months'
+          : 'they are flexible on timing';
+        justExtractedDescriptions.push(label);
+      }
+      if (justExtracted.condition_level != null) justExtractedDescriptions.push(`the property condition is ${justExtracted.condition_level}`);
+      if (justExtracted.ownership_status != null) justExtractedDescriptions.push(`their ownership status is ${justExtracted.ownership_status}`);
+      if (justExtracted.distress_signals?.length) justExtractedDescriptions.push(`distress signals: ${justExtracted.distress_signals.join(', ')}`);
+    }
+    const justExtractedSummary = justExtractedDescriptions.length > 0
+      ? `The seller just told you ${justExtractedDescriptions.join(' and ')}. Simply confirm you received their answer (e.g. "Got it", "Thanks for sharing that") - do NOT agree to, commit to, or validate their price or timeline. You are gathering information only, not making any offer or promise.`
+      : '';
+
+    // ── Build the purpose string. No property facts available in this path. ─
+    let purpose: string;
+    if (campComplete) {
+      const knownSummary = [
+        knownFields.timeline != null     ? `timeline of ${knownFields.timeline === 365 ? 'no specific urgency' : `~${knownFields.timeline} days`}` : null,
+        knownFields.askingPrice != null  ? `asking price around $${Number(knownFields.askingPrice).toLocaleString()}` : null,
+        knownFields.conditionLevel != null ? `property in ${knownFields.conditionLevel} condition` : null,
+        knownFields.ownershipStatus != null ? `ownership: ${knownFields.ownershipStatus.replace('_', ' ')}` : null,
+      ].filter(Boolean).join(', ');
+
+      purpose = `CAMP COMPLETE - DO NOT ASK ANY MORE QUESTIONS. This is your closing message.
+What you know: ${knownSummary || 'gathered all key details'}.
+Your message must:
+1. Thank ${sellerFirstName} sincerely for their time and for sharing
+2. Tell them someone from the team will review the information and reach out soon to discuss next steps
+3. Keep it warm and genuine
+4. Do NOT ask anything. Do NOT request more info. End the conversation professionally.
+5. Do NOT repeat back their price or timeline in a way that implies agreement or commitment.`;
+    } else {
+      purpose = `${justExtractedSummary ? justExtractedSummary + ' ' : ''}
+CAMP PROGRESS:
+- Already gathered: ${knownLabels.length > 0 ? knownLabels.join(', ') : 'Nothing yet'}
+- Still need: ${missingLabels.join(', ')}
+
+Read the seller's last message carefully. Respond naturally to what they said.
+KEEP THE CONVERSATION GOING. Do NOT wrap up just because they answered one question - there are still missing topics and there's plenty more to learn. After you acknowledge what they said, take ONE of these moves: ask about a missing CAMP topic, or dig deeper into something they mentioned. Vary your approach across messages.
+If the conversation naturally opens up a chance to learn about one of the missing topics, take it. But do NOT force it. It's fine to just respond to what the seller said without asking a CAMP question if the moment isn't right.
+If the seller seems frustrated, confused, sharing something personal, or asked you a direct question, address THAT first. Building rapport is more important than checking boxes.
+You decide the right approach based on the conversation flow.`.trim();
+    }
+
+    // ── Build the same shape generateMessageDrafts() expects ──────────────
+    const conversationLines = conversationHistory.map((m) => `${m.direction}: ${m.body}`);
+    const inboundMessages = conversationHistory.filter((m) => m.direction === 'INBOUND');
+    const lastInboundMessage = inboundMessages.length > 0
+      ? inboundMessages[inboundMessages.length - 1].body
+      : undefined;
+
+    // Map the snake_case extraction keys to the camelCase justExtracted shape
+    // generateMessageDrafts expects (it reads askingPrice/timeline/etc).
+    const justExtractedForDrafts: Record<string, any> | undefined = justExtracted ? {
+      askingPrice:     justExtracted.asking_price ?? undefined,
+      _askingPriceRaw: justExtracted.asking_price_raw ?? undefined,
+      _askingPriceHigh: justExtracted.asking_price_high ?? undefined,
+      timeline:        justExtracted.timeline_days ?? undefined,
+      conditionLevel:  justExtracted.condition_level ?? undefined,
+      ownershipStatus: justExtracted.ownership_status ?? undefined,
+      distressSignals: justExtracted.distress_signals ?? undefined,
+    } : undefined;
+
+    // Synthesize a minimal "lead-shape" object so generateMessageDrafts() can
+    // run selectPrompt() and pick the right persona from ai_prompts. We never
+    // write this anywhere; it's purely for prompt selection.
+    const syntheticLead = {
+      status: 'QUALIFYING',
+      askingPrice:     knownFields.askingPrice ?? null,
+      timeline:        knownFields.timeline ?? null,
+      conditionLevel:  knownFields.conditionLevel ?? null,
+      ownershipStatus: knownFields.ownershipStatus ?? null,
+    };
+    const syntheticMessages = conversationHistory.map((m) => ({ direction: m.direction, body: m.body }));
+
+    const drafts = await this.generateMessageDrafts(
+      {
+        sellerName: sellerFirstName || 'there',
+        propertyAddress: '',           // intentionally blank - external partner does not pass this
+        conversationHistory: conversationLines,
+        purpose,
+        knownData: knownFields,
+        justExtracted: justExtractedForDrafts,
+        lastInboundMessage,
+      },
+      undefined,
+      syntheticLead,
+      syntheticMessages,
+    );
+
+    return {
+      message: drafts.message,
+      campComplete,
+      missingFields: campFields.filter((f) => !f.known).map((f) => f.field),
+    };
+  }
+
+  /**
    * Fallback message templates when AI is unavailable.
    * Uses conversation context to pick the right template — NEVER sends an
    * intro message when the seller has already replied.
