@@ -4,8 +4,23 @@ Stateless AI-messaging service for external partners (e.g. Closercontrol).
 The partner drives the SMS conversation; Dealcore generates the next reply
 and extracts CAMP-qualification fields from what the seller has said.
 
-Dealcore does **not** send messages, schedule drips, mark opt-outs, or touch
-any pipeline state. Those remain the partner's responsibility.
+Two entry points:
+
+- **`POST /external/conversations/draft-reply`** - generic partner-supplied
+  path. The partner posts the full conversation history and we return a
+  reply. Use this if you manage conversation state on your side.
+- **`POST /external/ghl/webhook`** - GoHighLevel webhook receiver. GHL fires
+  per-message events to us, and Dealcore pulls history + contact from GHL,
+  generates a reply, and sends it back via the GHL Conversations API. Use
+  this if you're driving the conversation in a GHL location.
+
+For the GHL flow, Dealcore needs a GHL Private Integration API token
+(`GHL_API_TOKEN` env var) with these scopes:
+`conversations/message.readonly`, `conversations/message.write`,
+`contacts.readonly`.
+
+In both flows, Dealcore does **not** schedule drips, enforce opt-outs, or
+touch pipeline state. Those remain the partner's responsibility.
 
 ## Auth
 
@@ -125,6 +140,69 @@ Message shape: `{ direction: "INBOUND" | "OUTBOUND", body: string, sentAt?: ISO-
   keyed by `(partnerKey, externalId)` plus a copy of each message we see.
   This is for analytics, debugging, and token-cost optimization. It never
   feeds back into Dealcore's native lead automation.
+
+## POST /external/ghl/webhook
+
+GoHighLevel webhook receiver. Configure GHL to fire `InboundMessage` events
+(SMS) at this URL.
+
+### Auth
+
+Shared-secret header:
+
+```
+X-Dealcore-Webhook-Secret: <secret>
+```
+
+The expected value is set in the `GHL_WEBHOOK_SECRET` env var on the
+Dealcore side. Closercontrol configures the header in their GHL webhook
+setup.
+
+### Behavior
+
+- Returns `200 {ok: true}` immediately. All real work is fire-and-forget.
+- Filters to `direction: "inbound"` only. Outbound events (including our
+  own replies coming back as webhook echoes) are ignored.
+- Filters to `messageType: "SMS"` only.
+- Fetches the last 30 messages from GHL Conversations API for AI context.
+- Fetches the contact from GHL Contacts API for seller first name + phone.
+- Runs the same persona, extraction, and scoring as the partner-supplied
+  endpoint above.
+- POSTs the generated reply back to GHL via `POST /conversations/messages`.
+- Errors at any step are logged and swallowed - GHL retries are not useful
+  here, the next seller reply will trigger the flow again.
+
+### Webhook payload
+
+We accept GHL's standard webhook shape:
+
+```json
+{
+  "type": "InboundMessage",
+  "messageType": "SMS",
+  "direction": "inbound",
+  "body": "around 70k, no rush",
+  "from": "+15613123544",
+  "to": "+17185718680",
+  "contactId": "9v8upkEZbA72XPOAetrv",
+  "conversationId": "UIrQdKE2KDZmYW5e321d",
+  "locationId": "KGhYhjQj2uhwQ8vuBjUO",
+  "dateAdded": "2026-06-03T14:39:00.324Z"
+}
+```
+
+We also accept the n8n-wrapped shape `[{ body: { ... } }]` so partners
+proxying through n8n can forward without unwrapping.
+
+### What's still on the partner side
+
+- Marking the contact opted-out in GHL when we log an opt-out (we don't
+  send anything on opt-out detection - GHL never sees the auto-reply).
+- Pipeline transitions: when `signals.shouldHandoff` is true (visible in
+  internal logs and the `external_conversations` row), the partner should
+  route the lead to a human in their GHL workflow. We don't currently
+  push that signal back to GHL - if you want it, we can add a tag or
+  custom-field update via the GHL API.
 
 ## Example: end-to-end flow
 
