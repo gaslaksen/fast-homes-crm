@@ -7,6 +7,10 @@ import { ExternalConversationsService } from './external-conversations.service';
 // (Closercontrol) traffic. We're a single-partner integration today.
 const GHL_PARTNER_KEY = 'closercontrol';
 
+// Tag we add to the GHL contact when CAMP qualification completes, so
+// Closercontrol's workflow can trigger handoff to a human.
+const QUALIFIED_TAG = 'dealcore:qualified';
+
 /**
  * Webhook receiver for GoHighLevel message events.
  *
@@ -156,6 +160,23 @@ export class GhlWebhookController {
       this.logger.log(`📤 Sent reply to conv=${conversationId} (campComplete=${result.signals.campComplete}): "${result.message.slice(0, 80)}"`);
     } catch (err: any) {
       this.logger.error(`GHL sendSms failed for conv=${conversationId}: ${err?.message || err}`);
+      return;  // don't tag if send failed — partner won't see the closing message
+    }
+
+    // ── Tag the contact as qualified once CAMP is complete ────────────────
+    // Closercontrol's GHL workflow watches for this tag to trigger handoff.
+    // The tag endpoint is idempotent so we don't track whether we've already
+    // tagged — if CAMP stays complete across multiple turns, re-tagging is
+    // a no-op on GHL's side.
+    if (result.signals.campComplete) {
+      try {
+        await this.ghl.addContactTags(contactId, [QUALIFIED_TAG]);
+        this.logger.log(`🏷️  Tagged contact=${contactId} with "${QUALIFIED_TAG}"`);
+      } catch (err: any) {
+        // Most likely cause: token missing contacts.write scope (403). Log
+        // and continue — the reply already went out, the tag is a nice-to-have.
+        this.logger.error(`GHL tag add failed for contact=${contactId}: ${err?.message || err}`);
+      }
     }
   }
 

@@ -122,4 +122,16 @@ export class GhlClient {
 
     return this.request<any>('POST', '/conversations/messages', payload);
   }
+
+  /**
+   * Add tag(s) to a contact. GHL's endpoint is idempotent — adding an
+   * existing tag is a no-op — so it's safe to call this every time CAMP
+   * is complete without tracking whether we've already tagged.
+   *
+   * Requires the contacts.write scope on the API token. If the token only
+   * has contacts.readonly, this will return 403 — caller logs and moves on.
+   */
+  async addContactTags(contactId: string, tags: string[]): Promise<any> {
+    return this.request<any>('POST', `/contacts/${encodeURIComponent(contactId)}/tags`, { tags });
+  }
 }
