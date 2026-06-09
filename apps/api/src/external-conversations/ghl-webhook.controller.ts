@@ -94,6 +94,35 @@ export class GhlWebhookController {
     const eventKeys = event && typeof event === 'object' ? Object.keys(event).slice(0, 30).join(',') : '<not-object>';
     this.logger.debug(`GHL webhook event keys: ${eventKeys}`);
 
+    // ── Human-takeover detection on outbound webhooks ─────────────────────
+    // Outbound messages SENT BY A USER in Closercontrol's UI carry a `userId`
+    // field. Our API-sent messages (authenticated via the Private Integration
+    // token) do NOT have userId. So if we see an outbound with userId set,
+    // a human stepped in - mark the conversation as human-taken-over and
+    // cancel any pending AI reply timer.
+    if (event.direction === 'outbound' && event.userId && event.conversationId) {
+      try {
+        const newlyMarked = await this.conversations.markHumanTakeover(
+          GHL_PARTNER_KEY,
+          event.conversationId,
+          event.userId,
+        );
+        if (newlyMarked) {
+          const pending = this.pendingReplies.get(event.conversationId);
+          if (pending) {
+            clearTimeout(pending);
+            this.pendingReplies.delete(event.conversationId);
+            this.logger.log(`🤚 Human took over conv=${event.conversationId} - cancelled pending AI reply`);
+          } else {
+            this.logger.log(`🤚 Human took over conv=${event.conversationId}`);
+          }
+        }
+      } catch (err: any) {
+        this.logger.error(`Failed to record human takeover for conv=${event.conversationId}: ${err?.message || err}`);
+      }
+      return;
+    }
+
     // ── Filter to inbound only ─────────────────────────────────────────────
     // We only act when the seller texts us. Outbound events (including the
     // reply we ourselves generated and sent, which GHL will fire back at us
@@ -115,6 +144,21 @@ export class GhlWebhookController {
     const locationId = event.locationId;
     if (!conversationId || !contactId) {
       this.logger.warn(`GHL webhook: missing conversationId or contactId, ignoring. event keys: ${eventKeys}`);
+      return;
+    }
+
+    // ── Skip if a human at the partner has taken over this conversation ───
+    // Once Closercontrol's staff sends a manual message in their UI, we mark
+    // the conversation as human-taken-over and never auto-respond again.
+    try {
+      if (await this.conversations.isHumanTakeover(GHL_PARTNER_KEY, conversationId)) {
+        this.logger.log(`🤚 Skipping inbound for conv=${conversationId} - human is handling this conversation`);
+        return;
+      }
+    } catch (err: any) {
+      // If the takeover check fails, default to NOT replying — safer to miss
+      // a reply than to AI-text someone the team is talking to.
+      this.logger.error(`Takeover check failed for conv=${conversationId}: ${err?.message || err} - skipping reply to be safe`);
       return;
     }
 
@@ -151,6 +195,18 @@ export class GhlWebhookController {
     locationId?: string,
   ): Promise<void> {
     this.logger.log(`🕒 Debounce window expired for conv=${conversationId} - fetching history and generating reply`);
+
+    // Race guard: a human may have taken over between when this timer was
+    // scheduled and when it fired. Re-check before doing any work.
+    try {
+      if (await this.conversations.isHumanTakeover(GHL_PARTNER_KEY, conversationId)) {
+        this.logger.log(`🤚 Skipping deferred reply for conv=${conversationId} - human took over during debounce window`);
+        return;
+      }
+    } catch (err: any) {
+      this.logger.error(`Takeover check failed for conv=${conversationId}: ${err?.message || err} - skipping reply to be safe`);
+      return;
+    }
 
     // ── Fetch conversation history + contact in parallel ──────────────────
     let messages: GhlMessage[];

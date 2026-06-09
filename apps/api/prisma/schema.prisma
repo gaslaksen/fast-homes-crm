@@ -626,6 +626,12 @@ model ExternalConversation {
   messageCount      Int                           @default(0)
   lastInboundAt     DateTime?
   lastOutboundAt    DateTime?
+  // Set when a human user at the partner sends a message manually in their UI.
+  // Detected via the presence of `userId` in outbound webhook payloads (our
+  // API-sent messages don't have one). Once set, all subsequent inbound webhooks
+  // for this conversation are ignored — the human owns the conversation now.
+  humanTookOverAt   DateTime?
+  humanTookOverBy   String?                       // partner's userId, for debugging
   createdAt         DateTime                      @default(now())
   updatedAt         DateTime                      @updatedAt
   messages          ExternalConversationMessage[]

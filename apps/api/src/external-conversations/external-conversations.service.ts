@@ -236,6 +236,54 @@ export class ExternalConversationsService {
     };
   }
 
+  /**
+   * Mark a conversation as taken over by a human at the partner. Idempotent:
+   * if the takeover is already recorded, this is a no-op. Returns true if
+   * the takeover was newly recorded, false if it was already set.
+   */
+  async markHumanTakeover(partnerKey: string, externalId: string, byUserId: string): Promise<boolean> {
+    // Upsert so we record takeover even if we've never seen this conversation
+    // before (rare but possible if the human sends before any inbound arrives).
+    const existing = await this.prisma.externalConversation.findUnique({
+      where: { partnerKey_externalId: { partnerKey, externalId } },
+    });
+
+    if (existing?.humanTookOverAt) {
+      return false; // already taken over
+    }
+
+    if (existing) {
+      await this.prisma.externalConversation.update({
+        where: { id: existing.id },
+        data: { humanTookOverAt: new Date(), humanTookOverBy: byUserId },
+      });
+    } else {
+      await this.prisma.externalConversation.create({
+        data: {
+          partnerKey,
+          externalId,
+          humanTookOverAt: new Date(),
+          humanTookOverBy: byUserId,
+        },
+      });
+    }
+
+    this.logger.log(`🤚 Human takeover recorded for ${partnerKey}/${externalId} by user=${byUserId}`);
+    return true;
+  }
+
+  /**
+   * Returns true if a human at the partner has taken over this conversation
+   * and the AI should not respond to further inbounds.
+   */
+  async isHumanTakeover(partnerKey: string, externalId: string): Promise<boolean> {
+    const row = await this.prisma.externalConversation.findUnique({
+      where: { partnerKey_externalId: { partnerKey, externalId } },
+      select: { humanTookOverAt: true },
+    });
+    return !!row?.humanTookOverAt;
+  }
+
   private messageKey(direction: string, body: string, sentAt: Date): string {
     return `${direction}|${body}|${sentAt.getTime()}`;
   }
