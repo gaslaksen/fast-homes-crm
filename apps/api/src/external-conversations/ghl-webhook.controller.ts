@@ -222,9 +222,21 @@ export class GhlWebhookController {
     // human's send was missed for any reason. If ANY outbound message in
     // the fetched history carries a userId, a human was involved at some
     // point - mark takeover and skip the AI reply.
-    const humanSentOutbound = messages.find(
-      (m) => m.direction === 'outbound' && typeof m.userId === 'string' && m.userId.length > 0,
-    );
+    //
+    // DIAGNOSTIC: log a histogram of outbound senders so we can verify the
+    // canned initial outreach really is sent without a userId (and thus
+    // never trips the look-back). Remove once we're confident.
+    const outboundMsgs = messages.filter((m) => m.direction === 'outbound');
+    const withUserId = outboundMsgs.filter((m) => typeof m.userId === 'string' && m.userId.length > 0);
+    const distinctUserIds = Array.from(new Set(withUserId.map((m) => m.userId!).filter(Boolean)));
+    this.logger.log(`📊 Look-back conv=${conversationId}: ${outboundMsgs.length} outbound msgs total, ${withUserId.length} with userId. Users: [${distinctUserIds.join(', ') || 'none'}]`);
+    if (outboundMsgs.length > 0 && withUserId.length === 0) {
+      // Useful sanity check that canned outreach has no userId.
+      const sample = outboundMsgs[0].body?.slice(0, 100) || '<no body>';
+      this.logger.log(`📊 First outbound (no userId) sample: "${sample}"`);
+    }
+
+    const humanSentOutbound = withUserId[0];
     if (humanSentOutbound) {
       try {
         const newlyMarked = await this.conversations.markHumanTakeover(
