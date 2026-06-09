@@ -73,26 +73,11 @@ export class GhlWebhookController {
   }
 
   private async handle(raw: any): Promise<void> {
-    // TEMP: log a snippet of the raw payload on every webhook so we can see
-    // what GHL is actually sending while we shake out the integration.
-    // Remove once flow is stable to keep logs quiet.
-    try {
-      const rawSnippet = JSON.stringify(raw).slice(0, 800);
-      this.logger.log(`🔬 GHL raw payload: ${rawSnippet}`);
-    } catch {
-      this.logger.log(`🔬 GHL raw payload: <unserializable>`);
-    }
-
     const event = this.extractEventBody(raw);
     if (!event) {
-      this.logger.warn(`GHL webhook: could not parse event body, ignoring`);
+      this.logger.warn(`GHL webhook: could not parse event body, ignoring. Payload: ${this.snippet(raw)}`);
       return;
     }
-
-    // Log the top-level keys so we can quickly see the event shape even if
-    // direction/conversationId/contactId aren't where we expect them.
-    const eventKeys = event && typeof event === 'object' ? Object.keys(event).slice(0, 30).join(',') : '<not-object>';
-    this.logger.debug(`GHL webhook event keys: ${eventKeys}`);
 
     // ── Human-takeover detection on outbound webhooks ─────────────────────
     // Outbound messages SENT BY A USER in Closercontrol's UI carry a `userId`
@@ -117,6 +102,8 @@ export class GhlWebhookController {
             this.logger.log(`🤚 Human took over conv=${event.conversationId}`);
           }
         }
+        // Already-marked repeats (status updates on the same human message)
+        // are silently swallowed - no log spam.
       } catch (err: any) {
         this.logger.error(`Failed to record human takeover for conv=${event.conversationId}: ${err?.message || err}`);
       }
@@ -128,7 +115,14 @@ export class GhlWebhookController {
     // reply we ourselves generated and sent, which GHL will fire back at us
     // as another webhook) get ignored. Without this filter we'd loop.
     if (event.direction !== 'inbound') {
-      this.logger.debug(`GHL webhook: ignoring direction=${event.direction} type=${event.type || event.eventType || '?'}`);
+      // Outbound echoes of our own messages are the common case - quiet debug.
+      // Anything else (no direction, unknown direction, unexpected event type)
+      // gets the full raw payload so we can see what GHL is sending us.
+      if (event.direction === 'outbound') {
+        this.logger.debug(`GHL webhook: ignoring outbound echo (no userId) type=${event.type || '?'}`);
+      } else {
+        this.logger.warn(`GHL webhook: ignoring unexpected direction=${event.direction} type=${event.type || event.eventType || '?'}. Payload: ${this.snippet(raw)}`);
+      }
       return;
     }
 
@@ -143,7 +137,8 @@ export class GhlWebhookController {
     const contactId = event.contactId;
     const locationId = event.locationId;
     if (!conversationId || !contactId) {
-      this.logger.warn(`GHL webhook: missing conversationId or contactId, ignoring. event keys: ${eventKeys}`);
+      const eventKeys = event && typeof event === 'object' ? Object.keys(event).slice(0, 30).join(',') : '<not-object>';
+      this.logger.warn(`GHL webhook: inbound missing conversationId or contactId. Keys: ${eventKeys}. Payload: ${this.snippet(raw)}`);
       return;
     }
 
@@ -287,6 +282,19 @@ export class GhlWebhookController {
         // and continue — the reply already went out, the tag is a nice-to-have.
         this.logger.error(`GHL tag add failed for contact=${contactId}: ${err?.message || err}`);
       }
+    }
+  }
+
+  /**
+   * Serialize a raw value to a bounded JSON snippet for log lines. Used when
+   * we hit a parse / shape error and want enough context to debug.
+   */
+  private snippet(value: any, max = 800): string {
+    try {
+      const s = JSON.stringify(value);
+      return s.length > max ? s.slice(0, max) + '…(truncated)' : s;
+    } catch {
+      return '<unserializable>';
     }
   }
 
