@@ -216,6 +216,33 @@ export class GhlWebhookController {
       return;
     }
 
+    // ── Look-back takeover detection ──────────────────────────────────────
+    // Catches conversations a human at the partner managed BEFORE our
+    // realtime takeover detection deployed, or where the webhook for the
+    // human's send was missed for any reason. If ANY outbound message in
+    // the fetched history carries a userId, a human was involved at some
+    // point - mark takeover and skip the AI reply.
+    const humanSentOutbound = messages.find(
+      (m) => m.direction === 'outbound' && typeof m.userId === 'string' && m.userId.length > 0,
+    );
+    if (humanSentOutbound) {
+      try {
+        const newlyMarked = await this.conversations.markHumanTakeover(
+          GHL_PARTNER_KEY,
+          conversationId,
+          humanSentOutbound.userId!,
+        );
+        if (newlyMarked) {
+          this.logger.log(`🤚 Look-back: human (user=${humanSentOutbound.userId}) was managing conv=${conversationId} - marking takeover, skipping AI reply`);
+        } else {
+          this.logger.log(`🤚 Skipping AI reply for conv=${conversationId} - human already on file`);
+        }
+      } catch (err: any) {
+        this.logger.error(`Look-back takeover record failed for conv=${conversationId}: ${err?.message || err}`);
+      }
+      return;
+    }
+
     const history = messages
       .filter((m) => typeof m.body === 'string' && m.body.trim().length > 0)
       .map((m) => ({

@@ -26,6 +26,7 @@ export type GhlMessage = {
   dateAdded?: string;
   contactId?: string;
   conversationId?: string;
+  userId?: string;                // present on outbound messages sent by a human in the partner's UI
 };
 
 export type GhlContact = {
