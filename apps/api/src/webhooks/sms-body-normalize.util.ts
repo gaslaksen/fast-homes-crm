@@ -30,7 +30,13 @@ export function sanitizeOutboundSmsBody(input: string): string {
     // Non-breaking space, narrow no-break space → regular space
     .replace(/ | /g, ' ')
     // Zero-width space → strip
-    .replace(/​/g, '');
+    .replace(/​/g, '')
+    // Hyphens used AS dashes (space-hyphen-space patterns, 1-3 hyphens) → comma.
+    // The conversational prompt forbids this but the model violates ~5% of the
+    // time. Replacing with ", " preserves the dash's natural flow without
+    // breaking compound words ("well-known"), ranges ("70-80"), or phone
+    // numbers ("555-1234") - those have no surrounding spaces, so don't match.
+    .replace(/ -{1,3} /g, ', ');
 }
 
 /**
