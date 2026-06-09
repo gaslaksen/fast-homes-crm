@@ -54,18 +54,33 @@ export class GhlWebhookController {
   }
 
   private async handle(raw: any): Promise<void> {
+    // TEMP: log a snippet of the raw payload on every webhook so we can see
+    // what GHL is actually sending while we shake out the integration.
+    // Remove once flow is stable to keep logs quiet.
+    try {
+      const rawSnippet = JSON.stringify(raw).slice(0, 800);
+      this.logger.log(`🔬 GHL raw payload: ${rawSnippet}`);
+    } catch {
+      this.logger.log(`🔬 GHL raw payload: <unserializable>`);
+    }
+
     const event = this.extractEventBody(raw);
     if (!event) {
       this.logger.warn(`GHL webhook: could not parse event body, ignoring`);
       return;
     }
 
+    // Log the top-level keys so we can quickly see the event shape even if
+    // direction/conversationId/contactId aren't where we expect them.
+    const eventKeys = event && typeof event === 'object' ? Object.keys(event).slice(0, 30).join(',') : '<not-object>';
+    this.logger.debug(`GHL webhook event keys: ${eventKeys}`);
+
     // ── Filter to inbound only ─────────────────────────────────────────────
     // We only act when the seller texts us. Outbound events (including the
     // reply we ourselves generated and sent, which GHL will fire back at us
     // as another webhook) get ignored. Without this filter we'd loop.
     if (event.direction !== 'inbound') {
-      this.logger.debug(`GHL webhook: ignoring direction=${event.direction}`);
+      this.logger.debug(`GHL webhook: ignoring direction=${event.direction} type=${event.type || event.eventType || '?'}`);
       return;
     }
 
@@ -80,7 +95,7 @@ export class GhlWebhookController {
     const contactId = event.contactId;
     const locationId = event.locationId;
     if (!conversationId || !contactId) {
-      this.logger.warn(`GHL webhook: missing conversationId or contactId, ignoring`);
+      this.logger.warn(`GHL webhook: missing conversationId or contactId, ignoring. event keys: ${eventKeys}`);
       return;
     }
 
