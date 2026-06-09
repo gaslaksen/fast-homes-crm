@@ -563,6 +563,52 @@ export class WebhooksController {
             return { success: true };
           }
 
+          // Try to attribute this SmrtPhone-originated message to a Dealcore
+          // user so the timeline shows their initials instead of "AI". The
+          // SmrtPhone payload includes userName ("Ian McCaskill") and the
+          // sending phone; match either against the lead's org users.
+          let smrtphoneSenderId: string | null = null;
+          const agentUserName: string = (body.userName || '').trim();
+          const fromDigits: string = fromPhone.replace(/\D/g, '').replace(/^1/, '');
+          const nameParts = agentUserName.split(/\s+/).filter(Boolean);
+          const first = nameParts[0] || '';
+          const last = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
+          const orClauses: any[] = [];
+          if (first && last) {
+            orClauses.push({
+              AND: [
+                { firstName: { equals: first, mode: 'insensitive' } },
+                { lastName: { equals: last, mode: 'insensitive' } },
+              ],
+            });
+          }
+          if (fromDigits.length >= 7) {
+            orClauses.push({ phone: { contains: fromDigits } });
+          }
+          if (orClauses.length > 0) {
+            try {
+              const match = await this.leadsService['prisma'].user.findFirst({
+                where: {
+                  ...(outboundLead.organizationId
+                    ? { organizationId: outboundLead.organizationId }
+                    : {}),
+                  OR: orClauses,
+                },
+                select: { id: true },
+              });
+              smrtphoneSenderId = match?.id ?? null;
+              if (!smrtphoneSenderId) {
+                console.log(
+                  `ℹ️  ${event}: could not resolve SmrtPhone sender "${agentUserName}" / ${fromPhone} to a Dealcore user`,
+                );
+              }
+            } catch (err: any) {
+              // Never let attribution failure block recording the message.
+              console.warn(`⚠️  ${event}: SmrtPhone sender lookup failed: ${err?.message || err}`);
+              smrtphoneSenderId = null;
+            }
+          }
+
           // Genuinely new outbound message sent from SmrtPhone UI — record it
           await this.leadsService['prisma'].message.create({
             data: {
@@ -573,6 +619,7 @@ export class WebhooksController {
               from: fromPhone,
               to: toPhone,
               twilioSid: outSmsId,
+              sentByUserId: smrtphoneSenderId,
               sentAt: new Date(),
             },
           });
