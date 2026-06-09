@@ -11,6 +11,14 @@ const GHL_PARTNER_KEY = 'closercontrol';
 // Closercontrol's workflow can trigger handoff to a human.
 const QUALIFIED_TAG = 'dealcore:qualified';
 
+// Debounce window for replying after an inbound. Sellers often send their
+// thought across multiple texts in quick succession ("around 70k" → "no rush"
+// → "place is rough"). Waiting 2 minutes after the LAST inbound before
+// replying lets us see the full thought and respond once with full context.
+// Every new inbound during this window cancels the pending reply and restarts
+// the clock. Mirrors the Dealcore-native pendingResponseTimers pattern.
+const REPLY_DEBOUNCE_MS = 120_000; // 2 minutes
+
 /**
  * Webhook receiver for GoHighLevel message events.
  *
@@ -34,6 +42,17 @@ const QUALIFIED_TAG = 'dealcore:qualified';
 @UseGuards(GhlWebhookGuard)
 export class GhlWebhookController {
   private readonly logger = new Logger(GhlWebhookController.name);
+
+  // Map of conversationId → pending setTimeout handle. When a new inbound
+  // arrives for a conversation that already has a pending reply, we cancel
+  // the existing timer and schedule a fresh 2-minute one. Only the LAST
+  // inbound in a burst triggers the actual reply, and the AI sees all the
+  // seller's messages because we fetch fresh history at fire time.
+  //
+  // In-memory only — timers do NOT survive a service restart. Acceptable
+  // for v1: a Railway redeploy mid-window means the seller gets no AI
+  // reply for that turn. Their next message will trigger fresh.
+  private pendingReplies = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(
     private ghl: GhlClient,
@@ -99,7 +118,39 @@ export class GhlWebhookController {
       return;
     }
 
-    this.logger.log(`📥 GHL inbound: conversation=${conversationId} contact=${contactId}`);
+    // ── Debounce: schedule the reply for 2 minutes from now ──────────────
+    // If another inbound arrives for this conversation before the timer
+    // fires, we cancel and restart. Lets us batch multi-text bursts from
+    // the seller into a single coherent reply.
+    const existing = this.pendingReplies.get(conversationId);
+    if (existing) {
+      clearTimeout(existing);
+      this.logger.log(`⏱️  Cancelled pending reply for conv=${conversationId} - new inbound arrived, restarting 2min clock`);
+    }
+
+    this.logger.log(`📥 GHL inbound: conversation=${conversationId} contact=${contactId} - reply scheduled in ${Math.round(REPLY_DEBOUNCE_MS / 1000)}s`);
+
+    const timer = setTimeout(() => {
+      this.pendingReplies.delete(conversationId);
+      this.generateAndSend(conversationId, contactId, locationId).catch((err) =>
+        this.logger.error(`Deferred reply failed for conv=${conversationId}: ${err?.message || err}`),
+      );
+    }, REPLY_DEBOUNCE_MS);
+
+    this.pendingReplies.set(conversationId, timer);
+  }
+
+  /**
+   * Runs after the 2-minute debounce window expires. Fetches fresh history
+   * from GHL (which now includes every inbound the seller sent during the
+   * window) and dispatches the reply.
+   */
+  private async generateAndSend(
+    conversationId: string,
+    contactId: string,
+    locationId?: string,
+  ): Promise<void> {
+    this.logger.log(`🕒 Debounce window expired for conv=${conversationId} - fetching history and generating reply`);
 
     // ── Fetch conversation history + contact in parallel ──────────────────
     let messages: GhlMessage[];
@@ -114,11 +165,6 @@ export class GhlWebhookController {
       return;
     }
 
-    // ── Build conversation history in our service's expected shape ────────
-    // Note: GHL's most-recent event may not yet be returned by the messages
-    // endpoint when the webhook fires (eventual consistency). If we don't
-    // see the inbound body in the fetched history, append it manually so
-    // the AI sees the seller's latest message.
     const history = messages
       .filter((m) => typeof m.body === 'string' && m.body.trim().length > 0)
       .map((m) => ({
@@ -127,16 +173,9 @@ export class GhlWebhookController {
         sentAt: m.dateAdded,
       }));
 
-    const eventBody = (event.body || '').trim();
-    const alreadyIncluded = eventBody && history.some(
-      (h) => h.direction === 'INBOUND' && h.body.trim() === eventBody,
-    );
-    if (eventBody && !alreadyIncluded) {
-      history.push({
-        direction: 'INBOUND',
-        body: eventBody,
-        sentAt: event.dateAdded || event.timestamp,
-      });
+    if (history.length === 0) {
+      this.logger.warn(`No history found for conv=${conversationId} after debounce - ignoring`);
+      return;
     }
 
     // ── Generate the AI response ──────────────────────────────────────────
