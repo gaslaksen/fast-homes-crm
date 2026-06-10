@@ -1,18 +1,17 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { format } from 'date-fns';
+import { format, formatDistanceToNow } from 'date-fns';
 import { leadsAPI, callsAPI, tasksAPI, authAPI } from '@/lib/api';
 import Avatar from '@/components/Avatar';
 import LeadQueueNav from '@/components/leadDetailV2/LeadQueueNav';
 import ShareDealModal from '@/components/ShareDealModal';
 import ScheduleFollowUpModal from '@/components/ScheduleFollowUpModal';
-import { getPrimaryAction } from './actionMap';
 import { getStage } from '@/lib/pipelineStages';
 import { formatPhoneDisplay, getLeadAddressLine, getLeadDisplayName } from '@/lib/format';
-import { zillowUrl, realtorUrl } from '@/lib/externalLinks';
+import { zillowUrl, googleMapsUrl } from '@/lib/externalLinks';
 import { readLeadQueue } from '@/lib/leadQueue';
 
 const STAGE_OPTIONS: { value: string; label: string }[] = [
@@ -56,6 +55,8 @@ export default function LeadRail({ lead, onLeadPatch, onMarkDead }: Props) {
   const [savingTier, setSavingTier] = useState(false);
   const [savingAutoRespond, setSavingAutoRespond] = useState(false);
   const [initiatingCall, setInitiatingCall] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [tasks, setTasks] = useState<any[]>([]);
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [teamMembers, setTeamMembers] = useState<any[]>([]);
@@ -165,52 +166,51 @@ export default function LeadRail({ lead, onLeadPatch, onMarkDead }: Props) {
     }
   };
 
+  const handleRefreshFromReapi = async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      await leadsAPI.refreshPropertyDetails(leadId);
+      const refreshed = await leadsAPI.get(leadId);
+      onLeadPatch(refreshed.data);
+    } catch (err: any) {
+      alert(`Refresh failed: ${err?.message || 'Unknown error'}`);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const handleCopyLink = () => {
+    const url = `${window.location.origin}/leads/${leadId}`;
+    navigator.clipboard.writeText(url).then(
+      () => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1200);
+      },
+      () => alert('Could not copy link'),
+    );
+  };
+
   const displayName = getLeadDisplayName(lead);
   const addressLine = getLeadAddressLine(lead);
   const isDead = lead.status === 'DEAD';
   const contactDisabled = !lead.sellerPhone || !!lead.doNotContact || isDead;
   const stageMeta = getStage(lead.status);
+  const addressParts = {
+    address: lead.propertyAddress,
+    city: lead.propertyCity,
+    state: lead.propertyState,
+    zip: lead.propertyZip,
+  };
   const mao = (() => {
     if (!lead.arv) return null;
     const pct = (lead.maoPercent ?? 70) / 100;
     return Math.round(lead.arv * pct - (lead.repairCosts ?? 0) - (lead.assignmentFee ?? 0));
   })();
   const openTasks = tasks.filter((t: any) => !t.completed);
-
-  // Same "what should I do next" logic as the Overview tab's Action Bar.
-  const primary = getPrimaryAction(lead, null);
-  const runPrimary = () => {
-    switch (primary.intent) {
-      case 'reply':
-      case 'sms':
-        return router.push(`/leads/${leadId}?tab=communications&action=reply`);
-      case 'offer':
-        return router.push(`/leads/${leadId}?tab=disposition&action=offer`);
-      case 'follow-up':
-        return setShowFollowUpModal(true);
-      case 'camp':
-        return router.push(`/leads/${leadId}?tab=communications&action=camp`);
-      case 'contract':
-        return router.push(`/leads/${leadId}?tab=disposition&action=contract`);
-      case 'dispo':
-        return router.push(`/leads/${leadId}?tab=disposition`);
-      case 'call':
-        window.location.href = `tel:${lead.sellerPhone}`;
-        return;
-      case 'share':
-        return setShowShareModal(true);
-    }
-  };
-
-  const quick = {
-    onSms: () => router.push(`/leads/${leadId}?tab=communications&action=reply`),
-    onCall: () => { window.location.href = `tel:${lead.sellerPhone}`; },
-    onAiCall: handleAiCall,
-    onFollowUp: () => setShowFollowUpModal(true),
-    onShare: () => setShowShareModal(true),
-    onOffer: () => router.push(`/leads/${leadId}?tab=disposition&action=offer`),
-    onMarkDead: onMarkDead,
-  };
+  const lastTouched = lead.lastTouchedAt
+    ? formatDistanceToNow(new Date(lead.lastTouchedAt), { addSuffix: true })
+    : null;
 
   return (
     <div className="p-4 space-y-4 text-sm">
@@ -241,64 +241,133 @@ export default function LeadRail({ lead, onLeadPatch, onMarkDead }: Props) {
         )}
       </div>
 
-      {/* Contact facts — always visible */}
-      <dl className="space-y-1 text-[13px]">
-        <InfoRow label="Address">{addressLine || '—'}</InfoRow>
-        <InfoRow label="Phone">
-          {lead.sellerPhone ? (
-            lead.doNotContact ? formatPhoneDisplay(lead.sellerPhone) : (
-              <a href={`tel:${lead.sellerPhone}`} className="hover:text-primary-600 hover:underline">
-                {formatPhoneDisplay(lead.sellerPhone)}
-              </a>
-            )
-          ) : '—'}
-        </InfoRow>
-        <InfoRow label="Email">
-          {lead.sellerEmail ? (
-            <a href={`mailto:${lead.sellerEmail}`} className="hover:text-primary-600 hover:underline truncate" title={lead.sellerEmail}>
-              {lead.sellerEmail}
-            </a>
-          ) : '—'}
-        </InfoRow>
-        <InfoRow label="Source">{lead.source || '—'}</InfoRow>
-        <InfoRow label="Touches">
-          <span className="text-xs font-semibold text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 rounded-full px-1.5 py-0.5">
-            {lead.touchCount ?? 0}
-          </span>
-        </InfoRow>
-      </dl>
-      {lead.doNotContact && (
-        <div className="px-2 py-1.5 rounded bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 text-xs text-red-700 dark:text-red-400">
-          Do Not Contact
+      {/* Pipeline card — the CRM state lives right under the name */}
+      <div className="space-y-3">
+        <div>
+          <RailLabel>Stage</RailLabel>
+          <select
+            value={lead.status}
+            disabled={savingStatus}
+            onChange={(e) => handleStatusChange(e.target.value)}
+            className={`mt-1 w-full text-sm font-semibold px-2 py-1.5 rounded-lg border cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary-400 disabled:opacity-50 ${
+              stageMeta?.color || 'bg-gray-50 dark:bg-gray-950 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-700'
+            }`}
+          >
+            {STAGE_OPTIONS.map((s) => (
+              <option key={s.value} value={s.value}>{s.label}</option>
+            ))}
+          </select>
         </div>
-      )}
 
-      {/* Next step + quick actions — mirrors the Overview tab's Action Bar */}
-      <div className="space-y-2">
-        <PrimarySplitButton label={primary.label} onPrimary={runPrimary} quick={quick} />
+        <div>
+          <RailLabel>Deal Tier</RailLabel>
+          <div className="mt-1 grid grid-cols-3 gap-1.5">
+            {TIERS.map((t) => (
+              <button
+                key={t.value}
+                type="button"
+                onClick={() => handleSetTier(lead.tier === t.value ? null : t.value)}
+                disabled={savingTier}
+                title={t.desc}
+                className={`px-2 py-1.5 rounded-lg border-2 text-xs font-bold transition-colors disabled:opacity-50 ${
+                  lead.tier === t.value ? t.cls : 'border-gray-200 dark:border-gray-700 text-gray-400 hover:border-gray-400'
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <RailLabel>Assigned to</RailLabel>
+          {lead.assignedTo ? (
+            <div className="mt-1 flex items-center justify-between gap-2">
+              <span className="flex items-center gap-1.5 min-w-0">
+                <Avatar
+                  name={`${lead.assignedTo.firstName ?? ''} ${lead.assignedTo.lastName ?? ''}`}
+                  avatarUrl={lead.assignedTo.avatarUrl}
+                  size="sm"
+                />
+                <span className="text-gray-800 dark:text-gray-200 truncate">
+                  {lead.assignedTo.firstName} {lead.assignedTo.lastName}
+                  {lead.assignedStage && <span className="text-gray-400 dark:text-gray-500"> · {lead.assignedStage}</span>}
+                </span>
+              </span>
+              <button
+                onClick={handleUnassign}
+                disabled={assignSaving}
+                className="text-xs text-red-600 dark:text-red-400 hover:underline disabled:opacity-50 shrink-0"
+              >
+                Unassign
+              </button>
+            </div>
+          ) : (
+            <div className="mt-1 flex items-center gap-2">
+              <select
+                value={assignUserId}
+                onChange={(e) => setAssignUserId(e.target.value)}
+                className="flex-1 min-w-0 text-sm px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 dark:text-gray-100"
+              >
+                <option value="">— Select member —</option>
+                {teamMembers.map((m: any) => (
+                  <option key={m.id} value={m.id}>{m.firstName} {m.lastName}</option>
+                ))}
+              </select>
+              <button
+                onClick={handleAssign}
+                disabled={!assignUserId || assignSaving}
+                className="text-xs px-3 py-1.5 rounded-lg bg-primary-600 text-white font-semibold hover:bg-primary-700 disabled:opacity-50 shrink-0"
+              >
+                {assignSaving ? '…' : 'Assign'}
+              </button>
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between gap-2">
+          <RailLabel>Touches</RailLabel>
+          <span className="flex items-baseline gap-1.5">
+            <span className="text-xs font-semibold text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 rounded-full px-2 py-0.5">
+              {lead.touchCount ?? 0}
+            </span>
+            {lastTouched && (
+              <span className="text-[11px] text-gray-400 dark:text-gray-500">last {lastTouched}</span>
+            )}
+          </span>
+        </div>
+      </div>
+
+      {/* Quick actions — same compact icon buttons as the Overview Action Bar */}
+      <div className="space-y-2 border-t border-gray-100 dark:border-gray-800 pt-3">
         <div className="flex items-center gap-1 flex-wrap">
-          <IconBtn title="Send SMS" onClick={quick.onSms} disabled={isDead}>
+          <IconBtn title="Send SMS" onClick={() => router.push(`/leads/${leadId}?tab=communications&action=reply`)} disabled={isDead}>
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" /></svg>
           </IconBtn>
-          <IconBtn title="Call seller" onClick={quick.onCall} disabled={contactDisabled}>
+          <IconBtn title="Call seller" onClick={() => { window.location.href = `tel:${lead.sellerPhone}`; }} disabled={contactDisabled}>
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" /></svg>
           </IconBtn>
-          <IconBtn title="Start AI call" onClick={quick.onAiCall} disabled={contactDisabled || initiatingCall}>
+          <IconBtn title="Start AI call" onClick={handleAiCall} disabled={contactDisabled || initiatingCall}>
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
           </IconBtn>
-          <IconBtn title="Schedule follow-up" onClick={quick.onFollowUp}>
+          <IconBtn title="Schedule follow-up" onClick={() => setShowFollowUpModal(true)}>
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
           </IconBtn>
-          <IconBtn title="Share with partners" onClick={quick.onShare}>
+          <IconBtn title="Share with partners" onClick={() => setShowShareModal(true)}>
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" /></svg>
           </IconBtn>
-          <IconBtn title="Send offer" onClick={quick.onOffer} disabled={isDead}>
+          <IconBtn title="Send offer" onClick={() => router.push(`/leads/${leadId}?tab=disposition&action=offer`)} disabled={isDead}>
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
           </IconBtn>
-          <IconBtn title="Mark dead" onClick={quick.onMarkDead} disabled={isDead}>
+          <IconBtn title={refreshing ? 'Refreshing…' : 'Refresh from REAPI'} onClick={handleRefreshFromReapi} disabled={refreshing}>
+            <svg className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+          </IconBtn>
+          <IconBtn title={copied ? 'Copied!' : 'Copy lead link'} onClick={handleCopyLink}>
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 010 5.656l-4 4a4 4 0 01-5.656-5.656l1.102-1.101m11.452-9.972a4 4 0 015.656 5.656l-4 4a4 4 0 01-5.656 0" /></svg>
+          </IconBtn>
+          <IconBtn title="Mark dead" onClick={onMarkDead} disabled={isDead}>
             <svg className="w-4 h-4 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
           </IconBtn>
-          <RailMoreMenu lead={lead} leadId={leadId} onLeadPatch={onLeadPatch} />
           <div className="flex-1" />
           <button
             onClick={handleToggleAutoRespond}
@@ -312,6 +381,28 @@ export default function LeadRail({ lead, onLeadPatch, onMarkDead }: Props) {
           >
             ✨ AI {lead.autoRespond ? 'ON' : 'OFF'}
           </button>
+        </div>
+
+        {/* External lookups — CC-style labeled buttons */}
+        <div className="flex gap-1.5">
+          <a
+            href={zillowUrl(addressParts)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex-1 inline-flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-colors"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>
+            View on Zillow
+          </a>
+          <a
+            href={googleMapsUrl(addressParts)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex-1 inline-flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-colors"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+            View on Google
+          </a>
         </div>
       </div>
 
@@ -349,90 +440,32 @@ export default function LeadRail({ lead, onLeadPatch, onMarkDead }: Props) {
         </button>
       </RailSection>
 
-      <RailSection title="Pipeline">
-        <div className="space-y-3">
-          <div>
-            <RailLabel>Stage</RailLabel>
-            <select
-              value={lead.status}
-              disabled={savingStatus}
-              onChange={(e) => handleStatusChange(e.target.value)}
-              className={`mt-1 w-full text-sm font-semibold px-2 py-1.5 rounded-lg border cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary-400 disabled:opacity-50 ${
-                stageMeta?.color || 'bg-gray-50 dark:bg-gray-950 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-700'
-              }`}
-            >
-              {STAGE_OPTIONS.map((s) => (
-                <option key={s.value} value={s.value}>{s.label}</option>
-              ))}
-            </select>
+      <RailSection title="Contact">
+        <dl className="space-y-1 text-[13px]">
+          <InfoRow label="Address">{addressLine || '—'}</InfoRow>
+          <InfoRow label="Phone">
+            {lead.sellerPhone ? (
+              lead.doNotContact ? formatPhoneDisplay(lead.sellerPhone) : (
+                <a href={`tel:${lead.sellerPhone}`} className="hover:text-primary-600 hover:underline">
+                  {formatPhoneDisplay(lead.sellerPhone)}
+                </a>
+              )
+            ) : '—'}
+          </InfoRow>
+          <InfoRow label="Email">
+            {lead.sellerEmail ? (
+              <a href={`mailto:${lead.sellerEmail}`} className="hover:text-primary-600 hover:underline truncate" title={lead.sellerEmail}>
+                {lead.sellerEmail}
+              </a>
+            ) : '—'}
+          </InfoRow>
+          <InfoRow label="Source">{lead.source || '—'}</InfoRow>
+        </dl>
+        {lead.doNotContact && (
+          <div className="mt-2 px-2 py-1.5 rounded bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 text-xs text-red-700 dark:text-red-400">
+            Do Not Contact
           </div>
-
-          <div>
-            <RailLabel>Deal Tier</RailLabel>
-            <div className="mt-1 grid grid-cols-3 gap-1.5">
-              {TIERS.map((t) => (
-                <button
-                  key={t.value}
-                  type="button"
-                  onClick={() => handleSetTier(lead.tier === t.value ? null : t.value)}
-                  disabled={savingTier}
-                  title={t.desc}
-                  className={`px-2 py-1.5 rounded-lg border-2 text-xs font-bold transition-colors disabled:opacity-50 ${
-                    lead.tier === t.value ? t.cls : 'border-gray-200 dark:border-gray-700 text-gray-400 hover:border-gray-400'
-                  }`}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <RailLabel>Assigned to</RailLabel>
-            {lead.assignedTo ? (
-              <div className="mt-1 flex items-center justify-between gap-2">
-                <span className="flex items-center gap-1.5 min-w-0">
-                  <Avatar
-                    name={`${lead.assignedTo.firstName ?? ''} ${lead.assignedTo.lastName ?? ''}`}
-                    avatarUrl={lead.assignedTo.avatarUrl}
-                    size="sm"
-                  />
-                  <span className="text-gray-800 dark:text-gray-200 truncate">
-                    {lead.assignedTo.firstName} {lead.assignedTo.lastName}
-                    {lead.assignedStage && <span className="text-gray-400 dark:text-gray-500"> · {lead.assignedStage}</span>}
-                  </span>
-                </span>
-                <button
-                  onClick={handleUnassign}
-                  disabled={assignSaving}
-                  className="text-xs text-red-600 dark:text-red-400 hover:underline disabled:opacity-50 shrink-0"
-                >
-                  Unassign
-                </button>
-              </div>
-            ) : (
-              <div className="mt-1 flex items-center gap-2">
-                <select
-                  value={assignUserId}
-                  onChange={(e) => setAssignUserId(e.target.value)}
-                  className="flex-1 min-w-0 text-sm px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 dark:text-gray-100"
-                >
-                  <option value="">— Select member —</option>
-                  {teamMembers.map((m: any) => (
-                    <option key={m.id} value={m.id}>{m.firstName} {m.lastName}</option>
-                  ))}
-                </select>
-                <button
-                  onClick={handleAssign}
-                  disabled={!assignUserId || assignSaving}
-                  className="text-xs px-3 py-1.5 rounded-lg bg-primary-600 text-white font-semibold hover:bg-primary-700 disabled:opacity-50 shrink-0"
-                >
-                  {assignSaving ? '…' : 'Assign'}
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
+        )}
       </RailSection>
 
       <RailSection title="Valuation">
@@ -522,183 +555,6 @@ function IconBtn({ title, onClick, disabled, children }: { title: string; onClic
     >
       {children}
     </button>
-  );
-}
-
-function PrimarySplitButton({
-  label,
-  onPrimary,
-  quick,
-}: {
-  label: string;
-  onPrimary: () => void;
-  quick: {
-    onSms: () => void;
-    onCall: () => void;
-    onAiCall: () => void;
-    onFollowUp: () => void;
-    onShare: () => void;
-    onOffer: () => void;
-    onMarkDead: () => void;
-  };
-}) {
-  const [open, setOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener('mousedown', onDoc);
-    return () => document.removeEventListener('mousedown', onDoc);
-  }, [open]);
-
-  const item = (text: string, fn: () => void, danger = false) => (
-    <button
-      onClick={() => { setOpen(false); fn(); }}
-      className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-800 ${danger ? 'text-red-600 dark:text-red-400' : ''}`}
-    >
-      {text}
-    </button>
-  );
-
-  return (
-    <div className="relative flex w-full" ref={menuRef}>
-      <button
-        onClick={onPrimary}
-        className="flex-1 px-4 py-2 rounded-l-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-semibold shadow-sm transition-colors"
-      >
-        {label}
-      </button>
-      <button
-        onClick={() => setOpen(!open)}
-        className="px-2 py-2 rounded-r-lg bg-primary-600 hover:bg-primary-700 text-white border-l border-primary-500 shadow-sm"
-        aria-label="More actions"
-      >
-        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-      </button>
-      {open && (
-        <div className="absolute top-full left-0 mt-1 w-56 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-lg py-1 z-30">
-          {item('Send SMS', quick.onSms)}
-          {item('Call seller', quick.onCall)}
-          {item('Start AI call', quick.onAiCall)}
-          {item('Schedule follow-up', quick.onFollowUp)}
-          {item('Send offer', quick.onOffer)}
-          {item('Share with partners', quick.onShare)}
-          <div className="h-px bg-gray-200 dark:bg-gray-700 my-1" />
-          {item('Mark dead', quick.onMarkDead, true)}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function RailMoreMenu({ lead, leadId, onLeadPatch }: { lead: any; leadId: string; onLeadPatch: (p: any) => void }) {
-  const [open, setOpen] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener('mousedown', onDoc);
-    return () => document.removeEventListener('mousedown', onDoc);
-  }, [open]);
-
-  const addressParts = {
-    address: lead.propertyAddress,
-    city: lead.propertyCity,
-    state: lead.propertyState,
-    zip: lead.propertyZip,
-  };
-
-  async function handleRefresh() {
-    if (refreshing) return;
-    setRefreshing(true);
-    try {
-      await leadsAPI.refreshPropertyDetails(leadId);
-      const refreshed = await leadsAPI.get(leadId);
-      onLeadPatch(refreshed.data);
-    } catch (err: any) {
-      alert(`Refresh failed: ${err?.message || 'Unknown error'}`);
-    } finally {
-      setRefreshing(false);
-      setOpen(false);
-    }
-  }
-
-  function handleCopyLink() {
-    const url = `${window.location.origin}/leads/${leadId}`;
-    navigator.clipboard.writeText(url).then(
-      () => {
-        setCopied(true);
-        setTimeout(() => {
-          setCopied(false);
-          setOpen(false);
-        }, 1200);
-      },
-      () => alert('Could not copy link'),
-    );
-  }
-
-  return (
-    <div className="relative" ref={menuRef}>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        title="More actions"
-        aria-label="More actions"
-        className="p-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300 transition-colors"
-      >
-        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-          <circle cx="5" cy="12" r="2" />
-          <circle cx="12" cy="12" r="2" />
-          <circle cx="19" cy="12" r="2" />
-        </svg>
-      </button>
-      {open && (
-        <div className="absolute top-full left-0 mt-1 w-52 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-lg py-1 z-30">
-          <a
-            href={zillowUrl(addressParts)}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={() => setOpen(false)}
-            className="block px-3 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-200"
-          >
-            Open in Zillow
-          </a>
-          <a
-            href={realtorUrl(addressParts)}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={() => setOpen(false)}
-            className="block px-3 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-200"
-          >
-            Open in Realtor.com
-          </a>
-          <div className="h-px bg-gray-200 dark:bg-gray-700 my-1" />
-          <button
-            type="button"
-            onClick={handleRefresh}
-            disabled={refreshing}
-            className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-200 disabled:opacity-50"
-          >
-            {refreshing ? 'Refreshing…' : 'Refresh from REAPI'}
-          </button>
-          <button
-            type="button"
-            onClick={handleCopyLink}
-            className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-200"
-          >
-            {copied ? 'Copied!' : 'Copy lead link'}
-          </button>
-        </div>
-      )}
-    </div>
   );
 }
 
