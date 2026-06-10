@@ -10,6 +10,7 @@ import { formatPhoneDisplay, getLeadDisplayName } from '@/lib/format';
 import Avatar from '@/components/Avatar';
 import AppShell from '@/components/AppShell';
 import { isKanbanV2, isListViewV2 } from '@/lib/flags';
+import { writeLeadQueue } from '@/lib/leadQueue';
 import KanbanV2Board from '@/components/kanbanV2/KanbanV2Board';
 import ListTable from '@/components/listViewV2/ListTable';
 import {
@@ -656,6 +657,17 @@ function LeadsPageInner() {
   const hasFilters = !!(search || bandFilter || statusFilter || sourceFilter || dateFilter ||
     staleFilter || arvFilter || dealFilter || stateFilter || assigneeFilter || tierFilter || showInactive || inDripFilter);
 
+  // Persist the visible queue so the lead detail page can offer prev/next
+  // navigation through this exact filtered + sorted list (morning-queue flow).
+  useEffect(() => {
+    if (viewMode !== 'table' || loading || leads.length === 0) return;
+    writeLeadQueue({
+      ids: leads.map((l: any) => l.id),
+      label: hasFilters ? 'Filtered leads' : 'All leads',
+      returnUrl: `${pathname}${window.location.search}`,
+    });
+  }, [leads, viewMode, loading, hasFilters, pathname]);
+
   // ─── Pipeline (Grid view) drag-and-drop ─────────────────────────────────────
   const onDragEnd = useCallback(async (result: DropResult) => {
     if (!result.destination) return;
@@ -692,7 +704,7 @@ function LeadsPageInner() {
 
   return (
     <AppShell>
-      <main className="max-w-screen-2xl mx-auto px-3 py-4 sm:px-6 sm:py-6 pb-16 md:pb-0 space-y-4">
+      <main className="px-3 py-4 sm:px-6 sm:py-6 pb-16 md:pb-0 space-y-4">
 
         {/* Page Header */}
         <div className="flex items-center justify-between">

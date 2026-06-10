@@ -26,7 +26,7 @@ interface LeadTabNavProps {
 export default function LeadTabNav({ leadId, activeTab }: LeadTabNavProps) {
   return (
     <div className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
-      <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="px-4 sm:px-6 lg:px-8">
         <nav className="flex space-x-4 text-sm overflow-x-auto scrollbar-none">
           {TABS.map((tab) => {
             const href =

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { formatDistanceToNow } from 'date-fns';
 import PropertyPhoto from '@/components/PropertyPhoto';
+import LeadQueueNav from '@/components/leadDetailV2/LeadQueueNav';
 import { getStage } from '@/lib/pipelineStages';
 import { getLeadAddressLine, getLeadDisplayName } from '@/lib/format';
 import { zillowUrl, realtorUrl } from '@/lib/externalLinks';
@@ -149,7 +150,7 @@ export default function LeadDetailHeader({ lead, onMarkDead, onRefreshFromReapi 
 
   return (
     <header className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
-      <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
+      <div className="px-4 sm:px-6 lg:px-8 py-3">
         <div className="flex items-start sm:items-center gap-3 sm:gap-4">
           <PropertyPhoto
             src={lead.primaryPhoto}
@@ -178,9 +179,15 @@ export default function LeadDetailHeader({ lead, onMarkDead, onRefreshFromReapi 
               lastTouched={lastTouched}
             />
           </div>
-          <div className="hidden sm:block">{actionCluster}</div>
+          <div className="hidden sm:flex items-center gap-3">
+            <LeadQueueNav leadId={lead.id} />
+            {actionCluster}
+          </div>
         </div>
-        <div className="mt-3 sm:hidden">{actionCluster}</div>
+        <div className="mt-3 flex items-center gap-3 sm:hidden">
+          {actionCluster}
+          <LeadQueueNav leadId={lead.id} />
+        </div>
       </div>
     </header>
   );

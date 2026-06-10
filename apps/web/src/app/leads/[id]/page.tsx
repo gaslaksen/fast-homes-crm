@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { leadsAPI, messagesAPI, compsAPI, settingsAPI, photosAPI, callsAPI, authAPI, tasksAPI, gmailAPI, campaignAPI, partnersAPI, sellerPortalAPI } from '@/lib/api';
+import { leadsAPI, messagesAPI, compsAPI, settingsAPI, photosAPI, callsAPI, authAPI, tasksAPI, gmailAPI, campaignAPI, partnersAPI, sellerPortalAPI, inboxAPI } from '@/lib/api';
 import ShareDealModal from '@/components/ShareDealModal';
 import ShareHistory from '@/components/ShareHistory';
 import DispoTab from '@/components/DispoTab';
@@ -14,6 +14,7 @@ import LeadDetailHeader from '@/components/leadDetailV2/LeadDetailHeader';
 import SellerPortalPanel from '@/components/SellerPortalPanel';
 import ScheduleFollowUpModal from '@/components/ScheduleFollowUpModal';
 import LeadOverviewV2 from '@/components/leadDetailV2/LeadOverviewV2';
+import LeadSummaryRail from '@/components/leadDetailV2/LeadSummaryRail';
 import { format } from 'date-fns';
 import { formatPhoneDisplay } from '@/lib/format';
 import CommunicationsTimeline from '@/components/communications/CommunicationsTimeline';
@@ -71,7 +72,8 @@ export default function LeadDetailPage() {
     if (tab && COMPS_TABS.includes(tab as any)) {
       return '__redirect__';
     }
-    return tab && DETAIL_TABS.includes(tab as any) ? tab : 'overview';
+    // Conversation-first: the CRM workflow lands on communications by default
+    return tab && DETAIL_TABS.includes(tab as any) ? tab : 'communications';
   });
 
   // Sync activeTab with URL changes (tab link clicks)
@@ -82,7 +84,7 @@ export default function LeadDetailPage() {
     } else if (tab && DETAIL_TABS.includes(tab as any)) {
       setActiveTab(tab);
     } else if (!tab) {
-      setActiveTab('overview');
+      setActiveTab('communications');
     }
   }, [searchParams, leadId, router]);
 
@@ -166,6 +168,8 @@ export default function LeadDetailPage() {
   const [arvInput, setArvInput] = useState('');
   const [savingArv, setSavingArv] = useState(false);
   const [sendingOutreach, setSendingOutreach] = useState(false);
+  const [savingStatus, setSavingStatus] = useState(false);
+  const [notesOpen, setNotesOpen] = useState(true);
   const replyIntentApplied = useRef(false);
   const offerIntentApplied = useRef(false);
   const portalLinkIntentApplied = useRef(false);
@@ -182,6 +186,8 @@ export default function LeadDetailPage() {
 
   useEffect(() => {
     loadLead();
+    // Viewing the thread counts as reading it (clears the inbox unread flag)
+    inboxAPI.markRead(leadId).catch(() => {});
     settingsAPI.getDrip().then((res) => setDemoMode(res.data.demoMode ?? false)).catch(() => {});
     authAPI.getTeam().then((res) => setTeamMembers(res.data || [])).catch(() => {});
     authAPI.getMe().then((res) => setCurrentUser(res.data)).catch(() => {});
@@ -448,6 +454,33 @@ export default function LeadDetailPage() {
 
   const openScheduleFollowUp = () => setShowFollowUpModal(true);
 
+  // Notes pane collapse state persists across leads
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem('dealcore:leadNotes:open');
+      if (stored !== null) setNotesOpen(stored === 'true');
+    } catch {}
+  }, []);
+  const toggleNotes = () => {
+    setNotesOpen((open) => {
+      try { window.localStorage.setItem('dealcore:leadNotes:open', String(!open)); } catch {}
+      return !open;
+    });
+  };
+
+  const handleStatusChange = async (newStatus: string) => {
+    setSavingStatus(true);
+    try {
+      await leadsAPI.update(leadId, { status: newStatus });
+      setLead((prev: any) => (prev ? { ...prev, status: newStatus } : prev));
+    } catch (err) {
+      console.error('Failed to update status', err);
+      alert('Failed to update stage');
+    } finally {
+      setSavingStatus(false);
+    }
+  };
+
   if (loading) {
     return <div className="min-h-screen flex items-center justify-center dark:bg-gray-950 dark:text-gray-100">Loading...</div>;
   }
@@ -462,6 +495,8 @@ export default function LeadDetailPage() {
 
   return (
     <AppShell>
+      {/* Full-height workspace: header + tabs pinned, panes scroll internally (desktop) */}
+      <div className="flex flex-col lg:h-[calc(100dvh-3.5rem)] lg:overflow-hidden">
       <LeadDetailHeader
         lead={lead}
         onMarkDead={() => {
@@ -484,7 +519,25 @@ export default function LeadDetailPage() {
       {/* Tab Nav */}
       <LeadTabNav leadId={leadId} activeTab={activeTab} />
 
-      <main className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      {/* Workspace: persistent summary rail | tab content | notes pane */}
+      <div className="flex-1 lg:min-h-0 lg:flex">
+
+      {/* Left rail: always-visible lead summary */}
+      <aside className="hidden lg:block w-72 xl:w-80 shrink-0 border-r border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 overflow-y-auto">
+        <LeadSummaryRail
+          lead={lead}
+          leadId={leadId}
+          leadTasks={leadTasks}
+          saving={{ status: savingStatus, tier: settingTier, autoRespond: togglingAutoRespond }}
+          onStatusChange={handleStatusChange}
+          onSetTier={handleSetTier}
+          onToggleAutoRespond={handleToggleAutoRespond}
+          onOpenFollowUp={openScheduleFollowUp}
+          onCompleteTask={handleCompleteTask}
+        />
+      </aside>
+
+      <main className={`flex-1 min-w-0 px-4 sm:px-6 py-6 ${activeTab === 'communications' ? 'lg:flex lg:flex-col lg:min-h-0' : 'lg:overflow-y-auto'}`}>
 
         {/* Overview Tab */}
         {activeTab === 'overview' && LEAD_DETAIL_V2 && (
@@ -1547,8 +1600,7 @@ export default function LeadDetailPage() {
 
         {/* Communications Tab */}
         {activeTab === 'communications' && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:h-[calc(100vh-12rem)]">
-            <div className="lg:col-span-2 flex flex-col gap-4 lg:min-h-0">
+          <div className="flex flex-col gap-4 lg:flex-1 lg:min-h-0">
 
               {/* AI paused banner — shown when a human has stepped in */}
               {!lead.autoRespond && !lead.doNotContact && lead.status !== 'DEAD' && (
@@ -1619,8 +1671,11 @@ export default function LeadDetailPage() {
               <div className="card flex flex-col lg:flex-1 lg:min-h-0 overflow-hidden">
                 <h2 className="text-xl font-bold mb-4 shrink-0">Communications</h2>
                 <div ref={timelineScrollRef} className="flex-1 lg:min-h-0 overflow-y-auto">
-                  <CommunicationsTimeline items={comms.timeline} />
-                  <div ref={messagesBottomRef} />
+                  {/* Cap thread width so bubbles stay readable on wide monitors */}
+                  <div className="max-w-4xl">
+                    <CommunicationsTimeline items={comms.timeline} />
+                    <div ref={messagesBottomRef} />
+                  </div>
                 </div>
               </div>
 
@@ -1691,21 +1746,17 @@ export default function LeadDetailPage() {
                   onSent={loadLead}
                 />
               </div>
-            </div>
-
-            {/* Right column: notes + AI call summaries (scrolls internally) */}
-            <div className="flex flex-col lg:min-h-0">
-              <div className="card lg:flex-1 lg:min-h-0 overflow-y-auto">
-                <NotesPanel
-                  notes={comms.notes}
-                  canAdd={!!currentUser}
-                  onAddNote={async (text) => {
-                    if (!currentUser) return;
-                    await leadsAPI.addNote(leadId, text, currentUser.id);
-                    await loadComms();
-                  }}
-                />
-              </div>
+            {/* Mobile fallback: notes inline below the conversation; desktop uses the right pane */}
+            <div className="lg:hidden card">
+              <NotesPanel
+                notes={comms.notes}
+                canAdd={!!currentUser}
+                onAddNote={async (text) => {
+                  if (!currentUser) return;
+                  await leadsAPI.addNote(leadId, text, currentUser.id);
+                  await loadComms();
+                }}
+              />
             </div>
           </div>
         )}
@@ -1904,6 +1955,50 @@ export default function LeadDetailPage() {
           </div>
         )}
       </main>
+
+      {/* Right notes pane (desktop, conversation view) */}
+      {activeTab === 'communications' && (notesOpen ? (
+        <aside className="hidden lg:flex w-80 xl:w-96 shrink-0 border-l border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 flex-col lg:min-h-0">
+          <div className="shrink-0 flex items-center justify-between px-4 py-2.5 border-b border-gray-100 dark:border-gray-800">
+            <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">Notes</span>
+            <button
+              type="button"
+              onClick={toggleNotes}
+              title="Collapse notes"
+              className="p-1 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-4">
+            <NotesPanel
+              notes={comms.notes}
+              canAdd={!!currentUser}
+              onAddNote={async (text) => {
+                if (!currentUser) return;
+                await leadsAPI.addNote(leadId, text, currentUser.id);
+                await loadComms();
+              }}
+            />
+          </div>
+        </aside>
+      ) : (
+        <div className="hidden lg:block shrink-0 border-l border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
+          <button
+            type="button"
+            onClick={toggleNotes}
+            title="Show notes"
+            className="h-full px-1.5 py-4 text-[11px] font-semibold text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors [writing-mode:vertical-rl]"
+          >
+            Notes
+          </button>
+        </div>
+      ))}
+
+      </div>{/* end workspace */}
+      </div>{/* end full-height shell */}
       <ScheduleFollowUpModal
         open={showFollowUpModal}
         onClose={() => setShowFollowUpModal(false)}

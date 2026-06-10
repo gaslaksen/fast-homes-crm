@@ -644,7 +644,7 @@ export default function CompsAnalysisPage() {
 
       {/* ═══════════════ VALUATION SECTION — Build 016: comps + ARV unified ═══════════════ */}
       {activeSection === 'valuation' && aiCurationFlag && lead && (
-        <div className="max-w-screen-2xl mx-auto">
+        <div>
           {/* Subject Property — hero photo + full data grid + ARV strip */}
           <SubjectPropertySection
             lead={lead as any}
@@ -793,7 +793,7 @@ export default function CompsAnalysisPage() {
 
       {/* ═══════════════ COMPS SECTION (legacy split-pane, flag-off) ═══════════════ */}
       {activeSection === 'valuation' && !aiCurationFlag && (
-        <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex flex-col lg:flex-row lg:h-[calc(100vh-12rem)]">
+        <div className="px-4 sm:px-6 lg:px-8 py-6 flex flex-col lg:flex-row lg:h-[calc(100vh-12rem)]">
           {/* ── LEFT PANE: Map + Subject Property ── */}
           <div className="lg:w-[45%] xl:w-[42%] flex flex-col border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 lg:overflow-y-auto rounded-l-lg">
             {/* Map */}
@@ -1079,7 +1079,7 @@ export default function CompsAnalysisPage() {
         </div>
       )}
 
-      <main className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <main className="px-4 sm:px-6 lg:px-8 py-6">
 
 
         {/* ═══════════════ DEAL MATH (Phase D) ═══════════════ */}
