@@ -47,3 +47,10 @@ uploads/
 # Misc
 *.pem
 .turbo
+
+# Local Claude session artifacts (per-developer working notes)
+.claude/docs/
+.claude/plans/
+
+# Retired comp-provider comparison exercise
+docs/arv-validation-set.md
