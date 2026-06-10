@@ -121,7 +121,7 @@ export default function CommunicationsTimeline({ items }: { items: TimelineItem[
           return (
             <div key={item.id} className="flex items-start gap-2 flex-row-reverse">
               <ActorAvatar actor={item.actor} />
-              <div className="p-3 rounded-lg max-w-[80%] bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-900/40">
+              <div className="p-3 rounded-lg max-w-[min(80%,36rem)] bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-900/40">
                 <div className="text-[10px] text-amber-700 dark:text-amber-400 mb-1 uppercase tracking-wide">
                   👁 Internal comment • {item.actor.name} • {format(new Date(item.at), 'MMM d, h:mm a')}
                 </div>
@@ -139,7 +139,7 @@ export default function CommunicationsTimeline({ items }: { items: TimelineItem[
             <div key={item.id} className={`flex items-start gap-2 ${rowDir}`}>
               <ActorAvatar actor={item.actor} />
               <div
-                className={`p-3 rounded-lg max-w-[80%] ${
+                className={`p-3 rounded-lg max-w-[min(80%,36rem)] ${
                   outbound ? 'bg-primary-50 dark:bg-primary-900/30' : 'bg-gray-100 dark:bg-gray-800'
                 }`}
               >
@@ -155,16 +155,16 @@ export default function CommunicationsTimeline({ items }: { items: TimelineItem[
           );
         }
 
-        // Email — distinct white card.
+        // Email — distinct white card, full width of the thread.
         if (item.kind === 'email') {
           const expanded = expandedId === item.id;
           return (
-            <div key={item.id} className={`flex items-start gap-2 ${rowDir}`}>
+            <div key={item.id} className="flex items-start gap-2">
               <ActorAvatar actor={item.actor} />
               <button
                 type="button"
                 onClick={() => setExpandedId(expanded ? null : item.id)}
-                className="text-left max-w-[85%] w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-sm p-3"
+                className="text-left flex-1 min-w-0 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-sm p-3"
               >
                 <div className="flex items-center gap-1.5 mb-1">
                   <ChannelBadge kind="email" />
@@ -191,11 +191,11 @@ export default function CommunicationsTimeline({ items }: { items: TimelineItem[
           );
         }
 
-        // Call — distinct white card with inline player.
+        // Call — compact card with inline player, right-justified like outbound texts.
         return (
-          <div key={item.id} className={`flex items-start gap-2 ${rowDir}`}>
+          <div key={item.id} className="flex items-start gap-2 flex-row-reverse">
             <ActorAvatar actor={item.actor} />
-            <div className="max-w-[85%] w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-sm p-3">
+            <div className="w-full max-w-md rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-sm p-3">
               <div className="flex items-center gap-1.5 mb-1.5">
                 <ChannelBadge kind="call" />
                 <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">Call</span>

@@ -3,9 +3,7 @@
 import Link from 'next/link';
 import Avatar from '@/components/Avatar';
 import DripEnvelopeIcon from '@/components/icons/DripEnvelopeIcon';
-import { computeMao, computeSpread, formatK } from '@/lib/dealMath';
 import StagePill from './StagePill';
-import EmptyCellChip from './EmptyCellChip';
 import TouchBadge from './TouchBadge';
 import { formatPhoneDisplay, getLeadDisplayName } from '@/lib/format';
 
@@ -77,27 +75,12 @@ function lastTouchCell(lastTouchedAt: string | null, status: string) {
   );
 }
 
-function spreadColor(n: number): string {
-  return n > 0
-    ? 'text-emerald-700 dark:text-emerald-400'
-    : n < 0
-    ? 'text-red-700 dark:text-red-400'
-    : 'text-gray-500';
-}
-
 export default function LeadRow({
   lead,
   selected,
   onToggleSelect,
   onRenderTier,
 }: Props) {
-  const maoInputs = {
-    maoPercent: lead.maoPercent,
-    repairCosts: lead.repairCosts,
-    assignmentFee: lead.assignmentFee,
-  };
-  const mao = computeMao(lead.arv, maoInputs);
-  const spread = computeSpread(lead.arv, lead.askingPrice, maoInputs);
   const isDead = lead.status === 'DEAD';
   const isInDrip =
     lead.dripSequence?.status === 'ACTIVE' ||
@@ -118,23 +101,28 @@ export default function LeadRow({
         className="h-3.5 w-3.5 rounded border-gray-300 dark:border-gray-600"
       />
 
-      {/* seller / property */}
+      {/* name */}
       <Link href={`/leads/${lead.id}`} className="min-w-0">
-        <div className="font-semibold text-sm text-gray-900 dark:text-gray-100 truncate group-hover:text-primary-700 dark:group-hover:text-primary-400">
+        <span className="block font-semibold text-sm text-gray-900 dark:text-gray-100 truncate group-hover:text-primary-700 dark:group-hover:text-primary-400">
           {getLeadDisplayName(lead)}
-        </div>
-        <div className="text-xs text-gray-400 dark:text-gray-500 truncate">
-          {lead.propertyAddress} · {lead.propertyCity}, {lead.propertyState}
+        </span>
+      </Link>
+
+      {/* address */}
+      <Link href={`/leads/${lead.id}`} className="min-w-0">
+        <span className="block text-sm text-gray-700 dark:text-gray-200 truncate">{lead.propertyAddress}</span>
+        <span className="block text-xs text-gray-400 dark:text-gray-500 truncate">
+          {lead.propertyCity}, {lead.propertyState}
           {lead.source && (
             <span className="ml-1 text-gray-300 dark:text-gray-600">
               · {SOURCE_LABELS[lead.source] || lead.source}
             </span>
           )}
-        </div>
+        </span>
       </Link>
 
-      {/* contact (phone + email stacked) */}
-      <div className="min-w-0 text-xs leading-tight">
+      {/* phone */}
+      <div className="min-w-0 text-xs">
         {lead.sellerPhone ? (
           <a
             href={`tel:${lead.sellerPhone}`}
@@ -147,11 +135,15 @@ export default function LeadRow({
         ) : (
           <span className="block text-gray-300 dark:text-gray-600">—</span>
         )}
+      </div>
+
+      {/* email */}
+      <div className="min-w-0 text-xs">
         {lead.sellerEmail ? (
           <a
             href={`mailto:${lead.sellerEmail}`}
             onClick={(e) => e.stopPropagation()}
-            className="block truncate text-gray-400 dark:text-gray-500 hover:text-primary-600 dark:hover:text-primary-400"
+            className="block truncate text-gray-500 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-400"
             title={lead.sellerEmail}
           >
             {lead.sellerEmail}
@@ -186,64 +178,6 @@ export default function LeadRow({
         {onRenderTier(lead)}
       </Link>
 
-      {/* ARV */}
-      <div className="text-right">
-        <EmptyCellChip
-          value={lead.arv}
-          formatted={formatK(lead.arv)}
-          cta="+ ARV"
-          href={`/leads/${lead.id}/comps-analysis?tab=valuation`}
-        />
-      </div>
-
-      {/* MAO */}
-      <div className="text-right">
-        <EmptyCellChip
-          value={mao}
-          formatted={formatK(mao)}
-          cta="+ MAO"
-          href={`/leads/${lead.id}/comps-analysis?tab=deal-analysis`}
-          colorClass="text-gray-700 dark:text-gray-300"
-          title={
-            mao == null
-              ? 'MAO requires ARV'
-              : `MAO = ARV × ${Math.round((lead.maoPercent ?? 70))}%${
-                  (lead.repairCosts ?? 0) > 0 ? ` − $${(lead.repairCosts ?? 0).toLocaleString()} repairs` : ''
-                }${
-                  (lead.assignmentFee ?? 0) > 0 ? ` − $${(lead.assignmentFee ?? 0).toLocaleString()} fee` : ''
-                }`
-          }
-        />
-      </div>
-
-      {/* Asking */}
-      <div className="text-right">
-        <EmptyCellChip
-          value={lead.askingPrice}
-          formatted={formatK(lead.askingPrice)}
-          cta="+ Ask"
-          href={`/leads/${lead.id}/edit#asking`}
-          colorClass="text-gray-600 dark:text-gray-400"
-        />
-      </div>
-
-      {/* Spread */}
-      <div className="text-right">
-        {spread != null ? (
-          <span className={`text-xs font-bold ${spreadColor(spread)}`}>
-            {spread >= 0 ? '+' : ''}
-            {formatK(spread)}
-          </span>
-        ) : (
-          <span
-            title="Spread requires MAO and Asking Price."
-            className="text-xs text-gray-300 dark:text-gray-600"
-          >
-            —
-          </span>
-        )}
-      </div>
-
       {/* Touches */}
       <Link href={`/leads/${lead.id}`} className="flex justify-center">
         <TouchBadge count={lead.touchCount ?? 0} />
@@ -257,5 +191,7 @@ export default function LeadRow({
   );
 }
 
+// Fluid columns: fr units share the page width so spacing adjusts with the
+// viewport instead of one column hogging the slack.
 export const LIST_GRID_COLS_CLASS =
-  'grid-cols-[auto_2fr_200px_170px_68px_72px_72px_72px_72px_60px_72px]';
+  'grid-cols-[28px_minmax(130px,1.1fr)_minmax(190px,1.6fr)_minmax(120px,0.9fr)_minmax(170px,1.4fr)_minmax(150px,1.2fr)_56px_64px_84px]';

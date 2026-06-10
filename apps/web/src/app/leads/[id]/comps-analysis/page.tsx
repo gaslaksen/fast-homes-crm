@@ -11,7 +11,7 @@ import type { AIArvCalculationResult, ValuationMode } from '@/lib/aiArvCalculati
 import AppShell from '@/components/AppShell';
 import LeadTabNav, { COMPS_TABS, DETAIL_TABS } from '@/components/LeadTabNav';
 import DealMathPanel from './deal-math/DealMathPanel';
-import LeadDetailHeader from '@/components/leadDetailV2/LeadDetailHeader';
+import LeadRail from '@/components/leadDetailV2/LeadRail';
 import CompRow from '@/components/CompRow';
 import SubjectPropertyCard from '@/components/SubjectPropertyCard';
 import CompsToolbar from '@/components/CompsToolbar';
@@ -617,27 +617,27 @@ export default function CompsAnalysisPage() {
 
   return (
     <AppShell>
-      <LeadDetailHeader
-        lead={lead}
-        onMarkDead={async () => {
-          try {
-            await leadsAPI.update(leadId, { status: 'DEAD' });
-          } catch (err) {
-            console.error('Failed to mark dead', err);
-          }
-          router.push(`/leads/${leadId}?tab=disposition`);
-        }}
-        onRefreshFromReapi={async () => {
-          try {
-            const res = await leadsAPI.refreshPropertyDetails(leadId);
-            const refreshed = await leadsAPI.get(leadId);
-            setLead(refreshed.data);
-            return { success: true, message: res?.data?.message };
-          } catch (err: any) {
-            return { success: false, message: err?.message || 'Refresh failed' };
-          }
-        }}
-      />
+      <div className="lg:flex">
+
+      {/* Left rail: shared lead workspace summary (sticky on desktop) */}
+      <aside className="hidden lg:block w-80 xl:w-96 shrink-0 border-r border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 lg:sticky lg:top-14 lg:h-[calc(100dvh-3.5rem)] lg:overflow-y-auto">
+        {lead && (
+          <LeadRail
+            lead={lead}
+            onLeadPatch={(patch: any) => setLead((prev: any) => (prev ? { ...prev, ...patch } : prev))}
+            onMarkDead={async () => {
+              try {
+                await leadsAPI.update(leadId, { status: 'DEAD' });
+              } catch (err) {
+                console.error('Failed to mark dead', err);
+              }
+              router.push(`/leads/${leadId}?tab=disposition`);
+            }}
+          />
+        )}
+      </aside>
+
+      <div className="flex-1 min-w-0">
 
       {/* Unified Tab Nav */}
       <LeadTabNav leadId={leadId} activeTab={activeSection} />
@@ -1421,6 +1421,8 @@ export default function CompsAnalysisPage() {
         </div>
       )}
 
+      </div>{/* end content column */}
+      </div>{/* end rail + content row */}
     </AppShell>
   );
 }

@@ -67,7 +67,7 @@ export default function ListTable({
         className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 overflow-auto"
         style={{ maxHeight: 'calc(100vh - 18rem)' }}
       >
-        <div className="min-w-[1000px]">
+        <div className="min-w-[1080px]">
         {/* Header — sticky within the scroll container so it stays put
             while the list body scrolls vertically. */}
         <div
@@ -79,18 +79,20 @@ export default function ListTable({
             onChange={onSelectAll}
             className="h-3.5 w-3.5 rounded border-gray-300 dark:border-gray-600"
           />
-          <Th label="Seller / Property" sortKey="address" current={sortKey} dir={sortDir} onSort={onSort} />
           <span className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 px-1">
-            Contact
+            Name
           </span>
-          <Th label="Stage"             sortKey="stage"   current={sortKey} dir={sortDir} onSort={onSort} />
-          <Th label="Tier"              sortKey="tier"    current={sortKey} dir={sortDir} onSort={onSort} align="center" />
-          <Th label="ARV"               sortKey="arv"     current={sortKey} dir={sortDir} onSort={onSort} align="right" />
-          <Th label="MAO"               sortKey="mao"     current={sortKey} dir={sortDir} onSort={onSort} align="right" />
-          <Th label="Asking"            sortKey="asking"  current={sortKey} dir={sortDir} onSort={onSort} align="right" />
-          <Th label="Spread"            sortKey="spread"  current={sortKey} dir={sortDir} onSort={onSort} align="right" />
-          <Th label="Touches"           sortKey="touches" current={sortKey} dir={sortDir} onSort={onSort} align="center" />
-          <Th label="Last Touch"        sortKey="touched" current={sortKey} dir={sortDir} onSort={onSort} align="right" />
+          <Th label="Address"    sortKey="address" current={sortKey} dir={sortDir} onSort={onSort} />
+          <span className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 px-1">
+            Phone
+          </span>
+          <span className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500 px-1">
+            Email
+          </span>
+          <Th label="Stage"      sortKey="stage"   current={sortKey} dir={sortDir} onSort={onSort} />
+          <Th label="Tier"       sortKey="tier"    current={sortKey} dir={sortDir} onSort={onSort} align="center" />
+          <Th label="Touches"    sortKey="touches" current={sortKey} dir={sortDir} onSort={onSort} align="center" />
+          <Th label="Last Touch" sortKey="touched" current={sortKey} dir={sortDir} onSort={onSort} align="right" />
         </div>
 
         {/* Body */}

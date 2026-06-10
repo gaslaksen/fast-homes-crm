@@ -10,13 +10,13 @@ import DispoTab from '@/components/DispoTab';
 import PhotoGallery from '@/components/PhotoGallery';
 import AppShell from '@/components/AppShell';
 import LeadTabNav, { DETAIL_TABS, COMPS_TABS } from '@/components/LeadTabNav';
-import LeadDetailHeader from '@/components/leadDetailV2/LeadDetailHeader';
+import LeadQueueNav from '@/components/leadDetailV2/LeadQueueNav';
 import SellerPortalPanel from '@/components/SellerPortalPanel';
 import ScheduleFollowUpModal from '@/components/ScheduleFollowUpModal';
 import LeadOverviewV2 from '@/components/leadDetailV2/LeadOverviewV2';
-import LeadSummaryRail from '@/components/leadDetailV2/LeadSummaryRail';
+import LeadRail from '@/components/leadDetailV2/LeadRail';
 import { format } from 'date-fns';
-import { formatPhoneDisplay } from '@/lib/format';
+import { formatPhoneDisplay, getLeadAddressLine, getLeadDisplayName } from '@/lib/format';
 import CommunicationsTimeline from '@/components/communications/CommunicationsTimeline';
 import NotesPanel from '@/components/communications/NotesPanel';
 import MessageComposer from '@/components/communications/MessageComposer';
@@ -168,7 +168,6 @@ export default function LeadDetailPage() {
   const [arvInput, setArvInput] = useState('');
   const [savingArv, setSavingArv] = useState(false);
   const [sendingOutreach, setSendingOutreach] = useState(false);
-  const [savingStatus, setSavingStatus] = useState(false);
   const [notesOpen, setNotesOpen] = useState(true);
   const replyIntentApplied = useRef(false);
   const offerIntentApplied = useRef(false);
@@ -468,18 +467,20 @@ export default function LeadDetailPage() {
     });
   };
 
-  const handleStatusChange = async (newStatus: string) => {
-    setSavingStatus(true);
-    try {
-      await leadsAPI.update(leadId, { status: newStatus });
-      setLead((prev: any) => (prev ? { ...prev, status: newStatus } : prev));
-    } catch (err) {
-      console.error('Failed to update status', err);
-      alert('Failed to update stage');
-    } finally {
-      setSavingStatus(false);
-    }
-  };
+  // Desktop: the workspace panes scroll internally; suppress the page-level
+  // scrollbar (a 1px calc rounding artifact otherwise keeps it visible).
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 1024px)');
+    const apply = () => {
+      document.documentElement.style.overflowY = mq.matches ? 'hidden' : '';
+    };
+    apply();
+    mq.addEventListener('change', apply);
+    return () => {
+      document.documentElement.style.overflowY = '';
+      mq.removeEventListener('change', apply);
+    };
+  }, []);
 
   if (loading) {
     return <div className="min-h-screen flex items-center justify-center dark:bg-gray-950 dark:text-gray-100">Loading...</div>;
@@ -495,47 +496,48 @@ export default function LeadDetailPage() {
 
   return (
     <AppShell>
-      {/* Full-height workspace: header + tabs pinned, panes scroll internally (desktop) */}
+      {/* Full-height workspace on desktop; panes scroll internally */}
       <div className="flex flex-col lg:h-[calc(100dvh-3.5rem)] lg:overflow-hidden">
-      <LeadDetailHeader
-        lead={lead}
-        onMarkDead={() => {
-          setShowDeadForm(true);
-          if (activeTab !== 'disposition') {
-            router.push(`/leads/${leadId}?tab=disposition`);
-          }
-        }}
-        onRefreshFromReapi={async () => {
-          try {
-            const res = await leadsAPI.refreshPropertyDetails(leadId);
-            await loadLead();
-            return { success: true, message: res?.data?.message };
-          } catch (err: any) {
-            return { success: false, message: err?.message || 'Refresh failed' };
-          }
-        }}
-      />
 
-      {/* Tab Nav */}
-      <LeadTabNav leadId={leadId} activeTab={activeTab} />
+      {/* Mobile identity strip (the rail is hidden below lg) */}
+      <div className="lg:hidden bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 px-4 py-3 flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="text-base font-semibold text-gray-900 dark:text-gray-100 leading-tight truncate">{getLeadDisplayName(lead)}</h1>
+          <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{getLeadAddressLine(lead)}</p>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {lead.sellerPhone && !lead.doNotContact && lead.status !== 'DEAD' && (
+            <a
+              href={`tel:${lead.sellerPhone}`}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-primary-600 hover:bg-primary-700 text-white"
+            >
+              📞 Call
+            </a>
+          )}
+          <LeadQueueNav leadId={leadId} />
+        </div>
+      </div>
 
-      {/* Workspace: persistent summary rail | tab content | notes pane */}
+      {/* Workspace: persistent rail | tabs + content | notes pane */}
       <div className="flex-1 lg:min-h-0 lg:flex">
 
-      {/* Left rail: always-visible lead summary */}
-      <aside className="hidden lg:block w-72 xl:w-80 shrink-0 border-r border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 overflow-y-auto">
-        <LeadSummaryRail
+      {/* Left rail: identity, actions, and always-visible lead summary */}
+      <aside className="hidden lg:block w-80 xl:w-96 shrink-0 border-r border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 overflow-y-auto">
+        <LeadRail
           lead={lead}
-          leadId={leadId}
-          leadTasks={leadTasks}
-          saving={{ status: savingStatus, tier: settingTier, autoRespond: togglingAutoRespond }}
-          onStatusChange={handleStatusChange}
-          onSetTier={handleSetTier}
-          onToggleAutoRespond={handleToggleAutoRespond}
-          onOpenFollowUp={openScheduleFollowUp}
-          onCompleteTask={handleCompleteTask}
+          onLeadPatch={(patch: any) => setLead((prev: any) => (prev ? { ...prev, ...patch } : prev))}
+          onMarkDead={() => {
+            setShowDeadForm(true);
+            if (activeTab !== 'disposition') {
+              router.push(`/leads/${leadId}?tab=disposition`);
+            }
+          }}
         />
       </aside>
+
+      {/* Center column: tabs + active tab content */}
+      <div className="flex-1 min-w-0 flex flex-col lg:min-h-0">
+      <LeadTabNav leadId={leadId} activeTab={activeTab} />
 
       <main className={`flex-1 min-w-0 px-4 sm:px-6 py-6 ${activeTab === 'communications' ? 'lg:flex lg:flex-col lg:min-h-0' : 'lg:overflow-y-auto'}`}>
 
@@ -1619,63 +1621,23 @@ export default function LeadDetailPage() {
                 </div>
               )}
 
-              {/* Action toolbar */}
-              <div className="card shrink-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  {lead.sellerPhone && (
-                    <span className="text-sm text-gray-600 dark:text-gray-400 mr-2">
-                      {formatPhoneDisplay(lead.sellerPhone)}
-                    </span>
-                  )}
-                  {lead.sellerPhone && !lead.doNotContact && (
-                    <a
-                      href={`tel:${lead.sellerPhone}`}
-                      className="btn btn-sm flex items-center gap-1"
-                      style={{ backgroundColor: '#16a34a', color: 'white' }}
-                    >
-                      📞 Call
-                    </a>
-                  )}
-                  <button
-                    onClick={handleAiCall}
-                    disabled={initiatingCall || lead.doNotContact}
-                    className="btn btn-sm flex items-center gap-1"
-                    style={{ backgroundColor: 'white', color: '#16a34a', border: '1px solid #16a34a', opacity: initiatingCall || lead.doNotContact ? 0.5 : 1 }}
-                  >
-                    {initiatingCall ? 'Initiating...' : '🤖 AI Call'}
-                  </button>
-                  {lead.messages?.length === 0 && !lead.doNotContact && (
+              {/* Unified communications timeline (scrolls internally) */}
+              <div className="card flex flex-col lg:flex-1 lg:min-h-0 overflow-hidden">
+                <div className="flex items-center justify-between mb-4 shrink-0">
+                  <h2 className="text-xl font-bold">Communications</h2>
+                  {comms.timeline.length === 0 && !lead.doNotContact && lead.status !== 'DEAD' && (
                     <button
-                      onClick={async () => {
-                        try {
-                          await leadsAPI.sendOutreach(lead.id);
-                          loadLead();
-                        } catch (e: any) {
-                          alert('Failed to send: ' + (e.response?.data?.message || e.message));
-                        }
-                      }}
-                      className="btn btn-sm text-xs border border-green-300 dark:border-green-800 text-green-700 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-950"
+                      onClick={handleSendOutreach}
+                      disabled={sendingOutreach}
+                      className="btn btn-sm text-xs border border-green-300 dark:border-green-800 text-green-700 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-950 disabled:opacity-50"
                     >
-                      📤 Send Initial Text
+                      {sendingOutreach ? 'Sending…' : '📤 Send Initial Text'}
                     </button>
                   )}
                 </div>
-                {lead.doNotContact && (
-                  <div className="mt-3 px-3 py-2 rounded bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 text-sm text-red-700 dark:text-red-400">
-                    This lead is on the Do Not Contact list. Calling and texting is disabled.
-                  </div>
-                )}
-              </div>
-
-              {/* Unified communications timeline (scrolls internally) */}
-              <div className="card flex flex-col lg:flex-1 lg:min-h-0 overflow-hidden">
-                <h2 className="text-xl font-bold mb-4 shrink-0">Communications</h2>
                 <div ref={timelineScrollRef} className="flex-1 lg:min-h-0 overflow-y-auto">
-                  {/* Cap thread width so bubbles stay readable on wide monitors */}
-                  <div className="max-w-4xl">
-                    <CommunicationsTimeline items={comms.timeline} />
-                    <div ref={messagesBottomRef} />
-                  </div>
+                  <CommunicationsTimeline items={comms.timeline} />
+                  <div ref={messagesBottomRef} />
                 </div>
               </div>
 
@@ -1955,6 +1917,7 @@ export default function LeadDetailPage() {
           </div>
         )}
       </main>
+      </div>{/* end center column */}
 
       {/* Right notes pane (desktop, conversation view) */}
       {activeTab === 'communications' && (notesOpen ? (

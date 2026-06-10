@@ -9,7 +9,7 @@ import PropertyPhoto from '@/components/PropertyPhoto';
 import { formatPhoneDisplay, getLeadDisplayName } from '@/lib/format';
 import Avatar from '@/components/Avatar';
 import AppShell from '@/components/AppShell';
-import { isKanbanV2, isListViewV2 } from '@/lib/flags';
+import { isKanbanV2 } from '@/lib/flags';
 import { writeLeadQueue } from '@/lib/leadQueue';
 import KanbanV2Board from '@/components/kanbanV2/KanbanV2Board';
 import ListTable from '@/components/listViewV2/ListTable';
@@ -486,7 +486,6 @@ function LeadsPageInner() {
   // List view v2: user id for localStorage-keyed sort pref
   const [currentUserId, setCurrentUserId] = useState<string | undefined>(undefined);
   useEffect(() => {
-    if (!isListViewV2()) return;
     authAPI.getMe()
       .then(r => setCurrentUserId(r.data?.id || r.data?.userId || 'anon'))
       .catch(() => setCurrentUserId('anon'));
@@ -496,7 +495,6 @@ function LeadsPageInner() {
   // Runs once after user id resolves; URL wins if it already specified a sort.
   const seededV2SortRef = useRef(false);
   useEffect(() => {
-    if (!isListViewV2()) return;
     if (!currentUserId || seededV2SortRef.current) return;
     seededV2SortRef.current = true;
     if (searchParams.get('sort')) return; // URL wins
@@ -518,7 +516,6 @@ function LeadsPageInner() {
 
   // List view v2: persist sort changes to localStorage
   useEffect(() => {
-    if (!isListViewV2()) return;
     if (!currentUserId) return;
     if (!seededV2SortRef.current) return;
     try {
@@ -968,8 +965,7 @@ function LeadsPageInner() {
             ))}
           </div>
 
-          {/* Desktop table — v2 behind NEXT_PUBLIC_LIST_VIEW_V2 */}
-          {isListViewV2() ? (
+          {/* Desktop table */}
             <ListTable
               leads={leads}
               selectedIds={selectedIds}
@@ -987,125 +983,6 @@ function LeadsPageInner() {
               }}
               renderTier={(l) => <TierBadge tier={(l.tier || 3) as 1 | 2 | 3} />}
             />
-          ) : (
-          <div className="hidden md:block overflow-x-auto -mx-6 px-6 md:mx-0 md:px-0">
-          <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden min-w-[900px]">
-            <div className="grid grid-cols-[auto_44px_2fr_110px_68px_72px_72px_72px_80px_60px_72px] gap-3 px-4 py-2.5 border-b border-gray-100 dark:border-gray-800 bg-gray-50/80 dark:bg-gray-800/80">
-              <input
-                type="checkbox"
-                checked={selectedIds.size === leads.length && leads.length > 0}
-                onChange={() =>
-                  selectedIds.size === leads.length
-                    ? setSelectedIds(new Set())
-                    : setSelectedIds(new Set(leads.map(l => l.id)))
-                }
-                className="h-3.5 w-3.5 rounded border-gray-300 dark:border-gray-600"
-              />
-              <div />
-              <SortHeader label="Property / Seller" sortKey="address" current={sortKey} dir={sortDir} onClick={handleSort} />
-              <SortHeader label="Stage"             sortKey="score"   current={sortKey} dir={sortDir} onClick={handleSort} />
-              <SortHeader label="Tier"              sortKey="tier"    current={sortKey} dir={sortDir} onClick={handleSort} />
-              <SortHeader label="Score"             sortKey="score"   current={sortKey} dir={sortDir} onClick={handleSort} />
-              <SortHeader label="ARV"               sortKey="arv"     current={sortKey} dir={sortDir} onClick={handleSort} />
-              <SortHeader label="Asking"            sortKey="asking"  current={sortKey} dir={sortDir} onClick={handleSort} />
-              <SortHeader label="Spread"            sortKey="arv"     current={sortKey} dir={sortDir} onClick={handleSort} />
-              <SortHeader label="Touches"           sortKey="touches" current={sortKey} dir={sortDir} onClick={handleSort} />
-              <SortHeader label="Last Touch"        sortKey="touched" current={sortKey} dir={sortDir} onClick={handleSort} />
-            </div>
-
-            <div className="divide-y divide-gray-50 dark:divide-gray-800">
-              {leads.map(lead => {
-                const s       = spread(lead);
-                const hoursAgo = lead.lastTouchedAt
-                  ? Math.round((Date.now() - new Date(lead.lastTouchedAt).getTime()) / 3600000)
-                  : null;
-                const stale = hoursAgo !== null && hoursAgo > 72 && !INACTIVE_STATUSES.includes(lead.status);
-                const tier  = (lead.tier || 2) as 1 | 2 | 3;
-
-                return (
-                  <div
-                    key={lead.id}
-                    className={`grid grid-cols-[auto_44px_2fr_110px_68px_72px_72px_72px_80px_60px_72px] gap-3 items-center px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors group ${
-                      selectedIds.has(lead.id) ? 'bg-primary-50/40 dark:bg-primary-950/40' : ''
-                    } ${lead.status === 'DEAD' ? 'opacity-60' : ''}`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={selectedIds.has(lead.id)}
-                      onChange={() => toggleSelect(lead.id)}
-                      onClick={e => e.stopPropagation()}
-                      className="h-3.5 w-3.5 rounded border-gray-300 dark:border-gray-600"
-                    />
-                    <PropertyPhoto
-                      src={lead.primaryPhoto}
-                      scoreBand={lead.scoreBand}
-                      address={lead.propertyAddress}
-                      size="sm"
-                    />
-                    <Link href={`/leads/${lead.id}`} className="min-w-0">
-                      <div className="font-semibold text-sm text-gray-900 dark:text-gray-100 truncate group-hover:text-primary-700 dark:group-hover:text-primary-400">
-                        {lead.propertyAddress}
-                      </div>
-                      <div className="text-xs text-gray-400 dark:text-gray-500 truncate">
-                        {lead.propertyCity}, {lead.propertyState} · {lead.sellerFirstName} {lead.sellerLastName}
-                        {lead.source && (
-                          <span className="ml-1 text-gray-300 dark:text-gray-600">· {SOURCE_LABELS[lead.source] || lead.source}</span>
-                        )}
-                      </div>
-                    </Link>
-                    <Link href={`/leads/${lead.id}`} className="flex items-center gap-1">
-                      <StatusBadge status={lead.status} />
-                      {lead.assignedTo && (
-                        <Avatar
-                          name={`${lead.assignedTo.firstName} ${lead.assignedTo.lastName}`}
-                          avatarUrl={lead.assignedTo.avatarUrl}
-                          size="sm"
-                        />
-                      )}
-                    </Link>
-                    <Link href={`/leads/${lead.id}`}>
-                      <TierBadge tier={tier} />
-                    </Link>
-                    <Link href={`/leads/${lead.id}`}>
-                      <ScorePill band={lead.scoreBand} score={lead.totalScore} />
-                    </Link>
-                    <Link href={lead.arv ? `/leads/${lead.id}` : `/leads/${lead.id}/comps-analysis`}>
-                      {lead.arv
-                        ? <span className="text-xs font-semibold text-gray-700 dark:text-gray-300">${(lead.arv / 1000).toFixed(0)}k</span>
-                        : <span className="text-[11px] text-primary-600 dark:text-primary-400 hover:underline">+ ARV</span>}
-                    </Link>
-                    <Link href={`/leads/${lead.id}`}>
-                      {lead.askingPrice
-                        ? <span className="text-xs text-gray-600 dark:text-gray-400">${(lead.askingPrice / 1000).toFixed(0)}k</span>
-                        : <span className="text-[11px] text-primary-600 dark:text-primary-400 hover:underline">+ Ask</span>}
-                    </Link>
-                    <Link href={`/leads/${lead.id}`}>
-                      {s !== null
-                        ? <span className={`text-xs font-bold ${s >= 0 ? 'text-green-600' : 'text-red-500'}`}>
-                            {s >= 0 ? '+' : ''}${(s / 1000).toFixed(0)}k
-                          </span>
-                        : <span className="text-xs text-gray-300 dark:text-gray-600">—</span>}
-                    </Link>
-                    <Link href={`/leads/${lead.id}`}>
-                      <span className="text-xs font-semibold text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 rounded-full px-1.5 py-0.5 min-w-[20px] text-center">
-                        {lead.touchCount ?? 0}
-                      </span>
-                    </Link>
-                    <Link href={`/leads/${lead.id}`}>
-                      {hoursAgo !== null
-                        ? <span className={`text-[11px] ${stale ? 'text-amber-600 font-semibold' : 'text-gray-400 dark:text-gray-500'}`}>
-                            {hoursAgo < 24 ? `${hoursAgo}h` : `${Math.round(hoursAgo / 24)}d`}
-                            {stale ? ' ⚠' : ''}
-                          </span>
-                        : <span className="text-[11px] text-gray-300 dark:text-gray-600">—</span>}
-                    </Link>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-          </div>
-          )}
 
           {/* Pagination */}
           {pagination.totalPages > 1 && (
