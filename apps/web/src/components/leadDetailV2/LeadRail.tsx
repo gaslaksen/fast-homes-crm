@@ -9,9 +9,8 @@ import Avatar from '@/components/Avatar';
 import LeadQueueNav from '@/components/leadDetailV2/LeadQueueNav';
 import ShareDealModal from '@/components/ShareDealModal';
 import ScheduleFollowUpModal from '@/components/ScheduleFollowUpModal';
-import { getStage } from '@/lib/pipelineStages';
-import { formatPhoneDisplay, getLeadAddressLine, getLeadDisplayName } from '@/lib/format';
-import { zillowUrl, googleMapsUrl } from '@/lib/externalLinks';
+import { formatPhoneDisplay, getLeadDisplayName } from '@/lib/format';
+import { zillowUrl, googleSearchUrl } from '@/lib/externalLinks';
 import { readLeadQueue } from '@/lib/leadQueue';
 
 const STAGE_OPTIONS: { value: string; label: string }[] = [
@@ -33,7 +32,41 @@ const STAGE_OPTIONS: { value: string; label: string }[] = [
   { value: 'DEAD', label: 'Dead' },
 ];
 
-// Tier styling mirrors PipelineTierCard on the Overview tab.
+const SOURCE_OPTIONS: { value: string; label: string }[] = [
+  { value: 'MANUAL', label: 'Manual' },
+  { value: 'PROPERTY_LEADS', label: 'Property Leads' },
+  { value: 'GOOGLE_ADS', label: 'Google Ads' },
+  { value: 'DEAL_SEARCH', label: 'Deal Search' },
+  { value: 'OTHER', label: 'Other' },
+];
+
+// Pill styling mirrors HeroStrip on the Overview tab so the rail reads the same.
+const TIER_CONFIG: Record<number, { label: string; cls: string }> = {
+  1: { label: 'T1 Contract Now', cls: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 border-green-300 dark:border-green-800' },
+  2: { label: 'T2 Keep Pursuing', cls: 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 border-yellow-300 dark:border-yellow-800' },
+  3: { label: 'T3 Cold', cls: 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border-gray-300 dark:border-gray-700' },
+};
+
+const STAGE_META: Record<string, { label: string; cls: string }> = {
+  NEW:                { label: 'New',             cls: 'bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800' },
+  ATTEMPTING_CONTACT: { label: 'Attempting',      cls: 'bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800' },
+  QUALIFYING:         { label: 'Qualifying',      cls: 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 border-purple-200 dark:border-purple-800' },
+  QUALIFIED:          { label: 'Qualified',       cls: 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 border-purple-200 dark:border-purple-800' },
+  OFFER_SENT:         { label: 'Offer Sent',      cls: 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 border-orange-200 dark:border-orange-800' },
+  NEGOTIATING:        { label: 'Negotiating',     cls: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-800' },
+  UNDER_CONTRACT:     { label: 'Under Contract',  cls: 'bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-400 border-teal-200 dark:border-teal-800' },
+  CLOSING:            { label: 'Closing',         cls: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800' },
+  ACQUIRED:           { label: 'Acquired',        cls: 'bg-cyan-100 dark:bg-cyan-900/30 text-cyan-700 dark:text-cyan-400 border-cyan-200 dark:border-cyan-800' },
+  SOLD:               { label: 'Sold',            cls: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 border-green-200 dark:border-green-800' },
+  SOLD_LOSS:          { label: 'Sold (Loss)',     cls: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 border-red-200 dark:border-red-800' },
+  HELD_LONG_TERM:     { label: 'Held',            cls: 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700' },
+  CANCELLED:          { label: 'Cancelled',       cls: 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-700' },
+  CLOSED_LOST:        { label: 'Closed Lost',     cls: 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-700' },
+  NURTURE:            { label: 'Nurture',         cls: 'bg-sky-100 dark:bg-sky-900/30 text-sky-700 dark:text-sky-400 border-sky-200 dark:border-sky-800' },
+  DEAD:               { label: '💀 Dead',         cls: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 border-red-300 dark:border-red-800' },
+};
+
+// Tier button styling mirrors PipelineTierCard on the Overview tab.
 const TIERS: { value: 1 | 2 | 3; label: string; desc: string; cls: string }[] = [
   { value: 1, label: 'T1', desc: 'Contract now', cls: 'border-green-300 dark:border-green-800 bg-green-50 dark:bg-green-950/40 text-green-700 dark:text-green-300' },
   { value: 2, label: 'T2', desc: 'Keep pursuing', cls: 'border-yellow-300 dark:border-yellow-800 bg-yellow-50 dark:bg-yellow-950/40 text-yellow-700 dark:text-yellow-300' },
@@ -65,6 +98,8 @@ export default function LeadRail({ lead, onLeadPatch, onMarkDead }: Props) {
   const [showFollowUpModal, setShowFollowUpModal] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
   const [backHref, setBackHref] = useState('/leads');
+  const [aiInsight, setAiInsight] = useState<string | null>(lead.aiInsight ?? null);
+  const [insightLoading, setInsightLoading] = useState(false);
 
   useEffect(() => {
     leadsAPI.getTasks(leadId).then((res) => setTasks(res.data || [])).catch(() => {});
@@ -75,6 +110,31 @@ export default function LeadRail({ lead, onLeadPatch, onMarkDead }: Props) {
     const queue = readLeadQueue();
     if (queue?.returnUrl) setBackHref(queue.returnUrl);
   }, []);
+
+  // Same AI insight the Overview hero shows.
+  useEffect(() => {
+    let cancelled = false;
+    setInsightLoading(true);
+    leadsAPI.getAiInsight(leadId).then((res) => {
+      if (cancelled) return;
+      setAiInsight(res.data?.insight ?? null);
+    }).catch(() => {}).finally(() => {
+      if (!cancelled) setInsightLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [leadId, lead.status, lead.tier]);
+
+  const regenerateInsight = async () => {
+    setInsightLoading(true);
+    try {
+      const res = await leadsAPI.getAiInsight(leadId, true);
+      setAiInsight(res.data?.insight ?? null);
+    } catch {
+      // keep prior insight
+    } finally {
+      setInsightLoading(false);
+    }
+  };
 
   const refreshTasks = () => leadsAPI.getTasks(leadId).then((res) => setTasks(res.data || [])).catch(() => {});
 
@@ -191,11 +251,18 @@ export default function LeadRail({ lead, onLeadPatch, onMarkDead }: Props) {
     );
   };
 
+  // Inline field editing: PATCH one field, merge into page state.
+  const saveField = (field: string) => async (value: string) => {
+    const payload: any = { [field]: value || null };
+    await leadsAPI.update(leadId, payload);
+    onLeadPatch(payload);
+  };
+
   const displayName = getLeadDisplayName(lead);
-  const addressLine = getLeadAddressLine(lead);
   const isDead = lead.status === 'DEAD';
   const contactDisabled = !lead.sellerPhone || !!lead.doNotContact || isDead;
-  const stageMeta = getStage(lead.status);
+  const tierCfg = lead.tier ? TIER_CONFIG[lead.tier] : null;
+  const stageMeta = STAGE_META[lead.status] || { label: lead.status, cls: 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700' };
   const addressParts = {
     address: lead.propertyAddress,
     city: lead.propertyCity,
@@ -234,109 +301,48 @@ export default function LeadRail({ lead, onLeadPatch, onMarkDead }: Props) {
         <h1 className="min-w-0 flex-1 text-lg font-bold text-gray-900 dark:text-gray-100 leading-tight truncate" title={displayName}>
           {displayName}
         </h1>
-        {isDead && (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 text-[11px] font-semibold border border-red-300 dark:border-red-800 shrink-0">
-            💀 DEAD
-          </span>
-        )}
       </div>
 
-      {/* Pipeline card — the CRM state lives right under the name */}
-      <div className="space-y-3">
-        <div>
-          <RailLabel>Stage</RailLabel>
-          <select
-            value={lead.status}
-            disabled={savingStatus}
-            onChange={(e) => handleStatusChange(e.target.value)}
-            className={`mt-1 w-full text-sm font-semibold px-2 py-1.5 rounded-lg border cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary-400 disabled:opacity-50 ${
-              stageMeta?.color || 'bg-gray-50 dark:bg-gray-950 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-700'
-            }`}
-          >
-            {STAGE_OPTIONS.map((s) => (
-              <option key={s.value} value={s.value}>{s.label}</option>
-            ))}
-          </select>
-        </div>
-
-        <div>
-          <RailLabel>Deal Tier</RailLabel>
-          <div className="mt-1 grid grid-cols-3 gap-1.5">
-            {TIERS.map((t) => (
-              <button
-                key={t.value}
-                type="button"
-                onClick={() => handleSetTier(lead.tier === t.value ? null : t.value)}
-                disabled={savingTier}
-                title={t.desc}
-                className={`px-2 py-1.5 rounded-lg border-2 text-xs font-bold transition-colors disabled:opacity-50 ${
-                  lead.tier === t.value ? t.cls : 'border-gray-200 dark:border-gray-700 text-gray-400 hover:border-gray-400'
-                }`}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div>
-          <RailLabel>Assigned to</RailLabel>
-          {lead.assignedTo ? (
-            <div className="mt-1 flex items-center justify-between gap-2">
-              <span className="flex items-center gap-1.5 min-w-0">
-                <Avatar
-                  name={`${lead.assignedTo.firstName ?? ''} ${lead.assignedTo.lastName ?? ''}`}
-                  avatarUrl={lead.assignedTo.avatarUrl}
-                  size="sm"
-                />
-                <span className="text-gray-800 dark:text-gray-200 truncate">
-                  {lead.assignedTo.firstName} {lead.assignedTo.lastName}
-                  {lead.assignedStage && <span className="text-gray-400 dark:text-gray-500"> · {lead.assignedStage}</span>}
-                </span>
-              </span>
-              <button
-                onClick={handleUnassign}
-                disabled={assignSaving}
-                className="text-xs text-red-600 dark:text-red-400 hover:underline disabled:opacity-50 shrink-0"
-              >
-                Unassign
-              </button>
-            </div>
-          ) : (
-            <div className="mt-1 flex items-center gap-2">
-              <select
-                value={assignUserId}
-                onChange={(e) => setAssignUserId(e.target.value)}
-                className="flex-1 min-w-0 text-sm px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 dark:text-gray-100"
-              >
-                <option value="">— Select member —</option>
-                {teamMembers.map((m: any) => (
-                  <option key={m.id} value={m.id}>{m.firstName} {m.lastName}</option>
-                ))}
-              </select>
-              <button
-                onClick={handleAssign}
-                disabled={!assignUserId || assignSaving}
-                className="text-xs px-3 py-1.5 rounded-lg bg-primary-600 text-white font-semibold hover:bg-primary-700 disabled:opacity-50 shrink-0"
-              >
-                {assignSaving ? '…' : 'Assign'}
-              </button>
-            </div>
-          )}
-        </div>
-
-        <div className="flex items-center justify-between gap-2">
-          <RailLabel>Touches</RailLabel>
-          <span className="flex items-baseline gap-1.5">
-            <span className="text-xs font-semibold text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 rounded-full px-2 py-0.5">
-              {lead.touchCount ?? 0}
+      {/* Status pills + touch summary — read-only, Overview hero style */}
+      <div className="space-y-1">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {tierCfg && (
+            <span className={`inline-flex items-center px-2 py-0.5 rounded-full border text-[11px] font-semibold ${tierCfg.cls}`}>
+              {tierCfg.label}
             </span>
-            {lastTouched && (
-              <span className="text-[11px] text-gray-400 dark:text-gray-500">last {lastTouched}</span>
-            )}
+          )}
+          <span className={`inline-flex items-center px-2 py-0.5 rounded-full border text-[11px] font-semibold ${stageMeta.cls}`}>
+            {stageMeta.label}
           </span>
         </div>
+        <div className="text-xs text-gray-500 dark:text-gray-400">
+          {lastTouched ? `Last touched ${lastTouched}` : 'Never touched'}
+        </div>
+        <div className="text-[11px] text-gray-400 dark:text-gray-500">
+          {lead.touchCount ?? 0} {lead.touchCount === 1 ? 'touch' : 'touches'}
+        </div>
       </div>
+
+      {/* AI insight — same content as the Overview hero */}
+      {(aiInsight || insightLoading) && (
+        <div className="rounded-lg border border-purple-100 dark:border-purple-900/40 bg-purple-50/50 dark:bg-purple-950/20 px-3 py-2">
+          <div className="flex items-center justify-between mb-0.5">
+            <span className="text-[10px] uppercase tracking-wide font-semibold text-purple-500 dark:text-purple-400">✨ AI Insight</span>
+            <button
+              type="button"
+              onClick={regenerateInsight}
+              disabled={insightLoading}
+              title="Regenerate insight"
+              className="text-purple-400 hover:text-purple-600 dark:hover:text-purple-300 disabled:opacity-40"
+            >
+              <svg className={`w-3 h-3 ${insightLoading ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+            </button>
+          </div>
+          <p className="text-xs text-gray-700 dark:text-gray-300 leading-relaxed">
+            {insightLoading && !aiInsight ? 'Generating…' : aiInsight}
+          </p>
+        </div>
+      )}
 
       {/* Quick actions — same compact icon buttons as the Overview Action Bar */}
       <div className="space-y-2 border-t border-gray-100 dark:border-gray-800 pt-3">
@@ -395,18 +401,49 @@ export default function LeadRail({ lead, onLeadPatch, onMarkDead }: Props) {
             View on Zillow
           </a>
           <a
-            href={googleMapsUrl(addressParts)}
+            href={googleSearchUrl(addressParts)}
             target="_blank"
             rel="noopener noreferrer"
             className="flex-1 inline-flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-colors"
           >
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><circle cx="11" cy="11" r="7" /><path strokeLinecap="round" d="M21 21l-4.35-4.35" /></svg>
             View on Google
           </a>
         </div>
       </div>
 
-      <RailSection title={`Follow-Ups${openTasks.length ? ` (${openTasks.length})` : ''}`}>
+      <RailSection title="Contact" storageKey="contact" defaultOpen>
+        <dl className="space-y-1 text-[13px]">
+          <EditableRow label="First" value={lead.sellerFirstName} required onSave={saveField('sellerFirstName')} />
+          <EditableRow label="Last" value={lead.sellerLastName} onSave={saveField('sellerLastName')} />
+          <EditableRow
+            label="Phone"
+            value={lead.sellerPhone}
+            displayValue={lead.sellerPhone ? formatPhoneDisplay(lead.sellerPhone) : undefined}
+            href={lead.sellerPhone && !lead.doNotContact ? `tel:${lead.sellerPhone}` : undefined}
+            required
+            onSave={saveField('sellerPhone')}
+          />
+          <EditableRow
+            label="Email"
+            value={lead.sellerEmail}
+            href={lead.sellerEmail ? `mailto:${lead.sellerEmail}` : undefined}
+            onSave={saveField('sellerEmail')}
+          />
+          <EditableRow label="Street" value={lead.propertyAddress} onSave={saveField('propertyAddress')} />
+          <EditableRow label="City" value={lead.propertyCity} onSave={saveField('propertyCity')} />
+          <EditableRow label="State" value={lead.propertyState} onSave={saveField('propertyState')} />
+          <EditableRow label="Zip" value={lead.propertyZip} onSave={saveField('propertyZip')} />
+          <EditableRow label="Source" value={lead.source} options={SOURCE_OPTIONS} onSave={saveField('source')} />
+        </dl>
+        {lead.doNotContact && (
+          <div className="mt-2 px-2 py-1.5 rounded bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 text-xs text-red-700 dark:text-red-400">
+            Do Not Contact
+          </div>
+        )}
+      </RailSection>
+
+      <RailSection title={`Follow-Ups${openTasks.length ? ` (${openTasks.length})` : ''}`} storageKey="followups">
         {openTasks.length > 0 ? (
           <div className="space-y-1.5">
             {openTasks.map((task: any) => (
@@ -440,35 +477,91 @@ export default function LeadRail({ lead, onLeadPatch, onMarkDead }: Props) {
         </button>
       </RailSection>
 
-      <RailSection title="Contact">
-        <dl className="space-y-1 text-[13px]">
-          <InfoRow label="Address">{addressLine || '—'}</InfoRow>
-          <InfoRow label="Phone">
-            {lead.sellerPhone ? (
-              lead.doNotContact ? formatPhoneDisplay(lead.sellerPhone) : (
-                <a href={`tel:${lead.sellerPhone}`} className="hover:text-primary-600 hover:underline">
-                  {formatPhoneDisplay(lead.sellerPhone)}
-                </a>
-              )
-            ) : '—'}
-          </InfoRow>
-          <InfoRow label="Email">
-            {lead.sellerEmail ? (
-              <a href={`mailto:${lead.sellerEmail}`} className="hover:text-primary-600 hover:underline truncate" title={lead.sellerEmail}>
-                {lead.sellerEmail}
-              </a>
-            ) : '—'}
-          </InfoRow>
-          <InfoRow label="Source">{lead.source || '—'}</InfoRow>
-        </dl>
-        {lead.doNotContact && (
-          <div className="mt-2 px-2 py-1.5 rounded bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 text-xs text-red-700 dark:text-red-400">
-            Do Not Contact
+      <RailSection title="Pipeline" storageKey="pipeline">
+        <div className="space-y-3">
+          <div>
+            <RailLabel>Stage</RailLabel>
+            <select
+              value={lead.status}
+              disabled={savingStatus}
+              onChange={(e) => handleStatusChange(e.target.value)}
+              className="mt-1 w-full text-sm px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary-400 disabled:opacity-50"
+            >
+              {STAGE_OPTIONS.map((s) => (
+                <option key={s.value} value={s.value}>{s.label}</option>
+              ))}
+            </select>
           </div>
-        )}
+
+          <div>
+            <RailLabel>Deal Tier</RailLabel>
+            <div className="mt-1 grid grid-cols-3 gap-1.5">
+              {TIERS.map((t) => (
+                <button
+                  key={t.value}
+                  type="button"
+                  onClick={() => handleSetTier(lead.tier === t.value ? null : t.value)}
+                  disabled={savingTier}
+                  title={t.desc}
+                  className={`px-2 py-1.5 rounded-lg border-2 text-xs font-bold transition-colors disabled:opacity-50 ${
+                    lead.tier === t.value ? t.cls : 'border-gray-200 dark:border-gray-700 text-gray-400 hover:border-gray-400'
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <RailLabel>Assigned to</RailLabel>
+            {lead.assignedTo ? (
+              <div className="mt-1 flex items-center justify-between gap-2">
+                <span className="flex items-center gap-1.5 min-w-0">
+                  <Avatar
+                    name={`${lead.assignedTo.firstName ?? ''} ${lead.assignedTo.lastName ?? ''}`}
+                    avatarUrl={lead.assignedTo.avatarUrl}
+                    size="sm"
+                  />
+                  <span className="text-gray-800 dark:text-gray-200 truncate">
+                    {lead.assignedTo.firstName} {lead.assignedTo.lastName}
+                    {lead.assignedStage && <span className="text-gray-400 dark:text-gray-500"> · {lead.assignedStage}</span>}
+                  </span>
+                </span>
+                <button
+                  onClick={handleUnassign}
+                  disabled={assignSaving}
+                  className="text-xs text-red-600 dark:text-red-400 hover:underline disabled:opacity-50 shrink-0"
+                >
+                  Unassign
+                </button>
+              </div>
+            ) : (
+              <div className="mt-1 flex items-center gap-2">
+                <select
+                  value={assignUserId}
+                  onChange={(e) => setAssignUserId(e.target.value)}
+                  className="flex-1 min-w-0 text-sm px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 dark:text-gray-100"
+                >
+                  <option value="">— Select member —</option>
+                  {teamMembers.map((m: any) => (
+                    <option key={m.id} value={m.id}>{m.firstName} {m.lastName}</option>
+                  ))}
+                </select>
+                <button
+                  onClick={handleAssign}
+                  disabled={!assignUserId || assignSaving}
+                  className="text-xs px-3 py-1.5 rounded-lg bg-primary-600 text-white font-semibold hover:bg-primary-700 disabled:opacity-50 shrink-0"
+                >
+                  {assignSaving ? '…' : 'Assign'}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
       </RailSection>
 
-      <RailSection title="Valuation">
+      <RailSection title="Valuation" storageKey="valuation">
         <div className="space-y-1.5">
           <RailStat
             label="ARV"
@@ -502,7 +595,7 @@ export default function LeadRail({ lead, onLeadPatch, onMarkDead }: Props) {
         </Link>
       </RailSection>
 
-      <RailSection title="CAMP Discovery">
+      <RailSection title="CAMP Discovery" storageKey="camp">
         <div className="grid grid-cols-2 gap-1.5">
           <CampChip label="Priority" value={lead.timeline ? `${lead.timeline} days` : null} complete={lead.campPriorityComplete} />
           <CampChip label="Money" value={lead.askingPrice ? `$${lead.askingPrice.toLocaleString()}` : null} complete={lead.campMoneyComplete} />
@@ -534,11 +627,113 @@ export default function LeadRail({ lead, onLeadPatch, onMarkDead }: Props) {
   );
 }
 
-function InfoRow({ label, children }: { label: string; children: React.ReactNode }) {
+// Click-to-edit field row: pencil on hover, Enter/blur saves, Esc cancels.
+function EditableRow({
+  label,
+  value,
+  displayValue,
+  href,
+  required,
+  options,
+  onSave,
+}: {
+  label: string;
+  value: string | null | undefined;
+  displayValue?: string;
+  href?: string;
+  required?: boolean;
+  options?: { value: string; label: string }[];
+  onSave: (value: string) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const begin = () => {
+    setDraft(value || '');
+    setEditing(true);
+  };
+
+  const commit = async (next?: string) => {
+    const trimmed = (next ?? draft).trim();
+    if (trimmed === (value || '') || (required && !trimmed)) {
+      setEditing(false);
+      return;
+    }
+    setSaving(true);
+    try {
+      await onSave(trimmed);
+    } catch (err) {
+      console.error(`Failed to save ${label}`, err);
+      alert(`Failed to save ${label}`);
+    } finally {
+      setSaving(false);
+      setEditing(false);
+    }
+  };
+
+  const shown = displayValue || (options ? options.find((o) => o.value === value)?.label || value : value);
+
   return (
-    <div className="flex items-baseline gap-2">
-      <dt className="w-16 shrink-0 text-[11px] uppercase tracking-wide font-semibold text-gray-400 dark:text-gray-500">{label}</dt>
-      <dd className="min-w-0 flex-1 text-gray-800 dark:text-gray-200 truncate">{children}</dd>
+    <div className="group flex items-baseline gap-2">
+      <dt className="w-14 shrink-0 text-[11px] uppercase tracking-wide font-semibold text-gray-400 dark:text-gray-500">{label}</dt>
+      <dd className="min-w-0 flex-1">
+        {editing ? (
+          options ? (
+            <select
+              autoFocus
+              value={draft}
+              disabled={saving}
+              onChange={(e) => commit(e.target.value)}
+              onBlur={() => setEditing(false)}
+              className="w-full text-[13px] px-1.5 py-0.5 rounded border border-primary-300 dark:border-primary-700 bg-white dark:bg-gray-800 dark:text-gray-100 focus:outline-none focus:ring-1 focus:ring-primary-400"
+            >
+              <option value="">—</option>
+              {options.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          ) : (
+            <input
+              autoFocus
+              value={draft}
+              disabled={saving}
+              onChange={(e) => setDraft(e.target.value)}
+              onBlur={() => commit()}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') commit();
+                if (e.key === 'Escape') setEditing(false);
+              }}
+              className="w-full text-[13px] px-1.5 py-0.5 rounded border border-primary-300 dark:border-primary-700 bg-white dark:bg-gray-800 dark:text-gray-100 focus:outline-none focus:ring-1 focus:ring-primary-400"
+            />
+          )
+        ) : (
+          <span className="flex items-center gap-1 min-w-0">
+            {href && value ? (
+              <a href={href} className="truncate text-gray-800 dark:text-gray-200 hover:text-primary-600 hover:underline" title={String(shown)}>
+                {shown}
+              </a>
+            ) : (
+              <button
+                type="button"
+                onClick={begin}
+                title={`Edit ${label.toLowerCase()}`}
+                className={`truncate text-left ${value ? 'text-gray-800 dark:text-gray-200' : 'text-gray-300 dark:text-gray-600'}`}
+              >
+                {shown || '—'}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={begin}
+              title={`Edit ${label.toLowerCase()}`}
+              className="opacity-0 group-hover:opacity-100 shrink-0 text-gray-300 hover:text-primary-600 dark:text-gray-600 dark:hover:text-primary-400 transition-opacity"
+            >
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+            </button>
+          </span>
+        )}
+      </dd>
     </div>
   );
 }
@@ -566,9 +761,37 @@ function RailLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
-function RailSection({ title, children }: { title: string; children: React.ReactNode }) {
+// Collapsible section; open state persists per section in localStorage.
+function RailSection({
+  title,
+  storageKey,
+  defaultOpen = false,
+  children,
+}: {
+  title: string;
+  storageKey: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(`dealcore:rail:${storageKey}`);
+      if (stored !== null) setOpen(stored === 'true');
+    } catch {}
+  }, [storageKey]);
+
+  const handleToggle = (e: React.SyntheticEvent<HTMLDetailsElement>) => {
+    const isOpen = e.currentTarget.open;
+    setOpen(isOpen);
+    try {
+      window.localStorage.setItem(`dealcore:rail:${storageKey}`, String(isOpen));
+    } catch {}
+  };
+
   return (
-    <details open className="border-t border-gray-100 dark:border-gray-800 pt-3 group">
+    <details open={open} onToggle={handleToggle} className="border-t border-gray-100 dark:border-gray-800 pt-3 group">
       <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden flex items-center gap-1.5 mb-2">
         <svg
           className="w-3 h-3 text-gray-400 transition-transform group-open:rotate-90"

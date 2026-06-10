@@ -46,6 +46,13 @@ export function googleMapsUrl(p: PropertyAddress): string {
   return `https://www.google.com/maps/search/${q}`;
 }
 
+// Plain Google results for the address — lets the user pick maps, Zillow,
+// Redfin, county records, or whatever else ranks for the property.
+export function googleSearchUrl(p: PropertyAddress): string {
+  const q = encodeURIComponent(joinAddress(p));
+  return `https://www.google.com/search?q=${q}`;
+}
+
 export function buildExternalLinks(p: PropertyAddress): ExternalLinks {
   return {
     zillow: zillowUrl(p),
