@@ -4,12 +4,14 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 
 const TABS = [
+  // Conversations leads: the workspace is conversation-first. The key stays
+  // 'communications' so existing deep links and ?tab= URLs keep working.
+  { key: 'communications', label: 'Conversations',   page: 'detail' },
   { key: 'overview',       label: 'Overview',        page: 'detail' },
   { key: 'valuation',      label: 'Valuation',       page: 'comps-analysis' },
   { key: 'deal-math',      label: 'Deal Math',       page: 'comps-analysis' },
   { key: 'deal-intel',     label: 'Deal Intel',      page: 'comps-analysis' },
   { key: 'disposition',    label: 'Disposition',     page: 'detail' },
-  { key: 'communications', label: 'Communications',  page: 'detail' },
   { key: 'activity',       label: 'Activity',        page: 'detail' },
 ] as const;
 

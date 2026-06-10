@@ -1624,7 +1624,7 @@ export default function LeadDetailPage() {
               {/* Unified communications timeline (scrolls internally) */}
               <div className="card flex flex-col lg:flex-1 lg:min-h-0 overflow-hidden">
                 <div className="flex items-center justify-between mb-4 shrink-0">
-                  <h2 className="text-xl font-bold">Communications</h2>
+                  <h2 className="text-xl font-bold">Conversation</h2>
                   {comms.timeline.length === 0 && !lead.doNotContact && lead.status !== 'DEAD' && (
                     <button
                       onClick={handleSendOutreach}

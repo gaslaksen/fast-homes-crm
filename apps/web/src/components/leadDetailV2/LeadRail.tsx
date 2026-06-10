@@ -9,6 +9,7 @@ import Avatar from '@/components/Avatar';
 import LeadQueueNav from '@/components/leadDetailV2/LeadQueueNav';
 import ShareDealModal from '@/components/ShareDealModal';
 import ScheduleFollowUpModal from '@/components/ScheduleFollowUpModal';
+import SellerPortalPanel from '@/components/SellerPortalPanel';
 import { formatPhoneDisplay, getLeadDisplayName } from '@/lib/format';
 import { zillowUrl, googleSearchUrl } from '@/lib/externalLinks';
 import { readLeadQueue } from '@/lib/leadQueue';
@@ -38,6 +39,22 @@ const SOURCE_OPTIONS: { value: string; label: string }[] = [
   { value: 'GOOGLE_ADS', label: 'Google Ads' },
   { value: 'DEAL_SEARCH', label: 'Deal Search' },
   { value: 'OTHER', label: 'Other' },
+];
+
+const PROPERTY_TYPE_OPTIONS: { value: string; label: string }[] = [
+  { value: 'Single Family', label: 'Single Family' },
+  { value: 'Townhouse', label: 'Townhouse' },
+  { value: 'Condo', label: 'Condo' },
+  { value: 'Multi-Family', label: 'Multi-Family' },
+  { value: 'Land', label: 'Land' },
+];
+
+const CONDITION_OPTIONS: { value: string; label: string }[] = [
+  { value: 'excellent', label: 'Excellent' },
+  { value: 'good', label: 'Good' },
+  { value: 'fair', label: 'Fair' },
+  { value: 'poor', label: 'Poor' },
+  { value: 'distressed', label: 'Distressed' },
 ];
 
 // Pill styling mirrors HeroStrip on the Overview tab so the rail reads the same.
@@ -258,6 +275,17 @@ export default function LeadRail({ lead, onLeadPatch, onMarkDead }: Props) {
     onLeadPatch(payload);
   };
 
+  const saveNumberField = (field: string, parse: (v: string) => number = parseFloat) => async (value: string) => {
+    const num = value ? parse(value) : null;
+    if (value && (num === null || Number.isNaN(num))) {
+      alert('Enter a number');
+      return;
+    }
+    const payload: any = { [field]: num };
+    await leadsAPI.update(leadId, payload);
+    onLeadPatch(payload);
+  };
+
   const displayName = getLeadDisplayName(lead);
   const isDead = lead.status === 'DEAD';
   const contactDisabled = !lead.sellerPhone || !!lead.doNotContact || isDead;
@@ -443,6 +471,57 @@ export default function LeadRail({ lead, onLeadPatch, onMarkDead }: Props) {
         )}
       </RailSection>
 
+      <RailSection title="Property" storageKey="property">
+        {(lead.reapiId || lead.attomId) && (
+          <div className="mb-2">
+            <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+              lead.reapiId
+                ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400'
+                : 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400'
+            }`}>
+              ✓ {lead.reapiId ? 'REAPI' : 'ATTOM'} Verified
+            </span>
+          </div>
+        )}
+        <dl className="space-y-1 text-[13px]">
+          <EditableRow label="Type" value={lead.propertyType} options={PROPERTY_TYPE_OPTIONS} onSave={saveField('propertyType')} />
+          <EditableRow label="Beds" value={lead.bedrooms != null ? String(lead.bedrooms) : null} onSave={saveNumberField('bedrooms', (v) => parseInt(v, 10))} />
+          <EditableRow label="Baths" value={lead.bathrooms != null ? String(lead.bathrooms) : null} onSave={saveNumberField('bathrooms')} />
+          <EditableRow
+            label="Sqft"
+            value={lead.sqft != null ? String(lead.sqft) : null}
+            displayValue={
+              lead.sqftOverride
+                ? `${lead.sqftOverride.toLocaleString()} (override)`
+                : lead.sqft != null ? lead.sqft.toLocaleString() : undefined
+            }
+            onSave={saveNumberField('sqft', (v) => parseInt(v.replace(/[^0-9]/g, ''), 10))}
+          />
+          <EditableRow label="Year" value={lead.yearBuilt != null ? String(lead.yearBuilt) : null} onSave={saveNumberField('yearBuilt', (v) => parseInt(v, 10))} />
+          <div className="flex items-baseline gap-2">
+            <dt className="w-14 shrink-0 text-[11px] uppercase tracking-wide font-semibold text-gray-400 dark:text-gray-500">Lot</dt>
+            <dd className="min-w-0 flex-1 text-gray-800 dark:text-gray-200">
+              {lead.lotSize
+                ? lead.lotSize > 100 ? `${(lead.lotSize / 43560).toFixed(2)} acres` : `${lead.lotSize.toFixed(2)} acres`
+                : '—'}
+            </dd>
+          </div>
+          <EditableRow
+            label="Cond."
+            value={lead.conditionLevel}
+            displayValue={lead.conditionLevel || lead.propertyCondition || undefined}
+            options={CONDITION_OPTIONS}
+            onSave={saveField('conditionLevel')}
+          />
+        </dl>
+        <Link
+          href={`/leads/${leadId}/comps-analysis?tab=valuation`}
+          className="mt-2 block text-center text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline"
+        >
+          Photos{lead.photos?.length ? ` (${lead.photos.length})` : ''} & full details →
+        </Link>
+      </RailSection>
+
       <RailSection title={`Follow-Ups${openTasks.length ? ` (${openTasks.length})` : ''}`} storageKey="followups">
         {openTasks.length > 0 ? (
           <div className="space-y-1.5">
@@ -602,6 +681,10 @@ export default function LeadRail({ lead, onLeadPatch, onMarkDead }: Props) {
           <CampChip label="Challenge" value={lead.conditionLevel || null} complete={lead.campChallengeComplete} />
           <CampChip label="Authority" value={lead.ownershipStatus?.replace(/_/g, ' ') || null} complete={lead.campAuthorityComplete} />
         </div>
+      </RailSection>
+
+      <RailSection title="Seller Portal" storageKey="portal">
+        <SellerPortalPanel leadId={leadId} />
       </RailSection>
 
       <ScheduleFollowUpModal
