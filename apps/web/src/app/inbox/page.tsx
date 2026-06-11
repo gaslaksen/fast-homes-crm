@@ -1,15 +1,17 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { formatDistanceToNowStrict } from 'date-fns';
 import AppShell from '@/components/AppShell';
 import PropertyPhoto from '@/components/PropertyPhoto';
 import CommunicationsTimeline from '@/components/communications/CommunicationsTimeline';
-import NotesPanel from '@/components/communications/NotesPanel';
 import MessageComposer from '@/components/communications/MessageComposer';
+import LeadSidePanel from '@/components/leadDetailV2/LeadSidePanel';
 import type { TimelineItem, NoteItem } from '@/components/communications/types';
 import { inboxAPI, leadsAPI, authAPI, gmailAPI, type InboxFilter } from '@/lib/api';
+import { getLeadAddressLine, getLeadDisplayName } from '@/lib/format';
 
 const POLL_MS = 60_000;
 const PAGE_SIZE = 20;
@@ -39,30 +41,25 @@ const TABS: { key: InboxFilter; label: string }[] = [
   { key: 'starred', label: 'Starred' },
 ];
 
-function bandPillClass(band: string): string {
-  const map: Record<string, string> = {
-    STRIKE_ZONE: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400',
-    HOT: 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400',
-    WARM: 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400',
-    WORKABLE: 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400',
-    COOL: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400',
-    COLD: 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400',
-    DEAD_COLD: 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400',
-  };
-  return map[band] || map.COLD;
-}
+// Thread row fields that should mirror edits made in the contact pane.
+const THREAD_SYNC_FIELDS = [
+  'sellerFirstName',
+  'sellerLastName',
+  'sellerPhone',
+  'propertyAddress',
+  'propertyCity',
+  'propertyState',
+] as const;
 
 function threadName(t: ThreadRow): string {
   const name = [t.sellerFirstName, t.sellerLastName].filter(Boolean).join(' ').trim();
   return name || t.propertyAddress;
 }
 
-function tagList(tags: unknown): string[] {
-  if (Array.isArray(tags)) return tags.filter((x): x is string => typeof x === 'string');
-  return [];
-}
+function InboxWorkspace() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
 
-export default function InboxPage() {
   const [filter, setFilter] = useState<InboxFilter>('all');
   const [counts, setCounts] = useState<{ all: number; unread: number; starred: number }>({
     all: 0,
@@ -76,13 +73,16 @@ export default function InboxPage() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
 
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Deep-linkable selection: /inbox?lead=<id> restores the open conversation.
+  const [selectedId, setSelectedId] = useState<string | null>(() => searchParams.get('lead'));
+  const [lead, setLead] = useState<any>(null);
   const [timeline, setTimeline] = useState<TimelineItem[]>([]);
   const [notes, setNotes] = useState<NoteItem[]>([]);
   const [commLoading, setCommLoading] = useState(false);
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [teamMembers, setTeamMembers] = useState<any[]>([]);
   const [gmailConnected, setGmailConnected] = useState(false);
+  const [resumingAi, setResumingAi] = useState(false);
 
   const threadRef = useRef<HTMLDivElement | null>(null);
   const pausePollRef = useRef(false);
@@ -92,6 +92,29 @@ export default function InboxPage() {
     authAPI.getTeam().then((res) => setTeamMembers(res.data || [])).catch(() => {});
     gmailAPI.status().then((res) => setGmailConnected(!!res.data?.connected)).catch(() => {});
   }, []);
+
+  // Desktop: the workspace panes scroll internally; suppress the page-level
+  // scrollbar (a 1px calc rounding artifact otherwise keeps it visible).
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 1024px)');
+    const apply = () => {
+      document.documentElement.style.overflowY = mq.matches ? 'hidden' : '';
+    };
+    apply();
+    mq.addEventListener('change', apply);
+    return () => {
+      document.documentElement.style.overflowY = '';
+      mq.removeEventListener('change', apply);
+    };
+  }, []);
+
+  const selectThread = useCallback(
+    (id: string | null) => {
+      setSelectedId(id);
+      router.replace(id ? `/inbox?lead=${id}` : '/inbox', { scroll: false });
+    },
+    [router],
+  );
 
   const loadCommunications = useCallback((leadId: string) => {
     setCommLoading(true);
@@ -131,10 +154,10 @@ export default function InboxPage() {
         setHasMore(!!res.data?.hasMore);
         setThreads((prev) => (opts.append ? [...prev, ...items] : items));
         if (!opts.append) {
-          setSelectedId((prev) => {
-            if (prev && items.some((i) => i.leadId === prev)) return prev;
-            return items[0]?.leadId || null;
-          });
+          // Keep the open conversation across reloads and tab switches (it can
+          // live outside the current page or filter); only auto-pick when
+          // nothing is open yet.
+          setSelectedId((prev) => prev || items[0]?.leadId || null);
         }
       } catch {
         if (!opts.append) setThreads([]);
@@ -185,14 +208,24 @@ export default function InboxPage() {
     };
   }, [filter, loadThreads, refreshCounts]);
 
-  // Load the thread + mark it read when selection changes.
+  // Load the thread + full lead, and mark it read, when selection changes.
   useEffect(() => {
     if (!selectedId) {
       setTimeline([]);
       setNotes([]);
+      setLead(null);
       return;
     }
+    let cancelled = false;
     loadCommunications(selectedId);
+    leadsAPI
+      .get(selectedId)
+      .then((res) => {
+        if (!cancelled) setLead(res.data);
+      })
+      .catch(() => {
+        if (!cancelled) setLead(null);
+      });
 
     inboxAPI
       .markRead(selectedId)
@@ -203,6 +236,9 @@ export default function InboxPage() {
         refreshCounts();
       })
       .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, [selectedId, refreshCounts, loadCommunications]);
 
   useEffect(() => {
@@ -235,6 +271,59 @@ export default function InboxPage() {
     }
   };
 
+  // Contact-pane edits flow back into the lead and the thread list row.
+  const patchLead = useCallback(
+    (patch: any) => {
+      setLead((prev: any) => (prev ? { ...prev, ...patch } : prev));
+      const threadPatch: any = {};
+      for (const key of THREAD_SYNC_FIELDS) {
+        if (key in patch) threadPatch[key] = patch[key];
+      }
+      if (Object.keys(threadPatch).length > 0) {
+        setThreads((prev) =>
+          prev.map((t) => (t.leadId === selectedId ? { ...t, ...threadPatch } : t)),
+        );
+      }
+    },
+    [selectedId],
+  );
+
+  // Triage flow: mark dead from the contact pane, then advance to the next
+  // conversation. The reason is saved as a note, mirroring the lead page.
+  const handleMarkDead = async () => {
+    if (!selectedId) return;
+    const reason = window.prompt('Reason for marking this lead dead? (saved as a note)');
+    if (reason === null) return;
+    try {
+      if (reason.trim() && currentUser) {
+        await leadsAPI.addNote(selectedId, `[Dead] ${reason.trim()}`, currentUser.id);
+      }
+      await leadsAPI.update(selectedId, { status: 'DEAD' });
+      patchLead({ status: 'DEAD' });
+      const idx = threads.findIndex((t) => t.leadId === selectedId);
+      const next = threads.find((t, i) => i > idx) || threads.find((t) => t.leadId !== selectedId);
+      if (next) selectThread(next.leadId);
+      refreshCounts();
+    } catch (err) {
+      console.error('Failed to mark lead dead', err);
+      alert('Failed to mark lead dead');
+    }
+  };
+
+  const handleResumeAi = async () => {
+    if (!selectedId || !lead) return;
+    setResumingAi(true);
+    try {
+      await leadsAPI.toggleAutoRespond(selectedId, true);
+      patchLead({ autoRespond: true });
+    } catch (err) {
+      console.error('Failed to resume AI', err);
+      alert('Failed to resume AI');
+    } finally {
+      setResumingAi(false);
+    }
+  };
+
   const countFor = (key: InboxFilter): number | null => {
     if (key === 'all') return counts.all;
     if (key === 'unread') return counts.unread;
@@ -242,20 +331,23 @@ export default function InboxPage() {
     return null;
   };
 
+  const headerName = lead ? getLeadDisplayName(lead) : selected ? threadName(selected) : '';
+  const headerAddress = lead
+    ? getLeadAddressLine(lead)
+    : selected
+      ? [selected.propertyAddress, selected.propertyCity, selected.propertyState]
+          .filter(Boolean)
+          .join(', ')
+      : '';
+
   return (
     <AppShell>
-      <main className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        <div className="mb-4">
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Inbox</h1>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-            All conversations across your leads.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,340px)_minmax(0,1fr)_minmax(0,300px)] gap-4 h-[calc(100vh-12rem)]">
+      {/* Full-height workspace on desktop; panes scroll internally */}
+      <div className="flex flex-col lg:h-[calc(100dvh-3.5rem)] lg:overflow-hidden">
+        <div className="flex-1 lg:min-h-0 flex flex-col lg:flex-row">
           {/* Thread list */}
-          <aside className="card overflow-hidden flex flex-col">
-            <div className="flex border-b border-gray-200 dark:border-gray-700">
+          <aside className="lg:w-[340px] lg:shrink-0 flex flex-col max-h-[45vh] lg:max-h-none lg:min-h-0 border-b lg:border-b-0 lg:border-r border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
+            <div className="shrink-0 flex border-b border-gray-200 dark:border-gray-700">
               {TABS.map((tab) => {
                 const active = filter === tab.key;
                 const c = countFor(tab.key);
@@ -264,7 +356,7 @@ export default function InboxPage() {
                     key={tab.key}
                     type="button"
                     onClick={() => setFilter(tab.key)}
-                    className={`flex-1 px-2 py-2 text-xs font-semibold transition-colors ${
+                    className={`flex-1 px-2 py-2.5 text-xs font-semibold transition-colors ${
                       active
                         ? 'text-teal-700 dark:text-teal-400 border-b-2 border-teal-600'
                         : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
@@ -303,7 +395,7 @@ export default function InboxPage() {
                   <li key={t.leadId}>
                     <button
                       type="button"
-                      onClick={() => setSelectedId(t.leadId)}
+                      onClick={() => selectThread(t.leadId)}
                       className={`w-full text-left px-3 py-3 transition-colors ${
                         isSelected
                           ? 'bg-teal-50 dark:bg-teal-900/20'
@@ -393,19 +485,46 @@ export default function InboxPage() {
           </aside>
 
           {/* Conversation pane */}
-          <section className="card flex flex-col overflow-hidden">
-            {selected ? (
+          <section className="flex-1 min-w-0 flex flex-col lg:min-h-0 min-h-[55vh] bg-white dark:bg-gray-900">
+            {selectedId ? (
               <>
-                <header className="border-b border-gray-200 dark:border-gray-700 px-4 py-3">
-                  <div className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">
-                    {threadName(selected)}
+                <header className="shrink-0 flex items-center justify-between gap-3 border-b border-gray-200 dark:border-gray-700 px-4 py-3">
+                  <div className="min-w-0">
+                    <div className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">
+                      {headerName || 'Conversation'}
+                    </div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                      {headerAddress}
+                    </div>
                   </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                    {selected.propertyAddress}
-                    {selected.propertyCity ? `, ${selected.propertyCity}` : ''}
-                    {selected.propertyState ? ` ${selected.propertyState}` : ''}
-                  </div>
+                  <Link
+                    href={`/leads/${selectedId}`}
+                    title="Open full lead workspace"
+                    className="shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                    </svg>
+                    Open lead
+                  </Link>
                 </header>
+
+                {/* AI paused banner - shown when a human has stepped in */}
+                {lead && !lead.autoRespond && !lead.doNotContact && lead.status !== 'DEAD' && (
+                  <div className="shrink-0 flex items-center justify-between gap-3 px-4 py-2 border-b border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950">
+                    <div className="flex items-center gap-2 text-amber-800 dark:text-amber-400 text-xs">
+                      <span>🤚</span>
+                      <span><strong>AI paused</strong> - you stepped in manually. The AI will not auto-respond until you resume it.</span>
+                    </div>
+                    <button
+                      onClick={handleResumeAi}
+                      disabled={resumingAi}
+                      className="shrink-0 px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold transition-colors disabled:opacity-50"
+                    >
+                      {resumingAi ? 'Resuming...' : '▶ Resume AI'}
+                    </button>
+                  </div>
+                )}
 
                 <div ref={threadRef} className="flex-1 overflow-y-auto px-4 py-3">
                   {commLoading ? (
@@ -415,15 +534,18 @@ export default function InboxPage() {
                   )}
                 </div>
 
-                <MessageComposer
-                  leadId={selected.leadId}
-                  sellerPhone={selected.sellerPhone}
-                  sellerEmail={null}
-                  gmailConnected={gmailConnected}
-                  currentUser={currentUser}
-                  teamMembers={teamMembers}
-                  onSent={() => loadCommunications(selected.leadId)}
-                />
+                <div className="shrink-0 border-t border-gray-200 dark:border-gray-700">
+                  <MessageComposer
+                    leadId={selectedId}
+                    sellerPhone={lead?.sellerPhone ?? selected?.sellerPhone ?? null}
+                    sellerEmail={lead?.sellerEmail ?? null}
+                    gmailConnected={gmailConnected}
+                    currentUser={currentUser}
+                    teamMembers={teamMembers}
+                    doNotContact={lead?.doNotContact}
+                    onSent={() => loadCommunications(selectedId)}
+                  />
+                </div>
               </>
             ) : (
               <div className="flex-1 flex items-center justify-center text-sm text-gray-400 dark:text-gray-500">
@@ -432,94 +554,34 @@ export default function InboxPage() {
             )}
           </section>
 
-          {/* Lightweight detail column */}
-          <aside className="card overflow-y-auto hidden lg:block">
-            {selected ? (
-              <div className="p-4 space-y-4">
-                <div>
-                  <div className="text-sm font-bold text-gray-900 dark:text-gray-100">
-                    {threadName(selected)}
-                  </div>
-                  <span
-                    className={`inline-block mt-1 text-[9px] font-bold px-1.5 py-0.5 rounded ${bandPillClass(
-                      selected.scoreBand,
-                    )}`}
-                  >
-                    {selected.scoreBand.replace('_', ' ')}
-                  </span>
-                </div>
-
-                <div>
-                  <div className="text-[10px] uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-1">
-                    Property
-                  </div>
-                  <div className="text-sm text-gray-800 dark:text-gray-200">
-                    {selected.propertyAddress}
-                  </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">
-                    {[selected.propertyCity, selected.propertyState].filter(Boolean).join(', ')}
-                  </div>
-                </div>
-
-                {selected.sellerPhone && (
-                  <div>
-                    <div className="text-[10px] uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-1">
-                      Phone
-                    </div>
-                    <a
-                      href={`tel:${selected.sellerPhone}`}
-                      className="text-sm text-teal-700 dark:text-teal-400 hover:underline"
-                    >
-                      {selected.sellerPhone}
-                    </a>
-                  </div>
-                )}
-
-                {tagList(selected.tags).length > 0 && (
-                  <div>
-                    <div className="text-[10px] uppercase tracking-wide text-gray-400 dark:text-gray-500 mb-1">
-                      Tags
-                    </div>
-                    <div className="flex flex-wrap gap-1">
-                      {tagList(selected.tags).map((tag) => (
-                        <span
-                          key={tag}
-                          className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300"
-                        >
-                          {tag}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                <Link
-                  href={`/leads/${selected.leadId}`}
-                  className="btn btn-secondary btn-sm w-full text-center"
-                >
-                  Open lead
-                </Link>
-
-                <div className="pt-2 border-t border-gray-100 dark:border-gray-800">
-                  <NotesPanel
-                    notes={notes}
-                    canAdd={!!currentUser}
-                    onAddNote={async (text) => {
-                      if (!currentUser) return;
-                      await leadsAPI.addNote(selected.leadId, text, currentUser.id);
-                      await loadCommunications(selected.leadId);
-                    }}
-                  />
-                </div>
-              </div>
-            ) : (
-              <div className="p-4 text-xs text-gray-400 dark:text-gray-500">
-                Contact details appear here.
-              </div>
-            )}
-          </aside>
+          {/* Right pane: Contact (full lead rail) / Notes / Activity */}
+          <LeadSidePanel
+            modes={['contact', 'notes', 'activity']}
+            storagePrefix="dealcore:inboxPane"
+            collapsedLabel="Details"
+            lead={lead}
+            notes={notes}
+            currentUser={currentUser}
+            onAddNote={async (text) => {
+              if (!currentUser || !selectedId) return;
+              await leadsAPI.addNote(selectedId, text, currentUser.id);
+              await loadCommunications(selectedId);
+            }}
+            onLeadPatch={patchLead}
+            onMarkDead={handleMarkDead}
+            hideRailNav
+          />
         </div>
-      </main>
+      </div>
     </AppShell>
+  );
+}
+
+// useSearchParams requires a Suspense boundary for static prerendering.
+export default function InboxPage() {
+  return (
+    <Suspense fallback={null}>
+      <InboxWorkspace />
+    </Suspense>
   );
 }
