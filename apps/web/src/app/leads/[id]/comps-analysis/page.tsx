@@ -6,7 +6,6 @@ import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { leadsAPI, compsAPI, compAnalysisAPI, photosAPI, arvCalculationAPI } from '@/lib/api';
 import ArvResultStrip, { type StripState } from '@/components/aiArvCalculation/ArvResultStrip';
-import PhotoGallery from '@/components/PhotoGallery';
 import ArvCalculationDrawer from '@/components/aiArvCalculation/ArvCalculationDrawer';
 import type { AIArvCalculationResult, ValuationMode } from '@/lib/aiArvCalculation/types';
 import AppShell from '@/components/AppShell';
@@ -657,6 +656,12 @@ export default function CompsAnalysisPage() {
                 console.error('Failed to refresh lead after Street View fetch:', err);
               }
             }}
+            onUploadPhotos={async (files) => {
+              if (files.length === 1) await photosAPI.upload(leadId, files[0]);
+              else await photosAPI.uploadMultiple(leadId, files);
+              const lr = await leadsAPI.get(leadId);
+              setLead(lr.data);
+            }}
             arvStripSlot={
               <ArvResultStrip
                 state={arvStripState}
@@ -669,53 +674,6 @@ export default function CompsAnalysisPage() {
               />
             }
           />
-
-          {/* Team photo management — re-homed here when the Overview tab was
-              retired. Upload, delete, and set-primary for staff; sellers still
-              upload through the portal. */}
-          <div className="px-3 sm:px-4 lg:px-6 pt-4">
-            <details
-              open={((lead as any).photos?.length ?? 0) > 0}
-              className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 group"
-            >
-              <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden flex items-center gap-1.5 px-4 py-3">
-                <svg className="w-3.5 h-3.5 text-gray-400 transition-transform group-open:rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                </svg>
-                <span className="text-sm font-bold text-gray-900 dark:text-gray-100">
-                  Photos{(lead as any).photos?.length ? ` (${(lead as any).photos.length})` : ''}
-                </span>
-              </summary>
-              <div className="px-4 pb-4">
-                <PhotoGallery
-                  photos={(lead as any).photos || []}
-                  primaryPhotoUrl={(lead as any).primaryPhoto}
-                  leadId={leadId}
-                  onUpload={async (files) => {
-                    if (files.length === 1) await photosAPI.upload(leadId, files[0]);
-                    else await photosAPI.uploadMultiple(leadId, files);
-                    const lr = await leadsAPI.get(leadId);
-                    setLead(lr.data);
-                  }}
-                  onFetchPhotos={async () => {
-                    await photosAPI.fetchAll(leadId);
-                    const lr = await leadsAPI.get(leadId);
-                    setLead(lr.data);
-                  }}
-                  onDelete={async (photoId) => {
-                    await photosAPI.delete(leadId, photoId);
-                    const lr = await leadsAPI.get(leadId);
-                    setLead(lr.data);
-                  }}
-                  onSetPrimary={async (photoId) => {
-                    await photosAPI.setPrimary(leadId, photoId);
-                    const lr = await leadsAPI.get(leadId);
-                    setLead(lr.data);
-                  }}
-                />
-              </div>
-            </details>
-          </div>
 
           {/* Drawer sits between subject + comp grid when a result exists.
               Auto-expands on first calc; tabs cover adjustments / method /
