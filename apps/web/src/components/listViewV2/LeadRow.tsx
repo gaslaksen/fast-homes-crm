@@ -38,6 +38,7 @@ export interface ListLead {
   primaryPhoto: string | null;
   lastTouchedAt: string | null;
   touchCount: number;
+  threadUnread?: boolean;
   assignedTo: {
     id: string;
     firstName: string | null;
@@ -101,9 +102,19 @@ export default function LeadRow({
         className="h-3.5 w-3.5 rounded border-gray-300 dark:border-gray-600"
       />
 
-      {/* name */}
-      <Link href={`/leads/${lead.id}`} className="min-w-0">
-        <span className="block font-semibold text-sm text-gray-900 dark:text-gray-100 truncate group-hover:text-primary-700 dark:group-hover:text-primary-400">
+      {/* name (+ unread reply indicator) */}
+      <Link href={`/leads/${lead.id}`} className="min-w-0 flex items-center gap-1.5">
+        {lead.threadUnread && (
+          <span
+            title="Unread reply"
+            className="w-2 h-2 rounded-full bg-primary-500 shrink-0"
+          />
+        )}
+        <span
+          className={`block text-sm truncate group-hover:text-primary-700 dark:group-hover:text-primary-400 ${
+            lead.threadUnread ? 'font-bold text-gray-900 dark:text-gray-50' : 'font-semibold text-gray-900 dark:text-gray-100'
+          }`}
+        >
           {getLeadDisplayName(lead)}
         </span>
       </Link>

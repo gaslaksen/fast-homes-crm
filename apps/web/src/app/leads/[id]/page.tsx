@@ -169,6 +169,7 @@ export default function LeadDetailPage() {
   const [savingArv, setSavingArv] = useState(false);
   const [sendingOutreach, setSendingOutreach] = useState(false);
   const [notesOpen, setNotesOpen] = useState(true);
+  const [paneMode, setPaneMode] = useState<'notes' | 'activity'>('notes');
   const replyIntentApplied = useRef(false);
   const offerIntentApplied = useRef(false);
   const portalLinkIntentApplied = useRef(false);
@@ -465,6 +466,16 @@ export default function LeadDetailPage() {
       try { window.localStorage.setItem('dealcore:leadNotes:open', String(!open)); } catch {}
       return !open;
     });
+  };
+  useEffect(() => {
+    try {
+      const m = window.localStorage.getItem('dealcore:leadPane:mode');
+      if (m === 'notes' || m === 'activity') setPaneMode(m);
+    } catch {}
+  }, []);
+  const switchPaneMode = (m: 'notes' | 'activity') => {
+    setPaneMode(m);
+    try { window.localStorage.setItem('dealcore:leadPane:mode', m); } catch {}
   };
 
   // Desktop: the workspace panes scroll internally; suppress the page-level
@@ -1919,15 +1930,30 @@ export default function LeadDetailPage() {
       </main>
       </div>{/* end center column */}
 
-      {/* Right notes pane (desktop, conversation view) */}
-      {activeTab === 'communications' && (notesOpen ? (
+      {/* Right pane (desktop, all tabs): Notes / Activity */}
+      {notesOpen ? (
         <aside className="hidden lg:flex w-80 xl:w-96 shrink-0 border-l border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 flex-col lg:min-h-0">
-          <div className="shrink-0 flex items-center justify-between px-4 py-2.5 border-b border-gray-100 dark:border-gray-800">
-            <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">Notes</span>
+          <div className="shrink-0 flex items-center justify-between px-3 py-2 border-b border-gray-100 dark:border-gray-800">
+            <div className="flex items-center gap-1">
+              {([['notes', 'Notes'], ['activity', 'Activity']] as const).map(([mode, label]) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => switchPaneMode(mode)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors ${
+                    paneMode === mode
+                      ? 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100'
+                      : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
             <button
               type="button"
               onClick={toggleNotes}
-              title="Collapse notes"
+              title="Collapse pane"
               className="p-1 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1936,15 +1962,19 @@ export default function LeadDetailPage() {
             </button>
           </div>
           <div className="flex-1 overflow-y-auto p-4">
-            <NotesPanel
-              notes={comms.notes}
-              canAdd={!!currentUser}
-              onAddNote={async (text) => {
-                if (!currentUser) return;
-                await leadsAPI.addNote(leadId, text, currentUser.id);
-                await loadComms();
-              }}
-            />
+            {paneMode === 'notes' ? (
+              <NotesPanel
+                notes={comms.notes}
+                canAdd={!!currentUser}
+                onAddNote={async (text) => {
+                  if (!currentUser) return;
+                  await leadsAPI.addNote(leadId, text, currentUser.id);
+                  await loadComms();
+                }}
+              />
+            ) : (
+              <PaneActivityLog activities={lead.activities || []} />
+            )}
           </div>
         </aside>
       ) : (
@@ -1952,13 +1982,13 @@ export default function LeadDetailPage() {
           <button
             type="button"
             onClick={toggleNotes}
-            title="Show notes"
+            title="Show notes & activity"
             className="h-full px-1.5 py-4 text-[11px] font-semibold text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors [writing-mode:vertical-rl]"
           >
             Notes
           </button>
         </div>
-      ))}
+      )}
 
       </div>{/* end workspace */}
       </div>{/* end full-height shell */}
@@ -1976,6 +2006,34 @@ export default function LeadDetailPage() {
         }}
       />
     </AppShell>
+  );
+}
+
+// Compact activity log for the right pane (full log stays on the Activity tab).
+function PaneActivityLog({ activities }: { activities: any[] }) {
+  if (activities.length === 0) {
+    return <p className="text-xs text-gray-400 dark:text-gray-500">No activity yet.</p>;
+  }
+  return (
+    <div className="space-y-2">
+      {activities.map((activity: any) => {
+        const meta = ACTIVITY_TYPE_META[activity.type] ?? {};
+        return (
+          <div key={activity.id} className="flex items-start gap-2 p-2 rounded-lg bg-gray-50 dark:bg-gray-950">
+            {meta.icon && (
+              <span className={`shrink-0 text-sm leading-none mt-0.5 ${meta.color ?? ''}`}>{meta.icon}</span>
+            )}
+            <div className="min-w-0 flex-1">
+              <div className="text-xs text-gray-800 dark:text-gray-200">{activity.description}</div>
+              <div className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">
+                {activity.user ? `${activity.user.firstName} ${activity.user.lastName} · ` : ''}
+                {format(new Date(activity.createdAt), 'MMM d, h:mm a')}
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 

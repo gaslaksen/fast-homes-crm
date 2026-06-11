@@ -316,6 +316,8 @@ function LeadsPageInner() {
   const [tierFilter,    setTierFilter]    = useState<number>(Number(searchParams.get('tier')) || 0); // 0 = all
   const [showInactive,  setShowInactive]  = useState(searchParams.get('inactive') === 'true');     // default: hide dead/closed
   const [inDripFilter,  setInDripFilter]  = useState(searchParams.get('inDrip') === 'active');     // "In Drip (N)" chip
+  const [needsReply,    setNeedsReply]    = useState(searchParams.get('needsReply') === 'true');   // smart view
+  const [untouched,     setUntouched]     = useState(searchParams.get('untouched') === 'true');    // smart view
   const [teamMembers,   setTeamMembers]   = useState<any[]>([]);
   const [sortKey,       setSortKey]       = useState<SortKey>((searchParams.get('sort') as SortKey) || 'touched');
   const [sortDir,       setSortDir]       = useState<SortDir>((searchParams.get('dir') as SortDir) || 'desc');
@@ -366,6 +368,8 @@ function LeadsPageInner() {
       if (tierFilter)               params.set('tier', String(tierFilter));
       if (showInactive)             params.set('inactive', 'true');
       if (inDripFilter)             params.set('inDrip', 'active');
+      if (needsReply)               params.set('needsReply', 'true');
+      if (untouched)                params.set('untouched', 'true');
       if (sortKey !== 'touched')    params.set('sort', sortKey);
       if (sortDir !== 'desc')       params.set('dir', sortDir);
       if (viewMode !== 'table')     params.set('view', viewMode);
@@ -381,8 +385,8 @@ function LeadsPageInner() {
 
     return () => clearTimeout(searchDebounceRef.current);
   }, [search, bandFilter, statusFilter, sourceFilter, dateFilter, staleFilter, arvFilter,
-      dealFilter, stateFilter, assigneeFilter, tierFilter, showInactive, inDripFilter, sortKey, sortDir,
-      viewMode, page, pathname, router]);
+      dealFilter, stateFilter, assigneeFilter, tierFilter, showInactive, inDripFilter, needsReply, untouched,
+      sortKey, sortDir, viewMode, page, pathname, router]);
 
   // Abort controller for cancelling in-flight requests when filters change
   const abortRef = useRef<AbortController>();
@@ -405,6 +409,8 @@ function LeadsPageInner() {
     if (arvFilter)       params.arvFilter = arvFilter;
     if (showInactive)    params.showInactive = 'true';
     if (inDripFilter)    params.inDrip = 'active';
+    if (needsReply)      params.needsReply = 'true';
+    if (untouched)       params.untouched = 'true';
     if (sortKey)         params.sort = sortKey;
     if (sortDir)         params.dir = sortDir;
     if (assigneeFilter === 'unassigned') params.assignedToUserId = 'none';
@@ -434,7 +440,8 @@ function LeadsPageInner() {
       if (!controller.signal.aborted) setLoading(false);
     }
   }, [page, search, bandFilter, statusFilter, sourceFilter, dateFilter, staleFilter,
-      arvFilter, dealFilter, stateFilter, assigneeFilter, tierFilter, showInactive, inDripFilter, sortKey, sortDir]);
+      arvFilter, dealFilter, stateFilter, assigneeFilter, tierFilter, showInactive, inDripFilter,
+      needsReply, untouched, sortKey, sortDir]);
 
   // Fetch pipeline data when in grid view
   const fetchPipeline = useCallback(async () => {
@@ -530,13 +537,15 @@ function LeadsPageInner() {
   const prevFiltersRef = useRef('');
   useEffect(() => {
     const key = [search, bandFilter, statusFilter, sourceFilter, dateFilter, staleFilter,
-                 arvFilter, dealFilter, stateFilter, assigneeFilter, tierFilter, showInactive, inDripFilter, sortKey, sortDir].join('|');
+                 arvFilter, dealFilter, stateFilter, assigneeFilter, tierFilter, showInactive, inDripFilter,
+                 needsReply, untouched, sortKey, sortDir].join('|');
     if (prevFiltersRef.current && prevFiltersRef.current !== key) {
       setPage(1);
     }
     prevFiltersRef.current = key;
   }, [search, bandFilter, statusFilter, sourceFilter, dateFilter, staleFilter,
-      arvFilter, dealFilter, stateFilter, assigneeFilter, tierFilter, showInactive, inDripFilter, sortKey, sortDir]);
+      arvFilter, dealFilter, stateFilter, assigneeFilter, tierFilter, showInactive, inDripFilter,
+      needsReply, untouched, sortKey, sortDir]);
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) setSortDir(d => d === 'desc' ? 'asc' : 'desc');
@@ -648,11 +657,28 @@ function LeadsPageInner() {
     setSearch(''); setBandFilter(''); setStatusFilter(''); setSourceFilter('');
     setDateFilter(''); setStaleFilter(''); setArvFilter(''); setDealFilter('');
     setStateFilter(''); setAssigneeFilter(''); setTierFilter(0); setShowInactive(false);
-    setInDripFilter(false);
+    setInDripFilter(false); setNeedsReply(false); setUntouched(false);
   };
 
   const hasFilters = !!(search || bandFilter || statusFilter || sourceFilter || dateFilter ||
-    staleFilter || arvFilter || dealFilter || stateFilter || assigneeFilter || tierFilter || showInactive || inDripFilter);
+    staleFilter || arvFilter || dealFilter || stateFilter || assigneeFilter || tierFilter || showInactive ||
+    inDripFilter || needsReply || untouched);
+
+  // Smart views: one-click queue presets, mutually exclusive with each other
+  // but composable with the advanced filters.
+  const activeView = needsReply ? 'needs-reply' : untouched ? 'untouched' : staleFilter === '3' ? 'stale' : 'all';
+  const setView = (view: string) => {
+    setNeedsReply(view === 'needs-reply');
+    setUntouched(view === 'untouched');
+    setStaleFilter(view === 'stale' ? '3' : '');
+  };
+  const SMART_VIEWS = [
+    { key: 'all', label: 'All' },
+    { key: 'needs-reply', label: 'Needs Reply' },
+    { key: 'untouched', label: 'Untouched' },
+    { key: 'stale', label: 'Stale 3d+' },
+  ];
+  const viewLabel = SMART_VIEWS.find((v) => v.key === activeView)?.label || 'All';
 
   // Persist the visible queue so the lead detail page can offer prev/next
   // navigation through this exact filtered + sorted list (morning-queue flow).
@@ -660,10 +686,10 @@ function LeadsPageInner() {
     if (viewMode !== 'table' || loading || leads.length === 0) return;
     writeLeadQueue({
       ids: leads.map((l: any) => l.id),
-      label: hasFilters ? 'Filtered leads' : 'All leads',
+      label: activeView !== 'all' ? viewLabel : hasFilters ? 'Filtered leads' : 'All leads',
       returnUrl: `${pathname}${window.location.search}`,
     });
-  }, [leads, viewMode, loading, hasFilters, pathname]);
+  }, [leads, viewMode, loading, hasFilters, activeView, viewLabel, pathname]);
 
   // ─── Pipeline (Grid view) drag-and-drop ─────────────────────────────────────
   const onDragEnd = useCallback(async (result: DropResult) => {
@@ -722,6 +748,26 @@ function LeadsPageInner() {
             <Link href="/leads/new" className="btn btn-primary btn-sm">+ New Lead</Link>
           </div>
         </div>
+
+        {/* Smart views: one-click morning queues */}
+        {viewMode === 'table' && (
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {SMART_VIEWS.map((v) => (
+              <button
+                key={v.key}
+                type="button"
+                onClick={() => setView(v.key)}
+                className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+                  activeView === v.key
+                    ? 'bg-primary-600 text-white border-primary-600'
+                    : 'bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800'
+                }`}
+              >
+                {v.label}
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* Search + Filter Bar */}
         <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 px-4 py-3 space-y-3">

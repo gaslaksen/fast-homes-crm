@@ -74,6 +74,8 @@ export class LeadsController {
     @Query('arvFilter') arvFilter?: string,
     @Query('showInactive') showInactive?: string,
     @Query('inDrip') inDrip?: string,
+    @Query('needsReply') needsReply?: string,
+    @Query('untouched') untouched?: string,
     @Query('sort') sort?: string,
     @Query('dir') dir?: string,
   ) {
@@ -98,6 +100,8 @@ export class LeadsController {
       arvFilter: arvFilter as 'has' | 'none' | undefined,
       showInactive: showInactive === 'true',
       inDrip: inDrip === 'active' ? 'active' : undefined,
+      needsReply: needsReply === 'true',
+      untouched: untouched === 'true',
       sort,
       dir: dir as 'asc' | 'desc' | undefined,
     });

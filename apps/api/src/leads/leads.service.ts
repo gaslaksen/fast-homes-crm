@@ -438,6 +438,8 @@ export class LeadsService {
     arvFilter?: 'has' | 'none';
     showInactive?: boolean;
     inDrip?: 'active';
+    needsReply?: boolean;
+    untouched?: boolean;
     sort?: string;
     dir?: 'asc' | 'desc';
   }) {
@@ -514,6 +516,10 @@ export class LeadsService {
       const cutoff = new Date(Date.now() - filters.staleMinDays * 24 * 3600000);
       where.lastTouchedAt = { lt: cutoff };
     }
+
+    // Smart views: "Needs Reply" = seller spoke last; "Untouched" = never worked
+    if (filters.needsReply) where.lastMessageDirection = 'INBOUND';
+    if (filters.untouched) where.touchCount = 0;
 
     if (filters.arvFilter === 'has') where.arv = { gt: 0 };
     if (filters.arvFilter === 'none') {
