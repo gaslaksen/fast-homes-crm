@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { formatDistanceToNowStrict } from 'date-fns';
 import AppShell from '@/components/AppShell';
-import PropertyPhoto from '@/components/PropertyPhoto';
+import Avatar from '@/components/Avatar';
 import CommunicationsTimeline from '@/components/communications/CommunicationsTimeline';
 import MessageComposer from '@/components/communications/MessageComposer';
 import LeadSidePanel from '@/components/leadDetailV2/LeadSidePanel';
@@ -403,14 +403,7 @@ function InboxWorkspace() {
                       }`}
                     >
                       <div className="flex items-start gap-2">
-                        <div className="flex-shrink-0 w-10 h-10 rounded-lg overflow-hidden bg-gray-100 dark:bg-gray-800">
-                          <PropertyPhoto
-                            src={t.primaryPhoto}
-                            address={t.propertyAddress}
-                            scoreBand={t.scoreBand}
-                            size="sm"
-                          />
-                        </div>
+                        <Avatar name={threadName(t)} size="md" />
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center justify-between gap-2">
                             <div
