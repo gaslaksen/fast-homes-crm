@@ -57,7 +57,7 @@ export default function DealsContextMenu({ x, y, dealId, status, onClose }: Prop
       className="fixed z-50 w-56 rounded-md border border-gray-200 bg-white py-1 shadow-xl dark:border-gray-700 dark:bg-gray-900"
       role="menu"
     >
-      <MenuItem onClick={() => go(`/leads/${dealId}?tab=overview`)}>Open lead</MenuItem>
+      <MenuItem onClick={() => go(`/leads/${dealId}`)}>Open lead</MenuItem>
       <MenuItem onClick={() => go(`/leads/${dealId}?tab=disposition`)}>Open disposition</MenuItem>
       <Divider />
       {canMarkSold ? (
