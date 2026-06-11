@@ -4,8 +4,9 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { format, formatDistanceToNow } from 'date-fns';
-import { leadsAPI, callsAPI, tasksAPI, authAPI } from '@/lib/api';
+import { leadsAPI, callsAPI, tasksAPI, authAPI, campaignAPI } from '@/lib/api';
 import Avatar from '@/components/Avatar';
+import DripEnvelopeIcon from '@/components/icons/DripEnvelopeIcon';
 import LeadQueueNav from '@/components/leadDetailV2/LeadQueueNav';
 import ShareDealModal from '@/components/ShareDealModal';
 import ScheduleFollowUpModal from '@/components/ScheduleFollowUpModal';
@@ -115,18 +116,55 @@ export default function LeadRail({ lead, onLeadPatch, onMarkDead }: Props) {
   const [showFollowUpModal, setShowFollowUpModal] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
   const [backHref, setBackHref] = useState('/leads');
+  const [enrollments, setEnrollments] = useState<any[]>([]);
+  const [campaigns, setCampaigns] = useState<any[]>([]);
+  const [selectedCampaignId, setSelectedCampaignId] = useState('');
+  const [enrolling, setEnrolling] = useState(false);
   const [aiInsight, setAiInsight] = useState<string | null>(lead.aiInsight ?? null);
   const [insightLoading, setInsightLoading] = useState(false);
 
   useEffect(() => {
     leadsAPI.getTasks(leadId).then((res) => setTasks(res.data || [])).catch(() => {});
+    campaignAPI.leadCampaigns(leadId).then((res) => setEnrollments(res.data || [])).catch(() => {});
   }, [leadId]);
   useEffect(() => {
     authAPI.getMe().then((res) => setCurrentUser(res.data)).catch(() => {});
     authAPI.getTeam().then((res) => setTeamMembers(res.data || [])).catch(() => {});
+    campaignAPI.list().then((res) => setCampaigns(res.data || [])).catch(() => {});
     const queue = readLeadQueue();
     if (queue?.returnUrl) setBackHref(queue.returnUrl);
   }, []);
+
+  const handleEnroll = async () => {
+    if (!selectedCampaignId) return;
+    setEnrolling(true);
+    try {
+      await campaignAPI.enrollLead(selectedCampaignId, leadId);
+      const res = await campaignAPI.leadCampaigns(leadId);
+      setEnrollments(res.data || []);
+      setSelectedCampaignId('');
+    } catch (err: any) {
+      alert(err?.response?.data?.message || 'Failed to enroll');
+    } finally {
+      setEnrolling(false);
+    }
+  };
+
+  const handlePauseEnrollment = async (enrollmentId: string) => {
+    await campaignAPI.pause(enrollmentId);
+    setEnrollments((prev) => prev.map((e) => (e.id === enrollmentId ? { ...e, status: 'PAUSED' } : e)));
+  };
+
+  const handleResumeEnrollment = async (enrollmentId: string) => {
+    await campaignAPI.resume(enrollmentId);
+    setEnrollments((prev) => prev.map((e) => (e.id === enrollmentId ? { ...e, status: 'ACTIVE' } : e)));
+  };
+
+  const handleUnenroll = async (enrollmentId: string) => {
+    if (!confirm('Remove from this campaign?')) return;
+    await campaignAPI.unenroll(enrollmentId);
+    setEnrollments((prev) => prev.filter((e) => e.id !== enrollmentId));
+  };
 
   // Same AI insight the Overview hero shows.
   useEffect(() => {
@@ -306,6 +344,8 @@ export default function LeadRail({ lead, onLeadPatch, onMarkDead }: Props) {
   const lastTouched = lead.lastTouchedAt
     ? formatDistanceToNow(new Date(lead.lastTouchedAt), { addSuffix: true })
     : null;
+  const activeEnrollments = enrollments.filter((e: any) => e.status === 'ACTIVE');
+  const inDrip = activeEnrollments.length > 0 || lead.dripSequence?.status === 'ACTIVE';
 
   return (
     <div className="p-4 space-y-4 text-sm">
@@ -342,6 +382,14 @@ export default function LeadRail({ lead, onLeadPatch, onMarkDead }: Props) {
           <span className={`inline-flex items-center px-2 py-0.5 rounded-full border text-[11px] font-semibold ${stageMeta.cls}`}>
             {stageMeta.label}
           </span>
+          {inDrip && (
+            <span
+              title="Enrolled in active drip campaign"
+              className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-300"
+            >
+              <DripEnvelopeIcon className="w-3 h-3" />
+            </span>
+          )}
         </div>
         <div className="text-xs text-gray-500 dark:text-gray-400">
           {lastTouched ? `Last touched ${lastTouched}` : 'Never touched'}
@@ -637,6 +685,87 @@ export default function LeadRail({ lead, onLeadPatch, onMarkDead }: Props) {
               </div>
             )}
           </div>
+        </div>
+      </RailSection>
+
+      <RailSection title={`Drip Campaigns${activeEnrollments.length ? ` (${activeEnrollments.length})` : ''}`} storageKey="drip">
+        {enrollments.length > 0 ? (
+          <div className="space-y-1.5">
+            {enrollments.map((enrollment: any) => (
+              <div key={enrollment.id} className="p-2 rounded-lg bg-gray-50 dark:bg-gray-950">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-medium text-gray-900 dark:text-gray-100 truncate">
+                    {enrollment.campaign?.name || 'Campaign'}
+                  </span>
+                  <span className={`text-[10px] font-semibold shrink-0 ${
+                    enrollment.status === 'ACTIVE' ? 'text-green-600 dark:text-green-400' :
+                    enrollment.status === 'PAUSED' ? 'text-yellow-600 dark:text-yellow-400' :
+                    enrollment.status === 'REPLIED' ? 'text-purple-600 dark:text-purple-400' :
+                    'text-gray-500 dark:text-gray-400'
+                  }`}>
+                    {enrollment.status}
+                  </span>
+                </div>
+                <div className="mt-0.5 flex items-center justify-between gap-2">
+                  <span className="text-[11px] text-gray-400 dark:text-gray-500 truncate">
+                    Step {enrollment.currentStepOrder}
+                    {enrollment.nextSendAt && enrollment.status === 'ACTIVE' && (
+                      <> · next {new Date(enrollment.nextSendAt).toLocaleDateString()}</>
+                    )}
+                  </span>
+                  <span className="flex items-center gap-1.5 shrink-0">
+                    {enrollment.status === 'ACTIVE' && (
+                      <button
+                        type="button"
+                        onClick={() => handlePauseEnrollment(enrollment.id)}
+                        className="text-[11px] font-medium text-yellow-700 dark:text-yellow-400 hover:underline"
+                      >
+                        Pause
+                      </button>
+                    )}
+                    {enrollment.status === 'PAUSED' && (
+                      <button
+                        type="button"
+                        onClick={() => handleResumeEnrollment(enrollment.id)}
+                        className="text-[11px] font-medium text-green-700 dark:text-green-400 hover:underline"
+                      >
+                        Resume
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => handleUnenroll(enrollment.id)}
+                      className="text-[11px] text-red-500 dark:text-red-400 hover:underline"
+                    >
+                      Remove
+                    </button>
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-gray-400 dark:text-gray-500">Not enrolled in any campaigns.</p>
+        )}
+        <div className="mt-2 flex items-center gap-1.5">
+          <select
+            value={selectedCampaignId}
+            onChange={(e) => setSelectedCampaignId(e.target.value)}
+            className="flex-1 min-w-0 text-xs px-2 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 dark:text-gray-100"
+          >
+            <option value="">Select a campaign…</option>
+            {campaigns.map((c: any) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={handleEnroll}
+            disabled={!selectedCampaignId || enrolling}
+            className="text-xs px-3 py-1.5 rounded-lg bg-primary-600 text-white font-semibold hover:bg-primary-700 disabled:opacity-50 shrink-0"
+          >
+            {enrolling ? '…' : 'Enroll'}
+          </button>
         </div>
       </RailSection>
 

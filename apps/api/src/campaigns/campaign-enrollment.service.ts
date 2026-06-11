@@ -12,6 +12,16 @@ export class CampaignEnrollmentService {
 
   constructor(private prisma: PrismaService) {}
 
+  // Enrollment changes show up in the lead's conversation timeline and the
+  // Activity pane via these records (best-effort; never blocks the change).
+  private async logActivity(leadId: string, type: string, description: string) {
+    try {
+      await this.prisma.activity.create({ data: { leadId, type, description } });
+    } catch (err) {
+      this.logger.warn(`Could not log ${type} activity for lead ${leadId}: ${err.message}`);
+    }
+  }
+
   async enrollLead(leadId: string, campaignId: string) {
     // Get campaign with its first step
     const campaign = await this.prisma.campaign.findUnique({
@@ -85,7 +95,7 @@ export class CampaignEnrollmentService {
       // Re-enroll (was REMOVED). Reset enrolledAt to now so cumulative-from-
       // enrollment delays anchor on the re-enrollment date, not the original
       // (which would make every step fire immediately on the next cron tick).
-      return this.prisma.campaignEnrollment.update({
+      const reEnrolled = await this.prisma.campaignEnrollment.update({
         where: { id: existing.id },
         data: {
           status: 'ACTIVE',
@@ -95,9 +105,11 @@ export class CampaignEnrollmentService {
           completedAt: null,
         },
       });
+      await this.logActivity(leadId, 'CAMPAIGN_ENROLLED', `Enrolled in drip campaign "${campaign.name}"`);
+      return reEnrolled;
     }
 
-    return this.prisma.campaignEnrollment.create({
+    const enrollment = await this.prisma.campaignEnrollment.create({
       data: {
         campaignId,
         leadId,
@@ -107,27 +119,38 @@ export class CampaignEnrollmentService {
         nextSendAt,
       },
     });
+    await this.logActivity(leadId, 'CAMPAIGN_ENROLLED', `Enrolled in drip campaign "${campaign.name}"`);
+    return enrollment;
   }
 
   async unenrollLead(enrollmentId: string) {
-    return this.prisma.campaignEnrollment.update({
+    const enrollment = await this.prisma.campaignEnrollment.update({
       where: { id: enrollmentId },
       data: { status: 'REMOVED' },
+      include: { campaign: { select: { name: true } } },
     });
+    await this.logActivity(enrollment.leadId, 'CAMPAIGN_UNENROLLED', `Removed from drip campaign "${enrollment.campaign.name}"`);
+    return enrollment;
   }
 
   async pauseEnrollment(enrollmentId: string) {
-    return this.prisma.campaignEnrollment.update({
+    const enrollment = await this.prisma.campaignEnrollment.update({
       where: { id: enrollmentId },
       data: { status: 'PAUSED' },
+      include: { campaign: { select: { name: true } } },
     });
+    await this.logActivity(enrollment.leadId, 'CAMPAIGN_PAUSED', `Paused drip campaign "${enrollment.campaign.name}"`);
+    return enrollment;
   }
 
   async resumeEnrollment(enrollmentId: string) {
-    return this.prisma.campaignEnrollment.update({
+    const enrollment = await this.prisma.campaignEnrollment.update({
       where: { id: enrollmentId },
       data: { status: 'ACTIVE' },
+      include: { campaign: { select: { name: true } } },
     });
+    await this.logActivity(enrollment.leadId, 'CAMPAIGN_RESUMED', `Resumed drip campaign "${enrollment.campaign.name}"`);
+    return enrollment;
   }
 
   /**
