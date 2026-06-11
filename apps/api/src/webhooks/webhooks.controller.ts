@@ -1,6 +1,7 @@
 import { Controller, Post, Body, Query, Req, Res, HttpCode, Logger } from '@nestjs/common';
 import * as fs from 'fs';
 import { Request, Response } from 'express';
+import Twilio from 'twilio';
 import { LeadsService } from '../leads/leads.service';
 import { MessagesService } from '../messages/messages.service';
 import { DripService } from '../drip/drip.service';
@@ -229,26 +230,64 @@ export class WebhooksController {
    */
   @Post('twilio/inbound')
   async handleTwilioInbound(@Body() body: any, @Req() req: Request, @Res() res: Response) {
-    console.log('📥 Twilio inbound message:', body);
+    console.log('📥 Twilio inbound message:', JSON.stringify(body).substring(0, 500));
+
+    const emptyTwiml = '<?xml version="1.0" encoding="UTF-8"?><Response></Response>';
+
+    if (!this.verifyTwilioSignature(req, body)) {
+      res.status(403).send('Invalid Twilio signature');
+      return;
+    }
 
     try {
       // Twilio sends form-encoded data
+      const from: string = body.From || '';
+      const text: string = (body.Body || '').trim();
+
+      if (!from) {
+        console.warn('⚠️  Twilio inbound: missing From field');
+        res.set('Content-Type', 'text/xml');
+        res.send(emptyTwiml);
+        return;
+      }
+
+      // MMS media (NumMedia / MediaUrl0, MediaUrl1, ...)
+      const numMedia = parseInt(body.NumMedia || '0', 10);
+      const mediaUrls: string[] = [];
+      for (let i = 0; i < numMedia; i++) {
+        if (body[`MediaUrl${i}`]) mediaUrls.push(body[`MediaUrl${i}`]);
+      }
+
+      // Keep CRM compliance state in sync with Twilio's carrier-level opt-out
+      // handling. Mark DNC BEFORE processing so the AI never auto-replies to a STOP.
+      const keyword = text.toUpperCase();
+      if (['STOP', 'STOPALL', 'UNSUBSCRIBE', 'CANCEL', 'END', 'QUIT'].includes(keyword)) {
+        await this.markDoNotText(from, 'Twilio STOP reply');
+      } else if (['START', 'UNSTOP'].includes(keyword)) {
+        await this.unmarkDoNotText(from);
+      }
+
       const result = await this.messagesService.handleInboundMessage({
         MessageSid: body.MessageSid || body.SmsSid,
-        From: body.From,
+        From: from,
         To: body.To,
-        Body: body.Body,
+        Body: text || '[📷 Photo]',  // placeholder for MMS-only messages
       });
 
       console.log('✅ Twilio message processed:', result);
 
+      if (mediaUrls.length > 0 && result?.leadId) {
+        this.logger.log(`📸 Twilio MMS detected: ${mediaUrls.length} media URL(s) from ${from}`);
+        this.processInboundMediaInBackground(mediaUrls, result.leadId);
+      }
+
       // Respond to Twilio with TwiML (empty response = no auto-reply)
       res.set('Content-Type', 'text/xml');
-      res.send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+      res.send(emptyTwiml);
     } catch (error) {
       console.error('❌ Twilio webhook error:', error);
       res.set('Content-Type', 'text/xml');
-      res.send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+      res.send(emptyTwiml);
     }
   }
 
@@ -412,50 +451,7 @@ export class WebhooksController {
           }
 
           if (uniqueMediaUrls.length > 0 && result?.leadId) {
-            // Run in background — don't block the webhook response
-            setImmediate(async () => {
-              try {
-                for (const url of uniqueMediaUrls) {
-                  this.logger.log(`📸 Downloading MMS photo for lead ${result.leadId}: ${url}`);
-                  const response = await fetch(url, {
-                    signal: AbortSignal.timeout(15000),
-                  });
-                  if (!response.ok) {
-                    this.logger.warn(`Failed to download MMS photo: ${response.status} ${response.statusText}`);
-                    continue;
-                  }
-                  const arrayBuffer = await response.arrayBuffer();
-                  const buffer = Buffer.from(arrayBuffer);
-                  await this.photosService.processAndSave(result.leadId, buffer, 'seller-mms');
-                  this.logger.log(`✅ Seller MMS photo saved for lead ${result.leadId}`);
-                }
-
-                // Check if we now have 2+ seller-mms photos → auto-trigger repair analysis
-                const lead = await this.leadsService['prisma'].lead.findUnique({
-                  where: { id: result.leadId },
-                });
-                const photos = (lead?.photos as any[]) || [];
-                const mmsCount = photos.filter((p: any) => p.source === 'seller-mms').length;
-
-                if (mmsCount >= 2) {
-                  // Find the most recent CompAnalysis for this lead
-                  const latestAnalysis = await this.compAnalysisService['prisma'].compAnalysis.findFirst({
-                    where: { leadId: result.leadId },
-                    orderBy: { createdAt: 'desc' },
-                  });
-
-                  if (latestAnalysis) {
-                    this.logger.log(`🔍 Auto-triggering photo repair analysis for lead ${result.leadId} (${mmsCount} MMS photos, analysis ${latestAnalysis.id})`);
-                    await this.compAnalysisService.analyzePhotosFromLead(latestAnalysis.id, result.leadId);
-                    this.logger.log(`✅ Auto photo repair analysis complete for lead ${result.leadId}`);
-                  } else {
-                    this.logger.log(`ℹ️ Lead ${result.leadId} has ${mmsCount} MMS photos but no CompAnalysis — skipping auto-analysis`);
-                  }
-                }
-              } catch (err: any) {
-                this.logger.error(`Failed to process MMS photos for lead ${result.leadId}: ${err.message}`);
-              }
-            });
+            this.processInboundMediaInBackground(uniqueMediaUrls, result.leadId);
           }
 
           return { success: true };
@@ -694,44 +690,14 @@ export class WebhooksController {
         // ── Compliance: DNT (Do Not Text / STOP reply) ───────────────────
         case 'addNumberToDNT': {
           // { phone, timestamp, userId, source, event }
-          const phone = formatPhoneNumber(body.phone || '');
-          if (phone) {
-            const affected = await this.leadsService['prisma'].lead.findMany({
-              where: { sellerPhone: phone },
-              select: { id: true },
-            });
-            await this.leadsService['prisma'].lead.updateMany({
-              where: { sellerPhone: phone },
-              data: { doNotContact: true, unsubscribedAt: new Date() },
-            });
-            for (const lead of affected) {
-              try {
-                await this.campaignEnrollmentService.removeAllActive(lead.id);
-              } catch (err: any) {
-                this.logger.error(`Failed to remove campaign enrollments for lead ${lead.id}: ${err.message}`);
-              }
-              try {
-                await this.dripService.cancelByLeadId(lead.id, 'DNT (STOP) webhook');
-              } catch {
-                // Drip may not exist - fine
-              }
-            }
-            console.log(`🚫 DNT (STOP): ${phone} — source: ${body.source} (cleaned ${affected.length} lead(s))`);
-          }
+          await this.markDoNotText(body.phone || '', `DNT (STOP) webhook - source: ${body.source}`);
           return { success: true };
         }
 
         // ── Compliance: re-subscribed (START reply) ──────────────────────
         case 'removeNumberFromDNT': {
           // { phone, timestamp, userId, source, event }
-          const phone = formatPhoneNumber(body.phone || '');
-          if (phone) {
-            await this.leadsService['prisma'].lead.updateMany({
-              where: { sellerPhone: phone },
-              data: { doNotContact: false },
-            });
-            console.log(`✅ DNT removed (START): ${phone}`);
-          }
+          await this.unmarkDoNotText(body.phone || '');
           return { success: true };
         }
 
@@ -1016,31 +982,177 @@ export class WebhooksController {
   }
 
   /**
-   * Twilio delivery status webhook (optional)
-   * Receives status updates for sent messages
+   * Twilio delivery status webhook
+   * Receives status updates for sent messages (set TWILIO_STATUS_CALLBACK_URL
+   * so the provider passes this URL as statusCallback on every send)
    */
   @Post('twilio/status')
-  async handleTwilioStatus(@Body() body: any) {
-    console.log('📥 Twilio status update:', body);
+  async handleTwilioStatus(@Body() body: any, @Req() req: Request) {
+    console.log('📥 Twilio status update:', JSON.stringify(body).substring(0, 300));
+
+    if (!this.verifyTwilioSignature(req, body)) {
+      return { success: false, error: 'Invalid Twilio signature' };
+    }
 
     try {
       const messageSid = body.MessageSid || body.SmsSid;
-      const status = body.MessageStatus || body.SmsStatus;
+      const status: string = (body.MessageStatus || body.SmsStatus || '').toLowerCase();
+      if (!messageSid || !status) {
+        return { success: false, error: 'Missing MessageSid or MessageStatus' };
+      }
+
+      // Twilio statuses: queued, sending, sent, delivered, undelivered, failed
+      const mappedStatus = status === 'undelivered' ? 'FAILED' : status.toUpperCase();
 
       // Update message status in database
       await this.messagesService['prisma'].message.updateMany({
         where: { twilioSid: messageSid },
         data: {
-          status: status.toUpperCase(),
+          status: mappedStatus,
           deliveredAt: status === 'delivered' ? new Date() : undefined,
         },
       });
+
+      if (body.ErrorCode) {
+        console.warn(`⚠️  Twilio SMS ${messageSid} failed: error ${body.ErrorCode}`);
+      }
 
       return { success: true };
     } catch (error) {
       console.error('❌ Twilio status webhook error:', error);
       return { success: false };
     }
+  }
+
+  // ─── Helper: validate Twilio webhook signatures ───
+  // Rejects forged requests. Validation runs whenever TWILIO_AUTH_TOKEN is set;
+  // set TWILIO_VALIDATE_WEBHOOKS=false to bypass for local testing.
+  private verifyTwilioSignature(req: Request, params: Record<string, any>): boolean {
+    const authToken = process.env.TWILIO_AUTH_TOKEN;
+    const validationEnabled =
+      (process.env.TWILIO_VALIDATE_WEBHOOKS || 'true').toLowerCase() !== 'false';
+
+    if (!authToken || !validationEnabled) {
+      if (!authToken) {
+        this.logger.warn('TWILIO_AUTH_TOKEN not set - skipping Twilio webhook signature validation');
+      }
+      return true;
+    }
+
+    const signature = (req.headers['x-twilio-signature'] as string) || '';
+    // Twilio signs the exact public URL it POSTed to. Behind a proxy (Railway)
+    // req.protocol/host may not match, so prefer TWILIO_WEBHOOK_BASE_URL.
+    const base = process.env.TWILIO_WEBHOOK_BASE_URL || `${req.protocol}://${req.get('host')}`;
+    const url = `${base}${req.originalUrl}`;
+
+    const valid = Twilio.validateRequest(authToken, signature, url, params || {});
+    if (!valid) {
+      this.logger.warn(`🚫 Invalid Twilio signature for ${url}`);
+    }
+    return valid;
+  }
+
+  // ─── Helper: STOP / opt-out - mark all leads with this phone as DNT ───
+  private async markDoNotText(rawPhone: string, reason: string) {
+    const phone = formatPhoneNumber(rawPhone || '');
+    if (!phone) return;
+
+    const affected = await this.leadsService['prisma'].lead.findMany({
+      where: { sellerPhone: phone },
+      select: { id: true },
+    });
+    await this.leadsService['prisma'].lead.updateMany({
+      where: { sellerPhone: phone },
+      data: { doNotContact: true, unsubscribedAt: new Date() },
+    });
+    for (const lead of affected) {
+      try {
+        await this.campaignEnrollmentService.removeAllActive(lead.id);
+      } catch (err: any) {
+        this.logger.error(`Failed to remove campaign enrollments for lead ${lead.id}: ${err.message}`);
+      }
+      try {
+        await this.dripService.cancelByLeadId(lead.id, reason);
+      } catch {
+        // Drip may not exist - fine
+      }
+    }
+    console.log(`🚫 DNT (STOP): ${phone} - ${reason} (cleaned ${affected.length} lead(s))`);
+  }
+
+  // ─── Helper: START / re-subscribe - clear DNT flag ───
+  private async unmarkDoNotText(rawPhone: string) {
+    const phone = formatPhoneNumber(rawPhone || '');
+    if (!phone) return;
+
+    await this.leadsService['prisma'].lead.updateMany({
+      where: { sellerPhone: phone },
+      data: { doNotContact: false },
+    });
+    console.log(`✅ DNT removed (START): ${phone}`);
+  }
+
+  // ─── Helper: download inbound MMS photos and auto-trigger repair analysis ───
+  // Shared by the SmrtPhone and Twilio inbound webhook paths.
+  private processInboundMediaInBackground(mediaUrls: string[], leadId: string) {
+    // Run in background - don't block the webhook response
+    setImmediate(async () => {
+      try {
+        for (const url of mediaUrls) {
+          this.logger.log(`📸 Downloading MMS photo for lead ${leadId}: ${url}`);
+          // Twilio media URLs require basic auth when media security is enabled
+          const headers: Record<string, string> = {};
+          if (
+            url.includes('api.twilio.com') &&
+            process.env.TWILIO_ACCOUNT_SID &&
+            process.env.TWILIO_AUTH_TOKEN
+          ) {
+            headers.Authorization =
+              'Basic ' +
+              Buffer.from(
+                `${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`,
+              ).toString('base64');
+          }
+          const response = await fetch(url, {
+            headers,
+            signal: AbortSignal.timeout(15000),
+          });
+          if (!response.ok) {
+            this.logger.warn(`Failed to download MMS photo: ${response.status} ${response.statusText}`);
+            continue;
+          }
+          const arrayBuffer = await response.arrayBuffer();
+          const buffer = Buffer.from(arrayBuffer);
+          await this.photosService.processAndSave(leadId, buffer, 'seller-mms');
+          this.logger.log(`✅ Seller MMS photo saved for lead ${leadId}`);
+        }
+
+        // Check if we now have 2+ seller-mms photos → auto-trigger repair analysis
+        const lead = await this.leadsService['prisma'].lead.findUnique({
+          where: { id: leadId },
+        });
+        const photos = (lead?.photos as any[]) || [];
+        const mmsCount = photos.filter((p: any) => p.source === 'seller-mms').length;
+
+        if (mmsCount >= 2) {
+          // Find the most recent CompAnalysis for this lead
+          const latestAnalysis = await this.compAnalysisService['prisma'].compAnalysis.findFirst({
+            where: { leadId },
+            orderBy: { createdAt: 'desc' },
+          });
+
+          if (latestAnalysis) {
+            this.logger.log(`🔍 Auto-triggering photo repair analysis for lead ${leadId} (${mmsCount} MMS photos, analysis ${latestAnalysis.id})`);
+            await this.compAnalysisService.analyzePhotosFromLead(latestAnalysis.id, leadId);
+            this.logger.log(`✅ Auto photo repair analysis complete for lead ${leadId}`);
+          } else {
+            this.logger.log(`ℹ️ Lead ${leadId} has ${mmsCount} MMS photos but no CompAnalysis - skipping auto-analysis`);
+          }
+        }
+      } catch (err: any) {
+        this.logger.error(`Failed to process MMS photos for lead ${leadId}: ${err.message}`);
+      }
+    });
   }
 
   // ─── Helper: find lead by phone number (normalizes + checks variants) ───

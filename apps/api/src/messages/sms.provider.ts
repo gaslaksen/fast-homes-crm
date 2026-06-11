@@ -11,13 +11,19 @@ export function checkSmsAllowed(
   to: string,
   config: ConfigService,
 ): { allowed: boolean; reason?: string } {
-  const testMode = config.get<string>('SMRTPHONE_TEST_MODE', 'false').toLowerCase() === 'true';
+  // SMS_TEST_MODE is provider-agnostic; SMRTPHONE_TEST_MODE kept for backwards compat
+  const testMode = (
+    config.get<string>('SMS_TEST_MODE') ??
+    config.get<string>('SMRTPHONE_TEST_MODE', 'false')
+  ).toLowerCase() === 'true';
 
   if (!testMode) {
     return { allowed: true };
   }
 
-  const rawList = config.get<string>('SMRTPHONE_ALLOWED_NUMBERS', '');
+  const rawList =
+    config.get<string>('SMS_ALLOWED_NUMBERS') ??
+    config.get<string>('SMRTPHONE_ALLOWED_NUMBERS', '');
   const allowedNumbers = rawList
     .split(',')
     .map((n) => n.trim().replace(/\D/g, ''))
@@ -53,9 +59,18 @@ export interface SmsProvider {
 export class TwilioSmsProvider implements SmsProvider {
   private client: Twilio.Twilio;
   private readonly logger = new Logger(TwilioSmsProvider.name);
+  private readonly defaultFrom: string;
+  private readonly statusCallback?: string;
 
-  constructor(accountSid: string, authToken: string) {
+  constructor(
+    accountSid: string,
+    authToken: string,
+    private readonly config?: ConfigService,
+  ) {
     this.client = Twilio(accountSid, authToken);
+    this.defaultFrom = config?.get<string>('TWILIO_PHONE_NUMBER') || '';
+    // Delivery receipts: Twilio POSTs status updates here (e.g. https://<api>/webhooks/twilio/status)
+    this.statusCallback = config?.get<string>('TWILIO_STATUS_CALLBACK_URL');
   }
 
   isConfigured() {
@@ -63,7 +78,21 @@ export class TwilioSmsProvider implements SmsProvider {
   }
 
   async sendSms(to: string, from: string, body: string): Promise<{ sid: string }> {
-    const msg = await this.client.messages.create({ body, from, to });
+    // Safety guard - respect TEST_MODE allowlist before any outbound send
+    if (this.config) {
+      const check = checkSmsAllowed(to, this.config);
+      if (!check.allowed) {
+        return { sid: `BLOCKED_TEST_MODE_${Date.now()}` };
+      }
+    }
+
+    const msg = await this.client.messages.create({
+      body,
+      from: from || this.defaultFrom,
+      to,
+      ...(this.statusCallback ? { statusCallback: this.statusCallback } : {}),
+    });
+    this.logger.log(`✅ Twilio SMS sent to ${to} - sid=${msg.sid} status=${msg.status}`);
     return { sid: msg.sid };
   }
 }
@@ -249,6 +278,30 @@ export function createSmsProvider(config: ConfigService): SmsProvider {
 
   const smrtphoneKey = config.get<string>('SMRTPHONE_API_KEY');
   const smrtphoneNumber = config.get<string>('SMRTPHONE_PHONE_NUMBER') || config.get<string>('TWILIO_PHONE_NUMBER') || '';
+  const twilioSid = config.get<string>('TWILIO_ACCOUNT_SID');
+  const twilioToken = config.get<string>('TWILIO_AUTH_TOKEN');
+
+  // Explicit override - lets Twilio (or the simulator) activate even while
+  // Smrtphone credentials remain configured during the migration period.
+  const forced = (config.get<string>('SMS_PROVIDER') || '').toLowerCase();
+
+  if (forced === 'twilio') {
+    if (!twilioSid || !twilioToken) {
+      const msg =
+        '❌ SMS_PROVIDER=twilio but TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN are not set. Refusing to start.';
+      logger.error(msg);
+      throw new Error(msg);
+    }
+    logger.log('📞 Using Twilio SMS provider (forced via SMS_PROVIDER=twilio)');
+    logBootIdentity('TwilioSmsProvider');
+    return new TwilioSmsProvider(twilioSid, twilioToken, config);
+  }
+
+  if (forced === 'smrtphone' && !smrtphoneKey) {
+    const msg = '❌ SMS_PROVIDER=smrtphone but SMRTPHONE_API_KEY is not set. Refusing to start.';
+    logger.error(msg);
+    throw new Error(msg);
+  }
 
   if (smrtphoneKey) {
     logger.log('📞 Using Smrtphone SMS provider');
@@ -260,13 +313,10 @@ export function createSmsProvider(config: ConfigService): SmsProvider {
     return new SmrtphoneSmsProvider(smrtphoneKey, smrtphoneNumber, config);
   }
 
-  const twilioSid = config.get<string>('TWILIO_ACCOUNT_SID');
-  const twilioToken = config.get<string>('TWILIO_AUTH_TOKEN');
-
   if (twilioSid && twilioToken) {
     logger.log('📞 Using Twilio SMS provider');
     logBootIdentity('TwilioSmsProvider');
-    return new TwilioSmsProvider(twilioSid, twilioToken);
+    return new TwilioSmsProvider(twilioSid, twilioToken, config);
   }
 
   // No real provider configured. This is the misconfig that caused the

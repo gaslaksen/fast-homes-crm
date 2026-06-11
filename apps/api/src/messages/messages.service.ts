@@ -6,7 +6,7 @@ import { DripService } from '../drip/drip.service';
 import { CampaignEnrollmentService } from '../campaigns/campaign-enrollment.service';
 import { LeadsService } from '../leads/leads.service';
 import { SellerPortalService } from '../seller-portal/seller-portal.service';
-import { SmsProvider, SmrtphoneSmsProvider, createSmsProvider } from './sms.provider';
+import { SmsProvider, SmrtphoneSmsProvider, TwilioSmsProvider, createSmsProvider } from './sms.provider';
 import { GmailService } from '../gmail/gmail.service';
 import { formatPhoneNumber, isOptOutMessage } from '@fast-homes/shared';
 import { dealFitFlags, propertyContextForPrompt } from '../leads/property-fit.util';
@@ -108,8 +108,11 @@ export class MessagesService {
     @Optional() private sellerPortalService: SellerPortalService,
     private gmailService: GmailService,
   ) {
-    this.twilioNumber = this.config.get<string>('SMRTPHONE_PHONE_NUMBER') || this.config.get<string>('TWILIO_PHONE_NUMBER') || '';
     this.smsProvider = createSmsProvider(this.config);
+    // Outbound "from" number follows the active provider
+    this.twilioNumber = this.smsProvider instanceof TwilioSmsProvider
+      ? this.config.get<string>('TWILIO_PHONE_NUMBER') || this.config.get<string>('SMRTPHONE_PHONE_NUMBER') || ''
+      : this.config.get<string>('SMRTPHONE_PHONE_NUMBER') || this.config.get<string>('TWILIO_PHONE_NUMBER') || '';
   }
 
   /**
