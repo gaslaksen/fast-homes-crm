@@ -1,5 +1,6 @@
 'use client';
 
+import { useRef, useState } from 'react';
 import { buildExternalLinks } from '@/lib/externalLinks';
 import HeroPhotoCarousel, { type HeroPhoto } from './HeroPhotoCarousel';
 
@@ -39,12 +40,16 @@ interface Props {
   // Optional render slot — when provided, replaces the bare REAPI ARV strip
   // with the Build-016 ArvResultStrip (Dealcore ARV + REAPI reference).
   arvStripSlot?: React.ReactNode;
+  // When provided, a drop/click upload zone renders under the carousel so
+  // staff can add lead photos here (same photo set Deal Math analyzes).
+  onUploadPhotos?: (files: File[]) => Promise<void>;
 }
 
 export default function SubjectPropertySection({
   lead,
   onLeadRefresh,
   arvStripSlot,
+  onUploadPhotos,
 }: Props) {
   const photos = Array.isArray(lead.photos) ? lead.photos : [];
 
@@ -87,7 +92,7 @@ export default function SubjectPropertySection({
 
         {/* 50/50 split on lg+; stack on smaller */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-6">
-          {/* Left: hero + thumbnails */}
+          {/* Left: hero + thumbnails + upload */}
           <div>
             <HeroPhotoCarousel
               leadId={lead.id}
@@ -95,6 +100,7 @@ export default function SubjectPropertySection({
               primaryPhotoUrl={lead.primaryPhoto ?? null}
               onStreetViewFetched={onLeadRefresh}
             />
+            {onUploadPhotos && <PhotoDropzone onUpload={onUploadPhotos} />}
           </div>
 
           {/* Right: address + labeled data grid + external links */}
@@ -225,6 +231,54 @@ export default function SubjectPropertySection({
 }
 
 // ── helpers ───────────────────────────────────────────────────────────
+
+// Compact drop/click upload zone, matching the Deal Math photo-analysis one.
+function PhotoDropzone({ onUpload }: { onUpload: (files: File[]) => Promise<void> }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+
+  const handleFiles = async (fileList: FileList | null) => {
+    const files = Array.from(fileList || []).filter((f) => f.type.startsWith('image/'));
+    if (files.length === 0 || uploading) return;
+    setUploading(true);
+    try {
+      await onUpload(files);
+    } catch (err) {
+      console.error('Photo upload failed', err);
+      alert('Failed to upload photos');
+    } finally {
+      setUploading(false);
+      if (inputRef.current) inputRef.current.value = '';
+    }
+  };
+
+  return (
+    <label
+      onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={(e) => { e.preventDefault(); setDragOver(false); handleFiles(e.dataTransfer.files); }}
+      className={`mt-2 block w-full rounded-lg border-2 border-dashed px-3 py-2.5 text-center cursor-pointer transition-colors ${
+        dragOver
+          ? 'border-primary-400 bg-primary-50 dark:bg-primary-950/30'
+          : 'border-gray-300 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-600'
+      } ${uploading ? 'opacity-50 cursor-wait' : ''}`}
+    >
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        disabled={uploading}
+        onChange={(e) => handleFiles(e.target.files)}
+        className="hidden"
+      />
+      <span className="text-sm text-gray-600 dark:text-gray-400">
+        {uploading ? 'Uploading…' : 'Drop photos here or click to choose'}
+      </span>
+    </label>
+  );
+}
 
 function Field({
   label,
