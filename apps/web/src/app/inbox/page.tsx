@@ -14,6 +14,9 @@ import { inboxAPI, leadsAPI, authAPI, gmailAPI, type InboxFilter } from '@/lib/a
 import { getLeadAddressLine, getLeadDisplayName } from '@/lib/format';
 
 const POLL_MS = 60_000;
+// Faster cadence for the open conversation so inbound texts appear without a
+// manual refresh. Only the active thread is polled at this rate.
+const CONV_POLL_MS = 8_000;
 const PAGE_SIZE = 20;
 
 interface ThreadRow {
@@ -86,6 +89,9 @@ function InboxWorkspace() {
 
   const threadRef = useRef<HTMLDivElement | null>(null);
   const pausePollRef = useRef(false);
+  // Signature of the currently displayed conversation, so silent polls only
+  // re-render (and re-scroll) when something actually changed.
+  const commSigRef = useRef('');
 
   useEffect(() => {
     authAPI.getMe().then((res) => setCurrentUser(res.data)).catch(() => {});
@@ -116,20 +122,41 @@ function InboxWorkspace() {
     [router],
   );
 
-  const loadCommunications = useCallback((leadId: string) => {
-    setCommLoading(true);
-    return leadsAPI
-      .communications(leadId)
-      .then((res) => {
-        setTimeline(res.data?.timeline || []);
-        setNotes(res.data?.notes || []);
-      })
-      .catch(() => {
-        setTimeline([]);
-        setNotes([]);
-      })
-      .finally(() => setCommLoading(false));
+  // Apply a communications payload, but only touch state when the content
+  // changed — keeps silent polls from re-rendering and yanking the scroll.
+  // Returns true when new timeline items arrived.
+  const applyComms = useCallback((data: any): boolean => {
+    const nextTimeline: TimelineItem[] = data?.timeline || [];
+    const nextNotes: NoteItem[] = data?.notes || [];
+    const prevSig = commSigRef.current;
+    const sig =
+      `${nextTimeline.length}:${nextTimeline[nextTimeline.length - 1]?.id ?? ''}` +
+      `|${nextNotes.length}:${nextNotes[nextNotes.length - 1]?.id ?? ''}`;
+    if (sig === prevSig) return false;
+    const prevLen = Number(prevSig.split(':')[0]) || 0;
+    commSigRef.current = sig;
+    setTimeline(nextTimeline);
+    setNotes(nextNotes);
+    return nextTimeline.length > prevLen;
   }, []);
+
+  const loadCommunications = useCallback(
+    (leadId: string) => {
+      setCommLoading(true);
+      return leadsAPI
+        .communications(leadId)
+        .then((res) => {
+          applyComms(res.data);
+        })
+        .catch(() => {
+          commSigRef.current = '';
+          setTimeline([]);
+          setNotes([]);
+        })
+        .finally(() => setCommLoading(false));
+    },
+    [applyComms],
+  );
 
   const selected = threads.find((t) => t.leadId === selectedId) || null;
 
@@ -139,6 +166,32 @@ function InboxWorkspace() {
       .then((res) => setCounts(res.data))
       .catch(() => {});
   }, []);
+
+  // Silent background refresh of the open conversation (no spinner, no reset
+  // on transient error). Marks the thread read when a new message lands so the
+  // active conversation doesn't flap to unread.
+  const pollTimeline = useCallback(
+    (leadId: string) => {
+      return leadsAPI
+        .communications(leadId)
+        .then((res) => {
+          const grew = applyComms(res.data);
+          if (grew) {
+            inboxAPI
+              .markRead(leadId)
+              .then(() => {
+                setThreads((prev) =>
+                  prev.map((t) => (t.leadId === leadId ? { ...t, threadUnread: false } : t)),
+                );
+                refreshCounts();
+              })
+              .catch(() => {});
+          }
+        })
+        .catch(() => {});
+    },
+    [applyComms, refreshCounts],
+  );
 
   const loadThreads = useCallback(
     async (opts: { filter: InboxFilter; page: number; append: boolean }) => {
@@ -211,6 +264,7 @@ function InboxWorkspace() {
   // Load the thread + full lead, and mark it read, when selection changes.
   useEffect(() => {
     if (!selectedId) {
+      commSigRef.current = '';
       setTimeline([]);
       setNotes([]);
       setLead(null);
@@ -244,6 +298,23 @@ function InboxWorkspace() {
   useEffect(() => {
     if (threadRef.current) threadRef.current.scrollTop = threadRef.current.scrollHeight;
   }, [timeline]);
+
+  // Poll the OPEN conversation on a fast cadence so inbound texts appear
+  // without a manual refresh. Pauses when the tab is hidden.
+  useEffect(() => {
+    if (!selectedId) return;
+    const interval = setInterval(() => {
+      if (!document.hidden) pollTimeline(selectedId);
+    }, CONV_POLL_MS);
+    const onVisibility = () => {
+      if (!document.hidden) pollTimeline(selectedId);
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [selectedId, pollTimeline]);
 
   const loadMore = () => {
     const next = page + 1;

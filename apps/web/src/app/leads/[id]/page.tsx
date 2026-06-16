@@ -20,6 +20,9 @@ import type { TimelineItem, NoteItem } from '@/components/communications/types';
 
 const LEAD_DETAIL_V2 = process.env.NEXT_PUBLIC_LEAD_DETAIL_V2 === 'restructured';
 
+// Poll the open conversation so inbound texts appear without a manual refresh.
+const CONV_POLL_MS = 8_000;
+
 export default function LeadDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -117,6 +120,9 @@ export default function LeadDetailPage() {
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const messagesBottomRef = useRef<HTMLDivElement | null>(null);
   const timelineScrollRef = useRef<HTMLDivElement | null>(null);
+  // Signature of the displayed conversation, so silent polls only re-render
+  // (and re-scroll) when something actually changed.
+  const commSigRef = useRef('');
 
   // Keep the communications timeline pinned to the latest message.
   useEffect(() => {
@@ -135,12 +141,53 @@ export default function LeadDetailPage() {
     gmailAPI.status().then((res) => setGmailConnected(res.data.connected)).catch(() => {});
   }, [leadId]);
 
+  // Poll the conversation on a fast cadence so inbound texts appear without a
+  // manual refresh. Pauses when the tab is hidden.
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (!document.hidden) pollComms();
+    }, CONV_POLL_MS);
+    const onVisibility = () => {
+      if (!document.hidden) pollComms();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leadId]);
+
+  const commSig = (t: TimelineItem[], n: NoteItem[]) =>
+    `${t.length}:${t[t.length - 1]?.id ?? ''}|${n.length}:${n[n.length - 1]?.id ?? ''}`;
+
   const loadComms = async () => {
     try {
       const res = await leadsAPI.communications(leadId);
-      setComms({ timeline: res.data?.timeline || [], notes: res.data?.notes || [] });
+      const timeline = res.data?.timeline || [];
+      const notes = res.data?.notes || [];
+      commSigRef.current = commSig(timeline, notes);
+      setComms({ timeline, notes });
     } catch {
       // keep existing
+    }
+  };
+
+  // Silent background refresh: only re-renders when the conversation changed,
+  // and marks the thread read when a new message lands while it's open.
+  const pollComms = async () => {
+    try {
+      const res = await leadsAPI.communications(leadId);
+      const timeline = res.data?.timeline || [];
+      const notes = res.data?.notes || [];
+      const sig = commSig(timeline, notes);
+      if (sig === commSigRef.current) return;
+      const prevLen = Number(commSigRef.current.split(':')[0]) || 0;
+      commSigRef.current = sig;
+      setComms({ timeline, notes });
+      if (timeline.length > prevLen) inboxAPI.markRead(leadId).catch(() => {});
+    } catch {
+      // ignore transient errors; keep current view
     }
   };
 
