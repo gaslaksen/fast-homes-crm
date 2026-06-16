@@ -5,6 +5,8 @@ import AppNav from '@/components/AppNav';
 import Sidebar from '@/components/Sidebar';
 import SidebarTopBar from '@/components/SidebarTopBar';
 import CommandPalette from '@/components/CommandPalette';
+import { DialerProvider } from '@/components/dialer/DialerContext';
+import Dialer from '@/components/dialer/Dialer';
 
 const LAYOUT = (process.env.NEXT_PUBLIC_NAV_LAYOUT || 'topbar').toLowerCase();
 const SIDEBAR_MODE = LAYOUT === 'sidebar';
@@ -47,37 +49,43 @@ export default function AppShell({ children }: { children: ReactNode }) {
 
   if (!SIDEBAR_MODE) {
     return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
-        <AppNav />
-        {children}
-        <CommandPalette />
-      </div>
+      <DialerProvider>
+        <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
+          <AppNav />
+          {children}
+          <CommandPalette />
+          <Dialer />
+        </div>
+      </DialerProvider>
     );
   }
 
   const contentPadding = collapsed ? 'md:pl-16' : 'md:pl-60';
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
-      <Sidebar
-        collapsed={collapsed}
-        onToggleCollapsed={() => setCollapsed((c) => !c)}
-        mobileOpen={mobileOpen}
-        onCloseMobile={() => setMobileOpen(false)}
-      />
-      {mobileOpen && (
-        <button
-          type="button"
-          aria-label="Close menu"
-          onClick={() => setMobileOpen(false)}
-          className="fixed inset-0 z-30 bg-gray-900/50 md:hidden"
+    <DialerProvider>
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
+        <Sidebar
+          collapsed={collapsed}
+          onToggleCollapsed={() => setCollapsed((c) => !c)}
+          mobileOpen={mobileOpen}
+          onCloseMobile={() => setMobileOpen(false)}
         />
-      )}
-      <div className={`${contentPadding} transition-[padding] duration-200`}>
-        <SidebarTopBar onOpenMobileSidebar={() => setMobileOpen(true)} />
-        {children}
+        {mobileOpen && (
+          <button
+            type="button"
+            aria-label="Close menu"
+            onClick={() => setMobileOpen(false)}
+            className="fixed inset-0 z-30 bg-gray-900/50 md:hidden"
+          />
+        )}
+        <div className={`${contentPadding} transition-[padding] duration-200`}>
+          <SidebarTopBar onOpenMobileSidebar={() => setMobileOpen(true)} />
+          {children}
+        </div>
+        <CommandPalette />
+        <Dialer />
       </div>
-      <CommandPalette />
-    </div>
+    </DialerProvider>
   );
 }

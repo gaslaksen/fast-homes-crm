@@ -333,6 +333,12 @@ export const campaignsAPI = {
 export const callsAPI = {
   initiateAiCall: (leadId: string) =>
     api.post('/calls/ai-initiate', { leadId }),
+  // Twilio browser dialer
+  twilioToken: () => api.post('/calls/twilio/token'),
+  twilioDisposition: (callSid: string, disposition: string, notes?: string) =>
+    api.post('/calls/twilio/disposition', { callSid, disposition, notes }),
+  twilioRecents: (limit = 25) =>
+    api.get('/calls/twilio/recents', { params: { limit } }),
 };
 
 // Photos API
