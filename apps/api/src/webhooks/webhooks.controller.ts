@@ -278,7 +278,7 @@ export class WebhooksController {
 
       if (mediaUrls.length > 0 && result?.leadId) {
         this.logger.log(`📸 Twilio MMS detected: ${mediaUrls.length} media URL(s) from ${from}`);
-        this.processInboundMediaInBackground(mediaUrls, result.leadId);
+        this.processInboundMediaInBackground(mediaUrls, result.leadId, result.messageId);
       }
 
       // Respond to Twilio with TwiML (empty response = no auto-reply)
@@ -451,7 +451,7 @@ export class WebhooksController {
           }
 
           if (uniqueMediaUrls.length > 0 && result?.leadId) {
-            this.processInboundMediaInBackground(uniqueMediaUrls, result.leadId);
+            this.processInboundMediaInBackground(uniqueMediaUrls, result.leadId, result.messageId);
           }
 
           return { success: true };
@@ -1094,10 +1094,13 @@ export class WebhooksController {
 
   // ─── Helper: download inbound MMS photos and auto-trigger repair analysis ───
   // Shared by the SmrtPhone and Twilio inbound webhook paths.
-  private processInboundMediaInBackground(mediaUrls: string[], leadId: string) {
+  private processInboundMediaInBackground(mediaUrls: string[], leadId: string, messageId?: string) {
     // Run in background - don't block the webhook response
     setImmediate(async () => {
       try {
+        // Collected so we can also attach the saved photos to the inbound
+        // message, making them render inline in the conversation feed.
+        const savedMedia: { url: string; thumbnailUrl: string }[] = [];
         for (const url of mediaUrls) {
           this.logger.log(`📸 Downloading MMS photo for lead ${leadId}: ${url}`);
           // Twilio media URLs require basic auth when media security is enabled
@@ -1123,8 +1126,24 @@ export class WebhooksController {
           }
           const arrayBuffer = await response.arrayBuffer();
           const buffer = Buffer.from(arrayBuffer);
-          await this.photosService.processAndSave(leadId, buffer, 'seller-mms');
+          const saved = await this.photosService.processAndSave(leadId, buffer, 'seller-mms');
+          if (saved?.url && saved?.thumbnailUrl) {
+            savedMedia.push({ url: saved.url, thumbnailUrl: saved.thumbnailUrl });
+          }
           this.logger.log(`✅ Seller MMS photo saved for lead ${leadId}`);
+        }
+
+        // Attach the saved photos to the inbound message so the conversation
+        // feed renders them inline instead of the "[📷 Photo]" placeholder.
+        if (messageId && savedMedia.length > 0) {
+          try {
+            await this.leadsService['prisma'].message.update({
+              where: { id: messageId },
+              data: { mediaUrls: savedMedia },
+            });
+          } catch (err: any) {
+            this.logger.warn(`Failed to attach media to message ${messageId}: ${err.message}`);
+          }
         }
 
         // Check if we now have 2+ seller-mms photos → auto-trigger repair analysis

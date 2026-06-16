@@ -296,6 +296,7 @@ model Message {
   direction   String
   status      String    @default("PENDING")
   body        String
+  mediaUrls   Json?     // MMS attachments: array of { url, thumbnailUrl } (base64 data URIs), null for plain SMS
   from        String
   to          String
   twilioSid   String?   // SmrtPhone message reference ID (not enforced unique — SmrtPhone doesn't guarantee unique IDs)

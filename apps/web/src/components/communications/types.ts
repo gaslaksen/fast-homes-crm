@@ -11,7 +11,7 @@ export type TimelineItem =
       direction: 'INBOUND' | 'OUTBOUND';
       at: string;
       actor: Actor;
-      payload: { body: string };
+      payload: { body: string; media?: { url: string; thumbnailUrl: string }[] };
     }
   | {
       id: string;

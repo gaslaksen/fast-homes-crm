@@ -86,13 +86,14 @@ export class CommunicationsService {
     const timeline: any[] = [];
 
     for (const m of messages as any[]) {
+      const media = Array.isArray(m.mediaUrls) ? m.mediaUrls : [];
       timeline.push({
         id: `sms_${m.id}`,
         kind: 'sms',
         direction: m.direction,
         at: m.createdAt,
         actor: commActor(m.direction, m.sentByUserId),
-        payload: { body: m.body },
+        payload: { body: m.body, media },
       });
     }
 
