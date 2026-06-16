@@ -5,6 +5,10 @@ import { format } from 'date-fns';
 import Avatar from '@/components/Avatar';
 import type { Actor, TimelineItem } from './types';
 
+// Placeholder body the webhook stores for MMS-only messages (no caption).
+// Kept in sync with apps/api webhooks.controller.ts.
+const MMS_PLACEHOLDER = '[📷 Photo]';
+
 function fmtDuration(seconds: number | null): string {
   if (seconds == null) return '';
   const m = Math.floor(seconds / 60);
@@ -135,6 +139,9 @@ export default function CommunicationsTimeline({ items }: { items: TimelineItem[
 
         // SMS — colored chat bubble.
         if (item.kind === 'sms') {
+          const media = item.payload.media ?? [];
+          // Hide the "[📷 Photo]" placeholder once the actual images are attached.
+          const showBody = item.payload.body && !(media.length > 0 && item.payload.body === MMS_PLACEHOLDER);
           return (
             <div key={item.id} className={`flex items-start gap-2 ${rowDir}`}>
               <ActorAvatar actor={item.actor} />
@@ -147,9 +154,31 @@ export default function CommunicationsTimeline({ items }: { items: TimelineItem[
                   <ChannelBadge kind="sms" />
                   <MetaLine actor={item.actor} at={item.at} />
                 </div>
-                <div className="text-sm text-gray-900 dark:text-gray-100 whitespace-pre-wrap">
-                  {item.payload.body}
-                </div>
+                {media.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mb-1.5">
+                    {media.map((m, i) => (
+                      <a
+                        key={i}
+                        href={m.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="Open full size"
+                        className="block"
+                      >
+                        <img
+                          src={m.thumbnailUrl || m.url}
+                          alt="MMS attachment"
+                          className="max-h-48 w-auto rounded-lg border border-black/5 dark:border-white/10 object-cover"
+                        />
+                      </a>
+                    ))}
+                  </div>
+                )}
+                {showBody && (
+                  <div className="text-sm text-gray-900 dark:text-gray-100 whitespace-pre-wrap">
+                    {item.payload.body}
+                  </div>
+                )}
               </div>
             </div>
           );
