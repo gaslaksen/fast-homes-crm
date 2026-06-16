@@ -67,6 +67,22 @@ export class CallsController {
     res.send(twiml);
   }
 
+  /**
+   * Inbound call webhook. Point your Twilio number's Voice "A call comes in" at
+   * https://<api>/calls/twilio/incoming. Rings the agents' browser dialers.
+   */
+  @Post('twilio/incoming')
+  @HttpCode(200)
+  async twilioIncoming(@Body() body: any, @Req() req: Request, @Res() res: Response) {
+    if (!this.verifyTwilioSignature(req, body)) {
+      res.status(403).send('Invalid Twilio signature');
+      return;
+    }
+    const twiml = await this.twilioVoiceService.generateIncomingTwiml(body);
+    res.set('Content-Type', 'text/xml');
+    res.send(twiml);
+  }
+
   /** Call status + Dial action callback. */
   @Post('twilio/status')
   @HttpCode(200)

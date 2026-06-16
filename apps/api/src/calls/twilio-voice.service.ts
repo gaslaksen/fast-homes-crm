@@ -143,6 +143,108 @@ export class TwilioVoiceService {
     return response.toString();
   }
 
+  /**
+   * TwiML for an inbound call to the Twilio number. Rings the agents' browsers
+   * via <Dial><Client>. Called by the phone number's Voice webhook.
+   */
+  async generateIncomingTwiml(params: Record<string, string>): Promise<string> {
+    const response = new VoiceResponse();
+
+    const from = params.From || params.from || '';
+    const to = params.To || params.to || '';
+    const callSid = params.CallSid || '';
+
+    const lead = await this.findLeadByPhone(from);
+    const callerName = lead
+      ? `${lead.sellerFirstName || ''} ${lead.sellerLastName || ''}`.trim()
+      : '';
+
+    // Log the inbound call
+    if (callSid) {
+      try {
+        await this.prisma.callLog.upsert({
+          where: { twilioCallSid: callSid },
+          create: {
+            twilioCallSid: callSid,
+            leadId: lead?.id || null,
+            fromNumber: from,
+            toNumber: to,
+            status: 'in-progress',
+            type: 'twilio_inbound',
+          },
+          update: { status: 'in-progress' },
+        });
+      } catch (err: any) {
+        this.logger.error(`Failed to log inbound call ${callSid}: ${err.message}`);
+      }
+    }
+
+    const identities = await this.getRingIdentities();
+    if (identities.length === 0) {
+      response.say('No agents are available to take your call. Please try again later.');
+      return response.toString();
+    }
+
+    const apiBase = this.config.get<string>('API_URL') || '';
+    const recordCalls =
+      (this.config.get<string>('TWILIO_RECORD_CALLS') || 'false').toLowerCase() === 'true';
+
+    const dial = response.dial({
+      timeout: 25,
+      answerOnBridge: true,
+      action: apiBase ? `${apiBase}/calls/twilio/status` : undefined,
+      method: 'POST',
+      ...(recordCalls
+        ? {
+            record: 'record-from-answer-dual' as const,
+            recordingStatusCallback: apiBase
+              ? `${apiBase}/calls/twilio/recording`
+              : undefined,
+            recordingStatusCallbackMethod: 'POST' as const,
+          }
+        : {}),
+    });
+
+    // Ring every agent browser at once; first to answer wins, offline ones no-op.
+    for (const identity of identities) {
+      const client = dial.client();
+      client.identity(identity);
+      client.parameter({ name: 'From', value: from });
+      if (callerName) client.parameter({ name: 'callerName', value: callerName });
+      if (lead?.id) client.parameter({ name: 'leadId', value: lead.id });
+    }
+
+    return response.toString();
+  }
+
+  private async getRingIdentities(): Promise<string[]> {
+    // Optional explicit allowlist of client identities (userIds) to ring
+    const override = this.config.get<string>('TWILIO_INBOUND_RING_IDENTITIES');
+    if (override) {
+      return override.split(',').map((s) => s.trim()).filter(Boolean);
+    }
+    // Default: ring all users (single-tenant). Capped as a safety bound.
+    const users = await this.prisma.user.findMany({ select: { id: true }, take: 20 });
+    return users.map((u) => u.id);
+  }
+
+  private async findLeadByPhone(phone: string) {
+    if (!phone) return null;
+    const stripped = phone.replace(/\D/g, '').replace(/^1/, '');
+    if (!stripped) return null;
+    return this.prisma.lead.findFirst({
+      where: {
+        OR: [
+          { sellerPhone: phone },
+          { sellerPhone: stripped },
+          { sellerPhone: `1${stripped}` },
+          { sellerPhone: `+1${stripped}` },
+        ],
+      },
+      select: { id: true, sellerFirstName: true, sellerLastName: true },
+    });
+  }
+
   /** Status callback (Dial action + per-call status). Updates CallLog by CallSid. */
   async handleStatusCallback(body: Record<string, string>): Promise<void> {
     const callSid = body.CallSid || '';
