@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { format } from 'date-fns';
 import Avatar from '@/components/Avatar';
+import LightboxOverlay, { type LightboxPhoto } from '@/components/LightboxOverlay';
 import type { Actor, TimelineItem } from './types';
 
 // Placeholder body the webhook stores for MMS-only messages (no caption).
@@ -96,9 +97,22 @@ function renderWithMentions(body: string) {
 
 export default function CommunicationsTimeline({ items }: { items: TimelineItem[] }) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
 
   if (items.length === 0) {
     return <div className="text-xs text-gray-400 dark:text-gray-500">No communications yet.</div>;
+  }
+
+  // Flatten every MMS photo in the thread into one gallery so the lightbox can
+  // arrow across all of them. The per-message start index lets a thumbnail open
+  // the lightbox at its own position.
+  const galleryPhotos: LightboxPhoto[] = [];
+  const mediaStartIndex = new Map<string, number>();
+  for (const it of items) {
+    if (it.kind === 'sms' && it.payload.media?.length) {
+      mediaStartIndex.set(it.id, galleryPhotos.length);
+      for (const m of it.payload.media) galleryPhotos.push({ url: m.url, source: 'MMS' });
+    }
   }
 
   return (
@@ -157,20 +171,19 @@ export default function CommunicationsTimeline({ items }: { items: TimelineItem[
                 {media.length > 0 && (
                   <div className="flex flex-wrap gap-1.5 mb-1.5">
                     {media.map((m, i) => (
-                      <a
+                      <button
                         key={i}
-                        href={m.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        title="Open full size"
+                        type="button"
+                        onClick={() => setLightboxIndex((mediaStartIndex.get(item.id) ?? 0) + i)}
+                        title="View photo"
                         className="block"
                       >
                         <img
                           src={m.thumbnailUrl || m.url}
                           alt="MMS attachment"
-                          className="max-h-48 w-auto rounded-lg border border-black/5 dark:border-white/10 object-cover"
+                          className="max-h-48 w-auto rounded-lg border border-black/5 dark:border-white/10 object-cover hover:opacity-90 transition-opacity"
                         />
-                      </a>
+                      </button>
                     ))}
                   </div>
                 )}
@@ -249,6 +262,13 @@ export default function CommunicationsTimeline({ items }: { items: TimelineItem[
           </div>
         );
       })}
+
+      <LightboxOverlay
+        photos={galleryPhotos}
+        index={lightboxIndex}
+        onClose={() => setLightboxIndex(null)}
+        onIndexChange={setLightboxIndex}
+      />
     </div>
   );
 }
