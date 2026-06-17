@@ -1,0 +1,29 @@
+{
+  "expo": {
+    "name": "Dealcore",
+    "slug": "dealcore",
+    "version": "0.1.0",
+    "scheme": "dealcore",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.dealcore.app",
+      "infoPlist": {
+        "UIBackgroundModes": ["remote-notification", "voip"]
+      }
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-notifications"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "apiUrl": "https://api.dealcore.app"
+    }
+  }
+}
