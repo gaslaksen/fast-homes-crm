@@ -12,10 +12,10 @@ import {
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 import * as jwt from 'jsonwebtoken';
-import Twilio from 'twilio';
 import { CallsService } from './calls.service';
 import { TwilioVoiceService } from './twilio-voice.service';
 import { InitiateCallDto } from './dto/initiate-call.dto';
+import { isTwilioRequestValid } from '../webhooks/twilio-signature.util';
 
 @Controller('calls')
 export class CallsController {
@@ -63,6 +63,22 @@ export class CallsController {
       return;
     }
     const twiml = await this.twilioVoiceService.generateDialTwiml(body);
+    res.set('Content-Type', 'text/xml');
+    res.send(twiml);
+  }
+
+  /**
+   * Inbound call webhook. Point your Twilio number's Voice "A call comes in" at
+   * https://<api>/calls/twilio/incoming. Rings the agents' browser dialers.
+   */
+  @Post('twilio/incoming')
+  @HttpCode(200)
+  async twilioIncoming(@Body() body: any, @Req() req: Request, @Res() res: Response) {
+    if (!this.verifyTwilioSignature(req, body)) {
+      res.status(403).send('Invalid Twilio signature');
+      return;
+    }
+    const twiml = await this.twilioVoiceService.generateIncomingTwiml(body);
     res.set('Content-Type', 'text/xml');
     res.send(twiml);
   }
@@ -126,22 +142,6 @@ export class CallsController {
   }
 
   private verifyTwilioSignature(req: Request, params: Record<string, any>): boolean {
-    const authToken = process.env.TWILIO_AUTH_TOKEN;
-    const validationEnabled =
-      (process.env.TWILIO_VALIDATE_WEBHOOKS || 'true').toLowerCase() !== 'false';
-    if (!authToken || !validationEnabled) {
-      if (!authToken) {
-        this.logger.warn('TWILIO_AUTH_TOKEN not set — skipping Twilio voice signature validation');
-      }
-      return true;
-    }
-    const signature = (req.headers['x-twilio-signature'] as string) || '';
-    const base = process.env.TWILIO_WEBHOOK_BASE_URL || `${req.protocol}://${req.get('host')}`;
-    const url = `${base}${req.originalUrl}`;
-    const valid = Twilio.validateRequest(authToken, signature, url, params || {});
-    if (!valid) {
-      this.logger.warn(`🚫 Invalid Twilio signature for ${url}`);
-    }
-    return valid;
+    return isTwilioRequestValid(req, params);
   }
 }

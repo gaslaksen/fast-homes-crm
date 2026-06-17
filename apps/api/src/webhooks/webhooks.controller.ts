@@ -1,7 +1,7 @@
 import { Controller, Post, Body, Query, Req, Res, HttpCode, Logger } from '@nestjs/common';
 import * as fs from 'fs';
 import { Request, Response } from 'express';
-import Twilio from 'twilio';
+import { isTwilioRequestValid } from './twilio-signature.util';
 import { LeadsService } from '../leads/leads.service';
 import { MessagesService } from '../messages/messages.service';
 import { DripService } from '../drip/drip.service';
@@ -1028,28 +1028,7 @@ export class WebhooksController {
   // Rejects forged requests. Validation runs whenever TWILIO_AUTH_TOKEN is set;
   // set TWILIO_VALIDATE_WEBHOOKS=false to bypass for local testing.
   private verifyTwilioSignature(req: Request, params: Record<string, any>): boolean {
-    const authToken = process.env.TWILIO_AUTH_TOKEN;
-    const validationEnabled =
-      (process.env.TWILIO_VALIDATE_WEBHOOKS || 'true').toLowerCase() !== 'false';
-
-    if (!authToken || !validationEnabled) {
-      if (!authToken) {
-        this.logger.warn('TWILIO_AUTH_TOKEN not set - skipping Twilio webhook signature validation');
-      }
-      return true;
-    }
-
-    const signature = (req.headers['x-twilio-signature'] as string) || '';
-    // Twilio signs the exact public URL it POSTed to. Behind a proxy (Railway)
-    // req.protocol/host may not match, so prefer TWILIO_WEBHOOK_BASE_URL.
-    const base = process.env.TWILIO_WEBHOOK_BASE_URL || `${req.protocol}://${req.get('host')}`;
-    const url = `${base}${req.originalUrl}`;
-
-    const valid = Twilio.validateRequest(authToken, signature, url, params || {});
-    if (!valid) {
-      this.logger.warn(`🚫 Invalid Twilio signature for ${url}`);
-    }
-    return valid;
+    return isTwilioRequestValid(req, params);
   }
 
   // ─── Helper: STOP / opt-out - mark all leads with this phone as DNT ───

@@ -65,6 +65,7 @@ export default function Dialer() {
       {d.view === 'dialpad' && (
         <DialpadView tab={tab} setTab={setTab} typed={typed} setTyped={setTyped} />
       )}
+      {d.view === 'incoming' && <IncomingView />}
       {d.view === 'connecting' && <CallingView phase="connecting" />}
       {d.view === 'oncall' && <CallingView phase="oncall" />}
       {d.view === 'summary' && <SummaryView />}
@@ -379,6 +380,46 @@ function CallingView({ phase }: { phase: 'connecting' | 'oncall' }) {
       >
         <PhoneIcon className="h-5 w-5 rotate-[135deg]" /> End Call
       </button>
+    </div>
+  );
+}
+
+function IncomingView() {
+  const d = useDialer();
+  const c = d.contact;
+  return (
+    <div className="px-5 py-6 flex flex-col items-center">
+      <p className="text-xs uppercase tracking-wide text-gray-400 mb-3">Incoming call</p>
+      <span className="h-20 w-20 rounded-full bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300 text-2xl font-semibold flex items-center justify-center mb-3 animate-pulse">
+        {initials(c?.name, c?.phone)}
+      </span>
+      <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+        {c?.name || prettyPhone(c?.phone) || 'Unknown caller'}
+      </p>
+      <p className="text-sm text-gray-400">{prettyPhone(c?.phone)}</p>
+
+      <div className="flex items-center justify-center gap-10 mt-7">
+        <button
+          onClick={d.declineIncoming}
+          aria-label="Decline"
+          className="flex flex-col items-center gap-1"
+        >
+          <span className="h-14 w-14 rounded-full bg-red-500 hover:bg-red-600 text-white flex items-center justify-center">
+            <PhoneIcon className="h-6 w-6 rotate-[135deg]" />
+          </span>
+          <span className="text-[11px] text-gray-500">Decline</span>
+        </button>
+        <button
+          onClick={d.acceptIncoming}
+          aria-label="Accept"
+          className="flex flex-col items-center gap-1"
+        >
+          <span className="h-14 w-14 rounded-full bg-green-500 hover:bg-green-600 text-white flex items-center justify-center">
+            <PhoneIcon className="h-6 w-6" />
+          </span>
+          <span className="text-[11px] text-gray-500">Accept</span>
+        </button>
+      </div>
     </div>
   );
 }

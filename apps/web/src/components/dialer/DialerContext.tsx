@@ -12,7 +12,7 @@ import {
 import { Device, Call } from '@twilio/voice-sdk';
 import { callsAPI } from '@/lib/api';
 
-export type DialerView = 'dialpad' | 'connecting' | 'oncall' | 'summary';
+export type DialerView = 'dialpad' | 'connecting' | 'oncall' | 'summary' | 'incoming';
 
 export interface CallContact {
   name?: string;
@@ -30,6 +30,8 @@ interface DialerState {
   muted: boolean;
   durationSec: number;
   lastCallSid: string | null;
+  /** An inbound call is ringing and awaiting accept/decline. */
+  incoming: boolean;
 
   openDialer: () => void;
   closeDialer: () => void;
@@ -38,6 +40,8 @@ interface DialerState {
   hangup: () => void;
   toggleMute: () => void;
   sendDigit: (digit: string) => void;
+  acceptIncoming: () => void;
+  declineIncoming: () => void;
   saveDisposition: (disposition: string, notes?: string) => Promise<void>;
   reset: () => void;
 }
@@ -59,11 +63,13 @@ export function DialerProvider({ children }: { children: ReactNode }) {
   const [muted, setMuted] = useState(false);
   const [durationSec, setDurationSec] = useState(0);
   const [lastCallSid, setLastCallSid] = useState<string | null>(null);
+  const [incoming, setIncoming] = useState(false);
 
   const deviceRef = useRef<Device | null>(null);
   const callRef = useRef<Call | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const initPromiseRef = useRef<Promise<Device | null> | null>(null);
+  const incomingHandlerRef = useRef<(call: Call) => void>(() => {});
 
   const stopTimer = useCallback(() => {
     if (timerRef.current) {
@@ -103,6 +109,9 @@ export function DialerProvider({ children }: { children: ReactNode }) {
         device.on('error', (e: any) => {
           setError(e?.message || 'Device error');
         });
+
+        // Inbound calls ring here once the Device is registered
+        device.on('incoming', (call: Call) => incomingHandlerRef.current(call));
 
         await device.register();
         deviceRef.current = device;
@@ -150,6 +159,78 @@ export function DialerProvider({ children }: { children: ReactNode }) {
     },
     [stopTimer],
   );
+
+  // Inbound: a call is ringing this browser. Show accept/decline, wait for the
+  // user before answering audio.
+  const handleIncoming = useCallback(
+    (call: Call) => {
+      const cp: Map<string, string> | undefined = (call as any).customParameters;
+      const from = cp?.get('From') || (call.parameters as any)?.From || '';
+      const name = cp?.get('callerName') || '';
+      const leadId = cp?.get('leadId') || undefined;
+
+      callRef.current = call;
+      setContact({ name: name || undefined, phone: from, leadId });
+      setIncoming(true);
+      setOpen(true);
+      setView('incoming');
+      setError(null);
+
+      call.on('accept', (c: Call) => {
+        setIncoming(false);
+        setView('oncall');
+        setLastCallSid((c.parameters as any)?.CallSid || null);
+        setDurationSec(0);
+        stopTimer();
+        timerRef.current = setInterval(() => setDurationSec((s) => s + 1), 1000);
+      });
+
+      const endRinging = () => {
+        stopTimer();
+        callRef.current = null;
+        setIncoming(false);
+        setMuted(false);
+      };
+
+      // Caller hung up or we rejected before answering -> back to idle
+      call.on('cancel', () => {
+        endRinging();
+        setView('dialpad');
+      });
+      call.on('reject', () => {
+        endRinging();
+        setView('dialpad');
+      });
+      // Disconnect after answering -> disposition; before answering -> idle
+      call.on('disconnect', () => {
+        endRinging();
+        setView((v) => (v === 'oncall' ? 'summary' : 'dialpad'));
+      });
+      call.on('error', (e: any) => {
+        setError(e?.message || 'Call error');
+        endRinging();
+        setView('dialpad');
+      });
+    },
+    [stopTimer],
+  );
+
+  useEffect(() => {
+    incomingHandlerRef.current = handleIncoming;
+  }, [handleIncoming]);
+
+  // Register the Device on mount so inbound calls can reach this browser.
+  useEffect(() => {
+    getDevice();
+  }, [getDevice]);
+
+  const acceptIncoming = useCallback(() => {
+    callRef.current?.accept();
+  }, []);
+
+  const declineIncoming = useCallback(() => {
+    callRef.current?.reject();
+  }, []);
 
   const startCall = useCallback(
     async (c: CallContact) => {
@@ -244,6 +325,7 @@ export function DialerProvider({ children }: { children: ReactNode }) {
         muted,
         durationSec,
         lastCallSid,
+        incoming,
         openDialer,
         closeDialer,
         toggleDialer,
@@ -251,6 +333,8 @@ export function DialerProvider({ children }: { children: ReactNode }) {
         hangup,
         toggleMute,
         sendDigit,
+        acceptIncoming,
+        declineIncoming,
         saveDisposition,
         reset,
       }}
