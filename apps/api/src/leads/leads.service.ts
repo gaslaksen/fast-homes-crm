@@ -10,6 +10,7 @@ import { CompsService } from '../comps/comps.service';
 import { ReapiService } from '../comps/reapi.service';
 import { PipelineService } from '../pipeline/pipeline.service';
 import { ProfitCalculationService } from './profit-calculation.service';
+import { PushService } from '../push/push.service';
 import { LeadStatus, LeadSource, formatPhoneNumber, toTitleCase } from '@fast-homes/shared';
 import { Prisma } from '@prisma/client';
 import { enrichAddressFromZip, cleanStreetAddress, lookupCityStateFromZip } from '../webhooks/address-parser';
@@ -38,6 +39,7 @@ export class LeadsService {
     private reapiService: ReapiService,
     private pipelineService: PipelineService,
     private profitCalc: ProfitCalculationService,
+    private pushService: PushService,
   ) {}
 
   /**
@@ -162,6 +164,11 @@ export class LeadsService {
         metadata: { source: data.source },
       },
     });
+
+    // Push notify the assigned user (or the whole org) about the new lead
+    this.pushService.notifyNewLead(lead).catch((err) =>
+      this.logger.error(`New-lead push failed for ${lead.id}: ${err.message}`),
+    );
 
     // Schedule automatic initial outreach
     if (lead.autoRespond && !lead.doNotContact) {

@@ -30,6 +30,7 @@ import { AiArvCalculationModule } from './ai-arv-calculation/ai-arv-calculation.
 import { PropertyLookupsModule } from './property-lookups/property-lookups.module';
 import { InboxModule } from './inbox/inbox.module';
 import { ExternalConversationsModule } from './external-conversations/external-conversations.module';
+import { PushModule } from './push/push.module';
 
 @Module({
   imports: [
@@ -66,6 +67,7 @@ import { ExternalConversationsModule } from './external-conversations/external-c
     PropertyLookupsModule,
     InboxModule,
     ExternalConversationsModule,
+    PushModule,
   ],
 })
 export class AppModule {}
