@@ -17,6 +17,15 @@ function fmtDuration(seconds: number | null): string {
   return `${m}m ${s}s`;
 }
 
+// Twilio recordings are served via our authenticated proxy; <audio> can't send
+// an Authorization header, so pass the JWT as a query param for those URLs.
+function recordingSrc(url: string): string {
+  if (!url.includes('/calls/twilio/recording-media/')) return url;
+  const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
+  if (!token) return url;
+  return `${url}${url.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`;
+}
+
 // AI/System get a fixed-color initials chip; users/sellers hash by name.
 function ActorAvatar({ actor }: { actor: Actor }) {
   if (actor.type === 'ai') {
@@ -254,7 +263,7 @@ export default function CommunicationsTimeline({ items }: { items: TimelineItem[
                 </span>
               </div>
               {item.payload.recordingUrl ? (
-                <audio controls preload="none" src={item.payload.recordingUrl} className="w-full h-8" />
+                <audio controls preload="none" src={recordingSrc(item.payload.recordingUrl)} className="w-full h-8" />
               ) : (
                 <div className="text-[11px] text-gray-400 dark:text-gray-500">No recording</div>
               )}
