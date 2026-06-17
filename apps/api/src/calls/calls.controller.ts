@@ -4,6 +4,7 @@ import {
   Get,
   Body,
   Query,
+  Param,
   Headers,
   Req,
   Res,
@@ -119,6 +120,33 @@ export class CallsController {
       body.notes,
     );
     return { success: true };
+  }
+
+  /**
+   * Stream a call recording. Twilio media needs account auth, so the browser
+   * can't hit it directly; this proxies with our credentials. <audio> can't send
+   * an Authorization header, so the JWT is passed as ?token=.
+   */
+  @Get('twilio/recording-media/:recordingSid')
+  async twilioRecordingMedia(
+    @Param('recordingSid') recordingSid: string,
+    @Query('token') token: string,
+    @Res() res: Response,
+  ) {
+    try {
+      jwt.verify(token || '', process.env.JWT_SECRET || 'dev-secret-key');
+    } catch {
+      res.status(401).send('Unauthorized');
+      return;
+    }
+    const media = await this.twilioVoiceService.fetchRecordingMedia(recordingSid);
+    if (!media) {
+      res.status(404).send('Recording not found');
+      return;
+    }
+    res.set('Content-Type', media.contentType);
+    res.set('Cache-Control', 'private, max-age=3600');
+    res.send(media.buffer);
   }
 
   /** Recent dialer calls for the Recents tab. */

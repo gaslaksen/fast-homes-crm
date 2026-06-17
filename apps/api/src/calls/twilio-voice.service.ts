@@ -1,7 +1,8 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, forwardRef, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Twilio from 'twilio';
 import { PrismaService } from '../prisma/prisma.service';
+import { CallsService } from './calls.service';
 import { formatPhoneNumber } from '@fast-homes/shared';
 
 const AccessToken = Twilio.jwt.AccessToken;
@@ -28,7 +29,27 @@ export class TwilioVoiceService {
   constructor(
     private readonly config: ConfigService,
     private readonly prisma: PrismaService,
+    @Inject(forwardRef(() => CallsService))
+    private readonly callsService: CallsService,
   ) {}
+
+  /**
+   * Public base URL Twilio uses to reach our callbacks. Prefer API_URL, fall
+   * back to TWILIO_WEBHOOK_BASE_URL so status/recording callbacks keep working
+   * even if only one is configured.
+   */
+  private callbackBase(): string {
+    const base =
+      this.config.get<string>('API_URL') ||
+      this.config.get<string>('TWILIO_WEBHOOK_BASE_URL') ||
+      '';
+    if (!base) {
+      this.logger.warn(
+        'Neither API_URL nor TWILIO_WEBHOOK_BASE_URL is set — Twilio status/recording callbacks will not fire',
+      );
+    }
+    return base.replace(/\/+$/, '');
+  }
 
   isConfigured(): boolean {
     return !!(
@@ -112,7 +133,7 @@ export class TwilioVoiceService {
       }
     }
 
-    const apiBase = this.config.get<string>('API_URL') || '';
+    const apiBase = this.callbackBase();
     const recordCalls =
       (this.config.get<string>('TWILIO_RECORD_CALLS') || 'false').toLowerCase() === 'true';
 
@@ -185,7 +206,7 @@ export class TwilioVoiceService {
       return response.toString();
     }
 
-    const apiBase = this.config.get<string>('API_URL') || '';
+    const apiBase = this.callbackBase();
     const recordCalls =
       (this.config.get<string>('TWILIO_RECORD_CALLS') || 'false').toLowerCase() === 'true';
 
@@ -265,7 +286,7 @@ export class TwilioVoiceService {
     const status = statusMap[rawStatus] || 'in-progress';
 
     try {
-      await this.prisma.callLog.updateMany({
+      const result = await this.prisma.callLog.updateMany({
         where: { twilioCallSid: callSid },
         data: {
           status,
@@ -273,25 +294,132 @@ export class TwilioVoiceService {
           ...(rawStatus ? { endedReason: rawStatus } : {}),
         },
       });
+      this.logger.log(
+        `📞 Status callback ${callSid}: ${rawStatus || '(none)'} -> ${status} (${duration}s), ${result.count} row(s) updated`,
+      );
     } catch (err: any) {
       this.logger.error(`Failed to update CallLog ${callSid}: ${err.message}`);
     }
   }
 
-  /** Recording callback. Stores the recording URL on the CallLog. */
+  /**
+   * Recording callback. Stores a playback proxy URL on the CallLog, then kicks
+   * off transcription + CAMP extraction in the background.
+   */
   async handleRecordingCallback(body: Record<string, string>): Promise<void> {
     const callSid = body.CallSid || '';
-    const recordingUrl = body.RecordingUrl || '';
-    if (!callSid || !recordingUrl) return;
+    const recordingSid = body.RecordingSid || '';
+    const recordingStatus = body.RecordingStatus || 'completed';
+    if (!callSid || !recordingSid) return;
+    if (recordingStatus !== 'completed') return; // only act on the final recording
+
+    // The raw Twilio media URL needs account auth to fetch, so we store a proxy
+    // URL the browser <audio> can hit; the proxy streams it with our credentials.
+    const base = this.callbackBase();
+    const proxyUrl = base
+      ? `${base}/calls/twilio/recording-media/${recordingSid}`
+      : `${body.RecordingUrl}.mp3`;
 
     try {
       await this.prisma.callLog.updateMany({
         where: { twilioCallSid: callSid },
-        data: { recordingUrl: `${recordingUrl}.mp3` },
+        data: { recordingUrl: proxyUrl },
       });
+      this.logger.log(`🎙️  Recording stored for ${callSid} (recordingSid=${recordingSid})`);
     } catch (err: any) {
       this.logger.error(`Failed to store recording for ${callSid}: ${err.message}`);
     }
+
+    // Transcribe + extract CAMP in the background (best-effort, never blocks)
+    setImmediate(() => {
+      this.transcribeAndExtract(callSid, recordingSid).catch((err) =>
+        this.logger.error(`Transcription failed for ${callSid}: ${err.message}`),
+      );
+    });
+  }
+
+  /** Fetch the recording, transcribe via OpenAI, store it, and run CAMP extraction. */
+  private async transcribeAndExtract(callSid: string, recordingSid: string): Promise<void> {
+    const openaiKey = this.config.get<string>('OPENAI_API_KEY');
+    if (!openaiKey) {
+      this.logger.warn('OPENAI_API_KEY not set — skipping Twilio call transcription');
+      return;
+    }
+
+    const accountSid = this.config.get<string>('TWILIO_ACCOUNT_SID');
+    const authToken = this.config.get<string>('TWILIO_AUTH_TOKEN');
+    if (!accountSid || !authToken) return;
+
+    // Pull the audio from Twilio (account-authenticated)
+    const mediaUrl = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Recordings/${recordingSid}.mp3`;
+    const auth = Buffer.from(`${accountSid}:${authToken}`).toString('base64');
+    const audioRes = await fetch(mediaUrl, {
+      headers: { Authorization: `Basic ${auth}` },
+      signal: AbortSignal.timeout(30000),
+    });
+    if (!audioRes.ok) {
+      this.logger.warn(`Could not fetch recording ${recordingSid}: ${audioRes.status}`);
+      return;
+    }
+    const audioBuffer = Buffer.from(await audioRes.arrayBuffer());
+
+    // OpenAI Whisper transcription (multipart upload)
+    const form = new FormData();
+    form.append('file', new Blob([audioBuffer], { type: 'audio/mpeg' }), `${recordingSid}.mp3`);
+    form.append('model', 'whisper-1');
+    const trRes = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${openaiKey}` },
+      body: form,
+      signal: AbortSignal.timeout(120000),
+    });
+    if (!trRes.ok) {
+      this.logger.warn(`Whisper transcription failed (${trRes.status}): ${await trRes.text()}`);
+      return;
+    }
+    const { text } = (await trRes.json()) as { text: string };
+    if (!text?.trim()) return;
+
+    const call = await this.prisma.callLog.findUnique({
+      where: { twilioCallSid: callSid },
+      select: { id: true, leadId: true },
+    });
+    if (!call) return;
+
+    await this.prisma.callLog.update({
+      where: { id: call.id },
+      data: { transcript: text },
+    });
+    this.logger.log(`📝 Transcribed ${callSid} (${text.length} chars)`);
+
+    // Reuse the existing CAMP extraction (generic over any call transcript)
+    if (call.leadId) {
+      await this.callsService.processSmrtPhoneTranscript(call.leadId, text);
+    }
+  }
+
+  /** Stream a Twilio recording through our credentials so the browser can play it. */
+  async fetchRecordingMedia(
+    recordingSid: string,
+  ): Promise<{ buffer: Buffer; contentType: string } | null> {
+    const accountSid = this.config.get<string>('TWILIO_ACCOUNT_SID');
+    const authToken = this.config.get<string>('TWILIO_AUTH_TOKEN');
+    if (!accountSid || !authToken || !recordingSid) return null;
+
+    const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Recordings/${recordingSid}.mp3`;
+    const auth = Buffer.from(`${accountSid}:${authToken}`).toString('base64');
+    const res = await fetch(url, {
+      headers: { Authorization: `Basic ${auth}` },
+      signal: AbortSignal.timeout(30000),
+    });
+    if (!res.ok) {
+      this.logger.warn(`Recording media fetch failed for ${recordingSid}: ${res.status}`);
+      return null;
+    }
+    return {
+      buffer: Buffer.from(await res.arrayBuffer()),
+      contentType: res.headers.get('content-type') || 'audio/mpeg',
+    };
   }
 
   /**
