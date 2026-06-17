@@ -48,8 +48,34 @@ model User {
   gmailToken    GmailToken?
   savedSearches SavedSearch[]
   aiCompCurations AiCompCuration[]
+  pushDevices   PushDevice[]
 
   @@map("users")
+}
+
+/// A registered mobile device for push notifications (new leads, messages, calls).
+/// One row per (user, device). apnsToken drives standard alerts; voipToken drives
+/// Twilio VoIP push for incoming calls (PushKit -> CallKit). organizationId is
+/// denormalized from the user so notification fan-out can be tenant-scoped without
+/// a join. Dormant until the API has APNs credentials configured.
+model PushDevice {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organizationId String?
+  platform       String   @default("ios") // ios | android (android reserved for later)
+  apnsToken      String?  // APNs device token for alert pushes
+  voipToken      String?  // PushKit VoIP token for incoming-call pushes
+  appVersion     String?
+  deviceName     String?
+  lastSeenAt     DateTime @default(now())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([userId, apnsToken])
+  @@index([userId])
+  @@index([organizationId])
+  @@map("push_devices")
 }
 
 model Lead {

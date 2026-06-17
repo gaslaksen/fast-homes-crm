@@ -8,6 +8,7 @@ import { LeadsService } from '../leads/leads.service';
 import { SellerPortalService } from '../seller-portal/seller-portal.service';
 import { SmsProvider, SmrtphoneSmsProvider, TwilioSmsProvider, createSmsProvider } from './sms.provider';
 import { GmailService } from '../gmail/gmail.service';
+import { PushService } from '../push/push.service';
 import { formatPhoneNumber, isOptOutMessage } from '@fast-homes/shared';
 import { dealFitFlags, propertyContextForPrompt } from '../leads/property-fit.util';
 
@@ -107,6 +108,7 @@ export class MessagesService {
     private leadsService: LeadsService,
     @Optional() private sellerPortalService: SellerPortalService,
     private gmailService: GmailService,
+    private pushService: PushService,
   ) {
     this.smsProvider = createSmsProvider(this.config);
     // Outbound "from" number follows the active provider
@@ -799,6 +801,11 @@ You decide the right approach based on the conversation flow.${portalInstruction
       },
     });
     await this.syncThreadSummary(lead.id, body, 'INBOUND');
+
+    // Push notify the assigned user (or the whole org) about the inbound reply
+    this.pushService.notifyNewMessage(lead, body).catch((err) =>
+      this.logger.error(`Inbound-message push failed for ${lead.id}: ${err.message}`),
+    );
 
     // Log activity
     await this.prisma.activity.create({
