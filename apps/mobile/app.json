@@ -14,13 +14,15 @@
         "UIBackgroundModes": [
           "remote-notification",
           "voip"
-        ]
+        ],
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "plugins": [
       "expo-router",
       "expo-secure-store",
-      "expo-notifications"
+      "expo-notifications",
+      "expo-asset"
     ],
     "experiments": {
       "typedRoutes": true
