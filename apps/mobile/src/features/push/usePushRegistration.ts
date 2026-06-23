@@ -27,7 +27,10 @@ export function usePushRegistration(enabled: boolean) {
     (async () => {
       try {
         // Push tokens are only issued on physical devices.
-        if (!Device.isDevice) return;
+        if (!Device.isDevice) {
+          console.warn('[push] skipped: not a physical device');
+          return;
+        }
 
         const existing = await Notifications.getPermissionsAsync();
         let granted = existing.granted;
@@ -35,17 +38,23 @@ export function usePushRegistration(enabled: boolean) {
           const req = await Notifications.requestPermissionsAsync();
           granted = req.granted;
         }
-        if (!granted || cancelled) return;
+        if (!granted) {
+          console.warn(`[push] notification permission not granted (status=${existing.status})`);
+          return;
+        }
+        if (cancelled) return;
 
         const token = await Notifications.getDevicePushTokenAsync(); // { type: 'apns', data }
         if (cancelled) return;
+        console.log(`[push] got APNs token ${String(token.data).slice(0, 10)}…, registering`);
 
         await api.post('/push/devices', {
           platform: Platform.OS,
           apnsToken: String(token.data),
         });
-      } catch {
-        // best-effort; the app still works without push
+        console.log('[push] device registered with API');
+      } catch (e: any) {
+        console.warn('[push] registration failed:', e?.message || String(e));
       }
     })();
 
