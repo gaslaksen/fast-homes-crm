@@ -8,18 +8,18 @@
       "distribution": "internal",
       "ios": { "simulator": false },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://api.dealcore.app"
+        "EXPO_PUBLIC_API_URL": "https://api.mydealcore.com"
       }
     },
     "preview": {
       "distribution": "internal",
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://api.dealcore.app"
+        "EXPO_PUBLIC_API_URL": "https://api.mydealcore.com"
       }
     },
     "production": {
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://api.dealcore.app"
+        "EXPO_PUBLIC_API_URL": "https://api.mydealcore.com"
       }
     }
   },

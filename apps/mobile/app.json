@@ -11,7 +11,10 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.dealcore.app",
       "infoPlist": {
-        "UIBackgroundModes": ["remote-notification", "voip"]
+        "UIBackgroundModes": [
+          "remote-notification",
+          "voip"
+        ]
       }
     },
     "plugins": [
@@ -23,7 +26,13 @@
       "typedRoutes": true
     },
     "extra": {
-      "apiUrl": "https://api.dealcore.app"
+      "apiUrl": "https://api.mydealcore.com",
+      "router": {
+        "origin": false
+      },
+      "eas": {
+        "projectId": "19391db0-d1c5-420f-a480-abb2e071ec44"
+      }
     }
   }
 }
