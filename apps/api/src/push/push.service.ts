@@ -135,6 +135,13 @@ export class PushService {
     return users.map((u) => u.id);
   }
 
+  /** How many registered (APNs-capable) devices a user has. For diagnostics. */
+  async countDevices(userId: string): Promise<number> {
+    return this.prisma.pushDevice.count({
+      where: { userId, apnsToken: { not: null } },
+    });
+  }
+
   // ─── Sending ──────────────────────────────────────────────────────────────
 
   /** Low-level fan-out to a set of users' registered devices. Best-effort. */
@@ -142,8 +149,8 @@ export class PushService {
     if (!userIds.length) return;
     const provider = await this.getProvider();
     if (!provider) {
-      this.logger.debug(
-        `Push dormant (APNs not configured) — skipped "${payload.title}" for ${userIds.length} user(s)`,
+      this.logger.warn(
+        `Push skipped: APNs not configured (set APNS_AUTH_KEY_P8/KEY_ID/TEAM_ID/BUNDLE_ID) — "${payload.title}" for ${userIds.length} user(s)`,
       );
       return;
     }
@@ -153,7 +160,12 @@ export class PushService {
       select: { apnsToken: true },
     });
     const tokens = [...new Set(devices.map((d) => d.apnsToken).filter(Boolean) as string[])];
-    if (!tokens.length) return;
+    if (!tokens.length) {
+      this.logger.warn(
+        `Push skipped: no registered device tokens for user(s) ${userIds.join(', ')}`,
+      );
+      return;
+    }
 
     try {
       const note = new this.apn.Notification();

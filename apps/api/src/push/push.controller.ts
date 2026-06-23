@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Headers,
+  Logger,
   Param,
   Post,
   UnauthorizedException,
@@ -18,6 +19,8 @@ interface DecodedToken {
 
 @Controller('push')
 export class PushController {
+  private readonly logger = new Logger(PushController.name);
+
   constructor(private readonly push: PushService) {}
 
   /** Register (or refresh) the caller's device for push. Auth via JWT bearer. */
@@ -45,12 +48,17 @@ export class PushController {
   @Post('test')
   async test(@Headers('authorization') authHeader?: string) {
     const { userId } = this.requireUser(authHeader);
+    const configured = this.push.isConfigured();
+    const devices = await this.push.countDevices(userId);
+    this.logger.log(
+      `Test push: user=${userId} configured=${configured} registeredDevices=${devices}`,
+    );
     await this.push.notifyUsers([userId], {
       title: 'Dealcore',
       body: 'Test notification — push is working.',
       data: { type: 'test' },
     });
-    return { sent: true, configured: this.push.isConfigured() };
+    return { sent: configured && devices > 0, configured, devices };
   }
 
   private requireUser(authHeader?: string): DecodedToken & { userId: string } {

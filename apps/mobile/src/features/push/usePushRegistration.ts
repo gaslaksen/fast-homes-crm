@@ -55,7 +55,14 @@ export function usePushRegistration(enabled: boolean) {
   }, [enabled]);
 }
 
-/** Ask the API to send a test push to the current user's devices. */
-export async function sendTestPush(): Promise<void> {
-  await api.post('/push/test');
+export interface TestPushResult {
+  sent: boolean;
+  configured: boolean;
+  devices: number;
+}
+
+/** Ask the API to send a test push to the current user's devices. Returns diagnostics. */
+export async function sendTestPush(): Promise<TestPushResult> {
+  const { data } = await api.post<TestPushResult>('/push/test');
+  return data;
 }

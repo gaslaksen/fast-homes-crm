@@ -26,10 +26,19 @@ export default function SettingsScreen() {
         style={styles.action}
         onPress={async () => {
           try {
-            await sendTestPush();
-            Alert.alert('Sent', 'A test notification was requested. Watch for it to arrive.');
+            const r = await sendTestPush();
+            Alert.alert(
+              r.sent ? 'Sent' : 'Not sent',
+              `Server configured for push: ${r.configured ? 'yes' : 'no'}\n` +
+                `Registered devices: ${r.devices}\n\n` +
+                (r.sent
+                  ? 'Watch for the notification to arrive.'
+                  : !r.configured
+                    ? 'The API is missing its APNs credentials.'
+                    : 'This device is not registered — check notification permission, then reopen the app.'),
+            );
           } catch {
-            Alert.alert('Error', 'Could not send a test notification.');
+            Alert.alert('Error', 'Could not reach the API to send a test notification.');
           }
         }}
       >
