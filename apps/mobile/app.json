@@ -13,8 +13,10 @@
       "infoPlist": {
         "UIBackgroundModes": [
           "remote-notification",
+          "audio",
           "voip"
         ],
+        "NSMicrophoneUsageDescription": "Dealcore uses the microphone for calls.",
         "ITSAppUsesNonExemptEncryption": false
       }
     },

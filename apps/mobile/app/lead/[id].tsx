@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useLocalSearchParams } from 'expo-router';
+import { Stack, useLocalSearchParams } from 'expo-router';
 import {
   ActivityIndicator,
   FlatList,
@@ -14,11 +14,25 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useMarkRead, useMessages, useSendMessage } from '@/features/inbox/hooks';
 import type { Message } from '@/features/inbox/types';
+import { useLead, leadName } from '@/features/calls/hooks';
+import { useCall } from '@/features/calls/CallContext';
+
+/** Header "Call" button — dials the lead's seller phone via Twilio Voice. */
+function ThreadCallButton({ phone, name }: { phone: string | null; name: string }) {
+  const { startCall } = useCall();
+  if (!phone) return null;
+  return (
+    <TouchableOpacity onPress={() => startCall(phone, name)} hitSlop={8}>
+      <Text style={styles.callBtn}>Call</Text>
+    </TouchableOpacity>
+  );
+}
 
 export default function ThreadScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const leadId = String(id);
   const { data: messages, isLoading } = useMessages(leadId);
+  const { data: lead } = useLead(leadId);
   const send = useSendMessage(leadId);
   const markRead = useMarkRead();
   const [draft, setDraft] = useState('');
@@ -48,8 +62,18 @@ export default function ThreadScreen() {
     );
   }
 
+  const name = lead ? leadName(lead) : 'Conversation';
+
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
+      <Stack.Screen
+        options={{
+          title: name,
+          headerRight: () => (
+            <ThreadCallButton phone={lead?.sellerPhone ?? null} name={name} />
+          ),
+        }}
+      />
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -103,6 +127,7 @@ export default function ThreadScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#fff' },
+  callBtn: { color: '#2563EB', fontSize: 17, fontWeight: '600', paddingHorizontal: 4 },
   flex: { flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   listContent: { padding: 12, gap: 8 },

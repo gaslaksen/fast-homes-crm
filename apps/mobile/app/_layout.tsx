@@ -8,6 +8,7 @@ import { AuthProvider, useAuth } from '@/lib/auth';
 import { queryClient } from '@/lib/queryClient';
 import { usePushRegistration } from '@/features/push/usePushRegistration';
 import { useNotificationRouting } from '@/features/push/useNotificationRouting';
+import { CallProvider } from '@/features/calls/CallContext';
 
 /** Redirects between the auth flow and the app shell based on session state. */
 function AuthGate() {
@@ -54,8 +55,10 @@ export default function RootLayout() {
     <SafeAreaProvider>
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
-          <StatusBar style="auto" />
-          <AuthGate />
+          <CallProvider>
+            <StatusBar style="auto" />
+            <AuthGate />
+          </CallProvider>
         </AuthProvider>
       </QueryClientProvider>
     </SafeAreaProvider>

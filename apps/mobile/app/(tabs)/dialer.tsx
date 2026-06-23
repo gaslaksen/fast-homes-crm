@@ -1,25 +1,124 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { useState } from 'react';
+import {
+  FlatList,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useCall } from '@/features/calls/CallContext';
+import { useRecentCalls, leadName, type RecentCall } from '@/features/calls/hooks';
 
-/**
- * Placeholder. The real dialer (Twilio Voice React Native SDK + CallKit) lands
- * in Phases 4-5 of docs/mobile-app-plan.md.
- */
+function otherParty(c: RecentCall): { name: string; number: string } {
+  const number = c.toNumber || c.lead?.sellerPhone || c.fromNumber || '';
+  const name = c.lead ? leadName(c.lead) : number || 'Unknown';
+  return { name, number };
+}
+
+function when(iso: string) {
+  const d = new Date(iso);
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
 export default function DialerScreen() {
+  const { startCall } = useCall();
+  const { data: recents, isRefetching, refetch } = useRecentCalls();
+  const [number, setNumber] = useState('');
+
   return (
-    <View style={styles.container}>
-      <Text style={styles.emoji}>📞</Text>
-      <Text style={styles.title}>Dialer coming soon</Text>
-      <Text style={styles.body}>
-        Outbound calling and native incoming-call screens arrive with the Twilio
-        Voice integration.
-      </Text>
-    </View>
+    <SafeAreaView style={styles.safe} edges={['bottom']}>
+      <View style={styles.dialRow}>
+        <TextInput
+          style={styles.input}
+          placeholder="Enter a phone number"
+          placeholderTextColor="#94A3B8"
+          keyboardType="phone-pad"
+          value={number}
+          onChangeText={setNumber}
+        />
+        <TouchableOpacity
+          style={[styles.callBtn, !number.trim() && styles.callBtnDisabled]}
+          disabled={!number.trim()}
+          onPress={() => startCall(number.trim())}
+        >
+          <Text style={styles.callBtnText}>Call</Text>
+        </TouchableOpacity>
+      </View>
+
+      <Text style={styles.section}>Recent calls</Text>
+      <FlatList
+        data={recents ?? []}
+        keyExtractor={(c) => c.id}
+        refreshControl={
+          <RefreshControl refreshing={isRefetching} onRefresh={() => refetch()} />
+        }
+        ListEmptyComponent={<Text style={styles.empty}>No recent calls.</Text>}
+        renderItem={({ item }) => {
+          const { name, number: num } = otherParty(item);
+          return (
+            <TouchableOpacity
+              style={styles.row}
+              onPress={() => num && startCall(num, name)}
+              disabled={!num}
+            >
+              <View style={styles.rowBody}>
+                <Text style={styles.rowName}>{name}</Text>
+                <Text style={styles.rowMeta}>
+                  {num}
+                  {item.disposition ? ` · ${item.disposition}` : ''}
+                </Text>
+              </View>
+              <Text style={styles.rowWhen}>{when(item.createdAt)}</Text>
+            </TouchableOpacity>
+          );
+        }}
+      />
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 8 },
-  emoji: { fontSize: 48 },
-  title: { fontSize: 20, fontWeight: '700', color: '#0F172A' },
-  body: { fontSize: 15, color: '#64748B', textAlign: 'center' },
+  safe: { flex: 1, backgroundColor: '#fff' },
+  dialRow: { flexDirection: 'row', gap: 10, padding: 16, alignItems: 'center' },
+  input: {
+    flex: 1,
+    backgroundColor: '#F1F5F9',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    fontSize: 17,
+    color: '#0F172A',
+  },
+  callBtn: {
+    backgroundColor: '#16A34A',
+    borderRadius: 12,
+    paddingHorizontal: 22,
+    paddingVertical: 13,
+  },
+  callBtnDisabled: { opacity: 0.4 },
+  callBtnText: { color: '#fff', fontWeight: '700', fontSize: 16 },
+  section: {
+    fontSize: 13,
+    color: '#94A3B8',
+    textTransform: 'uppercase',
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 4,
+  },
+  empty: { color: '#64748B', textAlign: 'center', padding: 24 },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#E2E8F0',
+  },
+  rowBody: { flex: 1 },
+  rowName: { fontSize: 16, fontWeight: '600', color: '#0F172A' },
+  rowMeta: { fontSize: 13, color: '#64748B', marginTop: 2 },
+  rowWhen: { fontSize: 13, color: '#94A3B8' },
 });

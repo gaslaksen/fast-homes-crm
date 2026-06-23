@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@tanstack/react-query": "^5.59.0",
+    "@twilio/voice-react-native-sdk": "^2.0.0-preview.2",
     "axios": "^1.7.7",
     "expo": "~52.0.0",
     "expo-asset": "~11.0.5",
