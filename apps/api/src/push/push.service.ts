@@ -274,13 +274,18 @@ export class PushService {
 
   /** Drop tokens APNs reports as gone so we stop sending to dead devices. */
   private async pruneDeadTokens(failed: any[]): Promise<void> {
+    // BadDeviceToken usually signals an environment mismatch (APNS_PRODUCTION vs
+    // the token's sandbox/production origin), not a truly dead device — log it
+    // rather than deleting a token that becomes valid once the env is corrected.
+    const mismatched = failed.filter((f) => f.response?.reason === 'BadDeviceToken');
+    if (mismatched.length) {
+      this.logger.warn(
+        `APNs BadDeviceToken x${mismatched.length} — likely APNS_PRODUCTION mismatch (sandbox vs production); not pruning`,
+      );
+    }
+    // Only 410 / Unregistered means the app was uninstalled — safe to delete.
     const dead = failed
-      .filter(
-        (f) =>
-          f.status === '410' ||
-          f.response?.reason === 'BadDeviceToken' ||
-          f.response?.reason === 'Unregistered',
-      )
+      .filter((f) => f.status === '410' || f.response?.reason === 'Unregistered')
       .map((f) => f.device)
       .filter(Boolean);
     if (!dead.length) return;
