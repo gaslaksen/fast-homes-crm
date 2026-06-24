@@ -39,13 +39,21 @@ export default function LoginScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.container}
       >
-        <Text style={styles.brand}>Dealcore</Text>
+        <View style={styles.brandRow}>
+          <View style={styles.logoMark}>
+            <Text style={styles.logoMarkText}>d</Text>
+          </View>
+          <Text style={styles.brand}>
+            <Text style={styles.brandThin}>deal</Text>
+            <Text style={styles.brandBold}>core</Text>
+          </Text>
+        </View>
         <Text style={styles.subtitle}>Sign in to your account</Text>
 
         <TextInput
           style={styles.input}
           placeholder="Email"
-          placeholderTextColor="#94A3B8"
+          placeholderTextColor="#9CA3AF"
           autoCapitalize="none"
           autoCorrect={false}
           keyboardType="email-address"
@@ -55,7 +63,7 @@ export default function LoginScreen() {
         <TextInput
           style={styles.input}
           placeholder="Password"
-          placeholderTextColor="#94A3B8"
+          placeholderTextColor="#9CA3AF"
           secureTextEntry
           value={password}
           onChangeText={setPassword}
@@ -83,16 +91,38 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#0F172A' },
   container: { flex: 1, justifyContent: 'center', paddingHorizontal: 28 },
-  brand: { fontSize: 34, fontWeight: '800', color: '#fff', textAlign: 'center' },
+  brandRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+  },
+  logoMark: {
+    width: 52,
+    height: 52,
+    borderRadius: 15,
+    backgroundColor: '#0D9488',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  logoMarkText: {
+    color: '#fff',
+    fontSize: 32,
+    fontWeight: '800',
+    lineHeight: 38,
+  },
+  brand: { fontSize: 34, color: '#fff', textAlign: 'center' },
+  brandThin: { fontWeight: '400' },
+  brandBold: { fontWeight: '800' },
   subtitle: {
     fontSize: 15,
-    color: '#94A3B8',
+    color: '#9CA3AF',
     textAlign: 'center',
     marginTop: 6,
     marginBottom: 28,
   },
   input: {
-    backgroundColor: '#1E293B',
+    backgroundColor: '#1F2937',
     color: '#fff',
     borderRadius: 12,
     paddingHorizontal: 16,
@@ -102,7 +132,7 @@ const styles = StyleSheet.create({
   },
   error: { color: '#F87171', marginBottom: 12, textAlign: 'center' },
   button: {
-    backgroundColor: '#2563EB',
+    backgroundColor: '#0D9488',
     borderRadius: 12,
     paddingVertical: 16,
     alignItems: 'center',

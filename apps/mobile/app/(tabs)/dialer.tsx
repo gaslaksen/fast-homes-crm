@@ -34,7 +34,7 @@ export default function DialerScreen() {
         <TextInput
           style={styles.input}
           placeholder="Enter a phone number"
-          placeholderTextColor="#94A3B8"
+          placeholderTextColor="#9CA3AF"
           keyboardType="phone-pad"
           value={number}
           onChangeText={setNumber}
@@ -85,7 +85,7 @@ const styles = StyleSheet.create({
   dialRow: { flexDirection: 'row', gap: 10, padding: 16, alignItems: 'center' },
   input: {
     flex: 1,
-    backgroundColor: '#F1F5F9',
+    backgroundColor: '#F3F4F6',
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 12,
@@ -102,23 +102,23 @@ const styles = StyleSheet.create({
   callBtnText: { color: '#fff', fontWeight: '700', fontSize: 16 },
   section: {
     fontSize: 13,
-    color: '#94A3B8',
+    color: '#9CA3AF',
     textTransform: 'uppercase',
     paddingHorizontal: 16,
     paddingTop: 8,
     paddingBottom: 4,
   },
-  empty: { color: '#64748B', textAlign: 'center', padding: 24 },
+  empty: { color: '#6B7280', textAlign: 'center', padding: 24 },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#E2E8F0',
+    borderBottomColor: '#E5E7EB',
   },
   rowBody: { flex: 1 },
   rowName: { fontSize: 16, fontWeight: '600', color: '#0F172A' },
-  rowMeta: { fontSize: 13, color: '#64748B', marginTop: 2 },
-  rowWhen: { fontSize: 13, color: '#94A3B8' },
+  rowMeta: { fontSize: 13, color: '#6B7280', marginTop: 2 },
+  rowWhen: { fontSize: 13, color: '#9CA3AF' },
 });

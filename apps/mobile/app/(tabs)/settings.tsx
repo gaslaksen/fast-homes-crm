@@ -61,17 +61,17 @@ export default function SettingsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F8FAFC' },
+  container: { flex: 1, backgroundColor: '#F9FAFB' },
   section: { backgroundColor: '#fff', padding: 20, marginTop: 16 },
-  label: { fontSize: 13, color: '#94A3B8', textTransform: 'uppercase' },
+  label: { fontSize: 13, color: '#9CA3AF', textTransform: 'uppercase' },
   value: { fontSize: 18, fontWeight: '600', color: '#0F172A', marginTop: 4 },
-  email: { fontSize: 14, color: '#64748B', marginTop: 2 },
+  email: { fontSize: 14, color: '#6B7280', marginTop: 2 },
   action: {
     backgroundColor: '#fff',
     padding: 18,
     marginTop: 16,
   },
-  actionText: { fontSize: 16, color: '#2563EB', fontWeight: '600' },
+  actionText: { fontSize: 16, color: '#0D9488', fontWeight: '600' },
   signOut: { marginTop: 16 },
   signOutText: { color: '#DC2626' },
 });

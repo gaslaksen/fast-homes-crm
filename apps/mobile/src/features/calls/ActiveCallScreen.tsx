@@ -81,7 +81,7 @@ const styles = StyleSheet.create({
   },
   header: { alignItems: 'center', paddingHorizontal: 24 },
   name: { color: '#fff', fontSize: 30, fontWeight: '600', textAlign: 'center' },
-  status: { color: '#94A3B8', fontSize: 18, marginTop: 12 },
+  status: { color: '#9CA3AF', fontSize: 18, marginTop: 12 },
   error: { color: '#F87171', fontSize: 14, marginTop: 16, textAlign: 'center' },
   controls: { alignItems: 'center', gap: 20 },
   smallBtn: {
@@ -89,7 +89,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderRadius: 28,
     borderWidth: 1,
-    borderColor: '#475569',
+    borderColor: '#4B5563',
   },
   smallBtnOn: { backgroundColor: '#fff', borderColor: '#fff' },
   smallBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
@@ -102,6 +102,6 @@ const styles = StyleSheet.create({
     minWidth: 200,
     alignItems: 'center',
   },
-  dismissBtn: { backgroundColor: '#334155' },
+  dismissBtn: { backgroundColor: '#374151' },
   endText: { color: '#fff', fontSize: 18, fontWeight: '700' },
 });

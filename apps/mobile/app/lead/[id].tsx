@@ -103,7 +103,7 @@ export default function ThreadScreen() {
           <TextInput
             style={styles.input}
             placeholder="Message"
-            placeholderTextColor="#94A3B8"
+            placeholderTextColor="#9CA3AF"
             value={draft}
             onChangeText={setDraft}
             multiline
@@ -127,13 +127,13 @@ export default function ThreadScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#fff' },
-  callBtn: { color: '#2563EB', fontSize: 17, fontWeight: '600', paddingHorizontal: 4 },
+  callBtn: { color: '#0D9488', fontSize: 17, fontWeight: '600', paddingHorizontal: 4 },
   flex: { flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   listContent: { padding: 12, gap: 8 },
   bubble: { maxWidth: '80%', borderRadius: 16, paddingHorizontal: 14, paddingVertical: 9 },
-  inbound: { alignSelf: 'flex-start', backgroundColor: '#F1F5F9' },
-  outbound: { alignSelf: 'flex-end', backgroundColor: '#2563EB' },
+  inbound: { alignSelf: 'flex-start', backgroundColor: '#F3F4F6' },
+  outbound: { alignSelf: 'flex-end', backgroundColor: '#0D9488' },
   inboundText: { color: '#0F172A', fontSize: 15 },
   outboundText: { color: '#fff', fontSize: 15 },
   composer: {
@@ -142,11 +142,11 @@ const styles = StyleSheet.create({
     padding: 8,
     gap: 8,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#E2E8F0',
+    borderTopColor: '#E5E7EB',
   },
   input: {
     flex: 1,
-    backgroundColor: '#F1F5F9',
+    backgroundColor: '#F3F4F6',
     borderRadius: 20,
     paddingHorizontal: 16,
     paddingVertical: 10,
@@ -155,7 +155,7 @@ const styles = StyleSheet.create({
     color: '#0F172A',
   },
   sendBtn: {
-    backgroundColor: '#2563EB',
+    backgroundColor: '#0D9488',
     borderRadius: 20,
     paddingHorizontal: 18,
     paddingVertical: 11,
