@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '@/lib/auth';
+import { Logo } from '@/components/Logo';
 
 export default function LoginScreen() {
   const { signIn } = useAuth();
@@ -40,9 +41,7 @@ export default function LoginScreen() {
         style={styles.container}
       >
         <View style={styles.brandRow}>
-          <View style={styles.logoMark}>
-            <Text style={styles.logoMarkText}>d</Text>
-          </View>
+          <Logo size={50} />
           <Text style={styles.brand}>
             <Text style={styles.brandThin}>deal</Text>
             <Text style={styles.brandBold}>core</Text>
@@ -96,20 +95,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 12,
-  },
-  logoMark: {
-    width: 52,
-    height: 52,
-    borderRadius: 15,
-    backgroundColor: '#0D9488',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  logoMarkText: {
-    color: '#fff',
-    fontSize: 32,
-    fontWeight: '800',
-    lineHeight: 38,
   },
   brand: { fontSize: 34, color: '#fff', textAlign: 'center' },
   brandThin: { fontWeight: '400' },

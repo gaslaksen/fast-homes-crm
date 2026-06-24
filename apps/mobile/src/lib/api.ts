@@ -19,6 +19,11 @@ export function setAuthToken(token: string | null) {
   authToken = token;
 }
 
+/** The current bearer token — needed to sign media proxy URLs (e.g. recordings). */
+export function getAuthToken(): string | null {
+  return authToken;
+}
+
 export function setUnauthorizedHandler(fn: (() => void) | null) {
   onUnauthorized = fn;
 }

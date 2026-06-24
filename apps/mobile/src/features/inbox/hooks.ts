@@ -35,6 +35,7 @@ export function useSendMessage(leadId: string) {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['lead', leadId, 'messages'] });
+      qc.invalidateQueries({ queryKey: ['lead', leadId, 'communications'] });
       qc.invalidateQueries({ queryKey: ['inbox', 'threads'] });
     },
   });
