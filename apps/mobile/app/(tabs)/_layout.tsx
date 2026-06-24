@@ -1,5 +1,5 @@
 import { Tabs } from 'expo-router';
-import { HomeIcon, MessageIcon, PhoneIcon, TrendingUpIcon } from '@/components/icons';
+import { HomeIcon, MessageIcon, PhoneIcon, TrendingUpIcon, SearchIcon } from '@/components/icons';
 import { colors } from '@/theme';
 
 export default function TabsLayout() {
@@ -27,6 +27,13 @@ export default function TabsLayout() {
         options={{
           title: 'Inbox',
           tabBarIcon: ({ color }) => <MessageIcon size={22} color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="search"
+        options={{
+          title: 'Search',
+          tabBarIcon: ({ color }) => <SearchIcon size={22} color={color} />,
         }}
       />
       <Tabs.Screen

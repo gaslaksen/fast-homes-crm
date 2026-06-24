@@ -42,12 +42,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (stored) {
           setAuthToken(stored);
           setToken(stored);
-          // Use the stored user for display (it has org name + first name); /auth/me
-          // only returns the thin JWT payload, so we keep the richer cached copy.
+          // Show the cached user instantly, then refresh from /auth/me (which
+          // returns the full user incl. firstName + organization).
           const cached = await SecureStore.getItemAsync(USER_KEY);
           if (cached) setUser(JSON.parse(cached));
-          // Validate the token; a stale token 401s and clears the session.
-          await api.get('/auth/me');
+          const { data } = await api.get('/auth/me');
+          const fresh = data?.user ?? data;
+          if (fresh?.id) {
+            setUser(fresh);
+            await SecureStore.setItemAsync(USER_KEY, JSON.stringify(fresh));
+          }
         }
       } catch {
         await clearSession();

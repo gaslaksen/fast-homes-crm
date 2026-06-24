@@ -19,6 +19,7 @@ import {
   type ActionItem,
   type HotLead,
 } from '@/features/dashboard/dashboard';
+import { useDealsSummary } from '@/features/deals/deals';
 import { bandStyle, fullName } from '@/features/leads/leads';
 import { useAuth } from '@/lib/auth';
 import { Logo } from '@/components/Logo';
@@ -40,15 +41,17 @@ function StatCard({
   Icon,
   iconColor,
   iconBg,
+  onPress,
 }: {
   label: string;
   value: string;
   Icon: (p: { size?: number; color?: string }) => JSX.Element;
   iconColor: string;
   iconBg: string;
+  onPress?: () => void;
 }) {
   return (
-    <View style={styles.statCard}>
+    <TouchableOpacity style={styles.statCard} onPress={onPress} disabled={!onPress} activeOpacity={0.7}>
       <View style={styles.statTop}>
         <Text style={styles.statLabel}>{label}</Text>
         <View style={[styles.statIcon, { backgroundColor: iconBg }]}>
@@ -56,7 +59,7 @@ function StatCard({
         </View>
       </View>
       <Text style={styles.statValue}>{value}</Text>
-    </View>
+    </TouchableOpacity>
   );
 }
 
@@ -107,6 +110,7 @@ export default function HomeScreen() {
   const actions = useActionQueue(6);
   const hot = useHotLeads(5);
   const counts = useInboxCounts();
+  const summary = useDealsSummary();
 
   const refreshing =
     stats.isRefetching || actions.isRefetching || hot.isRefetching || counts.isRefetching;
@@ -115,11 +119,12 @@ export default function HomeScreen() {
     actions.refetch();
     hot.refetch();
     counts.refetch();
+    summary.refetch();
   };
 
   const needAction = stats.data?.needsFollowUp ?? actions.data?.length ?? 0;
   const hotCount = stats.data?.leadsByBand?.HOT ?? hot.data?.length ?? 0;
-  const pipeline = stats.data?.pipelineArvTotal ?? 0;
+  const dealsValue = summary.data?.expected.sum ?? 0;
   const unread = counts.data?.unread ?? 0;
 
   function openAction(item: ActionItem) {
@@ -162,10 +167,38 @@ export default function HomeScreen() {
         <Text style={styles.welcome}>Welcome, {user?.firstName || 'there'}</Text>
 
         <View style={styles.statGrid}>
-          <StatCard label="Need action" value={String(needAction)} Icon={ZapIcon} iconColor="#A16207" iconBg="#FEF9C3" />
-          <StatCard label="Pipeline" value={moneyShort(pipeline)} Icon={TrendingUpIcon} iconColor="#15803D" iconBg="#DCFCE7" />
-          <StatCard label="Unread" value={String(unread)} Icon={MessageIcon} iconColor={colors.primary} iconBg={colors.primarySoft} />
-          <StatCard label="Hot leads" value={String(hotCount)} Icon={ZapIcon} iconColor="#B91C1C" iconBg="#FEE2E2" />
+          <StatCard
+            label="Need action"
+            value={String(needAction)}
+            Icon={ZapIcon}
+            iconColor="#A16207"
+            iconBg="#FEF9C3"
+            onPress={() => router.push({ pathname: '/search', params: { needsReply: 'true' } })}
+          />
+          <StatCard
+            label="Deals"
+            value={moneyShort(dealsValue)}
+            Icon={TrendingUpIcon}
+            iconColor="#15803D"
+            iconBg="#DCFCE7"
+            onPress={() => router.push('/deals')}
+          />
+          <StatCard
+            label="Unread"
+            value={String(unread)}
+            Icon={MessageIcon}
+            iconColor={colors.primary}
+            iconBg={colors.primarySoft}
+            onPress={() => router.push('/inbox')}
+          />
+          <StatCard
+            label="Hot leads"
+            value={String(hotCount)}
+            Icon={ZapIcon}
+            iconColor="#B91C1C"
+            iconBg="#FEE2E2"
+            onPress={() => router.push({ pathname: '/search', params: { band: 'HOT' } })}
+          />
         </View>
 
         <SectionLabel>Do next</SectionLabel>

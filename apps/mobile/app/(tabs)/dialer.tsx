@@ -11,6 +11,9 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useCall } from '@/features/calls/CallContext';
 import { useRecentCalls, leadName, type RecentCall } from '@/features/calls/hooks';
+import { useLeadSearch, fullName } from '@/features/leads/leads';
+import { SearchIcon } from '@/components/icons';
+import { colors } from '@/theme';
 
 function otherParty(c: RecentCall): { name: string; number: string } {
   const number = c.toNumber || c.lead?.sellerPhone || c.fromNumber || '';
@@ -27,6 +30,9 @@ export default function DialerScreen() {
   const { startCall } = useCall();
   const { data: recents, isRefetching, refetch } = useRecentCalls();
   const [number, setNumber] = useState('');
+  const [contact, setContact] = useState('');
+  const { data: leads } = useLeadSearch({ search: contact, limit: 25 });
+  const searching = !!contact.trim();
 
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
@@ -48,41 +54,97 @@ export default function DialerScreen() {
         </TouchableOpacity>
       </View>
 
-      <Text style={styles.section}>Recent calls</Text>
-      <FlatList
-        data={recents ?? []}
-        keyExtractor={(c) => c.id}
-        refreshControl={
-          <RefreshControl refreshing={isRefetching} onRefresh={() => refetch()} />
-        }
-        ListEmptyComponent={<Text style={styles.empty}>No recent calls.</Text>}
-        renderItem={({ item }) => {
-          const { name, number: num } = otherParty(item);
-          return (
+      <View style={styles.searchBar}>
+        <SearchIcon size={18} color="#9CA3AF" />
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search a contact to call"
+          placeholderTextColor="#9CA3AF"
+          value={contact}
+          onChangeText={setContact}
+          autoCorrect={false}
+          autoCapitalize="none"
+        />
+        {contact ? (
+          <TouchableOpacity onPress={() => setContact('')} hitSlop={8}>
+            <Text style={styles.clear}>Clear</Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
+
+      {searching ? (
+        <FlatList
+          data={leads ?? []}
+          keyExtractor={(l) => l.id}
+          keyboardShouldPersistTaps="handled"
+          ListEmptyComponent={<Text style={styles.empty}>No matching contacts.</Text>}
+          renderItem={({ item }) => (
             <TouchableOpacity
               style={styles.row}
-              onPress={() => num && startCall(num, name)}
-              disabled={!num}
+              onPress={() => item.sellerPhone && startCall(item.sellerPhone, fullName(item))}
+              disabled={!item.sellerPhone}
             >
               <View style={styles.rowBody}>
-                <Text style={styles.rowName}>{name}</Text>
+                <Text style={styles.rowName}>{fullName(item)}</Text>
                 <Text style={styles.rowMeta}>
-                  {num}
-                  {item.disposition ? ` · ${item.disposition}` : ''}
+                  {item.sellerPhone || 'No number'}
+                  {item.propertyCity ? ` · ${item.propertyCity}` : ''}
                 </Text>
               </View>
-              <Text style={styles.rowWhen}>{when(item.createdAt)}</Text>
+              <Text style={styles.callLink}>Call</Text>
             </TouchableOpacity>
-          );
-        }}
-      />
+          )}
+        />
+      ) : (
+        <FlatList
+          data={recents ?? []}
+          keyExtractor={(c) => c.id}
+          refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={() => refetch()} />}
+          ListHeaderComponent={<Text style={styles.section}>Recent calls</Text>}
+          ListEmptyComponent={<Text style={styles.empty}>No recent calls.</Text>}
+          renderItem={({ item }) => {
+            const { name, number: num } = otherParty(item);
+            return (
+              <TouchableOpacity
+                style={styles.row}
+                onPress={() => num && startCall(num, name)}
+                disabled={!num}
+              >
+                <View style={styles.rowBody}>
+                  <Text style={styles.rowName}>{name}</Text>
+                  <Text style={styles.rowMeta}>
+                    {num}
+                    {item.disposition ? ` · ${item.disposition}` : ''}
+                  </Text>
+                </View>
+                <Text style={styles.rowWhen}>{when(item.createdAt)}</Text>
+              </TouchableOpacity>
+            );
+          }}
+        />
+      )}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#fff' },
-  dialRow: { flexDirection: 'row', gap: 10, padding: 16, alignItems: 'center' },
+  dialRow: { flexDirection: 'row', gap: 10, paddingHorizontal: 16, paddingTop: 16, alignItems: 'center' },
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginHorizontal: 16,
+    marginTop: 12,
+    marginBottom: 4,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    backgroundColor: '#F3F4F6',
+    borderRadius: 12,
+  },
+  searchInput: { flex: 1, fontSize: 16, color: '#0F172A' },
+  clear: { fontSize: 14, color: colors.primary, fontWeight: '600' },
+  callLink: { fontSize: 15, color: colors.primary, fontWeight: '600' },
   input: {
     flex: 1,
     backgroundColor: '#F3F4F6',

@@ -54,6 +54,40 @@ export function useLeadDetail(leadId: string) {
   });
 }
 
+export interface LeadListItem {
+  id: string;
+  sellerFirstName: string | null;
+  sellerLastName: string | null;
+  sellerPhone: string | null;
+  propertyAddress: string | null;
+  propertyCity: string | null;
+  propertyState: string | null;
+  scoreBand: string | null;
+  status: string;
+  arv: number | null;
+}
+
+/** Search/browse leads via GET /leads (search + filters). */
+export function useLeadSearch(params: {
+  search?: string;
+  scoreBand?: string;
+  needsReply?: string;
+  status?: string;
+  limit?: number;
+}) {
+  const enabled = !!(params.search?.trim() || params.scoreBand || params.needsReply || params.status);
+  return useQuery({
+    queryKey: ['leads', 'search', params],
+    queryFn: async () => {
+      const { data } = await api.get<{ leads: LeadListItem[] }>('/leads', {
+        params: { ...params, limit: params.limit ?? 40 },
+      });
+      return data.leads;
+    },
+    enabled,
+  });
+}
+
 export function useUpdateLead(leadId: string) {
   const qc = useQueryClient();
   return useMutation({

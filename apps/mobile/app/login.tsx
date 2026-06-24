@@ -96,7 +96,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 12,
   },
-  brand: { fontSize: 34, color: '#fff', textAlign: 'center' },
+  brand: { fontSize: 34, lineHeight: 50, color: '#fff' },
   brandThin: { fontWeight: '400' },
   brandBold: { fontWeight: '800' },
   subtitle: {

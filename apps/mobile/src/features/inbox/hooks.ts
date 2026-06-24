@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { useAuth } from '@/lib/auth';
 import type { InboxFilter, InboxThreadsResponse, Message } from './types';
 
 /** Ask the AI to draft a reply for this lead. Returns the suggested message. */
@@ -41,9 +42,14 @@ export function useMessages(leadId: string) {
 
 export function useSendMessage(leadId: string) {
   const qc = useQueryClient();
+  const { user } = useAuth();
   return useMutation({
     mutationFn: async (message: string) => {
-      const { data } = await api.post(`/leads/${leadId}/messages/send`, { message });
+      // Pass userId so the message is attributed to the sender (not AI).
+      const { data } = await api.post(`/leads/${leadId}/messages/send`, {
+        message,
+        userId: user?.id,
+      });
       return data;
     },
     onSuccess: () => {

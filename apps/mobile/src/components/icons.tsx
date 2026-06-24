@@ -85,6 +85,15 @@ export function ChevronLeft({ size, color = '#000' }: IconProps) {
   );
 }
 
+export function SearchIcon({ size, color = '#000' }: IconProps) {
+  return (
+    <Svg {...base(size)} stroke={color}>
+      <Circle cx={11} cy={11} r={8} />
+      <Polyline points="21 21 16.65 16.65" />
+    </Svg>
+  );
+}
+
 export function TrendingUpIcon({ size, color = '#000' }: IconProps) {
   return (
     <Svg {...base(size)} stroke={color}>
