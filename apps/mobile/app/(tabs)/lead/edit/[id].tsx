@@ -164,7 +164,7 @@ export default function LeadEditScreen() {
           headerRight: () => (
             <TouchableOpacity onPress={onSave} disabled={update.isPending} hitSlop={8}>
               {update.isPending ? (
-                <ActivityIndicator color="#fff" size="small" />
+                <ActivityIndicator color={colors.primary} size="small" />
               ) : (
                 <Text style={styles.save}>Save</Text>
               )}
@@ -213,7 +213,7 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg },
   content: { padding: 16, gap: 16, paddingBottom: 48 },
-  save: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  save: { color: colors.primary, fontSize: 16, fontWeight: '700' },
 
   field: {
     paddingVertical: 8,

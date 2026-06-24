@@ -27,7 +27,7 @@
       "expo-asset"
     ],
     "experiments": {
-      "typedRoutes": true
+      "typedRoutes": false
     },
     "extra": {
       "apiUrl": "https://api.mydealcore.com",

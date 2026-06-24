@@ -77,6 +77,22 @@ export function ChevronRight({ size, color = '#000' }: IconProps) {
   );
 }
 
+export function ChevronLeft({ size, color = '#000' }: IconProps) {
+  return (
+    <Svg {...base(size)} stroke={color}>
+      <Polyline points="15 18 9 12 15 6" />
+    </Svg>
+  );
+}
+
+export function PencilIcon({ size, color = '#000' }: IconProps) {
+  return (
+    <Svg {...base(size)} stroke={color}>
+      <Path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+    </Svg>
+  );
+}
+
 /** Sparkle — used for AI actions. Filled, so it reads at small sizes. */
 export function SparkleIcon({ size = 22, color = '#000' }: IconProps) {
   return (

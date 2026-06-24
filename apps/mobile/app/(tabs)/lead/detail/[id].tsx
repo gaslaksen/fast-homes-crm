@@ -22,7 +22,7 @@ import {
 } from '@/features/leads/leads';
 import { useCall } from '@/features/calls/CallContext';
 import { Card, SectionLabel, Chip, Stat } from '@/components/ui';
-import { PhoneIcon, MessageIcon, MailIcon, ZapIcon } from '@/components/icons';
+import { PhoneIcon, MessageIcon, MailIcon, ZapIcon, PencilIcon } from '@/components/icons';
 import { money, timelineLabel } from '@/lib/format';
 import { colors } from '@/theme';
 
@@ -124,10 +124,11 @@ export default function LeadDetailScreen() {
           title: name,
           headerRight: () => (
             <TouchableOpacity
-              onPress={() => router.push({ pathname: '/lead-edit/[id]', params: { id: leadId } })}
-              hitSlop={8}
+              onPress={() => router.push({ pathname: '/lead/edit/[id]', params: { id: leadId } })}
+              hitSlop={10}
+              style={styles.editBtn}
             >
-              <Text style={styles.editBtn}>Edit</Text>
+              <PencilIcon size={20} color={colors.primary} />
             </TouchableOpacity>
           ),
         }}
@@ -312,7 +313,7 @@ const styles = StyleSheet.create({
   equityLabel: { fontSize: 14, color: colors.textSecondary },
   equityValue: { fontSize: 15, fontWeight: '600', color: colors.text },
 
-  editBtn: { color: colors.primaryOnDark, fontSize: 16, fontWeight: '600' },
+  editBtn: { paddingHorizontal: 4 },
   autoRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   autoMain: { flex: 1, gap: 2 },
   autoTitle: { fontSize: 15, fontWeight: '600', color: colors.text },

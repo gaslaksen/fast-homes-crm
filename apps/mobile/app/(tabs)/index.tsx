@@ -91,7 +91,7 @@ export default function HomeScreen() {
 
   function openAction(item: ActionItem) {
     const meta = actionMeta(item.type);
-    const pathname = meta.toConversation ? '/lead/[id]' : '/lead-detail/[id]';
+    const pathname = meta.toConversation ? '/lead/[id]' : '/lead/detail/[id]';
     router.push({ pathname, params: { id: item.leadId } });
   }
 
@@ -134,7 +134,7 @@ export default function HomeScreen() {
                 <HotLeadRow
                   lead={l}
                   onPress={() =>
-                    router.push({ pathname: '/lead-detail/[id]', params: { id: l.id } })
+                    router.push({ pathname: '/lead/detail/[id]', params: { id: l.id } })
                   }
                 />
               </View>

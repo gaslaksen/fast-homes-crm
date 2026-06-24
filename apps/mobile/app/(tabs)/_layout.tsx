@@ -8,9 +8,10 @@ export default function TabsLayout() {
       screenOptions={{
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.textMuted,
-        headerStyle: { backgroundColor: colors.nav },
-        headerTintColor: '#fff',
         tabBarStyle: { borderTopColor: colors.border },
+        headerStyle: { backgroundColor: colors.surface },
+        headerTintColor: colors.text,
+        headerTitleStyle: { color: colors.text, fontWeight: '600' },
       }}
     >
       <Tabs.Screen
@@ -41,6 +42,8 @@ export default function TabsLayout() {
           tabBarIcon: ({ color }) => <SettingsIcon size={22} color={color} />,
         }}
       />
+      {/* Lead flow lives in a nested stack so the tab bar persists; hidden from the bar. */}
+      <Tabs.Screen name="lead" options={{ href: null, headerShown: false }} />
     </Tabs>
   );
 }
