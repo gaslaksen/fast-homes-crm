@@ -1,5 +1,6 @@
 import {
   ActivityIndicator,
+  Alert,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -13,21 +14,48 @@ import {
   useActionQueue,
   useDashboardStats,
   useHotLeads,
+  useInboxCounts,
   actionMeta,
   type ActionItem,
   type HotLead,
 } from '@/features/dashboard/dashboard';
 import { bandStyle, fullName } from '@/features/leads/leads';
+import { useAuth } from '@/lib/auth';
+import { Logo } from '@/components/Logo';
 import { Card, SectionLabel, Chip } from '@/components/ui';
-import { ChevronRight } from '@/components/icons';
+import {
+  BellIcon,
+  SettingsIcon,
+  ChevronRight,
+  ZapIcon,
+  TrendingUpIcon,
+  MessageIcon,
+} from '@/components/icons';
 import { moneyShort } from '@/lib/format';
 import { colors } from '@/theme';
 
-function MetricTile({ label, value, tint }: { label: string; value: string; tint?: string }) {
+function StatCard({
+  label,
+  value,
+  Icon,
+  iconColor,
+  iconBg,
+}: {
+  label: string;
+  value: string;
+  Icon: (p: { size?: number; color?: string }) => JSX.Element;
+  iconColor: string;
+  iconBg: string;
+}) {
   return (
-    <View style={styles.metric}>
-      <Text style={[styles.metricValue, tint ? { color: tint } : null]}>{value}</Text>
-      <Text style={styles.metricLabel}>{label}</Text>
+    <View style={styles.statCard}>
+      <View style={styles.statTop}>
+        <Text style={styles.statLabel}>{label}</Text>
+        <View style={[styles.statIcon, { backgroundColor: iconBg }]}>
+          <Icon size={15} color={iconColor} />
+        </View>
+      </View>
+      <Text style={styles.statValue}>{value}</Text>
     </View>
   );
 }
@@ -74,20 +102,25 @@ function HotLeadRow({ lead, onPress }: { lead: HotLead; onPress: () => void }) {
 
 export default function HomeScreen() {
   const router = useRouter();
+  const { user } = useAuth();
   const stats = useDashboardStats();
   const actions = useActionQueue(6);
   const hot = useHotLeads(5);
+  const counts = useInboxCounts();
 
-  const refreshing = stats.isRefetching || actions.isRefetching || hot.isRefetching;
+  const refreshing =
+    stats.isRefetching || actions.isRefetching || hot.isRefetching || counts.isRefetching;
   const onRefresh = () => {
     stats.refetch();
     actions.refetch();
     hot.refetch();
+    counts.refetch();
   };
 
   const needAction = stats.data?.needsFollowUp ?? actions.data?.length ?? 0;
   const hotCount = stats.data?.leadsByBand?.HOT ?? hot.data?.length ?? 0;
   const pipeline = stats.data?.pipelineArvTotal ?? 0;
+  const unread = counts.data?.unread ?? 0;
 
   function openAction(item: ActionItem) {
     const meta = actionMeta(item.type);
@@ -96,15 +129,43 @@ export default function HomeScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.safe} edges={['bottom']}>
+    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+      <View style={styles.topbar}>
+        <View style={styles.org}>
+          <Logo size={34} />
+          <View style={styles.orgText}>
+            <Text style={styles.orgName} numberOfLines={1}>
+              {user?.organization?.name || 'Dealcore'}
+            </Text>
+            <Text style={styles.orgSub} numberOfLines={1}>
+              {[user?.firstName, user?.lastName].filter(Boolean).join(' ')}
+            </Text>
+          </View>
+        </View>
+        <View style={styles.topActions}>
+          <TouchableOpacity
+            hitSlop={8}
+            onPress={() => Alert.alert('Notifications', 'In-app notifications are coming soon.')}
+          >
+            <BellIcon size={23} color={colors.text} />
+          </TouchableOpacity>
+          <TouchableOpacity hitSlop={8} onPress={() => router.push('/settings')}>
+            <SettingsIcon size={23} color={colors.text} />
+          </TouchableOpacity>
+        </View>
+      </View>
+
       <ScrollView
         contentContainerStyle={styles.content}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
-        <View style={styles.metrics}>
-          <MetricTile label="Need action" value={String(needAction)} tint={colors.primary} />
-          <MetricTile label="Hot leads" value={String(hotCount)} />
-          <MetricTile label="Pipeline" value={moneyShort(pipeline)} />
+        <Text style={styles.welcome}>Welcome, {user?.firstName || 'there'}</Text>
+
+        <View style={styles.statGrid}>
+          <StatCard label="Need action" value={String(needAction)} Icon={ZapIcon} iconColor="#A16207" iconBg="#FEF9C3" />
+          <StatCard label="Pipeline" value={moneyShort(pipeline)} Icon={TrendingUpIcon} iconColor="#15803D" iconBg="#DCFCE7" />
+          <StatCard label="Unread" value={String(unread)} Icon={MessageIcon} iconColor={colors.primary} iconBg={colors.primarySoft} />
+          <StatCard label="Hot leads" value={String(hotCount)} Icon={ZapIcon} iconColor="#B91C1C" iconBg="#FEE2E2" />
         </View>
 
         <SectionLabel>Do next</SectionLabel>
@@ -133,9 +194,7 @@ export default function HomeScreen() {
                 {i > 0 ? <View style={styles.divider} /> : null}
                 <HotLeadRow
                   lead={l}
-                  onPress={() =>
-                    router.push({ pathname: '/lead/detail/[id]', params: { id: l.id } })
-                  }
+                  onPress={() => router.push({ pathname: '/lead/detail/[id]', params: { id: l.id } })}
                 />
               </View>
             ))
@@ -150,30 +209,43 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
-  content: { padding: 16, gap: 16, paddingBottom: 32 },
 
-  metrics: { flexDirection: 'row', gap: 12 },
-  metric: {
-    flex: 1,
+  topbar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: colors.surface,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  org: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
+  orgText: { flex: 1 },
+  orgName: { fontSize: 16, fontWeight: '700', color: colors.text },
+  orgSub: { fontSize: 12, color: colors.textSecondary },
+  topActions: { flexDirection: 'row', alignItems: 'center', gap: 18 },
+
+  content: { padding: 16, gap: 14, paddingBottom: 32 },
+  welcome: { fontSize: 22, fontWeight: '700', color: colors.text },
+
+  statGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  statCard: {
+    width: '47.8%',
+    flexGrow: 1,
     backgroundColor: colors.surface,
     borderRadius: 14,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.border,
-    paddingVertical: 16,
-    paddingHorizontal: 12,
-    alignItems: 'flex-start',
+    padding: 14,
   },
-  metricValue: { fontSize: 22, fontWeight: '700', color: colors.text },
-  metricLabel: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
+  statTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  statLabel: { fontSize: 13, color: colors.textSecondary, flex: 1 },
+  statIcon: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  statValue: { fontSize: 26, fontWeight: '700', color: colors.text, marginTop: 10 },
 
   listCard: { padding: 0, overflow: 'hidden' },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    gap: 10,
-  },
+  row: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 12, gap: 10 },
   rowMain: { flex: 1, gap: 3 },
   rowTitle: { fontSize: 15, fontWeight: '600', color: colors.text },
   rowSub: { fontSize: 13, color: colors.textSecondary },

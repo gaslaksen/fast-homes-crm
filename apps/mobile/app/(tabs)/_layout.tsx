@@ -1,5 +1,5 @@
 import { Tabs } from 'expo-router';
-import { HomeIcon, MessageIcon, PhoneIcon, SettingsIcon } from '@/components/icons';
+import { HomeIcon, MessageIcon, PhoneIcon, TrendingUpIcon } from '@/components/icons';
 import { colors } from '@/theme';
 
 export default function TabsLayout() {
@@ -18,6 +18,7 @@ export default function TabsLayout() {
         name="index"
         options={{
           title: 'Home',
+          headerShown: false,
           tabBarIcon: ({ color }) => <HomeIcon size={22} color={color} />,
         }}
       />
@@ -36,13 +37,12 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
-        name="settings"
+        name="deals"
         options={{
-          title: 'Settings',
-          tabBarIcon: ({ color }) => <SettingsIcon size={22} color={color} />,
+          title: 'Deals',
+          tabBarIcon: ({ color }) => <TrendingUpIcon size={22} color={color} />,
         }}
       />
-      {/* Lead flow lives in a nested stack so the tab bar persists; hidden from the bar. */}
       <Tabs.Screen name="lead" options={{ href: null, headerShown: false }} />
     </Tabs>
   );

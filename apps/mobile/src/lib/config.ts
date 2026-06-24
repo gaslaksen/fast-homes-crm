@@ -11,3 +11,4 @@ export const API_URL: string =
   'http://localhost:3001';
 
 export const TOKEN_KEY = 'dealcore.auth_token';
+export const USER_KEY = 'dealcore.auth_user';

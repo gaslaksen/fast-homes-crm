@@ -7,7 +7,7 @@ import React, {
 } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import { api, setAuthToken, setUnauthorizedHandler } from './api';
-import { TOKEN_KEY } from './config';
+import { TOKEN_KEY, USER_KEY } from './config';
 
 export interface AuthUser {
   id: string;
@@ -16,6 +16,7 @@ export interface AuthUser {
   lastName?: string;
   role?: string;
   organizationId?: string | null;
+  organization?: { id: string; name: string; plan?: string } | null;
 }
 
 interface AuthState {
@@ -41,9 +42,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (stored) {
           setAuthToken(stored);
           setToken(stored);
-          // Validate + hydrate the user; if the token is stale this 401s and clears.
-          const { data } = await api.get('/auth/me');
-          setUser(data?.user ?? data ?? null);
+          // Use the stored user for display (it has org name + first name); /auth/me
+          // only returns the thin JWT payload, so we keep the richer cached copy.
+          const cached = await SecureStore.getItemAsync(USER_KEY);
+          if (cached) setUser(JSON.parse(cached));
+          // Validate the token; a stale token 401s and clears the session.
+          await api.get('/auth/me');
         }
       } catch {
         await clearSession();
@@ -66,6 +70,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setToken(null);
     setUser(null);
     await SecureStore.deleteItemAsync(TOKEN_KEY);
+    await SecureStore.deleteItemAsync(USER_KEY);
   }
 
   async function signIn(email: string, password: string) {
@@ -73,6 +78,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const nextToken: string = data.token;
     setAuthToken(nextToken);
     await SecureStore.setItemAsync(TOKEN_KEY, nextToken);
+    if (data.user) await SecureStore.setItemAsync(USER_KEY, JSON.stringify(data.user));
     setToken(nextToken);
     setUser(data.user ?? null);
   }

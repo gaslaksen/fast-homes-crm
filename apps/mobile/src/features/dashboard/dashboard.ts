@@ -75,6 +75,49 @@ export function useActionQueue(limit = 8) {
   });
 }
 
+export interface PipelineLead {
+  id: string;
+  propertyAddress: string | null;
+  propertyCity: string | null;
+  propertyState: string | null;
+  sellerFirstName: string | null;
+  sellerLastName: string | null;
+  status: string;
+  scoreBand: string | null;
+  tier: number | null;
+  arv: number | null;
+  askingPrice: number | null;
+  primaryPhoto: string | null;
+  daysInStage?: number;
+}
+
+export function usePipeline() {
+  return useQuery({
+    queryKey: ['dashboard', 'pipeline'],
+    queryFn: async () => {
+      const { data } = await api.get<{ leadsByStage: Record<string, PipelineLead[]> }>(
+        '/pipeline',
+      );
+      return data.leadsByStage;
+    },
+    staleTime: 60_000,
+  });
+}
+
+export interface InboxCounts {
+  all: number;
+  unread: number;
+  starred: number;
+}
+
+export function useInboxCounts() {
+  return useQuery({
+    queryKey: ['inbox', 'counts'],
+    queryFn: async () => (await api.get<InboxCounts>('/inbox/counts')).data,
+    staleTime: 30_000,
+  });
+}
+
 export function useHotLeads(limit = 6) {
   return useQuery({
     queryKey: ['dashboard', 'hot-leads', limit],

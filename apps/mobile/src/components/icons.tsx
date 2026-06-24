@@ -85,6 +85,24 @@ export function ChevronLeft({ size, color = '#000' }: IconProps) {
   );
 }
 
+export function TrendingUpIcon({ size, color = '#000' }: IconProps) {
+  return (
+    <Svg {...base(size)} stroke={color}>
+      <Polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
+      <Polyline points="17 6 23 6 23 12" />
+    </Svg>
+  );
+}
+
+export function BellIcon({ size, color = '#000' }: IconProps) {
+  return (
+    <Svg {...base(size)} stroke={color}>
+      <Path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+      <Path d="M13.73 21a2 2 0 0 1-3.46 0" />
+    </Svg>
+  );
+}
+
 export function PencilIcon({ size, color = '#000' }: IconProps) {
   return (
     <Svg {...base(size)} stroke={color}>
