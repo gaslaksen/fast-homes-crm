@@ -9,6 +9,7 @@ import { queryClient } from '@/lib/queryClient';
 import { usePushRegistration } from '@/features/push/usePushRegistration';
 import { useNotificationRouting } from '@/features/push/useNotificationRouting';
 import { CallProvider } from '@/features/calls/CallContext';
+import { colors } from '@/theme';
 
 /** Redirects between the auth flow and the app shell based on session state. */
 function AuthGate() {
@@ -39,7 +40,15 @@ function AuthGate() {
   }
 
   return (
-    <Stack screenOptions={{ headerShown: false }}>
+    <Stack
+      screenOptions={{
+        headerShown: false,
+        headerStyle: { backgroundColor: colors.nav },
+        headerTintColor: '#fff',
+        headerTitleStyle: { color: '#fff', fontWeight: '600' },
+        headerBackButtonDisplayMode: 'minimal',
+      }}
+    >
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="login" />
       <Stack.Screen
@@ -49,6 +58,10 @@ function AuthGate() {
       <Stack.Screen
         name="lead-detail/[id]"
         options={{ headerShown: true, title: 'Lead', presentation: 'card' }}
+      />
+      <Stack.Screen
+        name="lead-edit/[id]"
+        options={{ headerShown: true, title: 'Edit lead', presentation: 'card' }}
       />
     </Stack>
   );

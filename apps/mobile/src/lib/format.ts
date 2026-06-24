@@ -14,6 +14,35 @@ export function moneyShort(n?: number | null): string {
   return '$' + Math.round(n);
 }
 
+/** Clock time, e.g. "3:55 PM". */
+export function clockTime(iso?: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  let h = d.getHours();
+  const m = d.getMinutes();
+  const ap = h >= 12 ? 'PM' : 'AM';
+  h = h % 12 || 12;
+  return `${h}:${m.toString().padStart(2, '0')} ${ap}`;
+}
+
+/** Day heading for conversation date separators: Today / Yesterday / Mon D, YYYY. */
+export function dayLabel(iso?: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const now = new Date();
+  const isSame = (a: Date, b: Date) => a.toDateString() === b.toDateString();
+  if (isSame(d, now)) return 'Today';
+  const yest = new Date(now);
+  yest.setDate(now.getDate() - 1);
+  if (isSame(d, yest)) return 'Yesterday';
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+export function sameDay(a?: string | null, b?: string | null): boolean {
+  if (!a || !b) return false;
+  return new Date(a).toDateString() === new Date(b).toDateString();
+}
+
 export function timeAgo(iso?: string | null): string {
   if (!iso) return '';
   const diff = Date.now() - new Date(iso).getTime();

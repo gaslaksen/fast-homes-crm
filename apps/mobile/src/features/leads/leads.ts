@@ -39,6 +39,7 @@ export interface LeadDetail {
   tier: number | null;
   status: string;
   tags: string[] | null;
+  autoRespond: boolean;
 }
 
 /** Full lead detail. Shares the cache key with the lighter useLead(). */

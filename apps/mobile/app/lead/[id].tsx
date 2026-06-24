@@ -6,20 +6,22 @@ import {
   KeyboardAvoidingView,
   Platform,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useMarkRead, useSendMessage } from '@/features/inbox/hooks';
+import { useGenerateDraft, useMarkRead, useSendMessage } from '@/features/inbox/hooks';
 import { useCommunications, type TimelineItem } from '@/features/inbox/timeline';
-import { TimelineRow } from '@/features/inbox/TimelineRow';
-import { useLead, leadName } from '@/features/calls/hooks';
+import { TimelineRow, DateSeparator } from '@/features/inbox/TimelineRow';
+import { useLeadDetail, useUpdateLead, fullName } from '@/features/leads/leads';
 import { useCall } from '@/features/calls/CallContext';
+import { SparkleIcon } from '@/components/icons';
+import { sameDay } from '@/lib/format';
 import { colors } from '@/theme';
 
-/** Header "Call" button — dials the lead's seller phone via Twilio Voice. */
 function ThreadCallButton({ phone, name }: { phone: string | null; name: string }) {
   const { startCall } = useCall();
   if (!phone) return null;
@@ -35,15 +37,17 @@ export default function ThreadScreen() {
   const leadId = String(id);
   const router = useRouter();
   const { data, isLoading } = useCommunications(leadId);
-  const { data: lead } = useLead(leadId);
+  const { data: lead } = useLeadDetail(leadId);
+  const update = useUpdateLead(leadId);
   const send = useSendMessage(leadId);
+  const draftMut = useGenerateDraft(leadId);
   const markRead = useMarkRead();
   const [draft, setDraft] = useState('');
   const listRef = useRef<FlatList<TimelineItem>>(null);
 
   const timeline = data?.timeline ?? [];
+  const name = lead ? fullName(lead) : 'Conversation';
 
-  // Clear the unread flag when the thread is opened.
   useEffect(() => {
     if (leadId) markRead.mutate(leadId);
   }, [leadId]);
@@ -55,11 +59,19 @@ export default function ThreadScreen() {
     try {
       await send.mutateAsync(body);
     } catch {
-      setDraft(body); // restore on failure
+      setDraft(body);
     }
   }
 
-  const name = lead ? leadName(lead) : 'Conversation';
+  async function onSuggest() {
+    if (draftMut.isPending) return;
+    try {
+      const msg = await draftMut.mutateAsync(undefined);
+      if (msg) setDraft(msg);
+    } catch {
+      // best-effort
+    }
+  }
 
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
@@ -67,9 +79,7 @@ export default function ThreadScreen() {
         options={{
           headerTitle: () => (
             <TouchableOpacity
-              onPress={() =>
-                router.push({ pathname: '/lead-detail/[id]', params: { id: leadId } })
-              }
+              onPress={() => router.push({ pathname: '/lead-detail/[id]', params: { id: leadId } })}
               hitSlop={6}
             >
               <Text style={styles.headerTitle} numberOfLines={1}>
@@ -78,9 +88,7 @@ export default function ThreadScreen() {
               <Text style={styles.headerSub}>Tap for lead details</Text>
             </TouchableOpacity>
           ),
-          headerRight: () => (
-            <ThreadCallButton phone={lead?.sellerPhone ?? null} name={name} />
-          ),
+          headerRight: () => <ThreadCallButton phone={lead?.sellerPhone ?? null} name={name} />,
         }}
       />
       {isLoading ? (
@@ -104,10 +112,46 @@ export default function ThreadScreen() {
             onLayout={() =>
               requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: false }))
             }
-            renderItem={({ item }) => <TimelineRow item={item} />}
+            renderItem={({ item, index }) => {
+              const prev = index > 0 ? timeline[index - 1] : null;
+              const showDate = !prev || !sameDay(prev.at, item.at);
+              return (
+                <>
+                  {showDate ? <DateSeparator date={item.at} /> : null}
+                  <TimelineRow item={item} />
+                </>
+              );
+            }}
           />
 
+          {lead ? (
+            <View style={styles.aiBar}>
+              <SparkleIcon size={15} color={lead.autoRespond ? colors.primary : colors.textMuted} />
+              <Text style={styles.aiText}>
+                AI auto-reply {lead.autoRespond ? 'on' : 'off'}
+              </Text>
+              <View style={styles.spacer} />
+              <Switch
+                value={!!lead.autoRespond}
+                onValueChange={(v) => update.mutate({ autoRespond: v })}
+                trackColor={{ true: colors.primary, false: colors.border }}
+              />
+            </View>
+          ) : null}
+
           <View style={styles.composer}>
+            <TouchableOpacity
+              style={styles.aiBtn}
+              onPress={onSuggest}
+              disabled={draftMut.isPending}
+              hitSlop={6}
+            >
+              {draftMut.isPending ? (
+                <ActivityIndicator size="small" color={colors.primary} />
+              ) : (
+                <SparkleIcon size={24} color={colors.primary} />
+              )}
+            </TouchableOpacity>
             <TextInput
               style={styles.input}
               placeholder="Message"
@@ -136,12 +180,26 @@ export default function ThreadScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
-  callBtn: { color: colors.primary, fontSize: 17, fontWeight: '600', paddingHorizontal: 4 },
-  headerTitle: { fontSize: 16, fontWeight: '600', color: colors.text, textAlign: 'center' },
-  headerSub: { fontSize: 11, color: colors.primary, textAlign: 'center' },
+  callBtn: { color: colors.primaryOnDark, fontSize: 17, fontWeight: '600', paddingHorizontal: 4 },
+  headerTitle: { fontSize: 16, fontWeight: '600', color: '#fff', textAlign: 'center' },
+  headerSub: { fontSize: 11, color: colors.primaryOnDark, textAlign: 'center' },
   flex: { flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   listContent: { padding: 12, gap: 8 },
+
+  aiBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    backgroundColor: colors.bg,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+  },
+  aiText: { fontSize: 13, color: colors.textSecondary, fontWeight: '500' },
+  spacer: { flex: 1 },
+
   composer: {
     flexDirection: 'row',
     alignItems: 'flex-end',
@@ -150,6 +208,7 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.border,
   },
+  aiBtn: { width: 38, height: 40, alignItems: 'center', justifyContent: 'center' },
   input: {
     flex: 1,
     backgroundColor: colors.bubbleIn,

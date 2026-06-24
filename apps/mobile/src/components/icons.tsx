@@ -76,3 +76,13 @@ export function ChevronRight({ size, color = '#000' }: IconProps) {
     </Svg>
   );
 }
+
+/** Sparkle — used for AI actions. Filled, so it reads at small sizes. */
+export function SparkleIcon({ size = 22, color = '#000' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill={color}>
+      <Path d="M12 2l1.9 6.1L20 10l-6.1 1.9L12 18l-1.9-6.1L4 10l6.1-1.9z" />
+      <Path d="M19 14l.8 2.2L22 17l-2.2.8L19 20l-.8-2.2L16 17l2.2-.8z" />
+    </Svg>
+  );
+}

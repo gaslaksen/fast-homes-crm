@@ -5,6 +5,7 @@ import {
   Linking,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TouchableOpacity,
   View,
@@ -118,7 +119,19 @@ export default function LeadDetailScreen() {
 
   return (
     <View style={styles.root}>
-      <Stack.Screen options={{ title: name }} />
+      <Stack.Screen
+        options={{
+          title: name,
+          headerRight: () => (
+            <TouchableOpacity
+              onPress={() => router.push({ pathname: '/lead-edit/[id]', params: { id: leadId } })}
+              hitSlop={8}
+            >
+              <Text style={styles.editBtn}>Edit</Text>
+            </TouchableOpacity>
+          ),
+        }}
+      />
       <ScrollView contentContainerStyle={styles.content}>
         {lead.primaryPhoto ? (
           <Image source={{ uri: lead.primaryPhoto }} style={styles.hero} resizeMode="cover" />
@@ -212,6 +225,25 @@ export default function LeadDetailScreen() {
             </View>
           ) : null}
         </Card>
+
+        <SectionLabel>Automation</SectionLabel>
+        <Card>
+          <View style={styles.autoRow}>
+            <View style={styles.autoMain}>
+              <Text style={styles.autoTitle}>AI auto-reply</Text>
+              <Text style={styles.autoSub}>
+                {lead.autoRespond
+                  ? 'AI is replying to this lead automatically.'
+                  : 'Replies are manual — AI is paused.'}
+              </Text>
+            </View>
+            <Switch
+              value={!!lead.autoRespond}
+              onValueChange={(v) => update.mutate({ autoRespond: v })}
+              trackColor={{ true: colors.primary, false: colors.border }}
+            />
+          </View>
+        </Card>
       </ScrollView>
     </View>
   );
@@ -279,4 +311,10 @@ const styles = StyleSheet.create({
   },
   equityLabel: { fontSize: 14, color: colors.textSecondary },
   equityValue: { fontSize: 15, fontWeight: '600', color: colors.text },
+
+  editBtn: { color: colors.primaryOnDark, fontSize: 16, fontWeight: '600' },
+  autoRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  autoMain: { flex: 1, gap: 2 },
+  autoTitle: { fontSize: 15, fontWeight: '600', color: colors.text },
+  autoSub: { fontSize: 13, color: colors.textSecondary },
 });

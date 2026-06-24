@@ -10,6 +10,7 @@ export const colors = {
   primaryLight: '#14B8A6', // primary-500 — on dark backgrounds
   primarySoft: '#CCFBF1', // primary-100 — avatar/fills
   primaryTint: '#F0FDFA', // primary-50 — lightest wash
+  primaryOnDark: '#5EEAD4', // primary-300 — teal accents on the navy nav
 
   // Surfaces
   bg: '#F9FAFB', // app background (gray-50)

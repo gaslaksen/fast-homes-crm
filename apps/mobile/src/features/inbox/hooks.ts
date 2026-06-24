@@ -2,6 +2,19 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import type { InboxFilter, InboxThreadsResponse, Message } from './types';
 
+/** Ask the AI to draft a reply for this lead. Returns the suggested message. */
+export function useGenerateDraft(leadId: string) {
+  return useMutation({
+    mutationFn: async (context?: string) => {
+      const { data } = await api.post<{ message: string }>(
+        `/leads/${leadId}/messages/draft`,
+        { context },
+      );
+      return data.message;
+    },
+  });
+}
+
 export function useThreads(filter: InboxFilter = 'all') {
   return useQuery({
     queryKey: ['inbox', 'threads', filter],
