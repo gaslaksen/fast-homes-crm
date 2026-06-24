@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
 import { colors } from '@/theme';
 import { RecordingPlayer } from '@/features/calls/RecordingPlayer';
@@ -27,8 +28,9 @@ function Meta({ name, channel, at, right }: { name: string; channel: string; at:
   );
 }
 
-/** Renders one item of the merged conversation timeline. */
-export function TimelineRow({ item }: { item: TimelineItem }) {
+/** Renders one item of the merged conversation timeline. Memoized so typing a
+ * draft in the thread doesn't re-render every message row. */
+export const TimelineRow = memo(function TimelineRow({ item }: { item: TimelineItem }) {
   const outbound = item.direction === 'OUTBOUND';
   const wrap = [styles.wrap, outbound ? styles.alignRight : styles.alignLeft];
 
@@ -103,7 +105,7 @@ export function TimelineRow({ item }: { item: TimelineItem }) {
       <Text style={styles.eventText}>{item.payload.description || item.payload.type}</Text>
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   wrap: { maxWidth: '84%', gap: 3 },

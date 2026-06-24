@@ -1,42 +1,14 @@
-import React, {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 import { Voice, Call, CallInvite } from '@twilio/voice-react-native-sdk';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { ActiveCallScreen } from './ActiveCallScreen';
+import { CallContext, useCall, type CallState, type CallStatus } from './callState';
 
-export type CallStatus =
-  | 'idle'
-  | 'connecting'
-  | 'ringing'
-  | 'connected'
-  | 'reconnecting'
-  | 'ended';
-
-interface CallState {
-  status: CallStatus;
-  muted: boolean;
-  /** Display name (or number) of the party being called. */
-  peerName: string;
-  /** Epoch ms when the call connected, for the duration timer. */
-  connectedAt: number | null;
-  /** Set when a call fails so the UI can show why. */
-  error: string | null;
-  startCall: (toNumber: string, name?: string) => Promise<void>;
-  toggleMute: () => Promise<void>;
-  hangUp: () => Promise<void>;
-  dismiss: () => void;
-}
-
-const CallContext = createContext<CallState | undefined>(undefined);
+// Re-exported so existing imports from '@/features/calls/CallContext' keep working.
+export { useCall };
+export type { CallState, CallStatus };
 
 export function CallProvider({ children }: { children: React.ReactNode }) {
   const voiceRef = useRef<Voice | null>(null);
@@ -208,10 +180,4 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       {status !== 'idle' && <ActiveCallScreen />}
     </CallContext.Provider>
   );
-}
-
-export function useCall(): CallState {
-  const ctx = useContext(CallContext);
-  if (!ctx) throw new Error('useCall must be used within CallProvider');
-  return ctx;
 }

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { useCall } from './CallContext';
+import { useCall } from './callState';
 
 function useDuration(connectedAt: number | null): string {
   const [, tick] = useState(0);
