@@ -2,7 +2,6 @@ import { useState } from 'react';
 import {
   FlatList,
   RefreshControl,
-  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -10,137 +9,135 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { usePipeline, type PipelineLead } from '@/features/dashboard/dashboard';
-import { bandStyle, fullName, statusLabel } from '@/features/leads/leads';
+import {
+  useDeals,
+  useDealsSummary,
+  bucketStyle,
+  BUCKETS,
+  type Bucket,
+  type DealRow,
+} from '@/features/deals/deals';
+import { statusLabel, strategyLabel } from '@/features/leads/leads';
 import { Chip } from '@/components/ui';
 import { ChevronRight } from '@/components/icons';
-import { moneyShort } from '@/lib/format';
+import { money, moneyShort } from '@/lib/format';
 import { colors } from '@/theme';
 
-const STAGE_ORDER = [
-  'NEW',
-  'ATTEMPTING_CONTACT',
-  'QUALIFYING',
-  'QUALIFIED',
-  'OFFER_SENT',
-  'NEGOTIATING',
-  'UNDER_CONTRACT',
-  'CLOSING',
-  'ACQUIRED',
-  'SOLD',
-  'NURTURE',
-];
-
-function FilterChip({
-  label,
+function SummaryCard({
+  bucket,
+  sum,
   count,
   active,
   onPress,
 }: {
-  label: string;
+  bucket: (typeof BUCKETS)[number];
+  sum: number;
   count: number;
   active: boolean;
   onPress: () => void;
 }) {
   return (
     <TouchableOpacity
-      style={[styles.filter, active && styles.filterActive]}
+      style={[styles.sumCard, active && { borderColor: bucket.color, borderWidth: 2 }]}
       onPress={onPress}
     >
-      <Text style={[styles.filterText, active && styles.filterTextActive]}>
-        {label} {count}
+      <Text style={[styles.sumLabel, { color: bucket.color }]}>{bucket.label}</Text>
+      <Text style={styles.sumValue}>{moneyShort(sum)}</Text>
+      <Text style={styles.sumCount}>
+        {count} deal{count === 1 ? '' : 's'}
       </Text>
     </TouchableOpacity>
   );
 }
 
-function DealRow({ lead, onPress }: { lead: PipelineLead; onPress: () => void }) {
-  const band = bandStyle(lead.scoreBand);
-  const addr = [lead.propertyAddress, lead.propertyCity].filter(Boolean).join(', ');
+function DealRowItem({ deal, onPress }: { deal: DealRow; onPress: () => void }) {
+  const b = bucketStyle(deal.bucket);
+  const addr = [deal.propertyAddress, deal.propertyCity].filter(Boolean).join(', ');
   return (
     <TouchableOpacity style={styles.row} onPress={onPress}>
       <View style={styles.rowMain}>
         <Text style={styles.name} numberOfLines={1}>
-          {fullName(lead)}
+          {deal.ownerName}
         </Text>
         <Text style={styles.addr} numberOfLines={1}>
           {addr}
         </Text>
         <View style={styles.rowChips}>
-          <Chip label={statusLabel(lead.status)} color={colors.textSecondary} soft={colors.bubbleIn} />
-          <Chip label={band.label} color={band.color} soft={band.soft} />
+          <Chip label={statusLabel(deal.status)} color={colors.textSecondary} soft={colors.bubbleIn} />
+          {deal.exitStrategy ? (
+            <Chip label={strategyLabel(deal.exitStrategy)} color={b.color} soft={b.soft} />
+          ) : null}
         </View>
       </View>
       <View style={styles.rowRight}>
-        {lead.arv != null ? <Text style={styles.arv}>{moneyShort(lead.arv)}</Text> : null}
-        <ChevronRight size={18} color={colors.textMuted} />
+        <Text style={[styles.profit, { color: deal.ourShareProfit != null ? b.color : colors.textMuted }]}>
+          {deal.ourShareProfit != null ? money(deal.ourShareProfit) : '—'}
+        </Text>
+        <Text style={styles.days}>{deal.daysInStage}d in stage</Text>
       </View>
+      <ChevronRight size={16} color={colors.textMuted} />
     </TouchableOpacity>
   );
 }
 
 export default function DealsScreen() {
   const router = useRouter();
-  const { data: byStage, isLoading, isRefetching, refetch } = usePipeline();
-  const [filter, setFilter] = useState<string>('all');
+  const [bucket, setBucket] = useState<Bucket | null>(null);
+  const summary = useDealsSummary();
+  const deals = useDeals({ bucket: bucket ?? undefined, sort: 'profit', dir: 'desc', limit: 100 });
 
-  const all: PipelineLead[] = byStage ? (Object.values(byStage) as PipelineLead[][]).flat() : [];
-  const present = byStage ? Object.keys(byStage).filter((s) => byStage[s].length) : [];
-  const ordered = [
-    ...STAGE_ORDER.filter((s) => present.includes(s)),
-    ...present.filter((s) => !STAGE_ORDER.includes(s)),
-  ];
-  const totalArv = all.reduce((sum: number, l: PipelineLead) => sum + (l.arv ?? 0), 0);
-  const list = (filter === 'all' ? all : (byStage?.[filter] ?? []))
-    .slice()
-    .sort((a: PipelineLead, b: PipelineLead) => (b.arv ?? 0) - (a.arv ?? 0));
+  const refreshing = summary.isRefetching || deals.isRefetching;
+  const onRefresh = () => {
+    summary.refetch();
+    deals.refetch();
+  };
+  const s = summary.data;
 
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
       <FlatList
-        data={list}
-        keyExtractor={(l) => l.id}
+        data={deals.data?.deals ?? []}
+        keyExtractor={(d) => d.id}
         contentContainerStyle={styles.content}
-        refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={() => refetch()} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         ListHeaderComponent={
-          <View>
-            <View style={styles.summary}>
-              <View>
-                <Text style={styles.summaryValue}>{all.length}</Text>
-                <Text style={styles.summaryLabel}>Active deals</Text>
-              </View>
-              <View style={styles.summaryRight}>
-                <Text style={styles.summaryValue}>{moneyShort(totalArv)}</Text>
-                <Text style={styles.summaryLabel}>Pipeline ARV</Text>
-              </View>
-            </View>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.filters}
-            >
-              <FilterChip label="All" count={all.length} active={filter === 'all'} onPress={() => setFilter('all')} />
-              {ordered.map((s) => (
-                <FilterChip
-                  key={s}
-                  label={statusLabel(s)}
-                  count={byStage?.[s].length ?? 0}
-                  active={filter === s}
-                  onPress={() => setFilter(s)}
-                />
-              ))}
-            </ScrollView>
+          <View style={styles.summaryRow}>
+            <SummaryCard
+              bucket={BUCKETS[0]}
+              sum={s?.potential.sum ?? 0}
+              count={s?.potential.count ?? 0}
+              active={bucket === 'potential'}
+              onPress={() => setBucket(bucket === 'potential' ? null : 'potential')}
+            />
+            <SummaryCard
+              bucket={BUCKETS[1]}
+              sum={s?.expected.sum ?? 0}
+              count={s?.expected.count ?? 0}
+              active={bucket === 'expected'}
+              onPress={() => setBucket(bucket === 'expected' ? null : 'expected')}
+            />
+            <SummaryCard
+              bucket={BUCKETS[2]}
+              sum={s?.realized.sum ?? 0}
+              count={s?.realized.count ?? 0}
+              active={bucket === 'realized'}
+              onPress={() => setBucket(bucket === 'realized' ? null : 'realized')}
+            />
           </View>
         }
         renderItem={({ item }) => (
-          <DealRow
-            lead={item}
+          <DealRowItem
+            deal={item}
             onPress={() => router.push({ pathname: '/lead/detail/[id]', params: { id: item.id } })}
           />
         )}
         ListEmptyComponent={
           <Text style={styles.empty}>
-            {isLoading ? 'Loading deals…' : 'No deals in this stage.'}
+            {deals.isLoading
+              ? 'Loading deals…'
+              : bucket
+                ? `No ${bucket} deals.`
+                : 'No active deals yet.'}
           </Text>
         }
       />
@@ -152,31 +149,19 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   content: { paddingBottom: 24 },
 
-  summary: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  summaryRow: { flexDirection: 'row', gap: 10, padding: 14 },
+  sumCard: {
+    flex: 1,
     backgroundColor: colors.surface,
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
-  },
-  summaryRight: { alignItems: 'flex-end' },
-  summaryValue: { fontSize: 22, fontWeight: '700', color: colors.text },
-  summaryLabel: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
-
-  filters: { paddingHorizontal: 12, paddingVertical: 12, gap: 8 },
-  filter: {
-    paddingHorizontal: 13,
-    paddingVertical: 7,
-    borderRadius: 18,
-    backgroundColor: colors.surface,
+    borderRadius: 14,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.border,
+    paddingVertical: 14,
+    paddingHorizontal: 10,
   },
-  filterActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  filterText: { fontSize: 13, fontWeight: '600', color: colors.textSecondary },
-  filterTextActive: { color: '#fff' },
+  sumLabel: { fontSize: 12, fontWeight: '700' },
+  sumValue: { fontSize: 19, fontWeight: '700', color: colors.text, marginTop: 6 },
+  sumCount: { fontSize: 11, color: colors.textSecondary, marginTop: 2 },
 
   row: {
     flexDirection: 'row',
@@ -191,9 +176,10 @@ const styles = StyleSheet.create({
   rowMain: { flex: 1, gap: 4 },
   name: { fontSize: 15, fontWeight: '600', color: colors.text },
   addr: { fontSize: 13, color: colors.textSecondary },
-  rowChips: { flexDirection: 'row', gap: 6, marginTop: 2 },
-  rowRight: { alignItems: 'flex-end', gap: 4 },
-  arv: { fontSize: 15, fontWeight: '700', color: colors.primary },
+  rowChips: { flexDirection: 'row', gap: 6, marginTop: 2, flexWrap: 'wrap' },
+  rowRight: { alignItems: 'flex-end', gap: 2 },
+  profit: { fontSize: 15, fontWeight: '700' },
+  days: { fontSize: 11, color: colors.textMuted },
 
   empty: { padding: 28, fontSize: 14, color: colors.textSecondary, textAlign: 'center' },
 });
