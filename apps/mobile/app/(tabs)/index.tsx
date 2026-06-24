@@ -1,134 +1,188 @@
-import { useRouter } from 'expo-router';
 import {
   ActivityIndicator,
-  FlatList,
   RefreshControl,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useThreads } from '@/features/inbox/hooks';
-import type { InboxThread } from '@/features/inbox/types';
+import { useRouter } from 'expo-router';
+import {
+  useActionQueue,
+  useDashboardStats,
+  useHotLeads,
+  actionMeta,
+  type ActionItem,
+  type HotLead,
+} from '@/features/dashboard/dashboard';
+import { bandStyle, fullName } from '@/features/leads/leads';
+import { Card, SectionLabel, Chip } from '@/components/ui';
+import { ChevronRight } from '@/components/icons';
+import { moneyShort } from '@/lib/format';
+import { colors } from '@/theme';
 
-function fullName(t: InboxThread) {
-  return [t.sellerFirstName, t.sellerLastName].filter(Boolean).join(' ') || t.sellerPhone || 'Unknown';
+function MetricTile({ label, value, tint }: { label: string; value: string; tint?: string }) {
+  return (
+    <View style={styles.metric}>
+      <Text style={[styles.metricValue, tint ? { color: tint } : null]}>{value}</Text>
+      <Text style={styles.metricLabel}>{label}</Text>
+    </View>
+  );
 }
 
-function timeAgo(iso: string | null) {
-  if (!iso) return '';
-  const diff = Date.now() - new Date(iso).getTime();
-  const m = Math.floor(diff / 60000);
-  if (m < 1) return 'now';
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h`;
-  return `${Math.floor(h / 24)}d`;
+function ActionRow({ item, onPress }: { item: ActionItem; onPress: () => void }) {
+  const meta = actionMeta(item.type);
+  const addr = [item.lead.propertyAddress, item.lead.propertyCity].filter(Boolean).join(', ');
+  return (
+    <TouchableOpacity style={styles.row} onPress={onPress}>
+      <View style={styles.rowMain}>
+        <Chip label={meta.label} color={meta.color} soft={meta.soft} />
+        <Text style={styles.rowTitle} numberOfLines={1}>
+          {item.title}
+        </Text>
+        <Text style={styles.rowSub} numberOfLines={1}>
+          {item.subtitle || addr}
+        </Text>
+      </View>
+      <ChevronRight size={18} color={colors.textMuted} />
+    </TouchableOpacity>
+  );
 }
 
-export default function InboxScreen() {
+function HotLeadRow({ lead, onPress }: { lead: HotLead; onPress: () => void }) {
+  const band = bandStyle(lead.scoreBand);
+  const addr = [lead.propertyAddress, lead.propertyCity].filter(Boolean).join(', ');
+  return (
+    <TouchableOpacity style={styles.row} onPress={onPress}>
+      <View style={styles.rowMain}>
+        <Text style={styles.hotName} numberOfLines={1}>
+          {fullName(lead)}
+        </Text>
+        <Text style={styles.rowSub} numberOfLines={1}>
+          {addr}
+        </Text>
+      </View>
+      <View style={styles.hotRight}>
+        {lead.arv != null ? <Text style={styles.hotArv}>{moneyShort(lead.arv)}</Text> : null}
+        <Chip label={band.label} color={band.color} soft={band.soft} />
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+export default function HomeScreen() {
   const router = useRouter();
-  const { data, isLoading, isRefetching, refetch, error } = useThreads('all');
+  const stats = useDashboardStats();
+  const actions = useActionQueue(6);
+  const hot = useHotLeads(5);
 
-  if (isLoading) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator />
-      </View>
-    );
-  }
+  const refreshing = stats.isRefetching || actions.isRefetching || hot.isRefetching;
+  const onRefresh = () => {
+    stats.refetch();
+    actions.refetch();
+    hot.refetch();
+  };
 
-  if (error) {
-    return (
-      <View style={styles.center}>
-        <Text style={styles.muted}>Could not load conversations.</Text>
-        <TouchableOpacity onPress={() => refetch()}>
-          <Text style={styles.retry}>Retry</Text>
-        </TouchableOpacity>
-      </View>
-    );
+  const needAction = stats.data?.needsFollowUp ?? actions.data?.length ?? 0;
+  const hotCount = stats.data?.leadsByBand?.HOT ?? hot.data?.length ?? 0;
+  const pipeline = stats.data?.pipelineArvTotal ?? 0;
+
+  function openAction(item: ActionItem) {
+    const meta = actionMeta(item.type);
+    const pathname = meta.toConversation ? '/lead/[id]' : '/lead-detail/[id]';
+    router.push({ pathname, params: { id: item.leadId } });
   }
 
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
-      <FlatList
-        data={data?.items ?? []}
-        keyExtractor={(t) => t.leadId}
-        refreshControl={
-          <RefreshControl refreshing={isRefetching} onRefresh={() => refetch()} />
-        }
-        ListEmptyComponent={
-          <View style={styles.center}>
-            <Text style={styles.muted}>No conversations yet.</Text>
-          </View>
-        }
-        renderItem={({ item }) => (
-          <TouchableOpacity
-            style={styles.row}
-            onPress={() => router.push({ pathname: '/lead/[id]', params: { id: item.leadId } })}
-          >
-            <View style={styles.avatar}>
-              <Text style={styles.avatarText}>
-                {(item.sellerFirstName?.[0] || item.sellerPhone?.[0] || '?').toUpperCase()}
-              </Text>
-            </View>
-            <View style={styles.rowBody}>
-              <View style={styles.rowTop}>
-                <Text style={[styles.name, item.threadUnread && styles.unreadText]} numberOfLines={1}>
-                  {fullName(item)}
-                </Text>
-                <Text style={styles.time}>{timeAgo(item.lastMessageAt)}</Text>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+      >
+        <View style={styles.metrics}>
+          <MetricTile label="Need action" value={String(needAction)} tint={colors.primary} />
+          <MetricTile label="Hot leads" value={String(hotCount)} />
+          <MetricTile label="Pipeline" value={moneyShort(pipeline)} />
+        </View>
+
+        <SectionLabel>Do next</SectionLabel>
+        <Card style={styles.listCard}>
+          {actions.isLoading ? (
+            <ActivityIndicator style={styles.pad} />
+          ) : actions.data?.length ? (
+            actions.data.map((it: ActionItem, i: number) => (
+              <View key={it.actionKey}>
+                {i > 0 ? <View style={styles.divider} /> : null}
+                <ActionRow item={it} onPress={() => openAction(it)} />
               </View>
-              <Text
-                style={[styles.preview, item.threadUnread && styles.unreadText]}
-                numberOfLines={1}
-              >
-                {item.lastMessageDirection === 'OUTBOUND' ? 'You: ' : ''}
-                {item.lastMessagePreview || item.propertyAddress || ''}
-              </Text>
-            </View>
-            {item.threadUnread ? <View style={styles.unreadDot} /> : null}
-          </TouchableOpacity>
-        )}
-      />
+            ))
+          ) : (
+            <Text style={styles.empty}>You're all caught up. 🎉</Text>
+          )}
+        </Card>
+
+        <SectionLabel>Hot leads</SectionLabel>
+        <Card style={styles.listCard}>
+          {hot.isLoading ? (
+            <ActivityIndicator style={styles.pad} />
+          ) : hot.data?.length ? (
+            hot.data.map((l: HotLead, i: number) => (
+              <View key={l.id}>
+                {i > 0 ? <View style={styles.divider} /> : null}
+                <HotLeadRow
+                  lead={l}
+                  onPress={() =>
+                    router.push({ pathname: '/lead-detail/[id]', params: { id: l.id } })
+                  }
+                />
+              </View>
+            ))
+          ) : (
+            <Text style={styles.empty}>No hot leads right now.</Text>
+          )}
+        </Card>
+      </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#fff' },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 8 },
-  muted: { color: '#6B7280', fontSize: 15 },
-  retry: { color: '#0D9488', fontWeight: '600', marginTop: 8 },
+  safe: { flex: 1, backgroundColor: colors.bg },
+  content: { padding: 16, gap: 16, paddingBottom: 32 },
+
+  metrics: { flexDirection: 'row', gap: 12 },
+  metric: {
+    flex: 1,
+    backgroundColor: colors.surface,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    paddingVertical: 16,
+    paddingHorizontal: 12,
+    alignItems: 'flex-start',
+  },
+  metricValue: { fontSize: 22, fontWeight: '700', color: colors.text },
+  metricLabel: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
+
+  listCard: { padding: 0, overflow: 'hidden' },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
+    paddingHorizontal: 14,
     paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#E5E7EB',
-    gap: 12,
+    gap: 10,
   },
-  avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#CCFBF1',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarText: { color: '#0D9488', fontWeight: '700', fontSize: 18 },
-  rowBody: { flex: 1 },
-  rowTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  name: { fontSize: 16, fontWeight: '600', color: '#0F172A', flex: 1 },
-  time: { fontSize: 13, color: '#9CA3AF', marginLeft: 8 },
-  preview: { fontSize: 14, color: '#6B7280', marginTop: 2 },
-  unreadText: { color: '#0F172A', fontWeight: '700' },
-  unreadDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: '#0D9488',
-  },
+  rowMain: { flex: 1, gap: 3 },
+  rowTitle: { fontSize: 15, fontWeight: '600', color: colors.text },
+  rowSub: { fontSize: 13, color: colors.textSecondary },
+  divider: { height: StyleSheet.hairlineWidth, backgroundColor: colors.border, marginLeft: 14 },
+
+  hotName: { fontSize: 15, fontWeight: '600', color: colors.text },
+  hotRight: { alignItems: 'flex-end', gap: 4 },
+  hotArv: { fontSize: 14, fontWeight: '700', color: colors.primary },
+
+  pad: { padding: 18 },
+  empty: { padding: 18, fontSize: 14, color: colors.textSecondary, textAlign: 'center' },
 });

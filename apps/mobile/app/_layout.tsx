@@ -46,6 +46,10 @@ function AuthGate() {
         name="lead/[id]"
         options={{ headerShown: true, title: 'Conversation', presentation: 'card' }}
       />
+      <Stack.Screen
+        name="lead-detail/[id]"
+        options={{ headerShown: true, title: 'Lead', presentation: 'card' }}
+      />
     </Stack>
   );
 }

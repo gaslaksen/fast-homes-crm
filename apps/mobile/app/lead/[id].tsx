@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Stack, useLocalSearchParams } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import {
   ActivityIndicator,
   FlatList,
@@ -33,6 +33,7 @@ function ThreadCallButton({ phone, name }: { phone: string | null; name: string 
 export default function ThreadScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const leadId = String(id);
+  const router = useRouter();
   const { data, isLoading } = useCommunications(leadId);
   const { data: lead } = useLead(leadId);
   const send = useSendMessage(leadId);
@@ -64,7 +65,19 @@ export default function ThreadScreen() {
     <SafeAreaView style={styles.safe} edges={['bottom']}>
       <Stack.Screen
         options={{
-          title: name,
+          headerTitle: () => (
+            <TouchableOpacity
+              onPress={() =>
+                router.push({ pathname: '/lead-detail/[id]', params: { id: leadId } })
+              }
+              hitSlop={6}
+            >
+              <Text style={styles.headerTitle} numberOfLines={1}>
+                {name}
+              </Text>
+              <Text style={styles.headerSub}>Tap for lead details</Text>
+            </TouchableOpacity>
+          ),
           headerRight: () => (
             <ThreadCallButton phone={lead?.sellerPhone ?? null} name={name} />
           ),
@@ -124,6 +137,8 @@ export default function ThreadScreen() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
   callBtn: { color: colors.primary, fontSize: 17, fontWeight: '600', paddingHorizontal: 4 },
+  headerTitle: { fontSize: 16, fontWeight: '600', color: colors.text, textAlign: 'center' },
+  headerSub: { fontSize: 11, color: colors.primary, textAlign: 'center' },
   flex: { flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   listContent: { padding: 12, gap: 8 },
