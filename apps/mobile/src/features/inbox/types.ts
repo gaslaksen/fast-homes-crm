@@ -25,6 +25,11 @@ export interface InboxThreadsResponse {
 
 export type InboxFilter = 'all' | 'unread' | 'starred' | 'recent';
 
+export interface MessageMedia {
+  url: string;
+  thumbnailUrl?: string | null;
+}
+
 /** Mirrors a row from GET /leads/:leadId/messages (raw Message record). */
 export interface Message {
   id: string;
@@ -32,6 +37,8 @@ export interface Message {
   direction: 'INBOUND' | 'OUTBOUND';
   status: string;
   body: string;
+  /** MMS attachments (data URIs or URLs); null for plain SMS. */
+  mediaUrls: MessageMedia[] | null;
   from: string | null;
   to: string | null;
   sentAt: string | null;

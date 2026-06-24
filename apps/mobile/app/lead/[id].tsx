@@ -3,6 +3,7 @@ import { Stack, useLocalSearchParams } from 'expo-router';
 import {
   ActivityIndicator,
   FlatList,
+  Image,
   KeyboardAvoidingView,
   Platform,
   StyleSheet,
@@ -84,16 +85,32 @@ export default function ThreadScreen() {
           data={messages ?? []}
           keyExtractor={(m) => m.id}
           contentContainerStyle={styles.listContent}
-          onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
+          onContentSizeChange={() =>
+            requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: false }))
+          }
+          onLayout={() =>
+            requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: false }))
+          }
           renderItem={({ item }) => {
             const outbound = item.direction === 'OUTBOUND';
+            const media = item.mediaUrls ?? [];
             return (
               <View
                 style={[styles.bubble, outbound ? styles.outbound : styles.inbound]}
               >
-                <Text style={outbound ? styles.outboundText : styles.inboundText}>
-                  {item.body}
-                </Text>
+                {media.map((m, i) => (
+                  <Image
+                    key={i}
+                    source={{ uri: m.thumbnailUrl || m.url }}
+                    style={[styles.media, (item.body || i < media.length - 1) && styles.mediaSpaced]}
+                    resizeMode="cover"
+                  />
+                ))}
+                {item.body ? (
+                  <Text style={outbound ? styles.outboundText : styles.inboundText}>
+                    {item.body}
+                  </Text>
+                ) : null}
               </View>
             );
           }}
@@ -132,6 +149,8 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   listContent: { padding: 12, gap: 8 },
   bubble: { maxWidth: '80%', borderRadius: 16, paddingHorizontal: 14, paddingVertical: 9 },
+  media: { width: 210, height: 210, borderRadius: 12, backgroundColor: '#0000000d' },
+  mediaSpaced: { marginBottom: 6 },
   inbound: { alignSelf: 'flex-start', backgroundColor: '#F3F4F6' },
   outbound: { alignSelf: 'flex-end', backgroundColor: '#0D9488' },
   inboundText: { color: '#0F172A', fontSize: 15 },
