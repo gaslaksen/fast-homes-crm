@@ -39,9 +39,12 @@ export class CallsController {
 
   // ─── Twilio browser dialer ────────────────────────────────────────────────
 
-  /** Mint a Voice access token for the logged-in user's browser softphone. */
+  /** Mint a Voice access token for the logged-in user (browser or mobile). */
   @Post('twilio/token')
-  async twilioToken(@Headers('authorization') authHeader?: string) {
+  async twilioToken(
+    @Headers('authorization') authHeader?: string,
+    @Query('platform') platform?: string,
+  ) {
     const { userId } = this.decodeToken(authHeader);
     if (!userId) {
       return { configured: false, error: 'Not authenticated' };
@@ -49,7 +52,10 @@ export class CallsController {
     if (!this.twilioVoiceService.isConfigured()) {
       return { configured: false };
     }
-    return { configured: true, ...this.twilioVoiceService.generateToken(userId) };
+    return {
+      configured: true,
+      ...this.twilioVoiceService.generateToken(userId, platform),
+    };
   }
 
   /**

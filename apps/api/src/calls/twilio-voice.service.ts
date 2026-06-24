@@ -60,8 +60,18 @@ export class TwilioVoiceService {
     );
   }
 
-  /** Mint a Voice access token for a browser softphone. identity = userId. */
-  generateToken(identity: string): { token: string; identity: string } {
+  /**
+   * Mint a Voice access token. identity = userId.
+   *
+   * For `platform === 'ios'` we attach the APNs VoIP push credential so the
+   * mobile SDK can register for incoming calls (Twilio sends a VoIP push that
+   * the Twilio Voice RN SDK turns into a CallKit ring). The browser path omits
+   * it and relies on `incomingAllow` for WebRTC.
+   */
+  generateToken(
+    identity: string,
+    platform?: string,
+  ): { token: string; identity: string } {
     const accountSid = this.config.get<string>('TWILIO_ACCOUNT_SID');
     const apiKeySid = this.config.get<string>('TWILIO_API_KEY_SID');
     const apiKeySecret = this.config.get<string>('TWILIO_API_KEY_SECRET');
@@ -73,16 +83,21 @@ export class TwilioVoiceService {
       );
     }
 
-    // Token TTL: 1 hour. The browser refreshes via the Device tokenWillExpire event.
+    // Token TTL: 1 hour. Clients refresh via the SDK's tokenWillExpire event.
     const token = new AccessToken(accountSid, apiKeySid, apiKeySecret, {
       identity,
       ttl: 3600,
     });
 
+    const pushCredentialSid = this.config.get<string>(
+      'TWILIO_APN_PUSH_CREDENTIAL_SID',
+    );
+
     token.addGrant(
       new VoiceGrant({
         outgoingApplicationSid: twimlAppSid,
-        incomingAllow: true, // lets inbound reach this client later (Phase 3)
+        incomingAllow: true,
+        ...(platform === 'ios' && pushCredentialSid ? { pushCredentialSid } : {}),
       }),
     );
 

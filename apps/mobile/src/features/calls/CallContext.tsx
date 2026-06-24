@@ -7,8 +7,10 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { Voice, Call } from '@twilio/voice-react-native-sdk';
+import { Platform } from 'react-native';
+import { Voice, Call, CallInvite } from '@twilio/voice-react-native-sdk';
 import { api } from '@/lib/api';
+import { useAuth } from '@/lib/auth';
 import { ActiveCallScreen } from './ActiveCallScreen';
 
 export type CallStatus =
@@ -46,12 +48,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const [connectedAt, setConnectedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    voiceRef.current = new Voice();
-    return () => {
-      callRef.current?.disconnect().catch(() => {});
-    };
-  }, []);
+  const { token: authToken } = useAuth();
 
   const attach = useCallback((call: Call) => {
     callRef.current = call;
@@ -71,6 +68,72 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       callRef.current = null;
     });
   }, []);
+
+  // Create the Voice instance once; wire PushKit + incoming-call handling.
+  useEffect(() => {
+    const voice = new Voice();
+    voiceRef.current = voice;
+
+    const onInvite = (invite: CallInvite) => {
+      // CallKit shows the native incoming-call UI. We only raise our in-app
+      // screen once the call is accepted, so we don't compete with CallKit.
+      let name = 'Incoming call';
+      try {
+        const params = invite.getCustomParameters?.() as Record<string, string>;
+        name = params?.callerName || invite.getFrom?.() || name;
+      } catch {
+        // fall back to the default label
+      }
+      invite.on(CallInvite.Event.Accepted, (call: Call) => {
+        setError(null);
+        setMuted(false);
+        setPeerName(name);
+        attach(call);
+        setStatus('connected');
+        setConnectedAt(Date.now());
+      });
+      invite.on(CallInvite.Event.Cancelled, () => {
+        if (!callRef.current) setStatus('idle');
+      });
+    };
+
+    voice.on(Voice.Event.CallInvite, onInvite);
+
+    // iOS: set up the PushKit registry so VoIP pushes can wake the app.
+    if (Platform.OS === 'ios') {
+      voice.initializePushRegistry().catch((e: any) =>
+        console.warn('[call] initializePushRegistry failed:', e?.message || e),
+      );
+    }
+
+    return () => {
+      callRef.current?.disconnect().catch(() => {});
+    };
+  }, []);
+
+  // Register/unregister for incoming calls as the auth session changes.
+  useEffect(() => {
+    const voice = voiceRef.current;
+    if (!authToken || !voice) return;
+    let registeredToken: string | null = null;
+    (async () => {
+      try {
+        const { data } = await api.post('/calls/twilio/token', null, {
+          params: { platform: 'ios' },
+        });
+        if (data?.configured && data?.token) {
+          await voice.register(data.token);
+          registeredToken = data.token;
+          console.log('[call] registered for incoming calls');
+        }
+      } catch (e: any) {
+        console.warn('[call] incoming registration failed:', e?.message || e);
+      }
+    })();
+    return () => {
+      if (registeredToken) voice.unregister(registeredToken).catch(() => {});
+    };
+  }, [authToken]);
 
   const startCall = useCallback(
     async (toNumber: string, name?: string) => {
