@@ -1,5 +1,27 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+
+export const EXIT_STRATEGIES = [
+  'wholesale',
+  'novation',
+  'double_close',
+  'fix_flip',
+  'concierge_listing',
+  'hold_rental',
+  'jv',
+  'sub_to',
+  'other',
+];
+
+export const COST_CATEGORIES = [
+  'holding',
+  'repair_prep',
+  'utilities',
+  'marketing',
+  'closing',
+  'jv_payout',
+  'other',
+];
 
 export interface DispositionPlan {
   exitStrategy: string | null;
@@ -54,6 +76,47 @@ export function useFinalSale(leadId: string) {
     queryFn: async () =>
       (await api.get<FinalSale | null>(`/leads/${leadId}/final-sale`)).data,
     enabled: !!leadId,
+  });
+}
+
+function invalidateDeal(qc: ReturnType<typeof useQueryClient>, leadId: string) {
+  qc.invalidateQueries({ queryKey: ['lead', leadId] });
+  qc.invalidateQueries({ queryKey: ['deals'] });
+}
+
+export function useUpsertDispositionPlan(leadId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: Partial<DispositionPlan>) =>
+      (await api.patch(`/leads/${leadId}/disposition-plan`, body)).data,
+    onSuccess: () => invalidateDeal(qc, leadId),
+  });
+}
+
+export function useAddDispositionCost(leadId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: { category: string; amount: number; description?: string }) =>
+      (await api.post(`/leads/${leadId}/disposition-costs`, body)).data,
+    onSuccess: () => invalidateDeal(qc, leadId),
+  });
+}
+
+export function useDeleteDispositionCost(leadId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (costId: string) =>
+      (await api.delete(`/leads/${leadId}/disposition-costs/${costId}`)).data,
+    onSuccess: () => invalidateDeal(qc, leadId),
+  });
+}
+
+export function useUpsertFinalSale(leadId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: Partial<FinalSale>) =>
+      (await api.post(`/leads/${leadId}/final-sale`, body)).data,
+    onSuccess: () => invalidateDeal(qc, leadId),
   });
 }
 

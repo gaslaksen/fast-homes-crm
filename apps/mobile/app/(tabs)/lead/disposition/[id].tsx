@@ -24,7 +24,7 @@ import {
   type DispositionCost,
 } from '@/features/deals/disposition';
 import { Card, SectionLabel, Chip, Stat } from '@/components/ui';
-import { ChevronRight } from '@/components/icons';
+import { ChevronRight, PencilIcon } from '@/components/icons';
 import { money } from '@/lib/format';
 import { colors } from '@/theme';
 
@@ -77,7 +77,22 @@ export default function DispositionScreen() {
 
   return (
     <View style={styles.root}>
-      <Stack.Screen options={{ title: name }} />
+      <Stack.Screen
+        options={{
+          title: name,
+          headerRight: () => (
+            <TouchableOpacity
+              onPress={() =>
+                router.push({ pathname: '/lead/disposition-edit/[id]', params: { id: leadId } })
+              }
+              hitSlop={10}
+              style={styles.editBtn}
+            >
+              <PencilIcon size={20} color={colors.primary} />
+            </TouchableOpacity>
+          ),
+        }}
+      />
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.header}>
           <Text style={styles.name}>{name}</Text>
@@ -178,6 +193,7 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg },
   content: { padding: 16, gap: 14, paddingBottom: 40 },
 
+  editBtn: { paddingHorizontal: 4 },
   header: { gap: 6 },
   name: { fontSize: 22, fontWeight: '700', color: colors.text },
   address: { fontSize: 14, color: colors.textSecondary },
