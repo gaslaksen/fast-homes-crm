@@ -40,6 +40,10 @@ export interface LeadDetail {
   status: string;
   tags: string[] | null;
   autoRespond: boolean;
+  realizedProfit: number | null;
+  profitBucket: string | null;
+  acquiredDate: string | null;
+  soldDate: string | null;
 }
 
 /** Full lead detail. Shares the cache key with the lighter useLead(). */

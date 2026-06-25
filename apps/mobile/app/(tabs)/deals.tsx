@@ -128,7 +128,7 @@ export default function DealsScreen() {
         renderItem={({ item }) => (
           <DealRowItem
             deal={item}
-            onPress={() => router.push({ pathname: '/lead/detail/[id]', params: { id: item.id } })}
+            onPress={() => router.push({ pathname: '/lead/disposition/[id]', params: { id: item.id } })}
           />
         )}
         ListEmptyComponent={

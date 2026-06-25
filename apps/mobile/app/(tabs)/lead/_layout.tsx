@@ -30,6 +30,7 @@ export default function LeadStackLayout() {
     >
       <Stack.Screen name="[id]" options={{ title: 'Conversation' }} />
       <Stack.Screen name="detail/[id]" options={{ title: 'Lead' }} />
+      <Stack.Screen name="disposition/[id]" options={{ title: 'Deal' }} />
       <Stack.Screen name="edit/[id]" options={{ title: 'Edit lead' }} />
     </Stack>
   );
