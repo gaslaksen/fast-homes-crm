@@ -20,7 +20,7 @@ import { useLeadDetail, useUpdateLead, fullName } from '@/features/leads/leads';
 import { useCall } from '@/features/calls/CallContext';
 import { SparkleIcon, PhoneIcon, MessageIcon, MailIcon } from '@/components/icons';
 import { sameDay } from '@/lib/format';
-import { colors } from '@/theme';
+import { useThemed, type Colors } from '@/theme';
 
 function initialsOf(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -31,6 +31,7 @@ function initialsOf(name: string): string {
 
 /** GHL-style header avatar with a tiny last-channel badge. */
 function HeaderAvatar({ name, kind }: { name: string; kind?: string }) {
+  const { colors, styles } = useThemed(makeStyles);
   const Badge = kind === 'call' ? PhoneIcon : kind === 'email' ? MailIcon : MessageIcon;
   return (
     <View>
@@ -45,6 +46,7 @@ function HeaderAvatar({ name, kind }: { name: string; kind?: string }) {
 }
 
 function ThreadCallButton({ phone, name }: { phone: string | null; name: string }) {
+  const { colors, styles } = useThemed(makeStyles);
   const { startCall } = useCall();
   if (!phone) return null;
   return (
@@ -55,6 +57,7 @@ function ThreadCallButton({ phone, name }: { phone: string | null; name: string 
 }
 
 export default function ThreadScreen() {
+  const { colors, styles } = useThemed(makeStyles);
   const { id } = useLocalSearchParams<{ id: string }>();
   const leadId = String(id);
   const router = useRouter();
@@ -204,7 +207,7 @@ export default function ThreadScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
   headerIcon: { paddingHorizontal: 4 },
   headerWrap: { flexDirection: 'row', alignItems: 'center', gap: 9 },

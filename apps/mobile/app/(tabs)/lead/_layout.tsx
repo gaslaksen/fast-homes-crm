@@ -1,7 +1,7 @@
 import { Stack, useRouter } from 'expo-router';
 import { TouchableOpacity } from 'react-native';
 import { ChevronLeft } from '@/components/icons';
-import { colors } from '@/theme';
+import { useColors } from '@/theme';
 
 /**
  * Lead flow (conversation → detail → edit) as a stack nested inside the tabs,
@@ -10,6 +10,7 @@ import { colors } from '@/theme';
  */
 export default function LeadStackLayout() {
   const router = useRouter();
+  const colors = useColors();
   return (
     <Stack
       screenOptions={{

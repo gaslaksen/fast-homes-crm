@@ -1,6 +1,6 @@
 import React from 'react';
 import { StyleSheet, Text, View, type ViewStyle } from 'react-native';
-import { colors } from '@/theme';
+import { useThemed, type Colors } from '@/theme';
 
 export function Card({
   children,
@@ -9,10 +9,12 @@ export function Card({
   children: React.ReactNode;
   style?: ViewStyle;
 }) {
+  const { styles } = useThemed(makeStyles);
   return <View style={[styles.card, style]}>{children}</View>;
 }
 
 export function SectionLabel({ children }: { children: React.ReactNode }) {
+  const { styles } = useThemed(makeStyles);
   return <Text style={styles.section}>{children}</Text>;
 }
 
@@ -25,6 +27,7 @@ export function Chip({
   color: string;
   soft: string;
 }) {
+  const { styles } = useThemed(makeStyles);
   return (
     <View style={[styles.chip, { backgroundColor: soft }]}>
       <Text style={[styles.chipText, { color }]}>{label}</Text>
@@ -42,6 +45,7 @@ export function Stat({
   value: string;
   accent?: boolean;
 }) {
+  const { styles } = useThemed(makeStyles);
   return (
     <View style={styles.stat}>
       <Text style={styles.statLabel}>{label}</Text>
@@ -50,7 +54,7 @@ export function Stat({
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) => StyleSheet.create({
   card: {
     backgroundColor: colors.surface,
     borderRadius: 16,

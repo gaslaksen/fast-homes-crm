@@ -30,7 +30,7 @@ import {
 import { strategyLabel } from '@/features/leads/leads';
 import { Card, SectionLabel } from '@/components/ui';
 import { money } from '@/lib/format';
-import { colors } from '@/theme';
+import { useThemed, type Colors } from '@/theme';
 
 function Field({
   label,
@@ -45,6 +45,7 @@ function Field({
   keyboardType?: KeyboardTypeOptions;
   placeholder?: string;
 }) {
+  const { colors, styles } = useThemed(makeStyles);
   return (
     <View style={styles.field}>
       <Text style={styles.fieldLabel}>{label}</Text>
@@ -74,6 +75,7 @@ function PickerField({
   options: string[];
   onPick: (v: string) => void;
 }) {
+  const { colors, styles } = useThemed(makeStyles);
   function open() {
     ActionSheetIOS.showActionSheetWithOptions(
       { title: label, options: [...options.map(display), 'Cancel'], cancelButtonIndex: options.length },
@@ -102,6 +104,7 @@ const num = (s: string): number | undefined => {
 };
 
 export default function DispositionEditScreen() {
+  const { colors, styles } = useThemed(makeStyles);
   const { id } = useLocalSearchParams<{ id: string }>();
   const leadId = String(id);
   const router = useRouter();
@@ -272,7 +275,7 @@ export default function DispositionEditScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) => StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   flex: { flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg },

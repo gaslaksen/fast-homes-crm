@@ -16,7 +16,7 @@ import {
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useLeadDetail, useUpdateLead, type LeadDetail } from '@/features/leads/leads';
 import { Card, SectionLabel } from '@/components/ui';
-import { colors } from '@/theme';
+import { useThemed, type Colors } from '@/theme';
 
 const CONDITIONS = ['excellent', 'good', 'fair', 'poor', 'distressed'];
 
@@ -37,6 +37,7 @@ function Field({
   autoCapitalize?: 'none' | 'words' | 'sentences';
   placeholder?: string;
 }) {
+  const { colors, styles } = useThemed(makeStyles);
   return (
     <View style={styles.field}>
       <Text style={styles.fieldLabel}>{label}</Text>
@@ -65,6 +66,7 @@ function PickerField({
   options: string[];
   onPick: (v: string) => void;
 }) {
+  const { colors, styles } = useThemed(makeStyles);
   function open() {
     ActionSheetIOS.showActionSheetWithOptions(
       { title: label, options: [...options, 'Cancel'], cancelButtonIndex: options.length },
@@ -86,6 +88,7 @@ function PickerField({
 }
 
 export default function LeadEditScreen() {
+  const { colors, styles } = useThemed(makeStyles);
   const { id } = useLocalSearchParams<{ id: string }>();
   const leadId = String(id);
   const router = useRouter();
@@ -208,7 +211,7 @@ export default function LeadEditScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) => StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   flex: { flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg },

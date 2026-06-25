@@ -13,9 +13,10 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useLeadSearch, bandStyle, fullName, statusLabel, type LeadListItem } from '@/features/leads/leads';
 import { Chip } from '@/components/ui';
 import { SearchIcon, ChevronRight } from '@/components/icons';
-import { colors } from '@/theme';
+import { useThemed, type Colors } from '@/theme';
 
 export default function SearchScreen() {
+  const { colors, styles } = useThemed(makeStyles);
   const router = useRouter();
   const params = useLocalSearchParams<{ band?: string; needsReply?: string }>();
   const [q, setQ] = useState('');
@@ -119,7 +120,7 @@ export default function SearchScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   searchBar: {
     flexDirection: 'row',

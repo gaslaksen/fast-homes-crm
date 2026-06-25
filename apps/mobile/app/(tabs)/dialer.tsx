@@ -13,7 +13,7 @@ import { useCall } from '@/features/calls/CallContext';
 import { useRecentCalls, leadName, type RecentCall } from '@/features/calls/hooks';
 import { useLeadSearch, fullName } from '@/features/leads/leads';
 import { SearchIcon } from '@/components/icons';
-import { colors } from '@/theme';
+import { useThemed, type Colors } from '@/theme';
 
 function otherParty(c: RecentCall): { name: string; number: string } {
   const number = c.toNumber || c.lead?.sellerPhone || c.fromNumber || '';
@@ -27,6 +27,7 @@ function when(iso: string) {
 }
 
 export default function DialerScreen() {
+  const { colors, styles } = useThemed(makeStyles);
   const { startCall } = useCall();
   const { data: recents, isRefetching, refetch } = useRecentCalls();
   const [number, setNumber] = useState('');
@@ -40,7 +41,7 @@ export default function DialerScreen() {
         <TextInput
           style={styles.input}
           placeholder="Enter a phone number"
-          placeholderTextColor="#9CA3AF"
+          placeholderTextColor={colors.textMuted}
           keyboardType="phone-pad"
           value={number}
           onChangeText={setNumber}
@@ -55,11 +56,11 @@ export default function DialerScreen() {
       </View>
 
       <View style={styles.searchBar}>
-        <SearchIcon size={18} color="#9CA3AF" />
+        <SearchIcon size={18} color={colors.textMuted} />
         <TextInput
           style={styles.searchInput}
           placeholder="Search a contact to call"
-          placeholderTextColor="#9CA3AF"
+          placeholderTextColor={colors.textMuted}
           value={contact}
           onChangeText={setContact}
           autoCorrect={false}
@@ -127,8 +128,8 @@ export default function DialerScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#fff' },
+const makeStyles = (colors: Colors) => StyleSheet.create({
+  safe: { flex: 1, backgroundColor: colors.surface },
   dialRow: { flexDirection: 'row', gap: 10, paddingHorizontal: 16, paddingTop: 16, alignItems: 'center' },
   searchBar: {
     flexDirection: 'row',
@@ -139,23 +140,23 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     paddingHorizontal: 14,
     paddingVertical: 10,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: colors.bubbleIn,
     borderRadius: 12,
   },
-  searchInput: { flex: 1, fontSize: 16, color: '#0F172A' },
+  searchInput: { flex: 1, fontSize: 16, color: colors.text },
   clear: { fontSize: 14, color: colors.primary, fontWeight: '600' },
   callLink: { fontSize: 15, color: colors.primary, fontWeight: '600' },
   input: {
     flex: 1,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: colors.bubbleIn,
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 12,
     fontSize: 17,
-    color: '#0F172A',
+    color: colors.text,
   },
   callBtn: {
-    backgroundColor: '#16A34A',
+    backgroundColor: colors.callAccept,
     borderRadius: 12,
     paddingHorizontal: 22,
     paddingVertical: 13,
@@ -164,23 +165,23 @@ const styles = StyleSheet.create({
   callBtnText: { color: '#fff', fontWeight: '700', fontSize: 16 },
   section: {
     fontSize: 13,
-    color: '#9CA3AF',
+    color: colors.textMuted,
     textTransform: 'uppercase',
     paddingHorizontal: 16,
     paddingTop: 8,
     paddingBottom: 4,
   },
-  empty: { color: '#6B7280', textAlign: 'center', padding: 24 },
+  empty: { color: colors.textSecondary, textAlign: 'center', padding: 24 },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#E5E7EB',
+    borderBottomColor: colors.border,
   },
   rowBody: { flex: 1 },
-  rowName: { fontSize: 16, fontWeight: '600', color: '#0F172A' },
-  rowMeta: { fontSize: 13, color: '#6B7280', marginTop: 2 },
-  rowWhen: { fontSize: 13, color: '#9CA3AF' },
+  rowName: { fontSize: 16, fontWeight: '600', color: colors.text },
+  rowMeta: { fontSize: 13, color: colors.textSecondary, marginTop: 2 },
+  rowWhen: { fontSize: 13, color: colors.textMuted },
 });

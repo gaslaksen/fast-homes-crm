@@ -21,7 +21,7 @@ import { statusLabel, strategyLabel } from '@/features/leads/leads';
 import { Chip } from '@/components/ui';
 import { ChevronRight } from '@/components/icons';
 import { money, moneyShort } from '@/lib/format';
-import { colors } from '@/theme';
+import { useThemed, type Colors } from '@/theme';
 
 function SummaryCard({
   bucket,
@@ -36,6 +36,7 @@ function SummaryCard({
   active: boolean;
   onPress: () => void;
 }) {
+  const { colors, styles } = useThemed(makeStyles);
   return (
     <TouchableOpacity
       style={[styles.sumCard, active && { borderColor: bucket.color, borderWidth: 2 }]}
@@ -51,6 +52,7 @@ function SummaryCard({
 }
 
 function DealRowItem({ deal, onPress }: { deal: DealRow; onPress: () => void }) {
+  const { colors, styles } = useThemed(makeStyles);
   const b = bucketStyle(deal.bucket);
   const addr = [deal.propertyAddress, deal.propertyCity].filter(Boolean).join(', ');
   return (
@@ -81,6 +83,7 @@ function DealRowItem({ deal, onPress }: { deal: DealRow; onPress: () => void }) 
 }
 
 export default function DealsScreen() {
+  const { colors, styles } = useThemed(makeStyles);
   const router = useRouter();
   const [bucket, setBucket] = useState<Bucket | null>(null);
   const summary = useDealsSummary();
@@ -145,7 +148,7 @@ export default function DealsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   content: { paddingBottom: 24 },
 

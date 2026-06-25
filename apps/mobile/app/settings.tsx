@@ -8,18 +8,46 @@ import {
 } from 'react-native';
 import { useAuth } from '@/lib/auth';
 import { sendTestPush } from '@/features/push/usePushRegistration';
+import { CheckIcon } from '@/components/icons';
+import { useThemed, useThemeMode, type Colors, type ThemeMode } from '@/theme';
+
+const APPEARANCE: { mode: ThemeMode; label: string; hint: string }[] = [
+  { mode: 'system', label: 'System', hint: 'Match your device setting' },
+  { mode: 'light', label: 'Light', hint: '' },
+  { mode: 'dark', label: 'Dark', hint: '' },
+];
 
 export default function SettingsScreen() {
   const { user, signOut } = useAuth();
+  const { colors, styles } = useThemed(makeStyles);
+  const { mode, setMode } = useThemeMode();
 
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <View style={styles.section}>
         <Text style={styles.label}>Signed in as</Text>
         <Text style={styles.value}>
           {[user?.firstName, user?.lastName].filter(Boolean).join(' ') || user?.email}
         </Text>
         <Text style={styles.email}>{user?.email}</Text>
+      </View>
+
+      <Text style={styles.sectionHeading}>Appearance</Text>
+      <View style={styles.group}>
+        {APPEARANCE.map((opt, i) => (
+          <TouchableOpacity
+            key={opt.mode}
+            style={[styles.optionRow, i > 0 && styles.optionDivider]}
+            onPress={() => setMode(opt.mode)}
+            activeOpacity={0.7}
+          >
+            <View style={styles.optionText}>
+              <Text style={styles.optionLabel}>{opt.label}</Text>
+              {opt.hint ? <Text style={styles.optionHint}>{opt.hint}</Text> : null}
+            </View>
+            {mode === opt.mode ? <CheckIcon size={20} color={colors.primary} /> : null}
+          </TouchableOpacity>
+        ))}
       </View>
 
       <TouchableOpacity
@@ -60,18 +88,42 @@ export default function SettingsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F9FAFB' },
-  section: { backgroundColor: '#fff', padding: 20, marginTop: 16 },
-  label: { fontSize: 13, color: '#9CA3AF', textTransform: 'uppercase' },
-  value: { fontSize: 18, fontWeight: '600', color: '#0F172A', marginTop: 4 },
-  email: { fontSize: 14, color: '#6B7280', marginTop: 2 },
-  action: {
-    backgroundColor: '#fff',
-    padding: 18,
-    marginTop: 16,
+const makeStyles = (colors: Colors) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: colors.bg },
+  content: { paddingBottom: 40 },
+  section: { backgroundColor: colors.surface, padding: 20, marginTop: 16 },
+  label: { fontSize: 13, color: colors.textMuted, textTransform: 'uppercase' },
+  value: { fontSize: 18, fontWeight: '600', color: colors.text, marginTop: 4 },
+  email: { fontSize: 14, color: colors.textSecondary, marginTop: 2 },
+
+  sectionHeading: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+    marginTop: 24,
+    marginBottom: 8,
+    marginHorizontal: 20,
   },
-  actionText: { fontSize: 16, color: '#0D9488', fontWeight: '600' },
+  group: { backgroundColor: colors.surface },
+  optionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+  },
+  optionDivider: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+  },
+  optionText: { gap: 2 },
+  optionLabel: { fontSize: 16, color: colors.text },
+  optionHint: { fontSize: 13, color: colors.textMuted },
+
+  action: { backgroundColor: colors.surface, padding: 18, marginTop: 16 },
+  actionText: { fontSize: 16, color: colors.primary, fontWeight: '600' },
   signOut: { marginTop: 16 },
-  signOutText: { color: '#DC2626' },
+  signOutText: { color: colors.danger },
 });

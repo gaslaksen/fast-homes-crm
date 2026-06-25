@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Audio } from 'expo-av';
 import { getAuthToken } from '@/lib/api';
-import { colors } from '@/theme';
+import { useThemed, type Colors } from '@/theme';
 
 /** Twilio recording proxy URLs need the bearer as ?token=; CDN URLs play as-is. */
 function signedUrl(url: string): string {
@@ -26,6 +26,7 @@ export function RecordingPlayer({
   durationSec?: number | null;
   dark?: boolean;
 }) {
+  const { colors, styles } = useThemed(makeStyles);
   const [sound, setSound] = useState<Audio.Sound | null>(null);
   const [loading, setLoading] = useState(false);
   const [playing, setPlaying] = useState(false);
@@ -93,7 +94,7 @@ export function RecordingPlayer({
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) => StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 200 },
   btn: {
     width: 34,

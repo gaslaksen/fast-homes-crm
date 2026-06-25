@@ -120,6 +120,14 @@ export function PencilIcon({ size, color = '#000' }: IconProps) {
   );
 }
 
+export function CheckIcon({ size, color = '#000' }: IconProps) {
+  return (
+    <Svg {...base(size)} stroke={color}>
+      <Path d="M20 6L9 17l-5-5" />
+    </Svg>
+  );
+}
+
 /** Sparkle — used for AI actions. Filled, so it reads at small sizes. */
 export function SparkleIcon({ size = 22, color = '#000' }: IconProps) {
   return (

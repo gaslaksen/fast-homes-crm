@@ -26,7 +26,7 @@ import {
 import { Card, SectionLabel, Chip, Stat } from '@/components/ui';
 import { ChevronRight, PencilIcon } from '@/components/icons';
 import { money } from '@/lib/format';
-import { colors } from '@/theme';
+import { useThemed, type Colors } from '@/theme';
 
 function dateShort(iso?: string | null): string {
   if (!iso) return '—';
@@ -38,6 +38,7 @@ function dateShort(iso?: string | null): string {
 }
 
 function Row({ label, value }: { label: string; value: string }) {
+  const { colors, styles } = useThemed(makeStyles);
   return (
     <View style={styles.kvRow}>
       <Text style={styles.kvLabel}>{label}</Text>
@@ -47,6 +48,7 @@ function Row({ label, value }: { label: string; value: string }) {
 }
 
 export default function DispositionScreen() {
+  const { colors, styles } = useThemed(makeStyles);
   const { id } = useLocalSearchParams<{ id: string }>();
   const leadId = String(id);
   const router = useRouter();
@@ -188,7 +190,7 @@ export default function DispositionScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) => StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg },
   content: { padding: 16, gap: 14, paddingBottom: 40 },

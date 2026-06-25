@@ -1,6 +1,6 @@
 import { memo } from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
-import { colors } from '@/theme';
+import { useThemed, type Colors } from '@/theme';
 import { RecordingPlayer } from '@/features/calls/RecordingPlayer';
 import { clockTime, dayLabel } from '@/lib/format';
 import type { TimelineItem } from './timeline';
@@ -13,6 +13,7 @@ function durationLabel(secs: number | null): string {
 
 /** Larger centered day heading between message groups. */
 export function DateSeparator({ date }: { date: string }) {
+  const { styles } = useThemed(makeStyles);
   return (
     <View style={styles.dateWrap}>
       <Text style={styles.dateText}>{dayLabel(date)}</Text>
@@ -21,6 +22,7 @@ export function DateSeparator({ date }: { date: string }) {
 }
 
 function Meta({ name, channel, at, right }: { name: string; channel: string; at: string; right?: boolean }) {
+  const { styles } = useThemed(makeStyles);
   return (
     <Text style={[styles.meta, right && styles.metaRight]} numberOfLines={1}>
       {name} · {channel} · {clockTime(at)}
@@ -31,6 +33,7 @@ function Meta({ name, channel, at, right }: { name: string; channel: string; at:
 /** Renders one item of the merged conversation timeline. Memoized so typing a
  * draft in the thread doesn't re-render every message row. */
 export const TimelineRow = memo(function TimelineRow({ item }: { item: TimelineItem }) {
+  const { styles } = useThemed(makeStyles);
   const outbound = item.direction === 'OUTBOUND';
   const wrap = [styles.wrap, outbound ? styles.alignRight : styles.alignLeft];
 
@@ -107,7 +110,7 @@ export const TimelineRow = memo(function TimelineRow({ item }: { item: TimelineI
   );
 });
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) => StyleSheet.create({
   wrap: { maxWidth: '84%', gap: 3 },
   alignLeft: { alignSelf: 'flex-start', alignItems: 'flex-start' },
   alignRight: { alignSelf: 'flex-end', alignItems: 'flex-end' },

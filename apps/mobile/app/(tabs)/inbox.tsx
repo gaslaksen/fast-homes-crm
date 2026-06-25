@@ -11,6 +11,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useThreads } from '@/features/inbox/hooks';
 import type { InboxThread } from '@/features/inbox/types';
+import { useThemed, type Colors } from '@/theme';
 
 function fullName(t: InboxThread) {
   return [t.sellerFirstName, t.sellerLastName].filter(Boolean).join(' ') || t.sellerPhone || 'Unknown';
@@ -29,6 +30,7 @@ function timeAgo(iso: string | null) {
 
 export default function InboxScreen() {
   const router = useRouter();
+  const { colors, styles } = useThemed(makeStyles);
   const { data, isLoading, isRefetching, refetch, error } = useThreads('all');
 
   if (isLoading) {
@@ -56,7 +58,7 @@ export default function InboxScreen() {
         data={data?.items ?? []}
         keyExtractor={(t) => t.leadId}
         refreshControl={
-          <RefreshControl refreshing={isRefetching} onRefresh={() => refetch()} />
+          <RefreshControl refreshing={isRefetching} onRefresh={() => refetch()} tintColor={colors.textMuted} />
         }
         ListEmptyComponent={
           <View style={styles.center}>
@@ -96,39 +98,39 @@ export default function InboxScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#fff' },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 8 },
-  muted: { color: '#6B7280', fontSize: 15 },
-  retry: { color: '#0D9488', fontWeight: '600', marginTop: 8 },
+const makeStyles = (colors: Colors) => StyleSheet.create({
+  safe: { flex: 1, backgroundColor: colors.surface },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 8, backgroundColor: colors.surface },
+  muted: { color: colors.textSecondary, fontSize: 15 },
+  retry: { color: colors.primary, fontWeight: '600', marginTop: 8 },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#E5E7EB',
+    borderBottomColor: colors.border,
     gap: 12,
   },
   avatar: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#CCFBF1',
+    backgroundColor: colors.primarySoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatarText: { color: '#0D9488', fontWeight: '700', fontSize: 18 },
+  avatarText: { color: colors.primaryDark, fontWeight: '700', fontSize: 18 },
   rowBody: { flex: 1 },
   rowTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  name: { fontSize: 16, fontWeight: '600', color: '#0F172A', flex: 1 },
-  time: { fontSize: 13, color: '#9CA3AF', marginLeft: 8 },
-  preview: { fontSize: 14, color: '#6B7280', marginTop: 2 },
-  unreadText: { color: '#0F172A', fontWeight: '700' },
+  name: { fontSize: 16, fontWeight: '600', color: colors.text, flex: 1 },
+  time: { fontSize: 13, color: colors.textMuted, marginLeft: 8 },
+  preview: { fontSize: 14, color: colors.textSecondary, marginTop: 2 },
+  unreadText: { color: colors.text, fontWeight: '700' },
   unreadDot: {
     width: 10,
     height: 10,
     borderRadius: 5,
-    backgroundColor: '#0D9488',
+    backgroundColor: colors.primary,
   },
 });

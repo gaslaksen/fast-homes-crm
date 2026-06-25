@@ -9,13 +9,14 @@ import { queryClient } from '@/lib/queryClient';
 import { usePushRegistration } from '@/features/push/usePushRegistration';
 import { useNotificationRouting } from '@/features/push/useNotificationRouting';
 import { CallProvider } from '@/features/calls/CallContext';
-import { colors } from '@/theme';
+import { ThemeProvider, useColors, useThemeMode } from '@/theme';
 
 /** Redirects between the auth flow and the app shell based on session state. */
 function AuthGate() {
   const { token, loading } = useAuth();
   const segments = useSegments();
   const router = useRouter();
+  const colors = useColors();
 
   // Register for push + handle notification taps once signed in.
   usePushRegistration(!!token);
@@ -33,7 +34,7 @@ function AuthGate() {
 
   if (loading) {
     return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg }}>
         <ActivityIndicator />
       </View>
     );
@@ -58,17 +59,24 @@ function AuthGate() {
   );
 }
 
+function ThemedStatusBar() {
+  const { scheme } = useThemeMode();
+  return <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />;
+}
+
 export default function RootLayout() {
   return (
-    <SafeAreaProvider>
-      <QueryClientProvider client={queryClient}>
-        <AuthProvider>
-          <CallProvider>
-            <StatusBar style="auto" />
-            <AuthGate />
-          </CallProvider>
-        </AuthProvider>
-      </QueryClientProvider>
-    </SafeAreaProvider>
+    <ThemeProvider>
+      <SafeAreaProvider>
+        <QueryClientProvider client={queryClient}>
+          <AuthProvider>
+            <CallProvider>
+              <ThemedStatusBar />
+              <AuthGate />
+            </CallProvider>
+          </AuthProvider>
+        </QueryClientProvider>
+      </SafeAreaProvider>
+    </ThemeProvider>
   );
 }

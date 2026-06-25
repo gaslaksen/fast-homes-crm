@@ -24,7 +24,7 @@ import { useCall } from '@/features/calls/CallContext';
 import { Card, SectionLabel, Chip, Stat } from '@/components/ui';
 import { PhoneIcon, MessageIcon, MailIcon, ZapIcon, PencilIcon } from '@/components/icons';
 import { money, timelineLabel } from '@/lib/format';
-import { colors } from '@/theme';
+import { useThemed, type Colors } from '@/theme';
 
 const STATUS_OPTIONS = [
   'NEW',
@@ -52,6 +52,7 @@ function ActionButton({
   onPress: () => void;
   disabled?: boolean;
 }) {
+  const { colors, styles } = useThemed(makeStyles);
   return (
     <TouchableOpacity
       style={[styles.action, disabled && styles.actionDisabled]}
@@ -65,6 +66,7 @@ function ActionButton({
 }
 
 function CampRow({ label, value }: { label: string; value: string | null }) {
+  const { colors, styles } = useThemed(makeStyles);
   return (
     <View style={styles.campRow}>
       <Text style={styles.campLabel}>{label}</Text>
@@ -76,6 +78,7 @@ function CampRow({ label, value }: { label: string; value: string | null }) {
 }
 
 export default function LeadDetailScreen() {
+  const { colors, styles } = useThemed(makeStyles);
   const { id } = useLocalSearchParams<{ id: string }>();
   const leadId = String(id);
   const router = useRouter();
@@ -250,7 +253,7 @@ export default function LeadDetailScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) => StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg },
   content: { padding: 16, gap: 16, paddingBottom: 40 },

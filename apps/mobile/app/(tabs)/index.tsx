@@ -33,7 +33,7 @@ import {
   MessageIcon,
 } from '@/components/icons';
 import { moneyShort } from '@/lib/format';
-import { colors } from '@/theme';
+import { useThemed, type Colors } from '@/theme';
 
 function StatCard({
   label,
@@ -50,6 +50,7 @@ function StatCard({
   iconBg: string;
   onPress?: () => void;
 }) {
+  const { colors, styles } = useThemed(makeStyles);
   return (
     <TouchableOpacity style={styles.statCard} onPress={onPress} disabled={!onPress} activeOpacity={0.7}>
       <View style={styles.statTop}>
@@ -64,6 +65,7 @@ function StatCard({
 }
 
 function ActionRow({ item, onPress }: { item: ActionItem; onPress: () => void }) {
+  const { colors, styles } = useThemed(makeStyles);
   const meta = actionMeta(item.type);
   const addr = [item.lead.propertyAddress, item.lead.propertyCity].filter(Boolean).join(', ');
   return (
@@ -83,6 +85,7 @@ function ActionRow({ item, onPress }: { item: ActionItem; onPress: () => void })
 }
 
 function HotLeadRow({ lead, onPress }: { lead: HotLead; onPress: () => void }) {
+  const { colors, styles } = useThemed(makeStyles);
   const band = bandStyle(lead.scoreBand);
   const addr = [lead.propertyAddress, lead.propertyCity].filter(Boolean).join(', ');
   return (
@@ -104,6 +107,7 @@ function HotLeadRow({ lead, onPress }: { lead: HotLead; onPress: () => void }) {
 }
 
 export default function HomeScreen() {
+  const { colors, styles } = useThemed(makeStyles);
   const router = useRouter();
   const { user } = useAuth();
   const stats = useDashboardStats();
@@ -240,7 +244,7 @@ export default function HomeScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors: Colors) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
 
   topbar: {

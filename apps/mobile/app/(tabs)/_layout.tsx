@@ -1,8 +1,9 @@
 import { Tabs } from 'expo-router';
 import { HomeIcon, MessageIcon, PhoneIcon, TrendingUpIcon, SearchIcon } from '@/components/icons';
-import { colors } from '@/theme';
+import { useColors } from '@/theme';
 
 export default function TabsLayout() {
+  const colors = useColors();
   return (
     <Tabs
       screenOptions={{
