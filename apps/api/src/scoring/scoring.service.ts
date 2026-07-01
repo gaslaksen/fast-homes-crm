@@ -262,6 +262,15 @@ IMPORTANT RULES FOR EXTRACTION:
 5. "Maybe 70" / "around 70" / "like 70" — still extract 70000, confidence just lower.
 6. Only return null if there is genuinely NO price information at all.
 
+CRITICAL — DO NOT extract a number as asking_price if it's clearly a PAST LISTING, APPRAISAL, ZILLOW ESTIMATE, or TAX ASSESSMENT. Those are historical/aspiration numbers, not what the seller would actually accept today. Examples that should NOT populate asking_price:
+- "we had it listed for 850k" / "listed it for X" / "we listed at X" / "it was on the market for X"
+- "the realtor had it at X"
+- "it appraised at X" / "appraisal came in at X"
+- "Zillow says X" / "Zestimate is X"
+- "county / assessor / tax valued it at X"
+- "it's worth X" (unclear source, don't extract)
+For any of the above, leave asking_price null so the AI keeps probing for their actual acceptable number. Only extract asking_price when the seller states what they WANT / WOULD TAKE / ARE ASKING (e.g. "I want 70k", "I'd take 250", "looking for around 400", "asking 200k").
+
 **Timeline** — similarly casual:
 - "30 days", "a month" → 30
 - "couple months" → 60
@@ -575,6 +584,19 @@ Rules:
 - Read the conversation history and make sure your reply flows naturally
 - If the seller shares something personal or emotional, acknowledge it genuinely before moving to business
 - If the seller asked you a question, answer it
+
+PRICE DISCOVERY - critical for real qualification:
+- If the seller mentions a PAST LISTING PRICE or an APPRAISAL / Zillow / tax number, do NOT treat that as their asking price. That number is context, not commitment - they may accept substantially less.
+- When a listing/appraisal number appears, DO NOT repeat it back as if it's their ask. Never say things like "$850k, got it" or "so you're asking 850". Instead, probe with a follow-up question about WHY it didn't sell or what they learned:
+  - "Interesting, what kind of feedback did you get from showings at that number?"
+  - "Was that from a while back? Any sense of why it didn't move at that price?"
+  - "Got it, was that with a realtor? What did they say about it?"
+- Continue with the other CAMP topics (timeline, condition, ownership) while their real acceptable number is still unknown.
+- Once you have a reasonable picture of the place, transition to asking their ACTUAL acceptable number with a hypothetical framing. Keep it short, one sentence, one question. Examples:
+  - "Assuming everything else lined up on our end and we could move on this quickly, what number would you actually take for it?"
+  - "If we could put something together that closes fast and takes the hassle off your plate, where would you land price-wise?"
+  - "What number would you actually walk with if we could keep this simple and move in a month or so?"
+- CRITICAL: even in these hypothetical framings, do NOT stack benefit phrases (no "cash offer + no closing costs + no realtor fees" - carrier will block). Pick ONE soft framing at most.
 
 CARRIER COMPLIANCE (A2P 10DLC) - these phrasing patterns trigger US mobile carrier filters and get the SMS blocked at the network level. NEVER use any of them:
 - "we buy houses" / "we buy homes" / "cash buyer" / "cash offer" / "cash for your house" / "fast cash" / "all cash"
