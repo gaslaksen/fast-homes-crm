@@ -7,6 +7,7 @@ import { formatDistanceToNowStrict } from 'date-fns';
 import AppShell from '@/components/AppShell';
 import Avatar from '@/components/Avatar';
 import CommunicationsTimeline from '@/components/communications/CommunicationsTimeline';
+import type { EmailAction } from '@/components/communications/MessageComposer';
 import MessageComposer from '@/components/communications/MessageComposer';
 import LeadSidePanel from '@/components/leadDetailV2/LeadSidePanel';
 import type { TimelineItem, NoteItem } from '@/components/communications/types';
@@ -86,6 +87,7 @@ function InboxWorkspace() {
   const [teamMembers, setTeamMembers] = useState<any[]>([]);
   // Email now always available via Mailgun (no per-user Gmail connection).
   const gmailConnected = true;
+  const [emailAction, setEmailAction] = useState<EmailAction | null>(null);
   const [resumingAi, setResumingAi] = useState(false);
 
   const threadRef = useRef<HTMLDivElement | null>(null);
@@ -594,7 +596,7 @@ function InboxWorkspace() {
                   {commLoading ? (
                     <div className="text-xs text-gray-400 animate-pulse">Loading…</div>
                   ) : (
-                    <CommunicationsTimeline items={timeline} />
+                    <CommunicationsTimeline items={timeline} onEmailAction={setEmailAction} />
                   )}
                 </div>
 
@@ -607,6 +609,7 @@ function InboxWorkspace() {
                     currentUser={currentUser}
                     teamMembers={teamMembers}
                     doNotContact={lead?.doNotContact}
+                    emailAction={emailAction}
                     onSent={() => loadCommunications(selectedId)}
                   />
                 </div>

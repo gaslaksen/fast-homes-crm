@@ -34,11 +34,21 @@ export class MessagesController {
   @Post('emails/send')
   async sendEmailReply(
     @Param('leadId') leadId: string,
-    @Body() body: { userId: string; subject?: string; body: string; inReplyToEmailId?: string },
+    @Body()
+    body: {
+      userId: string;
+      subject?: string;
+      body?: string;
+      bodyHtml?: string;
+      to?: string;
+      inReplyToEmailId?: string;
+    },
   ) {
     return this.messagesService.sendEmailReply(leadId, body.userId, {
       subject: body.subject,
       body: body.body,
+      bodyHtml: body.bodyHtml,
+      to: body.to,
       inReplyToEmailId: body.inReplyToEmailId,
     });
   }

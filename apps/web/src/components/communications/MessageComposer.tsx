@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { messagesAPI, leadsAPI } from '@/lib/api';
+import RichEmailEditor from './RichEmailEditor';
 
 type Channel = 'sms' | 'email' | 'comment';
 
@@ -10,6 +11,18 @@ interface TeamMember {
   firstName?: string;
   lastName?: string;
   email?: string;
+}
+
+// An email intent raised from the thread (Reply / Forward / Forward thread).
+// `nonce` changes on every request so the composer re-applies even for the
+// same email clicked twice.
+export interface EmailAction {
+  nonce: number;
+  mode: 'reply' | 'forward';
+  subject: string;
+  bodyHtml: string;
+  to?: string;
+  inReplyToEmailId?: string;
 }
 
 const CHANNELS: { key: Channel; label: string; icon: string }[] = [
@@ -22,6 +35,11 @@ function memberName(m: TeamMember): string {
   return [m.firstName, m.lastName].filter(Boolean).join(' ').trim() || m.email || 'User';
 }
 
+// Quill emits "<p><br></p>" for an empty document; treat that as blank.
+function htmlIsEmpty(html: string): boolean {
+  return !html || !html.replace(/<(p|br|div|span)[^>]*>/gi, '').replace(/<\/[^>]+>/g, '').replace(/&nbsp;/gi, '').trim();
+}
+
 export default function MessageComposer({
   leadId,
   sellerPhone,
@@ -31,6 +49,7 @@ export default function MessageComposer({
   teamMembers,
   doNotContact,
   seedBody,
+  emailAction,
   onSent,
 }: {
   leadId: string;
@@ -41,6 +60,7 @@ export default function MessageComposer({
   teamMembers: TeamMember[];
   doNotContact?: boolean;
   seedBody?: string;
+  emailAction?: EmailAction | null;
   onSent: () => void | Promise<void>;
 }) {
   const [channel, setChannel] = useState<Channel>('sms');
@@ -52,9 +72,13 @@ export default function MessageComposer({
   const [body, setBody] = useState('');
   const [draftLoading, setDraftLoading] = useState(false);
 
-  // Email fields (recipient is always the lead's sellerEmail, shown read-only)
+  // Email fields. Reply → recipient is the lead's sellerEmail (read-only);
+  // forward → recipient is editable.
+  const [emailMode, setEmailMode] = useState<'reply' | 'forward'>('reply');
+  const [emailTo, setEmailTo] = useState('');
   const [emailSubject, setEmailSubject] = useState('');
-  const [emailBody, setEmailBody] = useState('');
+  const [emailBodyHtml, setEmailBodyHtml] = useState('');
+  const [emailInReplyToId, setEmailInReplyToId] = useState<string | undefined>(undefined);
 
   // @mention state (comment mode)
   const [mentions, setMentions] = useState<string[]>([]);
@@ -69,10 +93,26 @@ export default function MessageComposer({
     }
   }, [seedBody]);
 
+  // Apply a Reply / Forward intent raised from a thread email.
+  useEffect(() => {
+    if (!emailAction) return;
+    setChannel('email');
+    setEmailMode(emailAction.mode);
+    setEmailSubject(emailAction.subject);
+    setEmailBodyHtml(emailAction.bodyHtml);
+    setEmailInReplyToId(emailAction.inReplyToEmailId);
+    setEmailTo(emailAction.mode === 'forward' ? emailAction.to ?? '' : sellerEmail || '');
+    setError(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [emailAction?.nonce]);
+
   const reset = () => {
     setBody('');
     setEmailSubject('');
-    setEmailBody('');
+    setEmailBodyHtml('');
+    setEmailInReplyToId(undefined);
+    setEmailMode('reply');
+    setEmailTo(sellerEmail || '');
     setMentions([]);
     setMentionQuery(null);
     setError(null);
@@ -129,12 +169,16 @@ export default function MessageComposer({
         if (!body.trim()) return;
         await messagesAPI.send(leadId, body, currentUser?.id);
       } else if (channel === 'email') {
-        if (!emailSubject.trim() || !emailBody.trim() || !currentUser?.id) return;
-        // Sends from the logged-in user to the lead's email, via Mailgun.
+        const recipient = emailMode === 'forward' ? emailTo.trim() : sellerEmail || '';
+        if (!emailSubject.trim() || htmlIsEmpty(emailBodyHtml) || !recipient || !currentUser?.id) return;
+        // Sends from the logged-in user via Mailgun. Reply → seller;
+        // forward → the entered recipient.
         await messagesAPI.sendEmail(leadId, {
           userId: currentUser.id,
           subject: emailSubject,
-          body: emailBody,
+          bodyHtml: emailBodyHtml,
+          to: emailMode === 'forward' ? recipient : undefined,
+          inReplyToEmailId: emailInReplyToId,
         });
       } else {
         if (!body.trim() || !currentUser) return;
@@ -212,19 +256,29 @@ export default function MessageComposer({
       </div>
 
       {/* Email channel — sends from the logged-in user via Mailgun */}
-      {channel === 'email' && !sellerEmail ? (
+      {channel === 'email' && emailMode === 'reply' && !sellerEmail ? (
         <div className="text-xs text-gray-500 dark:text-gray-400">
           This lead has no email address on file. Add one to send email.
         </div>
       ) : channel === 'email' ? (
         <div className="space-y-2">
-          <input
-            type="email"
-            value={sellerEmail || ''}
-            readOnly
-            className="input w-full text-sm bg-gray-50 dark:bg-gray-800 text-gray-500"
-            placeholder="To"
-          />
+          {emailMode === 'forward' ? (
+            <input
+              type="email"
+              value={emailTo}
+              onChange={(e) => setEmailTo(e.target.value)}
+              className="input w-full text-sm"
+              placeholder="Forward to (email address)"
+            />
+          ) : (
+            <input
+              type="email"
+              value={sellerEmail || ''}
+              readOnly
+              className="input w-full text-sm bg-gray-50 dark:bg-gray-800 text-gray-500"
+              placeholder="To"
+            />
+          )}
           <input
             type="text"
             value={emailSubject}
@@ -232,11 +286,9 @@ export default function MessageComposer({
             className="input w-full text-sm"
             placeholder="Subject"
           />
-          <textarea
-            className="input w-full text-sm"
-            rows={3}
-            value={emailBody}
-            onChange={(e) => setEmailBody(e.target.value)}
+          <RichEmailEditor
+            value={emailBodyHtml}
+            onChange={setEmailBodyHtml}
             placeholder="Write an email…"
           />
         </div>
@@ -276,21 +328,40 @@ export default function MessageComposer({
 
       {error && <div className="text-xs text-red-600 dark:text-red-400">{error}</div>}
 
-      <div className="flex items-center justify-end">
+      <div className="flex items-center justify-end gap-2">
+        {channel === 'email' && (emailInReplyToId || emailMode === 'forward' || !htmlIsEmpty(emailBodyHtml)) && (
+          <button
+            type="button"
+            onClick={reset}
+            disabled={sending}
+            className="btn btn-sm btn-secondary disabled:opacity-50"
+            title="Discard this email"
+          >
+            🗑 Discard
+          </button>
+        )}
         <button
           type="button"
           onClick={send}
           disabled={
             sending ||
             blockedBySms ||
-            (channel === 'email' && !sellerEmail) ||
+            (channel === 'email' && emailMode === 'reply' && !sellerEmail) ||
             (channel === 'email'
-              ? !emailSubject.trim() || !emailBody.trim()
+              ? !emailSubject.trim() ||
+                htmlIsEmpty(emailBodyHtml) ||
+                (emailMode === 'forward' && !emailTo.trim())
               : !body.trim())
           }
           className={`btn btn-sm ${isComment ? 'btn-secondary' : 'btn-primary'} disabled:opacity-50`}
         >
-          {sending ? 'Sending…' : isComment ? 'Post comment' : 'Send'}
+          {sending
+            ? 'Sending…'
+            : isComment
+              ? 'Post comment'
+              : channel === 'email' && emailMode === 'forward'
+                ? 'Forward'
+                : 'Send'}
         </button>
       </div>
     </div>

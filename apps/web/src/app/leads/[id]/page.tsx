@@ -14,6 +14,7 @@ import AlertsCard from '@/components/leadDetailV2/AlertsCard';
 import { useContradictions } from '@/components/leadDetailV2/useContradictions';
 import { formatPhoneDisplay, getLeadAddressLine, getLeadDisplayName } from '@/lib/format';
 import CommunicationsTimeline from '@/components/communications/CommunicationsTimeline';
+import type { EmailAction } from '@/components/communications/MessageComposer';
 import NotesPanel from '@/components/communications/NotesPanel';
 import MessageComposer from '@/components/communications/MessageComposer';
 import type { TimelineItem, NoteItem } from '@/components/communications/types';
@@ -111,6 +112,7 @@ export default function LeadDetailPage() {
   const [teamMembers, setTeamMembers] = useState<any[]>([]);
   // Email now always available via Mailgun (no per-user Gmail connection).
   const gmailConnected = true;
+  const [emailAction, setEmailAction] = useState<EmailAction | null>(null);
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [showDeadForm, setShowDeadForm] = useState(false);
   const [deadReason, setDeadReason] = useState('');
@@ -455,7 +457,7 @@ export default function LeadDetailPage() {
                   </div>
                 )}
                 <div ref={timelineScrollRef} className="flex-1 lg:min-h-0 overflow-y-auto">
-                  <CommunicationsTimeline items={comms.timeline} />
+                  <CommunicationsTimeline items={comms.timeline} onEmailAction={setEmailAction} />
                   <div ref={messagesBottomRef} />
                 </div>
               </div>
@@ -526,6 +528,7 @@ export default function LeadDetailPage() {
                   teamMembers={teamMembers}
                   doNotContact={lead.doNotContact}
                   seedBody={selectedDraft}
+                  emailAction={emailAction}
                   onSent={loadLead}
                 />
               </div>

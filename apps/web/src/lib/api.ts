@@ -126,10 +126,17 @@ export const messagesAPI = {
     api.post(`/leads/${leadId}/messages/draft`, { context }),
   send: (leadId: string, message: string, userId?: string) =>
     api.post(`/leads/${leadId}/messages/send`, { message, userId }),
-  // Send an email reply from the logged-in user, via Mailgun
+  // Send an email (reply or forward) from the logged-in user, via Mailgun
   sendEmail: (
     leadId: string,
-    data: { userId: string; subject?: string; body: string; inReplyToEmailId?: string },
+    data: {
+      userId: string;
+      subject?: string;
+      body?: string;
+      bodyHtml?: string;
+      to?: string;
+      inReplyToEmailId?: string;
+    },
   ) => api.post(`/leads/${leadId}/messages/emails/send`, data),
   rescore: (leadId: string, userId?: string) =>
     api.post(`/leads/${leadId}/messages/rescore`, { userId }),

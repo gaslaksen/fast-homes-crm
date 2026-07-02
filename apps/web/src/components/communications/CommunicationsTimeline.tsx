@@ -5,6 +5,36 @@ import { format } from 'date-fns';
 import Avatar from '@/components/Avatar';
 import LightboxOverlay, { type LightboxPhoto } from '@/components/LightboxOverlay';
 import type { Actor, TimelineItem } from './types';
+import type { EmailAction } from './MessageComposer';
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+// Build a Gmail-style quoted block from an email timeline item.
+function quoteEmail(item: Extract<TimelineItem, { kind: 'email' }>): string {
+  const who = item.direction === 'OUTBOUND' ? item.payload.toAddress : item.payload.fromAddress;
+  const when = format(new Date(item.at), "PPP 'at' p");
+  const inner = escapeHtml(item.payload.bodyText || '').replace(/\n/g, '<br>');
+  return (
+    `<p>On ${escapeHtml(when)}, ${escapeHtml(who || '')} wrote:</p>` +
+    `<blockquote style="margin:0 0 0 0.8ex;border-left:2px solid #ccc;padding-left:1ex;color:#555;">${inner}</blockquote>`
+  );
+}
+
+function withPrefix(subject: string, prefix: 'Re' | 'Fwd'): string {
+  const s = subject || '(no subject)';
+  const re = new RegExp(`^${prefix}:`, 'i');
+  return re.test(s.trim()) ? s : `${prefix}: ${s}`;
+}
+
+// Strip the "email_" timeline-id prefix back to the raw Email row id.
+function rawEmailId(timelineId: string): string {
+  return timelineId.replace(/^email_/, '');
+}
 
 // Placeholder body the webhook stores for MMS-only messages (no caption).
 // Kept in sync with apps/api webhooks.controller.ts.
@@ -104,9 +134,48 @@ function renderWithMentions(body: string) {
   );
 }
 
-export default function CommunicationsTimeline({ items }: { items: TimelineItem[] }) {
+export default function CommunicationsTimeline({
+  items,
+  onEmailAction,
+}: {
+  items: TimelineItem[];
+  onEmailAction?: (action: EmailAction) => void;
+}) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+
+  const emailItems = items.filter(
+    (i): i is Extract<TimelineItem, { kind: 'email' }> => i.kind === 'email',
+  );
+
+  const replyTo = (item: Extract<TimelineItem, { kind: 'email' }>) =>
+    onEmailAction?.({
+      nonce: Date.now(),
+      mode: 'reply',
+      subject: withPrefix(item.payload.subject, 'Re'),
+      bodyHtml: `<p><br></p><p><br></p>${quoteEmail(item)}`,
+      inReplyToEmailId: rawEmailId(item.id),
+    });
+
+  const forwardOne = (item: Extract<TimelineItem, { kind: 'email' }>) =>
+    onEmailAction?.({
+      nonce: Date.now(),
+      mode: 'forward',
+      subject: withPrefix(item.payload.subject, 'Fwd'),
+      bodyHtml: `<p><br></p><p>---------- Forwarded message ----------</p>${quoteEmail(item)}`,
+      to: '',
+    });
+
+  const forwardThread = (item: Extract<TimelineItem, { kind: 'email' }>) =>
+    onEmailAction?.({
+      nonce: Date.now(),
+      mode: 'forward',
+      subject: withPrefix(item.payload.subject, 'Fwd'),
+      bodyHtml:
+        `<p><br></p><p>---------- Forwarded conversation ----------</p>` +
+        emailItems.map(quoteEmail).join('<hr>'),
+      to: '',
+    });
 
   if (items.length === 0) {
     return <div className="text-xs text-gray-400 dark:text-gray-500">No communications yet.</div>;
@@ -209,35 +278,63 @@ export default function CommunicationsTimeline({ items }: { items: TimelineItem[
         // Email — distinct white card, full width of the thread.
         if (item.kind === 'email') {
           const expanded = expandedId === item.id;
+          const emailItem = item as Extract<TimelineItem, { kind: 'email' }>;
           return (
             <div key={item.id} className="flex items-start gap-2">
               <ActorAvatar actor={item.actor} />
-              <button
-                type="button"
-                onClick={() => setExpandedId(expanded ? null : item.id)}
-                className="text-left flex-1 min-w-0 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-sm p-3"
-              >
-                <div className="flex items-center gap-1.5 mb-1">
-                  <ChannelBadge kind="email" />
-                  <MetaLine actor={item.actor} at={item.at} />
-                </div>
-                <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                  {item.payload.subject || '(no subject)'}
-                </div>
-                {expanded ? (
-                  <div className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
-                    <div className="text-[11px] text-gray-500 mb-1">
-                      {outbound ? `To: ${item.payload.toAddress}` : `From: ${item.payload.fromAddress}`}
-                    </div>
-                    {item.payload.bodyText}
+              <div className="flex-1 min-w-0 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-sm">
+                <button
+                  type="button"
+                  onClick={() => setExpandedId(expanded ? null : item.id)}
+                  className="text-left w-full min-w-0 p-3"
+                >
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <ChannelBadge kind="email" />
+                    <MetaLine actor={item.actor} at={item.at} />
                   </div>
-                ) : (
-                  <div className="text-xs text-gray-500 dark:text-gray-400 truncate mt-0.5">
-                    {item.payload.bodyText?.slice(0, 120)}
-                    {item.payload.bodyText && item.payload.bodyText.length > 120 ? '…' : ''}
+                  <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                    {item.payload.subject || '(no subject)'}
+                  </div>
+                  {expanded ? (
+                    <div className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
+                      <div className="text-[11px] text-gray-500 mb-1">
+                        {outbound ? `To: ${item.payload.toAddress}` : `From: ${item.payload.fromAddress}`}
+                      </div>
+                      {item.payload.bodyText}
+                    </div>
+                  ) : (
+                    <div className="text-xs text-gray-500 dark:text-gray-400 truncate mt-0.5">
+                      {item.payload.bodyText?.slice(0, 120)}
+                      {item.payload.bodyText && item.payload.bodyText.length > 120 ? '…' : ''}
+                    </div>
+                  )}
+                </button>
+                {onEmailAction && (
+                  <div className="flex items-center gap-3 px-3 py-1.5 border-t border-gray-100 dark:border-gray-800 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => replyTo(emailItem)}
+                      className="text-teal-700 dark:text-teal-400 hover:underline font-medium"
+                    >
+                      ↩ Reply
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => forwardOne(emailItem)}
+                      className="text-gray-600 dark:text-gray-300 hover:underline"
+                    >
+                      ➤ Forward
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => forwardThread(emailItem)}
+                      className="text-gray-600 dark:text-gray-300 hover:underline"
+                    >
+                      ➤ Forward thread
+                    </button>
                   </div>
                 )}
-              </button>
+              </div>
             </div>
           );
         }

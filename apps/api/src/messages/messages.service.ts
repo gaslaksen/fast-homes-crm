@@ -1302,21 +1302,33 @@ You decide the right approach based on the conversation flow.${portalInstruction
   }
 
   /**
-   * Send an email reply within a lead conversation, from the logged-in user's
-   * own address. Replies route back into the thread via the per-lead Reply-To.
+   * Send an email within a lead conversation, from the logged-in user's own
+   * address. Handles replies (to the seller) and forwards (to an arbitrary
+   * recipient via `to`). Accepts rich HTML from the composer; a plain-text
+   * part is derived for the multipart alternative. Replies route back into the
+   * thread via the clean Reply-To on the crm subdomain.
    */
   async sendEmailReply(
     leadId: string,
     userId: string,
-    params: { subject?: string; body: string; inReplyToEmailId?: string },
+    params: {
+      subject?: string;
+      body?: string;
+      bodyHtml?: string;
+      to?: string;
+      inReplyToEmailId?: string;
+    },
   ) {
     const lead = await this.prisma.lead.findUnique({
       where: { id: leadId },
       select: { id: true, organizationId: true, sellerEmail: true, propertyAddress: true },
     });
     if (!lead) throw new NotFoundException('Lead not found');
-    if (!lead.sellerEmail) throw new BadRequestException('Lead has no email address');
     if (!lead.organizationId) throw new BadRequestException('Lead has no organization');
+
+    // Reply → seller; forward → the provided recipient.
+    const recipient = params.to?.trim() || lead.sellerEmail;
+    if (!recipient) throw new BadRequestException('No recipient email address');
 
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
@@ -1328,14 +1340,21 @@ You decide the right approach based on the conversation flow.${portalInstruction
       params.subject?.trim() ||
       `Re: your property at ${lead.propertyAddress ?? 'your property'}`;
 
+    // Derive a plain-text alternative from the HTML when only HTML is supplied.
+    const bodyHtml = params.bodyHtml?.trim() || undefined;
+    const bodyText =
+      params.body?.trim() || (bodyHtml ? this.htmlToText(bodyHtml) : '');
+    if (!bodyText && !bodyHtml) throw new BadRequestException('Empty message');
+
     let res: { mailgunId: string | null };
     try {
       res = await this.mailerService.sendAsUser({
         orgId: lead.organizationId,
         user,
-        to: lead.sellerEmail,
+        to: recipient,
         subject,
-        bodyText: params.body,
+        bodyText,
+        bodyHtml,
         leadId: lead.id,
         inReplyToEmailId: params.inReplyToEmailId,
         sentByUserId: userId,
@@ -1349,13 +1368,28 @@ You decide the right approach based on the conversation flow.${portalInstruction
       throw new BadRequestException(`Email send failed: ${detail}${status}`);
     }
 
-    await this.syncThreadSummary(lead.id, params.body, 'OUTBOUND');
+    await this.syncThreadSummary(lead.id, bodyText || subject, 'OUTBOUND');
     await this.leadsService.recordTouch(lead.id, 'EMAIL_SENT', {
-      description: `Email sent to ${lead.sellerEmail} from ${user.email}`,
+      description: `Email sent to ${recipient} from ${user.email}`,
       metadata: { subject, mailgunId: res.mailgunId, sentByUserId: userId },
     });
 
     return { success: true, mailgunId: res.mailgunId };
+  }
+
+  /** Collapse HTML to a readable plain-text alternative. */
+  private htmlToText(html: string): string {
+    return html
+      .replace(/<style[\s\S]*?<\/style>/gi, '')
+      .replace(/<\/(p|div|h[1-6]|li|tr)>/gi, '\n')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/&amp;/gi, '&')
+      .replace(/&lt;/gi, '<')
+      .replace(/&gt;/gi, '>')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
   }
 
   /**
