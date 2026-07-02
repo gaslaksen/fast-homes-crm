@@ -1312,16 +1312,26 @@ You decide the right approach based on the conversation flow.${portalInstruction
       params.subject?.trim() ||
       `Re: your property at ${lead.propertyAddress ?? 'your property'}`;
 
-    const res = await this.mailerService.sendAsUser({
-      orgId: lead.organizationId,
-      user,
-      to: lead.sellerEmail,
-      subject,
-      bodyText: params.body,
-      leadId: lead.id,
-      inReplyToEmailId: params.inReplyToEmailId,
-      sentByUserId: userId,
-    });
+    let res: { mailgunId: string | null };
+    try {
+      res = await this.mailerService.sendAsUser({
+        orgId: lead.organizationId,
+        user,
+        to: lead.sellerEmail,
+        subject,
+        bodyText: params.body,
+        leadId: lead.id,
+        inReplyToEmailId: params.inReplyToEmailId,
+        sentByUserId: userId,
+      });
+    } catch (err: any) {
+      // Surface the real Mailgun reason (e.g. auth/region/domain) to the UI
+      // instead of a generic 500 "Internal server error".
+      const detail = err?.details || err?.message || 'Unknown error';
+      const status = err?.status ? ` (status ${err.status})` : '';
+      this.logger.error(`Email reply send failed for lead ${lead.id}: ${detail}${status}`);
+      throw new BadRequestException(`Email send failed: ${detail}${status}`);
+    }
 
     await this.syncThreadSummary(lead.id, params.body, 'OUTBOUND');
     await this.leadsService.recordTouch(lead.id, 'EMAIL_SENT', {

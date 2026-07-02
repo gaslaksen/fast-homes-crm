@@ -52,8 +52,7 @@ export default function MessageComposer({
   const [body, setBody] = useState('');
   const [draftLoading, setDraftLoading] = useState(false);
 
-  // Email fields
-  const [emailTo, setEmailTo] = useState(sellerEmail || '');
+  // Email fields (recipient is always the lead's sellerEmail, shown read-only)
   const [emailSubject, setEmailSubject] = useState('');
   const [emailBody, setEmailBody] = useState('');
 
@@ -177,7 +176,7 @@ export default function MessageComposer({
             <span className="text-gray-400">▾</span>
           </button>
           {pickerOpen && (
-            <div className="absolute z-10 bottom-full mb-1 left-0 w-44 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg py-1">
+            <div className="absolute z-50 bottom-full mb-1 left-0 w-44 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg py-1">
               {CHANNELS.map((c) => (
                 <button
                   key={c.key}
@@ -221,7 +220,7 @@ export default function MessageComposer({
         <div className="space-y-2">
           <input
             type="email"
-            value={emailTo}
+            value={sellerEmail || ''}
             readOnly
             className="input w-full text-sm bg-gray-50 dark:bg-gray-800 text-gray-500"
             placeholder="To"

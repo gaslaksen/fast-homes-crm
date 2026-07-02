@@ -513,8 +513,10 @@ export default function LeadDetailPage() {
                 </div>
               )}
 
-              {/* Unified composer: SMS / Email / Internal Comment */}
-              <div className="card p-0 overflow-hidden shrink-0">
+              {/* Unified composer: SMS / Email / Internal Comment.
+                  No overflow-hidden here - it would clip the channel dropdown
+                  that opens upward above the composer. */}
+              <div className="card p-0 shrink-0">
                 <MessageComposer
                   leadId={leadId}
                   sellerPhone={lead.sellerPhone}
