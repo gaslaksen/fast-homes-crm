@@ -35,10 +35,15 @@ export class MailerService {
     });
   }
 
-  /** Per-lead Reply-To so inbound replies map back to the right lead thread. */
-  private replyToForLead(leadId?: string): string | undefined {
-    if (!leadId) return undefined;
-    return `reply+${leadId}@${this.domain}`;
+  /**
+   * A clean, human-looking inbound address on the sending subdomain (whose MX
+   * points at Mailgun). Replies here are matched back to a lead by the
+   * In-Reply-To header first, then by sender email - so the address itself
+   * carries no lead id and reads naturally (deals@crm..., ian@crm...).
+   */
+  private inboundReplyTo(localPart: string): string {
+    const clean = (localPart || 'deals').trim().toLowerCase().replace(/[^a-z0-9._-]/g, '') || 'deals';
+    return `${clean}@${this.domain}`;
   }
 
   private buildFrom(displayName: string | undefined, address: string): string {
@@ -142,7 +147,7 @@ export class MailerService {
       subject: params.subject,
       bodyText,
       bodyHtml,
-      replyTo: this.replyToForLead(params.leadId),
+      replyTo: this.inboundReplyTo('deals'),
       listUnsubscribeUrl: params.listUnsubscribeUrl,
       orgId: params.orgId,
       leadId: params.leadId,
@@ -183,6 +188,7 @@ export class MailerService {
     }
 
     const bodyHtml = params.bodyHtml ?? this.wrapEmailBody(params.bodyText).bodyHtml;
+    const userLocalPart = params.user.email.split('@')[0];
     return this.send({
       from: this.buildFrom(displayName, params.user.email),
       fromAddress: params.user.email,
@@ -190,7 +196,7 @@ export class MailerService {
       subject: params.subject,
       bodyText: params.bodyText,
       bodyHtml,
-      replyTo: this.replyToForLead(params.leadId),
+      replyTo: this.inboundReplyTo(userLocalPart),
       inReplyTo,
       references,
       orgId: params.orgId,

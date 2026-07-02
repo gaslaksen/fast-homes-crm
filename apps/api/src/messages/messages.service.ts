@@ -734,13 +734,29 @@ You decide the right approach based on the conversation flow.${portalInstruction
   }): Promise<{ success: boolean; reason?: string; leadId?: string; emailId?: string }> {
     const senderEmail = this.extractEmailAddress(data.from);
 
-    // Resolve the lead: prefer the signed reply+{leadId} tag, then sellerEmail.
+    // Resolve the lead, most-reliable signal first:
+    //  1. reply+{leadId} tag, if a legacy plus-address was used
+    //  2. In-Reply-To → the outbound Email it replies to → that lead
+    //  3. sender email → matching sellerEmail (like SMS matches by phone)
     let lead = data.leadId
       ? await this.prisma.lead.findUnique({ where: { id: data.leadId } })
       : null;
+
+    if (!lead && data.inReplyTo) {
+      const parent = await this.prisma.email.findFirst({
+        where: { messageIdHeader: data.inReplyTo, leadId: { not: null } },
+        select: { leadId: true },
+        orderBy: { sentAt: 'desc' },
+      });
+      if (parent?.leadId) {
+        lead = await this.prisma.lead.findUnique({ where: { id: parent.leadId } });
+      }
+    }
+
     if (!lead && senderEmail) {
       lead = await this.prisma.lead.findFirst({
         where: { sellerEmail: { equals: senderEmail, mode: 'insensitive' } },
+        orderBy: { updatedAt: 'desc' },
       });
     }
 
