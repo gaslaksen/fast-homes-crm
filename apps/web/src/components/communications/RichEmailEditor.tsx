@@ -37,13 +37,24 @@ export default function RichEmailEditor({
   placeholder?: string;
   minHeight?: number;
 }) {
-  // react-quill-new forwards a ref to the underlying component whose
-  // getEditor() returns the live Quill instance (for cursor emoji insertion).
-  const quillRef = useRef<any>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  // Remember the caret so emoji insertion lands where the user was typing,
+  // even though focus moves to the emoji button first.
+  const lastRangeRef = useRef<{ index: number; length: number } | null>(null);
   const [emojiOpen, setEmojiOpen] = useState(false);
   const pickerRef = useRef<HTMLDivElement | null>(null);
 
   const modules = useMemo(() => ({ toolbar: TOOLBAR }), []);
+
+  // Resolve the live Quill instance from the DOM (next/dynamic does not
+  // reliably forward a ref to the class component).
+  const getEditor = async (): Promise<any | null> => {
+    const el = containerRef.current?.querySelector('.ql-container');
+    if (!el) return null;
+    const mod: any = await import('react-quill-new');
+    const Quill = mod.Quill || mod.default?.Quill;
+    return Quill?.find ? Quill.find(el) : null;
+  };
 
   // Close the emoji popover on outside click.
   useEffect(() => {
@@ -57,13 +68,14 @@ export default function RichEmailEditor({
     return () => document.removeEventListener('mousedown', onDocClick);
   }, [emojiOpen]);
 
-  const insertEmoji = (emoji: string) => {
-    const editor = quillRef.current?.getEditor?.();
+  const insertEmoji = async (emoji: string) => {
+    const editor = await getEditor();
     if (editor) {
-      const range = editor.getSelection(true);
+      const range = lastRangeRef.current ?? editor.getSelection();
       const index = range ? range.index : editor.getLength();
       editor.insertText(index, emoji, 'user');
       editor.setSelection(index + emoji.length, 0);
+      lastRangeRef.current = { index: index + emoji.length, length: 0 };
     } else {
       onChange(`${value || ''}${emoji}`);
     }
@@ -71,31 +83,31 @@ export default function RichEmailEditor({
   };
 
   return (
-    <div className="rich-email-editor relative">
+    <div className="rich-email-editor relative" ref={containerRef}>
       <ReactQuill
-        // next/dynamic forwards the ref to react-quill-new (a class component),
-        // whose instance exposes getEditor(). If forwarding ever fails, emoji
-        // insertion falls back to appending at the end.
-        ref={quillRef}
         theme="snow"
         value={value}
         onChange={onChange}
+        onChangeSelection={(range: { index: number; length: number } | null) => {
+          if (range) lastRangeRef.current = range;
+        }}
         modules={modules}
         placeholder={placeholder}
       />
 
-      <div className="relative mt-1">
+      {/* Emoji button pinned to the top-right of the toolbar row */}
+      <div className="absolute top-1 right-1 z-10">
         <button
           type="button"
           onClick={() => setEmojiOpen((o) => !o)}
-          className="text-lg leading-none px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800"
+          className="text-lg leading-none px-1.5 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800"
           title="Insert emoji"
           aria-label="Insert emoji"
         >
           😊
         </button>
         {emojiOpen && (
-          <div ref={pickerRef} className="absolute z-50 bottom-full mb-1 left-0">
+          <div ref={pickerRef} className="absolute z-50 top-full mt-1 right-0">
             <EmojiPicker
               onEmojiClick={(e) => insertEmoji(e.emoji)}
               theme={EmojiTheme.AUTO}
