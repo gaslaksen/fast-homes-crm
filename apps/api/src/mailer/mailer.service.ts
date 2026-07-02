@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import Mailgun from 'mailgun.js';
-import * as formData from 'form-data';
+import FormData from 'form-data';
 import * as crypto from 'crypto';
 
 /**
@@ -27,7 +27,7 @@ export class MailerService {
   }
 
   private get mg() {
-    const mailgun = new Mailgun(formData as any);
+    const mailgun = new Mailgun(FormData as any);
     return mailgun.client({
       username: 'api',
       key: this.config.get<string>('MAILGUN_API_KEY') || '',
