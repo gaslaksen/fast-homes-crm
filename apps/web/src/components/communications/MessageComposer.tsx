@@ -1,8 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
-import { messagesAPI, gmailAPI, leadsAPI } from '@/lib/api';
+import { messagesAPI, leadsAPI } from '@/lib/api';
 
 type Channel = 'sms' | 'email' | 'comment';
 
@@ -131,8 +130,13 @@ export default function MessageComposer({
         if (!body.trim()) return;
         await messagesAPI.send(leadId, body, currentUser?.id);
       } else if (channel === 'email') {
-        if (!emailTo.trim() || !emailSubject.trim() || !emailBody.trim()) return;
-        await gmailAPI.orgSend({ leadId, to: emailTo, subject: emailSubject, bodyText: emailBody });
+        if (!emailSubject.trim() || !emailBody.trim() || !currentUser?.id) return;
+        // Sends from the logged-in user to the lead's email, via Mailgun.
+        await messagesAPI.sendEmail(leadId, {
+          userId: currentUser.id,
+          subject: emailSubject,
+          body: emailBody,
+        });
       } else {
         if (!body.trim() || !currentUser) return;
         await leadsAPI.addNote(leadId, body, currentUser.id, {
@@ -208,22 +212,18 @@ export default function MessageComposer({
         )}
       </div>
 
-      {/* Email channel needs Gmail */}
-      {channel === 'email' && !gmailConnected ? (
+      {/* Email channel — sends from the logged-in user via Mailgun */}
+      {channel === 'email' && !sellerEmail ? (
         <div className="text-xs text-gray-500 dark:text-gray-400">
-          Connect Gmail in{' '}
-          <Link href="/settings/profile" className="text-teal-700 dark:text-teal-400 hover:underline">
-            Settings
-          </Link>{' '}
-          to send email.
+          This lead has no email address on file. Add one to send email.
         </div>
       ) : channel === 'email' ? (
         <div className="space-y-2">
           <input
             type="email"
             value={emailTo}
-            onChange={(e) => setEmailTo(e.target.value)}
-            className="input w-full text-sm"
+            readOnly
+            className="input w-full text-sm bg-gray-50 dark:bg-gray-800 text-gray-500"
             placeholder="To"
           />
           <input
@@ -284,9 +284,9 @@ export default function MessageComposer({
           disabled={
             sending ||
             blockedBySms ||
-            (channel === 'email' && !gmailConnected) ||
+            (channel === 'email' && !sellerEmail) ||
             (channel === 'email'
-              ? !emailTo.trim() || !emailSubject.trim() || !emailBody.trim()
+              ? !emailSubject.trim() || !emailBody.trim()
               : !body.trim())
           }
           className={`btn btn-sm ${isComment ? 'btn-secondary' : 'btn-primary'} disabled:opacity-50`}

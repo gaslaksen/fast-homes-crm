@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { leadsAPI, messagesAPI, settingsAPI, authAPI, gmailAPI, sellerPortalAPI, inboxAPI } from '@/lib/api';
+import { leadsAPI, messagesAPI, settingsAPI, authAPI, sellerPortalAPI, inboxAPI } from '@/lib/api';
 import DispoTab from '@/components/DispoTab';
 import AppShell from '@/components/AppShell';
 import LeadTabNav, { DETAIL_TABS, COMPS_TABS } from '@/components/LeadTabNav';
@@ -109,7 +109,8 @@ export default function LeadDetailPage() {
   const [simReplyText, setSimReplyText] = useState('');
   const [togglingAutoRespond, setTogglingAutoRespond] = useState(false);
   const [teamMembers, setTeamMembers] = useState<any[]>([]);
-  const [gmailConnected, setGmailConnected] = useState(false);
+  // Email now always available via Mailgun (no per-user Gmail connection).
+  const gmailConnected = true;
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [showDeadForm, setShowDeadForm] = useState(false);
   const [deadReason, setDeadReason] = useState('');
@@ -138,7 +139,6 @@ export default function LeadDetailPage() {
     settingsAPI.getDrip().then((res) => setDemoMode(res.data.demoMode ?? false)).catch(() => {});
     authAPI.getTeam().then((res) => setTeamMembers(res.data || [])).catch(() => {});
     authAPI.getMe().then((res) => setCurrentUser(res.data)).catch(() => {});
-    gmailAPI.status().then((res) => setGmailConnected(res.data.connected)).catch(() => {});
   }, [leadId]);
 
   // Poll the conversation on a fast cadence so inbound texts appear without a

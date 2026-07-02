@@ -10,7 +10,7 @@ import CommunicationsTimeline from '@/components/communications/CommunicationsTi
 import MessageComposer from '@/components/communications/MessageComposer';
 import LeadSidePanel from '@/components/leadDetailV2/LeadSidePanel';
 import type { TimelineItem, NoteItem } from '@/components/communications/types';
-import { inboxAPI, leadsAPI, authAPI, gmailAPI, type InboxFilter } from '@/lib/api';
+import { inboxAPI, leadsAPI, authAPI, type InboxFilter } from '@/lib/api';
 import { getLeadAddressLine, getLeadDisplayName } from '@/lib/format';
 
 const POLL_MS = 60_000;
@@ -84,7 +84,8 @@ function InboxWorkspace() {
   const [commLoading, setCommLoading] = useState(false);
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [teamMembers, setTeamMembers] = useState<any[]>([]);
-  const [gmailConnected, setGmailConnected] = useState(false);
+  // Email now always available via Mailgun (no per-user Gmail connection).
+  const gmailConnected = true;
   const [resumingAi, setResumingAi] = useState(false);
 
   const threadRef = useRef<HTMLDivElement | null>(null);
@@ -96,7 +97,6 @@ function InboxWorkspace() {
   useEffect(() => {
     authAPI.getMe().then((res) => setCurrentUser(res.data)).catch(() => {});
     authAPI.getTeam().then((res) => setTeamMembers(res.data || [])).catch(() => {});
-    gmailAPI.status().then((res) => setGmailConnected(!!res.data?.connected)).catch(() => {});
   }, []);
 
   // Desktop: the workspace panes scroll internally; suppress the page-level

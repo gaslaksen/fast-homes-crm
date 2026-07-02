@@ -126,6 +126,11 @@ export const messagesAPI = {
     api.post(`/leads/${leadId}/messages/draft`, { context }),
   send: (leadId: string, message: string, userId?: string) =>
     api.post(`/leads/${leadId}/messages/send`, { message, userId }),
+  // Send an email reply from the logged-in user, via Mailgun
+  sendEmail: (
+    leadId: string,
+    data: { userId: string; subject?: string; body: string; inReplyToEmailId?: string },
+  ) => api.post(`/leads/${leadId}/messages/emails/send`, data),
   rescore: (leadId: string, userId?: string) =>
     api.post(`/leads/${leadId}/messages/rescore`, { userId }),
   simulateReply: (leadId: string, message: string) =>
@@ -367,25 +372,6 @@ export const photosAPI = {
     api.delete(`/leads/${leadId}/photos/${photoId}`),
   setPrimary: (leadId: string, photoId: string) =>
     api.patch(`/leads/${leadId}/photos/primary`, { photoId }),
-};
-
-// Gmail API
-export const gmailAPI = {
-  // Per-user Gmail
-  status: () => api.get('/gmail/status'),
-  send: (data: { leadId?: string; to: string; subject: string; bodyHtml?: string; bodyText: string }) =>
-    api.post('/gmail/send', data),
-  sync: () => api.post('/gmail/sync'),
-  emails: (leadId: string) => api.get(`/gmail/emails/${leadId}`),
-  disconnect: () => api.delete('/gmail/disconnect'),
-  getAuthUrl: () => `${API_URL}/auth/gmail`,
-  // Org-level shared Gmail
-  orgStatus: () => api.get('/gmail/org-status'),
-  orgSend: (data: { leadId?: string; to: string; subject: string; bodyHtml?: string; bodyText: string }) =>
-    api.post('/gmail/org-send', data),
-  orgSync: () => api.post('/gmail/org-sync'),
-  orgDisconnect: () => api.delete('/gmail/org-disconnect'),
-  getOrgAuthUrl: () => `${API_URL}/auth/org-gmail`,
 };
 
 export const boldSignAPI = {

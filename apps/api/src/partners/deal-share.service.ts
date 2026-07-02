@@ -2,7 +2,6 @@ import { Injectable, Logger, NotFoundException, BadRequestException } from '@nes
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailerService } from '../mailer/mailer.service';
-import { GmailService } from '../gmail/gmail.service';
 import { DealPackageService } from './deal-package.service';
 import { randomBytes } from 'crypto';
 
@@ -14,7 +13,6 @@ export class DealShareService {
     private prisma: PrismaService,
     private config: ConfigService,
     private mailer: MailerService,
-    private gmail: GmailService,
     private dealPackage: DealPackageService,
   ) {}
 
@@ -90,32 +88,9 @@ export class DealShareService {
         orgName,
       }, partner.type);
 
-      // Send email via selected channel
+      // All deal shares go out via Mailgun; partner replies route to the sender.
       try {
-        if (channel === 'resend') {
-          await this.mailer.sendDealPackage(
-            partner.email,
-            subject,
-            html,
-            sender?.email,
-          );
-        } else if (channel === 'gmail') {
-          await this.gmail.sendEmail(userId, orgId, {
-            to: partner.email,
-            subject,
-            bodyHtml: html,
-            bodyText: `Deal opportunity: ${pkg.lead.propertyAddress}. View details: ${viewUrl}`,
-            leadId,
-          });
-        } else if (channel === 'org-gmail') {
-          await this.gmail.sendOrgEmail(orgId, {
-            to: partner.email,
-            subject,
-            bodyHtml: html,
-            bodyText: `Deal opportunity: ${pkg.lead.propertyAddress}. View details: ${viewUrl}`,
-            leadId,
-          });
-        }
+        await this.mailer.sendDealPackage(partner.email, subject, html, sender?.email);
       } catch (err) {
         this.logger.error(`Failed to send deal share to ${partner.email}: ${err.message}`);
         await this.prisma.dealShare.update({
@@ -282,25 +257,7 @@ export class DealShareService {
 
     const subject = share.emailSubject || `Deal Opportunity: ${pkg.lead.propertyAddress}`;
 
-    if (share.channel === 'resend') {
-      await this.mailer.sendDealPackage(share.partner.email, subject, html, sender?.email);
-    } else if (share.channel === 'gmail') {
-      await this.gmail.sendEmail(userId, orgId, {
-        to: share.partner.email,
-        subject,
-        bodyHtml: html,
-        bodyText: `Deal opportunity: ${pkg.lead.propertyAddress}. View details: ${viewUrl}`,
-        leadId: share.leadId,
-      });
-    } else if (share.channel === 'org-gmail') {
-      await this.gmail.sendOrgEmail(orgId, {
-        to: share.partner.email,
-        subject,
-        bodyHtml: html,
-        bodyText: `Deal opportunity: ${pkg.lead.propertyAddress}. View details: ${viewUrl}`,
-        leadId: share.leadId,
-      });
-    }
+    await this.mailer.sendDealPackage(share.partner.email, subject, html, sender?.email);
 
     // Extend expiration
     await this.prisma.dealShare.update({

@@ -1,4 +1,7 @@
-import { Controller, Post, Body, Query, Req, Res, HttpCode, Logger } from '@nestjs/common';
+import { Controller, Post, Body, Query, Req, Res, HttpCode, Logger, UseInterceptors } from '@nestjs/common';
+import { AnyFilesInterceptor } from '@nestjs/platform-express';
+import { ConfigService } from '@nestjs/config';
+import * as crypto from 'crypto';
 import * as fs from 'fs';
 import { Request, Response } from 'express';
 import { isTwilioRequestValid } from './twilio-signature.util';
@@ -29,7 +32,77 @@ export class WebhooksController {
     private campaignEnrollmentService: CampaignEnrollmentService,
     private slackLeadService: SlackLeadService,
     private investorFuseService: InvestorFuseService,
+    private config: ConfigService,
   ) {}
+
+  /**
+   * Mailgun inbound route webhook. Configured in Mailgun as a route matching
+   * the reply subdomain, forwarding the parsed message here. Verifies the
+   * Mailgun signature, extracts the lead from the reply+{leadId}@ recipient,
+   * and stores the reply in the conversation thread.
+   */
+  @Post('mailgun/inbound')
+  @HttpCode(200)
+  // Mailgun posts inbound as multipart/form-data (urlencoded when no
+  // attachments). AnyFilesInterceptor parses the text fields into body either way.
+  @UseInterceptors(AnyFilesInterceptor())
+  async handleMailgunInbound(@Body() body: any) {
+    if (!this.verifyMailgunSignature(body)) {
+      this.logger.warn('⚠️  Mailgun inbound: signature verification failed');
+      return { success: false, reason: 'invalid signature' };
+    }
+
+    const recipient: string = body.recipient || body.To || body.to || '';
+    const leadId = this.extractLeadIdFromRecipient(recipient);
+
+    const messageIdRaw: string = body['Message-Id'] || body['message-id'] || '';
+    const mailgunMessageId = messageIdRaw.replace(/^</, '').replace(/>$/, '') || null;
+
+    const result = await this.messagesService.handleInboundEmail({
+      leadId,
+      from: body.from || body.sender || '',
+      to: recipient,
+      subject: body.subject || body.Subject || '',
+      // Prefer the stripped reply text (quoted history removed) when present.
+      bodyText: body['stripped-text'] || body['body-plain'] || '',
+      bodyHtml: body['stripped-html'] || body['body-html'] || null,
+      mailgunMessageId,
+      messageIdHeader: messageIdRaw || null,
+      inReplyTo: body['In-Reply-To'] || body['in-reply-to'] || null,
+    });
+
+    return result;
+  }
+
+  /**
+   * Verify Mailgun's webhook signature: HMAC-SHA256(signing_key, timestamp+token).
+   */
+  private verifyMailgunSignature(body: any): boolean {
+    const signingKey = this.config.get<string>('MAILGUN_SIGNING_KEY');
+    if (!signingKey) {
+      this.logger.error('MAILGUN_SIGNING_KEY not set — rejecting inbound email');
+      return false;
+    }
+    const timestamp = body.timestamp;
+    const token = body.token;
+    const signature = body.signature;
+    if (!timestamp || !token || !signature) return false;
+
+    const expected = crypto
+      .createHmac('sha256', signingKey)
+      .update(`${timestamp}${token}`)
+      .digest('hex');
+    const a = Buffer.from(signature);
+    const b = Buffer.from(expected);
+    if (a.length !== b.length) return false;
+    return crypto.timingSafeEqual(a, b);
+  }
+
+  /** Parse reply+{leadId}@domain → leadId. */
+  private extractLeadIdFromRecipient(recipient: string): string | null {
+    const m = recipient.match(/reply\+([^@]+)@/i);
+    return m ? m[1] : null;
+  }
 
   /**
    * PropertyLeads.com webhook endpoint

@@ -1,9 +1,8 @@
 'use client';
 
 import { Suspense, useEffect, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
 import AppShell from '@/components/AppShell';
-import { authAPI, gmailAPI } from '@/lib/api';
+import { authAPI } from '@/lib/api';
 import { formatPhoneDisplay } from '@/lib/format';
 
 const ROLE_LABELS: Record<string, string> = {
@@ -53,24 +52,6 @@ function TeamPageInner() {
   const [pwError, setPwError] = useState('');
   const [pwSuccess, setPwSuccess] = useState('');
 
-  // Org Gmail. `healthy` reflects whether the refresh token actually works
-  // (the API now exercises it on /gmail/org-status). `connected` only means
-  // a token row exists; a row can exist with healthy=false if Google has
-  // revoked or otherwise broken the refresh token.
-  const [orgGmail, setOrgGmail] = useState<{
-    connected: boolean;
-    healthy?: boolean;
-    email?: string;
-    connectedBy?: string;
-    error?: string;
-  }>({ connected: false });
-  const [orgGmailLoading, setOrgGmailLoading] = useState(true);
-  const [orgGmailSyncing, setOrgGmailSyncing] = useState(false);
-  const [orgGmailDisconnecting, setOrgGmailDisconnecting] = useState(false);
-  const [orgGmailMsg, setOrgGmailMsg] = useState('');
-
-  const searchParams = useSearchParams();
-
   useEffect(() => {
     const user = getUser();
     setCurrentUser(user);
@@ -81,18 +62,7 @@ function TeamPageInner() {
       .then(r => setMembers(r.data))
       .catch(console.error)
       .finally(() => setLoading(false));
-
-    // Load org Gmail status
-    gmailAPI.orgStatus()
-      .then(r => setOrgGmail(r.data))
-      .catch(() => {})
-      .finally(() => setOrgGmailLoading(false));
-
-    // Check for callback result
-    const orgGmailParam = searchParams.get('orgGmail');
-    if (orgGmailParam === 'connected') setOrgGmailMsg('Org Gmail connected successfully!');
-    else if (orgGmailParam === 'error') setOrgGmailMsg('Failed to connect org Gmail. Please try again.');
-  }, [searchParams]);
+  }, []);
 
   const handleSaveOrgName = async () => {
     if (!orgNameDraft.trim()) return;
@@ -423,106 +393,15 @@ function TeamPageInner() {
           </div>
         )}
 
-        {/* Org Gmail (Shared Inbox) */}
+        {/* Shared Email (Mailgun) */}
         <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-6">
-          <h2 className="font-bold text-gray-900 dark:text-gray-100 mb-1">Shared Email (Gmail)</h2>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
-            Connect a shared Gmail address (e.g. deals@) for campaign emails. All team members can send from this address.
+          <h2 className="font-bold text-gray-900 dark:text-gray-100 mb-1">Shared Email</h2>
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            Outbound email is sent through Mailgun. Initial lead outreach and campaign
+            emails go out from <span className="font-mono">deals@quickcashhomebuyers.com</span>,
+            and replies from a conversation are sent from the logged-in team member. No
+            connection step is required.
           </p>
-
-          {orgGmailMsg && (
-            <div className={`text-sm px-4 py-2 rounded-lg mb-4 border ${
-              orgGmailMsg.includes('success')
-                ? 'bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-400 border-green-200 dark:border-green-800'
-                : 'bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-400 border-red-200 dark:border-red-800'
-            }`}>
-              {orgGmailMsg}
-            </div>
-          )}
-
-          {orgGmailLoading ? (
-            <div className="text-sm text-gray-400 dark:text-gray-500 animate-pulse">Loading...</div>
-          ) : orgGmail.connected ? (
-            <div className="space-y-3">
-              <div className="flex items-center gap-3 flex-wrap">
-                {orgGmail.healthy === false ? (
-                  <span className="inline-flex items-center gap-1.5 text-sm font-medium text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-950 px-3 py-1.5 rounded-full border border-red-200 dark:border-red-800">
-                    <span className="w-2 h-2 rounded-full bg-red-500" />
-                    Token broken — reconnect
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center gap-1.5 text-sm font-medium text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-950 px-3 py-1.5 rounded-full border border-green-200 dark:border-green-800">
-                    <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-                    Connected
-                  </span>
-                )}
-                <span className="text-sm text-gray-700 dark:text-gray-300 font-mono">{orgGmail.email}</span>
-              </div>
-              {orgGmail.healthy === false && orgGmail.error && (
-                <div className="text-xs text-red-600 dark:text-red-400">
-                  Last error from Google: <span className="font-mono">{orgGmail.error}</span>
-                </div>
-              )}
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={async () => {
-                    setOrgGmailSyncing(true);
-                    try {
-                      const r = await gmailAPI.orgSync();
-                      setOrgGmailMsg(`Synced ${r.data.imported} emails, re-matched ${r.data.rematched}.`);
-                    } catch {
-                      setOrgGmailMsg('Failed to sync inbox.');
-                    } finally {
-                      setOrgGmailSyncing(false);
-                    }
-                  }}
-                  disabled={orgGmailSyncing || !isAdmin}
-                  className="btn btn-secondary btn-sm"
-                >
-                  {orgGmailSyncing ? 'Syncing...' : 'Sync Inbox'}
-                </button>
-                {isAdmin && (
-                  <button
-                    onClick={async () => {
-                      if (!confirm('Disconnect the shared Gmail? Campaign emails will stop sending until reconnected.')) return;
-                      setOrgGmailDisconnecting(true);
-                      try {
-                        await gmailAPI.orgDisconnect();
-                        setOrgGmail({ connected: false });
-                        setOrgGmailMsg('Org Gmail disconnected.');
-                      } catch {
-                        setOrgGmailMsg('Failed to disconnect.');
-                      } finally {
-                        setOrgGmailDisconnecting(false);
-                      }
-                    }}
-                    disabled={orgGmailDisconnecting}
-                    className="btn btn-sm text-red-600 dark:text-red-400 border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-950"
-                  >
-                    {orgGmailDisconnecting ? 'Disconnecting...' : 'Disconnect'}
-                  </button>
-                )}
-              </div>
-            </div>
-          ) : (
-            <div>
-              {isAdmin ? (
-                <button
-                  onClick={() => {
-                    const token = localStorage.getItem('auth_token');
-                    window.location.href = `${gmailAPI.getOrgAuthUrl()}?token=${token}`;
-                  }}
-                  className="btn btn-primary"
-                >
-                  Connect Org Gmail
-                </button>
-              ) : (
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  No shared Gmail connected. Ask an admin to connect one.
-                </p>
-              )}
-            </div>
-          )}
         </div>
 
         {/* Change Your Own Password */}

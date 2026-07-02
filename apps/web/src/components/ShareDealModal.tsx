@@ -20,9 +20,7 @@ interface Props {
 }
 
 const CHANNEL_OPTIONS = [
-  { value: 'resend', label: 'DealCore Email', desc: 'Send from noreply@mydealcore.com' },
-  { value: 'gmail', label: 'My Gmail', desc: 'Send from your connected Gmail' },
-  { value: 'org-gmail', label: 'Team Gmail', desc: 'Send from shared team Gmail' },
+  { value: 'resend', label: 'DealCore Email', desc: 'Sent via Mailgun; replies go to you' },
 ];
 
 export default function ShareDealModal({ leadId, propertyAddress, isOpen, onClose, onShared }: Props) {

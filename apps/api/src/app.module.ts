@@ -15,7 +15,7 @@ import { PhotosModule } from './photos/photos.module';
 import { PipelineModule } from './pipeline/pipeline.module';
 import { VapiModule } from './vapi/vapi.module';
 import { CallsModule } from './calls/calls.module';
-import { GmailModule } from './gmail/gmail.module';
+import { MailerModule } from './mailer/mailer.module';
 import { BoldSignModule } from './boldsign/boldsign.module';
 import { CampaignsModule } from './campaigns/campaigns.module';
 import { DealSearchModule } from './deal-search/deal-search.module';
@@ -52,7 +52,7 @@ import { PushModule } from './push/push.module';
     PipelineModule,
     VapiModule,
     CallsModule,
-    GmailModule,
+    MailerModule,
     BoldSignModule,
     CampaignsModule,
     DealSearchModule,

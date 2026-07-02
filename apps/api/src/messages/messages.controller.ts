@@ -26,6 +26,23 @@ export class MessagesController {
     return this.messagesService.sendMessage(leadId, body.message, body.userId);
   }
 
+  @Get('emails')
+  async getEmails(@Param('leadId') leadId: string) {
+    return this.messagesService.getEmails(leadId);
+  }
+
+  @Post('emails/send')
+  async sendEmailReply(
+    @Param('leadId') leadId: string,
+    @Body() body: { userId: string; subject?: string; body: string; inReplyToEmailId?: string },
+  ) {
+    return this.messagesService.sendEmailReply(leadId, body.userId, {
+      subject: body.subject,
+      body: body.body,
+      inReplyToEmailId: body.inReplyToEmailId,
+    });
+  }
+
   @Post('rescore')
   async rescoreLead(
     @Param('leadId') leadId: string,

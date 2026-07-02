@@ -795,6 +795,9 @@ model Email {
   leadId      String?
   lead        Lead?    @relation(fields: [leadId], references: [id], onDelete: SetNull)
   gmailMsgId  String?  @unique
+  mailgunMessageId String? @unique // Mailgun Message-Id (with angle brackets stripped)
+  messageIdHeader  String? // RFC 5322 Message-ID we set/received, for threading
+  inReplyTo        String? // In-Reply-To header value on inbound replies
   threadId    String?
   direction   String
   fromAddress String

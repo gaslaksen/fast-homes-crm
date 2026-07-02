@@ -11,7 +11,7 @@ import * as os from 'os';
 import { PrismaService } from '../prisma/prisma.service';
 import { MessagesService } from '../messages/messages.service';
 import { LeadsService } from '../leads/leads.service';
-import { GmailService } from '../gmail/gmail.service';
+import { MailerService } from '../mailer/mailer.service';
 
 // Instance tag for distinguishing Railway replicas in logs.
 const INSTANCE_TAG = `${os.hostname()}/${process.pid}`;
@@ -51,8 +51,7 @@ export class CampaignExecutionService implements OnModuleInit {
     private messagesService: MessagesService,
     @Inject(forwardRef(() => LeadsService))
     private leadsService: LeadsService,
-    @Inject(forwardRef(() => GmailService))
-    private gmailService: GmailService,
+    private mailerService: MailerService,
   ) {}
 
   async onModuleInit() {
@@ -247,9 +246,10 @@ export class CampaignExecutionService implements OnModuleInit {
       });
     }
 
-    // Note: Email touches are already recorded by gmailService.sendOrgEmail() via recordTouch('EMAIL_SENT').
-    // SMS touches are already recorded by messagesService.sendMessage() via recordTouch('MESSAGE_SENT').
-    // No additional recordTouch needed here — adding one would create duplicate activity entries.
+    // Note: Email touches are recorded inline in the EMAIL branch above (after
+    // mailerService.sendAsDeals). SMS touches are recorded by
+    // messagesService.sendMessage() via recordTouch('MESSAGE_SENT').
+    // No additional recordTouch needed here — adding one would create duplicates.
 
     // Advance to next step (only reached for SENT or SKIPPED).
     const nextStep = steps.find((s: any) => s.stepOrder === currentStep.stepOrder + 1);
@@ -336,18 +336,15 @@ export class CampaignExecutionService implements OnModuleInit {
       if (!orgId) {
         return { kind: 'SKIPPED', reason: `lead ${lead.id} has no organizationId` };
       }
-      const orgGmailStatus = await this.gmailService.getOrgGmailStatus(orgId);
-      if (!orgGmailStatus.connected) {
-        return { kind: 'SKIPPED', reason: `org ${orgId} has no Gmail connected` };
-      }
-
-      // Daily rate limit guard (Gmail Workspace ~2000/day). This is transient
-      // — we want to retry tomorrow, not advance past the step.
+      // Daily rate limit guard against the deals@ sender to protect domain
+      // reputation during warmup. Transient — retry tomorrow, don't skip the step.
+      const dealsFrom =
+        this.config.get<string>('EMAIL_DEALS_FROM') || 'deals@quickcashhomebuyers.com';
       const startOfToday = new Date();
       startOfToday.setHours(0, 0, 0, 0);
       const todaySendCount = await this.prisma.email.count({
         where: {
-          fromAddress: orgGmailStatus.email!,
+          fromAddress: dealsFrom,
           direction: 'outbound',
           sentAt: { gte: startOfToday },
         },
@@ -355,20 +352,27 @@ export class CampaignExecutionService implements OnModuleInit {
       if (todaySendCount >= 1800) {
         return {
           kind: 'RETRY',
-          reason: `org Gmail daily limit reached (${todaySendCount} sent today)`,
+          reason: `deals@ daily send limit reached (${todaySendCount} sent today)`,
         };
       }
 
-      const unsubUrl = this.gmailService.buildUnsubscribeUrl(lead.id);
+      const unsubUrl = this.mailerService.buildUnsubscribeUrl(lead.id);
       return this.sendWithRetry(enrollment, currentStep, async () => {
-        const email = await this.gmailService.sendOrgEmail(orgId, {
+        const email = await this.mailerService.sendAsDeals({
+          orgId,
           to: lead.sellerEmail,
           subject: renderedSubject || 'Following up on your property',
           bodyText: renderedBody,
           leadId: lead.id,
           listUnsubscribeUrl: unsubUrl,
         });
-        return email.gmailMsgId || email.id;
+        // MailerService persists the Email row but does not touch the lead;
+        // record the EMAIL_SENT touch here to keep pipeline tracking accurate.
+        await this.leadsService.recordTouch(lead.id, 'EMAIL_SENT', {
+          description: `Email sent to ${lead.sellerEmail} from ${dealsFrom}`,
+          metadata: { subject: renderedSubject, mailgunId: email.mailgunId },
+        });
+        return email.mailgunId || `${lead.id}-${Date.now()}`;
       });
     }
 

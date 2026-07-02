@@ -1,4 +1,4 @@
-import { Injectable, Inject, forwardRef, Logger, Optional } from '@nestjs/common';
+import { Injectable, Inject, forwardRef, Logger, Optional, NotFoundException, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { ScoringService } from '../scoring/scoring.service';
@@ -7,7 +7,7 @@ import { CampaignEnrollmentService } from '../campaigns/campaign-enrollment.serv
 import { LeadsService } from '../leads/leads.service';
 import { SellerPortalService } from '../seller-portal/seller-portal.service';
 import { SmsProvider, SmrtphoneSmsProvider, TwilioSmsProvider, createSmsProvider } from './sms.provider';
-import { GmailService } from '../gmail/gmail.service';
+import { MailerService } from '../mailer/mailer.service';
 import { PushService } from '../push/push.service';
 import { formatPhoneNumber, isOptOutMessage } from '@fast-homes/shared';
 import { dealFitFlags, propertyContextForPrompt } from '../leads/property-fit.util';
@@ -107,7 +107,7 @@ export class MessagesService {
     @Inject(forwardRef(() => LeadsService))
     private leadsService: LeadsService,
     @Optional() private sellerPortalService: SellerPortalService,
-    private gmailService: GmailService,
+    private mailerService: MailerService,
     private pushService: PushService,
   ) {
     this.smsProvider = createSmsProvider(this.config);
@@ -673,7 +673,7 @@ You decide the right approach based on the conversation flow.${portalInstruction
 
       this.logger.log(`Initial outreach sent for lead ${leadId}`);
 
-      // Send matching email if the lead has an email address and org Gmail is connected
+      // Send a matching first email from deals@ (via Mailgun) when we have an address
       if (lead.sellerEmail && lead.organizationId) {
         this.sendInitialEmailOutreach(lead).catch((err) => {
           this.logger.error(`Initial email outreach failed for lead ${leadId}: ${err.message}`);
@@ -688,7 +688,7 @@ You decide the right approach based on the conversation flow.${portalInstruction
   }
 
   /**
-   * Send an initial outreach email mirroring the SMS, via org Gmail (deals@).
+   * Send an initial outreach email mirroring the SMS, from deals@ via Mailgun.
    * Fire-and-forget — failures here should never block the SMS flow.
    */
   private async sendInitialEmailOutreach(lead: {
@@ -700,18 +700,12 @@ You decide the right approach based on the conversation flow.${portalInstruction
   }): Promise<void> {
     if (!lead.sellerEmail || !lead.organizationId) return;
 
-    // Check org Gmail is connected before attempting
-    const status = await this.gmailService.getOrgGmailStatus(lead.organizationId);
-    if (!status.connected) {
-      this.logger.warn(`Org Gmail not connected for org ${lead.organizationId}, skipping initial email outreach`);
-      return;
-    }
-
     const emailBody = `Hi ${lead.sellerFirstName},\n\nThis is Dax from Quick Cash Home Buyers. We just received your information about selling your property at ${lead.propertyAddress}.\n\nWe'd love to learn more about your situation. How much are you asking for the property? And what's your ideal timeline to sell?\n\nLooking forward to hearing from you!`;
 
-    const unsubscribeUrl = this.gmailService.buildUnsubscribeUrl(lead.id);
+    const unsubscribeUrl = this.mailerService.buildUnsubscribeUrl(lead.id);
 
-    await this.gmailService.sendOrgEmail(lead.organizationId, {
+    await this.mailerService.sendAsDeals({
+      orgId: lead.organizationId,
       to: lead.sellerEmail,
       subject: `Quick question about your property at ${lead.propertyAddress}`,
       bodyText: emailBody,
@@ -720,6 +714,121 @@ You decide the right approach based on the conversation flow.${portalInstruction
     });
 
     this.logger.log(`Initial email outreach sent for lead ${lead.id} to ${lead.sellerEmail}`);
+  }
+
+  /**
+   * Handle an inbound email reply routed by Mailgun. The lead is identified by
+   * the reply+{leadId}@ Reply-To address; falls back to matching sellerEmail.
+   * Stores an inbound Email, surfaces it in the thread, and pauses automation.
+   */
+  async handleInboundEmail(data: {
+    leadId?: string | null;
+    from: string;
+    to: string;
+    subject: string;
+    bodyText: string;
+    bodyHtml?: string | null;
+    mailgunMessageId?: string | null;
+    messageIdHeader?: string | null;
+    inReplyTo?: string | null;
+  }): Promise<{ success: boolean; reason?: string; leadId?: string; emailId?: string }> {
+    const senderEmail = this.extractEmailAddress(data.from);
+
+    // Resolve the lead: prefer the signed reply+{leadId} tag, then sellerEmail.
+    let lead = data.leadId
+      ? await this.prisma.lead.findUnique({ where: { id: data.leadId } })
+      : null;
+    if (!lead && senderEmail) {
+      lead = await this.prisma.lead.findFirst({
+        where: { sellerEmail: { equals: senderEmail, mode: 'insensitive' } },
+      });
+    }
+
+    if (!lead) {
+      this.logger.warn(`Inbound email: no lead for leadId=${data.leadId} sender=${senderEmail}`);
+      return { success: false, reason: 'Lead not found' };
+    }
+    if (!lead.organizationId) {
+      return { success: false, reason: 'Lead has no organization' };
+    }
+
+    // Idempotency: Mailgun can retry deliveries.
+    if (data.mailgunMessageId) {
+      const existing = await this.prisma.email.findUnique({
+        where: { mailgunMessageId: data.mailgunMessageId },
+      });
+      if (existing) {
+        return { success: true, leadId: lead.id, emailId: existing.id };
+      }
+    }
+
+    const email = await this.prisma.email.create({
+      data: {
+        orgId: lead.organizationId,
+        leadId: lead.id,
+        direction: 'inbound',
+        fromAddress: senderEmail || data.from,
+        toAddress: data.to,
+        subject: data.subject || '(no subject)',
+        bodyHtml: data.bodyHtml ?? null,
+        bodyText: data.bodyText || '',
+        sentAt: new Date(),
+        threadId: lead.id,
+        mailgunMessageId: data.mailgunMessageId ?? null,
+        messageIdHeader: data.messageIdHeader ?? null,
+        inReplyTo: data.inReplyTo ?? null,
+      },
+    });
+
+    const summaryText = (data.bodyText || data.subject || '').trim().substring(0, 500);
+    await this.syncThreadSummary(lead.id, summaryText, 'INBOUND');
+
+    // Push notify the assigned user (or the whole org) about the inbound reply
+    this.pushService.notifyNewMessage(lead, summaryText).catch((err) =>
+      this.logger.error(`Inbound-email push failed for ${lead.id}: ${err.message}`),
+    );
+
+    await this.prisma.activity.create({
+      data: {
+        leadId: lead.id,
+        type: 'EMAIL_RECEIVED',
+        description: `Email received from ${senderEmail || data.from}`,
+        metadata: { subject: data.subject, preview: summaryText.substring(0, 100) },
+      },
+    });
+
+    await this.prisma.lead.update({
+      where: { id: lead.id },
+      data: {
+        lastTouchedAt: new Date(),
+        touchCount: { increment: 1 },
+        ...(lead.status === 'ATTEMPTING_CONTACT'
+          ? { status: 'QUALIFYING', stageChangedAt: new Date(), daysInStage: 0 }
+          : {}),
+      },
+    });
+
+    // A human reply means the seller is engaging — pause automated sequences.
+    try {
+      await this.dripService.handleReply(lead.id);
+    } catch {
+      /* drip may not exist */
+    }
+    try {
+      await this.campaignEnrollmentService.handleReply(lead.id);
+    } catch {
+      /* enrollment may not exist */
+    }
+
+    this.logger.log(`📧 Inbound email stored for lead ${lead.id} from ${senderEmail}`);
+    return { success: true, leadId: lead.id, emailId: email.id };
+  }
+
+  /** Pull the bare address out of a "Name <addr@x>" or plain string. */
+  private extractEmailAddress(from: string): string {
+    if (!from) return '';
+    const m = from.match(/<([^>]+)>/);
+    return (m ? m[1] : from).trim().toLowerCase();
   }
 
   /**
@@ -1166,6 +1275,61 @@ You decide the right approach based on the conversation flow.${portalInstruction
       where: { leadId },
       orderBy: { createdAt: 'asc' },
     });
+  }
+
+  /** All email correspondence for a lead, oldest first, for the merged thread. */
+  async getEmails(leadId: string) {
+    return this.prisma.email.findMany({
+      where: { leadId },
+      orderBy: { sentAt: 'asc' },
+    });
+  }
+
+  /**
+   * Send an email reply within a lead conversation, from the logged-in user's
+   * own address. Replies route back into the thread via the per-lead Reply-To.
+   */
+  async sendEmailReply(
+    leadId: string,
+    userId: string,
+    params: { subject?: string; body: string; inReplyToEmailId?: string },
+  ) {
+    const lead = await this.prisma.lead.findUnique({
+      where: { id: leadId },
+      select: { id: true, organizationId: true, sellerEmail: true, propertyAddress: true },
+    });
+    if (!lead) throw new NotFoundException('Lead not found');
+    if (!lead.sellerEmail) throw new BadRequestException('Lead has no email address');
+    if (!lead.organizationId) throw new BadRequestException('Lead has no organization');
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { firstName: true, lastName: true, email: true },
+    });
+    if (!user?.email) throw new BadRequestException('Sending user has no email address');
+
+    const subject =
+      params.subject?.trim() ||
+      `Re: your property at ${lead.propertyAddress ?? 'your property'}`;
+
+    const res = await this.mailerService.sendAsUser({
+      orgId: lead.organizationId,
+      user,
+      to: lead.sellerEmail,
+      subject,
+      bodyText: params.body,
+      leadId: lead.id,
+      inReplyToEmailId: params.inReplyToEmailId,
+      sentByUserId: userId,
+    });
+
+    await this.syncThreadSummary(lead.id, params.body, 'OUTBOUND');
+    await this.leadsService.recordTouch(lead.id, 'EMAIL_SENT', {
+      description: `Email sent to ${lead.sellerEmail} from ${user.email}`,
+      metadata: { subject, mailgunId: res.mailgunId, sentByUserId: userId },
+    });
+
+    return { success: true, mailgunId: res.mailgunId };
   }
 
   /**

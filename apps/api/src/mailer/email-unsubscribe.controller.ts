@@ -10,15 +10,15 @@ import {
 } from '@nestjs/common';
 import { Response } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
-import { GmailService } from './gmail.service';
+import { MailerService } from './mailer.service';
 
 /**
- * Public (no auth) endpoints that honor Gmail's `List-Unsubscribe` /
- * `List-Unsubscribe-Post: List-Unsubscribe=One-Click` headers.
+ * Public (no auth) endpoints that honor the `List-Unsubscribe` /
+ * `List-Unsubscribe-Post: List-Unsubscribe=One-Click` headers on outbound email.
  *
  * GET  /email/unsubscribe?token=...  — human click from the email footer;
  *                                       returns a small HTML confirmation page
- * POST /email/unsubscribe?token=...  — Gmail one-click; returns 200 JSON
+ * POST /email/unsubscribe?token=...  — one-click; returns 200 JSON
  *
  * Both share the same idempotent opt-out: set Lead.doNotContact = true and
  * move all ACTIVE/PAUSED campaign enrollments for that lead to OPTED_OUT.
@@ -29,7 +29,7 @@ export class EmailUnsubscribeController {
 
   constructor(
     private prisma: PrismaService,
-    private gmailService: GmailService,
+    private mailerService: MailerService,
   ) {}
 
   @Get()
@@ -48,7 +48,7 @@ export class EmailUnsubscribeController {
   private async processUnsubscribe(
     token: string,
   ): Promise<{ ok: boolean; message: string }> {
-    const leadId = this.gmailService.verifyUnsubscribeToken(token || '');
+    const leadId = this.mailerService.verifyUnsubscribeToken(token || '');
     if (!leadId) {
       this.logger.warn(`Unsubscribe rejected: invalid token`);
       return { ok: false, message: 'Invalid or expired unsubscribe link.' };
