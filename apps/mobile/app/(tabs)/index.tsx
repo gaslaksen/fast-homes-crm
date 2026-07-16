@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -45,7 +46,7 @@ function StatCard({
 }: {
   label: string;
   value: string;
-  Icon: (p: { size?: number; color?: string }) => JSX.Element;
+  Icon: (p: { size?: number; color?: string }) => ReactElement;
   iconColor: string;
   iconBg: string;
   onPress?: () => void;
