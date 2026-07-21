@@ -38,6 +38,12 @@ const ICON = {
       <path d="M21 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6M3 13l2-7a2 2 0 012-2h10a2 2 0 012 2l2 7M3 13h18M10 17h4" />
     </svg>
   ),
+  foreclosure: (
+    <svg className={iconClass} {...strokeProps}>
+      <path d="M3 10l9-7 9 7M5 9v11a1 1 0 001 1h12a1 1 0 001-1V9M9 21v-6h6v6" />
+      <path d="M2 4l20 16" />
+    </svg>
+  ),
   dealSearch: (
     <svg className={iconClass} {...strokeProps}>
       <circle cx="11" cy="11" r="7" />
@@ -94,6 +100,7 @@ function buildNavGroups(badges: { needsReply: number; newLeads: number }): NavGr
       label: 'Pipeline',
       items: [
         { label: 'Leads', href: '/leads', icon: ICON.leads, badge: badges.newLeads },
+        { label: 'Foreclosures', href: '/foreclosures', icon: ICON.foreclosure },
         { label: 'Deals', href: '/deals', icon: ICON.deals },
       ],
     },

@@ -119,6 +119,38 @@ export const leadsAPI = {
   communications: (id: string) => api.get(`/leads/${id}/communications`),
 };
 
+// Foreclosures API
+export const foreclosuresAPI = {
+  list: (params?: any) => api.get('/foreclosures', { params }),
+  stats: () => api.get('/foreclosures/stats'),
+  get: (id: string) => api.get(`/foreclosures/${id}`),
+  update: (id: string, data: any) => api.patch(`/foreclosures/${id}`, data),
+  refresh: () => api.post('/foreclosures/refresh'),
+  skiptrace: (id: string) => api.post(`/foreclosures/${id}/skiptrace`),
+  importParse: (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.post('/foreclosures/import/parse', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+  importExecute: (file: File, options?: any) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (options) formData.append('options', JSON.stringify(options));
+    return api.post('/foreclosures/import', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+  uploadPdf: (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.post('/foreclosures/upload-pdf', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+};
+
 // Messages API
 export const messagesAPI = {
   list: (leadId: string) => api.get(`/leads/${leadId}/messages`),

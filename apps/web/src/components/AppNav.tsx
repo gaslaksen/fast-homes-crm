@@ -12,6 +12,7 @@ import { useDialer } from '@/components/dialer/DialerContext';
 const NAV_ITEMS = [
   { label: 'Dashboard', href: '/dashboard' },
   { label: 'Leads',     href: '/leads' },
+  { label: 'Foreclosures', href: '/foreclosures' },
   { label: 'Drip Campaigns', href: '/drip-campaigns' },
   { label: 'Deal Search', href: '/deal-search' },
   { label: 'Partners',  href: '/settings/partners' },

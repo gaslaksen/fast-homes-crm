@@ -31,6 +31,7 @@ import { PropertyLookupsModule } from './property-lookups/property-lookups.modul
 import { InboxModule } from './inbox/inbox.module';
 import { ExternalConversationsModule } from './external-conversations/external-conversations.module';
 import { PushModule } from './push/push.module';
+import { ForeclosuresModule } from './foreclosures/foreclosures.module';
 
 @Module({
   imports: [
@@ -68,6 +69,7 @@ import { PushModule } from './push/push.module';
     InboxModule,
     ExternalConversationsModule,
     PushModule,
+    ForeclosuresModule,
   ],
 })
 export class AppModule {}
