@@ -113,6 +113,7 @@ export default function LeadManagementPage() {
   const sourceLabels: Record<string, string> = {
     PROPERTY_LEADS: 'Property Leads',
     GOOGLE_ADS: 'Google Ads',
+    LEADHOUSE: 'LeadHouse',
     MANUAL: 'Manual',
     OTHER: 'Other',
   };

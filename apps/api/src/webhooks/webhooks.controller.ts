@@ -298,6 +298,239 @@ export class WebhooksController {
   }
 
   /**
+   * LeadHouse webhook endpoint
+   *
+   * LeadHouse (LH365) PPC funnels — Facebook lead ads routed through
+   * LeadConnector — POST a Perspective-style payload here. The lead data
+   * arrives as three parallel maps keyed by opaque, funnel-specific question
+   * ids (question_b77we9, custom-3f955bde…):
+   *   - profile: { key: { value, title } }
+   *   - values:  { key: value }
+   *   - titles:  { key: title }
+   *
+   * Because the question ids change from funnel to funnel, we map every field
+   * by its human-readable title text (e.g. "How Quickly Are You Looking to
+   * Sell") rather than the key, so the same handler works across all LeadHouse
+   * funnels.
+   *
+   * Configure the LeadHouse / LeadConnector outbound webhook to POST here:
+   *   https://fast-homesapi-production.up.railway.app/webhooks/leadhouse
+   */
+  @Post('leadhouse')
+  @HttpCode(200)
+  async handleLeadHouse(
+    @Body() body: any,
+    @Query('dryRun') dryRun?: string,
+  ) {
+    console.log('📥 LeadHouse webhook received:', JSON.stringify(body, null, 2));
+
+    if (dryRun === 'true' || body?.dryRun === true) {
+      this.logger.log('🧪 LeadHouse dry-run mode — no lead will be created');
+      const preview = this.mapLeadHousePayload(body);
+      try {
+        fs.writeFileSync('/tmp/leadhouse-sample.json', JSON.stringify(body, null, 2));
+        this.logger.log('📄 Saved payload → /tmp/leadhouse-sample.json');
+      } catch (e) {
+        this.logger.warn('Could not write sample file:', e.message);
+      }
+      return { success: true, dryRun: true, mapped: preview };
+    }
+
+    try {
+      const mapped = this.mapLeadHousePayload(body);
+
+      // Enrich/parse the address (fills city/state from zip when missing)
+      const addr = await normalizeLeadAddressAsync({
+        property_address: mapped.propertyAddress,
+        city: mapped.propertyCity,
+        state: mapped.propertyState,
+        zip: mapped.propertyZip,
+      });
+
+      const leadData = {
+        source: LeadSource.LEADHOUSE,
+        organizationId: process.env.DEFAULT_ORGANIZATION_ID,
+        propertyAddress: addr.propertyAddress,
+        propertyCity: addr.propertyCity,
+        propertyState: addr.propertyState,
+        propertyZip: addr.propertyZip,
+        sellerFirstName: mapped.sellerFirstName,
+        sellerLastName: mapped.sellerLastName,
+        sellerPhone: formatPhoneNumber(mapped.sellerPhone),
+        sellerEmail: mapped.sellerEmail,
+        propertyType: mapped.propertyType,
+        timeline: mapped.timeline,
+        conditionLevel: mapped.conditionLevel,
+        ownershipStatus: mapped.ownershipStatus,
+        sellerMotivation: mapped.sellerMotivation,
+        sourceMetadata: {
+          ...body,
+          _leadhouseId: body?.id,
+          _funnelId: body?.funnelId,
+          _funnelName: body?.funnelName,
+          _notes: mapped.notes,
+        },
+      };
+
+      const lead = await this.leadsService.createLead(leadData);
+
+      await this.triggerAiOutreach(lead.id, 'LeadHouse');
+
+      return { success: true, leadId: lead.id };
+    } catch (error) {
+      console.error('❌ LeadHouse webhook error:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Maps a raw LeadHouse payload into flat lead fields. Matches every field by
+   * its title text (not the funnel-specific question key) so it survives new
+   * funnels that reuse the same question wording under different ids.
+   */
+  private mapLeadHousePayload(body: any): {
+    propertyAddress: string;
+    propertyCity: string;
+    propertyState: string;
+    propertyZip: string;
+    sellerFirstName: string;
+    sellerLastName: string;
+    sellerPhone: string;
+    sellerEmail: string;
+    propertyType?: string;
+    timeline?: number;
+    conditionLevel?: string;
+    ownershipStatus?: string;
+    sellerMotivation?: string;
+    notes: string;
+  } {
+    // Build unified key → value and key → title maps from both `values`
+    // (flat) and `profile` (nested { value, title }) so we cope with either
+    // shape LeadHouse might send.
+    const values: Record<string, any> = {};
+    const titles: Record<string, string> = {};
+    if (body?.values && typeof body.values === 'object') {
+      for (const [k, v] of Object.entries(body.values)) values[k] = v;
+    }
+    if (body?.titles && typeof body.titles === 'object') {
+      for (const [k, t] of Object.entries(body.titles)) titles[k] = String(t);
+    }
+    if (body?.profile && typeof body.profile === 'object') {
+      for (const [k, obj] of Object.entries<any>(body.profile)) {
+        if (obj && typeof obj === 'object') {
+          if (values[k] == null) values[k] = obj.value;
+          if (!titles[k] && obj.title) titles[k] = String(obj.title);
+        }
+      }
+    }
+
+    // Look up an answer by matching the question title against phrases.
+    const byTitle = (...phrases: string[]): string | undefined => {
+      for (const [key, title] of Object.entries(titles)) {
+        const t = title.toLowerCase();
+        if (phrases.some((p) => t.includes(p))) {
+          const v = values[key];
+          const s = v == null ? '' : String(v).trim();
+          if (s) return s;
+        }
+      }
+      return undefined;
+    };
+    // Direct key lookup for the stable, semantic keys LeadHouse always sends.
+    const byKey = (key: string): string | undefined => {
+      const v = values[key];
+      const s = v == null ? '' : String(v).trim();
+      return s || undefined;
+    };
+
+    // Strip Slack-style :emoji_shortcodes: that LeadHouse leaves in answers.
+    const clean = (s?: string): string | undefined =>
+      s ? s.replace(/:[a-z0-9_+-]+:/gi, '').replace(/\s+/g, ' ').trim() || undefined : undefined;
+
+    const propertyAddress = byTitle('property address') || byKey('street') || '';
+    const propertyCity = byTitle('property city') || byKey('city') || '';
+    const propertyState = byTitle('property state') || '';
+    const propertyZip = byTitle('property zip', 'zip code') || byKey('zip') || '';
+
+    const sellerFirstName = byTitle('first name') || byKey('firstName') || '';
+    const sellerLastName = byTitle('last name') || byKey('lastName') || '';
+    const sellerEmail = byTitle('email') || byKey('email') || '';
+    const sellerPhone = byTitle('phone') || byKey('phone') || '';
+
+    const propertyType = clean(byTitle('type of property'));
+    const conditionAnswer = clean(byTitle('condition of the property'));
+    const ownershipAnswer = clean(byTitle('best describes you'));
+    const timelineAnswer = clean(byTitle('how quickly'));
+    const motivationAnswer = clean(byKey('reasonforselling') || byTitle('divorce, inheritance', 'reason for selling'));
+    const mattersMost = clean(byTitle('matters most'));
+    const belowMarket = clean(byTitle('below market'));
+    const mlsListed = clean(byTitle('listed on'));
+
+    // Assemble free-text notes from the qualifying answers we don't map to a
+    // dedicated column, so nothing the seller told us is lost.
+    const noteParts: string[] = [];
+    if (timelineAnswer) noteParts.push(`Timeline: ${timelineAnswer}`);
+    if (motivationAnswer) noteParts.push(`Reason for selling: ${motivationAnswer}`);
+    if (mattersMost) noteParts.push(`What matters most: ${mattersMost}`);
+    if (belowMarket) noteParts.push(`Open to below-market cash offer: ${belowMarket}`);
+    if (mlsListed) noteParts.push(`MLS/Zillow listed: ${mlsListed}`);
+    if (body?.funnelName) noteParts.push(`Funnel: ${String(body.funnelName).trim()}`);
+
+    return {
+      propertyAddress,
+      propertyCity,
+      propertyState: propertyState.toUpperCase(),
+      propertyZip,
+      sellerFirstName,
+      sellerLastName,
+      sellerPhone,
+      sellerEmail,
+      propertyType,
+      timeline: this.mapLeadHouseTimelineToDays(timelineAnswer),
+      conditionLevel: conditionAnswer,
+      ownershipStatus: this.normalizeLeadHouseOwnership(ownershipAnswer),
+      sellerMotivation: motivationAnswer,
+      notes: noteParts.join(' | '),
+    };
+  }
+
+  /**
+   * Convert a LeadHouse "how quickly" answer to an approximate number of days
+   * so the priority score can be computed. Returns undefined when unknown.
+   */
+  private mapLeadHouseTimelineToDays(answer?: string): number | undefined {
+    if (!answer) return undefined;
+    const a = answer.toLowerCase();
+    if (a.includes('asap') || a.includes('immediate') || a.includes('right away')) return 7;
+    if (a.includes('30') || a.includes('1 month') || a.includes('one month')) return 30;
+    if (a.includes('60') || a.includes('2 month')) return 60;
+    if (a.includes('90') || a.includes('3 month')) return 90;
+    if (a.includes('just') || a.includes('curious') || a.includes('exploring') || a.includes('not sure')) return undefined;
+    return undefined;
+  }
+
+  /**
+   * Normalize a LeadHouse "which best describes you" answer into a readable
+   * ownership status that also carries the keyword the authority score looks
+   * for (sole / heir / helping). Falls back to the raw answer.
+   */
+  private normalizeLeadHouseOwnership(answer?: string): string | undefined {
+    if (!answer) return undefined;
+    const a = answer.toLowerCase();
+    if (a.includes('inherit')) return 'Heir (inherited property)';
+    if (a.includes('agent') || a.includes('realtor') || a.includes('wholesal') || a.includes('broker') || a.includes('behalf') || a.includes('someone else') || a.includes('helping')) {
+      return 'Not the owner (helping / agent)';
+    }
+    if (a.includes('spouse') || a.includes('jointly') || a.includes('joint') || a.includes('co-own') || a.includes('together')) {
+      return 'Co-owner';
+    }
+    if (a.includes('purchas') || a.includes('bought') || a.includes('myself') || a.includes('i own') || a.includes('own it')) {
+      return 'Sole owner';
+    }
+    return answer;
+  }
+
+  /**
    * Twilio inbound message webhook
    * Receives incoming SMS messages
    */

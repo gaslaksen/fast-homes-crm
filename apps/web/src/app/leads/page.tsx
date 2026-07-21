@@ -123,6 +123,7 @@ const STATUS_LABELS: Record<string, string> = {
 const SOURCE_LABELS: Record<string, string> = {
   PROPERTY_LEADS: 'PPL',
   GOOGLE_ADS: 'PPC',
+  LEADHOUSE: 'LeadHouse',
   MANUAL: 'Manual',
   DEAL_SEARCH: 'Deal Search',
   OTHER: 'Other',

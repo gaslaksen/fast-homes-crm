@@ -11,6 +11,7 @@ const INACTIVE_STATUSES = ['DEAD', 'SOLD', 'SOLD_LOSS', 'HELD_LONG_TERM', 'CANCE
 const SOURCE_LABELS: Record<string, string> = {
   PROPERTY_LEADS: 'PPL',
   GOOGLE_ADS: 'PPC',
+  LEADHOUSE: 'LeadHouse',
   MANUAL: 'Manual',
   DEAL_SEARCH: 'Deal Search',
   OTHER: 'Other',

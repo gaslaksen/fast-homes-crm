@@ -195,6 +195,7 @@ export default function EditLeadPage() {
                   <option value="MANUAL">Manual</option>
                   <option value="PROPERTY_LEADS">Property Leads</option>
                   <option value="GOOGLE_ADS">Google Ads</option>
+                  <option value="LEADHOUSE">LeadHouse</option>
                   <option value="OTHER">Other</option>
                 </select>
               </div>

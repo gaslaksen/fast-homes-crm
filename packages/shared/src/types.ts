@@ -38,6 +38,7 @@ export const TERMINAL_STATUSES: LeadStatus[] = [
 export enum LeadSource {
   PROPERTY_LEADS = 'PROPERTY_LEADS',
   GOOGLE_ADS = 'GOOGLE_ADS',
+  LEADHOUSE = 'LEADHOUSE',
   MANUAL = 'MANUAL',
   DEAL_SEARCH = 'DEAL_SEARCH',
   OTHER = 'OTHER',

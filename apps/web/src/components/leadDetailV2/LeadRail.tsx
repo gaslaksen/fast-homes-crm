@@ -39,6 +39,7 @@ const SOURCE_OPTIONS: { value: string; label: string }[] = [
   { value: 'MANUAL', label: 'Manual' },
   { value: 'PROPERTY_LEADS', label: 'Property Leads' },
   { value: 'GOOGLE_ADS', label: 'Google Ads' },
+  { value: 'LEADHOUSE', label: 'LeadHouse' },
   { value: 'DEAL_SEARCH', label: 'Deal Search' },
   { value: 'OTHER', label: 'Other' },
 ];
