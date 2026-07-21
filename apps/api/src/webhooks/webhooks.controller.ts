@@ -314,7 +314,7 @@ export class WebhooksController {
    * funnels.
    *
    * Configure the LeadHouse / LeadConnector outbound webhook to POST here:
-   *   https://fast-homesapi-production.up.railway.app/webhooks/leadhouse
+   *   https://api.mydealcore.com/webhooks/leadhouse
    */
   @Post('leadhouse')
   @HttpCode(200)
