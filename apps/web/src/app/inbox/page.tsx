@@ -11,7 +11,7 @@ import type { EmailAction } from '@/components/communications/MessageComposer';
 import MessageComposer from '@/components/communications/MessageComposer';
 import LeadSidePanel from '@/components/leadDetailV2/LeadSidePanel';
 import type { TimelineItem, NoteItem } from '@/components/communications/types';
-import { inboxAPI, leadsAPI, authAPI, type InboxFilter } from '@/lib/api';
+import { inboxAPI, leadsAPI, authAPI, actionsAPI, type InboxFilter } from '@/lib/api';
 import { getLeadAddressLine, getLeadDisplayName } from '@/lib/format';
 
 const POLL_MS = 60_000;
@@ -70,6 +70,10 @@ function InboxWorkspace() {
     unread: 0,
     starred: 0,
   });
+  // Lead ids that "need a reply" (last message inbound, past the reply SLA).
+  // Same rule that feeds the sidebar badge; drives the amber dot in the list so
+  // it's distinct from the teal unread dot.
+  const [needsReplyIds, setNeedsReplyIds] = useState<Set<string>>(new Set());
 
   const [threads, setThreads] = useState<ThreadRow[]>([]);
   const [page, setPage] = useState(1);
@@ -79,6 +83,11 @@ function InboxWorkspace() {
 
   // Deep-linkable selection: /inbox?lead=<id> restores the open conversation.
   const [selectedId, setSelectedId] = useState<string | null>(() => searchParams.get('lead'));
+  // Mirror of selectedId for reads inside loadThreads without stale closures.
+  const selectedIdRef = useRef<string | null>(selectedId);
+  // Skip selection reconciliation on the initial mount so a deep-linked lead
+  // isn't clobbered when it lives outside the first page of the default tab.
+  const didMountRef = useRef(false);
   const [lead, setLead] = useState<any>(null);
   const [timeline, setTimeline] = useState<TimelineItem[]>([]);
   const [notes, setNotes] = useState<NoteItem[]>([]);
@@ -162,10 +171,26 @@ function InboxWorkspace() {
 
   const selected = threads.find((t) => t.leadId === selectedId) || null;
 
+  useEffect(() => {
+    selectedIdRef.current = selectedId;
+  }, [selectedId]);
+
   const refreshCounts = useCallback(() => {
     inboxAPI
       .counts()
       .then((res) => setCounts(res.data))
+      .catch(() => {});
+  }, []);
+
+  const refreshNeedsReply = useCallback(() => {
+    actionsAPI
+      .queue({ category: 'NEEDS_REPLY', limit: 500 })
+      .then((res) => {
+        const ids: string[] = (res.data?.items || [])
+          .map((i: any) => i.leadId)
+          .filter(Boolean);
+        setNeedsReplyIds(new Set(ids));
+      })
       .catch(() => {});
   }, []);
 
@@ -196,7 +221,12 @@ function InboxWorkspace() {
   );
 
   const loadThreads = useCallback(
-    async (opts: { filter: InboxFilter; page: number; append: boolean }) => {
+    async (opts: {
+      filter: InboxFilter;
+      page: number;
+      append: boolean;
+      reconcile?: boolean;
+    }) => {
       if (opts.append) setLoadingMore(true);
       else setLoading(true);
       try {
@@ -209,10 +239,20 @@ function InboxWorkspace() {
         setHasMore(!!res.data?.hasMore);
         setThreads((prev) => (opts.append ? [...prev, ...items] : items));
         if (!opts.append) {
-          // Keep the open conversation across reloads and tab switches (it can
-          // live outside the current page or filter); only auto-pick when
-          // nothing is open yet.
-          setSelectedId((prev) => prev || items[0]?.leadId || null);
+          const cur = selectedIdRef.current;
+          const inList = cur ? items.some((t) => t.leadId === cur) : false;
+          if (opts.reconcile) {
+            // Tab switch: keep the open conversation only if it belongs to the
+            // new tab; otherwise jump to the first item (or clear the pane when
+            // the tab is empty). Prevents a read thread from lingering on the
+            // Unread tab.
+            if (!inList) selectThread(items[0]?.leadId ?? null);
+          } else if (!cur) {
+            // Initial / poll load with nothing open: auto-pick the first.
+            selectThread(items[0]?.leadId ?? null);
+          }
+          // Silent poll reloads keep the current selection even when it lives
+          // outside the current page, so reading isn't interrupted.
         }
       } catch {
         if (!opts.append) setThreads([]);
@@ -221,15 +261,20 @@ function InboxWorkspace() {
         else setLoading(false);
       }
     },
-    [],
+    [selectThread],
   );
 
   // Reload list + counts whenever the active tab changes.
   useEffect(() => {
     setPage(1);
-    loadThreads({ filter, page: 1, append: false });
+    // Reconcile the open conversation against the new tab on every switch, but
+    // not on the first mount (a deep-linked lead may sit outside this tab).
+    const reconcile = didMountRef.current;
+    didMountRef.current = true;
+    loadThreads({ filter, page: 1, append: false, reconcile });
     refreshCounts();
-  }, [filter, loadThreads, refreshCounts]);
+    refreshNeedsReply();
+  }, [filter, loadThreads, refreshCounts, refreshNeedsReply]);
 
   // Poll the active tab + counts.
   useEffect(() => {
@@ -238,6 +283,7 @@ function InboxWorkspace() {
       if (pausePollRef.current) return;
       loadThreads({ filter, page: 1, append: false });
       refreshCounts();
+      refreshNeedsReply();
     };
     const start = () => {
       if (!interval) interval = setInterval(tick, POLL_MS);
@@ -261,7 +307,7 @@ function InboxWorkspace() {
       stop();
       document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [filter, loadThreads, refreshCounts]);
+  }, [filter, loadThreads, refreshCounts, refreshNeedsReply]);
 
   // Load the thread + full lead, and mark it read, when selection changes.
   useEffect(() => {
@@ -489,8 +535,19 @@ function InboxWorkspace() {
                               {threadName(t)}
                             </div>
                             <div className="flex items-center gap-1 flex-shrink-0">
+                              {needsReplyIds.has(t.leadId) && (
+                                <span
+                                  title="Needs reply"
+                                  aria-label="Needs reply"
+                                  className="w-2 h-2 rounded-full bg-amber-500"
+                                />
+                              )}
                               {t.threadUnread && (
-                                <span className="w-2 h-2 rounded-full bg-teal-500" />
+                                <span
+                                  title="Unread"
+                                  aria-label="Unread"
+                                  className="w-2 h-2 rounded-full bg-teal-500"
+                                />
                               )}
                               <span className="text-[10px] text-gray-400 dark:text-gray-500">
                                 {age}
