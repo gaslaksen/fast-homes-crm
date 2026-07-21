@@ -288,6 +288,7 @@ model Lead {
   finalSale           FinalSale?
   aiCompCurations     AiCompCuration[]
   aiArvCalculations   AiArvCalculation[] @relation("LeadAiArvCalculations")
+  foreclosureDetail   ForeclosureDetail?
 
   @@index([organizationId, tier])
   @@index([organizationId, status])
@@ -302,6 +303,76 @@ model Lead {
   @@index([organizationId, stageChangedAt])
   @@index([organizationId, lastMessageAt])
   @@map("leads")
+}
+
+// Foreclosure-specific detail, 1:1 with a Lead whose source = FORECLOSURE.
+// Holds the pre-foreclosure notice facts + skip-trace + derived scoring that
+// power the Foreclosures pipeline tab. Ingested from the Mecklenburg Times RSS
+// feed, uploaded eCourts PDFs, or the initial tracker-sheet import.
+model ForeclosureDetail {
+  id             String   @id @default(cuid())
+  leadId         String   @unique
+  lead           Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  organizationId String?
+
+  // Idempotent-ingestion keys. dedupeUid = "caseNumber|address|saleDate" (from
+  // the offline tracker's uidOf). noticeId = the source notice identifier
+  // (Meck Times detail= number, or eCourts file id).
+  dedupeUid      String
+  noticeId       String?
+
+  // Notice
+  noticeType     String?  // ForeclosureNoticeType
+  noticeUrl      String?
+  caseNumber     String?
+  county         String?
+  trustee        String?
+  rawSnippet     String?
+  sourceKind     String?  // ForeclosureSourceKind
+
+  // Facts
+  saleDate       DateTime?
+  hearingDate    DateTime?
+  loanDate       DateTime?
+  loanAmount     Float?
+  assessedValue  Float?
+
+  // Derived / workflow
+  priority       String?  @default("LOW") // ForeclosurePriority
+  leadScore      Int?     @default(0)
+  equityPct      Float?
+  equitySpread   Float?
+  workStatus     String?  @default("NOT_CONTACTED") // ForeclosureWorkStatus
+  doNotCall      Boolean  @default(false)
+
+  // Owner / skip trace
+  countyOwner    String?
+  ownerOccupied  String?  // 'Y' | 'N' | null
+  mailingAddress String?
+  mailCity       String?
+  mailState      String?
+  mailZip        String?
+  skipStatus     String?
+  phone2         String?  // Lead.sellerPhone holds phone1; email on Lead
+
+  // External links
+  parcelId       String?
+  parcelUrl      String?
+  parcelType     String?  // 'exact' | 'county' | 'search'
+  parcelLabel    String?
+  zillowUrl      String?
+  realtorQuery   String?
+  realtorZip     String?
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([organizationId, dedupeUid])
+  @@unique([organizationId, noticeId])
+  @@index([organizationId, priority])
+  @@index([organizationId, saleDate])
+  @@index([organizationId, workStatus])
+  @@map("foreclosure_details")
 }
 
 model ConversationView {

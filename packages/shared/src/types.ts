@@ -41,7 +41,41 @@ export enum LeadSource {
   LEADHOUSE = 'LEADHOUSE',
   MANUAL = 'MANUAL',
   DEAL_SEARCH = 'DEAL_SEARCH',
+  FORECLOSURE = 'FORECLOSURE',
   OTHER = 'OTHER',
+}
+
+// Foreclosure lead priority (from the pre-foreclosure notice triage rules).
+export enum ForeclosurePriority {
+  HIGH = 'HIGH',
+  MEDIUM = 'MEDIUM',
+  LOW = 'LOW',
+}
+
+// Foreclosure notice type parsed from the public notice / eCourts filing.
+export enum ForeclosureNoticeType {
+  MORTGAGE_FORECLOSURE = 'mortgage_foreclosure',
+  HOA_LIEN = 'hoa_lien',
+  TAX_FORECLOSURE = 'tax_foreclosure',
+  SHERIFF_SALE = 'sheriff_sale',
+  PRE_FORECLOSURE_HEARING = 'pre_foreclosure_hearing',
+}
+
+// How a foreclosure lead entered Dealcore.
+export enum ForeclosureSourceKind {
+  RSS = 'rss',
+  PDF = 'pdf',
+  IMPORT = 'import',
+  MANUAL = 'manual',
+}
+
+// Per-lead work status on the Foreclosures board (mirrors the offline tracker).
+export enum ForeclosureWorkStatus {
+  NOT_CONTACTED = 'NOT_CONTACTED',
+  IN_CONVERSATION = 'IN_CONVERSATION',
+  APPOINTMENT_SET = 'APPOINTMENT_SET',
+  UNDER_CONTRACT = 'UNDER_CONTRACT',
+  DEAD = 'DEAD',
 }
 
 // Score Bands (Council Model)
