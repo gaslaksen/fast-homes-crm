@@ -11,6 +11,9 @@ import {
   parseDateISO,
   isoToDate,
   normalizePhoneDigits,
+  phoneTypeOf,
+  isoWeekKey,
+  touchDayCount,
   zillowUrlOf,
   realtorQueryOf,
   parcelLinkFor,
@@ -131,6 +134,8 @@ export class ForeclosuresService {
             mailZip: input.mailZip || null,
             skipStatus: input.skipStatus || null,
             phone2,
+            phone1Type: input.phone1Type || phoneTypeOf(input.phone1),
+            phone2Type: input.phone2Type || phoneTypeOf(input.phone2),
             parcelId: derived.parcel.parcelId || null,
             parcelUrl: derived.parcel.parcelUrl,
             parcelType: derived.parcel.parcelType,
@@ -261,24 +266,45 @@ export class ForeclosuresService {
   /** Update workflow fields on a foreclosure lead (work status, DNC, etc). */
   async update(
     id: string,
-    patch: { workStatus?: string; doNotCall?: boolean; notes?: string; assignedToUserId?: string | null },
+    patch: {
+      workStatus?: string;
+      doNotCall?: boolean;
+      notes?: string;
+      callNotes?: string;
+      touchDays?: Record<string, boolean>;
+      assignedToUserId?: string | null;
+    },
     organizationId?: string,
   ) {
     const lead = await this.prisma.lead.findFirst({
       where: { id, source: LeadSource.FORECLOSURE, ...(organizationId ? { organizationId } : {}) },
-      select: { id: true },
+      select: { id: true, foreclosureDetail: { select: { touchDays: true, touchWeek: true, touchCount: true } } },
     });
     if (!lead) return null;
 
     const detailPatch: any = {};
     if (patch.workStatus !== undefined) detailPatch.workStatus = patch.workStatus;
     if (patch.doNotCall !== undefined) detailPatch.doNotCall = patch.doNotCall;
+    if (patch.callNotes !== undefined) detailPatch.callNotes = patch.callNotes;
+
+    // Weekly touch checkmarks. If the stored checks belong to a prior ISO
+    // week, fold them into the running touchCount before applying this week's.
+    if (patch.touchDays !== undefined) {
+      const week = isoWeekKey();
+      const d = lead.foreclosureDetail;
+      if (d && d.touchWeek && d.touchWeek !== week) {
+        detailPatch.touchCount = (d.touchCount || 0) + touchDayCount(d.touchDays);
+      }
+      detailPatch.touchDays = patch.touchDays;
+      detailPatch.touchWeek = week;
+    }
 
     const leadPatch: any = {};
     if (patch.assignedToUserId !== undefined) leadPatch.assignedToUserId = patch.assignedToUserId;
     // Mirror DEAD work status onto the Lead status so it drops out of pipelines.
     if (patch.workStatus === 'DEAD') leadPatch.status = 'DEAD';
     if (patch.doNotCall !== undefined) leadPatch.doNotContact = patch.doNotCall;
+    if (patch.touchDays !== undefined) leadPatch.lastTouchedAt = new Date();
 
     await this.prisma.lead.update({
       where: { id },
@@ -317,6 +343,17 @@ export class ForeclosuresService {
   private toDto(lead: any) {
     const d = lead.foreclosureDetail || {};
     const saleIso = d.saleDate ? new Date(d.saleDate).toISOString().slice(0, 10) : null;
+
+    // Weekly touch state: report a prior week's leftover checks as part of the
+    // running total, and an empty current week (write-side rollover persists
+    // this the next time a day is toggled).
+    const week = isoWeekKey();
+    const stale = d.touchWeek && d.touchWeek !== week;
+    const touchDays = stale ? {} : (d.touchDays || {});
+    // Stale days count as accumulated history; current days as this week's.
+    // Either way the total is the running count plus whatever is stored.
+    const totalTouches = (d.touchCount || 0) + touchDayCount(d.touchDays);
+
     return {
       id: lead.id,
       address: lead.propertyAddress,
@@ -348,6 +385,11 @@ export class ForeclosuresService {
       equitySpread: d.equitySpread ?? null,
       workStatus: d.workStatus || 'NOT_CONTACTED',
       doNotCall: !!d.doNotCall,
+      callNotes: d.callNotes || '',
+      touchDays,
+      totalTouches,
+      phone1Type: d.phone1Type || null,
+      phone2Type: d.phone2Type || null,
       ownerOccupied: d.ownerOccupied || null,
       mailingAddress: d.mailingAddress || null,
       mailCity: d.mailCity || null,

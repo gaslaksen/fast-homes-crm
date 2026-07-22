@@ -344,6 +344,14 @@ model ForeclosureDetail {
   equitySpread   Float?
   workStatus     String?  @default("NOT_CONTACTED") // ForeclosureWorkStatus
   doNotCall      Boolean  @default(false)
+  callNotes      String?
+
+  // Weekly touch tracking (mirrors the offline tracker): touchDays holds this
+  // week's mon-fri checkmarks, touchWeek is the ISO week key they belong to,
+  // touchCount accumulates checks from prior (rolled-over) weeks.
+  touchDays      Json?
+  touchWeek      String?
+  touchCount     Int      @default(0)
 
   // Owner / skip trace
   countyOwner    String?
@@ -354,6 +362,8 @@ model ForeclosureDetail {
   mailZip        String?
   skipStatus     String?
   phone2         String?  // Lead.sellerPhone holds phone1; email on Lead
+  phone1Type     String?  // 'Mobile' | 'Landline' | null
+  phone2Type     String?
 
   // External links
   parcelId       String?

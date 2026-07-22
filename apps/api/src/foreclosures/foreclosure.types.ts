@@ -27,6 +27,8 @@ export interface ForeclosureLeadInput {
   countyOwner?: string;
   phone1?: string;
   phone2?: string;
+  phone1Type?: string;
+  phone2Type?: string;
   email?: string;
   ownerOccupied?: string; // 'Y' | 'N'
   mailingAddress?: string;

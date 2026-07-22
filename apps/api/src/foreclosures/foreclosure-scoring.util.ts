@@ -111,6 +111,33 @@ export function normalizePhoneDigits(s: any): string | null {
   return digits.slice(-10);
 }
 
+/** Phone line type embedded in a raw cell like "7045551234 (Mobile)". */
+export function phoneTypeOf(s: any): string | null {
+  if (!s) return null;
+  if (/mobile/i.test(String(s))) return 'Mobile';
+  if (/land/i.test(String(s))) return 'Landline';
+  return null;
+}
+
+/**
+ * ISO week key for weekly touch tracking, e.g. "2026-W30". Ported from the
+ * offline tracker's isoWeek() so rollover behavior matches.
+ */
+export function isoWeekKey(date = new Date()): string {
+  const dt = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const day = dt.getUTCDay() || 7;
+  dt.setUTCDate(dt.getUTCDate() + 4 - day);
+  const ys = new Date(Date.UTC(dt.getUTCFullYear(), 0, 1));
+  const wk = Math.ceil((((dt.getTime() - ys.getTime()) / 86400000) + 1) / 7);
+  return `${dt.getUTCFullYear()}-W${String(wk).padStart(2, '0')}`;
+}
+
+/** Count of checked days in a touchDays object like {mon:true,tue:false}. */
+export function touchDayCount(days: any): number {
+  if (!days || typeof days !== 'object') return 0;
+  return Object.values(days).filter(Boolean).length;
+}
+
 /** State for a city: SC when in the SC set, else NC. */
 export function stateForCity(city?: string): 'NC' | 'SC' {
   return SC_CITIES.has(String(city || '').toUpperCase()) ? 'SC' : 'NC';
