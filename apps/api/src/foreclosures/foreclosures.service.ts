@@ -193,21 +193,42 @@ export class ForeclosuresService {
     if (filters.noticeType) detailWhere.noticeType = filters.noticeType;
     if (filters.occupancy === 'owner') detailWhere.ownerOccupied = 'Y';
     if (filters.occupancy === 'absentee') detailWhere.ownerOccupied = 'N';
-    if (filters.equityMin != null) detailWhere.equityPct = { gte: filters.equityMin };
-    if (filters.saleWithinDays != null) {
-      const until = new Date();
-      until.setDate(until.getDate() + filters.saleWithinDays);
-      detailWhere.saleDate = { gte: new Date(new Date().setHours(0, 0, 0, 0)), lte: until };
+
+    // Equity bands, mirroring the tracker: 50%+, 30-50, 0-30, negative.
+    switch (filters.equityBand) {
+      case '50': detailWhere.equityPct = { gte: 50 }; break;
+      case '30': detailWhere.equityPct = { gte: 30, lt: 50 }; break;
+      case '0': detailWhere.equityPct = { gte: 0, lt: 30 }; break;
+      case 'neg': detailWhere.equityPct = { lt: 0 }; break;
     }
+
+    // Ownership length: loan originated at least N years ago.
+    if (filters.ownedYearsMin) {
+      const cutoff = new Date();
+      cutoff.setFullYear(cutoff.getFullYear() - filters.ownedYearsMin);
+      detailWhere.loanDate = { lte: cutoff };
+    }
+
+    // Sale window: overdue, or coming up within N days.
+    const todayStart = new Date(new Date().setHours(0, 0, 0, 0));
+    if (filters.saleWindow === 'over') {
+      detailWhere.saleDate = { lt: todayStart };
+    } else if (filters.saleWindow && /^\d+$/.test(filters.saleWindow)) {
+      const until = new Date();
+      until.setDate(until.getDate() + Number(filters.saleWindow));
+      detailWhere.saleDate = { gte: todayStart, lte: until };
+    }
+
+    if (filters.valueMin) detailWhere.assessedValue = { gte: filters.valueMin };
+    if (filters.hideDead) detailWhere.workStatus = filters.workStatus || { not: 'DEAD' };
+    if (filters.hideDnc) detailWhere.doNotCall = false;
 
     const where: any = {
       source: LeadSource.FORECLOSURE,
       ...(filters.organizationId ? { organizationId: filters.organizationId } : {}),
       foreclosureDetail: { is: detailWhere },
     };
-    if (!filters.includeDead) {
-      where.foreclosureDetail.is = { ...detailWhere, workStatus: { not: 'DEAD' } };
-    }
+    if (filters.city) where.propertyCity = { equals: filters.city, mode: 'insensitive' };
     if (filters.search) {
       const q = filters.search.trim();
       where.OR = [
@@ -224,7 +245,7 @@ export class ForeclosuresService {
 
     const orderBy = this.orderByFor(filters.sort);
 
-    const [rows, total] = await Promise.all([
+    const [rows, total, cityRows] = await Promise.all([
       this.prisma.lead.findMany({
         where,
         include: { foreclosureDetail: true },
@@ -233,10 +254,26 @@ export class ForeclosuresService {
         take: pageSize,
       }),
       this.prisma.lead.count({ where }),
+      // Distinct cities across the whole org's foreclosure set (unfiltered),
+      // for the city filter dropdown.
+      this.prisma.lead.findMany({
+        where: {
+          source: LeadSource.FORECLOSURE,
+          ...(filters.organizationId ? { organizationId: filters.organizationId } : {}),
+        },
+        select: { propertyCity: true },
+        distinct: ['propertyCity'],
+      }),
     ]);
+
+    const cities = cityRows
+      .map((c) => c.propertyCity)
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
 
     return {
       leads: rows.map((r) => this.toDto(r)),
+      cities,
       pagination: { page, pageSize, total, totalPages: Math.ceil(total / pageSize) },
     };
   }

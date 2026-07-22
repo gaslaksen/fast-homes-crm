@@ -57,11 +57,15 @@ export interface ForeclosureListFilters {
   priority?: string;
   noticeType?: string;
   workStatus?: string;
+  city?: string;
   occupancy?: string; // 'owner' | 'absentee'
-  equityMin?: number;
-  saleWithinDays?: number;
+  equityBand?: string; // '50' (50%+) | '30' (30-50) | '0' (0-30) | 'neg'
+  ownedYearsMin?: number; // loan originated at least N years ago
+  saleWindow?: string; // 'over' (past due) | '7' | '14' | '30' (days out)
+  valueMin?: number; // assessed value floor
+  hideDead?: boolean;
+  hideDnc?: boolean;
   sort?: string; // 'sale' | 'score' | 'equity' | 'added'
-  includeDead?: boolean;
   page?: number;
   pageSize?: number;
 }
