@@ -57,7 +57,12 @@ export class AuthController {
   async me(@Headers('authorization') authHeader: string) {
     const token = authHeader?.replace('Bearer ', '');
     if (!token) throw new UnauthorizedException('No token');
-    return this.authService.verifyToken(token);
+    try {
+      return await this.authService.verifyToken(token);
+    } catch (err: any) {
+      // 401 (not 500) so the web client clears the stale session and redirects to login
+      throw new UnauthorizedException(err.message);
+    }
   }
 
   // ── Team management (admin only) ──────────────────────────────────────────

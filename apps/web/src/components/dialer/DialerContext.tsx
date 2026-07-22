@@ -106,7 +106,22 @@ export function DialerProvider({ children }: { children: ReactNode }) {
           }
         });
 
-        device.on('error', (e: any) => {
+        device.on('error', async (e: any) => {
+          // 20101/20104: access token invalid/expired (e.g. laptop slept past the
+          // 1h TTL so tokenWillExpire never fired). Refresh and re-register.
+          if (e?.code === 20101 || e?.code === 20104) {
+            try {
+              const r = await callsAPI.twilioToken();
+              if (r.data?.token) {
+                device.updateToken(r.data.token);
+                if (device.state !== 'registered') await device.register();
+                setError(null);
+                return;
+              }
+            } catch {
+              /* fall through to the visible error */
+            }
+          }
           setError(e?.message || 'Device error');
         });
 

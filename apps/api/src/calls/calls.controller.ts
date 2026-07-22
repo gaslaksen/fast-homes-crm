@@ -10,6 +10,7 @@ import {
   Res,
   HttpCode,
   Logger,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 import * as jwt from 'jsonwebtoken';
@@ -47,7 +48,8 @@ export class CallsController {
   ) {
     const { userId } = this.decodeToken(authHeader);
     if (!userId) {
-      return { configured: false, error: 'Not authenticated' };
+      // 401 so the web client clears the stale session instead of showing "not configured"
+      throw new UnauthorizedException('Not authenticated');
     }
     if (!this.twilioVoiceService.isConfigured()) {
       return { configured: false };
@@ -169,7 +171,8 @@ export class CallsController {
   private decodeToken(authHeader?: string): { userId?: string; organizationId?: string } {
     try {
       const token = authHeader?.replace('Bearer ', '');
-      return (jwt.decode(token) as any) || {};
+      // verify (not decode): reject expired tokens and forged/foreign signatures
+      return (jwt.verify(token || '', process.env.JWT_SECRET || 'dev-secret-key') as any) || {};
     } catch {
       return {};
     }
