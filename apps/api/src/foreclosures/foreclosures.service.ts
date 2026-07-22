@@ -187,10 +187,16 @@ export class ForeclosuresService {
     const page = Math.max(1, filters.page || 1);
     const pageSize = Math.min(200, filters.pageSize || 60);
 
+    // Chip filters arrive as comma-separated lists (multi-select).
+    const asList = (v?: string) => String(v || '').split(',').map((s) => s.trim()).filter(Boolean);
+
     const detailWhere: any = {};
-    if (filters.priority) detailWhere.priority = filters.priority.toUpperCase();
-    if (filters.workStatus) detailWhere.workStatus = filters.workStatus;
-    if (filters.noticeType) detailWhere.noticeType = filters.noticeType;
+    const priorities = asList(filters.priority).map((p) => p.toUpperCase());
+    if (priorities.length) detailWhere.priority = { in: priorities };
+    const workStatuses = asList(filters.workStatus);
+    if (workStatuses.length) detailWhere.workStatus = { in: workStatuses };
+    const noticeTypes = asList(filters.noticeType);
+    if (noticeTypes.length) detailWhere.noticeType = { in: noticeTypes };
     if (filters.occupancy === 'owner') detailWhere.ownerOccupied = 'Y';
     if (filters.occupancy === 'absentee') detailWhere.ownerOccupied = 'N';
 
@@ -220,7 +226,7 @@ export class ForeclosuresService {
     }
 
     if (filters.valueMin) detailWhere.assessedValue = { gte: filters.valueMin };
-    if (filters.hideDead) detailWhere.workStatus = filters.workStatus || { not: 'DEAD' };
+    if (filters.hideDead && !workStatuses.length) detailWhere.workStatus = { not: 'DEAD' };
     if (filters.hideDnc) detailWhere.doNotCall = false;
 
     const where: any = {
@@ -352,6 +358,22 @@ export class ForeclosuresService {
     });
 
     return this.get(id, organizationId);
+  }
+
+  /**
+   * Bulk delete foreclosure leads. Scoped to the org and to source=FORECLOSURE
+   * so stray ids cannot touch other pipelines; ForeclosureDetail rows cascade.
+   */
+  async bulkDelete(ids: string[], organizationId?: string): Promise<{ deleted: number }> {
+    if (!ids?.length) return { deleted: 0 };
+    const result = await this.prisma.lead.deleteMany({
+      where: {
+        id: { in: ids },
+        source: LeadSource.FORECLOSURE,
+        ...(organizationId ? { organizationId } : {}),
+      },
+    });
+    return { deleted: result.count };
   }
 
   /** Aggregate stat tiles for the top of the Foreclosures tab. */
