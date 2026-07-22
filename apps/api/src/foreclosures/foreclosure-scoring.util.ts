@@ -180,9 +180,10 @@ export interface ParcelLink {
 
 /**
  * Build a parcel link without any network I/O. Mecklenburg addresses get a
- * Spatialest search link; known counties get their GIS site; everything else
- * gets a Google parcel-records search. Exact PID resolution (Mecklenburg GIS
- * MasterAddress query) happens later in the skip-trace enrich step.
+ * Spatialest search link; everything else gets a Google parcel-records search
+ * (county GIS homepages proved useless as card links since they cannot deep
+ * link an address). Exact PID resolution (Mecklenburg GIS MasterAddress
+ * query) happens later in the skip-trace enrich step.
  */
 export function parcelLinkFor(address?: string, city?: string): ParcelLink {
   const cU = String(city || '').toUpperCase().trim();
@@ -194,10 +195,6 @@ export function parcelLinkFor(address?: string, city?: string): ParcelLink {
       parcelType: 'search',
       parcelLabel: 'Search address',
     };
-  }
-  const county = CITY_COUNTY[cU];
-  if (county && COUNTY_GIS[county]) {
-    return { parcelId: '', parcelUrl: COUNTY_GIS[county], parcelType: 'county', parcelLabel: `${county} County GIS` };
   }
   return {
     parcelId: '',

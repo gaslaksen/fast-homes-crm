@@ -163,6 +163,7 @@ export class ForeclosureImportService {
   private normalizeNoticeType(raw: string): string {
     const t = raw.toLowerCase().replace(/\s+/g, '_');
     if (!t) return '';
+    if (t.includes('auction')) return 'auction_com_foreclosure';
     if (t.includes('hoa') || t.includes('lien')) return 'hoa_lien';
     if (t.includes('tax')) return 'tax_foreclosure';
     if (t.includes('sheriff')) return 'sheriff_sale';

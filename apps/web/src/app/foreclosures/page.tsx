@@ -62,15 +62,6 @@ const WORK_STATUSES = [
   { value: 'DEAD', label: 'Dead' },
 ];
 
-const NOTICE_TYPES = [
-  { value: '', label: 'All notices' },
-  { value: 'mortgage_foreclosure', label: 'Mortgage Foreclosure' },
-  { value: 'hoa_lien', label: 'HOA / Lien' },
-  { value: 'tax_foreclosure', label: 'Tax Foreclosure' },
-  { value: 'sheriff_sale', label: 'Sheriff Sale' },
-  { value: 'pre_foreclosure_hearing', label: 'Pre-Foreclosure Hearing' },
-];
-
 const DAYS = ['mon', 'tue', 'wed', 'thu', 'fri'] as const;
 const DAY_LABELS = ['M', 'T', 'W', 'T', 'F'];
 
@@ -88,7 +79,7 @@ function fmtDateUS(iso: string | null): string {
   return m ? `${+m[2]}/${+m[3]}/${m[1]}` : iso;
 }
 function noticeLabel(t: string | null): string {
-  return (t || '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  return (t || '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()).replace('Com ', '');
 }
 function scoreClass(s: number): string {
   if (s >= 65) return 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 border-green-300 dark:border-green-700';
@@ -117,6 +108,12 @@ function copyToClipboard(text: string) {
   if (navigator.clipboard?.writeText) {
     navigator.clipboard.writeText(text).catch(() => {});
   }
+}
+/** Parcel link: exact PID uses the stored deep link; everything else gets a
+ *  Google parcel-records search (county GIS homepages cannot deep link). */
+function parcelHref(l: FclLead): string {
+  if (l.parcelType === 'exact' && l.parcelUrl) return l.parcelUrl;
+  return `https://www.google.com/search?q=${encodeURIComponent(`${l.address} ${l.city || ''} parcel property records`)}`;
 }
 // Realtor.com live resolver (exact property via the rdc geo suggest API),
 // ported from the tracker's openRealtor(). Falls back to a zip search.
@@ -154,7 +151,7 @@ function leadCsvRow(l: FclLead): string[] {
     l.equityPct == null ? '' : String(l.equityPct), l.equitySpread == null ? '' : String(l.equitySpread),
     l.ownerOccupied || '', String(l.score),
     WORK_STATUSES.find((s) => s.value === l.workStatus)?.label || l.workStatus,
-    l.doNotCall ? 'Y' : '', l.callNotes || '', l.zillowUrl || '', l.parcelUrl || '', l.noticeUrl || '',
+    l.doNotCall ? 'Y' : '', l.callNotes || '', l.zillowUrl || '', parcelHref(l), l.noticeUrl || '',
   ];
 }
 
@@ -205,7 +202,10 @@ function CopyBtn({ text, label }: { text: string; label: string }) {
     <button
       onClick={(e) => { e.preventDefault(); e.stopPropagation(); copyToClipboard(text); setCopied(true); setTimeout(() => setCopied(false), 1100); }}
       title={`Copy ${label}`}
-      className={`ml-1 text-xs px-1 rounded transition-colors ${copied ? 'text-green-500' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'}`}
+      className={`ml-1.5 flex-shrink-0 w-7 h-7 flex items-center justify-center rounded-md border text-sm transition-colors ${
+        copied
+          ? 'text-green-500 border-green-400 bg-green-50 dark:bg-green-900/20'
+          : 'text-gray-400 dark:text-gray-500 border-gray-200 dark:border-gray-700 hover:text-gray-700 dark:hover:text-gray-200 hover:border-gray-400 dark:hover:border-gray-500'}`}
     >
       {copied ? '✓' : '⧉'}
     </button>
@@ -219,18 +219,25 @@ function SectionLabel({ children, className }: { children: React.ReactNode; clas
 // ─── Page ─────────────────────────────────────────────────────────────────────
 export default function ForeclosuresPage() {
   const [leads, setLeads] = useState<FclLead[]>([]);
+  const [cities, setCities] = useState<string[]>([]);
   const [stats, setStats] = useState({ total: 0, high: 0, soon: 0, highEquity: 0 });
   const [loading, setLoading] = useState(true);
   const [pagination, setPagination] = useState({ page: 1, pageSize: 60, total: 0, totalPages: 1 });
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
-  // Filters
+  // Filters (mirroring the offline tracker's filter bar)
   const [search, setSearch] = useState('');
   const [priority, setPriority] = useState('');
+  const [workStatus, setWorkStatus] = useState('');
   const [noticeType, setNoticeType] = useState('');
+  const [city, setCity] = useState('');
+  const [equityBand, setEquityBand] = useState('');
+  const [ownedYearsMin, setOwnedYearsMin] = useState('');
+  const [saleWindow, setSaleWindow] = useState('');
   const [occupancy, setOccupancy] = useState('');
-  const [equityMin, setEquityMin] = useState('');
-  const [saleWithinDays, setSaleWithinDays] = useState('');
+  const [valueMin, setValueMin] = useState('');
+  const [hideDead, setHideDead] = useState(false);
+  const [hideDnc, setHideDnc] = useState(false);
   const [sort, setSort] = useState('sale');
   const [page, setPage] = useState(1);
 
@@ -254,19 +261,26 @@ export default function ForeclosuresPage() {
       const params: Record<string, string> = { sort, page: String(page), pageSize: '60' };
       if (search) params.search = search;
       if (priority) params.priority = priority;
+      if (workStatus) params.workStatus = workStatus;
       if (noticeType) params.noticeType = noticeType;
+      if (city) params.city = city;
+      if (equityBand) params.equityBand = equityBand;
+      if (ownedYearsMin) params.ownedYearsMin = ownedYearsMin;
+      if (saleWindow) params.saleWindow = saleWindow;
       if (occupancy) params.occupancy = occupancy;
-      if (equityMin) params.equityMin = equityMin;
-      if (saleWithinDays) params.saleWithinDays = saleWithinDays;
+      if (valueMin) params.valueMin = valueMin;
+      if (hideDead) params.hideDead = 'true';
+      if (hideDnc) params.hideDnc = 'true';
       const res = await foreclosuresAPI.list(params);
       setLeads(res.data.leads || []);
+      setCities(res.data.cities || []);
       setPagination(res.data.pagination || { page: 1, pageSize: 60, total: 0, totalPages: 1 });
     } catch (e: any) {
       if (e.name !== 'CanceledError') showToast('Failed to load foreclosures', true);
     } finally {
       setLoading(false);
     }
-  }, [search, priority, noticeType, occupancy, equityMin, saleWithinDays, sort, page]);
+  }, [search, priority, workStatus, noticeType, city, equityBand, ownedYearsMin, saleWindow, occupancy, valueMin, hideDead, hideDnc, sort, page]);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -288,7 +302,7 @@ export default function ForeclosuresPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [search, priority, noticeType, occupancy, equityMin, saleWithinDays, sort]);
+  }, [search, priority, workStatus, noticeType, city, equityBand, ownedYearsMin, saleWindow, occupancy, valueMin, hideDead, hideDnc, sort]);
 
   const updateLead = async (id: string, patch: any, localPatch?: any) => {
     setLeads((prev) => prev.map((l) => (l.id === id ? { ...l, ...(localPatch || patch) } : l)));
@@ -305,6 +319,16 @@ export default function ForeclosuresPage() {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
+      return next;
+    });
+  };
+
+  const selectAllShown = () => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      const allSelected = leads.every((l) => next.has(l.id));
+      if (allSelected) leads.forEach((l) => next.delete(l.id));
+      else leads.forEach((l) => next.add(l.id));
       return next;
     });
   };
@@ -363,13 +387,19 @@ export default function ForeclosuresPage() {
   const resetFilters = () => {
     setSearch('');
     setPriority('');
+    setWorkStatus('');
     setNoticeType('');
+    setCity('');
+    setEquityBand('');
+    setOwnedYearsMin('');
+    setSaleWindow('');
     setOccupancy('');
-    setEquityMin('');
-    setSaleWithinDays('');
+    setValueMin('');
+    setHideDead(false);
+    setHideDnc(false);
   };
 
-  const anyFilter = search || priority || noticeType || occupancy || equityMin || saleWithinDays;
+  const anyFilter = search || priority || workStatus || noticeType || city || equityBand || ownedYearsMin || saleWindow || occupancy || valueMin || hideDead || hideDnc;
   const selectedLeads = leads.filter((l) => selected.has(l.id));
 
   return (
@@ -405,76 +435,114 @@ export default function ForeclosuresPage() {
           <StatCard label="Total leads" value={stats.total} />
           <StatCard label="High priority" value={stats.high} accent="text-red-600 dark:text-red-400" />
           <StatCard label="Sale within 14d" value={stats.soon} accent="text-amber-600 dark:text-amber-400" />
-          <StatCard label="High equity (40%+)" value={stats.highEquity} accent="text-green-600 dark:text-green-400" />
+          <StatCard label="40%+ equity" value={stats.highEquity} accent="text-green-600 dark:text-green-400" />
         </div>
 
-        {/* Controls */}
-        <div className="flex flex-col gap-3 mb-4">
-          <div className="flex gap-2 flex-wrap items-center">
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search address, owner, case number, email..."
-              className="input flex-1 min-w-[220px]"
-            />
-            <select value={sort} onChange={(e) => setSort(e.target.value)} className="input w-auto">
-              <option value="sale">Sort: Sale date</option>
-              <option value="score">Sort: Lead score</option>
-              <option value="equity">Sort: Equity %</option>
-              <option value="added">Sort: Recently added</option>
-            </select>
-            <select value={noticeType} onChange={(e) => setNoticeType(e.target.value)} className="input w-auto">
-              {NOTICE_TYPES.map((n) => <option key={n.value} value={n.value}>{n.label}</option>)}
-            </select>
-            <select value={equityMin} onChange={(e) => setEquityMin(e.target.value)} className="input w-auto">
-              <option value="">Any equity</option>
-              <option value="20">Equity 20%+</option>
-              <option value="40">Equity 40%+</option>
-              <option value="50">Equity 50%+</option>
-            </select>
-            <select value={saleWithinDays} onChange={(e) => setSaleWithinDays(e.target.value)} className="input w-auto">
-              <option value="">Any sale date</option>
-              <option value="7">Sale within 7d</option>
-              <option value="14">Sale within 14d</option>
-              <option value="30">Sale within 30d</option>
-            </select>
-            {anyFilter && (
-              <button onClick={resetFilters} className="btn btn-secondary btn-sm">Reset</button>
-            )}
-          </div>
-          <div className="flex gap-2 flex-wrap items-center">
-            <span className="text-[11px] text-gray-400 dark:text-gray-500 uppercase tracking-wide">Priority</span>
-            {['HIGH', 'MEDIUM', 'LOW'].map((p) => (
-              <Chip key={p} active={priority === p} onClick={() => setPriority(priority === p ? '' : p)}
-                activeClass={p === 'HIGH' ? 'bg-red-600 text-white border-red-600' : p === 'MEDIUM' ? 'bg-amber-500 text-white border-amber-500' : 'bg-blue-600 text-white border-blue-600'}>
-                {p.charAt(0) + p.slice(1).toLowerCase()}
-              </Chip>
-            ))}
-            <span className="w-px h-4 bg-gray-200 dark:bg-gray-700 mx-1" />
-            <span className="text-[11px] text-gray-400 dark:text-gray-500 uppercase tracking-wide">Occupancy</span>
-            <Chip active={occupancy === 'absentee'} onClick={() => setOccupancy(occupancy === 'absentee' ? '' : 'absentee')}>Absentee</Chip>
-            <Chip active={occupancy === 'owner'} onClick={() => setOccupancy(occupancy === 'owner' ? '' : 'owner')}>Owner-occupied</Chip>
-          </div>
+        {/* Search + sort */}
+        <div className="flex gap-2 flex-wrap items-center mb-3">
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search address, owner, case number, email..."
+            className="input flex-1 min-w-[220px]"
+          />
+          <select value={sort} onChange={(e) => setSort(e.target.value)} className="input w-auto">
+            <option value="sale">Sort: Sale date</option>
+            <option value="score">Sort: Lead score</option>
+            <option value="equity">Sort: Equity %</option>
+            <option value="added">Sort: Recently added</option>
+          </select>
         </div>
 
-        {/* Count */}
-        <div className="text-xs text-gray-500 dark:text-gray-400 mb-3 flex justify-between">
-          <span>{loading ? 'Loading...' : `${pagination.total} lead${pagination.total === 1 ? '' : 's'}`}</span>
+        {/* Quick filter chips (priority / status / notice type) */}
+        <div className="flex gap-2 flex-wrap items-center mb-2">
+          <span className="text-[11px] text-gray-400 dark:text-gray-500 uppercase tracking-wide">Quick filters</span>
+          {['HIGH', 'MEDIUM', 'LOW'].map((p) => (
+            <Chip key={p} active={priority === p} onClick={() => setPriority(priority === p ? '' : p)}
+              activeClass={p === 'HIGH' ? 'bg-red-600 text-white border-red-600' : p === 'MEDIUM' ? 'bg-amber-500 text-white border-amber-500' : 'bg-blue-600 text-white border-blue-600'}>
+              {p.charAt(0) + p.slice(1).toLowerCase()}
+            </Chip>
+          ))}
+          <span className="w-px h-4 bg-gray-200 dark:bg-gray-700 mx-1" />
+          {[['IN_CONVERSATION', 'In Conversation'], ['APPOINTMENT_SET', 'Appointment Set'], ['UNDER_CONTRACT', 'Under Contract']].map(([v, label]) => (
+            <Chip key={v} active={workStatus === v} onClick={() => setWorkStatus(workStatus === v ? '' : v)}>{label}</Chip>
+          ))}
+          <span className="w-px h-4 bg-gray-200 dark:bg-gray-700 mx-1" />
+          {[['pre_foreclosure_hearing', 'Pre-Foreclosure'], ['mortgage_foreclosure', 'Mortgage FC'], ['auction_com_foreclosure', 'Auction FC']].map(([v, label]) => (
+            <Chip key={v} active={noticeType === v} onClick={() => setNoticeType(noticeType === v ? '' : v)}>{label}</Chip>
+          ))}
+        </div>
+
+        {/* Filter selects (city / equity / owned / sale / occupancy / value / flags) */}
+        <div className="flex gap-2 flex-wrap items-center mb-4">
+          <span className="text-[11px] text-gray-400 dark:text-gray-500 uppercase tracking-wide">Filters</span>
+          <select value={city} onChange={(e) => setCity(e.target.value)} className="input w-auto py-1.5 text-sm">
+            <option value="">All cities</option>
+            {cities.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+          <select value={equityBand} onChange={(e) => setEquityBand(e.target.value)} className="input w-auto py-1.5 text-sm">
+            <option value="">Any equity</option>
+            <option value="50">Equity 50%+</option>
+            <option value="30">Equity 30-50%</option>
+            <option value="0">Equity 0-30%</option>
+            <option value="neg">Negative equity</option>
+          </select>
+          <select value={ownedYearsMin} onChange={(e) => setOwnedYearsMin(e.target.value)} className="input w-auto py-1.5 text-sm">
+            <option value="">Any ownership length</option>
+            <option value="5">Owned 5+ yrs</option>
+            <option value="10">Owned 10+ yrs</option>
+            <option value="15">Owned 15+ yrs</option>
+            <option value="20">Owned 20+ yrs</option>
+          </select>
+          <select value={saleWindow} onChange={(e) => setSaleWindow(e.target.value)} className="input w-auto py-1.5 text-sm">
+            <option value="">Any sale date</option>
+            <option value="over">Sale overdue</option>
+            <option value="7">Sale in 7 days</option>
+            <option value="14">Sale in 14 days</option>
+            <option value="30">Sale in 30 days</option>
+          </select>
+          <select value={occupancy} onChange={(e) => setOccupancy(e.target.value)} className="input w-auto py-1.5 text-sm">
+            <option value="">Any occupancy</option>
+            <option value="absentee">Absentee owner</option>
+            <option value="owner">Owner-occupied</option>
+          </select>
+          <select value={valueMin} onChange={(e) => setValueMin(e.target.value)} className="input w-auto py-1.5 text-sm">
+            <option value="">Any value</option>
+            <option value="100000">Value $100k+</option>
+            <option value="200000">Value $200k+</option>
+            <option value="300000">Value $300k+</option>
+            <option value="500000">Value $500k+</option>
+          </select>
+          <Chip active={hideDead} onClick={() => setHideDead(!hideDead)} activeClass="bg-red-600 text-white border-red-600">Hide dead</Chip>
+          <Chip active={hideDnc} onClick={() => setHideDnc(!hideDnc)} activeClass="bg-red-600 text-white border-red-600">Hide Do-Not-Call</Chip>
+          {anyFilter && (
+            <button onClick={resetFilters} className="btn btn-secondary btn-sm ml-auto">Reset filters</button>
+          )}
+        </div>
+
+        {/* Count + bulk tools */}
+        <div className="text-xs text-gray-500 dark:text-gray-400 mb-3 flex items-center justify-between flex-wrap gap-2">
+          <span>{loading ? 'Loading...' : `${pagination.total} lead${pagination.total === 1 ? '' : 's'} · click a card to select it for CSV export`}</span>
           {leads.length > 0 && (
-            <button onClick={() => downloadCsv(leads)} className="text-primary-600 dark:text-primary-400 hover:underline">
-              Download shown as CSV
-            </button>
+            <span className="flex items-center gap-3">
+              <button onClick={selectAllShown} className="text-primary-600 dark:text-primary-400 hover:underline">
+                Select all shown
+              </button>
+              <button onClick={() => downloadCsv(leads)} className="text-primary-600 dark:text-primary-400 hover:underline">
+                Download shown as CSV
+              </button>
+            </span>
           )}
         </div>
 
         {/* Grid */}
         {!loading && leads.length === 0 ? (
           <div className="text-center py-16 text-gray-500 dark:text-gray-400">
-            <p className="text-lg font-medium">No foreclosure leads yet</p>
-            <p className="text-sm mt-1">Import the tracker sheet, upload an eCourts PDF, or refresh the feed to get started.</p>
+            <p className="text-lg font-medium">No foreclosure leads found</p>
+            <p className="text-sm mt-1">Import the tracker sheet, upload an eCourts PDF, refresh the feed, or clear filters.</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 items-start">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
             {leads.map((l) => (
               <LeadCard key={l.id} lead={l} onUpdate={updateLead}
                 selected={selected.has(l.id)} onToggleSelect={() => toggleSelect(l.id)} />
@@ -541,30 +609,38 @@ function LeadCard({ lead: l, onUpdate, selected, onToggleSelect }: {
     onUpdate(l.id, { touchDays: next }, { touchDays: next, totalTouches: Math.max(0, l.totalTouches + delta) });
   };
 
-  const parcelMain = l.parcelType === 'county' ? 'County GIS' : 'Property';
-  const parcelSub = l.parcelType === 'exact' ? `PID ${l.parcelId}` : (l.parcelType === 'county' ? (l.parcelLabel || '').replace(' County GIS', '') : 'search');
+  // Whole-card click selects (like the tracker); ignore interactive elements.
+  const onCardClick = (e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest('a,button,select,textarea,input,label')) return;
+    onToggleSelect();
+  };
 
-  const linkBtn = 'flex-1 min-w-[90px] flex flex-col items-center justify-center gap-0.5 px-2 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/60 hover:border-primary-400 dark:hover:border-primary-500 transition-colors text-sm font-semibold text-gray-800 dark:text-gray-200';
+  const parcelSub = l.parcelType === 'exact' ? `PID ${l.parcelId}` : 'search';
+
+  const linkBtn = 'flex-1 min-w-[80px] flex flex-col items-center justify-center gap-0.5 px-2 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/60 hover:border-primary-400 dark:hover:border-primary-500 transition-colors text-sm font-semibold text-gray-800 dark:text-gray-200';
   const linkSub = 'text-[10px] font-normal text-gray-400 dark:text-gray-500';
 
   return (
-    <div className={`bg-white dark:bg-gray-900 rounded-xl border overflow-hidden flex flex-col transition-shadow hover:shadow-md ${
-      l.doNotCall ? 'border-red-400 dark:border-red-500 ring-1 ring-red-400' : selected ? 'border-primary-500 ring-1 ring-primary-500' : 'border-gray-200 dark:border-gray-700'}`}>
-      <div className={`h-1 ${priBar}`} />
+    <div
+      onClick={onCardClick}
+      className={`h-full bg-white dark:bg-gray-900 rounded-xl border overflow-hidden flex flex-col transition-shadow hover:shadow-md cursor-pointer ${
+        l.doNotCall ? 'border-red-400 dark:border-red-500 ring-1 ring-red-400' : selected ? 'border-primary-500 ring-1 ring-primary-500' : 'border-gray-200 dark:border-gray-700'}`}
+    >
+      <div className={`h-1 flex-shrink-0 ${priBar}`} />
       <div className="p-4 flex flex-col gap-3 flex-1">
 
         {/* Header */}
         <div className="flex justify-between items-start gap-2">
           <div className="flex items-start gap-2.5 min-w-0">
             <button
-              onClick={onToggleSelect}
+              onClick={(e) => { e.stopPropagation(); onToggleSelect(); }}
               className={`flex-shrink-0 w-[18px] h-[18px] mt-0.5 rounded border-[1.5px] flex items-center justify-center text-[11px] font-bold transition-colors ${
                 selected ? 'bg-primary-600 border-primary-600 text-white' : 'bg-gray-50 dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-transparent hover:border-primary-400'}`}
               title="Select"
             >✓</button>
             <div className="min-w-0">
               <div className="flex items-center min-w-0">
-                <Link href={`/leads/${l.id}`} className="font-bold text-gray-900 dark:text-gray-100 hover:text-primary-600 dark:hover:text-primary-400 leading-tight truncate">
+                <Link href={`/leads/${l.id}`} onClick={(e) => e.stopPropagation()} className="font-bold text-gray-900 dark:text-gray-100 hover:text-primary-600 dark:hover:text-primary-400 leading-tight truncate">
                   {l.address}
                 </Link>
                 <CopyBtn text={[l.address, l.city, l.zip].filter(Boolean).join(', ')} label="address" />
@@ -596,20 +672,20 @@ function LeadCard({ lead: l, onUpdate, selected, onToggleSelect }: {
         {/* Owner */}
         <div>
           <SectionLabel>Owner</SectionLabel>
-          <div className="text-sm text-gray-800 dark:text-gray-200 mt-0.5">
-            {l.ownerNames || l.countyOwner || '-'}
+          <div className="text-sm text-gray-800 dark:text-gray-200 mt-0.5 flex items-start">
+            <span className="min-w-0">{l.ownerNames || l.countyOwner || '-'}</span>
             {(l.ownerNames || l.countyOwner) && <CopyBtn text={l.ownerNames || l.countyOwner || ''} label="name" />}
           </div>
         </div>
 
-        {/* Contact */}
-        <div className="rounded-lg bg-gray-50 dark:bg-gray-800/60 border border-gray-100 dark:border-gray-800 px-3 py-2 flex flex-col gap-1.5">
+        {/* Contact (fixed min height keeps cards uniform) */}
+        <div className="rounded-lg bg-gray-50 dark:bg-gray-800/60 border border-gray-100 dark:border-gray-800 px-3 py-2 flex flex-col gap-1.5 justify-center min-h-[104px]">
           {(l.phone1 || l.phone2 || l.email) ? (
             <>
               {l.phone1 && (
                 <div className="flex items-center text-sm">
                   <span className="w-5 text-gray-400 dark:text-gray-500">☎</span>
-                  <a href={`tel:${l.phone1}`} className="text-gray-800 dark:text-gray-200 hover:text-primary-600 dark:hover:text-primary-400">{formatPhoneDisplay(l.phone1)}</a>
+                  <a href={`tel:${l.phone1}`} onClick={(e) => e.stopPropagation()} className="text-gray-800 dark:text-gray-200 hover:text-primary-600 dark:hover:text-primary-400">{formatPhoneDisplay(l.phone1)}</a>
                   <CopyBtn text={l.phone1} label="number" />
                   {l.phone1Type && <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400">{l.phone1Type}</span>}
                 </div>
@@ -617,7 +693,7 @@ function LeadCard({ lead: l, onUpdate, selected, onToggleSelect }: {
               {l.phone2 && (
                 <div className="flex items-center text-sm">
                   <span className="w-5 text-gray-400 dark:text-gray-500">☎</span>
-                  <a href={`tel:${l.phone2}`} className="text-gray-800 dark:text-gray-200 hover:text-primary-600 dark:hover:text-primary-400">{formatPhoneDisplay(l.phone2)}</a>
+                  <a href={`tel:${l.phone2}`} onClick={(e) => e.stopPropagation()} className="text-gray-800 dark:text-gray-200 hover:text-primary-600 dark:hover:text-primary-400">{formatPhoneDisplay(l.phone2)}</a>
                   <CopyBtn text={l.phone2} label="number" />
                   {l.phone2Type && <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400">{l.phone2Type}</span>}
                 </div>
@@ -625,7 +701,7 @@ function LeadCard({ lead: l, onUpdate, selected, onToggleSelect }: {
               {l.email && (
                 <div className="flex items-center text-sm min-w-0">
                   <span className="w-5 text-gray-400 dark:text-gray-500">✉</span>
-                  <a href={`mailto:${l.email}`} className="text-gray-800 dark:text-gray-200 hover:text-primary-600 dark:hover:text-primary-400 truncate">{l.email}</a>
+                  <a href={`mailto:${l.email}`} onClick={(e) => e.stopPropagation()} className="text-gray-800 dark:text-gray-200 hover:text-primary-600 dark:hover:text-primary-400 truncate">{l.email}</a>
                   <CopyBtn text={l.email} label="email" />
                 </div>
               )}
@@ -638,25 +714,18 @@ function LeadCard({ lead: l, onUpdate, selected, onToggleSelect }: {
         {/* Links */}
         <div className="flex gap-2">
           {l.zillowUrl && (
-            <a href={l.zillowUrl} target="_blank" rel="noopener noreferrer" className={linkBtn}>
+            <a href={l.zillowUrl} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className={linkBtn}>
               <span>🏠 Zillow</span><span className={linkSub}>listing</span>
             </a>
           )}
           {l.realtorQuery && (
-            <button onClick={() => openRealtor(l)} className={linkBtn}>
+            <button onClick={(e) => { e.stopPropagation(); openRealtor(l); }} className={linkBtn}>
               <span>🔑 Realtor</span><span className={linkSub}>listing</span>
             </button>
           )}
-          {l.parcelUrl && (
-            <a href={l.parcelUrl} target="_blank" rel="noopener noreferrer" className={linkBtn}>
-              <span>📍 {parcelMain}</span><span className={linkSub}>{parcelSub}</span>
-            </a>
-          )}
-          {l.noticeUrl && (
-            <a href={l.noticeUrl} target="_blank" rel="noopener noreferrer" className={linkBtn}>
-              <span>📰 Notice</span><span className={linkSub}>source</span>
-            </a>
-          )}
+          <a href={parcelHref(l)} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className={linkBtn}>
+            <span>📍 Property</span><span className={linkSub}>{parcelSub}</span>
+          </a>
         </div>
 
         {/* Tracking */}
@@ -667,6 +736,7 @@ function LeadCard({ lead: l, onUpdate, selected, onToggleSelect }: {
               <select
                 value={l.workStatus}
                 onChange={(e) => onUpdate(l.id, { workStatus: e.target.value })}
+                onClick={(e) => e.stopPropagation()}
                 className="input py-1.5 text-sm w-full"
               >
                 {WORK_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
@@ -706,13 +776,14 @@ function LeadCard({ lead: l, onUpdate, selected, onToggleSelect }: {
           <textarea
             value={notes}
             onChange={(e) => saveNotes(e.target.value)}
+            onClick={(e) => e.stopPropagation()}
             placeholder="Call notes, reminders..."
             rows={2}
-            className="input text-sm resize-y min-h-[52px]"
+            className="input text-sm resize-none h-[52px]"
           />
         </div>
 
-        {/* Facts grid */}
+        {/* Facts grid (all six cells always render so cards stay uniform) */}
         <div className="grid grid-cols-2 border-t border-gray-100 dark:border-gray-800 -mx-4 -mb-4 mt-auto divide-x divide-y divide-gray-100 dark:divide-gray-800">
           <div className="px-4 py-2.5">
             <SectionLabel>Sale date</SectionLabel>
@@ -730,20 +801,16 @@ function LeadCard({ lead: l, onUpdate, selected, onToggleSelect }: {
             <SectionLabel>Loan amount</SectionLabel>
             <div className="text-sm font-semibold mt-0.5 text-gray-800 dark:text-gray-200">{money(l.loanAmount)}</div>
           </div>
-          {l.equitySpread != null && (
-            <>
-              <div className="px-4 py-2.5">
-                <SectionLabel>Equity spread</SectionLabel>
-                <div className={`text-sm font-semibold mt-0.5 ${l.equitySpread >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                  {signedMoney(l.equitySpread)}
-                </div>
-              </div>
-              <div className="px-4 py-2.5">
-                <SectionLabel>Est. equity %</SectionLabel>
-                <div className="text-sm font-semibold mt-0.5 text-gray-800 dark:text-gray-200">{l.equityPct == null ? '-' : `${l.equityPct}%`}</div>
-              </div>
-            </>
-          )}
+          <div className="px-4 py-2.5">
+            <SectionLabel>Equity spread</SectionLabel>
+            <div className={`text-sm font-semibold mt-0.5 ${l.equitySpread == null ? 'text-gray-800 dark:text-gray-200' : l.equitySpread >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+              {signedMoney(l.equitySpread)}
+            </div>
+          </div>
+          <div className="px-4 py-2.5">
+            <SectionLabel>Est. equity %</SectionLabel>
+            <div className="text-sm font-semibold mt-0.5 text-gray-800 dark:text-gray-200">{l.equityPct == null ? '-' : `${l.equityPct}%`}</div>
+          </div>
         </div>
       </div>
     </div>

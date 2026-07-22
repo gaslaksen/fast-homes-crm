@@ -59,6 +59,7 @@ export enum ForeclosureNoticeType {
   TAX_FORECLOSURE = 'tax_foreclosure',
   SHERIFF_SALE = 'sheriff_sale',
   PRE_FORECLOSURE_HEARING = 'pre_foreclosure_hearing',
+  AUCTION_COM_FORECLOSURE = 'auction_com_foreclosure',
 }
 
 // How a foreclosure lead entered Dealcore.
