@@ -158,6 +158,18 @@ export class ForeclosuresController {
     return this.ingest.ingestPdf(file.buffer, file.originalname, { organizationId: orgId });
   }
 
+  @Post('bulk-delete')
+  async bulkDelete(
+    @Body() body: { ids: string[] },
+    @Headers('authorization') authHeader?: string,
+  ) {
+    if (!Array.isArray(body?.ids) || body.ids.length === 0) {
+      throw new BadRequestException('No lead ids provided');
+    }
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.foreclosures.bulkDelete(body.ids, organizationId);
+  }
+
   @Post('refresh')
   async refresh(@Headers('authorization') authHeader?: string) {
     const { organizationId } = this.decodeToken(authHeader);

@@ -225,11 +225,12 @@ export default function ForeclosuresPage() {
   const [pagination, setPagination] = useState({ page: 1, pageSize: 60, total: 0, totalPages: 1 });
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
-  // Filters (mirroring the offline tracker's filter bar)
+  // Filters (mirroring the offline tracker's filter bar). Chip groups are
+  // multi-select: any combination within a group ORs together.
   const [search, setSearch] = useState('');
-  const [priority, setPriority] = useState('');
-  const [workStatus, setWorkStatus] = useState('');
-  const [noticeType, setNoticeType] = useState('');
+  const [priorities, setPriorities] = useState<Set<string>>(new Set());
+  const [workStatuses, setWorkStatuses] = useState<Set<string>>(new Set());
+  const [noticeTypes, setNoticeTypes] = useState<Set<string>>(new Set());
   const [city, setCity] = useState('');
   const [equityBand, setEquityBand] = useState('');
   const [ownedYearsMin, setOwnedYearsMin] = useState('');
@@ -260,9 +261,9 @@ export default function ForeclosuresPage() {
     try {
       const params: Record<string, string> = { sort, page: String(page), pageSize: '60' };
       if (search) params.search = search;
-      if (priority) params.priority = priority;
-      if (workStatus) params.workStatus = workStatus;
-      if (noticeType) params.noticeType = noticeType;
+      if (priorities.size) params.priority = Array.from(priorities).join(',');
+      if (workStatuses.size) params.workStatus = Array.from(workStatuses).join(',');
+      if (noticeTypes.size) params.noticeType = Array.from(noticeTypes).join(',');
       if (city) params.city = city;
       if (equityBand) params.equityBand = equityBand;
       if (ownedYearsMin) params.ownedYearsMin = ownedYearsMin;
@@ -280,7 +281,7 @@ export default function ForeclosuresPage() {
     } finally {
       setLoading(false);
     }
-  }, [search, priority, workStatus, noticeType, city, equityBand, ownedYearsMin, saleWindow, occupancy, valueMin, hideDead, hideDnc, sort, page]);
+  }, [search, priorities, workStatuses, noticeTypes, city, equityBand, ownedYearsMin, saleWindow, occupancy, valueMin, hideDead, hideDnc, sort, page]);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -302,7 +303,15 @@ export default function ForeclosuresPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [search, priority, workStatus, noticeType, city, equityBand, ownedYearsMin, saleWindow, occupancy, valueMin, hideDead, hideDnc, sort]);
+  }, [search, priorities, workStatuses, noticeTypes, city, equityBand, ownedYearsMin, saleWindow, occupancy, valueMin, hideDead, hideDnc, sort]);
+
+  /** Toggle a value inside a multi-select chip group. */
+  const toggleIn = (set: Set<string>, value: string, setter: (s: Set<string>) => void) => {
+    const next = new Set(set);
+    if (next.has(value)) next.delete(value);
+    else next.add(value);
+    setter(next);
+  };
 
   const updateLead = async (id: string, patch: any, localPatch?: any) => {
     setLeads((prev) => prev.map((l) => (l.id === id ? { ...l, ...(localPatch || patch) } : l)));
@@ -386,9 +395,9 @@ export default function ForeclosuresPage() {
 
   const resetFilters = () => {
     setSearch('');
-    setPriority('');
-    setWorkStatus('');
-    setNoticeType('');
+    setPriorities(new Set());
+    setWorkStatuses(new Set());
+    setNoticeTypes(new Set());
     setCity('');
     setEquityBand('');
     setOwnedYearsMin('');
@@ -399,7 +408,25 @@ export default function ForeclosuresPage() {
     setHideDnc(false);
   };
 
-  const anyFilter = search || priority || workStatus || noticeType || city || equityBand || ownedYearsMin || saleWindow || occupancy || valueMin || hideDead || hideDnc;
+  const handleDeleteSelected = async () => {
+    const ids = Array.from(selected);
+    if (!ids.length) return;
+    if (!window.confirm(`Delete ${ids.length} lead${ids.length === 1 ? '' : 's'}? This cannot be undone.`)) return;
+    setBusy(true);
+    try {
+      const res = await foreclosuresAPI.bulkDelete(ids);
+      showToast(`Deleted ${res.data.deleted} lead${res.data.deleted === 1 ? '' : 's'}.`);
+      setSelected(new Set());
+      fetchLeads();
+      fetchStats();
+    } catch (e: any) {
+      showToast(e.response?.data?.message || 'Delete failed', true);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const anyFilter = search || priorities.size || workStatuses.size || noticeTypes.size || city || equityBand || ownedYearsMin || saleWindow || occupancy || valueMin || hideDead || hideDnc;
   const selectedLeads = leads.filter((l) => selected.has(l.id));
 
   return (
@@ -458,18 +485,18 @@ export default function ForeclosuresPage() {
         <div className="flex gap-2 flex-wrap items-center mb-2">
           <span className="text-[11px] text-gray-400 dark:text-gray-500 uppercase tracking-wide">Quick filters</span>
           {['HIGH', 'MEDIUM', 'LOW'].map((p) => (
-            <Chip key={p} active={priority === p} onClick={() => setPriority(priority === p ? '' : p)}
+            <Chip key={p} active={priorities.has(p)} onClick={() => toggleIn(priorities, p, setPriorities)}
               activeClass={p === 'HIGH' ? 'bg-red-600 text-white border-red-600' : p === 'MEDIUM' ? 'bg-amber-500 text-white border-amber-500' : 'bg-blue-600 text-white border-blue-600'}>
               {p.charAt(0) + p.slice(1).toLowerCase()}
             </Chip>
           ))}
           <span className="w-px h-4 bg-gray-200 dark:bg-gray-700 mx-1" />
           {[['IN_CONVERSATION', 'In Conversation'], ['APPOINTMENT_SET', 'Appointment Set'], ['UNDER_CONTRACT', 'Under Contract']].map(([v, label]) => (
-            <Chip key={v} active={workStatus === v} onClick={() => setWorkStatus(workStatus === v ? '' : v)}>{label}</Chip>
+            <Chip key={v} active={workStatuses.has(v)} onClick={() => toggleIn(workStatuses, v, setWorkStatuses)}>{label}</Chip>
           ))}
           <span className="w-px h-4 bg-gray-200 dark:bg-gray-700 mx-1" />
           {[['pre_foreclosure_hearing', 'Pre-Foreclosure'], ['mortgage_foreclosure', 'Mortgage FC'], ['auction_com_foreclosure', 'Auction FC']].map(([v, label]) => (
-            <Chip key={v} active={noticeType === v} onClick={() => setNoticeType(noticeType === v ? '' : v)}>{label}</Chip>
+            <Chip key={v} active={noticeTypes.has(v)} onClick={() => toggleIn(noticeTypes, v, setNoticeTypes)}>{label}</Chip>
           ))}
         </div>
 
@@ -568,6 +595,10 @@ export default function ForeclosuresPage() {
           <span className="text-gray-700 dark:text-gray-200"><b className="text-primary-600 dark:text-primary-400">{selected.size}</b> selected</span>
           <button onClick={() => downloadCsv(selectedLeads)} className="btn btn-primary btn-sm">Download CSV</button>
           <button onClick={() => setSelected(new Set())} className="btn btn-secondary btn-sm">Clear</button>
+          <button onClick={handleDeleteSelected} disabled={busy}
+            className="btn btn-sm bg-red-600 hover:bg-red-700 text-white border border-red-600 disabled:opacity-50">
+            Delete
+          </button>
         </div>
       )}
 
