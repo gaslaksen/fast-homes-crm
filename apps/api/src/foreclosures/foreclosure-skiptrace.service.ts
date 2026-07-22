@@ -102,8 +102,14 @@ export class ForeclosureSkiptraceService {
       try {
         const contact = await this.batchSkipTrace(parcel, address, lead.propertyCity, lead.propertyZip);
         if (contact) {
-          if (contact.phone1) leadPatch.sellerPhone = contact.phone1;
-          if (contact.phone2) detailPatch.phone2 = contact.phone2;
+          if (contact.phone1) {
+            leadPatch.sellerPhone = contact.phone1;
+            detailPatch.phone1Type = contact.phone1Type || null;
+          }
+          if (contact.phone2) {
+            detailPatch.phone2 = contact.phone2;
+            detailPatch.phone2Type = contact.phone2Type || null;
+          }
           if (contact.email && !lead.sellerEmail) leadPatch.sellerEmail = contact.email;
         }
       } catch (e: any) {
@@ -208,7 +214,7 @@ export class ForeclosureSkiptraceService {
     fallbackStreet: string,
     city?: string,
     zip?: string,
-  ): Promise<{ phone1?: string; phone2?: string; email?: string } | null> {
+  ): Promise<{ phone1?: string; phone1Type?: string; phone2?: string; phone2Type?: string; email?: string } | null> {
     if (!this.batchKey) return null;
     const street = parcel?.siteadd || fallbackStreet;
     if (!street) return null;
@@ -227,8 +233,16 @@ export class ForeclosureSkiptraceService {
     if (!persons || persons.length === 0 || !persons[0]?.meta?.matched) return null;
 
     const p = persons[0];
-    const phones = (p.phoneNumbers || []).map((ph: any) => normalizePhoneDigits(ph.number)).filter(Boolean);
+    const phones = (p.phoneNumbers || [])
+      .map((ph: any) => ({ num: normalizePhoneDigits(ph.number), type: ph.type || null }))
+      .filter((ph: any) => ph.num);
     const emails = (p.emails || []).map((e: any) => e.email).filter(Boolean);
-    return { phone1: phones[0], phone2: phones[1], email: emails[0] };
+    return {
+      phone1: phones[0]?.num,
+      phone1Type: phones[0]?.type,
+      phone2: phones[1]?.num,
+      phone2Type: phones[1]?.type,
+      email: emails[0],
+    };
   }
 }

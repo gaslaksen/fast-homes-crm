@@ -18,6 +18,8 @@ interface FclLead {
   email: string | null;
   phone1: string | null;
   phone2: string | null;
+  phone1Type: string | null;
+  phone2Type: string | null;
   noticeType: string | null;
   noticeUrl: string | null;
   caseNumber: string | null;
@@ -33,13 +35,22 @@ interface FclLead {
   equitySpread: number | null;
   workStatus: string;
   doNotCall: boolean;
+  callNotes: string;
+  touchDays: Record<string, boolean>;
+  totalTouches: number;
   ownerOccupied: string | null;
   mailingAddress: string | null;
+  mailCity: string | null;
+  mailState: string | null;
+  mailZip: string | null;
   skipStatus: string | null;
+  parcelId: string | null;
   parcelUrl: string | null;
+  parcelType: string | null;
   parcelLabel: string | null;
   zillowUrl: string | null;
   realtorQuery: string | null;
+  realtorZip: string | null;
   daysToSale: number | null;
 }
 
@@ -60,34 +71,102 @@ const NOTICE_TYPES = [
   { value: 'pre_foreclosure_hearing', label: 'Pre-Foreclosure Hearing' },
 ];
 
+const DAYS = ['mon', 'tue', 'wed', 'thu', 'fri'] as const;
+const DAY_LABELS = ['M', 'T', 'W', 'T', 'F'];
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 function money(n: number | null): string {
   return n == null ? '-' : `$${Math.round(n).toLocaleString()}`;
+}
+function signedMoney(n: number | null): string {
+  if (n == null) return '-';
+  return `${n >= 0 ? '+$' : '-$'}${Math.abs(Math.round(n)).toLocaleString()}`;
+}
+function fmtDateUS(iso: string | null): string {
+  if (!iso) return '-';
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return m ? `${+m[2]}/${+m[3]}/${m[1]}` : iso;
 }
 function noticeLabel(t: string | null): string {
   return (t || '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 function scoreClass(s: number): string {
-  if (s >= 65) return 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 border-green-300 dark:border-green-800';
-  if (s >= 40) return 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 border-amber-300 dark:border-amber-800';
+  if (s >= 65) return 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 border-green-300 dark:border-green-700';
+  if (s >= 40) return 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 border-amber-300 dark:border-amber-700';
   return 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-700';
 }
 function priorityClass(p: string): string {
-  if (p === 'HIGH') return 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400';
-  if (p === 'MEDIUM') return 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400';
-  return 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400';
+  if (p === 'HIGH') return 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300';
+  if (p === 'MEDIUM') return 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300';
+  return 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300';
 }
-function daysBadge(d: number | null): { text: string; cls: string } | null {
-  if (d == null) return null;
-  if (d < 0) return { text: 'Sale passed', cls: 'bg-gray-100 dark:bg-gray-800 text-gray-500' };
-  if (d === 0) return { text: 'Sale today', cls: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400' };
-  if (d <= 7) return { text: `${d}d to sale`, cls: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400' };
-  if (d <= 21) return { text: `${d}d to sale`, cls: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400' };
-  return { text: `${d}d to sale`, cls: 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400' };
+// Timing badge, ported from the tracker's daysBadge().
+function daysBadge(d: number | null): { text: string; cls: string } {
+  if (d == null) return { text: '-', cls: '' };
+  if (d < 0) return { text: 'Passed', cls: 'text-red-600 dark:text-red-400' };
+  if (d === 0) return { text: 'TODAY', cls: 'text-red-600 dark:text-red-400' };
+  if (d <= 14) return { text: `${d}d to sale`, cls: 'text-red-600 dark:text-red-400' };
+  if (d <= 30) return { text: `${d}d to sale`, cls: 'text-amber-600 dark:text-amber-400' };
+  return { text: `${d}d to sale`, cls: '' };
 }
-function realtorUrl(l: FclLead): string {
-  if (!l.realtorQuery) return '';
-  return `https://www.realtor.com/realestateandhomes-search/${encodeURIComponent(String(l.zip || '').replace(/\s+/g, '-'))}`;
+function csvEsc(v: any): string {
+  const s = v == null ? '' : String(v);
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+function copyToClipboard(text: string) {
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(text).catch(() => {});
+  }
+}
+// Realtor.com live resolver (exact property via the rdc geo suggest API),
+// ported from the tracker's openRealtor(). Falls back to a zip search.
+function openRealtor(lead: FclLead) {
+  const w = window.open('about:blank', '_blank'); // keep user gesture
+  const fallback = `https://www.realtor.com/realestateandhomes-search/${encodeURIComponent(String(lead.realtorZip || lead.zip || '').replace(/\s+/g, '-'))}`;
+  let cache: Record<string, string> = {};
+  try { cache = JSON.parse(localStorage.getItem('rdc_mpr') || '{}'); } catch { /* ignore */ }
+  if (cache[lead.id]) { if (w) w.location.href = `https://www.realtor.com/realestateandhomes-detail/M${cache[lead.id]}`; return; }
+  if (!lead.realtorQuery) { if (w) w.location.href = fallback; return; }
+  const api = `https://parser-external.geo.moveaws.com/suggest?input=${encodeURIComponent(lead.realtorQuery)}&client_id=rdc&limit=1`;
+  fetch(api).then((r) => r.json()).then((j) => {
+    const a = j?.autocomplete?.[0];
+    if (a?.mpr_id && a.area_type === 'address') {
+      cache[lead.id] = a.mpr_id;
+      try { localStorage.setItem('rdc_mpr', JSON.stringify(cache)); } catch { /* ignore */ }
+      if (w) w.location.href = `https://www.realtor.com/realestateandhomes-detail/M${a.mpr_id}`;
+    } else if (w) { w.location.href = fallback; }
+  }).catch(() => { if (w) w.location.href = fallback; });
+}
+
+const CSV_HEADERS = ['First Name', 'Last Name', 'Owner Name', 'Property Address', 'Property City', 'Property State', 'Property Zip', 'Mailing Address', 'Mailing City', 'Mailing State', 'Mailing Zip', 'Phone 1', 'Phone 1 Type', 'Phone 2', 'Phone 2 Type', 'Email', 'Priority', 'Notice Type', 'Case Number', 'Sale Date', 'Days To Sale', 'Loan Date', 'Loan Amount', 'Assessed Value', 'Equity %', 'Equity Spread', 'Owner Occupied', 'Lead Score', 'Status', 'Do Not Call', 'Notes', 'Zillow URL', 'Property Record URL', 'Notice URL'];
+
+function leadCsvRow(l: FclLead): string[] {
+  const owner = (l.ownerNames || l.countyOwner || '').split(';')[0].trim();
+  const parts = owner.split(/\s+/);
+  return [
+    parts[0] || '', parts.slice(1).join(' '), l.ownerNames || l.countyOwner || '',
+    l.address, l.city, l.state, l.zip,
+    l.mailingAddress || '', l.mailCity || '', l.mailState || '', l.mailZip || '',
+    l.phone1 || '', l.phone1Type || '', l.phone2 || '', l.phone2Type || '', l.email || '',
+    l.priority, noticeLabel(l.noticeType), l.caseNumber || '', l.saleDate || '',
+    l.daysToSale == null ? '' : String(l.daysToSale), l.loanDate || '',
+    l.loanAmount == null ? '' : String(l.loanAmount), l.assessedValue == null ? '' : String(l.assessedValue),
+    l.equityPct == null ? '' : String(l.equityPct), l.equitySpread == null ? '' : String(l.equitySpread),
+    l.ownerOccupied || '', String(l.score),
+    WORK_STATUSES.find((s) => s.value === l.workStatus)?.label || l.workStatus,
+    l.doNotCall ? 'Y' : '', l.callNotes || '', l.zillowUrl || '', l.parcelUrl || '', l.noticeUrl || '',
+  ];
+}
+
+function downloadCsv(leads: FclLead[]) {
+  const rows = [CSV_HEADERS, ...leads.map(leadCsvRow)];
+  const csv = rows.map((r) => r.map(csvEsc).join(',')).join('\r\n');
+  const blob = new Blob([`﻿${csv}`], { type: 'text/csv;charset=utf-8;' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `foreclosure-leads-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
 }
 
 // ─── Small UI atoms ───────────────────────────────────────────────────────────
@@ -119,12 +198,31 @@ function Tag({ children, cls }: { children: React.ReactNode; cls: string }) {
   return <span className={`text-[11px] px-2 py-0.5 rounded font-semibold ${cls}`}>{children}</span>;
 }
 
+function CopyBtn({ text, label }: { text: string; label: string }) {
+  const [copied, setCopied] = useState(false);
+  if (!text) return null;
+  return (
+    <button
+      onClick={(e) => { e.preventDefault(); e.stopPropagation(); copyToClipboard(text); setCopied(true); setTimeout(() => setCopied(false), 1100); }}
+      title={`Copy ${label}`}
+      className={`ml-1 text-xs px-1 rounded transition-colors ${copied ? 'text-green-500' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'}`}
+    >
+      {copied ? '✓' : '⧉'}
+    </button>
+  );
+}
+
+function SectionLabel({ children, className }: { children: React.ReactNode; className?: string }) {
+  return <div className={`text-[10px] uppercase tracking-wider font-semibold text-gray-400 dark:text-gray-500 ${className || ''}`}>{children}</div>;
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 export default function ForeclosuresPage() {
   const [leads, setLeads] = useState<FclLead[]>([]);
   const [stats, setStats] = useState({ total: 0, high: 0, soon: 0, highEquity: 0 });
   const [loading, setLoading] = useState(true);
   const [pagination, setPagination] = useState({ page: 1, pageSize: 60, total: 0, totalPages: 1 });
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   // Filters
   const [search, setSearch] = useState('');
@@ -188,20 +286,27 @@ export default function ForeclosuresPage() {
     fetchStats();
   }, [fetchStats]);
 
-  // Reset to page 1 when a filter changes.
   useEffect(() => {
     setPage(1);
   }, [search, priority, noticeType, occupancy, equityMin, saleWithinDays, sort]);
 
-  const updateLead = async (id: string, patch: any) => {
-    // Optimistic update
-    setLeads((prev) => prev.map((l) => (l.id === id ? { ...l, ...patch } : l)));
+  const updateLead = async (id: string, patch: any, localPatch?: any) => {
+    setLeads((prev) => prev.map((l) => (l.id === id ? { ...l, ...(localPatch || patch) } : l)));
     try {
       await foreclosuresAPI.update(id, patch);
     } catch {
       showToast('Update failed', true);
       fetchLeads();
     }
+  };
+
+  const toggleSelect = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   };
 
   const handleCsv = async (file: File) => {
@@ -265,6 +370,7 @@ export default function ForeclosuresPage() {
   };
 
   const anyFilter = search || priority || noticeType || occupancy || equityMin || saleWithinDays;
+  const selectedLeads = leads.filter((l) => selected.has(l.id));
 
   return (
     <AppShell>
@@ -352,8 +458,13 @@ export default function ForeclosuresPage() {
         </div>
 
         {/* Count */}
-        <div className="text-xs text-gray-500 dark:text-gray-400 mb-3">
-          {loading ? 'Loading...' : `${pagination.total} lead${pagination.total === 1 ? '' : 's'}`}
+        <div className="text-xs text-gray-500 dark:text-gray-400 mb-3 flex justify-between">
+          <span>{loading ? 'Loading...' : `${pagination.total} lead${pagination.total === 1 ? '' : 's'}`}</span>
+          {leads.length > 0 && (
+            <button onClick={() => downloadCsv(leads)} className="text-primary-600 dark:text-primary-400 hover:underline">
+              Download shown as CSV
+            </button>
+          )}
         </div>
 
         {/* Grid */}
@@ -363,9 +474,10 @@ export default function ForeclosuresPage() {
             <p className="text-sm mt-1">Import the tracker sheet, upload an eCourts PDF, or refresh the feed to get started.</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 items-start">
             {leads.map((l) => (
-              <LeadCard key={l.id} lead={l} onUpdate={updateLead} realtor={realtorUrl(l)} />
+              <LeadCard key={l.id} lead={l} onUpdate={updateLead}
+                selected={selected.has(l.id)} onToggleSelect={() => toggleSelect(l.id)} />
             ))}
           </div>
         )}
@@ -382,9 +494,18 @@ export default function ForeclosuresPage() {
         )}
       </div>
 
+      {/* Selection bar */}
+      {selected.size > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 px-4 py-2.5 rounded-xl bg-white dark:bg-gray-900 border border-primary-500 shadow-lg text-sm">
+          <span className="text-gray-700 dark:text-gray-200"><b className="text-primary-600 dark:text-primary-400">{selected.size}</b> selected</span>
+          <button onClick={() => downloadCsv(selectedLeads)} className="btn btn-primary btn-sm">Download CSV</button>
+          <button onClick={() => setSelected(new Set())} className="btn btn-secondary btn-sm">Clear</button>
+        </div>
+      )}
+
       {/* Toast */}
       {toast && (
-        <div className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-5 py-3 rounded-xl text-sm shadow-lg border ${
+        <div className={`fixed bottom-6 right-6 z-50 px-5 py-3 rounded-xl text-sm shadow-lg border ${
           toast.err ? 'bg-white dark:bg-gray-900 border-red-400 text-red-600 dark:text-red-400'
                     : 'bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100'}`}>
           {toast.msg}
@@ -394,22 +515,63 @@ export default function ForeclosuresPage() {
   );
 }
 
-// ─── Lead card ────────────────────────────────────────────────────────────────
-function LeadCard({ lead: l, onUpdate, realtor }: { lead: FclLead; onUpdate: (id: string, patch: any) => void; realtor: string }) {
+// ─── Lead card (modeled on the offline tracker card) ─────────────────────────
+function LeadCard({ lead: l, onUpdate, selected, onToggleSelect }: {
+  lead: FclLead;
+  onUpdate: (id: string, patch: any, localPatch?: any) => void;
+  selected: boolean;
+  onToggleSelect: () => void;
+}) {
   const db = daysBadge(l.daysToSale);
   const priBar = l.priority === 'HIGH' ? 'bg-red-500' : l.priority === 'MEDIUM' ? 'bg-amber-500' : 'bg-blue-500';
+  const [notes, setNotes] = useState(l.callNotes || '');
+  const notesTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const saveNotes = (val: string) => {
+    setNotes(val);
+    if (notesTimer.current) clearTimeout(notesTimer.current);
+    notesTimer.current = setTimeout(() => {
+      onUpdate(l.id, { callNotes: val }, { callNotes: val });
+    }, 600);
+  };
+
+  const toggleDay = (day: string) => {
+    const next = { ...(l.touchDays || {}), [day]: !l.touchDays?.[day] };
+    const delta = next[day] ? 1 : -1;
+    onUpdate(l.id, { touchDays: next }, { touchDays: next, totalTouches: Math.max(0, l.totalTouches + delta) });
+  };
+
+  const parcelMain = l.parcelType === 'county' ? 'County GIS' : 'Property';
+  const parcelSub = l.parcelType === 'exact' ? `PID ${l.parcelId}` : (l.parcelType === 'county' ? (l.parcelLabel || '').replace(' County GIS', '') : 'search');
+
+  const linkBtn = 'flex-1 min-w-[90px] flex flex-col items-center justify-center gap-0.5 px-2 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/60 hover:border-primary-400 dark:hover:border-primary-500 transition-colors text-sm font-semibold text-gray-800 dark:text-gray-200';
+  const linkSub = 'text-[10px] font-normal text-gray-400 dark:text-gray-500';
+
   return (
-    <div className={`bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col ${l.doNotCall ? 'ring-2 ring-red-400' : ''}`}>
+    <div className={`bg-white dark:bg-gray-900 rounded-xl border overflow-hidden flex flex-col transition-shadow hover:shadow-md ${
+      l.doNotCall ? 'border-red-400 dark:border-red-500 ring-1 ring-red-400' : selected ? 'border-primary-500 ring-1 ring-primary-500' : 'border-gray-200 dark:border-gray-700'}`}>
       <div className={`h-1 ${priBar}`} />
       <div className="p-4 flex flex-col gap-3 flex-1">
+
         {/* Header */}
         <div className="flex justify-between items-start gap-2">
-          <div className="min-w-0">
-            <Link href={`/leads/${l.id}`} className="font-bold text-gray-900 dark:text-gray-100 hover:text-primary-600 leading-tight block truncate">
-              {l.address}
-            </Link>
-            <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-              {[l.city, l.state, l.zip].filter(Boolean).join(', ')}
+          <div className="flex items-start gap-2.5 min-w-0">
+            <button
+              onClick={onToggleSelect}
+              className={`flex-shrink-0 w-[18px] h-[18px] mt-0.5 rounded border-[1.5px] flex items-center justify-center text-[11px] font-bold transition-colors ${
+                selected ? 'bg-primary-600 border-primary-600 text-white' : 'bg-gray-50 dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-transparent hover:border-primary-400'}`}
+              title="Select"
+            >✓</button>
+            <div className="min-w-0">
+              <div className="flex items-center min-w-0">
+                <Link href={`/leads/${l.id}`} className="font-bold text-gray-900 dark:text-gray-100 hover:text-primary-600 dark:hover:text-primary-400 leading-tight truncate">
+                  {l.address}
+                </Link>
+                <CopyBtn text={[l.address, l.city, l.zip].filter(Boolean).join(', ')} label="address" />
+              </div>
+              <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                {[l.city, l.zip].filter(Boolean).join(', ') || '-'}
+              </div>
             </div>
           </div>
           <div className={`flex-shrink-0 w-11 h-11 rounded-lg border flex flex-col items-center justify-center font-bold ${scoreClass(l.score)}`}>
@@ -422,72 +584,166 @@ function LeadCard({ lead: l, onUpdate, realtor }: { lead: FclLead; onUpdate: (id
         <div className="flex gap-1.5 flex-wrap">
           <Tag cls={priorityClass(l.priority)}>{l.priority}</Tag>
           {l.noticeType && <Tag cls="bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400">{noticeLabel(l.noticeType)}</Tag>}
-          {db && <Tag cls={db.cls}>{db.text}</Tag>}
           {l.equityPct != null && (
-            <Tag cls={l.equityPct >= 0 ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'}>
+            <Tag cls={l.equityPct >= 0 ? 'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300' : 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300'}>
               {l.equityPct >= 0 ? '▲' : '▼'} {l.equityPct}% equity
             </Tag>
           )}
-          {l.ownerOccupied === 'N' && <Tag cls="bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400">Absentee</Tag>}
+          {l.ownerOccupied === 'N' && <Tag cls="bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300">Absentee owner</Tag>}
+          {l.ownerOccupied === 'Y' && <Tag cls="bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300">Owner-occupied</Tag>}
         </div>
 
-        {/* Owner + facts */}
-        <div className="text-sm grid grid-cols-2 gap-y-1 gap-x-3">
-          <div>
-            <div className="text-[10px] uppercase tracking-wide text-gray-400 dark:text-gray-500">Owner</div>
-            <div className="text-gray-800 dark:text-gray-200 truncate">{l.ownerNames || l.countyOwner || '-'}</div>
-          </div>
-          <div>
-            <div className="text-[10px] uppercase tracking-wide text-gray-400 dark:text-gray-500">Case</div>
-            <div className="text-gray-800 dark:text-gray-200 truncate">{l.caseNumber || '-'}</div>
-          </div>
-          <div>
-            <div className="text-[10px] uppercase tracking-wide text-gray-400 dark:text-gray-500">Sale date</div>
-            <div className="text-gray-800 dark:text-gray-200">{l.saleDate || '-'}</div>
-          </div>
-          <div>
-            <div className="text-[10px] uppercase tracking-wide text-gray-400 dark:text-gray-500">Assessed</div>
-            <div className="text-gray-800 dark:text-gray-200">{money(l.assessedValue)}</div>
+        {/* Owner */}
+        <div>
+          <SectionLabel>Owner</SectionLabel>
+          <div className="text-sm text-gray-800 dark:text-gray-200 mt-0.5">
+            {l.ownerNames || l.countyOwner || '-'}
+            {(l.ownerNames || l.countyOwner) && <CopyBtn text={l.ownerNames || l.countyOwner || ''} label="name" />}
           </div>
         </div>
 
         {/* Contact */}
-        {(l.phone1 || l.phone2 || l.email) && (
-          <div className="flex flex-col gap-1 text-sm border-t border-gray-100 dark:border-gray-800 pt-2">
-            {l.phone1 && <a href={`tel:${l.phone1}`} className="text-primary-600 dark:text-primary-400 hover:underline">☎ {formatPhoneDisplay(l.phone1)}</a>}
-            {l.phone2 && <a href={`tel:${l.phone2}`} className="text-primary-600 dark:text-primary-400 hover:underline">☎ {formatPhoneDisplay(l.phone2)}</a>}
-            {l.email && <a href={`mailto:${l.email}`} className="text-primary-600 dark:text-primary-400 hover:underline truncate">✉ {l.email}</a>}
-          </div>
-        )}
-
-        {/* Links */}
-        <div className="flex gap-1.5 flex-wrap text-xs">
-          {l.zillowUrl && <a href={l.zillowUrl} target="_blank" rel="noopener noreferrer" className="px-2 py-1 rounded bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200">Zillow</a>}
-          {realtor && <a href={realtor} target="_blank" rel="noopener noreferrer" className="px-2 py-1 rounded bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200">Realtor</a>}
-          {l.parcelUrl && <a href={l.parcelUrl} target="_blank" rel="noopener noreferrer" className="px-2 py-1 rounded bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200">{l.parcelLabel || 'Parcel'}</a>}
-          {l.noticeUrl && <a href={l.noticeUrl} target="_blank" rel="noopener noreferrer" className="px-2 py-1 rounded bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200">Notice</a>}
+        <div className="rounded-lg bg-gray-50 dark:bg-gray-800/60 border border-gray-100 dark:border-gray-800 px-3 py-2 flex flex-col gap-1.5">
+          {(l.phone1 || l.phone2 || l.email) ? (
+            <>
+              {l.phone1 && (
+                <div className="flex items-center text-sm">
+                  <span className="w-5 text-gray-400 dark:text-gray-500">☎</span>
+                  <a href={`tel:${l.phone1}`} className="text-gray-800 dark:text-gray-200 hover:text-primary-600 dark:hover:text-primary-400">{formatPhoneDisplay(l.phone1)}</a>
+                  <CopyBtn text={l.phone1} label="number" />
+                  {l.phone1Type && <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400">{l.phone1Type}</span>}
+                </div>
+              )}
+              {l.phone2 && (
+                <div className="flex items-center text-sm">
+                  <span className="w-5 text-gray-400 dark:text-gray-500">☎</span>
+                  <a href={`tel:${l.phone2}`} className="text-gray-800 dark:text-gray-200 hover:text-primary-600 dark:hover:text-primary-400">{formatPhoneDisplay(l.phone2)}</a>
+                  <CopyBtn text={l.phone2} label="number" />
+                  {l.phone2Type && <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400">{l.phone2Type}</span>}
+                </div>
+              )}
+              {l.email && (
+                <div className="flex items-center text-sm min-w-0">
+                  <span className="w-5 text-gray-400 dark:text-gray-500">✉</span>
+                  <a href={`mailto:${l.email}`} className="text-gray-800 dark:text-gray-200 hover:text-primary-600 dark:hover:text-primary-400 truncate">{l.email}</a>
+                  <CopyBtn text={l.email} label="email" />
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="text-sm text-gray-400 dark:text-gray-500 italic">No phone or email on file</div>
+          )}
         </div>
 
-        {/* Actions */}
-        <div className="flex items-center gap-2 border-t border-gray-100 dark:border-gray-800 pt-2 mt-auto">
-          <select
-            value={l.workStatus}
-            onChange={(e) => onUpdate(l.id, { workStatus: e.target.value })}
-            className="input py-1 text-xs flex-1"
-          >
-            {WORK_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-          </select>
-          <button
-            onClick={() => onUpdate(l.id, { doNotCall: !l.doNotCall })}
-            className={`px-2 py-1 rounded text-xs font-medium border ${
-              l.doNotCall
-                ? 'bg-red-600 text-white border-red-600'
-                : 'bg-white dark:bg-gray-900 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-700'
-            }`}
-            title="Do Not Call"
-          >
-            DNC
-          </button>
+        {/* Links */}
+        <div className="flex gap-2">
+          {l.zillowUrl && (
+            <a href={l.zillowUrl} target="_blank" rel="noopener noreferrer" className={linkBtn}>
+              <span>🏠 Zillow</span><span className={linkSub}>listing</span>
+            </a>
+          )}
+          {l.realtorQuery && (
+            <button onClick={() => openRealtor(l)} className={linkBtn}>
+              <span>🔑 Realtor</span><span className={linkSub}>listing</span>
+            </button>
+          )}
+          {l.parcelUrl && (
+            <a href={l.parcelUrl} target="_blank" rel="noopener noreferrer" className={linkBtn}>
+              <span>📍 {parcelMain}</span><span className={linkSub}>{parcelSub}</span>
+            </a>
+          )}
+          {l.noticeUrl && (
+            <a href={l.noticeUrl} target="_blank" rel="noopener noreferrer" className={linkBtn}>
+              <span>📰 Notice</span><span className={linkSub}>source</span>
+            </a>
+          )}
+        </div>
+
+        {/* Tracking */}
+        <div className="border-t border-gray-100 dark:border-gray-800 pt-3 flex flex-col gap-2.5">
+          <div className="flex items-center gap-3">
+            <div className="flex-1 min-w-0">
+              <SectionLabel className="mb-1">Status</SectionLabel>
+              <select
+                value={l.workStatus}
+                onChange={(e) => onUpdate(l.id, { workStatus: e.target.value })}
+                className="input py-1.5 text-sm w-full"
+              >
+                {WORK_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+              </select>
+            </div>
+            <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400 cursor-pointer select-none mt-4">
+              <input
+                type="checkbox"
+                checked={l.doNotCall}
+                onChange={() => onUpdate(l.id, { doNotCall: !l.doNotCall })}
+                className="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-red-600 focus:ring-red-500"
+              />
+              Do Not Call
+            </label>
+          </div>
+
+          <div className="flex items-end gap-3 flex-wrap">
+            <div>
+              <SectionLabel className="mb-1">Contacted this week</SectionLabel>
+              <div className="flex gap-1.5">
+                {DAYS.map((d, i) => (
+                  <button key={d} onClick={() => toggleDay(d)} className="flex flex-col items-center gap-0.5 group">
+                    <span className={`w-6 h-6 rounded border flex items-center justify-center text-[11px] font-bold transition-colors ${
+                      l.touchDays?.[d]
+                        ? 'bg-primary-600 border-primary-600 text-white'
+                        : 'bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-600 text-transparent group-hover:border-primary-400'}`}>✓</span>
+                    <span className="text-[9px] text-gray-400 dark:text-gray-500">{DAY_LABELS[i]}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="ml-auto text-xs text-gray-500 dark:text-gray-400 pb-1">
+              Total touches: <b className="text-gray-800 dark:text-gray-200">{l.totalTouches}</b>
+            </div>
+          </div>
+
+          <textarea
+            value={notes}
+            onChange={(e) => saveNotes(e.target.value)}
+            placeholder="Call notes, reminders..."
+            rows={2}
+            className="input text-sm resize-y min-h-[52px]"
+          />
+        </div>
+
+        {/* Facts grid */}
+        <div className="grid grid-cols-2 border-t border-gray-100 dark:border-gray-800 -mx-4 -mb-4 mt-auto divide-x divide-y divide-gray-100 dark:divide-gray-800">
+          <div className="px-4 py-2.5">
+            <SectionLabel>Sale date</SectionLabel>
+            <div className={`text-sm font-semibold mt-0.5 ${db.cls || 'text-gray-800 dark:text-gray-200'}`}>{fmtDateUS(l.saleDate)}</div>
+          </div>
+          <div className="px-4 py-2.5">
+            <SectionLabel>{l.daysToSale != null && l.daysToSale <= 30 ? 'Countdown' : 'Timing'}</SectionLabel>
+            <div className={`text-sm font-semibold mt-0.5 ${db.cls || 'text-gray-800 dark:text-gray-200'}`}>{db.text}</div>
+          </div>
+          <div className="px-4 py-2.5">
+            <SectionLabel>Assessed value</SectionLabel>
+            <div className="text-sm font-semibold mt-0.5 text-gray-800 dark:text-gray-200">{money(l.assessedValue)}</div>
+          </div>
+          <div className="px-4 py-2.5">
+            <SectionLabel>Loan amount</SectionLabel>
+            <div className="text-sm font-semibold mt-0.5 text-gray-800 dark:text-gray-200">{money(l.loanAmount)}</div>
+          </div>
+          {l.equitySpread != null && (
+            <>
+              <div className="px-4 py-2.5">
+                <SectionLabel>Equity spread</SectionLabel>
+                <div className={`text-sm font-semibold mt-0.5 ${l.equitySpread >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                  {signedMoney(l.equitySpread)}
+                </div>
+              </div>
+              <div className="px-4 py-2.5">
+                <SectionLabel>Est. equity %</SectionLabel>
+                <div className="text-sm font-semibold mt-0.5 text-gray-800 dark:text-gray-200">{l.equityPct == null ? '-' : `${l.equityPct}%`}</div>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>
