@@ -408,6 +408,31 @@ export default function ForeclosuresPage() {
     setHideDnc(false);
   };
 
+  /** Re-run skip trace for one lead, then refresh that card in place. */
+  const runSkiptraceOne = async (id: string) => {
+    await foreclosuresAPI.skiptrace(id);
+    const res = await foreclosuresAPI.get(id);
+    setLeads((prev) => prev.map((l) => (l.id === id ? res.data : l)));
+  };
+
+  /** Queue skip trace for every checked lead; results land as they finish. */
+  const handleSkiptraceSelected = async () => {
+    const ids = Array.from(selected);
+    if (!ids.length) return;
+    setBusy(true);
+    try {
+      const res = await foreclosuresAPI.bulkSkiptrace(ids);
+      showToast(`Skip trace started for ${res.data.queued} lead${res.data.queued === 1 ? '' : 's'} - results appear as they finish.`);
+      // Each lead takes a couple of seconds server-side; refresh in waves.
+      setTimeout(fetchLeads, 6000);
+      setTimeout(fetchLeads, 20000);
+    } catch (e: any) {
+      showToast(e.response?.data?.message || 'Skip trace failed to start', true);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const handleDeleteSelected = async () => {
     const ids = Array.from(selected);
     if (!ids.length) return;
@@ -571,7 +596,7 @@ export default function ForeclosuresPage() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
             {leads.map((l) => (
-              <LeadCard key={l.id} lead={l} onUpdate={updateLead}
+              <LeadCard key={l.id} lead={l} onUpdate={updateLead} onSkiptrace={runSkiptraceOne}
                 selected={selected.has(l.id)} onToggleSelect={() => toggleSelect(l.id)} />
             ))}
           </div>
@@ -594,6 +619,7 @@ export default function ForeclosuresPage() {
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 px-4 py-2.5 rounded-xl bg-white dark:bg-gray-900 border border-primary-500 shadow-lg text-sm">
           <span className="text-gray-700 dark:text-gray-200"><b className="text-primary-600 dark:text-primary-400">{selected.size}</b> selected</span>
           <button onClick={() => downloadCsv(selectedLeads)} className="btn btn-primary btn-sm">Download CSV</button>
+          <button onClick={handleSkiptraceSelected} disabled={busy} className="btn btn-secondary btn-sm disabled:opacity-50">Skip trace</button>
           <button onClick={() => setSelected(new Set())} className="btn btn-secondary btn-sm">Clear</button>
           <button onClick={handleDeleteSelected} disabled={busy}
             className="btn btn-sm bg-red-600 hover:bg-red-700 text-white border border-red-600 disabled:opacity-50">
@@ -615,16 +641,30 @@ export default function ForeclosuresPage() {
 }
 
 // ─── Lead card (modeled on the offline tracker card) ─────────────────────────
-function LeadCard({ lead: l, onUpdate, selected, onToggleSelect }: {
+function LeadCard({ lead: l, onUpdate, onSkiptrace, selected, onToggleSelect }: {
   lead: FclLead;
   onUpdate: (id: string, patch: any, localPatch?: any) => void;
+  onSkiptrace: (id: string) => Promise<void>;
   selected: boolean;
   onToggleSelect: () => void;
 }) {
   const db = daysBadge(l.daysToSale);
   const priBar = l.priority === 'HIGH' ? 'bg-red-500' : l.priority === 'MEDIUM' ? 'bg-amber-500' : 'bg-blue-500';
   const [notes, setNotes] = useState(l.callNotes || '');
+  const [tracing, setTracing] = useState(false);
   const notesTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const runTrace = async () => {
+    if (tracing) return;
+    setTracing(true);
+    try {
+      await onSkiptrace(l.id);
+    } catch {
+      /* toast handled upstream via refetch failure; keep the card usable */
+    } finally {
+      setTracing(false);
+    }
+  };
 
   const saveNotes = (val: string) => {
     setNotes(val);
@@ -740,6 +780,16 @@ function LeadCard({ lead: l, onUpdate, selected, onToggleSelect }: {
           ) : (
             <div className="text-sm text-gray-400 dark:text-gray-500 italic">No phone or email on file</div>
           )}
+          <div className="flex justify-end">
+            <button
+              onClick={(e) => { e.stopPropagation(); runTrace(); }}
+              disabled={tracing}
+              title="Look up owner, parcel, and phones again (NC OneMap + BatchData)"
+              className="text-[11px] px-2 py-0.5 rounded border border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 hover:border-primary-400 transition-colors disabled:opacity-60"
+            >
+              {tracing ? 'Tracing...' : '↻ Skip trace'}
+            </button>
+          </div>
         </div>
 
         {/* Links */}

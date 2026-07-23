@@ -176,6 +176,18 @@ export class ForeclosuresController {
     return this.ingest.ingestRssFeed({ organizationId });
   }
 
+  @Post('bulk-skiptrace')
+  async bulkSkiptrace(
+    @Body() body: { ids: string[] },
+    @Headers('authorization') authHeader?: string,
+  ) {
+    if (!Array.isArray(body?.ids) || body.ids.length === 0) {
+      throw new BadRequestException('No lead ids provided');
+    }
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.skiptrace.enrichMany(body.ids, organizationId);
+  }
+
   @Post(':id/skiptrace')
   async runSkiptrace(@Param('id') id: string, @Headers('authorization') authHeader?: string) {
     const { organizationId } = this.decodeToken(authHeader);
