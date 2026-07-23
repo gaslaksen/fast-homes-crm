@@ -178,7 +178,7 @@ export default function HomeScreen() {
             Icon={ZapIcon}
             iconColor="#A16207"
             iconBg="#FEF9C3"
-            onPress={() => router.push({ pathname: '/search', params: { needsReply: 'true' } })}
+            onPress={() => router.push({ pathname: '/leads', params: { needsReply: 'true' } })}
           />
           <StatCard
             label="Deals"
@@ -202,7 +202,7 @@ export default function HomeScreen() {
             Icon={ZapIcon}
             iconColor="#B91C1C"
             iconBg="#FEE2E2"
-            onPress={() => router.push({ pathname: '/search', params: { band: 'HOT' } })}
+            onPress={() => router.push({ pathname: '/leads', params: { band: 'HOT' } })}
           />
         </View>
 

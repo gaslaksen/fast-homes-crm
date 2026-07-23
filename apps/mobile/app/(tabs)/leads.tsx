@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
-  ActivityIndicator,
   FlatList,
+  RefreshControl,
   StyleSheet,
   Text,
   TextInput,
@@ -15,7 +15,7 @@ import { Chip } from '@/components/ui';
 import { SearchIcon, ChevronRight } from '@/components/icons';
 import { useThemed, type Colors } from '@/theme';
 
-export default function SearchScreen() {
+export default function LeadsScreen() {
   const { colors, styles } = useThemed(makeStyles);
   const router = useRouter();
   const params = useLocalSearchParams<{ band?: string; needsReply?: string }>();
@@ -29,11 +29,11 @@ export default function SearchScreen() {
     setNeedsReply(params.needsReply || undefined);
   }, [params.band, params.needsReply]);
 
-  const { data: leads, isLoading } = useLeadSearch({
+  const { data: leads, isLoading, isRefetching, refetch } = useLeadSearch({
     search: q,
     scoreBand: band,
     needsReply,
-    limit: 40,
+    limit: 50,
   });
 
   const filterLabel = band
@@ -83,6 +83,9 @@ export default function SearchScreen() {
         data={leads ?? []}
         keyExtractor={(l) => l.id}
         keyboardShouldPersistTaps="handled"
+        refreshControl={
+          <RefreshControl refreshing={isRefetching} onRefresh={() => refetch()} tintColor={colors.textMuted} />
+        }
         renderItem={({ item }: { item: LeadListItem }) => {
           const b = bandStyle(item.scoreBand);
           const addr = [item.propertyAddress, item.propertyCity].filter(Boolean).join(', ');
@@ -96,7 +99,7 @@ export default function SearchScreen() {
                   {fullName(item)}
                 </Text>
                 <Text style={styles.addr} numberOfLines={1}>
-                  {addr}
+                  {addr || statusLabel(item.status)}
                 </Text>
               </View>
               <View style={styles.rowRight}>
@@ -108,11 +111,7 @@ export default function SearchScreen() {
         }}
         ListEmptyComponent={
           <Text style={styles.empty}>
-            {isLoading
-              ? 'Searching…'
-              : hasQuery
-                ? 'No matching leads.'
-                : 'Search across all your leads by name or address.'}
+            {isLoading ? 'Loading leads…' : hasQuery ? 'No matching leads.' : 'No leads yet.'}
           </Text>
         }
       />

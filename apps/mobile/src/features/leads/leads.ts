@@ -79,16 +79,16 @@ export function useLeadSearch(params: {
   status?: string;
   limit?: number;
 }) {
-  const enabled = !!(params.search?.trim() || params.scoreBand || params.needsReply || params.status);
+  // Always enabled: with no search/filters the API returns the recent leads,
+  // which is the Leads tab's default list.
   return useQuery({
     queryKey: ['leads', 'search', params],
     queryFn: async () => {
       const { data } = await api.get<{ leads: LeadListItem[] }>('/leads', {
-        params: { ...params, limit: params.limit ?? 40 },
+        params: { ...params, limit: params.limit ?? 50 },
       });
       return data.leads;
     },
-    enabled,
   });
 }
 
