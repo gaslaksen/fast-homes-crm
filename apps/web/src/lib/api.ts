@@ -126,6 +126,7 @@ export const foreclosuresAPI = {
   get: (id: string) => api.get(`/foreclosures/${id}`),
   update: (id: string, data: any) => api.patch(`/foreclosures/${id}`, data),
   bulkDelete: (ids: string[]) => api.post('/foreclosures/bulk-delete', { ids }),
+  bulkSkiptrace: (ids: string[]) => api.post('/foreclosures/bulk-skiptrace', { ids }),
   refresh: () => api.post('/foreclosures/refresh'),
   skiptrace: (id: string) => api.post(`/foreclosures/${id}/skiptrace`),
   importParse: (file: File) => {

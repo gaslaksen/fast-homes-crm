@@ -152,6 +152,32 @@ export class ForeclosureSkiptraceService {
     return { updated: true, skipStatus: detailPatch.skipStatus, parcelId: detailPatch.parcelId };
   }
 
+  /**
+   * Kick off skip-trace for many leads. Runs in the background with pacing
+   * (each lead makes 1-3 external calls), so the HTTP request returns
+   * immediately; results land on the cards as each lead finishes.
+   */
+  async enrichMany(ids: string[], organizationId?: string): Promise<{ queued: number }> {
+    const unique = Array.from(new Set(ids)).slice(0, 200);
+    void this.processMany(unique, organizationId);
+    return { queued: unique.length };
+  }
+
+  private async processMany(ids: string[], organizationId?: string) {
+    let ok = 0;
+    for (const id of ids) {
+      try {
+        const res = await this.enrichLead(id, organizationId);
+        if (res.updated) ok++;
+      } catch (e: any) {
+        this.logger.warn(`Bulk skip-trace failed for ${id}: ${e.message}`);
+      }
+      // Be polite to the free NC OneMap endpoint (mirrors the old Apps Script).
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    this.logger.log(`Bulk skip-trace done: ${ok}/${ids.length} leads enriched`);
+  }
+
   /** Query NC OneMap parcels by site address. Returns first match attrs or null. */
   private async lookupParcel(address: string): Promise<ParcelAttrs | null> {
     const clean = address.toUpperCase().replace(/[^A-Z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
