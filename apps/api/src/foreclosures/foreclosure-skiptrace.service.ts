@@ -9,7 +9,9 @@ const NC_PARCELS_URL =
   'https://services.nconemap.gov/secure/rest/services/NC1Map_Parcels/MapServer/1/query';
 const MECK_MASTER_ADDRESS_URL =
   'https://gis.charlottenc.gov/arcgis/rest/services/CountyData/MasterAddress/MapServer/0/query';
-const BATCHDATA_SKIPTRACE_URL = 'https://api.batchdata.com/api/v1/property/skip-trace';
+// Same default + BATCHDATA_API_BASE_URL override as comps/batchdata.service.ts,
+// so sandbox vs production is decided in one place (the env), not per caller.
+const BATCHDATA_DEFAULT_BASE_URL = 'https://api.batchdata.com/api/v1';
 
 const STREET_SUFFIXES = new Set([
   'RD', 'ROAD', 'DR', 'DRIVE', 'LN', 'LANE', 'CT', 'COURT', 'ST', 'STREET',
@@ -27,9 +29,13 @@ interface ParcelAttrs {
 export class ForeclosureSkiptraceService {
   private readonly logger = new Logger(ForeclosureSkiptraceService.name);
   private readonly batchKey?: string;
+  private readonly batchBaseUrl: string;
 
   constructor(private prisma: PrismaService, private config: ConfigService) {
     this.batchKey = this.config.get<string>('BATCHDATA_API_KEY');
+    this.batchBaseUrl = (
+      this.config.get<string>('BATCHDATA_API_BASE_URL') || BATCHDATA_DEFAULT_BASE_URL
+    ).replace(/\/$/, '');
   }
 
   /**
@@ -224,11 +230,34 @@ export class ForeclosureSkiptraceService {
     const z = parcel?.szip || zip;
     if (z) propertyAddress.zip = String(z).slice(0, 5);
 
-    const resp = await axios.post(
-      BATCHDATA_SKIPTRACE_URL,
-      { requests: [{ propertyAddress }] },
-      { headers: { Authorization: `Bearer ${this.batchKey}`, 'Content-Type': 'application/json' }, timeout: 20000 },
-    );
+    let resp;
+    try {
+      resp = await axios.post(
+        `${this.batchBaseUrl}/property/skip-trace`,
+        { requests: [{ propertyAddress }] },
+        {
+          headers: {
+            Authorization: `Bearer ${this.batchKey}`,
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+          },
+          timeout: 20000,
+        },
+      );
+    } catch (err: any) {
+      const status = err?.response?.status;
+      if (status === 401 || status === 403) {
+        // 401 = bad key; 403 = key valid but no access to the skip-trace
+        // product (not on the plan, or sandbox key against production URL).
+        throw new Error(
+          `BatchData auth ${status}: check that BATCHDATA_API_KEY has the ` +
+          `Property Skip Trace product enabled and matches BATCHDATA_API_BASE_URL ` +
+          `(${this.batchBaseUrl})`,
+        );
+      }
+      if (status === 402) throw new Error('BatchData: out of skip-trace credits');
+      throw err;
+    }
     const persons = resp.data?.results?.persons;
     if (!persons || persons.length === 0 || !persons[0]?.meta?.matched) return null;
 
