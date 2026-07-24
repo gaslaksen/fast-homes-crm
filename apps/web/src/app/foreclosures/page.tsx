@@ -223,6 +223,43 @@ function SectionLabel({ children, className }: { children: React.ReactNode; clas
   return <div className={`text-[10px] uppercase tracking-wider font-semibold text-gray-400 dark:text-gray-500 ${className || ''}`}>{children}</div>;
 }
 
+// Persist the filter bar so a page refresh keeps the same county/filters for
+// this browser (per the user's session), instead of resetting to the default
+// unfiltered view.
+const FILTERS_KEY = 'fcl_filters_v1';
+interface SavedFilters {
+  search?: string;
+  priorities?: string[];
+  workStatuses?: string[];
+  noticeTypes?: string[];
+  city?: string;
+  county?: string;
+  equityBand?: string;
+  ownedYearsMin?: string;
+  saleWindow?: string;
+  occupancy?: string;
+  valueMin?: string;
+  hideDead?: boolean;
+  hideDnc?: boolean;
+  sort?: string;
+  collapseAll?: boolean;
+}
+function loadSavedFilters(): SavedFilters {
+  if (typeof window === 'undefined') return {};
+  try {
+    return JSON.parse(localStorage.getItem(FILTERS_KEY) || '{}') || {};
+  } catch {
+    return {};
+  }
+}
+function saveFilters(f: SavedFilters) {
+  try {
+    localStorage.setItem(FILTERS_KEY, JSON.stringify(f));
+  } catch {
+    /* storage blocked; filters just won't persist */
+  }
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 export default function ForeclosuresPage() {
   const [leads, setLeads] = useState<FclLead[]>([]);
@@ -251,6 +288,9 @@ export default function ForeclosuresPage() {
   const [hideDnc, setHideDnc] = useState(false);
   const [sort, setSort] = useState('sale');
   const [page, setPage] = useState(1);
+  // Gate data fetching until saved filters are restored, so we never flash the
+  // default (unfiltered) list before the user's persisted county/filters load.
+  const [hydrated, setHydrated] = useState(false);
 
   const [toast, setToast] = useState<{ msg: string; err?: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -304,10 +344,54 @@ export default function ForeclosuresPage() {
     }
   }, []);
 
+  // Restore saved filters once, on mount, before the first fetch.
   useEffect(() => {
+    const s = loadSavedFilters();
+    if (s.search) setSearch(s.search);
+    if (s.priorities?.length) setPriorities(new Set(s.priorities));
+    if (s.workStatuses?.length) setWorkStatuses(new Set(s.workStatuses));
+    if (s.noticeTypes?.length) setNoticeTypes(new Set(s.noticeTypes));
+    if (s.city) setCity(s.city);
+    if (s.county) setCounty(s.county);
+    if (s.equityBand) setEquityBand(s.equityBand);
+    if (s.ownedYearsMin) setOwnedYearsMin(s.ownedYearsMin);
+    if (s.saleWindow) setSaleWindow(s.saleWindow);
+    if (s.occupancy) setOccupancy(s.occupancy);
+    if (s.valueMin) setValueMin(s.valueMin);
+    if (s.hideDead) setHideDead(true);
+    if (s.hideDnc) setHideDnc(true);
+    if (s.sort) setSort(s.sort);
+    if (s.collapseAll) setCollapseAll(true);
+    setHydrated(true);
+  }, []);
+
+  // Persist the filter bar whenever it changes (after hydration).
+  useEffect(() => {
+    if (!hydrated) return;
+    saveFilters({
+      search,
+      priorities: Array.from(priorities),
+      workStatuses: Array.from(workStatuses),
+      noticeTypes: Array.from(noticeTypes),
+      city,
+      county,
+      equityBand,
+      ownedYearsMin,
+      saleWindow,
+      occupancy,
+      valueMin,
+      hideDead,
+      hideDnc,
+      sort,
+      collapseAll,
+    });
+  }, [hydrated, search, priorities, workStatuses, noticeTypes, city, county, equityBand, ownedYearsMin, saleWindow, occupancy, valueMin, hideDead, hideDnc, sort, collapseAll]);
+
+  useEffect(() => {
+    if (!hydrated) return;
     const t = setTimeout(fetchLeads, search ? 300 : 0);
     return () => clearTimeout(t);
-  }, [fetchLeads, search]);
+  }, [hydrated, fetchLeads, search]);
 
   useEffect(() => {
     fetchStats();
