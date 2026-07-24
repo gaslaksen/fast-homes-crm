@@ -77,6 +77,8 @@ export function useLeadSearch(params: {
   scoreBand?: string;
   needsReply?: string;
   status?: string;
+  sort?: string;
+  dir?: string;
   limit?: number;
 }) {
   // Always enabled: with no search/filters the API returns the recent leads,

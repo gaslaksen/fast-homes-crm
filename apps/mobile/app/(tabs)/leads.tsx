@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
+  ActionSheetIOS,
   FlatList,
   RefreshControl,
   StyleSheet,
@@ -15,6 +16,25 @@ import { Chip } from '@/components/ui';
 import { SearchIcon, ChevronRight } from '@/components/icons';
 import { useThemed, type Colors } from '@/theme';
 
+const SORT_OPTIONS = [
+  { label: 'Best match', sort: 'tier', dir: 'desc' },
+  { label: 'Score: high to low', sort: 'score', dir: 'desc' },
+  { label: 'Newest', sort: 'created', dir: 'desc' },
+  { label: 'ARV: high to low', sort: 'arv', dir: 'desc' },
+  { label: 'Recently contacted', sort: 'touched', dir: 'desc' },
+  { label: 'Address: A to Z', sort: 'address', dir: 'asc' },
+];
+
+const FILTER_OPTIONS: { label: string; band?: string; needsReply?: boolean }[] = [
+  { label: 'All leads' },
+  { label: 'Hot', band: 'HOT' },
+  { label: 'Strike zone', band: 'STRIKE_ZONE' },
+  { label: 'Workable', band: 'WORKABLE' },
+  { label: 'Warm', band: 'WARM' },
+  { label: 'Cool', band: 'COOL' },
+  { label: 'Needs reply', needsReply: true },
+];
+
 export default function LeadsScreen() {
   const { colors, styles } = useThemed(makeStyles);
   const router = useRouter();
@@ -22,6 +42,7 @@ export default function LeadsScreen() {
   const [q, setQ] = useState('');
   const [band, setBand] = useState<string | undefined>(undefined);
   const [needsReply, setNeedsReply] = useState<string | undefined>(undefined);
+  const [sortIdx, setSortIdx] = useState(0);
 
   // Apply a filter passed in from the Home stat cards.
   useEffect(() => {
@@ -29,10 +50,13 @@ export default function LeadsScreen() {
     setNeedsReply(params.needsReply || undefined);
   }, [params.band, params.needsReply]);
 
+  const sortOpt = SORT_OPTIONS[sortIdx];
   const { data: leads, isLoading, isRefetching, refetch } = useLeadSearch({
     search: q,
     scoreBand: band,
     needsReply,
+    sort: sortOpt.sort,
+    dir: sortOpt.dir,
     limit: 50,
   });
 
@@ -42,6 +66,27 @@ export default function LeadsScreen() {
       ? 'Needs reply'
       : null;
   const hasQuery = !!(q.trim() || band || needsReply);
+
+  const openSort = () => {
+    ActionSheetIOS.showActionSheetWithOptions(
+      { title: 'Sort by', options: [...SORT_OPTIONS.map((o) => o.label), 'Cancel'], cancelButtonIndex: SORT_OPTIONS.length },
+      (i) => {
+        if (i != null && i < SORT_OPTIONS.length) setSortIdx(i);
+      },
+    );
+  };
+
+  const openFilter = () => {
+    ActionSheetIOS.showActionSheetWithOptions(
+      { title: 'Filter', options: [...FILTER_OPTIONS.map((o) => o.label), 'Cancel'], cancelButtonIndex: FILTER_OPTIONS.length },
+      (i) => {
+        if (i == null || i >= FILTER_OPTIONS.length) return;
+        const opt = FILTER_OPTIONS[i];
+        setBand(opt.band);
+        setNeedsReply(opt.needsReply ? 'true' : undefined);
+      },
+    );
+  };
 
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
@@ -62,6 +107,21 @@ export default function LeadsScreen() {
             <Text style={styles.clear}>Clear</Text>
           </TouchableOpacity>
         ) : null}
+      </View>
+
+      <View style={styles.controls}>
+        <TouchableOpacity style={styles.controlBtn} onPress={openSort} activeOpacity={0.7}>
+          <Text style={styles.controlText}>Sort: {sortOpt.label}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.controlBtn, filterLabel && styles.controlBtnActive]}
+          onPress={openFilter}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.controlText, filterLabel && styles.controlTextActive]}>
+            {filterLabel ?? 'Filter'}
+          </Text>
+        </TouchableOpacity>
       </View>
 
       {filterLabel ? (
@@ -135,6 +195,23 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
   },
   input: { flex: 1, fontSize: 16, color: colors.text },
   clear: { fontSize: 14, color: colors.primary, fontWeight: '600' },
+  controls: {
+    flexDirection: 'row',
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingBottom: 10,
+  },
+  controlBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: colors.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+  },
+  controlBtnActive: { backgroundColor: colors.primarySoft, borderColor: colors.primary },
+  controlText: { fontSize: 13, fontWeight: '600', color: colors.textSecondary },
+  controlTextActive: { color: colors.primaryDark },
   filterRow: {
     flexDirection: 'row',
     alignItems: 'center',

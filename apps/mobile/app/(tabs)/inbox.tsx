@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useRouter } from 'expo-router';
 import {
   ActivityIndicator,
@@ -5,12 +6,14 @@ import {
   RefreshControl,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useThreads } from '@/features/inbox/hooks';
-import type { InboxThread } from '@/features/inbox/types';
+import type { InboxFilter, InboxThread } from '@/features/inbox/types';
+import { SearchIcon } from '@/components/icons';
 import { useThemed, type Colors } from '@/theme';
 
 function fullName(t: InboxThread) {
@@ -28,41 +31,77 @@ function timeAgo(iso: string | null) {
   return `${Math.floor(h / 24)}d`;
 }
 
+const FILTERS: { key: InboxFilter; label: string }[] = [
+  { key: 'all', label: 'All' },
+  { key: 'unread', label: 'Unread' },
+];
+
 export default function InboxScreen() {
   const router = useRouter();
   const { colors, styles } = useThemed(makeStyles);
-  const { data, isLoading, isRefetching, refetch, error } = useThreads('all');
-
-  if (isLoading) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator />
-      </View>
-    );
-  }
-
-  if (error) {
-    return (
-      <View style={styles.center}>
-        <Text style={styles.muted}>Could not load conversations.</Text>
-        <TouchableOpacity onPress={() => refetch()}>
-          <Text style={styles.retry}>Retry</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
+  const [search, setSearch] = useState('');
+  const [filter, setFilter] = useState<InboxFilter>('all');
+  const { data, isLoading, isRefetching, refetch, error } = useThreads(filter, search);
 
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
+      <View style={styles.searchBar}>
+        <SearchIcon size={18} color={colors.textMuted} />
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search conversations"
+          placeholderTextColor={colors.textMuted}
+          value={search}
+          onChangeText={setSearch}
+          autoCorrect={false}
+          autoCapitalize="none"
+          returnKeyType="search"
+        />
+        {search ? (
+          <TouchableOpacity onPress={() => setSearch('')} hitSlop={8}>
+            <Text style={styles.retry}>Clear</Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
+
+      <View style={styles.segments}>
+        {FILTERS.map((f) => (
+          <TouchableOpacity
+            key={f.key}
+            style={[styles.segment, filter === f.key && styles.segmentActive]}
+            onPress={() => setFilter(f.key)}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.segmentText, filter === f.key && styles.segmentTextActive]}>
+              {f.label}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
       <FlatList
         data={data?.items ?? []}
         keyExtractor={(t) => t.leadId}
+        keyboardShouldPersistTaps="handled"
         refreshControl={
           <RefreshControl refreshing={isRefetching} onRefresh={() => refetch()} tintColor={colors.textMuted} />
         }
         ListEmptyComponent={
           <View style={styles.center}>
-            <Text style={styles.muted}>No conversations yet.</Text>
+            {isLoading ? (
+              <ActivityIndicator />
+            ) : error ? (
+              <>
+                <Text style={styles.muted}>Could not load conversations.</Text>
+                <TouchableOpacity onPress={() => refetch()}>
+                  <Text style={styles.retry}>Retry</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <Text style={styles.muted}>
+                {search.trim() ? 'No matching conversations.' : filter === 'unread' ? 'No unread conversations.' : 'No conversations yet.'}
+              </Text>
+            )}
           </View>
         }
         renderItem={({ item }) => (
@@ -103,6 +142,39 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 8, backgroundColor: colors.surface },
   muted: { color: colors.textSecondary, fontSize: 15 },
   retry: { color: colors.primary, fontWeight: '600', marginTop: 8 },
+
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginHorizontal: 14,
+    marginTop: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    backgroundColor: colors.bg,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+  },
+  searchInput: { flex: 1, fontSize: 16, color: colors.text },
+  segments: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  segment: {
+    paddingHorizontal: 16,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: colors.bg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+  },
+  segmentActive: { backgroundColor: colors.primarySoft, borderColor: colors.primary },
+  segmentText: { fontSize: 14, fontWeight: '600', color: colors.textSecondary },
+  segmentTextActive: { color: colors.primaryDark },
+
   row: {
     flexDirection: 'row',
     alignItems: 'center',

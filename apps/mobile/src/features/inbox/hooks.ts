@@ -16,12 +16,13 @@ export function useGenerateDraft(leadId: string) {
   });
 }
 
-export function useThreads(filter: InboxFilter = 'all') {
+export function useThreads(filter: InboxFilter = 'all', search = '') {
+  const q = search.trim();
   return useQuery({
-    queryKey: ['inbox', 'threads', filter],
+    queryKey: ['inbox', 'threads', filter, q],
     queryFn: async () => {
       const { data } = await api.get<InboxThreadsResponse>('/inbox/threads', {
-        params: { filter },
+        params: { filter, ...(q ? { search: q } : {}) },
       });
       return data;
     },

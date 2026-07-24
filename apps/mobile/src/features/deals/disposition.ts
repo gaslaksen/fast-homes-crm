@@ -120,6 +120,26 @@ export function useUpsertFinalSale(leadId: string) {
   });
 }
 
+/**
+ * Sets the manual repair estimate via the deal-math endpoint, which recomputes
+ * and persists `currentDealNumbers` (the projected profit). Editing ARV/asking
+ * on the lead alone does NOT recompute the deal math, so the deal editor calls
+ * this after patching the lead to force a recompute that picks up all inputs.
+ */
+export function useSetRepairEstimate(leadId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (value: number | null) =>
+      (
+        await api.patch(`/leads/${leadId}/deal-math/repair-estimate`, {
+          value,
+          method: 'MANUAL_OVERRIDE',
+        })
+      ).data,
+    onSuccess: () => invalidateDeal(qc, leadId),
+  });
+}
+
 const COST_LABELS: Record<string, string> = {
   holding: 'Holding',
   repair_prep: 'Repair / prep',

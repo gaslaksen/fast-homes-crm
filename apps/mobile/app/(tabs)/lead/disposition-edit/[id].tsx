@@ -22,12 +22,13 @@ import {
   useAddDispositionCost,
   useDeleteDispositionCost,
   useUpsertFinalSale,
+  useSetRepairEstimate,
   costLabel,
   EXIT_STRATEGIES,
   COST_CATEGORIES,
   type DispositionCost,
 } from '@/features/deals/disposition';
-import { strategyLabel } from '@/features/leads/leads';
+import { strategyLabel, useLeadDetail, useUpdateLead } from '@/features/leads/leads';
 import { Card, SectionLabel } from '@/components/ui';
 import { money } from '@/lib/format';
 import { useThemed, type Colors } from '@/theme';
@@ -109,6 +110,7 @@ export default function DispositionEditScreen() {
   const leadId = String(id);
   const router = useRouter();
 
+  const lead = useLeadDetail(leadId);
   const plan = useDispositionPlan(leadId);
   const costs = useDispositionCosts(leadId);
   const sale = useFinalSale(leadId);
@@ -116,8 +118,13 @@ export default function DispositionEditScreen() {
   const addCost = useAddDispositionCost(leadId);
   const delCost = useDeleteDispositionCost(leadId);
   const upsertSale = useUpsertFinalSale(leadId);
+  const updateLead = useUpdateLead(leadId);
+  const setRepairEstimate = useSetRepairEstimate(leadId);
 
   const [ready, setReady] = useState(false);
+  const [arv, setArv] = useState('');
+  const [repairs, setRepairs] = useState('');
+  const [asking, setAsking] = useState('');
   const [exit, setExit] = useState('');
   const [targetPrice, setTargetPrice] = useState('');
   const [targetClose, setTargetClose] = useState('');
@@ -129,7 +136,10 @@ export default function DispositionEditScreen() {
   const [costAmt, setCostAmt] = useState('');
 
   useEffect(() => {
-    if (!ready && plan.data !== undefined && sale.data !== undefined) {
+    if (!ready && plan.data !== undefined && sale.data !== undefined && lead.data) {
+      setArv(lead.data.arv != null ? String(lead.data.arv) : '');
+      setRepairs(lead.data.currentRepairEstimate != null ? String(lead.data.currentRepairEstimate) : '');
+      setAsking(lead.data.askingPrice != null ? String(lead.data.askingPrice) : '');
       setExit(plan.data?.exitStrategy ?? '');
       setTargetPrice(plan.data?.targetSalePrice != null ? String(plan.data.targetSalePrice) : '');
       setTargetClose(plan.data?.targetCloseDate ? plan.data.targetCloseDate.slice(0, 10) : '');
@@ -139,12 +149,23 @@ export default function DispositionEditScreen() {
       setClosedAt(sale.data?.closedAt ? sale.data.closedAt.slice(0, 10) : '');
       setReady(true);
     }
-  }, [plan.data, sale.data, ready]);
+  }, [plan.data, sale.data, lead.data, ready]);
 
-  const saving = upsertPlan.isPending || upsertSale.isPending;
+  const saving = upsertPlan.isPending || upsertSale.isPending || updateLead.isPending || setRepairEstimate.isPending;
   const costList: DispositionCost[] = costs.data ?? [];
 
   async function onSave() {
+    // Deal math: patch ARV/asking on the lead, then set the repair estimate,
+    // which recomputes the projected profit (currentDealNumbers) from all three.
+    // Best-effort so a recompute hiccup never blocks the disposition save.
+    let dealMathFailed = false;
+    try {
+      await updateLead.mutateAsync({ arv: num(arv) ?? null, askingPrice: num(asking) ?? null } as any);
+      await setRepairEstimate.mutateAsync(num(repairs) ?? null);
+    } catch {
+      dealMathFailed = true;
+    }
+
     try {
       await upsertPlan.mutateAsync({
         exitStrategy: exit || undefined,
@@ -162,10 +183,15 @@ export default function DispositionEditScreen() {
           });
         }
       }
-      router.back();
     } catch {
       Alert.alert('Error', 'Could not save the deal changes.');
+      return;
     }
+
+    if (dealMathFailed) {
+      Alert.alert('Saved', 'Deal details saved, but the projected profit could not be recalculated.');
+    }
+    router.back();
   }
 
   async function onAddCost() {
@@ -179,7 +205,7 @@ export default function DispositionEditScreen() {
     }
   }
 
-  if (plan.isLoading || sale.isLoading || !ready) {
+  if (plan.isLoading || sale.isLoading || lead.isLoading || !ready) {
     return (
       <View style={styles.center}>
         <ActivityIndicator />
@@ -205,6 +231,14 @@ export default function DispositionEditScreen() {
       />
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+          <SectionLabel>Deal math</SectionLabel>
+          <Card>
+            <Field label="ARV (after repair value)" value={arv} onChangeText={setArv} keyboardType="number-pad" placeholder="0" />
+            <Field label="Repair estimate" value={repairs} onChangeText={setRepairs} keyboardType="number-pad" placeholder="0" />
+            <Field label="Asking price" value={asking} onChangeText={setAsking} keyboardType="number-pad" placeholder="0" />
+            <Text style={styles.hint}>Updating these recalculates the projected profit and max offer.</Text>
+          </Card>
+
           <SectionLabel>Exit strategy</SectionLabel>
           <Card>
             <PickerField
