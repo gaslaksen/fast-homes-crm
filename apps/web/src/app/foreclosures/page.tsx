@@ -16,10 +16,15 @@ interface FclLead {
   ownerNames: string;
   countyOwner: string | null;
   email: string | null;
+  email2: string | null;
   phone1: string | null;
   phone2: string | null;
+  phone3: string | null;
+  phone4: string | null;
   phone1Type: string | null;
   phone2Type: string | null;
+  phone3Type: string | null;
+  phone4Type: string | null;
   noticeType: string | null;
   noticeUrl: string | null;
   caseNumber: string | null;
@@ -135,16 +140,18 @@ function openRealtor(lead: FclLead) {
   }).catch(() => { if (w) w.location.href = fallback; });
 }
 
-const CSV_HEADERS = ['First Name', 'Last Name', 'Owner Name', 'Property Address', 'Property City', 'Property State', 'Property Zip', 'Mailing Address', 'Mailing City', 'Mailing State', 'Mailing Zip', 'Phone 1', 'Phone 1 Type', 'Phone 2', 'Phone 2 Type', 'Email', 'Priority', 'Notice Type', 'Case Number', 'Sale Date', 'Days To Sale', 'Loan Date', 'Loan Amount', 'Assessed Value', 'Equity %', 'Equity Spread', 'Owner Occupied', 'Lead Score', 'Status', 'Do Not Call', 'Notes', 'Zillow URL', 'Property Record URL', 'Notice URL'];
+const CSV_HEADERS = ['First Name', 'Last Name', 'Owner Name', 'Property Address', 'Property City', 'Property State', 'Property Zip', 'County', 'Mailing Address', 'Mailing City', 'Mailing State', 'Mailing Zip', 'Phone 1', 'Phone 1 Type', 'Phone 2', 'Phone 2 Type', 'Phone 3', 'Phone 3 Type', 'Phone 4', 'Phone 4 Type', 'Email', 'Email 2', 'Priority', 'Notice Type', 'Case Number', 'Sale Date', 'Days To Sale', 'Loan Date', 'Loan Amount', 'Assessed Value', 'Equity %', 'Equity Spread', 'Owner Occupied', 'Lead Score', 'Status', 'Do Not Call', 'Notes', 'Zillow URL', 'Property Record URL', 'Notice URL'];
 
 function leadCsvRow(l: FclLead): string[] {
   const owner = (l.ownerNames || l.countyOwner || '').split(';')[0].trim();
   const parts = owner.split(/\s+/);
   return [
     parts[0] || '', parts.slice(1).join(' '), l.ownerNames || l.countyOwner || '',
-    l.address, l.city, l.state, l.zip,
+    l.address, l.city, l.state, l.zip, l.county || '',
     l.mailingAddress || '', l.mailCity || '', l.mailState || '', l.mailZip || '',
-    l.phone1 || '', l.phone1Type || '', l.phone2 || '', l.phone2Type || '', l.email || '',
+    l.phone1 || '', l.phone1Type || '', l.phone2 || '', l.phone2Type || '',
+    l.phone3 || '', l.phone3Type || '', l.phone4 || '', l.phone4Type || '',
+    l.email || '', l.email2 || '',
     l.priority, noticeLabel(l.noticeType), l.caseNumber || '', l.saleDate || '',
     l.daysToSale == null ? '' : String(l.daysToSale), l.loanDate || '',
     l.loanAmount == null ? '' : String(l.loanAmount), l.assessedValue == null ? '' : String(l.assessedValue),
@@ -220,6 +227,8 @@ function SectionLabel({ children, className }: { children: React.ReactNode; clas
 export default function ForeclosuresPage() {
   const [leads, setLeads] = useState<FclLead[]>([]);
   const [cities, setCities] = useState<string[]>([]);
+  const [counties, setCounties] = useState<string[]>([]);
+  const [collapseAll, setCollapseAll] = useState(false);
   const [stats, setStats] = useState({ total: 0, high: 0, soon: 0, highEquity: 0 });
   const [loading, setLoading] = useState(true);
   const [pagination, setPagination] = useState({ page: 1, pageSize: 60, total: 0, totalPages: 1 });
@@ -232,6 +241,7 @@ export default function ForeclosuresPage() {
   const [workStatuses, setWorkStatuses] = useState<Set<string>>(new Set());
   const [noticeTypes, setNoticeTypes] = useState<Set<string>>(new Set());
   const [city, setCity] = useState('');
+  const [county, setCounty] = useState('');
   const [equityBand, setEquityBand] = useState('');
   const [ownedYearsMin, setOwnedYearsMin] = useState('');
   const [saleWindow, setSaleWindow] = useState('');
@@ -265,6 +275,7 @@ export default function ForeclosuresPage() {
       if (workStatuses.size) params.workStatus = Array.from(workStatuses).join(',');
       if (noticeTypes.size) params.noticeType = Array.from(noticeTypes).join(',');
       if (city) params.city = city;
+      if (county) params.county = county;
       if (equityBand) params.equityBand = equityBand;
       if (ownedYearsMin) params.ownedYearsMin = ownedYearsMin;
       if (saleWindow) params.saleWindow = saleWindow;
@@ -275,13 +286,14 @@ export default function ForeclosuresPage() {
       const res = await foreclosuresAPI.list(params);
       setLeads(res.data.leads || []);
       setCities(res.data.cities || []);
+      setCounties(res.data.counties || []);
       setPagination(res.data.pagination || { page: 1, pageSize: 60, total: 0, totalPages: 1 });
     } catch (e: any) {
       if (e.name !== 'CanceledError') showToast('Failed to load foreclosures', true);
     } finally {
       setLoading(false);
     }
-  }, [search, priorities, workStatuses, noticeTypes, city, equityBand, ownedYearsMin, saleWindow, occupancy, valueMin, hideDead, hideDnc, sort, page]);
+  }, [search, priorities, workStatuses, noticeTypes, city, county, equityBand, ownedYearsMin, saleWindow, occupancy, valueMin, hideDead, hideDnc, sort, page]);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -303,7 +315,7 @@ export default function ForeclosuresPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [search, priorities, workStatuses, noticeTypes, city, equityBand, ownedYearsMin, saleWindow, occupancy, valueMin, hideDead, hideDnc, sort]);
+  }, [search, priorities, workStatuses, noticeTypes, city, county, equityBand, ownedYearsMin, saleWindow, occupancy, valueMin, hideDead, hideDnc, sort]);
 
   /** Toggle a value inside a multi-select chip group. */
   const toggleIn = (set: Set<string>, value: string, setter: (s: Set<string>) => void) => {
@@ -399,6 +411,7 @@ export default function ForeclosuresPage() {
     setWorkStatuses(new Set());
     setNoticeTypes(new Set());
     setCity('');
+    setCounty('');
     setEquityBand('');
     setOwnedYearsMin('');
     setSaleWindow('');
@@ -451,7 +464,7 @@ export default function ForeclosuresPage() {
     }
   };
 
-  const anyFilter = search || priorities.size || workStatuses.size || noticeTypes.size || city || equityBand || ownedYearsMin || saleWindow || occupancy || valueMin || hideDead || hideDnc;
+  const anyFilter = search || priorities.size || workStatuses.size || noticeTypes.size || city || county || equityBand || ownedYearsMin || saleWindow || occupancy || valueMin || hideDead || hideDnc;
   const selectedLeads = leads.filter((l) => selected.has(l.id));
 
   return (
@@ -528,6 +541,10 @@ export default function ForeclosuresPage() {
         {/* Filter selects (city / equity / owned / sale / occupancy / value / flags) */}
         <div className="flex gap-2 flex-wrap items-center mb-4">
           <span className="text-[11px] text-gray-400 dark:text-gray-500 uppercase tracking-wide">Filters</span>
+          <select value={county} onChange={(e) => setCounty(e.target.value)} className="input w-auto py-1.5 text-sm">
+            <option value="">All counties</option>
+            {counties.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
           <select value={city} onChange={(e) => setCity(e.target.value)} className="input w-auto py-1.5 text-sm">
             <option value="">All cities</option>
             {cities.map((c) => <option key={c} value={c}>{c}</option>)}
@@ -577,6 +594,9 @@ export default function ForeclosuresPage() {
           <span>{loading ? 'Loading...' : `${pagination.total} lead${pagination.total === 1 ? '' : 's'} · click a card to select it for CSV export`}</span>
           {leads.length > 0 && (
             <span className="flex items-center gap-3">
+              <button onClick={() => setCollapseAll((v) => !v)} className="text-primary-600 dark:text-primary-400 hover:underline">
+                {collapseAll ? 'Expand cards' : 'Collapse cards'}
+              </button>
               <button onClick={selectAllShown} className="text-primary-600 dark:text-primary-400 hover:underline">
                 Select all shown
               </button>
@@ -594,9 +614,10 @@ export default function ForeclosuresPage() {
             <p className="text-sm mt-1">Import the tracker sheet, upload an eCourts PDF, refresh the feed, or clear filters.</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 items-start">
             {leads.map((l) => (
               <LeadCard key={l.id} lead={l} onUpdate={updateLead} onSkiptrace={runSkiptraceOne}
+                collapseDefault={collapseAll}
                 selected={selected.has(l.id)} onToggleSelect={() => toggleSelect(l.id)} />
             ))}
           </div>
@@ -641,10 +662,11 @@ export default function ForeclosuresPage() {
 }
 
 // ─── Lead card (modeled on the offline tracker card) ─────────────────────────
-function LeadCard({ lead: l, onUpdate, onSkiptrace, selected, onToggleSelect }: {
+function LeadCard({ lead: l, onUpdate, onSkiptrace, collapseDefault, selected, onToggleSelect }: {
   lead: FclLead;
   onUpdate: (id: string, patch: any, localPatch?: any) => void;
   onSkiptrace: (id: string) => Promise<void>;
+  collapseDefault: boolean;
   selected: boolean;
   onToggleSelect: () => void;
 }) {
@@ -652,7 +674,20 @@ function LeadCard({ lead: l, onUpdate, onSkiptrace, selected, onToggleSelect }: 
   const priBar = l.priority === 'HIGH' ? 'bg-red-500' : l.priority === 'MEDIUM' ? 'bg-amber-500' : 'bg-blue-500';
   const [notes, setNotes] = useState(l.callNotes || '');
   const [tracing, setTracing] = useState(false);
+  const [collapsed, setCollapsed] = useState(collapseDefault);
+  const [editing, setEditing] = useState(false);
   const notesTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Follow the global Collapse/Expand toggle when it changes.
+  useEffect(() => { setCollapsed(collapseDefault); }, [collapseDefault]);
+
+  const phones = [
+    { num: l.phone1, type: l.phone1Type },
+    { num: l.phone2, type: l.phone2Type },
+    { num: l.phone3, type: l.phone3Type },
+    { num: l.phone4, type: l.phone4Type },
+  ].filter((p) => p.num);
+  const emails = [l.email, l.email2].filter(Boolean) as string[];
 
   const runTrace = async () => {
     if (tracing) return;
@@ -749,38 +784,37 @@ function LeadCard({ lead: l, onUpdate, onSkiptrace, selected, onToggleSelect }: 
           </div>
         </div>
 
-        {/* Contact (fixed min height keeps cards uniform) */}
-        <div className="rounded-lg bg-gray-50 dark:bg-gray-800/60 border border-gray-100 dark:border-gray-800 px-3 py-2 flex flex-col gap-1.5 justify-center min-h-[104px]">
-          {(l.phone1 || l.phone2 || l.email) ? (
+        {/* Contact */}
+        <div className="rounded-lg bg-gray-50 dark:bg-gray-800/60 border border-gray-100 dark:border-gray-800 px-3 py-2 flex flex-col gap-1.5 justify-center">
+          {(phones.length || emails.length) ? (
             <>
-              {l.phone1 && (
-                <div className="flex items-center text-sm">
+              {phones.map((p, i) => (
+                <div key={i} className="flex items-center text-sm">
                   <span className="w-5 text-gray-400 dark:text-gray-500">☎</span>
-                  <a href={`tel:${l.phone1}`} onClick={(e) => e.stopPropagation()} className="text-gray-800 dark:text-gray-200 hover:text-primary-600 dark:hover:text-primary-400">{formatPhoneDisplay(l.phone1)}</a>
-                  <CopyBtn text={l.phone1} label="number" />
-                  {l.phone1Type && <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400">{l.phone1Type}</span>}
+                  <a href={`tel:${p.num}`} onClick={(e) => e.stopPropagation()} className="text-gray-800 dark:text-gray-200 hover:text-primary-600 dark:hover:text-primary-400">{formatPhoneDisplay(p.num!)}</a>
+                  <CopyBtn text={p.num!} label="number" />
+                  {p.type && <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400">{p.type}</span>}
                 </div>
-              )}
-              {l.phone2 && (
-                <div className="flex items-center text-sm">
-                  <span className="w-5 text-gray-400 dark:text-gray-500">☎</span>
-                  <a href={`tel:${l.phone2}`} onClick={(e) => e.stopPropagation()} className="text-gray-800 dark:text-gray-200 hover:text-primary-600 dark:hover:text-primary-400">{formatPhoneDisplay(l.phone2)}</a>
-                  <CopyBtn text={l.phone2} label="number" />
-                  {l.phone2Type && <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400">{l.phone2Type}</span>}
-                </div>
-              )}
-              {l.email && (
-                <div className="flex items-center text-sm min-w-0">
+              ))}
+              {emails.map((em, i) => (
+                <div key={i} className="flex items-center text-sm min-w-0">
                   <span className="w-5 text-gray-400 dark:text-gray-500">✉</span>
-                  <a href={`mailto:${l.email}`} onClick={(e) => e.stopPropagation()} className="text-gray-800 dark:text-gray-200 hover:text-primary-600 dark:hover:text-primary-400 truncate">{l.email}</a>
-                  <CopyBtn text={l.email} label="email" />
+                  <a href={`mailto:${em}`} onClick={(e) => e.stopPropagation()} className="text-gray-800 dark:text-gray-200 hover:text-primary-600 dark:hover:text-primary-400 truncate">{em}</a>
+                  <CopyBtn text={em} label="email" />
                 </div>
-              )}
+              ))}
             </>
           ) : (
             <div className="text-sm text-gray-400 dark:text-gray-500 italic">No phone or email on file</div>
           )}
-          <div className="flex justify-end">
+          <div className="flex justify-end gap-2 pt-0.5">
+            <button
+              onClick={(e) => { e.stopPropagation(); setEditing(true); }}
+              title="Edit owner name, phones, and emails"
+              className="text-[11px] px-2 py-0.5 rounded border border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 hover:border-primary-400 transition-colors"
+            >
+              ✎ Edit
+            </button>
             <button
               onClick={(e) => { e.stopPropagation(); runTrace(); }}
               disabled={tracing}
@@ -834,64 +868,173 @@ function LeadCard({ lead: l, onUpdate, onSkiptrace, selected, onToggleSelect }: 
             </label>
           </div>
 
-          <div className="flex items-end gap-3 flex-wrap">
-            <div>
-              <SectionLabel className="mb-1">Contacted this week</SectionLabel>
-              <div className="flex gap-1.5">
-                {DAYS.map((d, i) => (
-                  <button key={d} onClick={() => toggleDay(d)} className="flex flex-col items-center gap-0.5 group">
-                    <span className={`w-6 h-6 rounded border flex items-center justify-center text-[11px] font-bold transition-colors ${
-                      l.touchDays?.[d]
-                        ? 'bg-primary-600 border-primary-600 text-white'
-                        : 'bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-600 text-transparent group-hover:border-primary-400'}`}>✓</span>
-                    <span className="text-[9px] text-gray-400 dark:text-gray-500">{DAY_LABELS[i]}</span>
-                  </button>
-                ))}
+          {!collapsed && (
+            <>
+              <div className="flex items-end gap-3 flex-wrap">
+                <div>
+                  <SectionLabel className="mb-1">Contacted this week</SectionLabel>
+                  <div className="flex gap-1.5">
+                    {DAYS.map((d, i) => (
+                      <button key={d} onClick={() => toggleDay(d)} className="flex flex-col items-center gap-0.5 group">
+                        <span className={`w-6 h-6 rounded border flex items-center justify-center text-[11px] font-bold transition-colors ${
+                          l.touchDays?.[d]
+                            ? 'bg-primary-600 border-primary-600 text-white'
+                            : 'bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-600 text-transparent group-hover:border-primary-400'}`}>✓</span>
+                        <span className="text-[9px] text-gray-400 dark:text-gray-500">{DAY_LABELS[i]}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="ml-auto text-xs text-gray-500 dark:text-gray-400 pb-1">
+                  Total touches: <b className="text-gray-800 dark:text-gray-200">{l.totalTouches}</b>
+                </div>
               </div>
-            </div>
-            <div className="ml-auto text-xs text-gray-500 dark:text-gray-400 pb-1">
-              Total touches: <b className="text-gray-800 dark:text-gray-200">{l.totalTouches}</b>
-            </div>
-          </div>
 
-          <textarea
-            value={notes}
-            onChange={(e) => saveNotes(e.target.value)}
-            onClick={(e) => e.stopPropagation()}
-            placeholder="Call notes, reminders..."
-            rows={2}
-            className="input text-sm resize-none h-[52px]"
-          />
+              <textarea
+                value={notes}
+                onChange={(e) => saveNotes(e.target.value)}
+                onClick={(e) => e.stopPropagation()}
+                placeholder="Call notes, reminders..."
+                rows={2}
+                className="input text-sm resize-none h-[52px]"
+              />
+            </>
+          )}
+
+          {/* Collapse / expand the details below the status row */}
+          <button
+            onClick={(e) => { e.stopPropagation(); setCollapsed((v) => !v); }}
+            className="text-[11px] text-gray-400 dark:text-gray-500 hover:text-primary-600 dark:hover:text-primary-400 self-center mt-0.5"
+          >
+            {collapsed ? '▾ Show details' : '▴ Hide details'}
+          </button>
         </div>
 
-        {/* Facts grid (all six cells always render so cards stay uniform) */}
-        <div className="grid grid-cols-2 border-t border-gray-100 dark:border-gray-800 -mx-4 -mb-4 mt-auto divide-x divide-y divide-gray-100 dark:divide-gray-800">
-          <div className="px-4 py-2.5">
-            <SectionLabel>Sale date</SectionLabel>
-            <div className={`text-sm font-semibold mt-0.5 ${db.cls || 'text-gray-800 dark:text-gray-200'}`}>{fmtDateUS(l.saleDate)}</div>
-          </div>
-          <div className="px-4 py-2.5">
-            <SectionLabel>{l.daysToSale != null && l.daysToSale <= 30 ? 'Countdown' : 'Timing'}</SectionLabel>
-            <div className={`text-sm font-semibold mt-0.5 ${db.cls || 'text-gray-800 dark:text-gray-200'}`}>{db.text}</div>
-          </div>
-          <div className="px-4 py-2.5">
-            <SectionLabel>Assessed value</SectionLabel>
-            <div className="text-sm font-semibold mt-0.5 text-gray-800 dark:text-gray-200">{money(l.assessedValue)}</div>
-          </div>
-          <div className="px-4 py-2.5">
-            <SectionLabel>Loan amount</SectionLabel>
-            <div className="text-sm font-semibold mt-0.5 text-gray-800 dark:text-gray-200">{money(l.loanAmount)}</div>
-          </div>
-          <div className="px-4 py-2.5">
-            <SectionLabel>Equity spread</SectionLabel>
-            <div className={`text-sm font-semibold mt-0.5 ${l.equitySpread == null ? 'text-gray-800 dark:text-gray-200' : l.equitySpread >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-              {signedMoney(l.equitySpread)}
+        {/* Facts grid */}
+        {!collapsed && (
+          <div className="grid grid-cols-2 border-t border-gray-100 dark:border-gray-800 -mx-4 -mb-4 mt-auto divide-x divide-y divide-gray-100 dark:divide-gray-800">
+            <div className="px-4 py-2.5">
+              <SectionLabel>Sale date</SectionLabel>
+              <div className={`text-sm font-semibold mt-0.5 ${db.cls || 'text-gray-800 dark:text-gray-200'}`}>{fmtDateUS(l.saleDate)}</div>
+            </div>
+            <div className="px-4 py-2.5">
+              <SectionLabel>{l.daysToSale != null && l.daysToSale <= 30 ? 'Countdown' : 'Timing'}</SectionLabel>
+              <div className={`text-sm font-semibold mt-0.5 ${db.cls || 'text-gray-800 dark:text-gray-200'}`}>{db.text}</div>
+            </div>
+            <div className="px-4 py-2.5">
+              <SectionLabel>Assessed value</SectionLabel>
+              <div className="text-sm font-semibold mt-0.5 text-gray-800 dark:text-gray-200">{money(l.assessedValue)}</div>
+            </div>
+            <div className="px-4 py-2.5">
+              <SectionLabel>Loan amount</SectionLabel>
+              <div className="text-sm font-semibold mt-0.5 text-gray-800 dark:text-gray-200">{money(l.loanAmount)}</div>
+            </div>
+            <div className="px-4 py-2.5">
+              <SectionLabel>Equity spread</SectionLabel>
+              <div className={`text-sm font-semibold mt-0.5 ${l.equitySpread == null ? 'text-gray-800 dark:text-gray-200' : l.equitySpread >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                {signedMoney(l.equitySpread)}
+              </div>
+            </div>
+            <div className="px-4 py-2.5">
+              <SectionLabel>Est. equity %</SectionLabel>
+              <div className="text-sm font-semibold mt-0.5 text-gray-800 dark:text-gray-200">{l.equityPct == null ? '-' : `${l.equityPct}%`}</div>
             </div>
           </div>
-          <div className="px-4 py-2.5">
-            <SectionLabel>Est. equity %</SectionLabel>
-            <div className="text-sm font-semibold mt-0.5 text-gray-800 dark:text-gray-200">{l.equityPct == null ? '-' : `${l.equityPct}%`}</div>
+        )}
+      </div>
+
+      {editing && (
+        <ContactEditModal
+          lead={l}
+          onClose={() => setEditing(false)}
+          onSave={(patch, local) => { onUpdate(l.id, patch, local); setEditing(false); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Contact edit modal ───────────────────────────────────────────────────────
+function ContactEditModal({ lead: l, onClose, onSave }: {
+  lead: FclLead;
+  onClose: () => void;
+  onSave: (patch: any, local: any) => void;
+}) {
+  const [owner, setOwner] = useState(l.ownerNames || '');
+  const [rows, setRows] = useState([
+    { num: l.phone1 || '', type: l.phone1Type || '' },
+    { num: l.phone2 || '', type: l.phone2Type || '' },
+    { num: l.phone3 || '', type: l.phone3Type || '' },
+    { num: l.phone4 || '', type: l.phone4Type || '' },
+  ]);
+  const [email1, setEmail1] = useState(l.email || '');
+  const [email2, setEmail2] = useState(l.email2 || '');
+
+  const setRow = (i: number, key: 'num' | 'type', val: string) =>
+    setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, [key]: val } : r)));
+
+  const digits = (v: string) => v.replace(/\D/g, '').slice(-10);
+
+  const save = () => {
+    const patch: any = {
+      ownerNames: owner.trim(),
+      email: email1.trim(),
+      email2: email2.trim(),
+    };
+    rows.forEach((r, i) => {
+      patch[`phone${i + 1}`] = r.num ? digits(r.num) : '';
+      patch[`phone${i + 1}Type`] = r.type || null;
+    });
+    // Local mirror so the card updates instantly (dto field names match).
+    const local: any = {
+      ownerNames: patch.ownerNames,
+      email: patch.email || null,
+      email2: patch.email2 || null,
+      phone1: patch.phone1 || null, phone1Type: patch.phone1Type,
+      phone2: patch.phone2 || null, phone2Type: patch.phone2Type,
+      phone3: patch.phone3 || null, phone3Type: patch.phone3Type,
+      phone4: patch.phone4 || null, phone4Type: patch.phone4Type,
+    };
+    onSave(patch, local);
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      onClick={(e) => { e.stopPropagation(); onClose(); }}
+    >
+      <div
+        className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 shadow-xl w-full max-w-md p-5 flex flex-col gap-3 max-h-[90vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between">
+          <h3 className="font-bold text-gray-900 dark:text-gray-100">Edit contact</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 text-lg leading-none">✕</button>
+        </div>
+        <div className="text-xs text-gray-500 dark:text-gray-400 -mt-1">{l.address}</div>
+
+        <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Owner name</label>
+        <input value={owner} onChange={(e) => setOwner(e.target.value)} className="input text-sm" placeholder="First Last" />
+
+        <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mt-1">Phones</label>
+        {rows.map((r, i) => (
+          <div key={i} className="flex gap-2">
+            <input value={r.num} onChange={(e) => setRow(i, 'num', e.target.value)} className="input text-sm flex-1" placeholder={`Phone ${i + 1}`} />
+            <select value={r.type} onChange={(e) => setRow(i, 'type', e.target.value)} className="input text-sm w-28">
+              <option value="">Type</option>
+              <option value="Mobile">Mobile</option>
+              <option value="Landline">Landline</option>
+            </select>
           </div>
+        ))}
+
+        <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mt-1">Emails</label>
+        <input value={email1} onChange={(e) => setEmail1(e.target.value)} className="input text-sm" placeholder="Email 1" />
+        <input value={email2} onChange={(e) => setEmail2(e.target.value)} className="input text-sm" placeholder="Email 2" />
+
+        <div className="flex justify-end gap-2 mt-2">
+          <button onClick={onClose} className="btn btn-secondary btn-sm">Cancel</button>
+          <button onClick={save} className="btn btn-primary btn-sm">Save</button>
         </div>
       </div>
     </div>

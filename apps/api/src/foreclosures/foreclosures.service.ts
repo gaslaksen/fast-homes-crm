@@ -20,6 +20,8 @@ import {
   splitOwnerName,
   looksDead,
   stateForCity,
+  countyForCity,
+  citiesInCounty,
 } from './foreclosure-scoring.util';
 
 export interface CreateForeclosureResult {
@@ -111,7 +113,7 @@ export class ForeclosuresService {
             noticeType: input.noticeType || null,
             noticeUrl: input.noticeUrl || null,
             caseNumber: input.caseNumber || null,
-            county: input.county || null,
+            county: input.county || countyForCity(input.city),
             trustee: input.trustee || null,
             rawSnippet: input.rawSnippet || null,
             sourceKind: input.sourceKind,
@@ -235,6 +237,19 @@ export class ForeclosuresService {
       foreclosureDetail: { is: detailWhere },
     };
     if (filters.city) where.propertyCity = { equals: filters.city, mode: 'insensitive' };
+    // County is derived from the city (leads store county but older imports may
+    // not), so match on the set of cities that belong to the chosen county.
+    if (filters.county) {
+      const cityList = citiesInCounty(filters.county);
+      where.AND = [
+        ...(where.AND || []),
+        {
+          OR: cityList.length
+            ? cityList.map((c) => ({ propertyCity: { equals: c, mode: 'insensitive' } }))
+            : [{ foreclosureDetail: { is: { county: filters.county } } }],
+        },
+      ];
+    }
     if (filters.search) {
       const q = filters.search.trim();
       where.OR = [
@@ -277,9 +292,15 @@ export class ForeclosuresService {
       .filter(Boolean)
       .sort((a, b) => a.localeCompare(b));
 
+    // Counties present, derived from the cities that actually have leads.
+    const counties = Array.from(
+      new Set(cities.map((c) => countyForCity(c)).filter(Boolean) as string[]),
+    ).sort((a, b) => a.localeCompare(b));
+
     return {
       leads: rows.map((r) => this.toDto(r)),
       cities,
+      counties,
       pagination: { page, pageSize, total, totalPages: Math.ceil(total / pageSize) },
     };
   }
@@ -306,7 +327,7 @@ export class ForeclosuresService {
     return lead ? this.toDto(lead) : null;
   }
 
-  /** Update workflow fields on a foreclosure lead (work status, DNC, etc). */
+  /** Update workflow + editable contact fields on a foreclosure lead. */
   async update(
     id: string,
     patch: {
@@ -316,6 +337,18 @@ export class ForeclosuresService {
       callNotes?: string;
       touchDays?: Record<string, boolean>;
       assignedToUserId?: string | null;
+      // Editable contact fields (from the card's Edit dialog)
+      ownerNames?: string;
+      phone1?: string;
+      phone2?: string;
+      phone3?: string;
+      phone4?: string;
+      phone1Type?: string | null;
+      phone2Type?: string | null;
+      phone3Type?: string | null;
+      phone4Type?: string | null;
+      email?: string;
+      email2?: string;
     },
     organizationId?: string,
   ) {
@@ -329,6 +362,18 @@ export class ForeclosuresService {
     if (patch.workStatus !== undefined) detailPatch.workStatus = patch.workStatus;
     if (patch.doNotCall !== undefined) detailPatch.doNotCall = patch.doNotCall;
     if (patch.callNotes !== undefined) detailPatch.callNotes = patch.callNotes;
+
+    // Contact edits. phone1/email live on the Lead; the rest on the detail.
+    // Numbers are normalized to 10 digits; empty string clears a field.
+    const cleanPhone = (v?: string) => (v === undefined ? undefined : normalizePhoneDigits(v) || '');
+    if (patch.phone2 !== undefined) detailPatch.phone2 = cleanPhone(patch.phone2) || null;
+    if (patch.phone3 !== undefined) detailPatch.phone3 = cleanPhone(patch.phone3) || null;
+    if (patch.phone4 !== undefined) detailPatch.phone4 = cleanPhone(patch.phone4) || null;
+    if (patch.phone1Type !== undefined) detailPatch.phone1Type = patch.phone1Type || null;
+    if (patch.phone2Type !== undefined) detailPatch.phone2Type = patch.phone2Type || null;
+    if (patch.phone3Type !== undefined) detailPatch.phone3Type = patch.phone3Type || null;
+    if (patch.phone4Type !== undefined) detailPatch.phone4Type = patch.phone4Type || null;
+    if (patch.email2 !== undefined) detailPatch.email2 = patch.email2 || null;
 
     // Weekly touch checkmarks. If the stored checks belong to a prior ISO
     // week, fold them into the running touchCount before applying this week's.
@@ -348,6 +393,13 @@ export class ForeclosuresService {
     if (patch.workStatus === 'DEAD') leadPatch.status = 'DEAD';
     if (patch.doNotCall !== undefined) leadPatch.doNotContact = patch.doNotCall;
     if (patch.touchDays !== undefined) leadPatch.lastTouchedAt = new Date();
+    if (patch.phone1 !== undefined) leadPatch.sellerPhone = cleanPhone(patch.phone1) || '';
+    if (patch.email !== undefined) leadPatch.sellerEmail = patch.email || null;
+    if (patch.ownerNames !== undefined) {
+      const { firstName, lastName } = splitOwnerName(patch.ownerNames);
+      leadPatch.sellerFirstName = firstName;
+      leadPatch.sellerLastName = lastName;
+    }
 
     await this.prisma.lead.update({
       where: { id },
@@ -422,15 +474,18 @@ export class ForeclosuresService {
       ownerNames: [lead.sellerFirstName, lead.sellerLastName].filter(Boolean).join(' ').trim(),
       countyOwner: d.countyOwner || null,
       email: lead.sellerEmail || null,
+      email2: d.email2 || null,
       phone1: lead.sellerPhone || null,
       phone2: d.phone2 || null,
+      phone3: d.phone3 || null,
+      phone4: d.phone4 || null,
       status: lead.status,
       assignedToUserId: lead.assignedToUserId || null,
       // Foreclosure detail
       noticeType: d.noticeType || null,
       noticeUrl: d.noticeUrl || null,
       caseNumber: d.caseNumber || null,
-      county: d.county || null,
+      county: d.county || countyForCity(lead.propertyCity),
       trustee: d.trustee || null,
       sourceKind: d.sourceKind || null,
       saleDate: saleIso,
@@ -449,6 +504,8 @@ export class ForeclosuresService {
       totalTouches,
       phone1Type: d.phone1Type || null,
       phone2Type: d.phone2Type || null,
+      phone3Type: d.phone3Type || null,
+      phone4Type: d.phone4Type || null,
       ownerOccupied: d.ownerOccupied || null,
       mailingAddress: d.mailingAddress || null,
       mailCity: d.mailCity || null,

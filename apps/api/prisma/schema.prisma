@@ -361,9 +361,17 @@ model ForeclosureDetail {
   mailState      String?
   mailZip        String?
   skipStatus     String?
-  phone2         String?  // Lead.sellerPhone holds phone1; email on Lead
+  // Contact numbers/emails. Lead.sellerPhone holds phone1 and Lead.sellerEmail
+  // holds email1; the rest live here so skip trace can attach up to 4 phones
+  // and 2 emails per lead.
+  phone2         String?
+  phone3         String?
+  phone4         String?
   phone1Type     String?  // 'Mobile' | 'Landline' | null
   phone2Type     String?
+  phone3Type     String?
+  phone4Type     String?
+  email2         String?
 
   // External links
   parcelId       String?

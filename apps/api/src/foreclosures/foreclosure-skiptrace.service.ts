@@ -103,20 +103,20 @@ export class ForeclosureSkiptraceService {
       }
     }
 
-    // Tier 2 - BatchData phones/email (paid, opt-in via key).
+    // Tier 2 - BatchData phones/email (paid, opt-in via key). Attaches up to
+    // 4 phones (phone1 on the Lead, phone2-4 on the detail) and 2 emails.
     if (this.batchKey) {
       try {
         const contact = await this.batchSkipTrace(parcel, address, lead.propertyCity, lead.propertyZip);
         if (contact) {
-          if (contact.phone1) {
-            leadPatch.sellerPhone = contact.phone1;
-            detailPatch.phone1Type = contact.phone1Type || null;
-          }
-          if (contact.phone2) {
-            detailPatch.phone2 = contact.phone2;
-            detailPatch.phone2Type = contact.phone2Type || null;
-          }
-          if (contact.email && !lead.sellerEmail) leadPatch.sellerEmail = contact.email;
+          const [p1, p2, p3, p4] = contact.phones;
+          if (p1) { leadPatch.sellerPhone = p1.num; detailPatch.phone1Type = p1.type || null; }
+          if (p2) { detailPatch.phone2 = p2.num; detailPatch.phone2Type = p2.type || null; }
+          if (p3) { detailPatch.phone3 = p3.num; detailPatch.phone3Type = p3.type || null; }
+          if (p4) { detailPatch.phone4 = p4.num; detailPatch.phone4Type = p4.type || null; }
+          const [e1, e2] = contact.emails;
+          if (e1 && !lead.sellerEmail) leadPatch.sellerEmail = e1;
+          if (e2) detailPatch.email2 = e2;
         }
       } catch (e: any) {
         this.logger.warn(`BatchData skip-trace failed for "${address}": ${e.message}`);
@@ -240,13 +240,13 @@ export class ForeclosureSkiptraceService {
     return m.length >= 2 && s.length >= 2 && m[0] === s[0] && m[1] === s[1];
   }
 
-  /** BatchData skip-trace: top two phones + first email, or null on no match. */
+  /** BatchData skip-trace: up to 4 phones + 2 emails, or null on no match. */
   private async batchSkipTrace(
     parcel: ParcelAttrs | null,
     fallbackStreet: string,
     city?: string,
     zip?: string,
-  ): Promise<{ phone1?: string; phone1Type?: string; phone2?: string; phone2Type?: string; email?: string } | null> {
+  ): Promise<{ phones: { num: string; type: string | null }[]; emails: string[] } | null> {
     if (!this.batchKey) return null;
     const street = parcel?.siteadd || fallbackStreet;
     if (!street) return null;
@@ -288,16 +288,19 @@ export class ForeclosureSkiptraceService {
     if (!persons || persons.length === 0 || !persons[0]?.meta?.matched) return null;
 
     const p = persons[0];
+    // Dedupe by number; mobiles are already prioritized first by BatchData.
+    const seen = new Set<string>();
     const phones = (p.phoneNumbers || [])
       .map((ph: any) => ({ num: normalizePhoneDigits(ph.number), type: ph.type || null }))
-      .filter((ph: any) => ph.num);
-    const emails = (p.emails || []).map((e: any) => e.email).filter(Boolean);
-    return {
-      phone1: phones[0]?.num,
-      phone1Type: phones[0]?.type,
-      phone2: phones[1]?.num,
-      phone2Type: phones[1]?.type,
-      email: emails[0],
-    };
+      .filter((ph: any): ph is { num: string; type: string | null } => {
+        if (!ph.num || seen.has(ph.num)) return false;
+        seen.add(ph.num);
+        return true;
+      })
+      .slice(0, 4);
+    const emails = Array.from(
+      new Set((p.emails || []).map((e: any) => e.email).filter(Boolean) as string[]),
+    ).slice(0, 2);
+    return { phones, emails };
   }
 }

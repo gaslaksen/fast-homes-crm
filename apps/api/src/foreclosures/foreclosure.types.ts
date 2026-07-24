@@ -58,6 +58,7 @@ export interface ForeclosureListFilters {
   noticeType?: string;
   workStatus?: string;
   city?: string;
+  county?: string;
   occupancy?: string; // 'owner' | 'absentee'
   equityBand?: string; // '50' (50%+) | '30' (30-50) | '0' (0-30) | 'neg'
   ownedYearsMin?: number; // loan originated at least N years ago
