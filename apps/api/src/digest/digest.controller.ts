@@ -68,6 +68,29 @@ export class DigestController {
     return this.render.renderHtml(brief);
   }
 
+  /**
+   * Who the 7:00 AM cron will actually mail. Worth checking before the first
+   * automatic run, since a silently-missing teammate is invisible otherwise.
+   */
+  @Get('recipients')
+  async recipients(@Headers('authorization') authHeader?: string) {
+    const user = await this.loadUser(authHeader);
+    const rows = await this.prisma.user.findMany({
+      where: { organizationId: user.organizationId, digestEnabled: true },
+      select: { email: true, firstName: true, lastName: true, role: true },
+      orderBy: { firstName: 'asc' },
+    });
+    const optedOut = await this.prisma.user.findMany({
+      where: { organizationId: user.organizationId, digestEnabled: false },
+      select: { email: true },
+    });
+    return {
+      schedule: '07:00 America/New_York, daily',
+      willReceive: rows,
+      optedOut: optedOut.map((u) => u.email),
+    };
+  }
+
   /** Send today's brief to the caller's own address. */
   @Post('send-test')
   async sendTest(@Headers('authorization') authHeader?: string) {

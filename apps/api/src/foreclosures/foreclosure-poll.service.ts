@@ -26,7 +26,9 @@ export class ForeclosurePollService {
     this.enabled = (this.config.get<string>('FORECLOSURE_RSS_POLL_ENABLED') ?? 'true') !== 'false';
   }
 
-  @Cron('0 7 * * *', { timeZone: 'America/New_York' })
+  // 6:30, deliberately ahead of the 7:00 Daily Brief so overnight notices are
+  // ingested before the brief queries them. See digest-cron.service.ts.
+  @Cron('30 6 * * *', { timeZone: 'America/New_York' })
   async pollFeed() {
     if (!this.enabled || this.running) return;
     this.running = true;

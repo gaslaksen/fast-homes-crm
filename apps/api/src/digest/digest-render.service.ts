@@ -365,8 +365,6 @@ export class DigestRenderService {
     </div>
     <div style="font-size:13px;padding-top:8px;">
       <a href="${this.esc(b.appUrl)}" style="color:${TEAL};font-weight:600;text-decoration:none;">Open Dealcore</a>
-      <span style="color:#cbd5e1;">&nbsp;&middot;&nbsp;</span>
-      <a href="${this.esc(b.appUrl)}/settings" style="color:${TEAL};font-weight:600;text-decoration:none;">Digest settings</a>
     </div>
     <div style="font-size:12px;color:${FAINT};padding-top:12px;line-height:1.5;">
       Quick Cash Home Buyers &middot; (704) 471-3920 &middot; Charlotte, NC

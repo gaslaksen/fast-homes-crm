@@ -5,11 +5,12 @@ import { DigestService } from './digest.service';
 import { DigestNewsService } from './digest-news.service';
 import { DigestRenderService } from './digest-render.service';
 import { DigestController } from './digest.controller';
+import { DigestCronService } from './digest-cron.service';
 
 @Module({
   imports: [PrismaModule, MailerModule],
   controllers: [DigestController],
-  providers: [DigestService, DigestRenderService, DigestNewsService],
+  providers: [DigestService, DigestRenderService, DigestNewsService, DigestCronService],
   exports: [DigestService, DigestRenderService],
 })
 export class DigestModule {}
