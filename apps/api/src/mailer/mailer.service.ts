@@ -207,6 +207,41 @@ export class MailerService {
   }
 
   /**
+   * Internal team email with a fully-formed HTML body (daily digest, ops
+   * alerts). Unlike sendAsDeals/sendAsUser this does NOT run the body through
+   * wrapEmailBody - the caller owns the whole document, signature included.
+   * Nothing is persisted to the Email table because there is no lead thread.
+   */
+  async sendInternalHtml(params: {
+    to: string;
+    subject: string;
+    html: string;
+    text?: string;
+    tags?: string[];
+  }): Promise<{ mailgunId: string | null }> {
+    const address = this.config.get<string>('EMAIL_INTERNAL_FROM') || 'deals@quickcashhomebuyers.com';
+    const displayName = this.config.get<string>('EMAIL_INTERNAL_FROM_NAME') || 'Dealcore';
+
+    const message: Record<string, any> = {
+      from: this.buildFrom(displayName, address),
+      to: params.to,
+      subject: params.subject,
+      html: params.html,
+      'o:tag': params.tags?.length ? params.tags : ['internal'],
+    };
+    if (params.text) message.text = params.text;
+
+    try {
+      const res = await this.mg.messages.create(this.domain, message as any);
+      const mailgunId = (res?.id || '').replace(/^</, '').replace(/>$/, '') || null;
+      return { mailgunId };
+    } catch (err: any) {
+      this.logger.error(`Mailgun internal send to ${params.to} failed: ${err?.message}`);
+      throw err;
+    }
+  }
+
+  /**
    * Deal-package share email. Kept for the partners flow.
    */
   async sendDealPackage(to: string, subject: string, html: string, replyTo?: string) {

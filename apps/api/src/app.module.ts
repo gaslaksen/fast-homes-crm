@@ -32,6 +32,7 @@ import { InboxModule } from './inbox/inbox.module';
 import { ExternalConversationsModule } from './external-conversations/external-conversations.module';
 import { PushModule } from './push/push.module';
 import { ForeclosuresModule } from './foreclosures/foreclosures.module';
+import { DigestModule } from './digest/digest.module';
 
 @Module({
   imports: [
@@ -70,6 +71,7 @@ import { ForeclosuresModule } from './foreclosures/foreclosures.module';
     ExternalConversationsModule,
     PushModule,
     ForeclosuresModule,
+    DigestModule,
   ],
 })
 export class AppModule {}
