@@ -57,6 +57,24 @@ export const COUNTY_GIS: Record<string, string> = {
   'Cherokee SC': 'https://cherokeesc.connectgis.com/',
 };
 
+/** County for a city: Mecklenburg for the Meck set, else the CITY_COUNTY map. */
+export function countyForCity(city?: string): string | null {
+  const cU = String(city || '').toUpperCase().trim();
+  if (!cU) return null;
+  if (MECK_CITIES.has(cU)) return 'Mecklenburg';
+  return CITY_COUNTY[cU] || null;
+}
+
+/** All cities (uppercase) known to belong to a given county. */
+export function citiesInCounty(county: string): string[] {
+  const out: string[] = [];
+  if (county === 'Mecklenburg') out.push(...Array.from(MECK_CITIES));
+  for (const [cityU, cnty] of Object.entries(CITY_COUNTY)) {
+    if (cnty === county) out.push(cityU);
+  }
+  return out;
+}
+
 /** Slug for URLs: collapse non-alphanumerics to single hyphens. */
 export function slug(s: string): string {
   return String(s || '').replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
