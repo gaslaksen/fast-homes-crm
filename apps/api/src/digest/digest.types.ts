@@ -1,3 +1,6 @@
+import { NewsItem } from './digest-news.service';
+export { NewsItem };
+
 /**
  * Shape of an assembled Daily Brief. `DigestService` builds this from the live
  * pipeline; `DigestRenderService` turns it into HTML and plain text. Nothing in
@@ -42,6 +45,11 @@ export interface DigestAction {
   /** Ranking score. Higher sorts first; also picks the rail color. */
   score: number;
   urgency: DigestUrgency;
+  /**
+   * Action family. Used to cap how many slots one category can take, so a
+   * heavy foreclosure ingest cannot crowd out every closing and offer.
+   */
+  category: 'reply' | 'foreclosure' | 'closing' | 'signature' | 'offer' | 'task' | 'cleanup';
 }
 
 export interface WaitingRow {
@@ -97,6 +105,8 @@ export interface DigestBrief {
   dateLabel: string;
   timeLabel: string;
   greetingName: string | null;
+  /** "Good morning" / "Good afternoon" / "Good evening" in the org timezone. */
+  greetingPrefix: string;
   /** "Charlotte metro", derived from the most common active-lead city. */
   marketLabel: string | null;
 
@@ -116,6 +126,7 @@ export interface DigestBrief {
   newOvernight: NewLeadRow[];
   newOvernightTotal: number;
   yesterday: YesterdayStat[];
+  news: NewsItem[];
 
   appUrl: string;
   /** True when every actionable section came back empty. Cron skips the send. */

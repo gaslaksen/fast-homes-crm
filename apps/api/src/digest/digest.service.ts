@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
+import { DigestNewsService } from './digest-news.service';
 import {
   BigThing,
   BoardTile,
@@ -30,6 +31,7 @@ export class DigestService {
   constructor(
     private prisma: PrismaService,
     private config: ConfigService,
+    private news: DigestNewsService,
   ) {}
 
   private get appUrl(): string {
@@ -91,6 +93,49 @@ export class DigestService {
   /** Whole days from now to a future date, floored at 0. */
   private daysUntil(d: Date, now: Date): number {
     return Math.max(0, Math.round((d.getTime() - now.getTime()) / DAY));
+  }
+
+  /** Signed days: negative means the date has already passed. */
+  private daysDelta(d: Date, now: Date): number {
+    return Math.round((d.getTime() - now.getTime()) / DAY);
+  }
+
+  /** "(704) 471-3920" from any 10 or 11 digit form. */
+  private fmtPhone(raw: string | null | undefined): string | null {
+    const digits = String(raw ?? '').replace(/[^0-9]/g, '');
+    const ten = digits.length === 11 && digits.startsWith('1') ? digits.slice(1) : digits;
+    if (ten.length !== 10) return raw ? String(raw) : null;
+    return `(${ten.slice(0, 3)}) ${ten.slice(3, 6)}-${ten.slice(6)}`;
+  }
+
+  /**
+   * County owner strings arrive as raw record text: "SURDI MARY ANN HEIRS",
+   * "ROBERT TONY BROFFMAN;", "JESUS ALFONSO DELCID; ELIZABETH DELCID". Take the
+   * first owner, drop the record suffixes, and title-case it so the brief reads
+   * like a person wrote it.
+   */
+  private cleanOwnerName(raw: string | null | undefined): string | null {
+    const first = String(raw ?? '').split(';')[0].replace(/[,;\s]+$/, '').trim();
+    if (!first) return null;
+    const stripped = first
+      .replace(/\b(HEIRS?|ESTATE|DECEASED|ET\s?AL|TRUSTEE|LIFE\s?ESTATE)\b/gi, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!stripped) return null;
+    return stripped
+      .split(' ')
+      .map((w) => (w.length <= 1 ? w.toUpperCase() : w[0].toUpperCase() + w.slice(1).toLowerCase()))
+      .join(' ');
+  }
+
+  /** "Good morning" / "Good afternoon" / "Good evening" in the org timezone. */
+  private greeting(now: Date): string {
+    const hour = Number(
+      new Intl.DateTimeFormat('en-US', { timeZone: TZ, hour: 'numeric', hour12: false }).format(now),
+    );
+    if (hour < 12) return 'Good morning';
+    if (hour < 18) return 'Good afternoon';
+    return 'Good evening';
   }
 
   private truncate(s: string | null | undefined, max = 92): string {
@@ -270,17 +315,35 @@ export class DigestService {
         where: active,
         _count: { propertyCity: true },
         orderBy: { _count: { propertyCity: 'desc' } },
-        take: 1,
+        take: 3,
       }),
     ]);
 
     const yesterday = await this.buildYesterday(orgId, since, now);
 
+    // Feeds live outside our control, so this is best-effort: getItems swallows
+    // its own failures and returns [] rather than taking the brief down.
+    const strategies = [
+      ...new Set(openContracts.map((c) => c.exitStrategy).filter(Boolean) as string[]),
+    ];
+    const news = await this.news.getItems({
+      markets: topCity.map((c) => c.propertyCity).filter(Boolean) as string[],
+      strategies,
+      closingSoon: openContracts.filter(
+        (c) => c.expectedCloseDate && c.expectedCloseDate >= now && c.expectedCloseDate <= in60,
+      ).length,
+      activeLeads: activeCount,
+      foreclosureCount: foreclosureOpenTotal,
+    });
+
     // ── Board ───────────────────────────────────────────────────────────────
-    const closingSoon = openContracts.filter(
-      (c) => c.expectedCloseDate && c.expectedCloseDate <= in60 && c.expectedCloseDate >= now,
-    );
-    const expectedFees = closingSoon.reduce((sum, c) => sum + (c.assignmentFee || 0), 0);
+    // Every open contract counts, including ones whose close date already
+    // slipped. Filtering to future dates silently hid most of the money.
+    const expectedFees = openContracts.reduce((sum, c) => sum + (c.assignmentFee || 0), 0);
+    const overdueContracts = openContracts.filter(
+      (c) => c.expectedCloseDate && this.daysDelta(c.expectedCloseDate, now) < 0,
+    ).length;
+    const feelessContracts = openContracts.filter((c) => !c.assignmentFee).length;
     const oldestWait = unread.length && unread[0].lastMessageAt
       ? this.fmtWait(now.getTime() - unread[0].lastMessageAt.getTime())
       : null;
@@ -302,12 +365,17 @@ export class DigestService {
       },
       {
         label: 'Under contract', value: String(underContractCount),
-        subtext: newContracts ? `up ${newContracts} since yesterday` : 'no change',
-        urgency: newContracts ? 'good' : 'neutral',
+        subtext: overdueContracts
+          ? `${overdueContracts} past close date`
+          : newContracts ? `up ${newContracts} since yesterday` : 'no change',
+        urgency: overdueContracts ? 'critical' : newContracts ? 'good' : 'neutral',
       },
       {
         label: 'Expected fees', value: this.moneyCompact(expectedFees),
-        subtext: `${closingSoon.length} deals, 60 days`, urgency: 'good',
+        subtext: feelessContracts
+          ? `${openContracts.length} open, ${feelessContracts} with no fee set`
+          : `across ${openContracts.length} open deal${openContracts.length === 1 ? '' : 's'}`,
+        urgency: feelessContracts ? 'warn' : 'good',
       },
       {
         label: 'Going cold', value: String(staleLeads),
@@ -331,17 +399,36 @@ export class DigestService {
     });
 
     // ── Deals in motion ─────────────────────────────────────────────────────
-    const dealsInMotion: DealRow[] = openContracts.slice(0, 6).map((c) => {
+    // Overdue first (a blown close date is the loudest thing here), then
+    // soonest upcoming, then the unscheduled.
+    const rankedContracts = [...openContracts].sort((a, b) => {
+      const ad = a.expectedCloseDate ? this.daysDelta(a.expectedCloseDate, now) : 9999;
+      const bd = b.expectedCloseDate ? this.daysDelta(b.expectedCloseDate, now) : 9999;
+      const aOver = ad < 0, bOver = bd < 0;
+      if (aOver !== bOver) return aOver ? -1 : 1;
+      return aOver ? ad - bd : ad - bd;
+    });
+
+    const dealsInMotion: DealRow[] = rankedContracts.slice(0, 6).map((c) => {
       const close = c.expectedCloseDate;
-      const days = close ? this.daysUntil(close, now) : null;
-      const { note, noteUrgency } = this.contractBlocker(c, now, days);
+      const delta = close ? this.daysDelta(close, now) : null;
+      const { note, noteUrgency } = this.contractBlocker(c, now, delta);
       return {
         property: this.place(c.lead),
         note, noteUrgency,
         closeLabel: close ? this.fmtShortDate(close) : 'No date set',
-        daysLabel: days == null ? 'unscheduled' : `${days} days`,
-        daysUrgency: days == null ? 'warn' : days <= 5 ? 'critical' : days <= 14 ? 'warn' : 'neutral',
-        fee: this.money(c.assignmentFee),
+        daysLabel:
+          delta == null ? 'unscheduled'
+          : delta < 0 ? `${Math.abs(delta)} days overdue`
+          : delta === 0 ? 'today'
+          : `${delta} days`,
+        daysUrgency:
+          delta == null ? 'warn'
+          : delta < 0 ? 'critical'
+          : delta <= 5 ? 'critical'
+          : delta <= 14 ? 'warn'
+          : 'neutral',
+        fee: c.assignmentFee ? this.money(c.assignmentFee) : 'not set',
         url: this.leadUrl(c.lead.id, '/contract'),
       };
     });
@@ -349,7 +436,9 @@ export class DigestService {
     // ── Foreclosure watch ───────────────────────────────────────────────────
     const foreclosures: ForeclosureRow[] = foreclosureRows.map((f) => {
       const days = f.saleDate ? this.daysUntil(f.saleDate, now) : 99;
+      const owner = this.cleanOwnerName(f.countyOwner);
       const facts = [
+        owner,
         f.noticeType ? f.noticeType.replace(/_/g, ' ') : null,
         f.saleDate ? `sale ${this.fmtShortDate(f.saleDate)}` : null,
         f.priority || null,
@@ -411,6 +500,7 @@ export class DigestService {
       dateLabel: this.fmtDate(now),
       timeLabel: this.fmtTime(now),
       greetingName: params.greetingName ?? null,
+      greetingPrefix: this.greeting(now),
       marketLabel: market,
       subject: '',
       preheader: '',
@@ -429,6 +519,7 @@ export class DigestService {
       newOvernight,
       newOvernightTotal: newLeads.length,
       yesterday,
+      news,
       appUrl: this.appUrl,
       isEmpty:
         !bigThing && !actions.length && !waiting.length &&
@@ -449,6 +540,14 @@ export class DigestService {
     now: Date,
     days: number | null,
   ): { note: string; noteUrgency: DigestUrgency } {
+    // An expected close date in the past outranks every other blocker: either
+    // it slipped and nobody updated it, or the deal is quietly dead.
+    if (days != null && days < 0) {
+      return {
+        note: `Close date passed ${Math.abs(days)} days ago, needs a new date or a kill`,
+        noteUrgency: 'critical',
+      };
+    }
     if (days != null && days <= 7 && !c.titleCompany) {
       return { note: 'No title company set', noteUrgency: 'critical' };
     }
@@ -462,7 +561,9 @@ export class DigestService {
     if (share) {
       const last = share.lastOpenedAt ?? share.createdAt;
       const silentDays = Math.floor((now.getTime() - new Date(last).getTime()) / DAY);
-      if (silentDays >= 3) {
+      // Bounded: past 30 days this stops being "silent" and starts being stale
+      // data, and reporting "buyer silent 109 days" as a blocker is just noise.
+      if (silentDays >= 3 && silentDays <= 30) {
         return { note: `Buyer silent ${silentDays} days`, noteUrgency: 'warn' };
       }
     }
@@ -510,6 +611,7 @@ export class DigestService {
         ctaUrl: this.leadUrl(l.id),
         score,
         urgency: 'critical',
+        category: 'reply',
       });
     }
 
@@ -517,12 +619,17 @@ export class DigestService {
       if (!f.saleDate) continue;
       const days = this.daysUntil(f.saleDate, now);
       if (days > 14) continue;
-      const score = (90 + (14 - days) * 3) * (f.priority === 'HIGH' ? 1.5 : 1);
+      // Urgency alone is not worth much. A LOW-priority, score-11 notice two
+      // counties over should not outrank a HIGH, score-63 one day later, so
+      // the skip-trace score and priority both weigh in.
+      const priorityMultiplier =
+        f.priority === 'HIGH' ? 1.5 : f.priority === 'MEDIUM' ? 1.0 : 0.7;
+      const score = (90 + (14 - days) * 3 + (f.leadScore ?? 0) * 0.4) * priorityMultiplier;
+      const owner = this.cleanOwnerName(f.countyOwner);
       out.push({
-        title: `Call ${this.personName({
-          sellerFirstName: f.countyOwner?.split(' ')[0],
-          sellerLastName: f.countyOwner?.split(' ').slice(1).join(' '),
-        })}, sale in ${days} day${days === 1 ? '' : 's'}`,
+        title: owner
+          ? `Call ${owner}, sale in ${days} day${days === 1 ? '' : 's'}`
+          : `Owner unknown, sale in ${days} day${days === 1 ? '' : 's'}`,
         detail: [
           this.place({ propertyAddress: f.lead?.propertyAddress, propertyCity: f.lead?.propertyCity }),
           f.noticeType ? f.noticeType.replace(/_/g, ' ') : null,
@@ -534,20 +641,40 @@ export class DigestService {
         ctaUrl: f.lead ? this.leadUrl(f.lead.id) : `${this.appUrl}/foreclosures`,
         score,
         urgency: days <= 5 ? 'critical' : 'warn',
+        category: 'foreclosure',
       });
     }
 
     for (const c of ctx.openContracts) {
-      if (!c.expectedCloseDate || c.expectedCloseDate > ctx.in7) continue;
-      if (c.titleCompany) continue;
-      out.push({
-        title: 'Assign title before this one closes',
-        detail: `${this.place(c.lead)} · closes in ${this.daysUntil(c.expectedCloseDate, now)} days · no title company on the contract`,
-        ctaLabel: 'Open contract',
-        ctaUrl: this.leadUrl(c.lead.id, '/contract'),
-        score: 85,
-        urgency: 'critical',
-      });
+      if (!c.expectedCloseDate) continue;
+      const delta = this.daysDelta(c.expectedCloseDate, now);
+
+      // Already blew its close date. Either it slipped and the record is stale,
+      // or the deal died and nobody marked it. Both need a human today.
+      if (delta < 0) {
+        out.push({
+          title: 'Reset or kill a contract that missed its close date',
+          detail: `${this.place(c.lead)} · was due ${this.fmtShortDate(c.expectedCloseDate)} · ${Math.abs(delta)} days ago · still ${(c.contractStatus || 'open').replace(/-/g, ' ')}`,
+          ctaLabel: 'Open contract',
+          ctaUrl: this.leadUrl(c.lead.id, '/contract'),
+          score: 88,
+          urgency: 'critical',
+          category: 'closing',
+        });
+        continue;
+      }
+
+      if (delta <= 7 && !c.titleCompany) {
+        out.push({
+          title: 'Assign title before this one closes',
+          detail: `${this.place(c.lead)} · closes in ${delta} day${delta === 1 ? '' : 's'} · no title company on the contract`,
+          ctaLabel: 'Open contract',
+          ctaUrl: this.leadUrl(c.lead.id, '/contract'),
+          score: 85,
+          urgency: 'critical',
+          category: 'closing',
+        });
+      }
     }
 
     for (const c of ctx.openContracts) {
@@ -561,6 +688,7 @@ export class DigestService {
         ctaUrl: this.leadUrl(c.lead.id, '/contract'),
         score: 75 + days,
         urgency: 'warn',
+        category: 'signature',
       });
     }
 
@@ -573,6 +701,7 @@ export class DigestService {
         ctaUrl: this.leadUrl(o.lead.id, '/offers'),
         score: 80,
         urgency: 'warn',
+        category: 'offer',
       });
     }
 
@@ -587,6 +716,7 @@ export class DigestService {
         // replied an hour ago. Aging tops out after two weeks.
         score: 60 + Math.min(days, 14),
         urgency: days >= 3 ? 'warn' : 'neutral',
+        category: 'task',
       });
     }
 
@@ -598,21 +728,45 @@ export class DigestService {
         ctaUrl: `${this.appUrl}/leads?filter=stale`,
         score: 40,
         urgency: 'neutral',
+        category: 'cleanup',
       });
     }
 
-    // One lead gets one slot. Without this a single messy deal (unanswered
-    // reply + overdue task + stalled offer) eats the whole list.
+    // Two passes of thinning:
+    //   1. One lead gets one slot, so a single messy deal (unanswered reply +
+    //      overdue task + stalled offer) cannot eat the whole list.
+    //   2. At most 2 per category, so a heavy foreclosure ingest cannot bury
+    //      every closing, offer, and reply behind five identical call tasks.
+    //      A "top 5 things to do" made of one category is a filtered list, not
+    //      a prioritized one.
+    const CATEGORY_CAP = 2;
     const seen = new Set<string>();
-    const deduped: DigestAction[] = [];
+    const byCategory = new Map<string, number>();
+    const picked: DigestAction[] = [];
+
     for (const a of out.sort((x, y) => y.score - x.score)) {
       const key = a.ctaUrl.match(/\/leads\/([^/?#]+)/)?.[1] ?? a.ctaUrl;
       if (seen.has(key)) continue;
+      if ((byCategory.get(a.category) ?? 0) >= CATEGORY_CAP) continue;
       seen.add(key);
-      deduped.push(a);
-      if (deduped.length === 5) break;
+      byCategory.set(a.category, (byCategory.get(a.category) ?? 0) + 1);
+      picked.push(a);
+      if (picked.length === 5) break;
     }
-    return deduped;
+
+    // If the caps left the list short (a genuinely one-sided day), backfill by
+    // score so the reader still gets five things.
+    if (picked.length < 5) {
+      for (const a of out) {
+        if (picked.length === 5) break;
+        const key = a.ctaUrl.match(/\/leads\/([^/?#]+)/)?.[1] ?? a.ctaUrl;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        picked.push(a);
+      }
+    }
+
+    return picked.sort((a, b) => b.score - a.score);
   }
 
   /**
@@ -651,11 +805,24 @@ export class DigestService {
           : 'Nothing else on the board is a warm seller who already raised their hand. Reply rates fall off a cliff after the first few hours.',
         ctaLabel: `Open ${best.sellerFirstName || 'the'} thread`,
         ctaUrl: this.leadUrl(best.id),
-        phone: best.sellerPhone ?? null,
+        phone: this.fmtPhone(best.sellerPhone),
       };
     }
 
-    const imminent = ctx.foreclosureRows.find((f) => f.saleDate && this.daysUntil(f.saleDate, now) <= 5);
+    // Among the notices selling this week, lead with the one actually worth a
+    // call. Picking whichever sells soonest put a LOW-priority, score-11 notice
+    // two counties over at the top of the brief while a HIGH, score-63 one day
+    // later sat in a table below.
+    const imminent = ctx.foreclosureRows
+      .filter((f) => f.saleDate && this.daysUntil(f.saleDate, now) <= 5)
+      .sort((a, b) => {
+        const rank = (p?: string) => (p === 'HIGH' ? 2 : p === 'MEDIUM' ? 1 : 0);
+        const pd = rank(b.priority) - rank(a.priority);
+        if (pd !== 0) return pd;
+        const sd = (b.leadScore ?? 0) - (a.leadScore ?? 0);
+        if (sd !== 0) return sd;
+        return a.saleDate.getTime() - b.saleDate.getTime();
+      })[0];
     if (imminent) {
       const days = this.daysUntil(imminent.saleDate, now);
       return {
@@ -671,7 +838,7 @@ export class DigestService {
           : 'The window closes on the sale date. Everything else on the board can wait a day; this cannot.',
         ctaLabel: 'Open foreclosure',
         ctaUrl: imminent.lead ? this.leadUrl(imminent.lead.id) : `${this.appUrl}/foreclosures`,
-        phone: imminent.lead?.sellerPhone ?? null,
+        phone: this.fmtPhone(imminent.lead?.sellerPhone),
       };
     }
 

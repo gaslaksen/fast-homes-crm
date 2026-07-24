@@ -56,7 +56,7 @@ export class DigestRenderService {
 
   private sectionLabel(title: string, trailing?: string, trailingColor = FAINT): string {
     return `
-      <tr><td class="px" style="padding:22px 32px 10px 32px;">
+      <tr><td class="px" style="padding:22px 36px 10px 32px;">
         <div style="font-size:11px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:${MUTED};">
           ${this.esc(title)}${trailing ? `<span style="color:${trailingColor};font-weight:600;text-transform:none;letter-spacing:0;">&nbsp;${this.esc(trailing)}</span>` : ''}
         </div>
@@ -64,7 +64,7 @@ export class DigestRenderService {
   }
 
   private divider(): string {
-    return `<tr><td class="px" style="padding:14px 32px 0 32px;"><div style="border-top:1px solid ${HAIRLINE};"></div></td></tr>`;
+    return `<tr><td class="px" style="padding:14px 36px 0 32px;"><div style="border-top:1px solid ${HAIRLINE};"></div></td></tr>`;
   }
 
   // ── Sections ─────────────────────────────────────────────────────────────
@@ -81,7 +81,7 @@ export class DigestRenderService {
       : '';
 
     return `
-      <tr><td class="px" style="padding:26px 32px 4px 32px;">
+      <tr><td class="px" style="padding:26px 36px 4px 32px;">
         <div style="font-size:11px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:${TEAL};padding-bottom:8px;">1 big thing</div>
         <div style="font-size:22px;font-weight:700;color:${INK};line-height:1.28;letter-spacing:-0.4px;">${this.esc(t.headline)}</div>
         <div style="font-size:15px;color:${BODY};line-height:1.62;padding-top:10px;">${this.esc(t.detail)}</div>
@@ -89,7 +89,7 @@ export class DigestRenderService {
           <b style="color:${INK};">Why it matters:</b> ${this.esc(t.whyItMatters)}
         </div>
       </td></tr>
-      <tr><td class="px" style="padding:18px 32px 24px 32px;">
+      <tr><td class="px" style="padding:18px 36px 24px 32px;">
         <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
           <td style="background:${TEAL};border-radius:8px;">
             <a href="${this.esc(t.ctaUrl)}" style="display:inline-block;padding:12px 22px;font-size:14px;font-weight:600;color:#ffffff;text-decoration:none;">${this.esc(t.ctaLabel)} &rarr;</a>
@@ -122,10 +122,10 @@ export class DigestRenderService {
 
     return `
       ${this.divider()}
-      <tr><td class="px" style="padding:22px 32px 4px 32px;">
+      <tr><td class="px" style="padding:22px 36px 4px 32px;">
         <div style="font-size:11px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:${MUTED};padding-bottom:14px;">The board</div>
       </td></tr>
-      <tr><td class="px" style="padding:0 26px 8px 26px;">
+      <tr><td class="px" style="padding:0 30px 8px 30px;">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">${rows.join('')}</table>
       </td></tr>`;
   }
@@ -146,11 +146,11 @@ export class DigestRenderService {
 
     return `
       ${this.divider()}
-      <tr><td class="px" style="padding:22px 32px 6px 32px;">
+      <tr><td class="px" style="padding:22px 36px 6px 32px;">
         <div style="font-size:11px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:${MUTED};">Do this first</div>
         <div style="font-size:13px;color:${FAINT};padding-top:4px;">Ranked by dollars at risk today.</div>
       </td></tr>
-      <tr><td class="px" style="padding:12px 32px 6px 32px;">${items}</td></tr>`;
+      <tr><td class="px" style="padding:12px 36px 6px 32px;">${items}</td></tr>`;
   }
 
   private renderWaiting(b: DigestBrief): string {
@@ -169,7 +169,7 @@ export class DigestRenderService {
     return `
       ${this.divider()}
       ${this.sectionLabel('Waiting on you', `${b.waitingTotal} unanswered ${b.waitingTotal === 1 ? 'reply' : 'replies'}`, '#b45309')}
-      <tr><td class="px" style="padding:0 32px 6px 32px;">
+      <tr><td class="px" style="padding:0 36px 6px 32px;">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid ${HAIRLINE};border-radius:10px;">${rows}</table>
         <div style="padding-top:10px;">
           <a href="${this.esc(b.appUrl)}/inbox?filter=unread" style="font-size:13px;font-weight:600;color:${TEAL};text-decoration:none;">Open the unified inbox &rarr;</a>
@@ -199,7 +199,7 @@ export class DigestRenderService {
     return `
       ${this.divider()}
       ${this.sectionLabel('Deals in motion', `${b.dealsInMotion.length} open · ${b.dealsTotalFee} expected`)}
-      <tr><td class="px" style="padding:0 32px 6px 32px;">
+      <tr><td class="px" style="padding:0 36px 6px 32px;">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;font-size:13px;">
           <tr style="background:#f8fafc;">
             <th align="left" style="padding:9px 10px;font-size:11px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid ${HAIRLINE};">Property</th>
@@ -238,7 +238,7 @@ export class DigestRenderService {
     return `
       ${this.divider()}
       ${this.sectionLabel('Foreclosure watch', 'sale dates inside 21 days')}
-      <tr><td class="px" style="padding:0 32px 6px 32px;">${cards}${footer}</td></tr>`;
+      <tr><td class="px" style="padding:0 36px 6px 32px;">${cards}${footer}</td></tr>`;
   }
 
   private renderNewLeads(b: DigestBrief): string {
@@ -254,12 +254,32 @@ export class DigestRenderService {
     return `
       ${this.divider()}
       ${this.sectionLabel('Came in overnight', `${b.newOvernightTotal} lead${b.newOvernightTotal === 1 ? '' : 's'}`)}
-      <tr><td class="px" style="padding:0 32px 6px 32px;">
+      <tr><td class="px" style="padding:0 36px 6px 32px;">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size:13px;">${rows}</table>
         ${remainder > 0
           ? `<div style="padding-top:10px;"><a href="${this.esc(b.appUrl)}/leads" style="font-size:13px;font-weight:600;color:${TEAL};text-decoration:none;">See the other ${remainder} &rarr;</a></div>`
           : ''}
       </td></tr>`;
+  }
+
+  private renderNews(b: DigestBrief): string {
+    if (!b.news.length) return '';
+    const items = b.news.map((n, i) => `
+      <div style="${i ? `border-top:1px solid #eef1f4;padding-top:16px;` : ''}padding-bottom:${i === b.news.length - 1 ? '0' : '16px'};">
+        <div style="font-size:15px;font-weight:700;color:${INK};line-height:1.4;">
+          <a href="${this.esc(n.url)}" style="color:${INK};text-decoration:none;">${this.esc(n.headline)}</a>
+        </div>
+        ${n.oneLiner ? `<div style="font-size:14px;color:${BODY};line-height:1.6;padding-top:3px;">${this.esc(n.oneLiner)}</div>` : ''}
+        <div style="font-size:14px;color:${BODY};line-height:1.6;padding-top:6px;">
+          <b style="color:${INK};">Why it matters:</b> ${this.esc(n.whyItMatters)}
+        </div>
+        <div style="font-size:12px;color:${FAINT};padding-top:5px;">${this.esc(n.source)} &middot; ${this.esc(n.publishedLabel)}</div>
+      </div>`).join('');
+
+    return `
+      ${this.divider()}
+      ${this.sectionLabel('Market and news', `${b.news.length} thing${b.news.length === 1 ? '' : 's'}, 40 seconds`)}
+      <tr><td class="px" style="padding:0 36px 8px 36px;">${items}</td></tr>`;
   }
 
   private renderYesterday(b: DigestBrief): string {
@@ -274,7 +294,7 @@ export class DigestRenderService {
 
     return `
       ${this.divider()}
-      <tr><td class="px" style="padding:20px 32px 24px 32px;">
+      <tr><td class="px" style="padding:20px 36px 24px 32px;">
         <div style="font-size:11px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:${MUTED};padding-bottom:10px;">Yesterday, by the numbers</div>
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size:13px;color:${BODY};">${cells.join('')}</table>
       </td></tr>`;
@@ -283,7 +303,9 @@ export class DigestRenderService {
   // ── Entry points ─────────────────────────────────────────────────────────
 
   renderHtml(b: DigestBrief): string {
-    const greeting = b.greetingName ? ` &middot; Good morning, ${this.esc(b.greetingName)}` : '';
+    const greeting = b.greetingName
+      ? ` &middot; ${this.esc(b.greetingPrefix)}, ${this.esc(b.greetingName)}`
+      : '';
     const market = b.marketLabel
       ? `<td align="right" class="hide-sm" style="font-size:12px;color:#99f6e4;font-weight:600;letter-spacing:0.4px;text-transform:uppercase;">${this.esc(b.marketLabel)}</td>`
       : '<td></td>';
@@ -299,7 +321,7 @@ export class DigestRenderService {
 <style>
   body { margin:0; padding:0; background:#eef1f4; -webkit-font-smoothing:antialiased; }
   a { text-decoration:none; }
-  @media only screen and (max-width:620px) {
+  @media only screen and (max-width:700px) {
     .container { width:100% !important; }
     .px { padding-left:18px !important; padding-right:18px !important; }
     .tile { display:block !important; width:100% !important; box-sizing:border-box !important; }
@@ -313,9 +335,9 @@ export class DigestRenderService {
 <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;height:0;width:0;">${this.esc(b.preheader)}</div>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#eef1f4;">
 <tr><td align="center" style="padding:28px 12px 40px 12px;">
-<table role="presentation" class="container" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px;max-width:600px;background:#ffffff;border-radius:14px;overflow:hidden;font-family:${FONT};">
+<table role="presentation" class="container" width="680" cellpadding="0" cellspacing="0" border="0" style="width:680px;max-width:680px;background:#ffffff;border-radius:14px;overflow:hidden;font-family:${FONT};">
 
-  <tr><td class="px" style="background:${TEAL_DARK};padding:22px 32px 20px 32px;">
+  <tr><td class="px" style="background:${TEAL_DARK};padding:22px 36px 20px 32px;">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
       <tr>
         <td style="font-size:19px;font-weight:700;color:#ffffff;letter-spacing:-0.3px;line-height:1.2;">Dealcore Daily Brief</td>
@@ -334,9 +356,10 @@ export class DigestRenderService {
   ${this.renderDeals(b)}
   ${this.renderForeclosures(b)}
   ${this.renderNewLeads(b)}
+  ${this.renderNews(b)}
   ${this.renderYesterday(b)}
 
-  <tr><td class="px" style="background:#f8fafc;border-top:1px solid ${HAIRLINE};padding:20px 32px 24px 32px;">
+  <tr><td class="px" style="background:#f8fafc;border-top:1px solid ${HAIRLINE};padding:20px 36px 24px 32px;">
     <div style="font-size:13px;color:${MUTED};line-height:1.6;">
       Generated by <b style="color:${INK};">Dealcore</b> at ${this.esc(b.timeLabel)} from your live pipeline.
     </div>
@@ -424,6 +447,17 @@ export class DigestRenderService {
       for (const n of b.newOvernight) {
         out.push(`  ${n.property} - ${n.meta}`);
         out.push(`     ${n.note}`);
+      }
+      out.push('');
+    }
+
+    if (b.news.length) {
+      out.push('MARKET AND NEWS');
+      for (const n of b.news) {
+        out.push(`  ${n.headline}`);
+        if (n.oneLiner) out.push(`     ${n.oneLiner}`);
+        out.push(`     Why it matters: ${n.whyItMatters}`);
+        out.push(`     ${n.source} - ${n.publishedLabel} - ${n.url}`);
       }
       out.push('');
     }
