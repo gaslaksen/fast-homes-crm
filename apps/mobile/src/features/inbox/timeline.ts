@@ -22,7 +22,10 @@ export interface CallPayload {
 }
 export interface EmailPayload {
   subject: string | null;
+  fromAddress?: string | null;
+  toAddress?: string | null;
   bodyText?: string | null;
+  bodyHtml?: string | null;
 }
 export interface EventPayload {
   type: string;

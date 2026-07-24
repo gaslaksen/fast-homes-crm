@@ -61,6 +61,28 @@ export function useSendMessage(leadId: string) {
   });
 }
 
+/** Reply to an email in the thread via Mailgun. */
+export function useSendEmailReply(leadId: string) {
+  const qc = useQueryClient();
+  const { user } = useAuth();
+  return useMutation({
+    mutationFn: async (params: { subject?: string; body: string; to?: string; inReplyToEmailId?: string }) => {
+      const { data } = await api.post(`/leads/${leadId}/messages/emails/send`, {
+        userId: user?.id,
+        subject: params.subject,
+        body: params.body,
+        to: params.to,
+        inReplyToEmailId: params.inReplyToEmailId,
+      });
+      return data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['lead', leadId, 'communications'] });
+      qc.invalidateQueries({ queryKey: ['inbox', 'threads'] });
+    },
+  });
+}
+
 export function useMarkRead() {
   const qc = useQueryClient();
   return useMutation({

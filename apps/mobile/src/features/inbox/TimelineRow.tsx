@@ -1,9 +1,17 @@
 import { memo } from 'react';
-import { Image, StyleSheet, Text, View } from 'react-native';
+import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useRouter } from 'expo-router';
 import { useThemed, type Colors } from '@/theme';
 import { RecordingPlayer } from '@/features/calls/RecordingPlayer';
+import { ChevronRight } from '@/components/icons';
 import { clockTime, dayLabel } from '@/lib/format';
 import type { TimelineItem } from './timeline';
+
+/** Plain-text preview from an email body (strips tags if only HTML is present). */
+export function emailPreview(bodyText?: string | null, bodyHtml?: string | null): string {
+  const raw = bodyText?.trim() || (bodyHtml ? bodyHtml.replace(/<[^>]+>/g, ' ') : '');
+  return raw.replace(/\s+/g, ' ').trim();
+}
 
 function durationLabel(secs: number | null): string {
   if (!secs) return '';
@@ -32,8 +40,15 @@ function Meta({ name, channel, at, right }: { name: string; channel: string; at:
 
 /** Renders one item of the merged conversation timeline. Memoized so typing a
  * draft in the thread doesn't re-render every message row. */
-export const TimelineRow = memo(function TimelineRow({ item }: { item: TimelineItem }) {
-  const { styles } = useThemed(makeStyles);
+export const TimelineRow = memo(function TimelineRow({
+  item,
+  leadId,
+}: {
+  item: TimelineItem;
+  leadId: string;
+}) {
+  const { colors, styles } = useThemed(makeStyles);
+  const router = useRouter();
   const outbound = item.direction === 'OUTBOUND';
   const wrap = [styles.wrap, outbound ? styles.alignRight : styles.alignLeft];
 
@@ -84,12 +99,29 @@ export const TimelineRow = memo(function TimelineRow({ item }: { item: TimelineI
   }
 
   if (item.kind === 'email') {
+    const preview = emailPreview(item.payload.bodyText, item.payload.bodyHtml);
+    const emailId = item.id.replace(/^email_/, '');
     return (
       <View style={wrap}>
         <Meta name={item.actor.name} channel="Email" at={item.at} right={outbound} />
-        <View style={styles.callCard}>
-          <Text style={styles.emailSubject}>{item.payload.subject || '(no subject)'}</Text>
-        </View>
+        <TouchableOpacity
+          style={styles.emailCard}
+          activeOpacity={0.7}
+          onPress={() => router.push({ pathname: '/lead/email/[id]', params: { id: emailId, leadId } })}
+        >
+          <View style={styles.emailHead}>
+            <Text style={styles.emailSubjectStrong} numberOfLines={1}>
+              {item.payload.subject || '(no subject)'}
+            </Text>
+            <ChevronRight size={16} color={colors.textMuted} />
+          </View>
+          {preview ? (
+            <Text style={styles.emailPreview} numberOfLines={2}>
+              {preview}
+            </Text>
+          ) : null}
+          <Text style={styles.emailOpen}>Tap to read & reply</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -137,6 +169,20 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
   },
   callTitle: { fontSize: 13, fontWeight: '600', color: colors.text },
   emailSubject: { fontSize: 14, color: colors.textSecondary },
+  emailCard: {
+    alignSelf: 'stretch',
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    gap: 4,
+  },
+  emailHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  emailSubjectStrong: { flex: 1, fontSize: 14, fontWeight: '600', color: colors.text },
+  emailPreview: { fontSize: 13, color: colors.textSecondary },
+  emailOpen: { fontSize: 12, fontWeight: '600', color: colors.primary, marginTop: 2 },
   muted: { fontSize: 12, color: colors.textMuted },
 
   noteCard: {

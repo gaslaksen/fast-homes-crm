@@ -147,7 +147,7 @@ export default function ThreadScreen() {
               return (
                 <>
                   {showDate ? <DateSeparator date={item.at} /> : null}
-                  <TimelineRow item={item} />
+                  <TimelineRow item={item} leadId={leadId} />
                 </>
               );
             }}

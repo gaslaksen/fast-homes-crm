@@ -44,6 +44,7 @@ export default function LeadStackLayout() {
       <Stack.Screen name="disposition/[id]" options={{ title: 'Deal' }} />
       <Stack.Screen name="disposition-edit/[id]" options={{ title: 'Edit deal' }} />
       <Stack.Screen name="edit/[id]" options={{ title: 'Edit lead' }} />
+      <Stack.Screen name="email/[id]" options={{ title: 'Email' }} />
     </Stack>
   );
 }
