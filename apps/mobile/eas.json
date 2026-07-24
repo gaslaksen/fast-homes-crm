@@ -17,11 +17,13 @@
     },
     "preview": {
       "distribution": "internal",
+      "autoIncrement": true,
       "env": {
         "EXPO_PUBLIC_API_URL": "https://api.mydealcore.com"
       }
     },
     "production": {
+      "autoIncrement": true,
       "ios": {
         "image": "latest"
       },
