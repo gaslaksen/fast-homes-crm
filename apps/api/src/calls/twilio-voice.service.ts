@@ -165,13 +165,30 @@ export class TwilioVoiceService {
       response.say(disclosure);
     }
 
-    // The agent joins an empty conference; the seller is added as a participant
-    // once that conference starts (see handleConferenceStatus). Ordering matters
-    // for ringback: a participant added through the Participants API with
-    // earlyMedia pipes the real carrier ring tone into the conference, so the
-    // agent hears ringing instead of dead air. Dialling the seller as an
-    // independent call leg cannot do that, because there is no conference for
-    // their early media to land in yet.
+    // Dial the seller immediately, as an independent leg that joins the same
+    // conference.
+    //
+    // An earlier version deferred this to the conference-status webhook so the
+    // seller could be added with earlyMedia (which gives true ringback). That
+    // made placing a call depend on an inbound webhook arriving, and when it
+    // did not, the call silently did nothing at all. Dialling here instead
+    // means a call either connects or fails loudly. Ringback is handled by
+    // waitUrl below.
+    try {
+      await this.client().calls.create({
+        to,
+        from: callerId,
+        twiml: this.participantTwiml(conferenceName, 'customer'),
+        statusCallback: apiBase ? `${apiBase}/calls/twilio/status` : undefined,
+        statusCallbackMethod: 'POST',
+        statusCallbackEvent: ['completed'],
+      });
+    } catch (err: any) {
+      this.logger.error(`Failed to dial ${to} for ${callSid}: ${err.message}`);
+      response.say('We could not reach that number. Please try again.');
+      return response.toString();
+    }
+
     const dial = response.dial({
       // Agent leg joins with no caller ID of its own; the seller's leg carries
       // the outbound caller ID.
@@ -186,8 +203,11 @@ export class TwilioVoiceService {
         // call. A normal hangup is covered by the seller's endConferenceOnExit.
         endConferenceOnExit: false,
         beep: 'false',
-        // No hold music: the seller's early media is the audio we want here.
-        waitUrl: '',
+        // What the agent hears while the seller's phone rings. An empty string
+        // means silence, which reads as a dead line, so only use it when a
+        // ringback file is configured. Otherwise fall through to Twilio's
+        // default hold music, which at least confirms the call is progressing.
+        ...(this.ringbackUrl() ? { waitUrl: this.ringbackUrl() } : {}),
         ...(apiBase
           ? {
               statusCallback: `${apiBase}/calls/twilio/conference-status`,
@@ -210,12 +230,12 @@ export class TwilioVoiceService {
   }
 
   /**
-   * Conference status webhook. On `conference-start` the agent is in the room,
-   * so this is the moment to ring the seller.
+   * Conference status webhook. Bookkeeping only.
    *
-   * Adding them here rather than up front is what restores ringback: the
-   * Participants API with earlyMedia streams their carrier ring tone into the
-   * conference, which the agent is already listening to.
+   * The seller is dialled up front in generateDialTwiml, not from here. An
+   * earlier version added them on `conference-start` so they could join with
+   * earlyMedia, but that made every outbound call depend on this webhook
+   * arriving, and a call that never dialled gave no visible error at all.
    */
   async handleConferenceStatus(params: Record<string, string>): Promise<void> {
     const event = params.StatusCallbackEvent || '';
@@ -225,46 +245,9 @@ export class TwilioVoiceService {
     if (event === 'conference-end') {
       await this.prisma.callLog
         .updateMany({ where: { conferenceName }, data: { status: 'completed' } })
-        .catch(() => undefined);
-      return;
-    }
-
-    if (event !== 'conference-start') return;
-
-    const log = await this.prisma.callLog.findFirst({ where: { conferenceName } });
-    if (!log?.toNumber) {
-      this.logger.warn(`Conference ${conferenceName} started with no target number on the CallLog`);
-      return;
-    }
-
-    // Inbound calls reach the agent through <Dial><Client>, not a conference,
-    // so only browser-originated calls should dial a second leg here.
-    if (log.type !== 'twilio_browser') return;
-
-    const conferenceSid = params.ConferenceSid;
-    if (!conferenceSid) return;
-
-    try {
-      await this.client()
-        .conferences(conferenceSid)
-        .participants.create({
-          to: log.toNumber,
-          from: log.fromNumber || (await this.phoneNumbers.defaultFor('voice')),
-          label: 'customer',
-          // The whole point: stream ring/busy/voicemail audio to the agent
-          // while the seller's phone is still ringing.
-          earlyMedia: true,
-          // Seller hangs up -> the call is over, including any consult leg.
-          endConferenceOnExit: true,
-          statusCallback: this.callbackBase()
-            ? `${this.callbackBase()}/calls/twilio/status`
-            : undefined,
-          statusCallbackMethod: 'POST',
-          statusCallbackEvent: ['completed'],
-        });
-      this.logger.log(`📞 Dialled ${log.toNumber} into conference ${conferenceName}`);
-    } catch (err: any) {
-      this.logger.error(`Failed to add seller to ${conferenceName}: ${err.message}`);
+        .catch((err) =>
+          this.logger.warn(`Failed to close out ${conferenceName}: ${err.message}`),
+        );
     }
   }
 
@@ -283,6 +266,33 @@ export class TwilioVoiceService {
     return `dc-${callSid}`;
   }
 
+  /**
+   * Audio the agent hears while the seller's phone rings. Set
+   * TWILIO_RINGBACK_URL to a URL returning TwiML that plays a ring tone (e.g.
+   * `<Response><Play loop="0">https://.../ringback.mp3</Play></Response>`).
+   * Unset, Twilio's default conference hold music plays instead.
+   */
+  private ringbackUrl(): string {
+    return (this.config.get<string>('TWILIO_RINGBACK_URL') || '').trim();
+  }
+
+  /** TwiML for a leg that joins an existing conference. */
+  private participantTwiml(conferenceName: string, label: string): string {
+    const vr = new VoiceResponse();
+    const dial = vr.dial();
+    dial.conference(
+      {
+        participantLabel: label,
+        startConferenceOnEnter: true,
+        // Seller hangs up -> the call is over, including any consult leg.
+        endConferenceOnExit: true,
+        beep: 'false',
+      },
+      conferenceName,
+    );
+    return vr.toString();
+  }
+
 
   /**
    * Outbound caller IDs the dialer may present. Delegates to PhoneNumbersService
@@ -293,9 +303,23 @@ export class TwilioVoiceService {
     return list.map((n) => ({ number: n.number, label: n.label }));
   }
 
-  /** Validate a client-supplied caller ID against the allowlist. */
+  /**
+   * Validate a client-supplied caller ID against the allowlist.
+   *
+   * Falls back to TWILIO_PHONE_NUMBER if the lookup itself fails. Placing a
+   * call must never depend on a database read succeeding: an unhandled throw
+   * here returns no TwiML to Twilio, and the call dies before it dials.
+   */
   private async resolveCallerId(requested?: string): Promise<string> {
-    return this.phoneNumbers.resolve(requested, 'voice');
+    try {
+      return await this.phoneNumbers.resolve(requested, 'voice');
+    } catch (err: any) {
+      const fallback = this.config.get<string>('TWILIO_PHONE_NUMBER') || '';
+      this.logger.error(
+        `Caller ID lookup failed (${err.message}); falling back to ${fallback || 'no number'}`,
+      );
+      return fallback;
+    }
   }
 
   /** Look up the live conference for an agent call, or null if it has ended. */
