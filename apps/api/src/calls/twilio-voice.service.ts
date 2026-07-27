@@ -261,14 +261,27 @@ export class TwilioVoiceService {
     return vr.toString();
   }
 
+  /** "(704) 529-9523" from any 10 or 11 digit form, for display. */
+  private prettyNumber(raw: string): string {
+    const digits = raw.replace(/\D/g, '');
+    const ten = digits.length === 11 && digits.startsWith('1') ? digits.slice(1) : digits;
+    if (ten.length !== 10) return raw;
+    return `(${ten.slice(0, 3)}) ${ten.slice(3, 6)}-${ten.slice(6)}`;
+  }
+
   /**
    * Outbound caller IDs the dialer may use. Configured as a comma-separated
    * TWILIO_CALLER_IDS list of `+1NNNNNNNNNN` or `Label:+1NNNNNNNNNN` entries,
    * defaulting to TWILIO_PHONE_NUMBER.
+   *
+   * Entries without a label fall back to the formatted number rather than a
+   * fixed word, so a list of several unlabelled numbers stays distinguishable
+   * in the picker. Duplicates are dropped, keeping the first spelling, because
+   * the same number listed twice would give the dropdown two identical rows.
    */
   listCallerIds(): { number: string; label: string }[] {
     const raw = this.config.get<string>('TWILIO_CALLER_IDS') || '';
-    const entries = raw
+    const parsed = raw
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean)
@@ -281,12 +294,20 @@ export class TwilioVoiceService {
       })
       .filter((e) => !!e.number);
 
-    if (entries.length === 0) {
-      const fallback = this.config.get<string>('TWILIO_PHONE_NUMBER') || '';
-      if (!fallback) return [];
-      return [{ number: fallback, label: 'Main' }];
-    }
-    return entries.map((e) => ({ number: e.number, label: e.label || 'Main' }));
+    const entries = parsed.length > 0
+      ? parsed
+      : [{ label: 'Main', number: this.config.get<string>('TWILIO_PHONE_NUMBER') || '' }];
+
+    const seen = new Set<string>();
+    return entries
+      .filter((e) => {
+        if (!e.number) return false;
+        const key = e.number.replace(/\D/g, '').slice(-10);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .map((e) => ({ number: e.number, label: e.label || this.prettyNumber(e.number) }));
   }
 
   /** Validate a client-supplied caller ID against the allowlist. */
