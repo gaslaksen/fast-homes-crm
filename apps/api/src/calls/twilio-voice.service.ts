@@ -307,14 +307,23 @@ export class TwilioVoiceService {
 
     // Belt and braces: also close the conference, which removes anyone else
     // still in it (for example a consult leg from an abandoned warm transfer).
+    //
+    // A 404 here is the good outcome, not a failure: ending the last leg above
+    // usually empties the conference, and Twilio tears an empty conference down
+    // on its own before this call lands. Only a different error is worth
+    // surfacing.
     const conferenceSid = params.ConferenceSid;
     if (conferenceSid) {
       await this.client()
         .conferences(conferenceSid)
         .update({ status: 'completed' })
-        .catch((err: any) =>
-          this.logger.warn(`Could not end conference ${conferenceName}: ${err.message}`),
-        );
+        .catch((err: any) => {
+          if (err?.status === 404 || err?.code === 20404) {
+            this.logger.log(`Conference ${conferenceName} had already ended`);
+            return;
+          }
+          this.logger.warn(`Could not end conference ${conferenceName}: ${err.message}`);
+        });
     }
   }
 
