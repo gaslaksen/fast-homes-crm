@@ -18,6 +18,7 @@ import { UpdateDripDto } from './update-drip.dto';
 import { CreateAiPromptDto, UpdateAiPromptDto } from './ai-prompt.dto';
 import { UpdateComplianceDto } from './update-compliance.dto';
 import { ComplianceService } from '../messages/compliance.service';
+import { PhoneNumbersService } from '../phone-numbers/phone-numbers.service';
 import * as jwt from 'jsonwebtoken';
 
 @Controller('settings')
@@ -28,6 +29,7 @@ export class SettingsController {
     private scoringService: ScoringService,
     private config: ConfigService,
     private complianceService: ComplianceService,
+    private phoneNumbers: PhoneNumbersService,
   ) {}
 
   private getUser(authHeader: string) {
@@ -90,6 +92,32 @@ export class SettingsController {
       data: { avatarUrl },
       select: { id: true, avatarUrl: true },
     });
+  }
+
+  // ─── Phone Numbers ──────────────────────────────────
+  // The org's sending numbers. Shared by the dialer's caller-ID picker and the
+  // SMS composer's From picker, so both channels stay in step.
+
+  @Get('phone-numbers')
+  async listPhoneNumbers() {
+    return this.phoneNumbers.list({ includeInactive: true });
+  }
+
+  @Post('phone-numbers')
+  async addPhoneNumber(
+    @Body() body: { number: string; label?: string; smsEnabled?: boolean; voiceEnabled?: boolean; isDefault?: boolean },
+  ) {
+    return this.phoneNumbers.create(body);
+  }
+
+  @Patch('phone-numbers/:id')
+  async updatePhoneNumber(@Param('id') id: string, @Body() body: any) {
+    return this.phoneNumbers.update(id, body);
+  }
+
+  @Delete('phone-numbers/:id')
+  async deletePhoneNumber(@Param('id') id: string) {
+    return this.phoneNumbers.remove(id);
   }
 
   // ─── Messaging Compliance ───────────────────────────

@@ -9,6 +9,7 @@ import { SmsProvider, createSmsProvider } from './sms.provider';
 import { MailerService } from '../mailer/mailer.service';
 import { PushService } from '../push/push.service';
 import { ComplianceService } from './compliance.service';
+import { PhoneNumbersService } from '../phone-numbers/phone-numbers.service';
 import { formatPhoneNumber, isOptOutMessage } from '@fast-homes/shared';
 import { dealFitFlags, propertyContextForPrompt } from '../leads/property-fit.util';
 
@@ -109,6 +110,7 @@ export class MessagesService {
     private mailerService: MailerService,
     private pushService: PushService,
     private complianceService: ComplianceService,
+    private phoneNumbers: PhoneNumbersService,
   ) {
     this.smsProvider = createSmsProvider(this.config);
     this.twilioNumber = this.config.get<string>('TWILIO_PHONE_NUMBER') || '';
@@ -166,7 +168,15 @@ export class MessagesService {
   /**
    * Send outbound message via Twilio
    */
-  async sendMessage(leadId: string, body: string, userId?: string) {
+  /**
+   * Send an outbound SMS.
+   *
+   * `fromNumber` is the composer's explicit choice. Left undefined, the number
+   * is resolved per lead: replies stick to whichever of our numbers that seller
+   * already knows, and only a brand-new lead falls through to the default.
+   * Anything supplied is validated against the allowlist, never used directly.
+   */
+  async sendMessage(leadId: string, body: string, userId?: string, fromNumber?: string) {
     const lead = await this.prisma.lead.findUnique({
       where: { id: leadId },
     });
@@ -180,7 +190,9 @@ export class MessagesService {
     }
 
     const to = formatPhoneNumber(lead.sellerPhone);
-    const from = this.twilioNumber;
+    const from =
+      (await this.phoneNumbers.resolveForLead(leadId, fromNumber).catch(() => null)) ||
+      this.twilioNumber;
 
     // Compliance footer (sender ID + opt-out). Twilio does not add either, so
     // it is attached here per Settings > Messaging Compliance: first message to

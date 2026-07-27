@@ -1126,6 +1126,29 @@ model SavedSearch {
 // Twilio does not prepend a sender name or append opt-out language the way the
 // old provider did, so the footer is assembled here and applied in the SMS send
 // path (first message per lead, then optionally every N days).
+/// A Twilio number this org can send from. Replaces the TWILIO_CALLER_IDS env
+/// var so numbers can be added, relabelled and re-defaulted without a redeploy.
+/// Seeded from that env var on first boot (see PhoneNumberSeedService).
+///
+/// `isDefault` is the fallback for anything with no better signal: the dialer's
+/// initial caller ID, and the first text to a brand-new lead. Replies do NOT
+/// use it, they stick to whichever number that seller already knows.
+model PhoneNumber {
+  id           String   @id @default(cuid())
+  number       String   @unique   // E.164, e.g. +17045299523
+  label        String              // shown in the From picker, e.g. "Charlotte"
+  smsEnabled   Boolean  @default(true)
+  voiceEnabled Boolean  @default(true)
+  isDefault    Boolean  @default(false)
+  active       Boolean  @default(true)   // false hides it without losing history
+  sortOrder    Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([active, sortOrder])
+  @@map("phone_numbers")
+}
+
 model MessagingCompliance {
   id              String   @id @default("default")
 

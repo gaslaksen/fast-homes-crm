@@ -3,8 +3,20 @@
 import { useEffect, useRef, useState } from 'react';
 import { messagesAPI, leadsAPI } from '@/lib/api';
 import RichEmailEditor from './RichEmailEditor';
+import { formatPhoneDisplay } from '@/lib/format';
 
 type Channel = 'sms' | 'email' | 'comment';
+
+/** One of our sending numbers, as offered for this lead's thread. */
+interface FromOption {
+  number: string;
+  label: string;
+  isDefault: boolean;
+  /** Already the sender on this thread, so replying from it keeps continuity. */
+  lastUsed: boolean;
+}
+
+const prettyPhone = (raw?: string | null) => (raw ? formatPhoneDisplay(raw) : '');
 
 interface TeamMember {
   id: string;
@@ -80,6 +92,12 @@ export default function MessageComposer({
   const [emailBodyHtml, setEmailBodyHtml] = useState('');
   const [emailInReplyToId, setEmailInReplyToId] = useState<string | undefined>(undefined);
 
+  // Which of our numbers this text goes out from. The server preselects the one
+  // already on this thread, so a reply keeps the same sender the seller knows.
+  const [fromNumber, setFromNumber] = useState<string>('');
+  const [fromOptions, setFromOptions] = useState<FromOption[]>([]);
+  const [fromPickerOpen, setFromPickerOpen] = useState(false);
+
   // @mention state (comment mode)
   const [mentions, setMentions] = useState<string[]>([]);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
@@ -92,6 +110,26 @@ export default function MessageComposer({
       setBody(seedBody);
     }
   }, [seedBody]);
+
+  // Load the sending numbers for this lead. Re-fetched per lead because which
+  // number is "last used" is a property of the thread, not of the org.
+  useEffect(() => {
+    let cancelled = false;
+    messagesAPI
+      .fromOptions(leadId)
+      .then((res) => {
+        if (cancelled) return;
+        setFromOptions(res.data?.numbers || []);
+        setFromNumber(res.data?.selected || '');
+      })
+      .catch(() => {
+        // Picker stays hidden; the server picks the number on its own.
+        if (!cancelled) setFromOptions([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [leadId]);
 
   // Apply a Reply / Forward intent raised from a thread email.
   useEffect(() => {
@@ -167,7 +205,7 @@ export default function MessageComposer({
     try {
       if (channel === 'sms') {
         if (!body.trim()) return;
-        await messagesAPI.send(leadId, body, currentUser?.id);
+        await messagesAPI.send(leadId, body, currentUser?.id, fromNumber || undefined);
       } else if (channel === 'email') {
         const recipient = emailMode === 'forward' ? emailTo.trim() : sellerEmail || '';
         if (!emailSubject.trim() || htmlIsEmpty(emailBodyHtml) || !recipient || !currentUser?.id) return;
@@ -254,6 +292,74 @@ export default function MessageComposer({
           </button>
         )}
       </div>
+
+      {/* From / To. Only shown when there is a real choice to make. */}
+      {channel === 'sms' && fromOptions.length > 1 && (
+        <div className="flex items-center gap-3 text-xs">
+          <div className="relative flex items-center gap-1.5">
+            <span className="text-gray-400">From:</span>
+            <button
+              type="button"
+              onClick={() => setFromPickerOpen((o) => !o)}
+              className="flex items-center gap-1 font-medium text-gray-700 dark:text-gray-200 hover:text-gray-900 dark:hover:text-white"
+            >
+              {prettyPhone(fromNumber)}
+              <span className="text-gray-400">▾</span>
+            </button>
+            {fromPickerOpen && (
+              <div className="absolute z-50 bottom-full mb-1 left-0 w-72 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg py-1">
+                {fromOptions.map((o) => (
+                  <button
+                    key={o.number}
+                    type="button"
+                    onClick={() => {
+                      setFromNumber(o.number);
+                      setFromPickerOpen(false);
+                    }}
+                    className="w-full text-left px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span
+                        className={`text-sm ${
+                          o.number === fromNumber
+                            ? 'text-teal-700 dark:text-teal-400 font-semibold'
+                            : 'text-gray-800 dark:text-gray-200'
+                        }`}
+                      >
+                        {prettyPhone(o.number)}
+                      </span>
+                      <span className="flex items-center gap-1 shrink-0">
+                        {o.lastUsed && (
+                          <span className="text-[10px] font-semibold text-teal-600 dark:text-teal-400">
+                            Last Used
+                          </span>
+                        )}
+                        {o.isDefault && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400">
+                            Default
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                    {o.label && o.label !== prettyPhone(o.number) && (
+                      <div className="text-[11px] text-gray-400 mt-0.5">{o.label}</div>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <span className="h-3 w-px bg-gray-200 dark:bg-gray-700" />
+
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className="text-gray-400">To:</span>
+            <span className="font-medium text-gray-700 dark:text-gray-200 truncate">
+              {prettyPhone(sellerPhone) || '-'}
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Email channel — sends from the logged-in user via Mailgun */}
       {channel === 'email' && emailMode === 'reply' && !sellerEmail ? (

@@ -92,6 +92,23 @@ export class CallsController {
     res.send(twiml);
   }
 
+  /**
+   * Conference status callback. Fires when the agent's conference starts, which
+   * is when we ring the seller into it (that ordering is what gives the agent
+   * real ringback rather than silence).
+   */
+  @Post('twilio/conference-status')
+  @HttpCode(200)
+  async twilioConferenceStatus(@Body() body: any, @Req() req: Request, @Res() res: Response) {
+    if (!this.verifyTwilioSignature(req, body)) {
+      res.status(403).send('Invalid Twilio signature');
+      return;
+    }
+    await this.twilioVoiceService.handleConferenceStatus(body);
+    res.set('Content-Type', 'text/xml');
+    res.send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+  }
+
   /** Call status + Dial action callback. */
   @Post('twilio/status')
   @HttpCode(200)
@@ -176,7 +193,7 @@ export class CallsController {
   async twilioNumbers(@Headers('authorization') authHeader?: string) {
     const { userId } = this.decodeToken(authHeader);
     if (!userId) throw new UnauthorizedException('Not authenticated');
-    return { numbers: this.twilioVoiceService.listCallerIds() };
+    return { numbers: await this.twilioVoiceService.listCallerIds() };
   }
 
   // ─── In-call controls (hold + transfer) ───────────────────────────────────

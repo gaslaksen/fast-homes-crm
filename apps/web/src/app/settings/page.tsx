@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { settingsAPI } from '@/lib/api';
 import AppShell from '@/components/AppShell';
 import MessagingCompliancePanel from '@/components/settings/MessagingCompliancePanel';
+import PhoneNumbersPanel from '@/components/settings/PhoneNumbersPanel';
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -309,6 +310,8 @@ export default function SettingsPage() {
             </div>
           </div>
         </div>
+
+        <PhoneNumbersPanel />
 
         <MessagingCompliancePanel />
 
