@@ -53,15 +53,27 @@ export class PhoneNumbersService {
     private config: ConfigService,
   ) {}
 
+  /**
+   * Never throws. A missing table or an unreachable database returns an empty
+   * list, which makes every caller fall back to TWILIO_PHONE_NUMBER, i.e. the
+   * single-number behaviour that existed before this table. Calling and texting
+   * must not stop working because a lookup failed.
+   */
   async list(opts?: { channel?: 'sms' | 'voice'; includeInactive?: boolean }): Promise<SendingNumber[]> {
-    const rows = await this.prisma.phoneNumber.findMany({
-      where: {
-        ...(opts?.includeInactive ? {} : { active: true }),
-        ...(opts?.channel === 'sms' ? { smsEnabled: true } : {}),
-        ...(opts?.channel === 'voice' ? { voiceEnabled: true } : {}),
-      },
-      orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
-    });
+    let rows: any[];
+    try {
+      rows = await this.prisma.phoneNumber.findMany({
+        where: {
+          ...(opts?.includeInactive ? {} : { active: true }),
+          ...(opts?.channel === 'sms' ? { smsEnabled: true } : {}),
+          ...(opts?.channel === 'voice' ? { voiceEnabled: true } : {}),
+        },
+        orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+      });
+    } catch (err: any) {
+      this.logger.error(`Phone number lookup failed, falling back to env: ${err.message}`);
+      return [];
+    }
     return rows.map((r) => ({
       id: r.id,
       number: r.number,
@@ -146,7 +158,7 @@ export class PhoneNumbersService {
         orderBy: { createdAt: 'desc' },
         select: { to: true },
       }),
-    ]);
+    ]).catch(() => [null, null] as const);
 
     const candidate = lastOutbound?.from || lastInbound?.to;
     if (!candidate) return null;

@@ -186,3 +186,48 @@ describe('resolveForLead', () => {
     expect(await svc.resolveForLead('lead1', '+15551234567')).toBe(MAIN);
   });
 });
+
+/**
+ * Regression cover for a live outage: the dial path began reading these numbers
+ * from the database, and a failing read threw all the way out of the Twilio
+ * voice webhook. Twilio got no TwiML back, so calls stopped dialling entirely.
+ * A lookup failure must degrade to the env-var number, never propagate.
+ */
+describe('database failure degrades instead of throwing', () => {
+  const broken = () => {
+    const prisma = {
+      phoneNumber: {
+        findMany: async () => {
+          throw new Error('relation "phone_numbers" does not exist');
+        },
+      },
+      message: {
+        findFirst: async () => {
+          throw new Error('connection terminated');
+        },
+      },
+    } as any;
+    const config = { get: (k: string) => (k === 'TWILIO_PHONE_NUMBER' ? MAIN : undefined) } as any;
+    return new PhoneNumbersService(prisma, config);
+  };
+
+  it('list returns empty rather than throwing', async () => {
+    await expect(broken().list({ channel: 'voice' })).resolves.toEqual([]);
+  });
+
+  it('defaultFor falls back to the env number', async () => {
+    await expect(broken().defaultFor('voice')).resolves.toBe(MAIN);
+  });
+
+  it('resolve falls back to the env number', async () => {
+    await expect(broken().resolve(CLT, 'voice')).resolves.toBe(MAIN);
+  });
+
+  it('resolveForLead falls back to the env number', async () => {
+    await expect(broken().resolveForLead('lead1')).resolves.toBe(MAIN);
+  });
+
+  it('stickyNumberFor returns null rather than throwing', async () => {
+    await expect(broken().stickyNumberFor('lead1')).resolves.toBeNull();
+  });
+});
