@@ -205,8 +205,7 @@ export class TwilioVoiceService {
         beep: 'false',
         // What the agent hears while the seller's phone rings. Twilio's default
         // here is hold music, which does not sound like placing a call, so this
-        // points at a ring tone instead. GET lets Twilio cache the file rather
-        // than refetch it on every call.
+        // points at TwiML that loops a ring tone until the call connects.
         ...(this.ringbackUrl()
           ? { waitUrl: this.ringbackUrl(), waitMethod: 'GET' as const }
           : {}),
@@ -268,19 +267,26 @@ export class TwilioVoiceService {
     return `dc-${callSid}`;
   }
 
+  /** Absolute URL of the generated ring tone audio. */
+  ringbackAudioUrl(): string {
+    const apiBase = this.callbackBase();
+    return apiBase ? `${apiBase}/calls/twilio/ringback.wav` : '';
+  }
+
   /**
-   * Audio the agent hears while the seller's phone rings.
+   * What the agent hears while the seller's phone rings.
    *
-   * Defaults to the ring tone this API serves, because Twilio's built-in
-   * conference wait audio is hold music, which does not sound like placing a
-   * call. TWILIO_RINGBACK_URL overrides it with any URL returning audio or
-   * TwiML.
+   * Points at the TwiML endpoint, not the .wav: Twilio plays a static file at
+   * waitUrl once and then falls silent, whereas the TwiML wraps it in
+   * <Play loop="0"> which repeats until the call connects.
+   *
+   * TWILIO_RINGBACK_URL overrides it with any URL returning audio or TwiML.
    */
   private ringbackUrl(): string {
     const override = (this.config.get<string>('TWILIO_RINGBACK_URL') || '').trim();
     if (override) return override;
     const apiBase = this.callbackBase();
-    return apiBase ? `${apiBase}/calls/twilio/ringback.wav` : '';
+    return apiBase ? `${apiBase}/calls/twilio/ringback` : '';
   }
 
   /** TwiML for a leg that joins an existing conference. */

@@ -111,6 +111,24 @@ export class CallsController {
   }
 
   /**
+   * The conference waitUrl. Returns TwiML rather than the audio itself,
+   * because Twilio plays a static file at waitUrl exactly once and then stops.
+   * `loop="0"` on <Play> is what repeats it until the call connects or is hung
+   * up, so the agent keeps hearing ringing rather than one ring then silence.
+   *
+   * Unauthenticated for the same reason as the audio below: a fixed response
+   * with no data in it.
+   */
+  @Get('twilio/ringback')
+  ringbackTwiml(@Res() res: Response) {
+    const url = `${this.twilioVoiceService.ringbackAudioUrl()}`;
+    res.set('Content-Type', 'text/xml');
+    res.send(
+      `<?xml version="1.0" encoding="UTF-8"?><Response><Play loop="0">${url}</Play></Response>`,
+    );
+  }
+
+  /**
    * Ring tone the agent hears while the seller's phone rings.
    *
    * Fetched by Twilio as the conference waitUrl, so it is deliberately
