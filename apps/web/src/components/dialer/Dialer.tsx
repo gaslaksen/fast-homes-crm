@@ -165,7 +165,11 @@ function CallerIdBar() {
                 <span className="block text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
                   {c.label}
                 </span>
-                <span className="block text-xs text-gray-400">{prettyPhone(c.number)}</span>
+                {/* An unlabelled number falls back to its own formatted form,
+                    so skip the sub-line rather than printing it twice. */}
+                {c.label !== prettyPhone(c.number) && (
+                  <span className="block text-xs text-gray-400">{prettyPhone(c.number)}</span>
+                )}
               </span>
               <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400">
                 Local
@@ -188,7 +192,9 @@ function CallerIdBar() {
         </span>
         <span className="block text-sm text-gray-900 dark:text-gray-100 truncate">
           {d.callerId?.label || 'Main'}
-          <span className="text-gray-400"> · {prettyPhone(d.callerId?.number)}</span>
+          {d.callerId?.label !== prettyPhone(d.callerId?.number) && (
+            <span className="text-gray-400"> · {prettyPhone(d.callerId?.number)}</span>
+          )}
         </span>
       </span>
       <svg className="h-4 w-4 shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
