@@ -19,8 +19,7 @@ const VoiceResponse = Twilio.twiml.VoiceResponse;
  *     <Dial callerId=ourNumber><Number>lead</Number></Dial> and a CallLog row is opened.
  *  4. Status + recording callbacks update that CallLog by CallSid.
  *
- * Entirely dormant until TWILIO_API_KEY_SID / SECRET / TWIML_APP_SID are set, so it
- * never interferes with the live Smrtphone calling path.
+ * Entirely dormant until TWILIO_API_KEY_SID / SECRET / TWIML_APP_SID are set.
  */
 @Injectable()
 export class TwilioVoiceService {
@@ -111,21 +110,26 @@ export class TwilioVoiceService {
   async generateDialTwiml(params: Record<string, string>): Promise<string> {
     const response = new VoiceResponse();
 
-    const callerId =
-      this.config.get<string>('TWILIO_PHONE_NUMBER') || '';
     const to = formatPhoneNumber(params.To || params.to || '');
     const callSid = params.CallSid || '';
     const leadId = params.leadId || params.LeadId || null;
     // From looks like "client:<userId>" for browser-originated calls
     const userId = (params.From || '').replace(/^client:/, '') || null;
 
+    // The browser sends the caller ID it picked. Never trust it directly: an
+    // arbitrary value here would let the client spoof any number on the
+    // account, so resolve it against the configured allowlist.
+    const callerId = this.resolveCallerId(params.callerId || params.CallerId);
+
     if (!to || !callerId) {
       this.logger.warn(
-        `Twilio voice webhook missing ${!to ? 'To' : 'callerId'} — rejecting call`,
+        `Twilio voice webhook missing ${!to ? 'To' : 'callerId'}, rejecting call`,
       );
       response.say('We could not place this call. Please try again.');
       return response.toString();
     }
+
+    const conferenceName = this.conferenceNameFor(callSid);
 
     // Open a CallLog row keyed by the browser leg's CallSid
     if (callSid) {
@@ -140,8 +144,9 @@ export class TwilioVoiceService {
             toNumber: to,
             status: 'in-progress',
             type: 'twilio_browser',
+            conferenceName,
           },
-          update: { status: 'in-progress', toNumber: to },
+          update: { status: 'in-progress', toNumber: to, conferenceName },
         });
       } catch (err: any) {
         this.logger.error(`Failed to open CallLog for ${callSid}: ${err.message}`);
@@ -158,25 +163,287 @@ export class TwilioVoiceService {
       response.say(disclosure);
     }
 
+    // Dial the seller into the same conference as a separate REST-originated
+    // leg. A plain <Dial><Number> would be simpler, but a two-party bridge
+    // cannot be put on hold or transferred; a conference can.
+    try {
+      await this.client().calls.create({
+        to,
+        from: callerId,
+        twiml: this.participantTwiml(conferenceName, 'customer', {
+          startConferenceOnEnter: true,
+          // Seller hangs up -> the whole call is over, including any consult leg.
+          endConferenceOnExit: true,
+          record: recordCalls,
+          apiBase,
+        }),
+        statusCallback: apiBase ? `${apiBase}/calls/twilio/status` : undefined,
+        statusCallbackMethod: 'POST',
+        statusCallbackEvent: ['completed'],
+      });
+    } catch (err: any) {
+      this.logger.error(`Failed to dial customer leg for ${callSid}: ${err.message}`);
+      response.say('We could not reach that number. Please try again.');
+      return response.toString();
+    }
+
     const dial = response.dial({
-      callerId,
-      answerOnBridge: true, // caller hears ringback, not silence
-      // Dial 'action' fires when the dialed leg ends -> final status + duration
+      // Agent leg joins with no caller ID of its own; the customer leg above
+      // carries the outbound caller ID.
       action: apiBase ? `${apiBase}/calls/twilio/status` : undefined,
       method: 'POST',
-      ...(recordCalls
-        ? {
-            record: 'record-from-answer-dual' as const,
-            recordingStatusCallback: apiBase
-              ? `${apiBase}/calls/twilio/recording`
-              : undefined,
-            recordingStatusCallbackMethod: 'POST' as const,
-          }
-        : {}),
     });
-    dial.number(to);
+    dial.conference(
+      {
+        participantLabel: 'agent',
+        startConferenceOnEnter: true,
+        // Left false so a warm transfer can drop the agent without killing the
+        // call. A normal hangup is handled by the customer leg's
+        // endConferenceOnExit, plus the explicit cleanup in endConference().
+        endConferenceOnExit: false,
+        beep: 'false',
+        // Silence rather than Twilio's default hold music while the seller's
+        // phone rings.
+        waitUrl: '',
+      },
+      conferenceName,
+    );
 
     return response.toString();
+  }
+
+  // ── Conference helpers ────────────────────────────────────────────────────
+
+  private client() {
+    return Twilio(
+      this.config.get<string>('TWILIO_ACCOUNT_SID'),
+      this.config.get<string>('TWILIO_AUTH_TOKEN'),
+    );
+  }
+
+  /** Conference name derived from the agent leg's CallSid, so the browser only
+   *  ever has to send its own CallSid to address the call. */
+  private conferenceNameFor(callSid: string): string {
+    return `dc-${callSid}`;
+  }
+
+  /** TwiML for a leg that joins an existing conference. */
+  private participantTwiml(
+    conferenceName: string,
+    label: string,
+    opts: {
+      startConferenceOnEnter: boolean;
+      endConferenceOnExit: boolean;
+      record?: boolean;
+      apiBase?: string;
+    },
+  ): string {
+    const vr = new VoiceResponse();
+    const dial = vr.dial();
+    dial.conference(
+      {
+        participantLabel: label,
+        startConferenceOnEnter: opts.startConferenceOnEnter,
+        endConferenceOnExit: opts.endConferenceOnExit,
+        beep: 'false',
+        ...(opts.record
+          ? {
+              record: 'record-from-start' as const,
+              recordingStatusCallback: opts.apiBase
+                ? `${opts.apiBase}/calls/twilio/recording`
+                : undefined,
+              recordingStatusCallbackMethod: 'POST' as const,
+            }
+          : {}),
+      },
+      conferenceName,
+    );
+    return vr.toString();
+  }
+
+  /**
+   * Outbound caller IDs the dialer may use. Configured as a comma-separated
+   * TWILIO_CALLER_IDS list of `+1NNNNNNNNNN` or `Label:+1NNNNNNNNNN` entries,
+   * defaulting to TWILIO_PHONE_NUMBER.
+   */
+  listCallerIds(): { number: string; label: string }[] {
+    const raw = this.config.get<string>('TWILIO_CALLER_IDS') || '';
+    const entries = raw
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map((entry) => {
+        const idx = entry.lastIndexOf(':');
+        if (idx > 0) {
+          return { label: entry.slice(0, idx).trim(), number: entry.slice(idx + 1).trim() };
+        }
+        return { label: '', number: entry };
+      })
+      .filter((e) => !!e.number);
+
+    if (entries.length === 0) {
+      const fallback = this.config.get<string>('TWILIO_PHONE_NUMBER') || '';
+      if (!fallback) return [];
+      return [{ number: fallback, label: 'Main' }];
+    }
+    return entries.map((e) => ({ number: e.number, label: e.label || 'Main' }));
+  }
+
+  /** Validate a client-supplied caller ID against the allowlist. */
+  private resolveCallerId(requested?: string): string {
+    const allowed = this.listCallerIds();
+    const fallback = allowed[0]?.number || this.config.get<string>('TWILIO_PHONE_NUMBER') || '';
+    if (!requested) return fallback;
+
+    const digits = (s: string) => s.replace(/\D/g, '').slice(-10);
+    const match = allowed.find((a) => digits(a.number) === digits(requested));
+    if (!match) {
+      this.logger.warn(`Rejected caller ID ${requested} (not in TWILIO_CALLER_IDS), using ${fallback}`);
+      return fallback;
+    }
+    return match.number;
+  }
+
+  /** Look up the live conference for an agent call, or null if it has ended. */
+  private async findConference(callSid: string) {
+    const friendlyName = this.conferenceNameFor(callSid);
+    const list = await this.client().conferences.list({
+      friendlyName,
+      status: 'in-progress',
+      limit: 1,
+    });
+    return list[0] ?? null;
+  }
+
+  /** Put the seller on hold (or take them off). */
+  async setHold(callSid: string, hold: boolean): Promise<{ ok: boolean }> {
+    const conf = await this.findConference(callSid);
+    if (!conf) throw new Error('Call is no longer active');
+    await this.client()
+      .conferences(conf.sid)
+      .participants('customer')
+      .update({ hold });
+    this.logger.log(`${hold ? '⏸' : '▶️'} Hold=${hold} for call ${callSid}`);
+    return { ok: true };
+  }
+
+  /**
+   * Blind transfer: dial the target into the conference and drop the agent
+   * immediately. The seller hears ringing until the target picks up.
+   */
+  async blindTransfer(callSid: string, rawTo: string): Promise<{ ok: boolean }> {
+    const to = formatPhoneNumber(rawTo || '');
+    if (!to) throw new Error('A transfer destination is required');
+
+    const conf = await this.findConference(callSid);
+    if (!conf) throw new Error('Call is no longer active');
+
+    const callerId = this.resolveCallerId();
+    const client = this.client();
+
+    await client.conferences(conf.sid).participants.create({
+      to,
+      from: callerId,
+      label: 'consult',
+      earlyMedia: true,
+      endConferenceOnExit: true,
+    });
+
+    await this.dropAgent(conf.sid);
+    await this.markTransfer(callSid, 'transferred', to);
+
+    this.logger.log(`➡️  Blind transfer of ${callSid} to ${to}`);
+    return { ok: true };
+  }
+
+  /**
+   * Warm transfer step 1: hold the seller and dial the target so the agent can
+   * brief them privately. Both agent and target stay in the conference; the
+   * seller is on hold and hears nothing.
+   */
+  async startWarmTransfer(callSid: string, rawTo: string): Promise<{ ok: boolean }> {
+    const to = formatPhoneNumber(rawTo || '');
+    if (!to) throw new Error('A transfer destination is required');
+
+    const conf = await this.findConference(callSid);
+    if (!conf) throw new Error('Call is no longer active');
+
+    const client = this.client();
+    await client.conferences(conf.sid).participants('customer').update({ hold: true });
+    await client.conferences(conf.sid).participants.create({
+      to,
+      from: this.resolveCallerId(),
+      label: 'consult',
+      earlyMedia: true,
+      endConferenceOnExit: false,
+    });
+
+    await this.markTransfer(callSid, 'warm_consulting', to);
+    this.logger.log(`🤝 Warm transfer consult started for ${callSid} to ${to}`);
+    return { ok: true };
+  }
+
+  /**
+   * Warm transfer step 2a: hand off. Take the seller off hold, make the target
+   * the party whose exit ends the call, and drop the agent.
+   */
+  async completeWarmTransfer(callSid: string): Promise<{ ok: boolean }> {
+    const conf = await this.findConference(callSid);
+    if (!conf) throw new Error('Call is no longer active');
+
+    const client = this.client();
+    await client.conferences(conf.sid).participants('consult').update({ endConferenceOnExit: true });
+    await client.conferences(conf.sid).participants('customer').update({ hold: false });
+    await this.dropAgent(conf.sid);
+
+    const log = await this.prisma.callLog.findUnique({ where: { twilioCallSid: callSid } });
+    await this.markTransfer(callSid, 'transferred', log?.transferTo ?? null);
+
+    this.logger.log(`✅ Warm transfer of ${callSid} completed`);
+    return { ok: true };
+  }
+
+  /**
+   * Warm transfer step 2b: back out. Drop the target and return the seller to
+   * the agent.
+   */
+  async cancelWarmTransfer(callSid: string): Promise<{ ok: boolean }> {
+    const conf = await this.findConference(callSid);
+    if (!conf) throw new Error('Call is no longer active');
+
+    const client = this.client();
+    try {
+      await client.conferences(conf.sid).participants('consult').remove();
+    } catch (err: any) {
+      // Target may have already hung up; taking the seller off hold still matters.
+      this.logger.warn(`Consult leg already gone for ${callSid}: ${err.message}`);
+    }
+    await client.conferences(conf.sid).participants('customer').update({ hold: false });
+
+    await this.markTransfer(callSid, null, null);
+    this.logger.log(`↩️  Warm transfer of ${callSid} cancelled`);
+    return { ok: true };
+  }
+
+  /** Remove the agent without ending the conference. */
+  private async dropAgent(conferenceSid: string) {
+    const client = this.client();
+    try {
+      await client.conferences(conferenceSid).participants('agent').remove();
+    } catch (err: any) {
+      this.logger.warn(`Could not drop agent from ${conferenceSid}: ${err.message}`);
+    }
+  }
+
+  private async markTransfer(callSid: string, state: string | null, to: string | null) {
+    await this.prisma.callLog
+      .update({
+        where: { twilioCallSid: callSid },
+        data: { transferState: state, transferTo: to },
+      })
+      .catch((err) =>
+        this.logger.warn(`Failed to record transfer state for ${callSid}: ${err.message}`),
+      );
   }
 
   /**
@@ -409,7 +676,7 @@ export class TwilioVoiceService {
 
     // Reuse the existing CAMP extraction (generic over any call transcript)
     if (call.leadId) {
-      await this.callsService.processSmrtPhoneTranscript(call.leadId, text);
+      await this.callsService.processCallTranscript(call.leadId, text);
     }
   }
 

@@ -913,6 +913,7 @@ function RepairMethodPicker(props: {
                         )}
                         {p.source && (
                           <span className="absolute bottom-0 left-0 right-0 text-[9px] text-center bg-black/50 text-white py-0.5 truncate">
+                            {/* 'seller-portal' is a legacy source on rows created before sellers texted photos in */}
                             {p.source === 'seller-portal' ? 'Seller'
                               : p.source === 'seller-mms' ? 'MMS'
                                 : p.source === 'streetview' ? 'Street'

@@ -16,6 +16,8 @@ import { ScoringService } from '../scoring/scoring.service';
 import { ConfigService } from '@nestjs/config';
 import { UpdateDripDto } from './update-drip.dto';
 import { CreateAiPromptDto, UpdateAiPromptDto } from './ai-prompt.dto';
+import { UpdateComplianceDto } from './update-compliance.dto';
+import { ComplianceService } from '../messages/compliance.service';
 import * as jwt from 'jsonwebtoken';
 
 @Controller('settings')
@@ -25,6 +27,7 @@ export class SettingsController {
     private dripService: DripService,
     private scoringService: ScoringService,
     private config: ConfigService,
+    private complianceService: ComplianceService,
   ) {}
 
   private getUser(authHeader: string) {
@@ -87,6 +90,20 @@ export class SettingsController {
       data: { avatarUrl },
       select: { id: true, avatarUrl: true },
     });
+  }
+
+  // ─── Messaging Compliance ───────────────────────────
+  // Sender ID + opt-out language appended to outbound SMS. Twilio adds neither
+  // on its own, so these settings are what keeps outbound texts compliant.
+
+  @Get('compliance')
+  async getCompliance() {
+    return this.complianceService.get();
+  }
+
+  @Patch('compliance')
+  async updateCompliance(@Body() body: UpdateComplianceDto) {
+    return this.complianceService.update(body);
   }
 
   // ─── Drip Settings ──────────────────────────────────

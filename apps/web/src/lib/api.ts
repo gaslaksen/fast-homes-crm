@@ -317,6 +317,15 @@ export const settingsAPI = {
     api.patch('/settings/profile', data),
   uploadAvatar: (base64: string) =>
     api.post('/settings/profile/avatar', { base64 }),
+  getCompliance: () => api.get('/settings/compliance'),
+  updateCompliance: (data: {
+    optOutEnabled?: boolean;
+    optOutText?: string;
+    senderIdEnabled?: boolean;
+    senderIdText?: string;
+    periodicEnabled?: boolean;
+    periodicDays?: number;
+  }) => api.patch('/settings/compliance', data),
 };
 
 // Prompts API
@@ -385,6 +394,18 @@ export const callsAPI = {
     api.post('/calls/twilio/disposition', { callSid, disposition, notes }),
   twilioRecents: (limit = 25) =>
     api.get('/calls/twilio/recents', { params: { limit } }),
+  twilioNumbers: () => api.get('/calls/twilio/numbers'),
+  // In-call controls. All address the call by the browser leg's CallSid.
+  twilioHold: (callSid: string, hold: boolean) =>
+    api.post('/calls/twilio/hold', { callSid, hold }),
+  twilioBlindTransfer: (callSid: string, to: string) =>
+    api.post('/calls/twilio/transfer/blind', { callSid, to }),
+  twilioWarmTransfer: (callSid: string, to: string) =>
+    api.post('/calls/twilio/transfer/warm', { callSid, to }),
+  twilioWarmTransferComplete: (callSid: string) =>
+    api.post('/calls/twilio/transfer/warm/complete', { callSid }),
+  twilioWarmTransferCancel: (callSid: string) =>
+    api.post('/calls/twilio/transfer/warm/cancel', { callSid }),
 };
 
 // Photos API
@@ -485,14 +506,6 @@ export const partnersAPI = {
   getLeadShares: (leadId: string) => api.get(`/leads/${leadId}/shares`),
   getPartnerShares: (partnerId: string) => api.get(`/partners/${partnerId}/shares`),
   resend: (shareId: string) => api.post(`/partners/shares/${shareId}/resend`),
-};
-
-export const sellerPortalAPI = {
-  getInfo: (leadId: string) => api.get(`/leads/${leadId}/seller-portal`),
-  create: (leadId: string) => api.post(`/leads/${leadId}/seller-portal`),
-  regenerate: (leadId: string) => api.post(`/leads/${leadId}/seller-portal/regenerate`),
-  sendLink: (leadId: string) => api.post(`/leads/${leadId}/seller-portal/send`),
-  updateStatus: (leadId: string, status: 'active' | 'disabled') => api.patch(`/leads/${leadId}/seller-portal`, { status }),
 };
 
 export const dispoAPI = {

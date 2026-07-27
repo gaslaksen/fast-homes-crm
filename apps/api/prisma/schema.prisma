@@ -111,8 +111,7 @@ model Lead {
   sellerLastName    String
   sellerPhone       String
   sellerEmail       String?
-  smrtphoneContactId Int?    // Smrtphone contact ID (created on initial outreach)
-  
+
   timeline          Int?
   askingPrice       Float?
   conditionLevel    String?
@@ -234,6 +233,16 @@ model Lead {
   // closing handoff so we don't wrap up before expectations are surfaced.
   expectationsSetAt     DateTime?
 
+  // Set when the AI asks the seller to text photos of the property. Gates the
+  // post-CAMP handoff: we ask for photos first, then close on the next reply,
+  // so the conversation doesn't end the moment the last CAMP field lands.
+  photosRequestedAt     DateTime?
+
+  // Last time an outbound SMS to this lead carried the compliance footer
+  // (sender ID + opt-out). Drives "first message only" and the optional
+  // periodic re-send interval in Settings > Messaging Compliance.
+  complianceFooterSentAt DateTime?
+
   // Deal tier: 1 = contract now, 2 = opportunity, 3 = dead/no go
   tier                  Int?
 
@@ -285,7 +294,6 @@ model Lead {
   callLogs          CallLog[]
   campaignEnrollments CampaignEnrollment[]
   dealShares          DealShare[]
-  sellerPortal        SellerPortal?
   dispositionPlan     DispositionPlan?
   dispositionCosts    DispositionCost[]
   finalSale           FinalSale?
@@ -417,7 +425,9 @@ model Message {
   mediaUrls   Json?     // MMS attachments: array of { url, thumbnailUrl } (base64 data URIs), null for plain SMS
   from        String
   to          String
-  twilioSid   String?   // SmrtPhone message reference ID (not enforced unique — SmrtPhone doesn't guarantee unique IDs)
+  // Twilio MessageSid. Not @unique: legacy rows from the previous provider are
+  // not guaranteed unique, and simulated/blocked sends reuse synthetic ids.
+  twilioSid   String?
   sentByUserId String?  // agent who manually sent an outbound text; null = AI/system/inbound
   sentAt      DateTime?
   deliveredAt DateTime?
@@ -817,9 +827,7 @@ model Offer {
   status           String    @default("pending") // pending/accepted/rejected/countered/withdrawn
   counterAmount    Float?
   notes            String?
-  visibleOnPortal  Boolean   @default(false)
   terms            String?   @db.Text
-  sellerRespondedAt DateTime?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
@@ -833,13 +841,20 @@ model CallLog {
   leadId       String?
   lead         Lead?    @relation(fields: [leadId], references: [id], onDelete: SetNull)
   vapiCallId       String?  @unique
-  smrtphoneCallId  String?  @unique
   twilioCallSid    String?  @unique  // Twilio browser-dialer call (CallSid)
   fromNumber       String?           // dialer caller ID used
   toNumber         String?           // number dialed
+
+  // Browser calls run through a Twilio Conference (rather than a plain <Dial>)
+  // so the agent can hold and transfer. Participants carry stable labels:
+  // 'agent' (the browser leg), 'customer' (the lead), 'consult' (a warm-transfer
+  // target). conferenceName is derived from the agent leg's CallSid.
+  conferenceName   String?
+  transferState    String?           // null | warm_consulting | transferred
+  transferTo       String?           // number the call was/is being transferred to
   disposition      String?           // post-call outcome (Voicemail, Follow Up, etc.)
   status           String   @default("queued")
-  type             String   @default("ai_outbound")  // ai_outbound|smrtphone_call|smrtagent_call|twilio_browser
+  type             String   @default("ai_outbound")  // ai_outbound|twilio_browser|twilio_inbound
   transcript   String?  @db.Text
   summary      String?  @db.Text
   recordingUrl String?
@@ -1107,20 +1122,27 @@ model SavedSearch {
   @@map("saved_searches")
 }
 
-model SellerPortal {
-  id               String    @id @default(cuid())
-  leadId           String    @unique
-  lead             Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
-  viewToken        String    @unique
-  status           String    @default("active") // active | disabled
-  portalLinkSentAt DateTime?
-  openedAt         DateTime?
-  openCount        Int       @default(0)
-  lastOpenedAt     DateTime?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+// Settings > Messaging Compliance. Singleton, same pattern as DripSettings.
+// Twilio does not prepend a sender name or append opt-out language the way the
+// old provider did, so the footer is assembled here and applied in the SMS send
+// path (first message per lead, then optionally every N days).
+model MessagingCompliance {
+  id              String   @id @default("default")
 
-  @@map("seller_portals")
+  optOutEnabled   Boolean  @default(true)
+  optOutText      String   @default("Reply STOP to stop texting")
+
+  senderIdEnabled Boolean  @default(true)
+  senderIdText    String   @default("Quick Cash Home Buyers")
+
+  // When on, the footer is re-sent every `periodicDays` days instead of only
+  // on the first message to a lead.
+  periodicEnabled Boolean  @default(false)
+  periodicDays    Int      @default(30)
+
+  updatedAt       DateTime @updatedAt
+
+  @@map("messaging_compliance")
 }
 
 // Action Queue: per-user state for the dashboard Action Queue. The queue items

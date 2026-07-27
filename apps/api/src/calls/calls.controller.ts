@@ -159,14 +159,104 @@ export class CallsController {
 
   /** Recent dialer calls for the Recents tab. */
   @Get('twilio/recents')
-  async twilioRecents(@Query('limit') limit?: string) {
+  async twilioRecents(
+    @Query('limit') limit?: string,
+    @Headers('authorization') authHeader?: string,
+  ) {
+    const { userId } = this.decodeToken(authHeader);
+    if (!userId) throw new UnauthorizedException('Not authenticated');
     const calls = await this.twilioVoiceService.recentCalls(
       limit ? parseInt(limit, 10) : 25,
     );
     return { calls };
   }
 
+  /** Outbound caller IDs the dialer may present, for the "Calling From" picker. */
+  @Get('twilio/numbers')
+  async twilioNumbers(@Headers('authorization') authHeader?: string) {
+    const { userId } = this.decodeToken(authHeader);
+    if (!userId) throw new UnauthorizedException('Not authenticated');
+    return { numbers: this.twilioVoiceService.listCallerIds() };
+  }
+
+  // ─── In-call controls (hold + transfer) ───────────────────────────────────
+  // All of these address the call by the browser leg's CallSid; the service
+  // resolves that to the live Twilio Conference.
+
+  @Post('twilio/hold')
+  async twilioHold(
+    @Body() body: { callSid: string; hold: boolean },
+    @Headers('authorization') authHeader?: string,
+  ) {
+    return this.runCallControl(authHeader, () =>
+      this.twilioVoiceService.setHold(body.callSid, !!body.hold),
+    );
+  }
+
+  /** Drop the seller onto the target and leave immediately. */
+  @Post('twilio/transfer/blind')
+  async twilioBlindTransfer(
+    @Body() body: { callSid: string; to: string },
+    @Headers('authorization') authHeader?: string,
+  ) {
+    return this.runCallControl(authHeader, () =>
+      this.twilioVoiceService.blindTransfer(body.callSid, body.to),
+    );
+  }
+
+  /** Hold the seller and dial the target so the agent can brief them first. */
+  @Post('twilio/transfer/warm')
+  async twilioWarmTransfer(
+    @Body() body: { callSid: string; to: string },
+    @Headers('authorization') authHeader?: string,
+  ) {
+    return this.runCallControl(authHeader, () =>
+      this.twilioVoiceService.startWarmTransfer(body.callSid, body.to),
+    );
+  }
+
+  /** Hand the seller over to the consulted target and drop the agent. */
+  @Post('twilio/transfer/warm/complete')
+  async twilioWarmTransferComplete(
+    @Body() body: { callSid: string },
+    @Headers('authorization') authHeader?: string,
+  ) {
+    return this.runCallControl(authHeader, () =>
+      this.twilioVoiceService.completeWarmTransfer(body.callSid),
+    );
+  }
+
+  /** Abandon the consult and take the seller off hold. */
+  @Post('twilio/transfer/warm/cancel')
+  async twilioWarmTransferCancel(
+    @Body() body: { callSid: string },
+    @Headers('authorization') authHeader?: string,
+  ) {
+    return this.runCallControl(authHeader, () =>
+      this.twilioVoiceService.cancelWarmTransfer(body.callSid),
+    );
+  }
+
   // ─── Helpers ──────────────────────────────────────────────────────────────
+
+  /**
+   * Shared auth + error shape for the in-call control endpoints. Twilio errors
+   * here (conference gone, participant already left) are expected during a live
+   * call, so they come back as a message the dialer can show rather than a 500.
+   */
+  private async runCallControl(
+    authHeader: string | undefined,
+    fn: () => Promise<{ ok: boolean }>,
+  ) {
+    const { userId } = this.decodeToken(authHeader);
+    if (!userId) throw new UnauthorizedException('Not authenticated');
+    try {
+      return await fn();
+    } catch (err: any) {
+      this.logger.warn(`Call control failed: ${err.message}`);
+      return { ok: false, error: err.message || 'Call control failed' };
+    }
+  }
 
   private decodeToken(authHeader?: string): { userId?: string; organizationId?: string } {
     try {

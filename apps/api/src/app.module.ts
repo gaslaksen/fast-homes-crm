@@ -20,7 +20,6 @@ import { BoldSignModule } from './boldsign/boldsign.module';
 import { CampaignsModule } from './campaigns/campaigns.module';
 import { DealSearchModule } from './deal-search/deal-search.module';
 import { PartnersModule } from './partners/partners.module';
-import { SellerPortalModule } from './seller-portal/seller-portal.module';
 import { RemindersModule } from './reminders/reminders.module';
 import { ActionsModule } from './actions/actions.module';
 import { DispositionModule } from './disposition/disposition.module';
@@ -59,7 +58,6 @@ import { DigestModule } from './digest/digest.module';
     CampaignsModule,
     DealSearchModule,
     PartnersModule,
-    SellerPortalModule,
     RemindersModule,
     ActionsModule,
     DispositionModule,

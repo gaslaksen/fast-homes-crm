@@ -334,13 +334,13 @@ export class CallsService {
   }
 
   /**
-   * Process a SmrtPhone call transcript using Claude to extract CAMP data
+   * Process a call transcript using Claude to extract CAMP data
    * and update the lead, same as Vapi's structured analysis does.
    */
-  async processSmrtPhoneTranscript(leadId: string, transcript: string, summary?: string) {
+  async processCallTranscript(leadId: string, transcript: string, summary?: string) {
     if (!this.anthropic || !transcript) return;
 
-    this.logger.log(`Extracting CAMP data from SmrtPhone transcript for lead ${leadId}`);
+    this.logger.log(`Extracting CAMP data from call transcript for lead ${leadId}`);
 
     try {
       const response = await this.anthropic.messages.create({
@@ -381,11 +381,11 @@ ${transcript}`,
         extracted.conditionNotes = sanitizeOutboundSmsBody(extracted.conditionNotes);
       }
 
-      this.logger.log(`SmrtPhone transcript extraction: ${JSON.stringify(extracted)}`);
+      this.logger.log(`Call transcript extraction: ${JSON.stringify(extracted)}`);
 
       await this.syncStructuredDataToLead(leadId, extracted, summary);
     } catch (error) {
-      this.logger.error(`SmrtPhone transcript extraction failed: ${error.message}`);
+      this.logger.error(`Call transcript extraction failed: ${error.message}`);
     }
   }
 }

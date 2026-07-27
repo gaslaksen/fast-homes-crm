@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { settingsAPI } from '@/lib/api';
 import AppShell from '@/components/AppShell';
+import MessagingCompliancePanel from '@/components/settings/MessagingCompliancePanel';
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -221,7 +222,7 @@ export default function SettingsPage() {
                 </span>
               </div>
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                When a new lead arrives, AI sends the first text and handles the CAMP qualification conversation via SmrtPhone.
+                When a new lead arrives, AI sends the first text and handles the CAMP qualification conversation via Twilio.
               </p>
             </div>
             <button
@@ -308,6 +309,8 @@ export default function SettingsPage() {
             </div>
           </div>
         </div>
+
+        <MessagingCompliancePanel />
 
         {/* Demo Mode Card */}
         <div className="card max-w-2xl mt-6">

@@ -79,7 +79,6 @@ export interface Offer {
   status: string;
   counterAmount: number | null;
   notes: string | null;
-  visibleOnPortal: boolean;
   createdAt: string;
 }
 
