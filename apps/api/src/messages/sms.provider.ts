@@ -11,19 +11,14 @@ export function checkSmsAllowed(
   to: string,
   config: ConfigService,
 ): { allowed: boolean; reason?: string } {
-  // SMS_TEST_MODE is provider-agnostic; SMRTPHONE_TEST_MODE kept for backwards compat
-  const testMode = (
-    config.get<string>('SMS_TEST_MODE') ??
-    config.get<string>('SMRTPHONE_TEST_MODE', 'false')
-  ).toLowerCase() === 'true';
+  const testMode =
+    (config.get<string>('SMS_TEST_MODE', 'false')).toLowerCase() === 'true';
 
   if (!testMode) {
     return { allowed: true };
   }
 
-  const rawList =
-    config.get<string>('SMS_ALLOWED_NUMBERS') ??
-    config.get<string>('SMRTPHONE_ALLOWED_NUMBERS', '');
+  const rawList = config.get<string>('SMS_ALLOWED_NUMBERS', '');
   const allowedNumbers = rawList
     .split(',')
     .map((n) => n.trim().replace(/\D/g, ''))
@@ -38,9 +33,9 @@ export function checkSmsAllowed(
 
   if (!isAllowed) {
     safetyLogger.warn(
-      `🚫 TEST_MODE: Blocked SMS to ${to} — not in allowed list. Add to SMRTPHONE_ALLOWED_NUMBERS or set SMRTPHONE_TEST_MODE=false`,
+      `🚫 TEST_MODE: Blocked SMS to ${to} - not in allowed list. Add to SMS_ALLOWED_NUMBERS or set SMS_TEST_MODE=false`,
     );
-    return { allowed: false, reason: `TEST_MODE active — ${to} not in SMRTPHONE_ALLOWED_NUMBERS` };
+    return { allowed: false, reason: `TEST_MODE active - ${to} not in SMS_ALLOWED_NUMBERS` };
   }
 
   safetyLogger.log(`✅ TEST_MODE: Allowed SMS to ${to}`);
@@ -98,145 +93,6 @@ export class TwilioSmsProvider implements SmsProvider {
 }
 
 // ---------------------------------------------------------------------------
-// Smrtphone
-// ---------------------------------------------------------------------------
-export class SmrtphoneSmsProvider implements SmsProvider {
-  private readonly logger = new Logger(SmrtphoneSmsProvider.name);
-  private readonly groupId?: string;
-
-  constructor(
-    private readonly apiKey: string,
-    private readonly phoneNumber: string,
-    private readonly config?: ConfigService,
-  ) {
-    this.groupId = config?.get<string>('SMRTPHONE_GROUP_ID');
-  }
-
-  isConfigured() {
-    return !!this.apiKey;
-  }
-
-  async sendSms(to: string, from: string, body: string): Promise<{ sid: string }> {
-    // Safety guard — respect TEST_MODE allowlist before any outbound send
-    if (this.config) {
-      const check = checkSmsAllowed(to, this.config);
-      if (!check.allowed) {
-        return { sid: `BLOCKED_TEST_MODE_${Date.now()}` };
-      }
-    }
-
-    const fromNumber = from || this.phoneNumber;
-
-    // SmrtPhone API: https://phone.smrt.studio/sms/send
-    // Auth: X-Auth-smrtPhone header
-    // Body: application/x-www-form-urlencoded  (from, to, message)
-    const params = new URLSearchParams({
-      from: fromNumber,
-      to,
-      message: body,
-    });
-
-    // Route to the shared team inbox so all group members see the conversation
-    if (this.groupId) {
-      params.set('smrtPhoneGroupId', this.groupId);
-    }
-
-    let response: Response;
-    try {
-      response = await fetch('https://phone.smrt.studio/sms/send', {
-        method: 'POST',
-        headers: {
-          'X-Auth-smrtPhone': this.apiKey,
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: params.toString(),
-        signal: AbortSignal.timeout(10000),
-      });
-    } catch (fetchErr: any) {
-      this.logger.warn(`⚠️  SmrtPhone unreachable (${fetchErr.message}) — simulating send locally`);
-      this.logger.log(`📱 [SIMULATED SMS] To: ${to} | "${body.substring(0, 80)}"`);
-      return { sid: `SIMULATED_OFFLINE_${Date.now()}` };
-    }
-
-    const responseText = await response.text();
-
-    if (!response.ok) {
-      throw new Error(`SmrtPhone API error ${response.status}: ${responseText}`);
-    }
-
-    this.logger.log(`✅ SmrtPhone SMS sent to ${to} — response: ${responseText.substring(0, 100)}`);
-
-    // SmrtPhone returns plain text or a message ID — extract if present
-    let sid = `smrtphone-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    try {
-      const data = JSON.parse(responseText);
-      const parsed = data.messageId || data.id || data.smsId;
-      if (parsed) sid = String(parsed);
-    } catch {
-      // Plain text response — use it as the SID if it looks like a short unique ID
-      if (responseText && responseText.length < 64 && !responseText.includes(' ') && !responseText.toLowerCase().includes('ok') && !responseText.toLowerCase().includes('success')) {
-        sid = responseText.trim();
-      }
-    }
-
-    return { sid };
-  }
-
-  async createContact(args: {
-    phone: string;
-    firstName: string;
-    lastName: string;
-  }): Promise<{ contactId: number; existed: boolean } | null> {
-    if (!this.apiKey) return null;
-
-    const requestBody = {
-      phone: args.phone,
-      first_name: args.firstName,
-      last_name: args.lastName,
-    };
-    const apiKeyTail = this.apiKey.slice(-4);
-    this.logger.log(
-      `📞 SmrtPhone createContact → POST https://api.smrt.studio/api/v1/contacts/create | apiKey=…${apiKeyTail} | body=${JSON.stringify(requestBody)}`,
-    );
-
-    let response: Response;
-    try {
-      response = await fetch('https://api.smrt.studio/api/v1/contacts/create', {
-        method: 'POST',
-        headers: {
-          'X-Auth-smrtPhone': this.apiKey,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestBody),
-        signal: AbortSignal.timeout(10000),
-      });
-    } catch (err: any) {
-      this.logger.warn(`⚠️  SmrtPhone contacts API unreachable: ${err.message}`);
-      return null;
-    }
-
-    const text = await response.text();
-    this.logger.log(
-      `📞 SmrtPhone createContact ← status=${response.status} body=${text}`,
-    );
-
-    if (!response.ok) {
-      throw new Error(`SmrtPhone contacts API error ${response.status}: ${text}`);
-    }
-
-    const data = JSON.parse(text);
-    if (data.error) {
-      throw new Error(`SmrtPhone contacts API returned error: ${text}`);
-    }
-
-    return {
-      contactId: Number(data.contact_id),
-      existed: Boolean(data.existed),
-    };
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Simulated (dev / no credentials)
 // ---------------------------------------------------------------------------
 export class SimulatedSmsProvider implements SmsProvider {
@@ -276,41 +132,12 @@ export function createSmsProvider(config: ConfigService): SmsProvider {
     );
   };
 
-  const smrtphoneKey = config.get<string>('SMRTPHONE_API_KEY');
-  const smrtphoneNumber = config.get<string>('SMRTPHONE_PHONE_NUMBER') || config.get<string>('TWILIO_PHONE_NUMBER') || '';
   const twilioSid = config.get<string>('TWILIO_ACCOUNT_SID');
   const twilioToken = config.get<string>('TWILIO_AUTH_TOKEN');
 
-  // Explicit override - lets Twilio (or the simulator) activate even while
-  // Smrtphone credentials remain configured during the migration period.
-  const forced = (config.get<string>('SMS_PROVIDER') || '').toLowerCase();
-
-  if (forced === 'twilio') {
-    if (!twilioSid || !twilioToken) {
-      const msg =
-        '❌ SMS_PROVIDER=twilio but TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN are not set. Refusing to start.';
-      logger.error(msg);
-      throw new Error(msg);
-    }
-    logger.log('📞 Using Twilio SMS provider (forced via SMS_PROVIDER=twilio)');
-    logBootIdentity('TwilioSmsProvider');
-    return new TwilioSmsProvider(twilioSid, twilioToken, config);
-  }
-
-  if (forced === 'smrtphone' && !smrtphoneKey) {
-    const msg = '❌ SMS_PROVIDER=smrtphone but SMRTPHONE_API_KEY is not set. Refusing to start.';
-    logger.error(msg);
-    throw new Error(msg);
-  }
-
-  if (smrtphoneKey) {
-    logger.log('📞 Using Smrtphone SMS provider');
-    const testMode = config.get<string>('SMRTPHONE_TEST_MODE', 'false');
-    if (testMode.toLowerCase() === 'true') {
-      logger.warn('🔒 SMRTPHONE_TEST_MODE=true — SMS sends restricted to SMRTPHONE_ALLOWED_NUMBERS');
-    }
-    logBootIdentity('SmrtphoneSmsProvider');
-    return new SmrtphoneSmsProvider(smrtphoneKey, smrtphoneNumber, config);
+  const testMode = (config.get<string>('SMS_TEST_MODE', 'false')).toLowerCase() === 'true';
+  if (testMode) {
+    logger.warn('🔒 SMS_TEST_MODE=true - SMS sends restricted to SMS_ALLOWED_NUMBERS');
   }
 
   if (twilioSid && twilioToken) {
@@ -323,7 +150,7 @@ export function createSmsProvider(config: ConfigService): SmsProvider {
   // 04/07/2026 incident: an orphan Railway service (`fast-homes-crm`) deployed
   // from the same repo with only DATABASE_URL set fell through to the
   // simulator, then raced the real `@fast-homes/api` service for campaign
-  // enrollments and won most of them — so real SMS was never delivered.
+  // enrollments and won most of them, so real SMS was never delivered.
   // The earlier `NODE_ENV === 'production'` gate didn't catch it because the
   // orphan had NODE_ENV unset. Now we always crash unless ALLOW_SIMULATED_SMS
   // is explicitly set, regardless of NODE_ENV.
@@ -331,8 +158,8 @@ export function createSmsProvider(config: ConfigService): SmsProvider {
 
   if (!allowSimulated) {
     const msg =
-      '❌ No SMS provider configured (SMRTPHONE_API_KEY / TWILIO_* env vars missing). ' +
-      'Refusing to start. Set SMRTPHONE_API_KEY, or set ALLOW_SIMULATED_SMS=true ' +
+      '❌ No SMS provider configured (TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN missing). ' +
+      'Refusing to start. Set the Twilio credentials, or set ALLOW_SIMULATED_SMS=true ' +
       'to explicitly opt in to the simulator (dev only).';
     logger.error(msg);
     throw new Error(msg);

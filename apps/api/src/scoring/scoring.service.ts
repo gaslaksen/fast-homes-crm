@@ -650,11 +650,9 @@ Return ONLY a JSON object:
       const drafts = JSON.parse(cleaned);
 
       // Hard guarantee that em dashes, smart quotes, and similar Unicode
-      // characters never reach the seller — the prompt forbids them but the
-      // model still slips occasionally. Stripping here also keeps the stored
-      // body byte-equal to what SmrtPhone delivers, so the smsOutgoing
-      // webhook matcher never misclassifies our own message as a manual
-      // reply (Meghan Kinee thread, 2026-05-08).
+      // characters never reach the seller. The prompt forbids them but the
+      // model still slips occasionally, and they force the message into UCS-2
+      // encoding, which drops the segment limit from 160 characters to 70.
       if (drafts && typeof drafts.message === 'string') {
         drafts.message = sanitizeOutboundSmsBody(drafts.message);
       }

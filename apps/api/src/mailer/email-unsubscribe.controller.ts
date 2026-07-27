@@ -11,6 +11,7 @@ import {
 import { Response } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailerService } from './mailer.service';
+import { COMPANY_NAME, COMPANY_PHONE } from '../common/company.constants';
 
 /**
  * Public (no auth) endpoints that honor the `List-Unsubscribe` /
@@ -98,7 +99,7 @@ export class EmailUnsubscribeController {
   <div style="font-size:20px;font-weight:600;color:${color};margin-bottom:12px;">${title}</div>
   <div style="font-size:15px;color:#444;line-height:1.5;">${message}</div>
   <div style="margin-top:24px;font-size:13px;color:#888;">
-    Quick Cash Home Buyers &middot; (704) 471-3920
+    ${COMPANY_NAME} &middot; ${COMPANY_PHONE}
   </div>
 </div>
 </body>

@@ -143,7 +143,7 @@ function LegacyDispoTab({
   const [docSent, setDocSent] = useState<{ documentId: string; signingUrl: string; title: string } | null>(null);
 
   // Offer form state
-  const [offerForm, setOfferForm] = useState({ offerAmount: '', notes: '', offerDate: '', visibleOnPortal: false, terms: '' });
+  const [offerForm, setOfferForm] = useState({ offerAmount: '', notes: '', offerDate: '', terms: '' });
   const searchParams = useSearchParams();
   const offerIntentApplied = useRef(false);
 
@@ -225,10 +225,9 @@ function LegacyDispoTab({
         offerAmount: parseFloat(offerForm.offerAmount),
         notes: offerForm.notes || null,
         offerDate: offerForm.offerDate || undefined,
-        visibleOnPortal: offerForm.visibleOnPortal,
         terms: offerForm.terms || null,
       });
-      setOfferForm({ offerAmount: '', notes: '', offerDate: '', visibleOnPortal: false, terms: '' });
+      setOfferForm({ offerAmount: '', notes: '', offerDate: '', terms: '' });
       setShowOfferForm(false);
       await load();
     } catch (e) {
@@ -371,18 +370,6 @@ function LegacyDispoTab({
                 rows={3}
                 placeholder="Cash offer, close in 30 days, no repairs needed..."
               />
-            </div>
-            <div className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                id="visibleOnPortal"
-                checked={offerForm.visibleOnPortal}
-                onChange={(e) => setOfferForm((f) => ({ ...f, visibleOnPortal: e.target.checked }))}
-                className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-              />
-              <label htmlFor="visibleOnPortal" className="text-xs text-gray-600 dark:text-gray-400">
-                Show on Seller Portal (seller can accept/decline)
-              </label>
             </div>
             <div className="flex gap-2 pt-1">
               <button onClick={handleCreateOffer} disabled={saving || !offerForm.offerAmount} className="btn btn-primary btn-sm">

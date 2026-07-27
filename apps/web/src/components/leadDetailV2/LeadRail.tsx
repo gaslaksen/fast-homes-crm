@@ -10,7 +10,6 @@ import DripEnvelopeIcon from '@/components/icons/DripEnvelopeIcon';
 import LeadQueueNav from '@/components/leadDetailV2/LeadQueueNav';
 import ShareDealModal from '@/components/ShareDealModal';
 import ScheduleFollowUpModal from '@/components/ScheduleFollowUpModal';
-import SellerPortalPanel from '@/components/SellerPortalPanel';
 import { formatPhoneDisplay, getLeadDisplayName } from '@/lib/format';
 import { zillowUrl, googleSearchUrl } from '@/lib/externalLinks';
 import { readLeadQueue } from '@/lib/leadQueue';
@@ -818,10 +817,6 @@ export default function LeadRail({ lead, onLeadPatch, onMarkDead, hideNav }: Pro
           <CampChip label="Challenge" value={lead.conditionLevel || null} complete={lead.campChallengeComplete} />
           <CampChip label="Authority" value={lead.ownershipStatus?.replace(/_/g, ' ') || null} complete={lead.campAuthorityComplete} />
         </div>
-      </RailSection>
-
-      <RailSection title="Seller Portal" storageKey="portal">
-        <SellerPortalPanel leadId={leadId} />
       </RailSection>
 
       <ScheduleFollowUpModal

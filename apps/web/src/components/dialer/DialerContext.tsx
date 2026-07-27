@@ -14,34 +14,62 @@ import { callsAPI } from '@/lib/api';
 
 export type DialerView = 'dialpad' | 'connecting' | 'oncall' | 'summary' | 'incoming';
 
+/** Which panel the dialpad view is showing. */
+export type DialerTab = 'recents' | 'contacts' | 'keypad' | 'voicemail' | 'queue';
+
 export interface CallContact {
   name?: string;
   phone: string;
   leadId?: string;
 }
 
+export interface CallerId {
+  number: string;
+  label: string;
+}
+
+/** Where a warm transfer has got to. 'idle' means no transfer in progress. */
+export type TransferState = 'idle' | 'consulting';
+
 interface DialerState {
   open: boolean;
   view: DialerView;
+  tab: DialerTab;
   /** Whether Twilio Voice is configured + the Device is usable. */
   ready: boolean;
   error: string | null;
   contact: CallContact | null;
   muted: boolean;
+  onHold: boolean;
   durationSec: number;
   lastCallSid: string | null;
   /** An inbound call is ringing and awaiting accept/decline. */
   incoming: boolean;
 
+  /** Outbound caller IDs available, and the one currently selected. */
+  callerIds: CallerId[];
+  callerId: CallerId | null;
+  setCallerId: (c: CallerId) => void;
+
+  transferState: TransferState;
+  /** Number being consulted during a warm transfer. */
+  transferTo: string | null;
+
   openDialer: () => void;
   closeDialer: () => void;
   toggleDialer: () => void;
+  setTab: (t: DialerTab) => void;
   startCall: (contact: CallContact) => Promise<void>;
   hangup: () => void;
   toggleMute: () => void;
+  toggleHold: () => Promise<void>;
   sendDigit: (digit: string) => void;
   acceptIncoming: () => void;
   declineIncoming: () => void;
+  blindTransfer: (to: string) => Promise<void>;
+  startWarmTransfer: (to: string) => Promise<void>;
+  completeWarmTransfer: () => Promise<void>;
+  cancelWarmTransfer: () => Promise<void>;
   saveDisposition: (disposition: string, notes?: string) => Promise<void>;
   reset: () => void;
 }
@@ -57,13 +85,19 @@ export function useDialer() {
 export function DialerProvider({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<DialerView>('dialpad');
+  const [tab, setTab] = useState<DialerTab>('keypad');
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [contact, setContact] = useState<CallContact | null>(null);
   const [muted, setMuted] = useState(false);
+  const [onHold, setOnHold] = useState(false);
   const [durationSec, setDurationSec] = useState(0);
   const [lastCallSid, setLastCallSid] = useState<string | null>(null);
   const [incoming, setIncoming] = useState(false);
+  const [callerIds, setCallerIds] = useState<CallerId[]>([]);
+  const [callerId, setCallerId] = useState<CallerId | null>(null);
+  const [transferState, setTransferState] = useState<TransferState>('idle');
+  const [transferTo, setTransferTo] = useState<string | null>(null);
 
   const deviceRef = useRef<Device | null>(null);
   const callRef = useRef<Call | null>(null);
@@ -161,6 +195,9 @@ export function DialerProvider({ children }: { children: ReactNode }) {
         stopTimer();
         callRef.current = null;
         setMuted(false);
+        setOnHold(false);
+        setTransferState('idle');
+        setTransferTo(null);
         setView('summary');
       };
 
@@ -205,6 +242,9 @@ export function DialerProvider({ children }: { children: ReactNode }) {
         callRef.current = null;
         setIncoming(false);
         setMuted(false);
+        setOnHold(false);
+        setTransferState('idle');
+        setTransferTo(null);
       };
 
       // Caller hung up or we rejected before answering -> back to idle
@@ -239,6 +279,26 @@ export function DialerProvider({ children }: { children: ReactNode }) {
     getDevice();
   }, [getDevice]);
 
+  // Load the outbound caller IDs for the "Calling From" picker. The server
+  // re-validates whatever we send, so this list is a convenience, not a control.
+  useEffect(() => {
+    let cancelled = false;
+    callsAPI
+      .twilioNumbers()
+      .then((res) => {
+        if (cancelled) return;
+        const nums: CallerId[] = res.data?.numbers || [];
+        setCallerIds(nums);
+        setCallerId((current) => current ?? nums[0] ?? null);
+      })
+      .catch(() => {
+        /* picker just stays empty; the server falls back to the default number */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const acceptIncoming = useCallback(() => {
     callRef.current?.accept();
   }, []);
@@ -265,6 +325,7 @@ export function DialerProvider({ children }: { children: ReactNode }) {
           params: {
             To: c.phone,
             ...(c.leadId ? { leadId: c.leadId } : {}),
+            ...(callerId ? { callerId: callerId.number } : {}),
           },
         });
         wireCall(call);
@@ -273,7 +334,7 @@ export function DialerProvider({ children }: { children: ReactNode }) {
         setView('dialpad');
       }
     },
-    [getDevice, wireCall],
+    [getDevice, wireCall, callerId],
   );
 
   const hangup = useCallback(() => {
@@ -291,6 +352,101 @@ export function DialerProvider({ children }: { children: ReactNode }) {
   const sendDigit = useCallback((digit: string) => {
     callRef.current?.sendDigits(digit);
   }, []);
+
+  // ── In-call controls ──────────────────────────────────────────────────────
+  // These act on the server-side conference rather than the local WebRTC leg,
+  // so they need the CallSid. Twilio can legitimately fail here (the other
+  // party hung up mid-action), so failures surface as a dialer error, not a throw.
+  const callControl = useCallback(
+    async (fn: (sid: string) => Promise<{ data: any }>, failure: string) => {
+      if (!lastCallSid) {
+        setError('Call is not connected yet');
+        return null;
+      }
+      try {
+        const res = await fn(lastCallSid);
+        if (res.data?.ok === false) {
+          setError(res.data.error || failure);
+          return null;
+        }
+        setError(null);
+        return res.data;
+      } catch (e: any) {
+        setError(e?.response?.data?.error || e?.message || failure);
+        return null;
+      }
+    },
+    [lastCallSid],
+  );
+
+  const toggleHold = useCallback(async () => {
+    const next = !onHold;
+    const ok = await callControl(
+      (sid) => callsAPI.twilioHold(sid, next),
+      'Could not change hold',
+    );
+    if (ok) setOnHold(next);
+  }, [callControl, onHold]);
+
+  const blindTransfer = useCallback(
+    async (to: string) => {
+      const ok = await callControl(
+        (sid) => callsAPI.twilioBlindTransfer(sid, to),
+        'Transfer failed',
+      );
+      // On a blind transfer we leave the call immediately; the seller stays
+      // connected to the target without us.
+      if (ok) {
+        stopTimer();
+        callRef.current = null;
+        setView('summary');
+      }
+    },
+    [callControl, stopTimer],
+  );
+
+  const startWarmTransfer = useCallback(
+    async (to: string) => {
+      const ok = await callControl(
+        (sid) => callsAPI.twilioWarmTransfer(sid, to),
+        'Could not start transfer',
+      );
+      if (ok) {
+        setTransferState('consulting');
+        setTransferTo(to);
+        // The seller is on hold for the duration of the consult.
+        setOnHold(true);
+      }
+    },
+    [callControl],
+  );
+
+  const completeWarmTransfer = useCallback(async () => {
+    const ok = await callControl(
+      (sid) => callsAPI.twilioWarmTransferComplete(sid),
+      'Could not complete transfer',
+    );
+    if (ok) {
+      setTransferState('idle');
+      setTransferTo(null);
+      setOnHold(false);
+      stopTimer();
+      callRef.current = null;
+      setView('summary');
+    }
+  }, [callControl, stopTimer]);
+
+  const cancelWarmTransfer = useCallback(async () => {
+    const ok = await callControl(
+      (sid) => callsAPI.twilioWarmTransferCancel(sid),
+      'Could not cancel transfer',
+    );
+    if (ok) {
+      setTransferState('idle');
+      setTransferTo(null);
+      setOnHold(false);
+    }
+  }, [callControl]);
 
   const saveDisposition = useCallback(
     async (disposition: string, notes?: string) => {
@@ -315,6 +471,9 @@ export function DialerProvider({ children }: { children: ReactNode }) {
     setDurationSec(0);
     setLastCallSid(null);
     setError(null);
+    setOnHold(false);
+    setTransferState('idle');
+    setTransferTo(null);
   }, []);
 
   const openDialer = useCallback(() => setOpen(true), []);
@@ -334,22 +493,35 @@ export function DialerProvider({ children }: { children: ReactNode }) {
       value={{
         open,
         view,
+        tab,
         ready,
         error,
         contact,
         muted,
+        onHold,
         durationSec,
         lastCallSid,
         incoming,
+        callerIds,
+        callerId,
+        setCallerId,
+        transferState,
+        transferTo,
         openDialer,
         closeDialer,
         toggleDialer,
+        setTab,
         startCall,
         hangup,
         toggleMute,
+        toggleHold,
         sendDigit,
         acceptIncoming,
         declineIncoming,
+        blindTransfer,
+        startWarmTransfer,
+        completeWarmTransfer,
+        cancelWarmTransfer,
         saveDisposition,
         reset,
       }}

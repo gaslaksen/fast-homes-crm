@@ -5,10 +5,10 @@ import { ScoringService } from '../scoring/scoring.service';
 import { DripService } from '../drip/drip.service';
 import { CampaignEnrollmentService } from '../campaigns/campaign-enrollment.service';
 import { LeadsService } from '../leads/leads.service';
-import { SellerPortalService } from '../seller-portal/seller-portal.service';
-import { SmsProvider, SmrtphoneSmsProvider, TwilioSmsProvider, createSmsProvider } from './sms.provider';
+import { SmsProvider, createSmsProvider } from './sms.provider';
 import { MailerService } from '../mailer/mailer.service';
 import { PushService } from '../push/push.service';
+import { ComplianceService } from './compliance.service';
 import { formatPhoneNumber, isOptOutMessage } from '@fast-homes/shared';
 import { dealFitFlags, propertyContextForPrompt } from '../leads/property-fit.util';
 
@@ -106,15 +106,12 @@ export class MessagesService {
     private campaignEnrollmentService: CampaignEnrollmentService,
     @Inject(forwardRef(() => LeadsService))
     private leadsService: LeadsService,
-    @Optional() private sellerPortalService: SellerPortalService,
     private mailerService: MailerService,
     private pushService: PushService,
+    private complianceService: ComplianceService,
   ) {
     this.smsProvider = createSmsProvider(this.config);
-    // Outbound "from" number follows the active provider
-    this.twilioNumber = this.smsProvider instanceof TwilioSmsProvider
-      ? this.config.get<string>('TWILIO_PHONE_NUMBER') || this.config.get<string>('SMRTPHONE_PHONE_NUMBER') || ''
-      : this.config.get<string>('SMRTPHONE_PHONE_NUMBER') || this.config.get<string>('TWILIO_PHONE_NUMBER') || '';
+    this.twilioNumber = this.config.get<string>('TWILIO_PHONE_NUMBER') || '';
   }
 
   /**
@@ -185,22 +182,54 @@ export class MessagesService {
     const to = formatPhoneNumber(lead.sellerPhone);
     const from = this.twilioNumber;
 
+    // Compliance footer (sender ID + opt-out). Twilio does not add either, so
+    // it is attached here per Settings > Messaging Compliance: first message to
+    // this lead, then optionally on a repeating interval. Applied before the
+    // Message row is written so the stored body matches what the seller sees.
+    let outboundBody = body;
+    let stampFooterSent = false;
+    try {
+      const compliance = await this.complianceService.get();
+      const footer = this.complianceService.buildFooter(compliance);
+      const attach = await this.complianceService.shouldAttachFooter(
+        compliance,
+        lead.complianceFooterSentAt,
+      );
+      if (attach) {
+        const withFooter = this.complianceService.applyFooter(body, footer);
+        if (withFooter !== body) {
+          outboundBody = withFooter;
+          stampFooterSent = true;
+        }
+      }
+    } catch (err: any) {
+      this.logger.warn(`Compliance footer lookup failed for ${leadId}: ${err.message}`);
+    }
+
     // Create message record
     const message = await this.prisma.message.create({
       data: {
         leadId,
         direction: 'OUTBOUND',
         status: 'PENDING',
-        body,
+        body: outboundBody,
         from,
         to,
         sentByUserId: userId ?? null,
       },
     });
-    await this.syncThreadSummary(leadId, body, 'OUTBOUND');
+    await this.syncThreadSummary(leadId, outboundBody, 'OUTBOUND');
 
     try {
-      const sent = await this.smsProvider.sendSms(to, from, body);
+      const sent = await this.smsProvider.sendSms(to, from, outboundBody);
+
+      if (stampFooterSent) {
+        await this.prisma.lead
+          .update({ where: { id: leadId }, data: { complianceFooterSentAt: new Date() } })
+          .catch((err) =>
+            this.logger.warn(`Failed to stamp complianceFooterSentAt for ${leadId}: ${err.message}`),
+          );
+      }
 
       await this.prisma.message.update({
         where: { id: message.id },
@@ -212,18 +241,6 @@ export class MessagesService {
       });
 
       this.logger.log(`Message sent via ${this.smsProvider.constructor.name}: ${sent.sid}`);
-
-      // Mark portal link as sent if this outbound message contains the portal URL
-      if (this.sellerPortalService) {
-        try {
-          const portalUrl = await this.sellerPortalService.getPortalUrl(leadId);
-          if (portalUrl && body.includes(portalUrl)) {
-            await this.sellerPortalService.markPortalLinkSent(leadId);
-          }
-        } catch (err: any) {
-          this.logger.warn(`Failed to check/mark portal link for ${leadId}: ${err.message}`);
-        }
-      }
 
       // Record touch (activity log + pipeline tracking)
       await this.leadsService.recordTouch(leadId, 'MESSAGE_SENT', {
@@ -413,7 +430,6 @@ export class MessagesService {
 
     // ── Build the purpose string — conversational, AI decides the approach ─────
     let purpose: string;
-    let portalInstruction = '';
 
     // We track whether this turn is an expectations-setting turn so the caller
     // can stamp `lead.expectationsSetAt` only after the message actually sends.
@@ -435,26 +451,37 @@ export class MessagesService {
     const needsExpectationsTurn =
       !lead.expectationsSetAt &&
       ((campComplete && fitFlags.hasOpenFitConcern) || earlyMoneyKiller);
-    const isClosingTurn = campComplete && !needsExpectationsTurn;
 
-    if (isClosingTurn) {
-      // ── Closing-message portal fallback ──────────────────────────────────
-      // If the portal link was never sent during mid-conversation messages,
-      // include it in the closing message so the seller still gets the link.
-      if (this.sellerPortalService) {
-        const portalSent = await this.sellerPortalService.hasPortalLinkBeenSent(leadId);
-        if (!portalSent) {
-          const portalUrl = await this.sellerPortalService.getPortalUrl(leadId);
-          if (portalUrl) {
-            portalInstruction = `
-IMPORTANT — INCLUDE THIS LINK in your closing message: ${portalUrl}
-After thanking them, mention you've put together a page where they can verify property details and upload photos at their convenience. Frame it naturally — something like:
-"Before I let you go — I put together a quick page for your property where you can double-check the details and upload any photos when you get a chance:\n${portalUrl}\n\nNo rush on that, but it helps our team when they review everything."
-CRITICAL: Do NOT place a period, comma, or any punctuation immediately after the URL — it breaks the link on phones.`;
-          }
-        }
-      }
+    // ── Photo turn ────────────────────────────────────────────────────────────
+    // CAMP used to hand straight off to the closing message, so the thread died
+    // the moment the last field landed. Now that sellers text photos in directly
+    // (inbound MMS is stored on Message.mediaUrls), we spend one more turn asking
+    // for them and only close on the reply after that.
+    const sellerSentPhotos = lead.messages.some(
+      (m) => m.direction === 'INBOUND' && Array.isArray(m.mediaUrls) && m.mediaUrls.length > 0,
+    );
+    const needsPhotoTurn =
+      campComplete &&
+      !needsExpectationsTurn &&
+      !lead.photosRequestedAt &&
+      !sellerSentPhotos;
 
+    const isClosingTurn = campComplete && !needsExpectationsTurn && !needsPhotoTurn;
+
+    if (needsPhotoTurn) {
+      // CAMP is complete but we have no photos yet. Spend a turn asking for them
+      // by text (MMS) rather than closing. autoRespond stays on, so the seller's
+      // reply (with or without photos) triggers the closing turn next pass.
+      purpose = `${propertyContext}CAMP COMPLETE, BUT DO NOT CLOSE THE CONVERSATION YET. This turn is the photo request.
+Your message must:
+1. Briefly acknowledge what ${lead.sellerFirstName} just told you.
+2. Ask them to text a few photos of the property right here in this thread. Make it easy and low effort, for example a handful of quick phone shots of the main living areas, kitchen, bathrooms and anything that needs work.
+3. Explain in one short clause why it helps, for example so the team can put together an accurate number without needing to schedule a walkthrough first.
+4. Keep it casual and human, two or three sentences at most.
+5. Do NOT send any link. Do NOT mention a website, a portal, a page, an upload form, or email. Photos come back as a text reply to this same number.
+6. Do NOT use closing language like "before I let you go", "thanks for everything", or "the team will review and reach out". The conversation is still open.
+7. Do NOT repeat back their price or timeline in a way that implies agreement or commitment.`;
+    } else if (isClosingTurn) {
       // CAMP is complete — close the conversation warmly, no more questions
       const knownSummary = [
         lead.timeline != null ? `timeline of ${lead.timeline === 365 ? 'no specific urgency' : `~${lead.timeline} days`}` : null,
@@ -463,14 +490,19 @@ CRITICAL: Do NOT place a period, comma, or any punctuation immediately after the
         lead.ownershipStatus != null ? `ownership: ${lead.ownershipStatus.replace('_', ' ')}` : null,
       ].filter(Boolean).join(', ');
 
+      const photoAck = sellerSentPhotos
+        ? `\n${lead.sellerFirstName} has already texted photos in this thread. Thank them for the photos specifically, in your own words.`
+        : '';
+
       purpose = `${propertyContext}CAMP COMPLETE — DO NOT ASK ANY MORE QUESTIONS. This is your closing message.
-What you know: ${knownSummary || 'gathered all key details'}.
+What you know: ${knownSummary || 'gathered all key details'}.${photoAck}
 Your message must:
 1. Thank ${lead.sellerFirstName} sincerely for their time and for sharing
 2. Tell them someone from the team will review the information and reach out soon to discuss next steps
 3. Keep it warm and genuine
 4. Do NOT ask anything. Do NOT request more info. End the conversation professionally.
-5. Do NOT repeat back their price or timeline in a way that implies agreement or commitment.${portalInstruction}`;
+5. Do NOT repeat back their price or timeline in a way that implies agreement or commitment.
+6. Do NOT send any link and do NOT mention a website, portal, page, or upload form.`;
     } else if (needsExpectationsTurn) {
       // The team has flagged a deal-fit concern that needs to be surfaced
       // honestly before we wrap up. This is its own turn — autoRespond stays
@@ -498,29 +530,12 @@ This message must:
     } else {
       // CAMP not yet complete — let the AI decide what to explore next.
 
-      // ── Seller Portal URL injection ──────────────────────────────────────
-      // Once 3+ CAMP fields are known we offer the portal so the seller can
-      // verify details and upload photos. Tightened from 2+ to avoid sending
-      // a closing-toned message after one CAMP answer (we observed false
-      // wrap-ups when this fired with only price+timeline known).
-      if (this.sellerPortalService && knownFields.length >= 3) {
-        const portalSent = await this.sellerPortalService.hasPortalLinkBeenSent(leadId);
-        if (!portalSent) {
-          const portalUrl = await this.sellerPortalService.getPortalUrl(leadId);
-          if (portalUrl) {
-            const conditionUnknown = lead.conditionLevel == null;
-            const framingHint = conditionUnknown
-              ? `Weave it in casually — something like "If it's easier, here's a page where you can check what we have on file and upload any photos:\n${portalUrl}\n\nWhat kind of shape is the house in currently?"`
-              : `Weave it in casually — something like "If it's easier, here's a page where you can verify the details and upload any photos:\n${portalUrl}"`;
-
-            portalInstruction = `
-OPTIONAL — you may include this portal URL in your message if it fits naturally: ${portalUrl}
-${framingHint}
-Do NOT use closing language like "Before I let you go" or "Thanks for everything" — the conversation is still active.
-CRITICAL: Do NOT place a period, comma, or any punctuation immediately after the URL — it breaks the link on phones. End the sentence BEFORE the URL (use a colon or dash), then start the next question as a new paragraph after the URL.`;
-          }
-        }
-      }
+      // Once condition comes up and we still have no photos, asking for a
+      // couple of texted photos is a natural way to dig into condition without
+      // burning a CAMP question. Photos arrive as MMS on this same thread.
+      const photoNudge = !sellerSentPhotos && lead.conditionLevel != null
+        ? `\nOPTIONAL — if it fits naturally, you may ask ${lead.sellerFirstName} to text over a few quick photos of the property. Keep it casual and low effort. Never send a link or mention a website, portal, page, or upload form. Photos come back as a text reply to this same number.`
+        : '';
 
       purpose = `${propertyContext}${justExtractedSummary ? justExtractedSummary + ' ' : ''}
 CAMP PROGRESS:
@@ -532,7 +547,7 @@ ${isActiveListing ? 'This property IS already listed for sale. Do not ask if the
 KEEP THE CONVERSATION GOING. Do NOT wrap up just because they answered one question — there are still missing topics and there's plenty more to learn. After you acknowledge what they said, take ONE of these moves: ask about a missing CAMP topic, dig deeper into something they mentioned, or use a property fact you know (listing photos, last sale year) to ask a sharper question. Vary your approach across messages.
 If the conversation naturally opens up a chance to learn about one of the missing topics, take it. But do NOT force it. It's fine to just respond to what the seller said without asking a CAMP question if the moment isn't right.
 If the seller seems frustrated, confused, sharing something personal, or asked you a direct question, address THAT first. Building rapport is more important than checking boxes.
-You decide the right approach based on the conversation flow.${portalInstruction}`.trim();
+You decide the right approach based on the conversation flow.${photoNudge}`.trim();
     }
 
     const knownData = {
@@ -588,15 +603,24 @@ You decide the right approach based on the conversation flow.${portalInstruction
         this.logger.log(`📣 Expectations message sent for lead ${leadId} — concerns: ${fitFlags.concerns.join('; ')}`);
       }
 
-      // sendMessage() already marks the portal link as sent when the body
-      // contains the portal URL (see line ~210). Relying on that body-check
-      // also handles the case where the prompt said the link was OPTIONAL and
-      // the AI chose not to include it.
+      // Stamp the photo request once it has actually gone out, so the next
+      // inbound message moves on to the closing turn instead of asking again.
+      if (needsPhotoTurn) {
+        await this.prisma.lead
+          .update({ where: { id: leadId }, data: { photosRequestedAt: new Date() } })
+          .catch((err) =>
+            this.logger.warn(`Failed to stamp photosRequestedAt for ${leadId}: ${err.message}`),
+          );
+        this.logger.log(`📸 Photo request sent for lead ${leadId}`);
+      }
 
       // Refresh CAMP flags
       await this.scoringService.refreshCampFlags(leadId);
 
-      const phase = isClosingTurn ? 'closing' : needsExpectationsTurn ? 'expectations' : `missing ${missingFields.join(', ')}`;
+      const phase = isClosingTurn ? 'closing'
+        : needsExpectationsTurn ? 'expectations'
+        : needsPhotoTurn ? 'photo request'
+        : `missing ${missingFields.join(', ')}`;
       this.logger.log(`Auto-response sent for lead ${leadId} (CAMP: ${phase})`);
       return messageBody;
     } catch (error) {
@@ -635,33 +659,6 @@ You decide the right approach based on the conversation flow.${portalInstruction
     if (realMessages.length > 0) {
       this.logger.log(`Lead ${leadId}: real messages already exist (${realMessages.length}), skipping initial outreach`);
       return null;
-    }
-
-    // Create / upsert the contact in Smrtphone before sending so the SMS lands
-    // against a named contact in their UI. Idempotent on Smrtphone's side
-    // (dedupes by phone). Skip if we already have a stored contact_id.
-    if (
-      !lead.smrtphoneContactId &&
-      this.smsProvider instanceof SmrtphoneSmsProvider
-    ) {
-      try {
-        const result = await this.smsProvider.createContact({
-          phone: lead.sellerPhone,
-          firstName: lead.sellerFirstName,
-          lastName: lead.sellerLastName,
-        });
-        if (result?.contactId) {
-          await this.prisma.lead.update({
-            where: { id: leadId },
-            data: { smrtphoneContactId: result.contactId },
-          });
-          this.logger.log(
-            `Smrtphone contact ${result.existed ? 'matched' : 'created'} for lead ${leadId}: ${result.contactId}`,
-          );
-        }
-      } catch (err: any) {
-        this.logger.error(`Smrtphone contact create failed for lead ${leadId}: ${err.message}`);
-      }
     }
 
     // Fixed initial message — no AI. Asks for price and timeline upfront.

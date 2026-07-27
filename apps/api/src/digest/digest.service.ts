@@ -100,7 +100,7 @@ export class DigestService {
     return Math.round((d.getTime() - now.getTime()) / DAY);
   }
 
-  /** "(704) 471-3920" from any 10 or 11 digit form. */
+  /** "(888) 574-8121" from any 10 or 11 digit form. */
   private fmtPhone(raw: string | null | undefined): string | null {
     const digits = String(raw ?? '').replace(/[^0-9]/g, '');
     const ten = digits.length === 11 && digits.startsWith('1') ? digits.slice(1) : digits;

@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import Mailgun from 'mailgun.js';
 import FormData from 'form-data';
 import * as crypto from 'crypto';
+import { COMPANY_NAME, COMPANY_PHONE, COMPANY_PHONE_E164, COMPANY_WEBSITE, COMPANY_WEBSITE_URL } from '../common/company.constants';
 
 /**
  * All outbound email flows through Mailgun on the verified sending subdomain
@@ -341,10 +342,10 @@ export class MailerService {
    * Home Buyers signature and an optional unsubscribe footer.
    */
   wrapEmailBody(bodyText: string, unsubscribeUrl?: string): { bodyText: string; bodyHtml: string } {
-    const companyName = 'Quick Cash Home Buyers';
-    const phone = '(704) 471-3920';
-    const website = 'www.quickcashhomebuyers.com';
-    const websiteHref = 'https://www.quickcashhomebuyers.com';
+    const companyName = COMPANY_NAME;
+    const phone = COMPANY_PHONE;
+    const website = COMPANY_WEBSITE;
+    const websiteHref = COMPANY_WEBSITE_URL;
 
     const textSignature = `\n\n-\n${companyName}\n${phone}\n${website}`;
     const textUnsub = unsubscribeUrl ? `\n\nNot interested? Unsubscribe: ${unsubscribeUrl}` : '';
@@ -372,7 +373,7 @@ export class MailerService {
 ${paragraphs}
 <div style="margin-top:24px;padding-top:16px;border-top:1px solid #e5e5e5;font-size:14px;color:#555;">
   <div style="font-weight:600;color:#222;">${companyName}</div>
-  <div><a href="tel:+17044713920" style="color:#555;text-decoration:none;">${phone}</a></div>
+  <div><a href="tel:${COMPANY_PHONE_E164}" style="color:#555;text-decoration:none;">${phone}</a></div>
   <div><a href="${websiteHref}" style="color:#555;text-decoration:none;">${website}</a></div>
 </div>
 ${unsubHtml}

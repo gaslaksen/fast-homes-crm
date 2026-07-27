@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { leadsAPI, messagesAPI, settingsAPI, authAPI, sellerPortalAPI, inboxAPI } from '@/lib/api';
+import { leadsAPI, messagesAPI, settingsAPI, authAPI, inboxAPI } from '@/lib/api';
 import DispoTab from '@/components/DispoTab';
 import AppShell from '@/components/AppShell';
 import LeadTabNav, { DETAIL_TABS, COMPS_TABS } from '@/components/LeadTabNav';
@@ -80,25 +80,16 @@ export default function LeadDetailPage() {
         }, 200);
       }
     }
-    if ((action === 'send-portal-link' || action === 'resend-portal-link') && activeTab === 'communications' && !portalLinkIntentApplied.current) {
-      portalLinkIntentApplied.current = true;
-      (async () => {
-        try {
-          const res = await sellerPortalAPI.getInfo(leadId);
-          const portalUrl = res.data?.portalUrl;
-          if (!portalUrl) return;
-          const firstName = (lead.sellerFirstName || '').trim() || 'there';
-          const message = action === 'resend-portal-link'
-            ? `Hey ${firstName}, just resending the link in case you missed it — you can upload photos, see comps, and review offers here: ${portalUrl}`
-            : `Hey ${firstName}! Here's the link where you can upload photos of the property, view comps, and review offers: ${portalUrl}`;
-          setMessageDrafts({ message });
-          setSelectedDraft(message);
-        } catch (err) { console.error('Failed to load portal for draft', err); }
-        setTimeout(() => {
-          messagesBottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-          composerRef.current?.focus();
-        }, 200);
-      })();
+    if (action === 'request-photos' && activeTab === 'communications' && !photoRequestIntentApplied.current) {
+      photoRequestIntentApplied.current = true;
+      const firstName = (lead.sellerFirstName || '').trim() || 'there';
+      const message = `Hey ${firstName}, could you text over a few quick photos of the property? Just phone shots of the main rooms and anything that needs work. It helps us put together an accurate number.`;
+      setMessageDrafts({ message });
+      setSelectedDraft(message);
+      setTimeout(() => {
+        messagesBottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+        composerRef.current?.focus();
+      }, 200);
     }
   }, [activeTab, lead, leadId, searchParams]);
   const [messageDrafts, setMessageDrafts] = useState<any>(null);
@@ -119,7 +110,7 @@ export default function LeadDetailPage() {
   const [markingDead, setMarkingDead] = useState(false);
   const [sendingOutreach, setSendingOutreach] = useState(false);
   const replyIntentApplied = useRef(false);
-  const portalLinkIntentApplied = useRef(false);
+  const photoRequestIntentApplied = useRef(false);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const messagesBottomRef = useRef<HTMLDivElement | null>(null);
   const timelineScrollRef = useRef<HTMLDivElement | null>(null);

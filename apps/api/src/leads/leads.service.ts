@@ -5,7 +5,6 @@ import { MessagesService } from '../messages/messages.service';
 import { DripService } from '../drip/drip.service';
 import { CampaignEnrollmentService } from '../campaigns/campaign-enrollment.service';
 import { PhotosService } from '../photos/photos.service';
-import { SellerPortalService } from '../seller-portal/seller-portal.service';
 import { CompsService } from '../comps/comps.service';
 import { ReapiService } from '../comps/reapi.service';
 import { PipelineService } from '../pipeline/pipeline.service';
@@ -34,7 +33,6 @@ export class LeadsService {
     @Inject(forwardRef(() => CampaignEnrollmentService))
     private campaignEnrollmentService: CampaignEnrollmentService,
     @Optional() private photosService: PhotosService,
-    @Optional() private sellerPortalService: SellerPortalService,
     private compsService: CompsService,
     private reapiService: ReapiService,
     private pipelineService: PipelineService,
@@ -186,13 +184,6 @@ export class LeadsService {
       // reliable data source is identified.
     } else {
       console.log(`📍 Lead created: ${lead.id} - ${data.propertyAddress}. No PhotosService available.`);
-    }
-
-    // Auto-create seller portal (non-blocking)
-    if (this.sellerPortalService) {
-      this.sellerPortalService.createPortal(lead.id).catch((err) => {
-        this.logger.error(`Seller portal creation failed for ${lead.id}: ${err.message}`);
-      });
     }
 
     // Auto-populate property details from REAPI (non-blocking)
@@ -416,7 +407,6 @@ export class LeadsService {
           orderBy: { createdAt: 'desc' },
           take: 20,
         },
-        sellerPortal: true,
         dripSequence: true,
       },
     });
@@ -1624,7 +1614,6 @@ export class LeadsService {
         offerDate: data.offerDate ? new Date(data.offerDate) : new Date(),
         status: data.status ?? 'pending',
         notes: data.notes ?? null,
-        visibleOnPortal: data.visibleOnPortal ?? false,
         terms: data.terms ?? null,
       },
     });
@@ -1663,7 +1652,6 @@ export class LeadsService {
         ...(data.counterAmount !== undefined && { counterAmount: data.counterAmount }),
         ...(data.notes !== undefined && { notes: data.notes }),
         ...(data.offerAmount !== undefined && { offerAmount: data.offerAmount }),
-        ...(data.visibleOnPortal !== undefined && { visibleOnPortal: data.visibleOnPortal }),
         ...(data.terms !== undefined && { terms: data.terms }),
       },
     });

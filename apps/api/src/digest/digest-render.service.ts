@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { DigestBrief, DigestUrgency } from './digest.types';
+import { COMPANY_NAME, COMPANY_PHONE } from '../common/company.constants';
 
 /**
  * Turns an assembled DigestBrief into email HTML plus a plain-text fallback.
@@ -367,7 +368,7 @@ export class DigestRenderService {
       <a href="${this.esc(b.appUrl)}" style="color:${TEAL};font-weight:600;text-decoration:none;">Open Dealcore</a>
     </div>
     <div style="font-size:12px;color:${FAINT};padding-top:12px;line-height:1.5;">
-      Quick Cash Home Buyers &middot; (704) 471-3920 &middot; Charlotte, NC
+      ${COMPANY_NAME} &middot; ${COMPANY_PHONE} &middot; Charlotte, NC
     </div>
   </td></tr>
 
