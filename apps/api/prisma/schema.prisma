@@ -1294,3 +1294,17 @@ model AiArvCalculation {
   @@index([leadId, inputHash])
   @@map("ai_arv_calculations")
 }
+
+/// One row per Daily Brief send. `bigThingKey` is the identity of whatever led
+/// the brief, so the next run can avoid opening with the same story several
+/// mornings running. `metrics` is the board snapshot, for day-over-day deltas.
+model DigestRun {
+  id             String   @id @default(cuid())
+  organizationId String
+  sentAt         DateTime @default(now())
+  bigThingKey    String?
+  metrics        Json?
+
+  @@index([organizationId, sentAt])
+  @@map("digest_runs")
+}

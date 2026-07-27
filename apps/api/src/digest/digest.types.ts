@@ -16,6 +16,12 @@ export { NewsItem };
 export type DigestUrgency = 'critical' | 'warn' | 'neutral' | 'good';
 
 export interface BigThing {
+  /**
+   * Stable identity of whatever this story is about, e.g. "lead:abc123".
+   * Persisted to DigestRun so the next few briefs can avoid opening with the
+   * same story on consecutive mornings.
+   */
+  key: string;
   /** One-sentence headline. Doubles as the email preheader. */
   headline: string;
   /** Supporting facts: address, tier, how long it has been waiting. */
@@ -49,7 +55,7 @@ export interface DigestAction {
    * Action family. Used to cap how many slots one category can take, so a
    * heavy foreclosure ingest cannot crowd out every closing and offer.
    */
-  category: 'reply' | 'foreclosure' | 'closing' | 'signature' | 'offer' | 'task' | 'cleanup';
+  category: 'photos' | 'reply' | 'foreclosure' | 'closing' | 'signature' | 'offer' | 'task' | 'cleanup';
 }
 
 export interface WaitingRow {
@@ -122,6 +128,8 @@ export interface DigestBrief {
   dealsTotalFee: string;
   foreclosures: ForeclosureRow[];
   foreclosureIngestNote: string | null;
+  /** Notices selling too soon to work. Counted, not listed. */
+  foreclosureTooLateNote: string | null;
   foreclosureOpenTotal: number;
   newOvernight: NewLeadRow[];
   newOvernightTotal: number;

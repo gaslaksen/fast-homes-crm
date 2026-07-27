@@ -107,6 +107,15 @@ export class DigestCronService implements OnModuleInit {
             this.logger.error(`Daily Brief to ${user.email} failed: ${err?.message}`);
           }
         }
+        // Record what led today, so tomorrow's brief can avoid repeating it.
+        await this.prisma.digestRun.create({
+          data: {
+            organizationId: orgId,
+            sentAt: now,
+            bigThingKey: brief.bigThing?.key ?? null,
+            metrics: Object.fromEntries(brief.board.map((t) => [t.label, t.value])),
+          },
+        });
       } catch (err: any) {
         this.logger.error(`Daily Brief assembly failed for org ${orgId}: ${err?.message}`);
       }

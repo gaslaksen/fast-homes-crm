@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { DigestNewsService } from './digest-news.service';
 import {
@@ -20,6 +21,22 @@ const INACTIVE = ['SOLD', 'SOLD_LOSS', 'HELD_LONG_TERM', 'CANCELLED', 'CLOSED_LO
 
 /** Contract statuses that are still live work. */
 const OPEN_CONTRACT = ['draft', 'signed', 'inspection', 'past-inspection', 'at-title'];
+
+/**
+ * How a pre-foreclosure sale date maps to whether it is worth working.
+ *
+ * Counter-intuitive but load-bearing: a sale two days out is NOT the most
+ * urgent thing on the board, it is the least actionable. Reaching the owner,
+ * agreeing a number, and closing takes 2-3 weeks minimum. Inside that, there is
+ * no path at any price, so ranking by "soonest sale" surfaces exactly the
+ * notices nobody can do anything about, and it surfaces the same one every
+ * morning as its date creeps closer.
+ *
+ * The real signal is a sale far enough out to actually work.
+ */
+const FORECLOSURE_MIN_WORKABLE_DAYS = 14;
+const FORECLOSURE_IDEAL_DAYS = 35;
+const FORECLOSURE_MAX_WATCH_DAYS = 75;
 
 const TZ = 'America/New_York';
 const DAY = 24 * 60 * 60 * 1000;
@@ -205,6 +222,8 @@ export class DigestService {
     const threeDaysAgo = new Date(now.getTime() - 3 * DAY);
     const fourDaysAgo = new Date(now.getTime() - 4 * DAY);
     const in7 = new Date(now.getTime() + 7 * DAY);
+    const workableFrom = new Date(now.getTime() + FORECLOSURE_MIN_WORKABLE_DAYS * DAY);
+    const workableTo = new Date(now.getTime() + FORECLOSURE_MAX_WATCH_DAYS * DAY);
     const in21 = new Date(now.getTime() + 21 * DAY);
     const in60 = new Date(now.getTime() + 60 * DAY);
 
@@ -218,22 +237,37 @@ export class DigestService {
       newlyStale,
       newContracts,
       foreclosureRows,
+      foreclosureTooLate,
+      recentMedia,
       foreclosureOpenTotal,
       foreclosureNew,
       pendingOffers,
       overdueTasks,
       topCity,
     ] = await Promise.all([
-      // Inbound replies nobody has answered. All fields are denormalized on Lead.
+      // Inbound replies nobody has ANSWERED.
+      //
+      // Deliberately not filtered on threadUnread: that flag is cleared the
+      // moment someone opens the thread in the inbox, so a teammate who reads a
+      // message and gets distracted makes it disappear from this list. Read is
+      // not answered. The only honest signal is that the newest message in the
+      // thread is still inbound.
       this.prisma.lead.findMany({
-        where: { ...active, threadUnread: true, lastMessageDirection: 'INBOUND' },
+        where: {
+          ...active,
+          lastMessageDirection: 'INBOUND',
+          // A five-month-old unanswered text is a nurture problem, not a reply
+          // you are about to send. Past two weeks it stops belonging here.
+          lastMessageAt: { gte: new Date(now.getTime() - 14 * DAY) },
+        },
         orderBy: { lastMessageAt: 'asc' },
-        take: 8,
+        take: 12,
         select: {
           id: true, sellerFirstName: true, sellerLastName: true, sellerPhone: true,
           propertyAddress: true, propertyCity: true, tier: true, scoreBand: true,
           lastMessageAt: true, lastMessagePreview: true, arv: true, askingPrice: true,
           currentRepairEstimate: true, currentDealNumbers: true, sellerMotivation: true,
+          threadUnread: true,
         },
       }),
 
@@ -280,16 +314,44 @@ export class DigestService {
 
       this.prisma.contract.count({ where: { ...leadOrg, createdAt: { gte: since } } }),
 
+      // The workable window, not "soonest". Ordered by how good the lead is,
+      // because inside this window every one of them is still reachable.
       this.prisma.foreclosureDetail.findMany({
         where: {
           ...org,
-          saleDate: { gte: now, lte: in21 },
+          saleDate: { gte: workableFrom, lte: workableTo },
           workStatus: { not: 'DEAD' },
           doNotCall: false,
         },
-        orderBy: [{ saleDate: 'asc' }, { leadScore: 'desc' }],
-        take: 5,
+        orderBy: [{ leadScore: 'desc' }, { saleDate: 'asc' }],
+        take: 6,
         include: { lead: { select: { id: true, propertyAddress: true, propertyCity: true, sellerPhone: true } } },
+      }),
+
+      // Counted, not listed. These are past the point of being workable, so
+      // they get one honest line instead of five cards nobody can act on.
+      this.prisma.foreclosureDetail.count({
+        where: {
+          ...org,
+          saleDate: { gte: now, lt: workableFrom },
+          workStatus: { not: 'DEAD' },
+          doNotCall: false,
+        },
+      }),
+
+      // Sellers who sent photos. A seller who bothers to photograph their own
+      // house is showing more intent than anything else in the pipeline, and
+      // that signal was previously invisible to the brief.
+      this.prisma.message.findMany({
+        where: {
+          ...leadOrg,
+          direction: 'INBOUND',
+          mediaUrls: { not: Prisma.DbNull },
+          createdAt: { gte: new Date(now.getTime() - 7 * DAY) },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 25,
+        select: { leadId: true, createdAt: true, mediaUrls: true, body: true },
       }),
 
       this.prisma.foreclosureDetail.count({ where: { ...org, workStatus: { notIn: ['DEAD', 'UNDER_CONTRACT'] } } }),
@@ -318,6 +380,27 @@ export class DigestService {
         take: 3,
       }),
     ]);
+
+    // leadId -> the most recent photo drop, for whichever leads are unanswered.
+    const photoByLead = new Map<string, { at: Date; count: number; body: string }>();
+    for (const m of recentMedia) {
+      if (!m.leadId || photoByLead.has(m.leadId)) continue;
+      const urls = Array.isArray(m.mediaUrls) ? m.mediaUrls.length : 1;
+      photoByLead.set(m.leadId, { at: m.createdAt, count: urls, body: m.body || '' });
+    }
+
+    // What the last few briefs opened with, so today's does not repeat them.
+    const recentRuns = orgId
+      ? await this.prisma.digestRun.findMany({
+          where: { organizationId: orgId, sentAt: { gte: new Date(now.getTime() - 4 * DAY) } },
+          orderBy: { sentAt: 'desc' },
+          take: 4,
+          select: { bigThingKey: true },
+        })
+      : [];
+    const recentKeys = new Set(
+      recentRuns.map((r) => r.bigThingKey).filter((k): k is string => !!k),
+    );
 
     const yesterday = await this.buildYesterday(orgId, since, now);
 
@@ -387,14 +470,24 @@ export class DigestService {
     // ── Waiting on you ──────────────────────────────────────────────────────
     const waiting: WaitingRow[] = unread.slice(0, 6).map((l) => {
       const waitedMs = l.lastMessageAt ? now.getTime() - l.lastMessageAt.getTime() : 0;
+      const photo = photoByLead.get(l.id);
+      const flags = [
+        photo ? `sent ${photo.count} photo${photo.count === 1 ? '' : 's'}` : null,
+        // "Someone opened this and walked away" is a different failure from
+        // "nobody has looked yet", and it is the more embarrassing one.
+        !l.threadUnread && waitedMs > 2 * 60 * 60 * 1000 ? 'read, not answered' : null,
+      ].filter(Boolean) as string[];
+
       return {
         name: this.personName(l),
         property: this.place(l),
-        tierLabel: this.tierLabel(l.tier, l.scoreBand),
+        tierLabel: [this.tierLabel(l.tier, l.scoreBand), ...flags].join(' · '),
         waitedLabel: this.fmtWait(waitedMs),
         preview: this.truncate(l.lastMessagePreview),
         url: this.leadUrl(l.id),
-        urgency: waitedMs > 4 * 60 * 60 * 1000 ? 'warn' : 'neutral',
+        urgency: photo || waitedMs > 12 * 60 * 60 * 1000
+          ? 'critical'
+          : waitedMs > 4 * 60 * 60 * 1000 ? 'warn' : 'neutral',
       };
     });
 
@@ -436,6 +529,11 @@ export class DigestService {
     // ── Foreclosure watch ───────────────────────────────────────────────────
     const foreclosures: ForeclosureRow[] = foreclosureRows.map((f) => {
       const days = f.saleDate ? this.daysUntil(f.saleDate, now) : 99;
+      // Inside this list everything is workable, so colour by lead quality
+      // rather than by countdown. Red-for-imminent trained the eye onto the
+      // notices that were already lost.
+      const quality: DigestUrgency =
+        f.priority === 'HIGH' ? 'critical' : f.priority === 'MEDIUM' ? 'warn' : 'neutral';
       const owner = this.cleanOwnerName(f.countyOwner);
       const facts = [
         owner,
@@ -454,10 +552,10 @@ export class DigestService {
 
       return {
         property: this.place({ propertyAddress: f.lead?.propertyAddress, propertyCity: f.lead?.propertyCity }),
-        daysLabel: `${days} days`,
+        daysLabel: `${days} day${days === 1 ? '' : 's'} out`,
         facts, status,
         url: f.lead ? this.leadUrl(f.lead.id) : `${this.appUrl}/foreclosures`,
-        urgency: days <= 5 ? 'critical' : days <= 10 ? 'warn' : 'neutral',
+        urgency: quality,
       };
     });
 
@@ -486,11 +584,13 @@ export class DigestService {
     // ── Actions ─────────────────────────────────────────────────────────────
     const actions = this.buildActions({
       now, unread, twoHoursAgo, foreclosureRows, openContracts, in7,
-      pendingOffers, overdueTasks, staleLeads,
+      pendingOffers, overdueTasks, staleLeads, photoByLead,
     });
 
     // ── Big thing ───────────────────────────────────────────────────────────
-    const bigThing = this.buildBigThing({ now, unread, foreclosureRows, openContracts, in7 });
+    const bigThing = this.buildBigThing({
+      now, unread, foreclosureRows, openContracts, in7, photoByLead, recentKeys,
+    });
 
     const market = topCity[0]?.propertyCity ? `${topCity[0].propertyCity} metro` : null;
 
@@ -514,6 +614,9 @@ export class DigestService {
       foreclosures,
       foreclosureIngestNote: foreclosureNew
         ? `${foreclosureNew} new notice${foreclosureNew > 1 ? 's' : ''} ingested overnight.`
+        : null,
+      foreclosureTooLateNote: foreclosureTooLate
+        ? `${foreclosureTooLate} more sell inside ${FORECLOSURE_MIN_WORKABLE_DAYS} days, too close to work.`
         : null,
       foreclosureOpenTotal,
       newOvernight,
@@ -590,6 +693,7 @@ export class DigestService {
     pendingOffers: any[];
     overdueTasks: any[];
     staleLeads: number;
+    photoByLead: Map<string, { at: Date; count: number; body: string }>;
   }): DigestAction[] {
     const out: DigestAction[] = [];
     const { now } = ctx;
@@ -598,7 +702,34 @@ export class DigestService {
       if (!l.lastMessageAt || l.lastMessageAt > ctx.twoHoursAgo) continue;
       const hours = (now.getTime() - l.lastMessageAt.getTime()) / 3_600_000;
       const value = this.leadValue(l);
-      const score = (100 + hours) * (l.tier === 1 ? 2 : 1);
+      const photo = ctx.photoByLead.get(l.id);
+
+      // A seller who photographs their own house has done work to sell it to
+      // you. Nothing else in the pipeline is a stronger buying signal, so this
+      // outranks every standing condition on the board.
+      if (photo) {
+        out.push({
+          title: `${this.personName(l)} sent ${photo.count} photo${photo.count === 1 ? '' : 's'} and is still waiting`,
+          detail: [
+            this.place(l),
+            this.tierLabel(l.tier, l.scoreBand),
+            `${this.fmtWait(now.getTime() - photo.at.getTime())} with no reply`,
+            value > 0 ? `${this.moneyCompact(value)} spread` : null,
+          ].filter(Boolean).join(' · '),
+          ctaLabel: 'Open the thread',
+          ctaUrl: this.leadUrl(l.id),
+          // Bounded: age breaks ties between photo drops, it does not let an
+          // old one outrank a fresh one by three orders of magnitude.
+          score: 400 + Math.min(hours, 72),
+          urgency: 'critical',
+          category: 'photos',
+        });
+        continue;
+      }
+
+      // Capped at 3 days of aging. Unbounded hours let a 143-day-old thread
+      // score 3551 and bury every other category in the list.
+      const score = (100 + Math.min(hours, 72)) * (l.tier === 1 ? 2 : 1);
       out.push({
         title: `Answer ${this.personName(l)}`,
         detail: [
@@ -618,18 +749,23 @@ export class DigestService {
     for (const f of ctx.foreclosureRows) {
       if (!f.saleDate) continue;
       const days = this.daysUntil(f.saleDate, now);
-      if (days > 14) continue;
-      // Urgency alone is not worth much. A LOW-priority, score-11 notice two
-      // counties over should not outrank a HIGH, score-63 one day later, so
-      // the skip-trace score and priority both weigh in.
+      // Below the workable floor there is no deal to be had, so it is not a
+      // task. ctx.foreclosureRows is already filtered to the window; this is a
+      // belt-and-braces guard.
+      if (days < FORECLOSURE_MIN_WORKABLE_DAYS || days > FORECLOSURE_MAX_WATCH_DAYS) continue;
+
       const priorityMultiplier =
         f.priority === 'HIGH' ? 1.5 : f.priority === 'MEDIUM' ? 1.0 : 0.7;
-      const score = (90 + (14 - days) * 3 + (f.leadScore ?? 0) * 0.4) * priorityMultiplier;
+      // Peaks at the ideal lead time and tapers either side: too close to work,
+      // or far enough out that it can wait for tomorrow's brief.
+      const timing = 1 - Math.min(1, Math.abs(days - FORECLOSURE_IDEAL_DAYS) / FORECLOSURE_IDEAL_DAYS);
+      const untouched = f.workStatus === 'NOT_CONTACTED' ? 12 : 0;
+      const score = (55 + timing * 25 + (f.leadScore ?? 0) * 0.4 + untouched) * priorityMultiplier;
       const owner = this.cleanOwnerName(f.countyOwner);
       out.push({
         title: owner
-          ? `Call ${owner}, sale in ${days} day${days === 1 ? '' : 's'}`
-          : `Owner unknown, sale in ${days} day${days === 1 ? '' : 's'}`,
+          ? `Call ${owner}, ${days} days to work it`
+          : `Skip-trace and call, ${days} days to work it`,
         detail: [
           this.place({ propertyAddress: f.lead?.propertyAddress, propertyCity: f.lead?.propertyCity }),
           f.noticeType ? f.noticeType.replace(/_/g, ' ') : null,
@@ -640,7 +776,7 @@ export class DigestService {
         ctaLabel: 'Open foreclosure',
         ctaUrl: f.lead ? this.leadUrl(f.lead.id) : `${this.appUrl}/foreclosures`,
         score,
-        urgency: days <= 5 ? 'critical' : 'warn',
+        urgency: f.priority === 'HIGH' ? 'critical' : 'warn',
         category: 'foreclosure',
       });
     }
@@ -780,11 +916,44 @@ export class DigestService {
     foreclosureRows: any[];
     openContracts: any[];
     in7: Date;
+    photoByLead: Map<string, { at: Date; count: number; body: string }>;
+    /** bigThingKeys from the last few sends, so the brief does not repeat itself. */
+    recentKeys: Set<string>;
   }): BigThing | null {
     const { now } = ctx;
 
-    if (ctx.unread.length) {
-      const best = [...ctx.unread].sort((a, b) => {
+    // A seller who sent photos and got silence is the single most newsworthy
+    // thing that can happen in a day: it is new, it is human, and it is
+    // recoverable. It leads even over a high-value thread with no media.
+    const withPhotos = ctx.unread
+      .filter((l) => ctx.photoByLead.has(l.id) && !ctx.recentKeys.has(`lead:${l.id}`))
+      .sort((a, b) => {
+        const pa = ctx.photoByLead.get(a.id)!, pb = ctx.photoByLead.get(b.id)!;
+        return pa.at.getTime() - pb.at.getTime();
+      })[0];
+
+    if (withPhotos) {
+      const photo = ctx.photoByLead.get(withPhotos.id)!;
+      const waited = now.getTime() - photo.at.getTime();
+      const value = this.leadValue(withPhotos);
+      return {
+        key: `lead:${withPhotos.id}`,
+        headline: `${this.personName(withPhotos)} sent ${photo.count} photo${photo.count === 1 ? '' : 's'} of the house and nobody has replied.`,
+        detail: `${this.place(withPhotos)}. Came in ${this.fmtWait(waited)} ago.${
+          photo.body ? ` They wrote: "${this.truncate(photo.body, 110)}"` : ''
+        }`,
+        whyItMatters: `A seller who photographs their own house is selling it to you. That is the strongest buying signal in the pipeline${
+          value > 0 ? `, and this one carries roughly ${this.money(value)} of spread` : ''
+        }. Silence after that reads as disinterest and is the easiest deal on the board to lose.`,
+        ctaLabel: 'Open the thread',
+        ctaUrl: this.leadUrl(withPhotos.id),
+        phone: this.fmtPhone(withPhotos.sellerPhone),
+      };
+    }
+
+    const freshUnread = ctx.unread.filter((l) => !ctx.recentKeys.has(`lead:${l.id}`));
+    if (freshUnread.length) {
+      const best = [...freshUnread].sort((a, b) => {
         const tierDiff = (a.tier ?? 9) - (b.tier ?? 9);
         if (tierDiff !== 0) return tierDiff;
         return this.leadValue(b) - this.leadValue(a);
@@ -796,6 +965,7 @@ export class DigestService {
         : 'earlier';
 
       return {
+        key: `lead:${best.id}`,
         headline: `${this.personName(best)} wrote back at ${time} and is still waiting.`,
         detail: `${this.place(best)}. The reply has been sitting ${this.fmtWait(waited)} unanswered.${
           best.lastMessagePreview ? ` They said: "${this.truncate(best.lastMessagePreview, 110)}"` : ''
@@ -809,12 +979,17 @@ export class DigestService {
       };
     }
 
-    // Among the notices selling this week, lead with the one actually worth a
-    // call. Picking whichever sells soonest put a LOW-priority, score-11 notice
-    // two counties over at the top of the brief while a HIGH, score-63 one day
-    // later sat in a table below.
+    // Only ever lead with a notice that can still be worked, and never with one
+    // that led a recent brief. Both rules exist because a countdown on an
+    // unwinnable property was opening the email several mornings running.
     const imminent = ctx.foreclosureRows
-      .filter((f) => f.saleDate && this.daysUntil(f.saleDate, now) <= 5)
+      .filter((f) => {
+        if (!f.saleDate) return false;
+        const d = this.daysUntil(f.saleDate, now);
+        if (d < FORECLOSURE_MIN_WORKABLE_DAYS || d > FORECLOSURE_MAX_WATCH_DAYS) return false;
+        if (f.workStatus !== 'NOT_CONTACTED') return false;
+        return f.lead ? !ctx.recentKeys.has(`lead:${f.lead.id}`) : true;
+      })
       .sort((a, b) => {
         const rank = (p?: string) => (p === 'HIGH' ? 2 : p === 'MEDIUM' ? 1 : 0);
         const pd = rank(b.priority) - rank(a.priority);
@@ -826,16 +1001,15 @@ export class DigestService {
     if (imminent) {
       const days = this.daysUntil(imminent.saleDate, now);
       return {
+        key: imminent.lead ? `lead:${imminent.lead.id}` : `fc:${imminent.id}`,
         headline: `${this.place({
           propertyAddress: imminent.lead?.propertyAddress,
           propertyCity: imminent.lead?.propertyCity,
-        })} sells at auction in ${days} day${days === 1 ? '' : 's'}.`,
+        })} has ${days} days left to work, and nobody has called.`,
         detail: `${(imminent.noticeType || 'foreclosure').replace(/_/g, ' ')} · sale ${this.fmtShortDate(imminent.saleDate)} · priority ${imminent.priority || 'unset'} · score ${imminent.leadScore ?? 0}${
           imminent.equitySpread != null ? ` · ${this.money(imminent.equitySpread)} equity spread` : ''
         }`,
-        whyItMatters: imminent.workStatus === 'NOT_CONTACTED'
-          ? 'Nobody has contacted this owner yet. After the sale date there is no deal here at any price.'
-          : 'The window closes on the sale date. Everything else on the board can wait a day; this cannot.',
+        whyItMatters: `Reaching the owner, agreeing a number, and closing takes two to three weeks. ${days} days is enough to do that, and it will not be in a week. This is the last useful window, not the sale date.`,
         ctaLabel: 'Open foreclosure',
         ctaUrl: imminent.lead ? this.leadUrl(imminent.lead.id) : `${this.appUrl}/foreclosures`,
         phone: this.fmtPhone(imminent.lead?.sellerPhone),
@@ -848,6 +1022,7 @@ export class DigestService {
     if (blocked) {
       const days = this.daysUntil(blocked.expectedCloseDate, now);
       return {
+        key: `lead:${blocked.lead.id}`,
         headline: `${this.place(blocked.lead)} closes in ${days} day${days === 1 ? '' : 's'} with no title company.`,
         detail: `${this.money(blocked.assignmentFee)} assignment fee · ${(blocked.contractStatus || '').replace(/-/g, ' ')} · expected ${this.fmtShortDate(blocked.expectedCloseDate)}`,
         whyItMatters: 'Title takes days to open a file. This is the one thing on the board that turns a signed deal into a missed close.',
@@ -881,9 +1056,11 @@ export class DigestService {
       ]);
 
     const stats: YesterdayStat[] = [];
-    if (sent) {
-      const rate = sent ? Math.round((replies / sent) * 100) : 0;
-      stats.push({ text: `${sent} texts sent · **${replies} replies** (${rate}%)` });
+    if (sent || replies) {
+      // No percentage: inbound in this window can be answering sends from days
+      // ago, which produced "7 texts sent, 8 replies (114%)". Two honest counts
+      // beat one ratio that cannot mean what it appears to mean.
+      stats.push({ text: `${sent} texts out · **${replies} inbound**` });
     }
     if (calls) stats.push({ text: `${calls} calls · **${connected} connected**` });
     if (offers) stats.push({ text: `${offers} offers sent · **${countered} countered**` });
@@ -902,9 +1079,9 @@ export class DigestService {
     if (b.waitingTotal) {
       parts.push(`${b.waitingTotal} repl${b.waitingTotal === 1 ? 'y' : 'ies'} waiting`);
     }
-    const urgentForeclosures = b.foreclosures.filter((f) => f.urgency === 'critical').length;
-    if (urgentForeclosures) {
-      parts.push(`${urgentForeclosures} sale date${urgentForeclosures > 1 ? 's' : ''} inside a week`);
+    const workable = b.foreclosures.filter((f) => f.urgency === 'critical').length;
+    if (workable) {
+      parts.push(`${workable} foreclosure${workable > 1 ? 's' : ''} worth calling`);
     }
     const urgentDeals = b.dealsInMotion.filter((d) => d.daysUrgency === 'critical').length;
     if (urgentDeals && parts.length < 2) {
