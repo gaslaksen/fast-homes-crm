@@ -203,11 +203,13 @@ export class TwilioVoiceService {
         // call. A normal hangup is covered by the seller's endConferenceOnExit.
         endConferenceOnExit: false,
         beep: 'false',
-        // What the agent hears while the seller's phone rings. An empty string
-        // means silence, which reads as a dead line, so only use it when a
-        // ringback file is configured. Otherwise fall through to Twilio's
-        // default hold music, which at least confirms the call is progressing.
-        ...(this.ringbackUrl() ? { waitUrl: this.ringbackUrl() } : {}),
+        // What the agent hears while the seller's phone rings. Twilio's default
+        // here is hold music, which does not sound like placing a call, so this
+        // points at a ring tone instead. GET lets Twilio cache the file rather
+        // than refetch it on every call.
+        ...(this.ringbackUrl()
+          ? { waitUrl: this.ringbackUrl(), waitMethod: 'GET' as const }
+          : {}),
         ...(apiBase
           ? {
               statusCallback: `${apiBase}/calls/twilio/conference-status`,
@@ -267,13 +269,18 @@ export class TwilioVoiceService {
   }
 
   /**
-   * Audio the agent hears while the seller's phone rings. Set
-   * TWILIO_RINGBACK_URL to a URL returning TwiML that plays a ring tone (e.g.
-   * `<Response><Play loop="0">https://.../ringback.mp3</Play></Response>`).
-   * Unset, Twilio's default conference hold music plays instead.
+   * Audio the agent hears while the seller's phone rings.
+   *
+   * Defaults to the ring tone this API serves, because Twilio's built-in
+   * conference wait audio is hold music, which does not sound like placing a
+   * call. TWILIO_RINGBACK_URL overrides it with any URL returning audio or
+   * TwiML.
    */
   private ringbackUrl(): string {
-    return (this.config.get<string>('TWILIO_RINGBACK_URL') || '').trim();
+    const override = (this.config.get<string>('TWILIO_RINGBACK_URL') || '').trim();
+    if (override) return override;
+    const apiBase = this.callbackBase();
+    return apiBase ? `${apiBase}/calls/twilio/ringback.wav` : '';
   }
 
   /** TwiML for a leg that joins an existing conference. */

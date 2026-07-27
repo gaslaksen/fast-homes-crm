@@ -18,6 +18,7 @@ import { CallsService } from './calls.service';
 import { TwilioVoiceService } from './twilio-voice.service';
 import { InitiateCallDto } from './dto/initiate-call.dto';
 import { isTwilioRequestValid } from '../webhooks/twilio-signature.util';
+import { RINGBACK_WAV } from './ringback.util';
 
 @Controller('calls')
 export class CallsController {
@@ -107,6 +108,21 @@ export class CallsController {
     await this.twilioVoiceService.handleConferenceStatus(body);
     res.set('Content-Type', 'text/xml');
     res.send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+  }
+
+  /**
+   * Ring tone the agent hears while the seller's phone rings.
+   *
+   * Fetched by Twilio as the conference waitUrl, so it is deliberately
+   * unauthenticated: Twilio does not sign media fetches, and the response is a
+   * fixed tone carrying no data. Served with a long cache header because the
+   * bytes never change.
+   */
+  @Get('twilio/ringback.wav')
+  ringback(@Res() res: Response) {
+    res.set('Content-Type', 'audio/wav');
+    res.set('Cache-Control', 'public, max-age=86400');
+    res.send(RINGBACK_WAV);
   }
 
   /** Call status + Dial action callback. */
