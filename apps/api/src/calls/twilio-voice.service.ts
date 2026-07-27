@@ -175,7 +175,7 @@ export class TwilioVoiceService {
     // means a call either connects or fails loudly. Ringback is handled by
     // waitUrl below.
     try {
-      await this.client().calls.create({
+      const customerCall = await this.client().calls.create({
         to,
         from: callerId,
         twiml: this.participantTwiml(conferenceName, 'customer'),
@@ -183,6 +183,14 @@ export class TwilioVoiceService {
         statusCallbackMethod: 'POST',
         statusCallbackEvent: ['completed'],
       });
+      // Needed to cancel this leg if the agent hangs up before it is answered.
+      if (callSid && customerCall?.sid) {
+        await this.prisma.callLog
+          .update({ where: { twilioCallSid: callSid }, data: { customerCallSid: customerCall.sid } })
+          .catch((err) =>
+            this.logger.warn(`Failed to store customer CallSid for ${callSid}: ${err.message}`),
+          );
+      }
     } catch (err: any) {
       this.logger.error(`Failed to dial ${to} for ${callSid}: ${err.message}`);
       response.say('We could not reach that number. Please try again.');
@@ -213,7 +221,9 @@ export class TwilioVoiceService {
           ? {
               statusCallback: `${apiBase}/calls/twilio/conference-status`,
               statusCallbackMethod: 'POST' as const,
-              statusCallbackEvent: ['start', 'end'],
+              // 'leave' matters: it is how we learn the agent hung up, which is
+              // the only signal that the seller's leg should be torn down too.
+              statusCallbackEvent: ['start', 'end', 'leave'],
             }
           : {}),
         ...(recordCalls
@@ -248,6 +258,84 @@ export class TwilioVoiceService {
         .updateMany({ where: { conferenceName }, data: { status: 'completed' } })
         .catch((err) =>
           this.logger.warn(`Failed to close out ${conferenceName}: ${err.message}`),
+        );
+      return;
+    }
+
+    if (event === 'participant-leave') {
+      await this.handleAgentLeave(params, conferenceName);
+    }
+  }
+
+  /**
+   * Tear the whole call down when the agent hangs up.
+   *
+   * The agent's conference participant is deliberately `endConferenceOnExit:
+   * false`, so that a warm transfer can drop them without cutting off the
+   * seller. The cost is that an ordinary hangup leaves everything running: the
+   * seller keeps ringing, or sits alone in the conference listening to wait
+   * audio. So the teardown is explicit here.
+   *
+   * Both legs are ended, not just the conference. Ending a conference does
+   * nothing to a leg that is still ringing an unanswered phone, which is the
+   * case that had sellers' phones ringing after the agent had already given up.
+   */
+  private async handleAgentLeave(params: Record<string, string>, conferenceName: string) {
+    const log = await this.prisma.callLog
+      .findFirst({ where: { conferenceName } })
+      .catch(() => null);
+    if (!log) return;
+
+    // Only the agent leaving triggers this. The seller leaving already ends the
+    // conference via their own endConferenceOnExit.
+    const leaverSid = params.CallSid || '';
+    const isAgent =
+      params.ParticipantLabel === 'agent' ||
+      (!!log.twilioCallSid && leaverSid === log.twilioCallSid);
+    if (!isAgent) return;
+
+    // A completed transfer is the one case where the agent leaves on purpose
+    // and the call must survive.
+    if (log.transferState === 'transferred') {
+      this.logger.log(`Agent left ${conferenceName} after a transfer; leaving the call up`);
+      return;
+    }
+
+    this.logger.log(`📴 Agent hung up ${conferenceName}, ending the call`);
+
+    if (log.customerCallSid) await this.endCall(log.customerCallSid);
+
+    // Belt and braces: also close the conference, which removes anyone else
+    // still in it (for example a consult leg from an abandoned warm transfer).
+    const conferenceSid = params.ConferenceSid;
+    if (conferenceSid) {
+      await this.client()
+        .conferences(conferenceSid)
+        .update({ status: 'completed' })
+        .catch((err: any) =>
+          this.logger.warn(`Could not end conference ${conferenceName}: ${err.message}`),
+        );
+    }
+  }
+
+  /**
+   * End a call leg whatever state it is in.
+   *
+   * Twilio wants `completed` for a call in progress and `canceled` for one that
+   * is still queued or ringing, and rejects the wrong one, so try the second if
+   * the first is refused. This is what actually stops an unanswered phone from
+   * continuing to ring.
+   */
+  private async endCall(callSid: string) {
+    const client = this.client();
+    try {
+      await client.calls(callSid).update({ status: 'completed' });
+    } catch {
+      await client
+        .calls(callSid)
+        .update({ status: 'canceled' })
+        .catch((err: any) =>
+          this.logger.warn(`Could not end call ${callSid}: ${err.message}`),
         );
     }
   }
@@ -380,8 +468,11 @@ export class TwilioVoiceService {
       endConferenceOnExit: true,
     });
 
-    await this.dropAgent(conf.sid);
+    // Mark the transfer BEFORE dropping the agent. Removing them fires
+    // participant-leave, and that handler ends the whole call unless it can see
+    // the leave was a transfer. Reversed, a transfer hangs up on the seller.
     await this.markTransfer(callSid, 'transferred', to);
+    await this.dropAgent(conf.sid);
 
     this.logger.log(`➡️  Blind transfer of ${callSid} to ${to}`);
     return { ok: true };
@@ -425,10 +516,12 @@ export class TwilioVoiceService {
     const client = this.client();
     await client.conferences(conf.sid).participants('consult').update({ endConferenceOnExit: true });
     await client.conferences(conf.sid).participants('customer').update({ hold: false });
-    await this.dropAgent(conf.sid);
 
+    // Mark the transfer BEFORE dropping the agent, so the participant-leave
+    // handler can tell this apart from the agent simply hanging up.
     const log = await this.prisma.callLog.findUnique({ where: { twilioCallSid: callSid } });
     await this.markTransfer(callSid, 'transferred', log?.transferTo ?? null);
+    await this.dropAgent(conf.sid);
 
     this.logger.log(`✅ Warm transfer of ${callSid} completed`);
     return { ok: true };
