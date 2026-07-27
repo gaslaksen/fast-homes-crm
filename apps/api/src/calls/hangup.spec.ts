@@ -133,3 +133,39 @@ describe('hanging up in the browser', () => {
     expect(conferences).toEqual([{ sid: CONF_SID, status: 'completed' }]);
   });
 });
+
+/**
+ * Ending the last leg usually empties the conference, and Twilio removes an
+ * empty conference itself. The explicit close that follows then 404s. That is
+ * the success path, so it must not look like a failure in the logs.
+ */
+describe('conference already gone', () => {
+  it('treats a 404 from ending the conference as success', async () => {
+    const { svc, calls } = harness();
+    const notFound: any = new Error('The requested resource ... was not found');
+    notFound.status = 404;
+    notFound.code = 20404;
+    (svc as any).client = () => ({
+      calls: () => ({ update: async () => { calls.push({ sid: CUSTOMER_SID, status: 'completed' }); return {}; } }),
+      conferences: () => ({ update: async () => { throw notFound; } }),
+    });
+
+    const warnSpy = jest.spyOn((svc as any).logger, 'warn');
+    await expect(svc.handleConferenceStatus(leaveEvent())).resolves.toBeUndefined();
+
+    // The seller leg still ended; only the redundant conference close 404'd.
+    expect(calls).toEqual([{ sid: CUSTOMER_SID, status: 'completed' }]);
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it('still warns on a real failure', async () => {
+    const { svc } = harness();
+    (svc as any).client = () => ({
+      calls: () => ({ update: async () => ({}) }),
+      conferences: () => ({ update: async () => { throw new Error('503 upstream'); } }),
+    });
+    const warnSpy = jest.spyOn((svc as any).logger, 'warn');
+    await svc.handleConferenceStatus(leaveEvent());
+    expect(warnSpy).toHaveBeenCalled();
+  });
+});
