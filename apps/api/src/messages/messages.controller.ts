@@ -1,9 +1,13 @@
 import { Controller, Get, Post, Body, Param } from '@nestjs/common';
 import { MessagesService } from './messages.service';
+import { PhoneNumbersService, numberKey } from '../phone-numbers/phone-numbers.service';
 
 @Controller('leads/:leadId/messages')
 export class MessagesController {
-  constructor(private messagesService: MessagesService) {}
+  constructor(
+    private messagesService: MessagesService,
+    private phoneNumbers: PhoneNumbersService,
+  ) {}
 
   @Get()
   async getMessages(@Param('leadId') leadId: string) {
@@ -21,9 +25,32 @@ export class MessagesController {
   @Post('send')
   async sendMessage(
     @Param('leadId') leadId: string,
-    @Body() body: { message: string; userId?: string },
+    @Body() body: { message: string; userId?: string; from?: string },
   ) {
-    return this.messagesService.sendMessage(leadId, body.message, body.userId);
+    return this.messagesService.sendMessage(leadId, body.message, body.userId, body.from);
+  }
+
+  /**
+   * Numbers the composer may send this lead from, plus which one is preselected.
+   * `lastUsed` marks the number already on this thread, `isDefault` the org
+   * fallback, mirroring the badges in the picker.
+   */
+  @Get('from-options')
+  async getFromOptions(@Param('leadId') leadId: string) {
+    const [numbers, sticky, selected] = await Promise.all([
+      this.phoneNumbers.list({ channel: 'sms' }),
+      this.phoneNumbers.stickyNumberFor(leadId),
+      this.phoneNumbers.resolveForLead(leadId),
+    ]);
+    return {
+      selected,
+      numbers: numbers.map((n) => ({
+        number: n.number,
+        label: n.label,
+        isDefault: n.isDefault,
+        lastUsed: !!sticky && numberKey(sticky) === numberKey(n.number),
+      })),
+    };
   }
 
   @Get('emails')

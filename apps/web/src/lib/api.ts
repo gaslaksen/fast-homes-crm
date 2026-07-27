@@ -158,8 +158,9 @@ export const messagesAPI = {
   list: (leadId: string) => api.get(`/leads/${leadId}/messages`),
   draft: (leadId: string, context?: string) =>
     api.post(`/leads/${leadId}/messages/draft`, { context }),
-  send: (leadId: string, message: string, userId?: string) =>
-    api.post(`/leads/${leadId}/messages/send`, { message, userId }),
+  send: (leadId: string, message: string, userId?: string, from?: string) =>
+    api.post(`/leads/${leadId}/messages/send`, { message, userId, from }),
+  fromOptions: (leadId: string) => api.get(`/leads/${leadId}/messages/from-options`),
   // Send an email (reply or forward) from the logged-in user, via Mailgun
   sendEmail: (
     leadId: string,
@@ -317,6 +318,12 @@ export const settingsAPI = {
     api.patch('/settings/profile', data),
   uploadAvatar: (base64: string) =>
     api.post('/settings/profile/avatar', { base64 }),
+  listPhoneNumbers: () => api.get('/settings/phone-numbers'),
+  addPhoneNumber: (data: { number: string; label?: string; smsEnabled?: boolean; voiceEnabled?: boolean; isDefault?: boolean }) =>
+    api.post('/settings/phone-numbers', data),
+  updatePhoneNumber: (id: string, data: Partial<{ label: string; smsEnabled: boolean; voiceEnabled: boolean; isDefault: boolean; active: boolean }>) =>
+    api.patch(`/settings/phone-numbers/${id}`, data),
+  deletePhoneNumber: (id: string) => api.delete(`/settings/phone-numbers/${id}`),
   getCompliance: () => api.get('/settings/compliance'),
   updateCompliance: (data: {
     optOutEnabled?: boolean;
