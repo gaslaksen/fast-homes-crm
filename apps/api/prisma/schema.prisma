@@ -850,6 +850,10 @@ model CallLog {
   // 'agent' (the browser leg), 'customer' (the lead), 'consult' (a warm-transfer
   // target). conferenceName is derived from the agent leg's CallSid.
   conferenceName   String?
+  // The seller's leg, dialled separately into the conference. Kept so hanging
+  // up in the browser can cancel it: without this we can end the conference but
+  // not a leg that is still ringing an unanswered phone.
+  customerCallSid  String?
   transferState    String?           // null | warm_consulting | transferred
   transferTo       String?           // number the call was/is being transferred to
   disposition      String?           // post-call outcome (Voicemail, Follow Up, etc.)
