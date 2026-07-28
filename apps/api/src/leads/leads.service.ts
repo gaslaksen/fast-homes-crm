@@ -408,6 +408,9 @@ export class LeadsService {
           take: 20,
         },
         dripSequence: true,
+        // Foreclosure leads carry extra contact numbers/emails here (phone2-4,
+        // email2) that the lead detail Contact section surfaces.
+        foreclosureDetail: true,
       },
     });
   }

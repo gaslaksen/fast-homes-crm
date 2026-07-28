@@ -513,6 +513,40 @@ export default function LeadRail({ lead, onLeadPatch, onMarkDead, hideNav }: Pro
             href={lead.sellerEmail ? `mailto:${lead.sellerEmail}` : undefined}
             onSave={saveField('sellerEmail')}
           />
+          {/* Extra foreclosure contacts (skip-trace). Read-only here; edit them
+              on the Foreclosures tab. Phones dial through the Dealcore dialer. */}
+          {[
+            { num: lead.foreclosureDetail?.phone2, type: lead.foreclosureDetail?.phone2Type },
+            { num: lead.foreclosureDetail?.phone3, type: lead.foreclosureDetail?.phone3Type },
+            { num: lead.foreclosureDetail?.phone4, type: lead.foreclosureDetail?.phone4Type },
+          ]
+            .filter((p) => p.num)
+            .map((p, i) => (
+              <ContactRow key={`ph${i}`} label={`Phone ${i + 2}`}>
+                <button
+                  type="button"
+                  onClick={() =>
+                    !lead.doNotContact &&
+                    dialer.startCall({ name: getLeadDisplayName(lead), phone: p.num, leadId })
+                  }
+                  disabled={lead.doNotContact}
+                  title={lead.doNotContact ? 'Do Not Contact is on' : 'Call with the Dealcore dialer'}
+                  className="truncate text-gray-800 dark:text-gray-200 hover:text-primary-600 hover:underline disabled:text-gray-400 disabled:no-underline disabled:cursor-not-allowed"
+                >
+                  {formatPhoneDisplay(p.num)}
+                </button>
+                {p.type && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400">{p.type}</span>
+                )}
+              </ContactRow>
+            ))}
+          {lead.foreclosureDetail?.email2 && (
+            <ContactRow label="Email 2">
+              <a href={`mailto:${lead.foreclosureDetail.email2}`} className="truncate text-gray-800 dark:text-gray-200 hover:text-primary-600 hover:underline">
+                {lead.foreclosureDetail.email2}
+              </a>
+            </ContactRow>
+          )}
           <EditableRow label="Street" value={lead.propertyAddress} onSave={saveField('propertyAddress')} />
           <EditableRow label="City" value={lead.propertyCity} onSave={saveField('propertyCity')} />
           <EditableRow label="State" value={lead.propertyState} onSave={saveField('propertyState')} />
@@ -843,6 +877,17 @@ export default function LeadRail({ lead, onLeadPatch, onMarkDead, hideNav }: Pro
 }
 
 // Click-to-edit field row: pencil on hover, Enter/blur saves, Esc cancels.
+// Read-only contact row matching EditableRow's label/value layout, for values
+// that live off the Lead (e.g. foreclosure extra phones/emails).
+function ContactRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-baseline gap-2">
+      <dt className="w-14 shrink-0 text-[11px] uppercase tracking-wide font-semibold text-gray-400 dark:text-gray-500">{label}</dt>
+      <dd className="min-w-0 flex-1 flex items-center gap-1">{children}</dd>
+    </div>
+  );
+}
+
 function EditableRow({
   label,
   value,
