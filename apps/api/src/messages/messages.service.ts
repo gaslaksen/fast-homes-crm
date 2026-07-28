@@ -12,6 +12,7 @@ import { ComplianceService } from './compliance.service';
 import { PhoneNumbersService } from '../phone-numbers/phone-numbers.service';
 import { formatPhoneNumber, isOptOutMessage } from '@fast-homes/shared';
 import { dealFitFlags, propertyContextForPrompt } from '../leads/property-fit.util';
+import { htmlToText } from './html-to-text.util';
 
 const MAX_AUTO_RESPONSES_PER_DAY = 20;
 const AUTO_RESPONSE_DELAY_MS = 180_000;       // 3 minutes — wait for seller to finish typing
@@ -1352,7 +1353,7 @@ You decide the right approach based on the conversation flow.${photoNudge}`.trim
     // Derive a plain-text alternative from the HTML when only HTML is supplied.
     const bodyHtml = params.bodyHtml?.trim() || undefined;
     const bodyText =
-      params.body?.trim() || (bodyHtml ? this.htmlToText(bodyHtml) : '');
+      params.body?.trim() || (bodyHtml ? htmlToText(bodyHtml) : '');
     if (!bodyText && !bodyHtml) throw new BadRequestException('Empty message');
 
     let res: { mailgunId: string | null };
@@ -1384,21 +1385,6 @@ You decide the right approach based on the conversation flow.${photoNudge}`.trim
     });
 
     return { success: true, mailgunId: res.mailgunId };
-  }
-
-  /** Collapse HTML to a readable plain-text alternative. */
-  private htmlToText(html: string): string {
-    return html
-      .replace(/<style[\s\S]*?<\/style>/gi, '')
-      .replace(/<\/(p|div|h[1-6]|li|tr)>/gi, '\n')
-      .replace(/<br\s*\/?>/gi, '\n')
-      .replace(/<[^>]+>/g, '')
-      .replace(/&nbsp;/gi, ' ')
-      .replace(/&amp;/gi, '&')
-      .replace(/&lt;/gi, '<')
-      .replace(/&gt;/gi, '>')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim();
   }
 
   /**
