@@ -42,6 +42,23 @@ export function decodeHtmlEntities(text: string): string {
 }
 
 /**
+ * Zero the margin on every paragraph, keeping any styling the editor set.
+ *
+ * The composer renders paragraphs flush (Quill's editor CSS sets margin 0) and
+ * expresses a blank line as its own empty paragraph. Mail clients instead give
+ * every <p> a default ~1em margin, so the two stack and the message arrives
+ * double spaced. Zeroing it makes the email match what the composer showed.
+ */
+function zeroParagraphMargins(html: string): string {
+  return html.replace(/<p\b([^>]*)>/gi, (_tag, attrs: string) => {
+    const style = attrs.match(/\sstyle\s*=\s*(["'])([\s\S]*?)\1/i);
+    if (!style) return `<p${attrs} style="margin:0;">`;
+    const [full, quote, value] = style;
+    return `<p${attrs.replace(full, ` style=${quote}margin:0;${value}${quote}`)}>`;
+  });
+}
+
+/**
  * Make editor HTML safe to send as an email body.
  *
  * Turns Quill's blanket &nbsp; back into ordinary spaces so the message wraps
@@ -51,7 +68,7 @@ export function decodeHtmlEntities(text: string): string {
  */
 export function normalizeEditorHtml(html: string): string {
   if (!html) return '';
-  return html
+  const spaced = html
     .replace(/(?:&nbsp;)+/gi, (run, offset: number, full: string) => {
       if (run.length > 6) return run;
       const before = full[offset - 1];
@@ -63,6 +80,7 @@ export function normalizeEditorHtml(html: string): string {
     // Quill writes a blank line as an empty paragraph, which some clients
     // collapse to nothing; a <br> inside keeps the gap the composer showed.
     .replace(/<p><\/p>/gi, '<p><br></p>');
+  return zeroParagraphMargins(spaced);
 }
 
 /** Collapse an HTML email body to a readable plain-text alternative. */
