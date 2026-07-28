@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { foreclosuresAPI } from '@/lib/api';
 import { formatPhoneDisplay } from '@/lib/format';
+import { useDialer } from '@/components/dialer/DialerContext';
 import AppShell from '@/components/AppShell';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -756,11 +757,17 @@ function LeadCard({ lead: l, onUpdate, onSkiptrace, collapseDefault, selected, o
 }) {
   const db = daysBadge(l.daysToSale);
   const priBar = l.priority === 'HIGH' ? 'bg-red-500' : l.priority === 'MEDIUM' ? 'bg-amber-500' : 'bg-blue-500';
+  const dialer = useDialer();
   const [notes, setNotes] = useState(l.callNotes || '');
   const [tracing, setTracing] = useState(false);
   const [collapsed, setCollapsed] = useState(collapseDefault);
   const [editing, setEditing] = useState(false);
   const notesTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Place the call through the in-app Twilio dialer (not the native handler).
+  const dial = (num: string) => {
+    dialer.startCall({ name: l.ownerNames || l.countyOwner || undefined, phone: num, leadId: l.id });
+  };
 
   // Follow the global Collapse/Expand toggle when it changes.
   useEffect(() => { setCollapsed(collapseDefault); }, [collapseDefault]);
@@ -875,7 +882,14 @@ function LeadCard({ lead: l, onUpdate, onSkiptrace, collapseDefault, selected, o
               {phones.map((p, i) => (
                 <div key={i} className="flex items-center text-sm">
                   <span className="w-5 text-gray-400 dark:text-gray-500">☎</span>
-                  <a href={`tel:${p.num}`} onClick={(e) => e.stopPropagation()} className="text-gray-800 dark:text-gray-200 hover:text-primary-600 dark:hover:text-primary-400">{formatPhoneDisplay(p.num!)}</a>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); dial(p.num!); }}
+                    disabled={l.doNotCall}
+                    title={l.doNotCall ? 'Do Not Call is on for this lead' : 'Call with the Dealcore dialer'}
+                    className="text-gray-800 dark:text-gray-200 hover:text-primary-600 dark:hover:text-primary-400 disabled:text-gray-400 disabled:cursor-not-allowed disabled:hover:text-gray-400"
+                  >
+                    {formatPhoneDisplay(p.num!)}
+                  </button>
                   <CopyBtn text={p.num!} label="number" />
                   {p.type && <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400">{p.type}</span>}
                 </div>
