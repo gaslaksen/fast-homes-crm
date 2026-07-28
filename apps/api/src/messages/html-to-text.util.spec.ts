@@ -1,4 +1,35 @@
-import { decodeHtmlEntities, htmlToText } from './html-to-text.util';
+import { decodeHtmlEntities, htmlToText, normalizeEditorHtml } from './html-to-text.util';
+
+describe('normalizeEditorHtml', () => {
+  it('turns the blanket &nbsp; Quill emits back into wrappable spaces', () => {
+    expect(normalizeEditorHtml('<p>My&nbsp;name&nbsp;is&nbsp;Ian&nbsp;McCaskill.</p>')).toBe(
+      '<p>My name is Ian McCaskill.</p>',
+    );
+  });
+
+  it('keeps a deliberate run of two or more', () => {
+    expect(normalizeEditorHtml('<p>a&nbsp;&nbsp;&nbsp;b</p>')).toBe('<p>a&nbsp;&nbsp;&nbsp;b</p>');
+  });
+
+  it('keeps a single one against a tag boundary, where a space would collapse', () => {
+    expect(normalizeEditorHtml('<p>&nbsp;indented</p>')).toBe('<p>&nbsp;indented</p>');
+    expect(normalizeEditorHtml('<p>trailing&nbsp;</p>')).toBe('<p>trailing&nbsp;</p>');
+  });
+
+  it('gives an empty paragraph a break so the blank line survives', () => {
+    expect(normalizeEditorHtml('<p>one</p><p></p><p>two</p>')).toBe(
+      '<p>one</p><p><br></p><p>two</p>',
+    );
+  });
+
+  it('leaves the apostrophe entity for the HTML part, which renders it fine', () => {
+    expect(normalizeEditorHtml('<p>I&#39;d&nbsp;like</p>')).toBe('<p>I&#39;d like</p>');
+  });
+
+  it('handles empty input', () => {
+    expect(normalizeEditorHtml('')).toBe('');
+  });
+});
 
 describe('decodeHtmlEntities', () => {
   it('decodes the numeric apostrophe Quill emits', () => {
@@ -55,5 +86,30 @@ describe('htmlToText', () => {
 
   it('handles empty input', () => {
     expect(htmlToText('')).toBe('');
+  });
+});
+
+// The body from a real Quill send, straight out of the editor.
+describe('a full composer body', () => {
+  const raw =
+    '<p>Hi&nbsp;{Name},</p><p></p>' +
+    '<p>My&nbsp;name&nbsp;is&nbsp;Ian&nbsp;McCaskill.&nbsp;I&nbsp;work&nbsp;with&nbsp;homeowners.</p>' +
+    '<p></p><p>I&#39;d&nbsp;like&nbsp;the&nbsp;chance.&nbsp;There&#39;s&nbsp;no&nbsp;obligation.</p>';
+
+  it('produces HTML that can wrap', () => {
+    const html = normalizeEditorHtml(raw);
+    expect(html).toBe(
+      '<p>Hi {Name},</p><p><br></p>' +
+        '<p>My name is Ian McCaskill. I work with homeowners.</p>' +
+        '<p><br></p><p>I&#39;d like the chance. There&#39;s no obligation.</p>',
+    );
+    expect(html).not.toMatch(/\w&nbsp;\w/);
+  });
+
+  it('produces a clean text alternative', () => {
+    expect(htmlToText(normalizeEditorHtml(raw))).toBe(
+      'Hi {Name},\n\nMy name is Ian McCaskill. I work with homeowners.\n\n' +
+        "I'd like the chance. There's no obligation.",
+    );
   });
 });

@@ -1,11 +1,14 @@
 /**
- * Plain-text derivation for the multipart alternative of an outbound email.
+ * Cleanup for the HTML the composer's editor (Quill) hands us, plus the
+ * plain-text derivation for the multipart alternative.
  *
- * The composer's editor (Quill) returns semantic HTML, which escapes not just
- * the markup characters but apostrophes and quotes too ("I&#39;d", "&quot;").
- * Stripping tags without decoding those leaks the raw entities into the text
- * part, so the seller reads "I&#39;d like the chance" in any client that
- * prefers text/plain.
+ * Quill's getSemanticHTML is built for a browser editor, not for email, and
+ * makes two choices that hurt on the way out:
+ *   - it escapes apostrophes and quotes as numeric entities ("I&#39;d"), which
+ *     leaks into the text part unless decoded;
+ *   - it emits &nbsp; for EVERY space (quill 2.0.3 does a literal
+ *     replaceAll(" ", "&nbsp;")), so no line can wrap at a word boundary and
+ *     clients break mid-word instead.
  */
 
 const NAMED_ENTITIES: Record<string, string> = {
@@ -36,6 +39,30 @@ export function decodeHtmlEntities(text: string): string {
     const key = entity.toLowerCase();
     return key in NAMED_ENTITIES ? NAMED_ENTITIES[key] : match;
   });
+}
+
+/**
+ * Make editor HTML safe to send as an email body.
+ *
+ * Turns Quill's blanket &nbsp; back into ordinary spaces so the message wraps
+ * normally. A run of two or more is kept: that is a deliberate multi-space.
+ * A single one hugging a tag boundary is kept too, because a plain space there
+ * would just be collapsed away by the client.
+ */
+export function normalizeEditorHtml(html: string): string {
+  if (!html) return '';
+  return html
+    .replace(/(?:&nbsp;)+/gi, (run, offset: number, full: string) => {
+      if (run.length > 6) return run;
+      const before = full[offset - 1];
+      const after = full[offset + run.length];
+      if (before === undefined || before === '>') return run;
+      if (after === undefined || after === '<') return run;
+      return ' ';
+    })
+    // Quill writes a blank line as an empty paragraph, which some clients
+    // collapse to nothing; a <br> inside keeps the gap the composer showed.
+    .replace(/<p><\/p>/gi, '<p><br></p>');
 }
 
 /** Collapse an HTML email body to a readable plain-text alternative. */
