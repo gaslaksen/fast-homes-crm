@@ -129,6 +129,8 @@ export const foreclosuresAPI = {
   bulkSkiptrace: (ids: string[]) => api.post('/foreclosures/bulk-skiptrace', { ids }),
   refresh: () => api.post('/foreclosures/refresh'),
   skiptrace: (id: string) => api.post(`/foreclosures/${id}/skiptrace`),
+  setSignalAction: (signalId: string, action: string, completed: boolean) =>
+    api.patch(`/foreclosures/signals/${signalId}/actions`, { action, completed }),
   importParse: (file: File) => {
     const formData = new FormData();
     formData.append('file', file);

@@ -3,10 +3,13 @@ import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
 import * as crypto from 'crypto';
 import Parser from 'rss-parser';
-import pdfParse from 'pdf-parse';
 import { ForeclosureSourceKind } from '@fast-homes/shared';
 import { ForeclosuresService } from './foreclosures.service';
 import { ForeclosureSkiptraceService } from './foreclosure-skiptrace.service';
+import { ForeclosureDocumentService } from './foreclosure-document.service';
+import { ForeclosureFilingService } from './foreclosure-filing.service';
+import { ForeclosureRulesService } from './foreclosure-rules.service';
+import { ForeclosureSignalsService } from './foreclosure-signals.service';
 import { ForeclosureExtractService, ExtractedNotice } from './foreclosure-extract.service';
 import { ForeclosureLeadInput } from './foreclosure.types';
 import { computePriority, parseDateISO, daysToSale } from './foreclosure-scoring.util';
@@ -25,42 +28,105 @@ export class ForeclosureIngestService {
     private foreclosures: ForeclosuresService,
     private skiptrace: ForeclosureSkiptraceService,
     private extract: ForeclosureExtractService,
+    private documents: ForeclosureDocumentService,
+    private filings: ForeclosureFilingService,
+    private rules: ForeclosureRulesService,
+    private signals: ForeclosureSignalsService,
   ) {
     this.feedUrl = this.config.get<string>('FORECLOSURE_RSS_URL') || MECK_TIMES_RSS;
   }
 
-  /** Parse an uploaded eCourts PDF into a single foreclosure lead. */
+  /**
+   * Parse an uploaded eCourts PDF into a single foreclosure lead.
+   *
+   * The filing is persisted first, so a PDF we cannot read is recorded and
+   * surfaced for manual entry instead of being dropped. The document holds the
+   * full text; only an 800-char snippet is mirrored onto ForeclosureDetail for
+   * the card preview.
+   */
   async ingestPdf(
     buffer: Buffer,
     filename: string,
     opts: { organizationId?: string | null },
-  ): Promise<{ created: boolean; leadId: string | null; extracted?: ExtractedNotice; reason?: string }> {
-    let text = '';
-    try {
-      const parsed = await pdfParse(buffer);
-      text = parsed.text || '';
-    } catch (e: any) {
-      this.logger.error(`PDF parse failed for ${filename}: ${e.message}`);
-      return { created: false, leadId: null, reason: 'could not read PDF' };
-    }
-    if (!text.trim()) return { created: false, leadId: null, reason: 'no text in PDF' };
+  ): Promise<{
+    created: boolean;
+    leadId: string | null;
+    documentId: string;
+    extracted?: ExtractedNotice;
+    reason?: string;
+  }> {
+    const doc = await this.documents.storePdf(buffer, filename, {
+      organizationId: opts.organizationId,
+      noticeUrl: null,
+    });
 
-    const extracted = await this.extract.extractFromText(text);
+    if (!doc.text.trim()) {
+      return {
+        created: false,
+        leadId: doc.leadId,
+        documentId: doc.id,
+        reason: doc.extractionError || 'no text in PDF',
+      };
+    }
+
+    // Same file, already turned into a lead. Return that lead rather than
+    // re-running extraction. A duplicate with no lead yet falls through and
+    // retries, so a previously failed run is recoverable by re-uploading.
+    if (doc.duplicate && doc.leadId) {
+      return { created: false, leadId: doc.leadId, documentId: doc.id, reason: 'duplicate' };
+    }
+
+    const extracted = await this.extract.extractFromText(doc.text);
     if (!extracted.propertyAddress && !extracted.caseNumber && !extracted.ownerNames) {
-      return { created: false, leadId: null, reason: 'could not extract notice fields', extracted };
+      return {
+        created: false,
+        leadId: null,
+        documentId: doc.id,
+        reason: 'could not extract notice fields',
+        extracted,
+      };
     }
 
-    // Stable notice id from the file contents so re-uploads dedupe.
+    // Stable notice id from the file contents so re-uploads dedupe. Kept on
+    // sha1 to match ids already written for PDFs ingested before documents
+    // existed; the document table's own idempotency key is a sha256.
     const noticeId = `pdf_${crypto.createHash('sha1').update(buffer).digest('hex').slice(0, 16)}`;
     const input = this.extractedToInput(extracted, {
       sourceKind: ForeclosureSourceKind.PDF,
       noticeId,
-      rawSnippet: text.slice(0, 800),
+      rawSnippet: doc.text.slice(0, 800),
+      // Regex-read case number backstops the model when it returns nothing.
+      caseNumber: extracted.caseNumber || doc.caseNumber || undefined,
     });
 
     const res = await this.foreclosures.createForeclosureLead(input, { organizationId: opts.organizationId });
+    if (res.leadId) await this.documents.attachToLead(doc.id, res.leadId);
+
+    // Full 25-field extraction runs off the same stored text. Failures here
+    // must not lose the lead, so it is logged and swallowed.
+    try {
+      await this.filings.extractAndStore(doc.id, doc.text, {
+        organizationId: opts.organizationId,
+        leadId: res.leadId,
+      });
+      // Deterministic classification runs off the stored filing. This is what
+      // suppresses equity math on a reverse mortgage.
+      if (res.leadId) {
+        await this.rules.evaluateLead(res.leadId, opts.organizationId);
+        await this.signals.analyzeLead(res.leadId, opts.organizationId);
+      }
+    } catch (e: any) {
+      this.logger.warn(`Filing extraction failed for document ${doc.id}: ${e.message}`);
+    }
+
     if (res.created && res.leadId) this.enrichAsync(res.leadId, opts.organizationId);
-    return { created: res.created, leadId: res.leadId, extracted, reason: res.reason };
+    return {
+      created: res.created,
+      leadId: res.leadId,
+      documentId: doc.id,
+      extracted,
+      reason: res.reason,
+    };
   }
 
   /** Pull the Mecklenburg Times feed and ingest every new, future-dated notice. */
@@ -143,7 +209,13 @@ export class ForeclosureIngestService {
   /** Convert AI-extracted notice fields to a normalized lead input. */
   private extractedToInput(
     e: ExtractedNotice,
-    meta: { sourceKind: ForeclosureSourceKind; noticeId?: string; noticeUrl?: string; rawSnippet?: string },
+    meta: {
+      sourceKind: ForeclosureSourceKind;
+      noticeId?: string;
+      noticeUrl?: string;
+      rawSnippet?: string;
+      caseNumber?: string;
+    },
   ): ForeclosureLeadInput {
     const isHearing = (e.noticeType || '').includes('hearing');
     // For a hearing notice the actionable date is the hearing date; mirror it
@@ -169,7 +241,7 @@ export class ForeclosureIngestService {
       state: e.state,
       zip: e.zip,
       ownerNames: e.ownerNames,
-      caseNumber: e.caseNumber,
+      caseNumber: meta.caseNumber || e.caseNumber,
       county: e.county,
       trustee: e.trustee,
       saleDate,

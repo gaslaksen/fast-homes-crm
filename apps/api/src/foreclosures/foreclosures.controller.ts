@@ -9,6 +9,10 @@ import { ForeclosuresService } from './foreclosures.service';
 import { ForeclosureImportService } from './foreclosure-import.service';
 import { ForeclosureIngestService } from './foreclosure-ingest.service';
 import { ForeclosureSkiptraceService } from './foreclosure-skiptrace.service';
+import { ForeclosureDocumentService } from './foreclosure-document.service';
+import { ForeclosureFilingService } from './foreclosure-filing.service';
+import { ForeclosureRulesService } from './foreclosure-rules.service';
+import { ForeclosureSignalsService } from './foreclosure-signals.service';
 
 const IMPORT_UPLOAD_OPTIONS = {
   storage: memoryStorage(),
@@ -47,6 +51,10 @@ export class ForeclosuresController {
     private importService: ForeclosureImportService,
     private ingest: ForeclosureIngestService,
     private skiptrace: ForeclosureSkiptraceService,
+    private documents: ForeclosureDocumentService,
+    private filings: ForeclosureFilingService,
+    private rules: ForeclosureRulesService,
+    private signals: ForeclosureSignalsService,
   ) {}
 
   private decodeToken(authHeader?: string): { userId?: string; organizationId?: string; role?: string } {
@@ -113,6 +121,125 @@ export class ForeclosuresController {
     const lead = await this.foreclosures.get(id, organizationId);
     if (!lead) throw new BadRequestException('Foreclosure lead not found');
     return lead;
+  }
+
+  /** Signals for this lead, most severe first. */
+  @Get(':id/signals')
+  async signalsForLead(@Param('id') id: string, @Headers('authorization') authHeader?: string) {
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.signals.forLead(id, organizationId);
+  }
+
+  /** Re-run the synthesis pass, e.g. after correcting a field or a lender. */
+  @Post(':id/analyze-signals')
+  async analyzeSignals(@Param('id') id: string, @Headers('authorization') authHeader?: string) {
+    const { organizationId } = this.decodeToken(authHeader);
+    const result = await this.signals.analyzeLead(id, organizationId);
+    if (!result) throw new BadRequestException('No extracted filing for this lead yet');
+    return result;
+  }
+
+  /**
+   * Tick or untick one recommended action. A record of what the user did -
+   * nothing here sends a message or contacts anyone.
+   */
+  @Patch('signals/:signalId/actions')
+  async setSignalAction(
+    @Param('signalId') signalId: string,
+    @Body() body: { action?: string; completed?: boolean },
+    @Headers('authorization') authHeader?: string,
+  ) {
+    const { organizationId } = this.decodeToken(authHeader);
+    if (!body?.action) throw new BadRequestException('action is required');
+    const updated = await this.signals.setActionCompletion(
+      signalId, body.action, body.completed !== false, organizationId,
+    );
+    if (!updated) throw new BadRequestException('Signal not found or action not offered on it');
+    return updated;
+  }
+
+  /** Lender patterns driving loan-type classification. Editable in-app. */
+  @Get('lender-profiles')
+  async listLenderProfiles(@Headers('authorization') authHeader?: string) {
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.rules.listProfiles(organizationId);
+  }
+
+  @Post('lender-profiles')
+  async createLenderProfile(@Body() body: any, @Headers('authorization') authHeader?: string) {
+    const { organizationId } = this.decodeToken(authHeader);
+    if (!body?.matchPattern || !body?.lenderName || !body?.loanType) {
+      throw new BadRequestException('matchPattern, lenderName, and loanType are required');
+    }
+    return this.rules.createProfile(body, organizationId);
+  }
+
+  @Patch('lender-profiles/:profileId')
+  async updateLenderProfile(
+    @Param('profileId') profileId: string,
+    @Body() body: any,
+    @Headers('authorization') authHeader?: string,
+  ) {
+    const { organizationId } = this.decodeToken(authHeader);
+    const updated = await this.rules.updateProfile(profileId, body || {}, organizationId);
+    if (!updated) throw new BadRequestException('Lender profile not found');
+    return updated;
+  }
+
+  @Post('lender-profiles/:profileId/delete')
+  async deleteLenderProfile(
+    @Param('profileId') profileId: string,
+    @Headers('authorization') authHeader?: string,
+  ) {
+    const { organizationId } = this.decodeToken(authHeader);
+    const removed = await this.rules.deleteProfile(profileId, organizationId);
+    if (!removed) throw new BadRequestException('Lender profile not found or not editable');
+    return removed;
+  }
+
+  /** Re-run the deterministic rules for one lead (after a lender edit). */
+  @Post(':id/evaluate-rules')
+  async evaluateRules(@Param('id') id: string, @Headers('authorization') authHeader?: string) {
+    const { organizationId } = this.decodeToken(authHeader);
+    const result = await this.rules.evaluateLead(id, organizationId);
+    if (!result) throw new BadRequestException('No extracted filing for this lead yet');
+    return result;
+  }
+
+  /** The extracted 25-field filing for this lead, with per-field confidence. */
+  @Get(':id/filing')
+  async filingForLead(
+    @Param('id') id: string,
+    @Headers('authorization') authHeader?: string,
+  ) {
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.filings.forLead(id, organizationId);
+  }
+
+  /**
+   * Correct extracted fields by hand. Every field in the body is marked
+   * verified and is never overwritten by a later re-extraction.
+   */
+  @Patch('filings/:filingId')
+  async updateFiling(
+    @Param('filingId') filingId: string,
+    @Body() body: Record<string, unknown>,
+    @Headers('authorization') authHeader?: string,
+  ) {
+    const { organizationId } = this.decodeToken(authHeader);
+    const updated = await this.filings.applyUserEdits(filingId, body || {}, organizationId);
+    if (!updated) throw new BadRequestException('Filing not found or no valid fields supplied');
+    return updated;
+  }
+
+  /** Every filing on this lead's case, newest first. Text is not included. */
+  @Get(':id/documents')
+  async documentsForLead(
+    @Param('id') id: string,
+    @Headers('authorization') authHeader?: string,
+  ) {
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.documents.listForLead(id, organizationId);
   }
 
   @Patch(':id')

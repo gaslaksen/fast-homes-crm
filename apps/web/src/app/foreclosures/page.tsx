@@ -58,6 +58,22 @@ interface FclLead {
   realtorQuery: string | null;
   realtorZip: string | null;
   daysToSale: number | null;
+  // Rules-engine verdict. debtFigureReliable=false means the equity fields
+  // above are deliberately blank, not merely unknown.
+  loanType: string | null;
+  lenderName: string | null;
+  debtFigureReliable: boolean;
+  signals: FclSignal[];
+}
+
+interface FclSignal {
+  id: string;
+  signalCode: string;
+  severity: 'critical' | 'notable' | 'info';
+  headline: string;
+  evidence: string[];
+  recommendedActions: string[];
+  completedActions: string[];
 }
 
 const WORK_STATUSES = [
@@ -106,6 +122,55 @@ function daysBadge(d: number | null): { text: string; cls: string } {
   if (d <= 30) return { text: `${d}d to sale`, cls: 'text-amber-600 dark:text-amber-400' };
   return { text: `${d}d to sale`, cls: '' };
 }
+// Short chip label per signal code. The full headline is up to 80 characters,
+// far too long for a chip, so the chip names the kind of thing and the modal
+// carries the sentence.
+const SIGNAL_LABELS: Record<string, string> = {
+  LOAN_TYPE_REVERSE: 'Reverse mortgage',
+  LOAN_TYPE_HOA: 'HOA lien',
+  LOAN_TYPE_TAX: 'Tax foreclosure',
+  LOAN_TYPE_PRIVATE: 'Private lender',
+  HEIR_ESTATE_PATH: 'Estate path?',
+  OCCUPANCY_RISK: 'Occupancy risk',
+  DEBT_FIGURE_UNRELIABLE: 'Debt figure unreliable',
+  TITLE_COMPLEXITY: 'Title complexity',
+  TIMELINE_URGENT: 'Urgent timeline',
+  TIMELINE_UPSET_BID_OPEN: 'Upset bid open',
+  CONTACT_TARGET_NOT_OWNER: 'Contact may not be owner',
+  SKIP_TRACE_LOW_YIELD_EXPECTED: 'Skip trace may be thin',
+  DATA_QUALITY_DEGRADED: 'Check extraction',
+};
+function signalLabel(code: string): string {
+  return SIGNAL_LABELS[code] || code.replace(/_/g, ' ').toLowerCase();
+}
+function severityClass(sev: string): string {
+  if (sev === 'critical') return 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300 hover:bg-red-200 dark:hover:bg-red-900/60';
+  if (sev === 'notable') return 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-900/60';
+  return 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700';
+}
+// Human label for an action enum, for the modal checklist.
+const ACTION_LABELS: Record<string, string> = {
+  CHECK_ESTATE_FILE: 'Check the county estate file',
+  TRACE_RELATIVES_NOT_OWNER: 'Trace relatives, not the record owner',
+  PULL_DOT_FROM_ROD: 'Pull the Deed of Trust from the Register of Deeds',
+  CONTACT_TRUSTEE_ATTORNEY: 'Contact the trustee attorney',
+  VERIFY_OCCUPANCY: 'Verify occupancy',
+  PRIORITIZE_DIRECT_MAIL: 'Prioritise direct mail over phone',
+  SKIP_PHONE_FIRST_TOUCH: 'Skip phone for the first touch',
+  MANUAL_FIELD_REVIEW: 'Review the extracted fields by hand',
+  STANDARD_OUTREACH: 'Standard outreach',
+};
+function actionLabel(a: string): string {
+  return ACTION_LABELS[a] || a.replace(/_/g, ' ').toLowerCase();
+}
+// Field names cited as evidence, rendered readably: camelCase to a sentence,
+// with a trailing "At" reading as "date" (hearingAt -> "Hearing date"). Only a
+// TRAILING one, so borrowerAgeFloorAtOrigination keeps its middle "at".
+function evidenceLabel(f: string): string {
+  const words = f.replace(/([A-Z])/g, ' $1').trim().toLowerCase().replace(/ at$/, ' date');
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
 function csvEsc(v: any): string {
   const s = v == null ? '' : String(v);
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -201,6 +266,21 @@ function Chip({ active, onClick, children, activeClass }: { active: boolean; onC
 
 function Tag({ children, cls }: { children: React.ReactNode; cls: string }) {
   return <span className={`text-[11px] px-2 py-0.5 rounded font-semibold ${cls}`}>{children}</span>;
+}
+
+/** A signal as a chip in the tag row. Clicking opens the detail modal. */
+function SignalChip({ signal, onOpen }: { signal: FclSignal; onOpen: () => void }) {
+  const done = signal.recommendedActions.length > 0 &&
+    signal.completedActions.length >= signal.recommendedActions.length;
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); onOpen(); }}
+      title={signal.headline}
+      className={`text-[11px] px-2 py-0.5 rounded font-semibold transition-colors ${severityClass(signal.severity)}`}
+    >
+      {done && '\u2713 '}{signalLabel(signal.signalCode)}
+    </button>
+  );
 }
 
 function CopyBtn({ text, label }: { text: string; label: string }) {
@@ -506,6 +586,28 @@ export default function ForeclosuresPage() {
     setHideDnc(false);
   };
 
+  /**
+   * Tick or untick a suggested next step. Optimistic so the checkbox responds
+   * immediately; on failure the list refetch puts it back.
+   */
+  const toggleSignalAction = async (signalId: string, action: string, completed: boolean) => {
+    setLeads((prev) => prev.map((l) => ({
+      ...l,
+      signals: (l.signals || []).map((sg) => sg.id !== signalId ? sg : {
+        ...sg,
+        completedActions: completed
+          ? Array.from(new Set([...sg.completedActions, action]))
+          : sg.completedActions.filter((a) => a !== action),
+      }),
+    })));
+    try {
+      await foreclosuresAPI.setSignalAction(signalId, action, completed);
+    } catch {
+      showToast('Could not save that step', true);
+      fetchLeads();
+    }
+  };
+
   /** Re-run skip trace for one lead, then refresh that card in place. */
   const runSkiptraceOne = async (id: string) => {
     await foreclosuresAPI.skiptrace(id);
@@ -702,6 +804,7 @@ export default function ForeclosuresPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 items-start">
             {leads.map((l) => (
               <LeadCard key={l.id} lead={l} onUpdate={updateLead} onSkiptrace={runSkiptraceOne}
+                onToggleAction={toggleSignalAction}
                 collapseDefault={collapseAll}
                 selected={selected.has(l.id)} onToggleSelect={() => toggleSelect(l.id)} />
             ))}
@@ -747,10 +850,11 @@ export default function ForeclosuresPage() {
 }
 
 // ─── Lead card (modeled on the offline tracker card) ─────────────────────────
-function LeadCard({ lead: l, onUpdate, onSkiptrace, collapseDefault, selected, onToggleSelect }: {
+function LeadCard({ lead: l, onUpdate, onSkiptrace, onToggleAction, collapseDefault, selected, onToggleSelect }: {
   lead: FclLead;
   onUpdate: (id: string, patch: any, localPatch?: any) => void;
   onSkiptrace: (id: string) => Promise<void>;
+  onToggleAction: (signalId: string, action: string, completed: boolean) => void;
   collapseDefault: boolean;
   selected: boolean;
   onToggleSelect: () => void;
@@ -762,6 +866,7 @@ function LeadCard({ lead: l, onUpdate, onSkiptrace, collapseDefault, selected, o
   const [tracing, setTracing] = useState(false);
   const [collapsed, setCollapsed] = useState(collapseDefault);
   const [editing, setEditing] = useState(false);
+  const [showSignals, setShowSignals] = useState(false);
   const notesTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Place the call through the in-app Twilio dialer (not the native handler).
@@ -814,6 +919,17 @@ function LeadCard({ lead: l, onUpdate, onSkiptrace, collapseDefault, selected, o
 
   const parcelSub = l.parcelType === 'exact' ? `PID ${l.parcelId}` : 'search';
 
+  // Signals: chip the ones worth seeing at a glance, count the rest.
+  const signals = l.signals || [];
+  const chipSignals = signals.filter((sg) => sg.severity !== 'info');
+  const infoSignalCount = signals.length - chipSignals.length;
+  // Equity is blank on purpose when the debt figure cannot be trusted; say so
+  // rather than letting it read as missing data.
+  const suppressedEquity = !l.debtFigureReliable && l.equityPct == null;
+  const equityBlankReason = suppressedEquity
+    ? 'Blank on purpose: the recorded principal on a reverse mortgage overstates the debt, so equity cannot be computed from it.'
+    : undefined;
+
   const linkBtn = 'flex-1 min-w-[80px] flex flex-col items-center justify-center gap-0.5 px-2 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/60 hover:border-primary-400 dark:hover:border-primary-500 transition-colors text-sm font-semibold text-gray-800 dark:text-gray-200';
   const linkSub = 'text-[10px] font-normal text-gray-400 dark:text-gray-500';
 
@@ -864,6 +980,20 @@ function LeadCard({ lead: l, onUpdate, onSkiptrace, collapseDefault, selected, o
           )}
           {l.ownerOccupied === 'N' && <Tag cls="bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300">Absentee owner</Tag>}
           {l.ownerOccupied === 'Y' && <Tag cls="bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300">Owner-occupied</Tag>}
+          {/* Signals ride the existing tag row. critical/notable get their own
+              chip; info-level collapse into a count so the row cannot crowd. */}
+          {chipSignals.map((sig) => (
+            <SignalChip key={sig.id} signal={sig} onOpen={() => setShowSignals(true)} />
+          ))}
+          {infoSignalCount > 0 && (
+            <button
+              onClick={(e) => { e.stopPropagation(); setShowSignals(true); }}
+              title="More signals"
+              className="text-[11px] px-2 py-0.5 rounded font-semibold bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+            >
+              +{infoSignalCount}
+            </button>
+          )}
         </div>
 
         {/* Owner */}
@@ -1025,21 +1155,41 @@ function LeadCard({ lead: l, onUpdate, onSkiptrace, collapseDefault, selected, o
             </div>
             <div className="px-4 py-2.5">
               <SectionLabel>Loan amount</SectionLabel>
-              <div className="text-sm font-semibold mt-0.5 text-gray-800 dark:text-gray-200">{money(l.loanAmount)}</div>
+              <div className="text-sm font-semibold mt-0.5 text-gray-800 dark:text-gray-200">
+                {money(l.loanAmount)}
+                {!l.debtFigureReliable && (
+                  <span
+                    title="Recorded principal on a reverse mortgage is a multiple of the maximum claim amount, so it overstates the debt. Not used for equity."
+                    className="ml-1 text-amber-600 dark:text-amber-400 cursor-help"
+                  >⚠</span>
+                )}
+              </div>
             </div>
-            <div className="px-4 py-2.5">
+            <div className="px-4 py-2.5" title={equityBlankReason}>
               <SectionLabel>Equity spread</SectionLabel>
               <div className={`text-sm font-semibold mt-0.5 ${l.equitySpread == null ? 'text-gray-800 dark:text-gray-200' : l.equitySpread >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
                 {signedMoney(l.equitySpread)}
+                {suppressedEquity && <span className="ml-1 text-amber-600 dark:text-amber-400 cursor-help">⚠</span>}
               </div>
             </div>
-            <div className="px-4 py-2.5">
+            <div className="px-4 py-2.5" title={equityBlankReason}>
               <SectionLabel>Est. equity %</SectionLabel>
-              <div className="text-sm font-semibold mt-0.5 text-gray-800 dark:text-gray-200">{l.equityPct == null ? '-' : `${l.equityPct}%`}</div>
+              <div className="text-sm font-semibold mt-0.5 text-gray-800 dark:text-gray-200">
+                {l.equityPct == null ? '-' : `${l.equityPct}%`}
+                {suppressedEquity && <span className="ml-1 text-amber-600 dark:text-amber-400 cursor-help">⚠</span>}
+              </div>
             </div>
           </div>
         )}
       </div>
+
+      {showSignals && (
+        <SignalModal
+          lead={l}
+          onClose={() => setShowSignals(false)}
+          onToggleAction={onToggleAction}
+        />
+      )}
 
       {editing && (
         <ContactEditModal
@@ -1048,6 +1198,89 @@ function LeadCard({ lead: l, onUpdate, onSkiptrace, collapseDefault, selected, o
           onSave={(patch, local) => { onUpdate(l.id, patch, local); setEditing(false); }}
         />
       )}
+    </div>
+  );
+}
+
+// ─── Signal detail modal ─────────────────────────────────────────────────────
+// Evidence is the field names the signal rests on; actions are suggestions the
+// user ticks off. Nothing here contacts anyone - ticking records what was done.
+function SignalModal({ lead, onClose, onToggleAction }: {
+  lead: FclLead;
+  onClose: () => void;
+  onToggleAction: (signalId: string, action: string, completed: boolean) => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      onClick={(e) => { e.stopPropagation(); onClose(); }}
+    >
+      <div
+        className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 shadow-xl w-full max-w-lg p-5 flex flex-col gap-4 max-h-[90vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between">
+          <h3 className="font-bold text-gray-900 dark:text-gray-100">Signals</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 text-lg leading-none">✕</button>
+        </div>
+        <div className="text-xs text-gray-500 dark:text-gray-400 -mt-2">{lead.address}</div>
+
+        {lead.signals.length === 0 && (
+          <div className="text-sm text-gray-400 dark:text-gray-500 italic">
+            No signals on this filing. Nothing unusual was found.
+          </div>
+        )}
+
+        {lead.signals.map((sig) => (
+          <div key={sig.id} className="rounded-lg border border-gray-200 dark:border-gray-700 p-3 flex flex-col gap-2">
+            <div className="flex items-start gap-2">
+              <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wide flex-shrink-0 mt-0.5 ${severityClass(sig.severity)}`}>
+                {sig.severity}
+              </span>
+              <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">{sig.headline}</span>
+            </div>
+
+            <div>
+              <SectionLabel>Based on</SectionLabel>
+              <div className="flex gap-1 flex-wrap mt-1">
+                {sig.evidence.map((f) => (
+                  <span key={f} className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400">
+                    {evidenceLabel(f)}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {sig.recommendedActions.length > 0 && (
+              <div>
+                <SectionLabel>Suggested next steps</SectionLabel>
+                <div className="flex flex-col gap-1 mt-1">
+                  {sig.recommendedActions.map((a) => {
+                    const done = sig.completedActions.includes(a);
+                    return (
+                      <label key={a} className="flex items-start gap-2 text-sm cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={done}
+                          onChange={() => onToggleAction(sig.id, a, !done)}
+                          className="w-4 h-4 mt-0.5 rounded border-gray-300 dark:border-gray-600 text-primary-600 focus:ring-primary-500 flex-shrink-0"
+                        />
+                        <span className={done ? 'text-gray-400 dark:text-gray-500 line-through' : 'text-gray-700 dark:text-gray-300'}>
+                          {actionLabel(a)}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+
+        <div className="text-[11px] text-gray-400 dark:text-gray-500 border-t border-gray-100 dark:border-gray-800 pt-3">
+          Suggestions only. Ticking a step records that you did it - nothing here sends a message.
+        </div>
+      </div>
     </div>
   );
 }

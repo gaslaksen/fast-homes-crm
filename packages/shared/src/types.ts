@@ -62,6 +62,29 @@ export enum ForeclosureNoticeType {
   AUCTION_COM_FORECLOSURE = 'auction_com_foreclosure',
 }
 
+// Kind of filing inside a foreclosure case file. One case accumulates several
+// of these over its life (hearing notice, then sale notice, then upset bids),
+// which is why documents hang off the case number rather than the lead.
+export enum ForeclosureDocumentType {
+  NOTICE_OF_HEARING = 'NOTICE_OF_HEARING',
+  NOTICE_OF_SALE = 'NOTICE_OF_SALE',
+  SUBSTITUTION_OF_TRUSTEE = 'SUBSTITUTION_OF_TRUSTEE',
+  ORDER_ALLOWING_SALE = 'ORDER_ALLOWING_SALE',
+  NOTICE_OF_UPSET_BID = 'NOTICE_OF_UPSET_BID',
+  CANCELLATION = 'CANCELLATION',
+  OTHER = 'OTHER',
+}
+
+// How the raw text was pulled out of an uploaded filing. 'ocr' is reserved:
+// every NC eCourts filing seen so far carries a usable text layer, so the OCR
+// path is deliberately not built yet. See charsPerPage on ForeclosureDocument.
+export enum ForeclosureExtractionMethod {
+  TEXT_LAYER = 'text_layer',
+  OCR = 'ocr',
+  HYBRID = 'hybrid',
+  NONE = 'none',
+}
+
 // How a foreclosure lead entered Dealcore.
 export enum ForeclosureSourceKind {
   RSS = 'rss',

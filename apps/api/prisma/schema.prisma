@@ -300,6 +300,9 @@ model Lead {
   aiCompCurations     AiCompCuration[]
   aiArvCalculations   AiArvCalculation[] @relation("LeadAiArvCalculations")
   foreclosureDetail   ForeclosureDetail?
+  foreclosureDocuments ForeclosureDocument[]
+  foreclosureFilings   ForeclosureFiling[]
+  foreclosureSignals   ForeclosureSignal[]
 
   @@index([organizationId, tier])
   @@index([organizationId, status])
@@ -353,6 +356,13 @@ model ForeclosureDetail {
   leadScore      Int?     @default(0)
   equityPct      Float?
   equitySpread   Float?
+  // Set by the deterministic rules engine from the matched lender profile.
+  loanType       String?  // ForeclosureLoanType
+  lenderName     String?
+  // False for a HECM, whose recorded principal is a multiple of the maximum
+  // claim amount and so overstates the debt. When false, equityPct and
+  // equitySpread above are deliberately left null rather than computed wrong.
+  debtFigureReliable Boolean @default(true)
   workStatus     String?  @default("NOT_CONTACTED") // ForeclosureWorkStatus
   doNotCall      Boolean  @default(false)
   callNotes      String?
@@ -402,6 +412,192 @@ model ForeclosureDetail {
   @@index([organizationId, saleDate])
   @@index([organizationId, workStatus])
   @@map("foreclosure_details")
+}
+
+/// One uploaded filing from a foreclosure case file. Deliberately stores the
+/// extracted TEXT and not the PDF: sampled Mecklenburg filings run 3-4 MB each
+/// (scanned cover pages at full resolution) against ~13 KB of text, so keeping
+/// bytes would cost gigabytes a year for something no downstream step reads.
+/// Extraction and signal passes both consume rawText, so re-running either at a
+/// bumped version needs nothing from disk. fileKey is reserved for a later move
+/// to object storage; nothing writes it today.
+///
+/// Documents key on caseNumber, not leadId, because one case accumulates
+/// several filings over its life. leadId is nullable so a filing can land
+/// before its lead exists.
+model ForeclosureDocument {
+  id               String   @id @default(cuid())
+  leadId           String?
+  lead             Lead?    @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  organizationId   String?
+
+  // sha256 of the uploaded bytes. Re-uploading the same file is a no-op; the
+  // same file arriving for a different org is not (hence the compound unique).
+  fileHash         String
+  originalFilename String?
+  fileSizeBytes    Int?
+  fileKey          String?
+
+  caseNumber       String?
+  county           String?
+  documentType     String?  // ForeclosureDocumentType
+  noticeUrl        String?
+
+  pageCount        Int?
+  extractionMethod String?  // ForeclosureExtractionMethod
+  rawText          String?  @db.Text
+  // chars / pageCount. Under ~400 means the text layer is missing and the file
+  // is image-only; those are flagged for manual entry rather than OCR'd.
+  charsPerPage     Float?
+
+  uploadedAt       DateTime  @default(now())
+  extractedAt      DateTime?
+  extractionError  String?
+
+  filing           ForeclosureFiling?
+
+  @@unique([organizationId, fileHash])
+  @@index([organizationId, caseNumber])
+  @@index([leadId, uploadedAt(sort: Desc)])
+  @@map("foreclosure_documents")
+}
+
+/// The ~25 structured fields pulled out of one filing's text by the extractor.
+/// One row per document; re-extracting at a bumped extractionVersion updates
+/// the row in place rather than adding a new one.
+///
+/// verifiedFields is the contract with the user: any field they correct by hand
+/// is listed there and no re-extraction ever overwrites it. fieldConfidence
+/// carries the model's 0-1 score per field so the review panel can flag the
+/// shaky ones.
+///
+/// hearingAt and saleAt are true instants. NC filings state Eastern wall-clock
+/// time with no zone ("September 8, 2026 at 2:00PM"), so the model returns the
+/// local date and time separately and courtLocalToUtc resolves the offset.
+model ForeclosureFiling {
+  id                    String   @id @default(cuid())
+  documentId            String   @unique
+  document              ForeclosureDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  leadId                String?
+  lead                  Lead?    @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  organizationId        String?
+  extractionVersion     Int      @default(1)
+
+  // Case
+  caseNumber            String?
+  county                String?
+  filedAt               DateTime?
+  submittedAt           DateTime?
+
+  // Parties
+  recordOwnerNames      String[]
+  substituteTrustee     String?
+  trusteeAttorney       String?
+  trusteeAttorneyBarNo  String?
+  trusteeFirm           String?
+  trusteeFirmAddress    String?
+  trusteeFirmPhone      String?
+  trusteeFileNumber     String?
+  holderName            String?
+  holderAddress         String?
+  // The originator often appears only here, as "MERS as nominee for X". It is
+  // what identifies a HECM when the current holder does not.
+  originalBeneficiary   String?
+
+  // Loan
+  dotDate               DateTime?
+  dotBook               String?
+  dotPage               String?
+  originalPrincipal     Float?
+
+  // Property
+  propertyAddress       String?
+  // High-value join key for the county parcel load in 019. Distinct from
+  // ForeclosureDetail.parcelId, which comes from the NC OneMap skip trace.
+  taxParcelId           String?
+
+  // Timeline
+  hearingAt             DateTime?
+  hearingMethod         String?
+  saleAt                DateTime?
+
+  // Meta
+  fieldConfidence       Json?
+  verifiedByUserAt      DateTime?
+  verifiedFields        String[]
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  signals               ForeclosureSignal[]
+
+  @@index([organizationId, caseNumber])
+  @@index([leadId])
+  @@map("foreclosure_filings")
+}
+
+/// One typed, actionable flag derived from a filing's extracted facts plus the
+/// deterministic rules output. Not prose: a code, a severity, one clause, the
+/// field names it rests on, and suggested next steps.
+///
+/// analysisVersion is separate from the filing's extractionVersion so the
+/// signals prompt can be improved and re-run without re-extracting anything.
+///
+/// evidence is never empty. A signal that cannot name a field it rests on is
+/// dropped before it reaches this table.
+model ForeclosureSignal {
+  id                 String   @id @default(cuid())
+  filingId           String
+  filing             ForeclosureFiling @relation(fields: [filingId], references: [id], onDelete: Cascade)
+  leadId             String?
+  lead               Lead?    @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  organizationId     String?
+  analysisVersion    Int      @default(1)
+
+  signalCode         String
+  severity           String   // 'info' | 'notable' | 'critical'
+  headline           String
+  evidence           String[]
+  recommendedActions String[]
+  /// Which recommended actions the user has ticked off, by action name.
+  completedActions   String[]
+  generatedAt        DateTime @default(now())
+
+  @@unique([filingId, signalCode])
+  @@index([leadId, severity])
+  @@index([organizationId, signalCode])
+  @@map("foreclosure_signals")
+}
+
+/// Lender name patterns that classify what kind of debt is being foreclosed.
+/// This is a lookup table rather than a model inference on purpose: identifying
+/// a reverse mortgage is the highest-value call in the pipeline, so it has to
+/// be reliable, auditable, and editable by the team as new filing patterns turn
+/// up. Grows with every unfamiliar holder the team sees.
+///
+/// organizationId null means a shared, seeded row visible to every org; a
+/// non-null value is an org's own addition.
+model LenderProfile {
+  id             String   @id @default(cuid())
+  organizationId String?
+  matchPattern   String
+  /// 'substring' compares with whitespace and punctuation stripped from both
+  /// sides, so it still matches the space-stripped text of a scanned page.
+  /// 'regex' runs against space-normalized text, for short acronyms that need
+  /// word boundaries (a bare "AAG" as a substring would over-match).
+  matchType      String   @default("substring")
+  lenderName     String
+  loanType       String
+  servicerType   String?
+  notes          String?
+  /// Higher wins when several patterns match; ties break on longer pattern.
+  priority       Int      @default(0)
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([organizationId, matchPattern])
+  @@index([organizationId, active])
+  @@map("lender_profiles")
 }
 
 model ConversationView {

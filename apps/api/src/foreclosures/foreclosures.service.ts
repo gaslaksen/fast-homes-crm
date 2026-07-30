@@ -23,6 +23,11 @@ import {
   countyForCity,
   citiesInCounty,
 } from './foreclosure-scoring.util';
+import { normalizeCaseNumber } from './foreclosure-document.util';
+import { mergeFilingFields } from './foreclosure-case-merge.util';
+
+/** Most severe first, matching the signals service's own ordering. */
+const SEVERITY_RANK: Record<string, number> = { critical: 3, notable: 2, info: 1 };
 
 export interface CreateForeclosureResult {
   leadId: string | null;
@@ -57,20 +62,54 @@ export class ForeclosuresService {
     const hearingIso = parseDateISO(input.hearingDate);
     const loanIso = parseDateISO(input.loanDate);
     const dedupeUid = uidOf({ caseNumber: input.caseNumber, address, saleDate: saleIso });
+    const caseKey = normalizeCaseNumber(input.caseNumber);
 
-    // Idempotency: skip if we already have this notice for the org.
+    // Idempotency, in three layers. dedupeUid and noticeId identify the same
+    // notice; caseNumber identifies the same CASE, which is what stops a later
+    // filing (a Notice of Sale, carrying the auction date) forking a second
+    // lead for a property we are already working. dedupeUid cannot do that job
+    // on its own because it folds in the sale date, so it changes the moment
+    // the sale is scheduled.
     const existing = await this.prisma.foreclosureDetail.findFirst({
       where: {
         organizationId,
         OR: [
           { dedupeUid },
           ...(input.noticeId ? [{ noticeId: input.noticeId }] : []),
+          ...(caseKey ? [{ caseNumber: caseKey }] : []),
         ],
       },
-      select: { leadId: true },
+      select: {
+        id: true,
+        leadId: true,
+        dedupeUid: true,
+        noticeId: true,
+        caseNumber: true,
+        noticeType: true,
+        noticeUrl: true,
+        trustee: true,
+        county: true,
+        saleDate: true,
+        hearingDate: true,
+        loanDate: true,
+        loanAmount: true,
+        assessedValue: true,
+        equityPct: true,
+        ownerOccupied: true,
+        skipStatus: true,
+      },
     });
+
     if (existing) {
-      return { leadId: existing.leadId, created: false, reason: 'duplicate' };
+      const sameNotice =
+        existing.dedupeUid === dedupeUid ||
+        (!!input.noticeId && existing.noticeId === input.noticeId);
+      if (sameNotice) {
+        return { leadId: existing.leadId, created: false, reason: 'duplicate' };
+      }
+      // Matched on case number alone: a genuinely new filing on a case we
+      // already track. Fold its facts in rather than dropping them.
+      return this.mergeIntoExistingCase(existing, input, { saleIso, hearingIso, loanIso });
     }
 
     const derived = this.buildDerived(input, { saleIso, loanIso });
@@ -112,7 +151,9 @@ export class ForeclosuresService {
             noticeId: input.noticeId || null,
             noticeType: input.noticeType || null,
             noticeUrl: input.noticeUrl || null,
-            caseNumber: input.caseNumber || null,
+            // Stored canonical so a later filing on the same case matches on
+            // the dedupe lookup regardless of how the source spaced it.
+            caseNumber: caseKey || input.caseNumber || null,
             county: input.county || countyForCity(input.city),
             trustee: input.trustee || null,
             rawSnippet: input.rawSnippet || null,
@@ -152,6 +193,89 @@ export class ForeclosuresService {
     });
 
     return { leadId: lead.id, created: true };
+  }
+
+  /**
+   * Fold a later filing on a known case into the lead that already represents
+   * it. Only court facts move; work status, do-not-call, call notes, touch
+   * tracking, and everything skip trace wrote are left alone.
+   *
+   * Priority and score are recomputed when a date moves, because both are
+   * derived from days-to-sale and neither is user-editable (see update(), which
+   * exposes no priority field). A merge that changes nothing writes nothing.
+   */
+  private async mergeIntoExistingCase(
+    existing: {
+      id: string;
+      leadId: string;
+      caseNumber: string | null;
+      noticeType: string | null;
+      noticeUrl: string | null;
+      trustee: string | null;
+      county: string | null;
+      saleDate: Date | null;
+      hearingDate: Date | null;
+      loanDate: Date | null;
+      loanAmount: number | null;
+      assessedValue: number | null;
+      equityPct: number | null;
+      ownerOccupied: string | null;
+      skipStatus: string | null;
+    },
+    input: ForeclosureLeadInput,
+    dates: { saleIso: string; hearingIso: string; loanIso: string },
+  ): Promise<CreateForeclosureResult> {
+    const patch = mergeFilingFields(existing, {
+      caseNumber: normalizeCaseNumber(input.caseNumber),
+      noticeType: input.noticeType || null,
+      noticeUrl: input.noticeUrl || null,
+      trustee: input.trustee || null,
+      county: input.county || countyForCity(input.city),
+      saleDate: isoToDate(dates.saleIso),
+      hearingDate: isoToDate(dates.hearingIso),
+      loanDate: isoToDate(dates.loanIso),
+      loanAmount: input.loanAmount ?? null,
+      assessedValue: input.assessedValue ?? null,
+    });
+
+    if (!Object.keys(patch).length) {
+      return { leadId: existing.leadId, created: false, reason: 'duplicate' };
+    }
+
+    // Rescore off the merged view of the case, not the incoming filing alone:
+    // a Notice of Sale carries a date but no equity or contact facts.
+    const merged = { ...existing, ...patch };
+    const detailPatch: any = { ...patch };
+    if (patch.saleDate !== undefined || patch.loanDate !== undefined) {
+      const derived = this.buildDerived(
+        {
+          ...input,
+          equityPct: merged.equityPct,
+          assessedValue: merged.assessedValue,
+          loanAmount: merged.loanAmount,
+          ownerOccupied: merged.ownerOccupied || undefined,
+          skipStatus: merged.skipStatus || undefined,
+        },
+        {
+          saleIso: merged.saleDate ? merged.saleDate.toISOString().slice(0, 10) : '',
+          loanIso: merged.loanDate ? merged.loanDate.toISOString().slice(0, 10) : '',
+        },
+      );
+      detailPatch.priority = derived.priority;
+      detailPatch.leadScore = derived.score;
+      detailPatch.equitySpread = derived.equitySpread;
+    }
+
+    await this.prisma.foreclosureDetail.update({
+      where: { id: existing.id },
+      data: detailPatch,
+    });
+
+    this.logger.log(
+      `Merged filing into existing case ${existing.caseNumber || '(unknown)'} ` +
+        `on lead ${existing.leadId}: ${Object.keys(patch).join(', ')}`,
+    );
+    return { leadId: existing.leadId, created: false, reason: 'merged into existing case' };
   }
 
   /** Compute the derived scoring/link fields shared by every ingestion path. */
@@ -269,7 +393,7 @@ export class ForeclosuresService {
     const [rows, total, cityRows] = await Promise.all([
       this.prisma.lead.findMany({
         where,
-        include: { foreclosureDetail: true },
+        include: { foreclosureDetail: true, foreclosureSignals: true },
         orderBy,
         skip: (page - 1) * pageSize,
         take: pageSize,
@@ -322,7 +446,7 @@ export class ForeclosuresService {
   async get(id: string, organizationId?: string) {
     const lead = await this.prisma.lead.findFirst({
       where: { id, source: LeadSource.FORECLOSURE, ...(organizationId ? { organizationId } : {}) },
-      include: { foreclosureDetail: true },
+      include: { foreclosureDetail: true, foreclosureSignals: true },
     });
     return lead ? this.toDto(lead) : null;
   }
@@ -497,6 +621,11 @@ export class ForeclosuresService {
       score: d.leadScore ?? 0,
       equityPct: d.equityPct ?? null,
       equitySpread: d.equitySpread ?? null,
+      // Rules-engine verdict. debtFigureReliable=false means equityPct and
+      // equitySpread above are deliberately null, not merely unknown.
+      loanType: d.loanType || null,
+      lenderName: d.lenderName || null,
+      debtFigureReliable: d.debtFigureReliable !== false,
       workStatus: d.workStatus || 'NOT_CONTACTED',
       doNotCall: !!d.doNotCall,
       callNotes: d.callNotes || '',
@@ -520,6 +649,20 @@ export class ForeclosuresService {
       realtorQuery: d.realtorQuery || null,
       realtorZip: d.realtorZip || null,
       daysToSale: saleIso ? daysToSale(saleIso) : null,
+      signals: (lead.foreclosureSignals || [])
+        .slice()
+        .sort((a: any, b: any) =>
+          (SEVERITY_RANK[b.severity] || 0) - (SEVERITY_RANK[a.severity] || 0) ||
+          a.signalCode.localeCompare(b.signalCode))
+        .map((s: any) => ({
+          id: s.id,
+          signalCode: s.signalCode,
+          severity: s.severity,
+          headline: s.headline,
+          evidence: s.evidence || [],
+          recommendedActions: s.recommendedActions || [],
+          completedActions: s.completedActions || [],
+        })),
       createdAt: lead.createdAt,
     };
   }
