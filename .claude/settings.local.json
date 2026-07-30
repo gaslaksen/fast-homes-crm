@@ -43,9 +43,6 @@
       "Bash(DATABASE_URL=\"postgresql://localhost/_validate\" /Users/geoff/Developer/Dealcore/apps/api/node_modules/.bin/prisma generate --schema=/Users/geoff/Developer/Dealcore/.claude/worktrees/romantic-matsumoto-d311ea/apps/api/prisma/schema.prisma)",
       "Bash(git add *)",
       "Bash(git commit -m ' *)",
-      "Bash(git push *)",
-      "Bash(git pull *)",
-      "Bash(git stash *)",
       "Bash(DATABASE_URL=\"postgresql://geoff@localhost:5432/fast_homes_crm\" /Users/geoff/Developer/Dealcore/apps/api/node_modules/.bin/prisma migrate status --schema=/Users/geoff/Developer/Dealcore/.claude/worktrees/romantic-matsumoto-d311ea/apps/api/prisma/schema.prisma)",
       "Bash(gh pr create --title 'feat\\(comps\\): ad-hoc property lookups \\(Phase 1+2 backend\\)' --body ' *)",
       "Bash(awk '/export const compAnalysisAPI/,/^};$/' apps/web/src/lib/api.ts)",
@@ -64,7 +61,8 @@
       "Bash(echo \"API exit: $?\")",
       "Bash(echo \"Web exit: $?\")",
       "Skill(schedule)",
-      "Skill(schedule:*)"
+      "Skill(schedule:*)",
+      "Read(//Users/geoff/Developer/Dealcore/**)"
     ]
   }
 }
