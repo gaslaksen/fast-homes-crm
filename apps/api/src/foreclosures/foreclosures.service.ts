@@ -114,9 +114,14 @@ export class ForeclosuresService {
 
     const derived = this.buildDerived(input, { saleIso, loanIso });
 
-    const { firstName, lastName } = splitOwnerName(input.ownerNames || input.countyOwner);
+    const split = splitOwnerName(input.ownerNames || input.countyOwner);
+    const firstName = (input.ownerFirstName || '').trim() || split.firstName;
+    const lastName = (input.ownerLastName || '').trim() || split.lastName;
     const phone1 = normalizePhoneDigits(input.phone1) || '';
     const phone2 = normalizePhoneDigits(input.phone2) || null;
+    const phone3 = normalizePhoneDigits(input.phone3) || null;
+    const phone4 = normalizePhoneDigits(input.phone4) || null;
+    const int = (n?: number | null) => (n == null ? undefined : Math.round(n));
 
     const lead = await this.prisma.lead.create({
       data: {
@@ -130,6 +135,11 @@ export class ForeclosuresService {
         propertyCity: (input.city || '').trim(),
         propertyState: (input.state || stateForCity(input.city)).trim(),
         propertyZip: (input.zip || '').trim(),
+        propertyType: input.propertyType || null,
+        bedrooms: int(input.bedrooms),
+        bathrooms: input.bathrooms ?? undefined,
+        sqft: int(input.sqft),
+        yearBuilt: int(input.yearBuilt),
         sellerFirstName: firstName,
         sellerLastName: lastName,
         sellerPhone: phone1,
@@ -177,8 +187,13 @@ export class ForeclosuresService {
             mailZip: input.mailZip || null,
             skipStatus: input.skipStatus || null,
             phone2,
+            phone3,
+            phone4,
             phone1Type: input.phone1Type || phoneTypeOf(input.phone1),
             phone2Type: input.phone2Type || phoneTypeOf(input.phone2),
+            phone3Type: input.phone3Type || phoneTypeOf(input.phone3),
+            phone4Type: input.phone4Type || phoneTypeOf(input.phone4),
+            email2: input.email2 || null,
             parcelId: derived.parcel.parcelId || null,
             parcelUrl: derived.parcel.parcelUrl,
             parcelType: derived.parcel.parcelType,

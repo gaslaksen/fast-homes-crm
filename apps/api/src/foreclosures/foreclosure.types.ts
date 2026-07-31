@@ -21,15 +21,30 @@ export interface ForeclosureLeadInput {
   city?: string;
   state?: string;
   zip?: string;
+  propertyType?: string;
+  bedrooms?: number | null;
+  bathrooms?: number | null;
+  sqft?: number | null;
+  yearBuilt?: number | null;
 
   // Owner / contact
   ownerNames?: string;
+  // Set only by sources that split the name themselves. Preferred over
+  // splitting ownerNames, which cannot tell "Campbell Patricia" (last-first,
+  // how most purchased lists write it) from "Patricia Campbell".
+  ownerFirstName?: string;
+  ownerLastName?: string;
   countyOwner?: string;
   phone1?: string;
   phone2?: string;
+  phone3?: string;
+  phone4?: string;
   phone1Type?: string;
   phone2Type?: string;
+  phone3Type?: string;
+  phone4Type?: string;
   email?: string;
+  email2?: string;
   ownerOccupied?: string; // 'Y' | 'N'
   mailingAddress?: string;
   mailCity?: string;
