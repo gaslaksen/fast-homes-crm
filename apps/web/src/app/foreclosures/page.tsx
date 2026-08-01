@@ -180,10 +180,12 @@ function copyToClipboard(text: string) {
     navigator.clipboard.writeText(text).catch(() => {});
   }
 }
-/** Parcel link: exact PID uses the stored deep link; everything else gets a
- *  Google parcel-records search (county GIS homepages cannot deep link). */
+/** Parcel link: a known parcel id uses the stored link (a Mecklenburg deep
+ *  link when we have one, otherwise a search carrying the id); everything else
+ *  gets a Google parcel-records search on the address, since county GIS
+ *  homepages cannot deep link one. */
 function parcelHref(l: FclLead): string {
-  if (l.parcelType === 'exact' && l.parcelUrl) return l.parcelUrl;
+  if ((l.parcelType === 'exact' || l.parcelType === 'county') && l.parcelUrl) return l.parcelUrl;
   return `https://www.google.com/search?q=${encodeURIComponent(`${l.address} ${l.city || ''} parcel property records`)}`;
 }
 // Realtor.com live resolver (exact property via the rdc geo suggest API),
@@ -917,7 +919,10 @@ function LeadCard({ lead: l, onUpdate, onSkiptrace, onToggleAction, collapseDefa
     onToggleSelect();
   };
 
-  const parcelSub = l.parcelType === 'exact' ? `PID ${l.parcelId}` : 'search';
+  const parcelSub =
+    l.parcelType === 'exact' ? `PID ${l.parcelId}`
+    : l.parcelType === 'county' && l.parcelId ? `Parcel ${l.parcelId}`
+    : 'search';
 
   // Signals: chip the ones worth seeing at a glance, count the rest.
   const signals = l.signals || [];

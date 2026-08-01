@@ -18,6 +18,7 @@ import {
   realtorQueryOf,
   parcelLinkFor,
   splitOwnerName,
+  ownerOccupiedFrom,
   looksDead,
   stateForCity,
   countyForCity,
@@ -112,7 +113,14 @@ export class ForeclosuresService {
       return this.mergeIntoExistingCase(existing, input, { saleIso, hearingIso, loanIso });
     }
 
-    const derived = this.buildDerived(input, { saleIso, loanIso });
+    // Fall back to comparing the mailing and property addresses when the
+    // source carries no occupancy column. Purchased lists ship the mailing
+    // address but never the flag, and occupancy drives both the absentee
+    // filter and the score, so deriving it beats leaving it blank.
+    const ownerOccupied =
+      input.ownerOccupied || ownerOccupiedFrom(input.mailingAddress, address) || undefined;
+
+    const derived = this.buildDerived({ ...input, ownerOccupied }, { saleIso, loanIso });
 
     const split = splitOwnerName(input.ownerNames || input.countyOwner);
     const firstName = (input.ownerFirstName || '').trim() || split.firstName;
@@ -180,7 +188,7 @@ export class ForeclosuresService {
             workStatus: 'NOT_CONTACTED',
             doNotCall: false,
             countyOwner: input.countyOwner || null,
-            ownerOccupied: input.ownerOccupied || null,
+            ownerOccupied: ownerOccupied || null,
             mailingAddress: input.mailingAddress || null,
             mailCity: input.mailCity || null,
             mailState: input.mailState || null,
@@ -319,7 +327,7 @@ export class ForeclosuresService {
       equitySpread: equitySpreadOf(input.assessedValue ?? null, input.loanAmount ?? null),
       zillowUrl: zillowUrlOf(input.address, input.city, input.zip),
       realtorQuery: realtorQueryOf(input.address, input.city, input.zip),
-      parcel: parcelLinkFor(input.address, input.city),
+      parcel: parcelLinkFor(input.address, input.city, input.parcelId),
     };
   }
 

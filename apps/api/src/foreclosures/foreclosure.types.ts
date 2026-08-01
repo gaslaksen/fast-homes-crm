@@ -21,6 +21,7 @@ export interface ForeclosureLeadInput {
   city?: string;
   state?: string;
   zip?: string;
+  parcelId?: string;
   propertyType?: string;
   bedrooms?: number | null;
   bathrooms?: number | null;

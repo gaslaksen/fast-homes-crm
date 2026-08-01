@@ -3,7 +3,13 @@ import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
 import { PrismaService } from '../prisma/prisma.service';
 import { LeadSource } from '@fast-homes/shared';
-import { MECK_CITIES, normalizePhoneDigits, scoreOf, daysToSale } from './foreclosure-scoring.util';
+import {
+  MECK_CITIES,
+  normalizePhoneDigits,
+  ownerOccupiedFrom,
+  scoreOf,
+  daysToSale,
+} from './foreclosure-scoring.util';
 
 const NC_PARCELS_URL =
   'https://services.nconemap.gov/secure/rest/services/NC1Map_Parcels/MapServer/1/query';
@@ -74,7 +80,9 @@ export class ForeclosureSkiptraceService {
       if (parcel.parval != null && parcel.parval !== '') {
         detailPatch.assessedValue = Number(parcel.parval) || null;
       }
-      detailPatch.ownerOccupied = this.isOwnerOccupied(parcel) ? 'Y' : 'N';
+      // The parcel record always has both addresses, so an unknown here means
+      // absentee rather than "cannot tell".
+      detailPatch.ownerOccupied = ownerOccupiedFrom(parcel.mailadd, parcel.siteadd) || 'N';
       detailPatch.skipStatus = detailPatch.skipStatus || 'OK';
 
       // Backfill the seller name on the Lead when the notice had no owner.
@@ -229,15 +237,6 @@ export class ForeclosureSkiptraceService {
     });
     if (!best) best = fs[0];
     return best.attributes.ParcelID || '';
-  }
-
-  /** Owner-occupied when the mailing address matches the site house# + street. */
-  private isOwnerOccupied(a: ParcelAttrs): boolean {
-    if (!a.mailadd || !a.siteadd) return false;
-    const norm = (s: string) => String(s).toUpperCase().replace(/[^A-Z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
-    const m = norm(a.mailadd).split(' ');
-    const s = norm(a.siteadd).split(' ');
-    return m.length >= 2 && s.length >= 2 && m[0] === s[0] && m[1] === s[1];
   }
 
   /** BatchData skip-trace: up to 4 phones + 2 emails, or null on no match. */

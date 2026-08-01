@@ -62,6 +62,7 @@ describe('ForeclosureImportService - purchased list format', () => {
     expect(input.assessedValue).toBe(333880);
     expect(input.saleDate).toBe('08/25/2026');
     expect(input.noticeType).toBe('mortgage_foreclosure');
+    expect(input.parcelId).toBe('13507202');
     expect(input.propertyType).toBe('Single Family');
     expect(input.bedrooms).toBe(3);
     expect(input.bathrooms).toBe(2);
@@ -110,9 +111,9 @@ describe('ForeclosureImportService - purchased list format', () => {
     const { recognized } = service.parseUpload(sheetBuffer([VENDOR_HEADERS, VENDOR_ROW]));
 
     expect(recognized).toEqual(
-      expect.arrayContaining(['Mobile-1', 'Landline-3', 'Email-5', 'Date Of Auctions']),
+      expect.arrayContaining(['Mobile-1', 'Landline-3', 'Email-5', 'Date Of Auctions', 'Parcel ID']),
     );
-    expect(recognized).not.toContain('Parcel ID');
+    expect(recognized).not.toContain('S No');
   });
 });
 

@@ -11,6 +11,7 @@ import Avatar from '@/components/Avatar';
 import AppShell from '@/components/AppShell';
 import { isKanbanV2 } from '@/lib/flags';
 import { writeLeadQueue } from '@/lib/leadQueue';
+import { SOURCE_LABELS, ASSIGNABLE_SOURCE_LABELS } from '@/lib/leadSources';
 import KanbanV2Board from '@/components/kanbanV2/KanbanV2Board';
 import ListTable from '@/components/listViewV2/ListTable';
 import {
@@ -118,15 +119,6 @@ const STATUS_LABELS: Record<string, string> = {
   CLOSED_LOST: 'Lost',
   NURTURE: 'Nurture',
   DEAD: '💀 Dead',
-};
-
-const SOURCE_LABELS: Record<string, string> = {
-  PROPERTY_LEADS: 'PPL',
-  GOOGLE_ADS: 'PPC',
-  LEADHOUSE: 'LeadHouse',
-  MANUAL: 'Manual',
-  DEAL_SEARCH: 'Deal Search',
-  OTHER: 'Other',
 };
 
 // ─── Tier computation (client-side, no DB field needed) ───────────────────────
@@ -974,7 +966,7 @@ function LeadsPageInner() {
                 className="text-xs border border-gray-200 dark:border-gray-700 rounded-md px-2 py-1 dark:bg-gray-800 dark:text-gray-200"
               >
                 <option value="">Change source...</option>
-                {Object.entries(SOURCE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                {Object.entries(ASSIGNABLE_SOURCE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
               </select>
               {bulkSource && (
                 <button onClick={handleBulkSource} className="text-xs px-3 py-1 bg-primary-600 text-white rounded-lg font-medium">

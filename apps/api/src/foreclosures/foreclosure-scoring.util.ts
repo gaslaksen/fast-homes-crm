@@ -197,15 +197,70 @@ export interface ParcelLink {
 }
 
 /**
+ * Owner-occupied when the mailing address matches the property address on
+ * house number and first street word. Deliberately loose: the two are written
+ * differently often enough ("5125 Birchbark Ln" against "5125 BIRCHBARK LANE")
+ * that an exact compare would report absentee owners who are not.
+ *
+ * Returns null when either side is too short to compare, so an address we
+ * cannot judge stays unknown rather than being called absentee.
+ */
+export function ownerOccupiedFrom(
+  mailingAddress?: string | null,
+  propertyAddress?: string | null,
+): 'Y' | 'N' | null {
+  const words = (s?: string | null) =>
+    String(s || '')
+      .toUpperCase()
+      .replace(/[^A-Z0-9 ]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .split(' ');
+  const m = words(mailingAddress);
+  const p = words(propertyAddress);
+  if (m.length < 2 || p.length < 2) return null;
+  return m[0] === p[0] && m[1] === p[1] ? 'Y' : 'N';
+}
+
+/**
  * Build a parcel link without any network I/O. Mecklenburg addresses get a
  * Spatialest search link; everything else gets a Google parcel-records search
  * (county GIS homepages proved useless as card links since they cannot deep
  * link an address). Exact PID resolution (Mecklenburg GIS MasterAddress
  * query) happens later in the skip-trace enrich step.
+ *
+ * A parcelId supplied by the source (purchased lists carry one) beats any
+ * address search and skips that lookup. Only Mecklenburg can deep link a PID,
+ * so elsewhere the id is stored and folded into the search terms instead of
+ * being pointed at a county that would not recognize it.
  */
-export function parcelLinkFor(address?: string, city?: string): ParcelLink {
+export function parcelLinkFor(address?: string, city?: string, parcelId?: string): ParcelLink {
   const cU = String(city || '').toUpperCase().trim();
   const isMeck = MECK_CITIES.has(cU) || !city;
+  const pid = String(parcelId || '').trim();
+
+  if (pid) {
+    // Unlike the address branch below, a blank city is NOT treated as
+    // Mecklenburg: sending another county's parcel id to the Mecklenburg
+    // record search returns someone else's property, or nothing.
+    if (MECK_CITIES.has(cU)) {
+      return {
+        parcelId: pid,
+        parcelUrl: `https://property.spatialest.com/nc/mecklenburg#/search/?term=${encodeURIComponent(pid)}&page=1`,
+        parcelType: 'exact',
+        parcelLabel: `PID ${pid}`,
+      };
+    }
+    return {
+      parcelId: pid,
+      parcelUrl: `https://www.google.com/search?q=${encodeURIComponent(
+        `${pid} ${city || ''} parcel property records`,
+      )}`,
+      parcelType: 'county',
+      parcelLabel: `Parcel ${pid}`,
+    };
+  }
+
   if (isMeck && address && address.indexOf(',') < 0) {
     return {
       parcelId: '',
