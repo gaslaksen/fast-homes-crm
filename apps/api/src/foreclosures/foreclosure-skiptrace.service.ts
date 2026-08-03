@@ -140,14 +140,24 @@ export class ForeclosureSkiptraceService {
 
     // Tier 2 - BatchData phones/email (paid, opt-in via key). Attaches up to
     // 4 phones (phone1 on the Lead, phone2-4 on the detail) and 2 emails.
-    let phonesFound = 0;
-    let emailsFound = 0;
+    // Name the unconfigured key explicitly: a missing BATCHDATA_API_KEY reads
+    // as "skip trace found no phones" on the card, which is not the same thing.
+    // Nor is "BatchData has no record of this owner" the same as "it has a
+    // record with no numbers on it" - the fix differs, so they log differently.
+    let tier2 = 'BATCHDATA_API_KEY not set, no phone lookup';
     if (this.batchKey) {
       try {
-        const contact = await this.batchSkipTrace(parcel, address, lead.propertyCity, lead.propertyZip);
+        const contact = await this.batchSkipTrace(
+          parcel,
+          address,
+          lead.propertyCity,
+          lead.propertyZip,
+          lead.propertyState,
+        );
+        tier2 = contact
+          ? `${contact.phones.length} phone(s), ${contact.emails.length} email(s)`
+          : 'BatchData no match';
         if (contact) {
-          phonesFound = contact.phones.length;
-          emailsFound = contact.emails.length;
           const [p1, p2, p3, p4] = contact.phones;
           if (p1) { leadPatch.sellerPhone = p1.num; detailPatch.phone1Type = p1.type || null; }
           if (p2) { detailPatch.phone2 = p2.num; detailPatch.phone2Type = p2.type || null; }
@@ -159,6 +169,7 @@ export class ForeclosureSkiptraceService {
         }
       } catch (e: any) {
         this.logger.warn(`BatchData skip-trace failed for "${address}": ${e.message}`);
+        tier2 = `BatchData failed: ${e.message}`;
       }
     }
 
@@ -188,11 +199,6 @@ export class ForeclosureSkiptraceService {
       data: { ...leadPatch, foreclosureDetail: { update: detailPatch } },
     });
 
-    // Name the unconfigured key explicitly: a missing BATCHDATA_API_KEY reads
-    // as "skip trace found no phones" on the card, which is not the same thing.
-    const tier2 = this.batchKey
-      ? `${phonesFound} phone(s), ${emailsFound} email(s)`
-      : 'BATCHDATA_API_KEY not set, no phone lookup';
     this.logger.log(
       `Skip trace ${leadId} "${address}": parcel ${parcel ? 'matched' : 'no match'}, ` +
         `${tier2}, status ${detailPatch.skipStatus}`,
@@ -286,15 +292,22 @@ export class ForeclosureSkiptraceService {
     fallbackStreet: string,
     city?: string,
     zip?: string,
+    state?: string,
   ): Promise<{ phones: { num: string; type: string | null }[]; emails: string[] } | null> {
     if (!this.batchKey) return null;
     const street = parcel?.siteadd || fallbackStreet;
     if (!street) return null;
 
-    const propertyAddress: any = { street: String(street), state: parcel?.mstate || 'NC' };
+    // Every part of this has to describe the PROPERTY. mstate is the owner's
+    // MAILING state, so using it here paired an NC street, city and zip with an
+    // absentee owner's out-of-state code and BatchData matched nothing. The
+    // parcel record carries no site-state field because NC OneMap only covers
+    // NC, which is why the mailing one was reachable and the right one was not.
+    const propertyAddress: any = { street: String(street), state: state || 'NC' };
     if (parcel?.scity || city) propertyAddress.city = String(parcel?.scity || city);
     const z = parcel?.szip || zip;
     if (z) propertyAddress.zip = String(z).slice(0, 5);
+    this.logger.debug(`BatchData query: ${JSON.stringify(propertyAddress)}`);
 
     let resp;
     try {

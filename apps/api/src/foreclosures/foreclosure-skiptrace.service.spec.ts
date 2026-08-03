@@ -86,6 +86,72 @@ describe('ForeclosureSkiptraceService.enrichLead', () => {
     });
   });
 
+  describe('the address sent to BatchData', () => {
+    /** Parcel whose owner is absentee, mailing to Florida. */
+    const FL_MAILER = {
+      features: [
+        {
+          attributes: {
+            ownname: 'CAMPBELL PATRICIA',
+            siteadd: '10990 PRINCETON VILLAGE DR',
+            scity: 'CHARLOTTE',
+            szip: '28277',
+            mailadd: '4400 OCEAN BLVD',
+            mcity: 'NAPLES',
+            mstate: 'FL',
+            mzip: '34102',
+            parval: 412000,
+          },
+        },
+      ],
+    };
+
+    function serviceWithBatch(lead: any) {
+      const update = jest.fn().mockResolvedValue({});
+      const prisma = {
+        lead: { findFirst: jest.fn().mockResolvedValue(lead), update },
+      } as unknown as PrismaService;
+      const config = {
+        get: (k: string) => (k === 'BATCHDATA_API_KEY' ? 'test-key' : undefined),
+      } as unknown as ConfigService;
+      return new ForeclosureSkiptraceService(prisma, config);
+    }
+
+    it('sends the property state, never the owner mailing state', async () => {
+      mockedAxios.get.mockResolvedValue({ data: FL_MAILER });
+      mockedAxios.post.mockResolvedValue({
+        data: { results: { persons: [{ meta: { matched: true }, phoneNumbers: [], emails: [] }] } },
+      });
+      const lead = leadWith({
+        propertyAddress: '10990 Princeton Village Dr',
+        propertyState: 'NC',
+        propertyZip: '28277',
+      });
+
+      await serviceWithBatch(lead).enrichLead('lead-1', 'org-1');
+
+      const body = mockedAxios.post.mock.calls[0][1] as any;
+      const sent = body.requests[0].propertyAddress;
+      // Street, city and zip are all the NC property. The state has to match
+      // them, or BatchData is being asked about an address that exists nowhere.
+      expect(sent.state).toBe('NC');
+      expect(sent.city).toBe('CHARLOTTE');
+      expect(sent.zip).toBe('28277');
+      expect(sent.street).toBe('10990 PRINCETON VILLAGE DR');
+    });
+
+    it('falls back to NC when the lead has no state recorded', async () => {
+      mockedAxios.get.mockResolvedValue({ data: FL_MAILER });
+      mockedAxios.post.mockResolvedValue({
+        data: { results: { persons: [{ meta: { matched: false } }] } },
+      });
+
+      await serviceWithBatch(leadWith({ propertyState: '' })).enrichLead('lead-1', 'org-1');
+
+      expect((mockedAxios.post.mock.calls[0][1] as any).requests[0].propertyAddress.state).toBe('NC');
+    });
+  });
+
   it('reports a missing lead instead of failing silently', async () => {
     const prisma = {
       lead: { findFirst: jest.fn().mockResolvedValue(null), update: jest.fn() },
