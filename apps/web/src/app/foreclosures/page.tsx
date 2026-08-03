@@ -66,6 +66,30 @@ interface FclLead {
   signals: FclSignal[];
 }
 
+/** One recorded pull of the Mecklenburg Times feed, cron or manual. */
+interface PollRun {
+  at: string;
+  trigger: string;
+  ok: boolean;
+  scanned: number;
+  created: number;
+  skipped: number;
+  pastDated: number;
+  errors: number;
+  message: string | null;
+  /** The run filed leads under a different org, so they are invisible here. */
+  orgMismatch: boolean;
+}
+
+interface Stats {
+  total: number;
+  high: number;
+  soon: number;
+  highEquity: number;
+  lastPoll: PollRun | null;
+  lastCronPoll: PollRun | null;
+}
+
 interface FclSignal {
   id: string;
   signalCode: string;
@@ -251,6 +275,67 @@ function StatCard({ label, value, accent }: { label: string; value: number | str
   );
 }
 
+/** "3 hours ago" / "2 days ago", coarse on purpose. */
+function timeAgo(iso: string): string {
+  const mins = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (!isFinite(mins)) return 'unknown';
+  if (mins < 2) return 'just now';
+  if (mins < 60) return `${mins} min ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs} hour${hrs === 1 ? '' : 's'} ago`;
+  const days = Math.round(hrs / 24);
+  return `${days} day${days === 1 ? '' : 's'} ago`;
+}
+
+// The poll runs daily, so a healthy cron is never much older than a day.
+// 36 hours leaves room for a deploy or a slow run without crying wolf.
+const CRON_STALE_HOURS = 36;
+
+/**
+ * When the feed was last pulled, and whether the daily cron is actually doing
+ * it. A manual Refresh always succeeds on demand, so "notices are arriving"
+ * is not evidence the schedule is alive - the cron line is tracked separately
+ * for that reason.
+ */
+function FeedStatus({ lastPoll, lastCronPoll }: { lastPoll: PollRun | null; lastCronPoll: PollRun | null }) {
+  const cronAgeHours = lastCronPoll
+    ? (Date.now() - new Date(lastCronPoll.at).getTime()) / 3600000
+    : Infinity;
+
+  let warning: string | null = null;
+  if (!lastCronPoll) {
+    warning = 'The daily 6:30am pull has never run. Notices only arrive when someone clicks Refresh feed.';
+  } else if (!lastCronPoll.ok) {
+    warning = `The last daily pull failed${lastCronPoll.message ? `: ${lastCronPoll.message}` : '.'}`;
+  } else if (cronAgeHours > CRON_STALE_HOURS) {
+    warning = `The daily pull last ran ${timeAgo(lastCronPoll.at)}. It should run every morning at 6:30.`;
+  } else if (lastCronPoll.orgMismatch) {
+    warning = 'The daily pull is filing notices under a different organization, so they will not appear here. Check FORECLOSURE_DEFAULT_ORG_ID.';
+  }
+
+  return (
+    <div className="mb-4 text-xs">
+      <div className="text-gray-500 dark:text-gray-400">
+        {lastPoll ? (
+          <>
+            Feed last pulled <span className="font-medium text-gray-700 dark:text-gray-300">{timeAgo(lastPoll.at)}</span>
+            {' '}({lastPoll.trigger === 'cron' ? 'scheduled' : 'manual'}):{' '}
+            {lastPoll.scanned} scanned, {lastPoll.created} new, {lastPoll.skipped} existing, {lastPoll.pastDated} past-dated
+          </>
+        ) : (
+          'Feed has not been pulled yet.'
+        )}
+      </div>
+      {warning && (
+        <div className="mt-1.5 flex items-start gap-1.5 rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-2.5 py-1.5 text-amber-800 dark:text-amber-300">
+          <span aria-hidden>⚠</span>
+          <span>{warning}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Chip({ active, onClick, children, activeClass }: { active: boolean; onClick: () => void; children: React.ReactNode; activeClass?: string }) {
   return (
     <button
@@ -349,7 +434,7 @@ export default function ForeclosuresPage() {
   const [cities, setCities] = useState<string[]>([]);
   const [counties, setCounties] = useState<string[]>([]);
   const [collapseAll, setCollapseAll] = useState(false);
-  const [stats, setStats] = useState({ total: 0, high: 0, soon: 0, highEquity: 0 });
+  const [stats, setStats] = useState<Stats>({ total: 0, high: 0, soon: 0, highEquity: 0, lastPoll: null, lastCronPoll: null });
   const [loading, setLoading] = useState(true);
   const [pagination, setPagination] = useState({ page: 1, pageSize: 60, total: 0, totalPages: 1 });
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -683,6 +768,8 @@ export default function ForeclosuresPage() {
               onChange={(e) => { const f = e.target.files?.[0]; if (f) handlePdf(f); e.target.value = ''; }} />
           </div>
         </div>
+
+        <FeedStatus lastPoll={stats.lastPoll} lastCronPoll={stats.lastCronPoll} />
 
         {/* Stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-5">

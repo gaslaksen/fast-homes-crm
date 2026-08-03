@@ -302,7 +302,7 @@ export class ForeclosuresController {
   @Post('refresh')
   async refresh(@Headers('authorization') authHeader?: string) {
     const { organizationId } = this.decodeToken(authHeader);
-    return this.ingest.ingestRssFeed({ organizationId });
+    return this.ingest.ingestRssFeed({ organizationId, trigger: 'manual' });
   }
 
   @Post('bulk-skiptrace')

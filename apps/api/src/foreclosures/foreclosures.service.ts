@@ -585,7 +585,24 @@ export class ForeclosuresService {
     const in14 = new Date();
     in14.setDate(in14.getDate() + 14);
 
-    const [total, high, soon, highEquity] = await Promise.all([
+    // Poll runs are read unscoped by org on purpose. There is one feed, and
+    // scoping would hide the exact failure this record exists to expose: a
+    // cron filing notices under an org the viewer is not in.
+    const runSelect = {
+      startedAt: true,
+      finishedAt: true,
+      trigger: true,
+      ok: true,
+      scanned: true,
+      created: true,
+      skipped: true,
+      pastDated: true,
+      errors: true,
+      message: true,
+      organizationId: true,
+    } as const;
+
+    const [total, high, soon, highEquity, lastRun, lastCronRun] = await Promise.all([
       this.prisma.lead.count({ where: base }),
       this.prisma.lead.count({ where: { ...base, foreclosureDetail: { is: { priority: 'HIGH' } } } }),
       this.prisma.lead.count({
@@ -594,8 +611,42 @@ export class ForeclosuresService {
       this.prisma.lead.count({
         where: { ...base, foreclosureDetail: { is: { equityPct: { gte: 40 } } } },
       }),
+      this.prisma.foreclosurePollRun.findFirst({
+        orderBy: { startedAt: 'desc' },
+        select: runSelect,
+      }),
+      this.prisma.foreclosurePollRun.findFirst({
+        where: { trigger: 'cron' },
+        orderBy: { startedAt: 'desc' },
+        select: runSelect,
+      }),
     ]);
-    return { total, high, soon, highEquity };
+
+    const shape = (r: typeof lastRun) =>
+      r && {
+        at: (r.finishedAt ?? r.startedAt).toISOString(),
+        trigger: r.trigger,
+        ok: r.ok,
+        scanned: r.scanned,
+        created: r.created,
+        skipped: r.skipped,
+        pastDated: r.pastDated,
+        errors: r.errors,
+        message: r.message,
+        // The cron files leads under FORECLOSURE_DEFAULT_ORG_ID. When that does
+        // not match the viewer's org the notices are created but invisible on
+        // this page, which looks identical to the poll having stopped.
+        orgMismatch: (r.organizationId || null) !== (organizationId || null),
+      };
+
+    return {
+      total,
+      high,
+      soon,
+      highEquity,
+      lastPoll: shape(lastRun) || null,
+      lastCronPoll: shape(lastCronRun) || null,
+    };
   }
 
   private toDto(lead: any) {

@@ -4,6 +4,7 @@ import axios from 'axios';
 import * as crypto from 'crypto';
 import Parser from 'rss-parser';
 import { ForeclosureSourceKind } from '@fast-homes/shared';
+import { PrismaService } from '../prisma/prisma.service';
 import { ForeclosuresService } from './foreclosures.service';
 import { ForeclosureSkiptraceService } from './foreclosure-skiptrace.service';
 import { ForeclosureDocumentService } from './foreclosure-document.service';
@@ -17,6 +18,18 @@ import { computePriority, parseDateISO, daysToSale } from './foreclosure-scoring
 const MECK_TIMES_RSS =
   'https://mecktimes.com/public-notice/export-rss/?feeds=real_estate';
 
+export type PollTrigger = 'cron' | 'manual';
+
+export interface RssIngestResult {
+  scanned: number;
+  created: number;
+  skipped: number;
+  pastDated: number;
+  errors: number;
+  /** Why the run failed, when it did. Surfaced on the foreclosures page. */
+  message?: string;
+}
+
 @Injectable()
 export class ForeclosureIngestService {
   private readonly logger = new Logger(ForeclosureIngestService.name);
@@ -25,6 +38,7 @@ export class ForeclosureIngestService {
 
   constructor(
     private config: ConfigService,
+    private prisma: PrismaService,
     private foreclosures: ForeclosuresService,
     private skiptrace: ForeclosureSkiptraceService,
     private extract: ForeclosureExtractService,
@@ -129,17 +143,74 @@ export class ForeclosureIngestService {
     };
   }
 
-  /** Pull the Mecklenburg Times feed and ingest every new, future-dated notice. */
-  async ingestRssFeed(
+  /**
+   * Pull the Mecklenburg Times feed and ingest every new, future-dated notice,
+   * recording the outcome either way. Without that record a cron that has
+   * quietly stopped, or that is filing leads under an org nobody can see, is
+   * invisible in the app and only shows up in logs that age out.
+   */
+  async ingestRssFeed(opts: {
+    organizationId?: string | null;
+    trigger?: PollTrigger;
+  }): Promise<RssIngestResult> {
+    const startedAt = new Date();
+    try {
+      const result = await this.runRssIngest(opts);
+      await this.recordPollRun(startedAt, opts, result);
+      return result;
+    } catch (e: any) {
+      await this.recordPollRun(startedAt, opts, {
+        scanned: 0,
+        created: 0,
+        skipped: 0,
+        pastDated: 0,
+        errors: 1,
+        message: e.message,
+      });
+      throw e;
+    }
+  }
+
+  /**
+   * Write the run row. Never allowed to fail the ingest it is reporting on:
+   * losing the audit line is a far smaller problem than losing the notices.
+   */
+  private async recordPollRun(
+    startedAt: Date,
+    opts: { organizationId?: string | null; trigger?: PollTrigger },
+    result: RssIngestResult,
+  ) {
+    try {
+      await this.prisma.foreclosurePollRun.create({
+        data: {
+          organizationId: opts.organizationId || null,
+          trigger: opts.trigger || 'manual',
+          startedAt,
+          finishedAt: new Date(),
+          ok: result.errors === 0,
+          scanned: result.scanned,
+          created: result.created,
+          skipped: result.skipped,
+          pastDated: result.pastDated,
+          errors: result.errors,
+          message: result.message || null,
+        },
+      });
+    } catch (e: any) {
+      this.logger.warn(`Could not record foreclosure poll run: ${e.message}`);
+    }
+  }
+
+  private async runRssIngest(
     opts: { organizationId?: string | null },
-  ): Promise<{ scanned: number; created: number; skipped: number; pastDated: number; errors: number }> {
+  ): Promise<RssIngestResult> {
     let xml: string;
     try {
       const resp = await axios.get(this.feedUrl, { timeout: 30000, responseType: 'text' });
       xml = resp.data;
     } catch (e: any) {
       this.logger.error(`RSS fetch failed: ${e.message}`);
-      return { scanned: 0, created: 0, skipped: 0, pastDated: 0, errors: 1 };
+      return { scanned: 0, created: 0, skipped: 0, pastDated: 0, errors: 1, message: `feed fetch failed: ${e.message}` };
     }
 
     let feed: Parser.Output<any>;
@@ -147,7 +218,7 @@ export class ForeclosureIngestService {
       feed = await this.rss.parseString(xml);
     } catch (e: any) {
       this.logger.error(`RSS parse failed: ${e.message}`);
-      return { scanned: 0, created: 0, skipped: 0, pastDated: 0, errors: 1 };
+      return { scanned: 0, created: 0, skipped: 0, pastDated: 0, errors: 1, message: `feed parse failed: ${e.message}` };
     }
 
     const items = feed.items || [];

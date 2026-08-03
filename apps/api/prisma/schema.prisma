@@ -1531,3 +1531,25 @@ model DigestRun {
   @@index([organizationId, sentAt])
   @@map("digest_runs")
 }
+
+/// One run of the Mecklenburg Times feed poll, cron or manual. Exists so the
+/// foreclosures page can show when notices were last pulled without digging
+/// through Railway logs, which age out. organizationId is nullable because the
+/// cron takes it from FORECLOSURE_DEFAULT_ORG_ID, which may be unset.
+model ForeclosurePollRun {
+  id             String    @id @default(cuid())
+  organizationId String?
+  trigger        String                       // 'cron' | 'manual'
+  startedAt      DateTime  @default(now())
+  finishedAt     DateTime?
+  ok             Boolean   @default(false)
+  scanned        Int       @default(0)
+  created        Int       @default(0)
+  skipped        Int       @default(0)
+  pastDated      Int       @default(0)
+  errors         Int       @default(0)
+  message        String?
+
+  @@index([startedAt])
+  @@map("foreclosure_poll_runs")
+}
