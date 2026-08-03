@@ -98,6 +98,7 @@ export class ForeclosuresService {
         equityPct: true,
         ownerOccupied: true,
         skipStatus: true,
+        debtFigureReliable: true,
       },
     });
 
@@ -244,6 +245,7 @@ export class ForeclosuresService {
       equityPct: number | null;
       ownerOccupied: string | null;
       skipStatus: string | null;
+      debtFigureReliable: boolean;
     },
     input: ForeclosureLeadInput,
     dates: { saleIso: string; hearingIso: string; loanIso: string },
@@ -286,7 +288,12 @@ export class ForeclosuresService {
       );
       detailPatch.priority = derived.priority;
       detailPatch.leadScore = derived.score;
-      detailPatch.equitySpread = derived.equitySpread;
+      // Leave a suppressed spread suppressed. The rules engine blanked it
+      // because the recorded debt figure cannot support the arithmetic, and a
+      // later filing on the same case does not change that.
+      if (existing.debtFigureReliable !== false) {
+        detailPatch.equitySpread = derived.equitySpread;
+      }
     }
 
     await this.prisma.foreclosureDetail.update({

@@ -12,6 +12,7 @@ import {
   equityPctWhenReliable,
   evaluateRules,
   loanTypeFromFilingText,
+  debtFigureCaveat,
   ForeclosureLoanType,
   ForeclosureUrgency,
   LenderMatchType,
@@ -434,5 +435,44 @@ describe('evaluateRules loan type precedence', () => {
     });
     expect(res.loanType).toBe(ForeclosureLoanType.UNKNOWN);
     expect(res.loanTypeSource).toBeNull();
+  });
+});
+
+describe('HOA liens suppress equity the way reverse mortgages do', () => {
+  it('marks the HOA lien figure unreliable', () => {
+    expect(principalFigureReliable(ForeclosureLoanType.HOA_ASSESSMENT)).toBe(false);
+    expect(principalFigureReliable(ForeclosureLoanType.REVERSE_HECM)).toBe(false);
+    expect(principalFigureReliable(ForeclosureLoanType.CONVENTIONAL)).toBe(true);
+    expect(principalFigureReliable(ForeclosureLoanType.TAX_LIEN)).toBe(true);
+  });
+
+  it('blanks both equity fields on an HOA filing', () => {
+    // $4,100 of unpaid dues against a $312,500 house would otherwise read as
+    // 98% equity on a property whose first mortgage is untouched.
+    const res = evaluateRules(
+      { holderName: 'Princeton at Southampton Owners Association, Inc.', originalPrincipal: 4100 },
+      SEED,
+      { assessedValue: 312500 },
+    );
+    expect(res.loanType).toBe(ForeclosureLoanType.HOA_ASSESSMENT);
+    expect(res.principalFigureReliable).toBe(false);
+    expect(res.equitySpread).toBeNull();
+    expect(res.equityPct).toBeNull();
+  });
+
+  it('still computes equity for an ordinary conventional filing', () => {
+    const res = evaluateRules(
+      { holderName: 'Bank of America, N.A.', originalPrincipal: 200000 },
+      SEED,
+      { assessedValue: 312500 },
+    );
+    expect(res.equitySpread).toBe(112500);
+    expect(res.equityPct).not.toBeNull();
+  });
+
+  it('explains the two suppressions differently, since they are opposite errors', () => {
+    expect(debtFigureCaveat(ForeclosureLoanType.REVERSE_HECM)).toMatch(/overstates/i);
+    expect(debtFigureCaveat(ForeclosureLoanType.HOA_ASSESSMENT)).toMatch(/senior mortgage/i);
+    expect(debtFigureCaveat(ForeclosureLoanType.CONVENTIONAL)).toBeNull();
   });
 });

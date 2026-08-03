@@ -155,6 +155,43 @@ describe('ForeclosureSkiptraceService.enrichLead', () => {
     });
   });
 
+  describe('a suppressed equity spread', () => {
+    const parcel = {
+      features: [{ attributes: {
+        ownname: 'CAMPBELL PATRICIA', siteadd: '5125 BIRCHBARK LN',
+        scity: 'CHARLOTTE', szip: '28227', mailadd: '5125 BIRCHBARK LN',
+        mcity: 'CHARLOTTE', mstate: 'NC', parval: 312500,
+      } }],
+    };
+
+    it('is not written back over by a skip trace', async () => {
+      // The rules engine blanked this because the recorded figure cannot
+      // support the arithmetic. A freshly found assessed value must not undo it.
+      mockedAxios.get.mockResolvedValue({ data: parcel });
+      const lead = leadWith();
+      lead.foreclosureDetail.loanAmount = 4100;
+      lead.foreclosureDetail.debtFigureReliable = false;
+      const { service, update } = buildService(lead);
+
+      await service.enrichLead('lead-1', 'org-1');
+
+      const written = update.mock.calls[0][0].data.foreclosureDetail.update;
+      expect(written.equitySpread).toBeUndefined();
+    });
+
+    it('is still computed for a lead whose figure is trusted', async () => {
+      mockedAxios.get.mockResolvedValue({ data: parcel });
+      const lead = leadWith();
+      lead.foreclosureDetail.loanAmount = 200000;
+      lead.foreclosureDetail.debtFigureReliable = true;
+      const { service, update } = buildService(lead);
+
+      await service.enrichLead('lead-1', 'org-1');
+
+      expect(update.mock.calls[0][0].data.foreclosureDetail.update.equitySpread).toBe(112500);
+    });
+  });
+
   it('reports a missing lead instead of failing silently', async () => {
     const prisma = {
       lead: { findFirst: jest.fn().mockResolvedValue(null), update: jest.fn() },

@@ -275,6 +275,31 @@ function StatCard({ label, value, accent }: { label: string; value: number | str
   );
 }
 
+/**
+ * Why the recorded debt figure is not used for equity. Two loan types suppress
+ * it for opposite reasons - a reverse mortgage records far MORE than is owed, an
+ * HOA lien records far less than stands against the property - so the note has
+ * to say which, or it tells the user the wrong thing half the time.
+ */
+function debtFigureNote(loanType: string | null): { figure: string; blank: string } {
+  if (loanType === 'HOA_ASSESSMENT') {
+    return {
+      figure: 'This is the HOA lien only. The first mortgage is senior to it and survives the association sale, so it is not the debt against the property. Not used for equity.',
+      blank: 'Blank on purpose: an HOA lien excludes the senior mortgage, so equity cannot be computed from it. Pull the mortgage payoff before bidding.',
+    };
+  }
+  if (loanType === 'REVERSE_HECM') {
+    return {
+      figure: 'Recorded principal on a reverse mortgage is a multiple of the maximum claim amount, so it overstates the debt. Not used for equity.',
+      blank: 'Blank on purpose: the recorded principal on a reverse mortgage overstates the debt, so equity cannot be computed from it.',
+    };
+  }
+  return {
+    figure: 'The recorded debt figure cannot be relied on for this filing. Not used for equity.',
+    blank: 'Blank on purpose: the recorded debt figure cannot support the equity calculation.',
+  };
+}
+
 /** "3 hours ago" / "2 days ago", coarse on purpose. */
 function timeAgo(iso: string): string {
   const mins = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
@@ -1018,9 +1043,7 @@ function LeadCard({ lead: l, onUpdate, onSkiptrace, onToggleAction, collapseDefa
   // Equity is blank on purpose when the debt figure cannot be trusted; say so
   // rather than letting it read as missing data.
   const suppressedEquity = !l.debtFigureReliable && l.equityPct == null;
-  const equityBlankReason = suppressedEquity
-    ? 'Blank on purpose: the recorded principal on a reverse mortgage overstates the debt, so equity cannot be computed from it.'
-    : undefined;
+  const equityBlankReason = suppressedEquity ? debtFigureNote(l.loanType).blank : undefined;
 
   const linkBtn = 'flex-1 min-w-[80px] flex flex-col items-center justify-center gap-0.5 px-2 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/60 hover:border-primary-400 dark:hover:border-primary-500 transition-colors text-sm font-semibold text-gray-800 dark:text-gray-200';
   const linkSub = 'text-[10px] font-normal text-gray-400 dark:text-gray-500';
@@ -1251,7 +1274,7 @@ function LeadCard({ lead: l, onUpdate, onSkiptrace, onToggleAction, collapseDefa
                 {money(l.loanAmount)}
                 {!l.debtFigureReliable && (
                   <span
-                    title="Recorded principal on a reverse mortgage is a multiple of the maximum claim amount, so it overstates the debt. Not used for equity."
+                    title={debtFigureNote(l.loanType).figure}
                     className="ml-1 text-amber-600 dark:text-amber-400 cursor-help"
                   >⚠</span>
                 )}

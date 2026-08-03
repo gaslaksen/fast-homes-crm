@@ -2,7 +2,9 @@ import {
   SIGNAL_CODES, SIGNAL_SEVERITIES, RECOMMENDED_ACTIONS, EVIDENCE_VOCABULARY,
   MAX_SIGNALS, MAX_HEADLINE_CHARS, SignalCode, SignalSeverity, RecommendedAction,
 } from './foreclosure-signals.schema';
-import { ForeclosureLoanType, ForeclosureUrgency, RulesResult } from './foreclosure-rules.util';
+import {
+  ForeclosureLoanType, ForeclosureUrgency, RulesResult, debtFigureCaveat,
+} from './foreclosure-rules.util';
 
 /**
  * Validating and completing the model's signal list.
@@ -121,15 +123,19 @@ export function signalPreconditions(
     };
   }
 
-  // The recorded principal on a HECM is a multiple of the maximum claim amount.
-  // This one is a boolean restatement, so it is fully determined.
+  // A HECM's recorded principal is a multiple of the maximum claim amount; an
+  // HOA lien leaves out the senior mortgage entirely. Both make the figure
+  // unusable for equity, in opposite directions, so the headline has to name
+  // which. This one is a boolean restatement, so it is fully determined.
   out.DEBT_FIGURE_UNRELIABLE = {
     required: !rules.principalFigureReliable,
     forbidden: rules.principalFigureReliable,
     minSeverity: 'notable',
     fallback: {
       severity: 'notable',
-      headline: 'Recorded principal overstates the debt - do not use for equity',
+      headline: truncateHeadline(
+        debtFigureCaveat(rules.loanType) || 'Recorded debt figure cannot be used for equity',
+      ),
       evidence: ['principalFigureReliable', 'originalPrincipal', 'loanType'],
       recommendedActions: ['MANUAL_FIELD_REVIEW'],
     },

@@ -201,9 +201,36 @@ export function borrowerAgeFloorToday(
  * produces a confidently wrong number on exactly the leads with the most
  * equity. The figure is still shown, with a warning; it must never reach a
  * computed equity field.
+ *
+ * False for an HOA assessment lien too, for the opposite reason. The lien is
+ * junior to the first mortgage and the mortgage survives the association's
+ * sale, so the amount on the claim of lien is a fraction of what actually
+ * stands against the property. "Assessed value minus a few thousand in unpaid
+ * dues" reads as enormous equity on a house that may have no equity at all.
+ *
+ * Same suppression, opposite errors, so anything shown to a user has to say
+ * which one it is - see debtFigureCaveat.
  */
 export function principalFigureReliable(loanType: string): boolean {
-  return loanType !== ForeclosureLoanType.REVERSE_HECM;
+  return (
+    loanType !== ForeclosureLoanType.REVERSE_HECM &&
+    loanType !== ForeclosureLoanType.HOA_ASSESSMENT
+  );
+}
+
+/**
+ * Why the recorded debt figure cannot be used, or null when it can. One
+ * sentence, phrased for the person looking at the card.
+ */
+export function debtFigureCaveat(loanType: string): string | null {
+  switch (loanType) {
+    case ForeclosureLoanType.REVERSE_HECM:
+      return 'Recorded principal overstates the debt - do not use for equity';
+    case ForeclosureLoanType.HOA_ASSESSMENT:
+      return 'Lien excludes the senior mortgage - do not use for equity';
+    default:
+      return null;
+  }
 }
 
 /**

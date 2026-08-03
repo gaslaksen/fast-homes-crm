@@ -212,7 +212,10 @@ export class ForeclosureSkiptraceService {
       skipStatus: detailPatch.skipStatus ?? d.skipStatus,
       dead: d.workStatus === 'DEAD',
     });
-    if (assessed != null && d.loanAmount != null) {
+    // Skip trace must not undo what the rules engine suppressed. A newly found
+    // assessed value on a reverse mortgage or an HOA lien would otherwise write
+    // a spread straight back over the deliberate blank.
+    if (assessed != null && d.loanAmount != null && d.debtFigureReliable !== false) {
       detailPatch.equitySpread = Math.round(assessed - d.loanAmount);
     }
 
