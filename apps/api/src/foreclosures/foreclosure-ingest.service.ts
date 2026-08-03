@@ -133,7 +133,10 @@ export class ForeclosureIngestService {
       this.logger.warn(`Filing extraction failed for document ${doc.id}: ${e.message}`);
     }
 
-    if (res.created && res.leadId) this.enrichAsync(res.leadId, opts.organizationId);
+    // Not gated on res.created: a filing that merged into a case we already
+    // track often carries the better address, which is exactly what lets the
+    // parcel lookup match on a lead that came back NO MATCH the first time.
+    if (res.leadId) this.enrichAsync(res.leadId, opts.organizationId);
     return {
       created: res.created,
       leadId: res.leadId,
@@ -259,6 +262,9 @@ export class ForeclosureIngestService {
         const res = await this.foreclosures.createForeclosureLead(input, {
           organizationId: opts.organizationId,
         });
+        // Only new leads, deliberately. The feed re-serves the same notices
+        // every morning, so enriching the existing ones would spend a lookup
+        // per lead per day to re-learn what we already have.
         if (res.created && res.leadId) {
           created++;
           this.enrichAsync(res.leadId, opts.organizationId);
@@ -329,10 +335,14 @@ export class ForeclosureIngestService {
     return m ? m[1] : '';
   }
 
-  /** Fire-and-forget skip-trace enrich so ingestion stays fast. */
+  /**
+   * Fire-and-forget skip-trace enrich so ingestion stays fast. Skips a lead
+   * that already has a phone, which is what makes it safe to call on merges
+   * as well as on newly created leads.
+   */
   private enrichAsync(leadId: string, organizationId?: string | null) {
     this.skiptrace
-      .enrichLead(leadId, organizationId || undefined)
+      .enrichLead(leadId, organizationId || undefined, { onlyIfMissingContact: true })
       .catch((e) => this.logger.warn(`Skip-trace enrich failed for ${leadId}: ${e.message}`));
   }
 }

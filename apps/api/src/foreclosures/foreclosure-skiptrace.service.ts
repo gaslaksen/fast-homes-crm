@@ -49,13 +49,40 @@ export class ForeclosureSkiptraceService {
    * owner-occupied (free NC OneMap), exact Mecklenburg parcel id where possible,
    * then phones/email (paid BatchData, only when a key is configured).
    * Recomputes the lead score afterward. Returns the updated detail summary.
+   *
+   * Every exit logs. This runs fire-and-forget off ingestion, so without a line
+   * per outcome a lead that was never enriched and one enriched with nothing to
+   * show look identical from the logs.
+   *
+   * onlyIfMissingContact is for the automatic callers: re-running a lead that
+   * already has a number spends a BatchData credit to learn what we know. The
+   * manual and bulk buttons leave it off, since the point of pressing them is
+   * to look again.
    */
-  async enrichLead(leadId: string, organizationId?: string) {
+  async enrichLead(
+    leadId: string,
+    organizationId?: string,
+    opts: { onlyIfMissingContact?: boolean } = {},
+  ) {
     const lead = await this.prisma.lead.findFirst({
       where: { id: leadId, source: LeadSource.FORECLOSURE, ...(organizationId ? { organizationId } : {}) },
       include: { foreclosureDetail: true },
     });
-    if (!lead || !lead.foreclosureDetail) return { updated: false, reason: 'not found' };
+    if (!lead || !lead.foreclosureDetail) {
+      this.logger.warn(`Skip trace ${leadId}: no foreclosure lead found, nothing enriched`);
+      return { updated: false, reason: 'not found' };
+    }
+
+    if (opts.onlyIfMissingContact) {
+      const d0 = lead.foreclosureDetail;
+      const hasPhone = [lead.sellerPhone, d0.phone2, d0.phone3, d0.phone4].some((p) =>
+        normalizePhoneDigits(p),
+      );
+      if (hasPhone) {
+        this.logger.log(`Skip trace ${leadId}: already has a phone, left alone`);
+        return { updated: false, reason: 'already has contact' };
+      }
+    }
 
     const address = lead.propertyAddress;
     const detailPatch: any = {};
@@ -113,10 +140,14 @@ export class ForeclosureSkiptraceService {
 
     // Tier 2 - BatchData phones/email (paid, opt-in via key). Attaches up to
     // 4 phones (phone1 on the Lead, phone2-4 on the detail) and 2 emails.
+    let phonesFound = 0;
+    let emailsFound = 0;
     if (this.batchKey) {
       try {
         const contact = await this.batchSkipTrace(parcel, address, lead.propertyCity, lead.propertyZip);
         if (contact) {
+          phonesFound = contact.phones.length;
+          emailsFound = contact.emails.length;
           const [p1, p2, p3, p4] = contact.phones;
           if (p1) { leadPatch.sellerPhone = p1.num; detailPatch.phone1Type = p1.type || null; }
           if (p2) { detailPatch.phone2 = p2.num; detailPatch.phone2Type = p2.type || null; }
@@ -156,6 +187,16 @@ export class ForeclosureSkiptraceService {
       where: { id: leadId },
       data: { ...leadPatch, foreclosureDetail: { update: detailPatch } },
     });
+
+    // Name the unconfigured key explicitly: a missing BATCHDATA_API_KEY reads
+    // as "skip trace found no phones" on the card, which is not the same thing.
+    const tier2 = this.batchKey
+      ? `${phonesFound} phone(s), ${emailsFound} email(s)`
+      : 'BATCHDATA_API_KEY not set, no phone lookup';
+    this.logger.log(
+      `Skip trace ${leadId} "${address}": parcel ${parcel ? 'matched' : 'no match'}, ` +
+        `${tier2}, status ${detailPatch.skipStatus}`,
+    );
 
     return { updated: true, skipStatus: detailPatch.skipStatus, parcelId: detailPatch.parcelId };
   }
