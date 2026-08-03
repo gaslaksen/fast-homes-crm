@@ -11,6 +11,7 @@ import {
   equitySpreadWhenReliable,
   equityPctWhenReliable,
   evaluateRules,
+  loanTypeFromFilingText,
   ForeclosureLoanType,
   ForeclosureUrgency,
   LenderMatchType,
@@ -90,6 +91,26 @@ describe('matchLenderProfile', () => {
       .toBe(ForeclosureLoanType.HOA_ASSESSMENT);
     expect(matchLenderProfile({ holderName: 'Mecklenburg County Tax Collector' }, SEED)!.profile.loanType)
       .toBe(ForeclosureLoanType.TAX_LIEN);
+  });
+
+  it('catches an association named without the word "Homeowners"', () => {
+    // Real filing 26SP002284-590, which the narrower patterns all missed.
+    expect(
+      matchLenderProfile({ holderName: 'Princeton at Southampton Owners Association, Inc.' }, SEED)!
+        .profile.loanType,
+    ).toBe(ForeclosureLoanType.HOA_ASSESSMENT);
+    expect(
+      matchLenderProfile({ holderName: 'Ballantyne Community Association' }, SEED)!.profile.loanType,
+    ).toBe(ForeclosureLoanType.HOA_ASSESSMENT);
+  });
+
+  it('does not read a bank filing as an HOA on the word Association', () => {
+    // Banks file as "National Association", which is why the pattern is
+    // "Owners Association" and not a bare "Association".
+    const match = matchLenderProfile(
+      { holderName: 'Bank of America, National Association' }, SEED,
+    );
+    expect(match?.profile.loanType).not.toBe(ForeclosureLoanType.HOA_ASSESSMENT);
   });
 
   it('returns null for an unrecognised lender rather than guessing', () => {
@@ -354,5 +375,64 @@ describe('the seeded table itself', () => {
     ]) {
       expect(names).toContain(required);
     }
+  });
+});
+
+describe('loanTypeFromFilingText', () => {
+  // Caption of the real filing 26SP002284-590, as pdf-parse returns it.
+  const HOA_CAPTION = `STATEOFNORTHCAROLINAINTHEGENERALCOURTOFJUSTICE
+COUNTYOFMECKLENBURG BEFORETHECLERK
+INTHEMATTEROFTHE PROPOSED FORECLOSUREOFCLAIMOFLIEN FILED AGAINST
+DELAHKUDJIKU NOTICEOFHEARING PRIORTOFORECLOSURE BY OFCLAIMOFLIEN
+PRINCETON AT SOUTHAMPTONOWNERS ASSOCIATION, INC.`;
+
+  it('reads an HOA claim of lien off the caption', () => {
+    expect(loanTypeFromFilingText(HOA_CAPTION)).toBe(ForeclosureLoanType.HOA_ASSESSMENT);
+  });
+
+  it('needs both the instrument and the body, not either alone', () => {
+    expect(loanTypeFromFilingText('NOTICE OF HEARING. Claim of Lien recorded.')).toBeNull();
+    expect(loanTypeFromFilingText('Princeton at Southampton Owners Association')).toBeNull();
+  });
+
+  it('does not read a tax foreclosure as an HOA lien', () => {
+    // "assessment" appears in tax filings too, so tax is tested first.
+    expect(
+      loanTypeFromFilingText('IN REM FORECLOSURE of tax lien for delinquent taxes and assessment'),
+    ).toBe(ForeclosureLoanType.TAX_LIEN);
+  });
+
+  it('answers null rather than UNKNOWN when it cannot tell', () => {
+    expect(loanTypeFromFilingText('NOTICE OF SUBSTITUTE TRUSTEE SALE under a deed of trust')).toBeNull();
+    expect(loanTypeFromFilingText('')).toBeNull();
+    expect(loanTypeFromFilingText(null)).toBeNull();
+  });
+});
+
+describe('evaluateRules loan type precedence', () => {
+  const hoaText = 'FORECLOSURE OF CLAIM OF LIEN by SOUTHAMPTON OWNERS ASSOCIATION INC';
+
+  it('falls back to the caption when no lender profile matches', () => {
+    const res = evaluateRules({ holderName: 'Nobody In The Table LLC' }, [], {
+      documentText: hoaText,
+    });
+    expect(res.loanType).toBe(ForeclosureLoanType.HOA_ASSESSMENT);
+    expect(res.loanTypeSource).toBe('filingText');
+  });
+
+  it('lets a matched lender profile win over the caption', () => {
+    const res = evaluateRules({ holderName: 'Finance of America Reverse LLC' }, SEED, {
+      documentText: hoaText,
+    });
+    expect(res.loanType).toBe(ForeclosureLoanType.REVERSE_HECM);
+    expect(res.loanTypeSource).toBe('profile');
+  });
+
+  it('stays UNKNOWN when neither the profiles nor the caption can tell', () => {
+    const res = evaluateRules({ holderName: 'Nobody In The Table LLC' }, SEED, {
+      documentText: 'NOTICE OF SUBSTITUTE TRUSTEE SALE',
+    });
+    expect(res.loanType).toBe(ForeclosureLoanType.UNKNOWN);
+    expect(res.loanTypeSource).toBeNull();
   });
 });

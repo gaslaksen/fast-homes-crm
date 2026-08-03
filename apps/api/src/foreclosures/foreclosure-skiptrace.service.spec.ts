@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
-import { ForeclosureSkiptraceService } from './foreclosure-skiptrace.service';
+import { ForeclosureSkiptraceService, streetLineOf } from './foreclosure-skiptrace.service';
 
 jest.mock('axios');
 const mockedAxios = axios as jest.Mocked<typeof axios>;
@@ -93,9 +93,12 @@ describe('ForeclosureSkiptraceService.enrichLead', () => {
         {
           attributes: {
             ownname: 'CAMPBELL PATRICIA',
-            siteadd: '10990 PRINCETON VILLAGE DR',
+            // Verbatim from NC OneMap for this parcel. siteadd is a full
+            // address, and the "Site Address Zip" is really the El Paso
+            // mailing zip - the county put it in the wrong field.
+            siteadd: '10990 PRINCETON VILLAGE DR CHARLOTTE NC',
             scity: 'CHARLOTTE',
-            szip: '28277',
+            szip: '79924-1507',
             mailadd: '4400 OCEAN BLVD',
             mcity: 'NAPLES',
             mstate: 'FL',
@@ -161,5 +164,25 @@ describe('ForeclosureSkiptraceService.enrichLead', () => {
     const res = await new ForeclosureSkiptraceService(prisma, config).enrichLead('nope');
 
     expect(res).toEqual({ updated: false, reason: 'not found' });
+  });
+});
+
+describe('streetLineOf', () => {
+  it('strips the city and state NC OneMap bakes into siteadd', () => {
+    expect(streetLineOf('10990 PRINCETON VILLAGE DR CHARLOTTE NC', 'CHARLOTTE', 'NC'))
+      .toBe('10990 PRINCETON VILLAGE DR');
+  });
+
+  it('leaves a street line that does not carry them', () => {
+    expect(streetLineOf('5125 Birchbark Ln', 'Charlotte', 'NC')).toBe('5125 Birchbark Ln');
+  });
+
+  it('does not eat a street whose name contains the city', () => {
+    expect(streetLineOf('120 CHARLOTTE ST CHARLOTTE NC', 'CHARLOTTE', 'NC')).toBe('120 CHARLOTTE ST');
+  });
+
+  it('copes with a missing city or state', () => {
+    expect(streetLineOf('900 Main St', undefined, undefined)).toBe('900 Main St');
+    expect(streetLineOf('', 'CHARLOTTE', 'NC')).toBe('');
   });
 });

@@ -85,16 +85,28 @@ export function signalPreconditions(
     [ForeclosureLoanType.PRIVATE_HARD_MONEY]: 'LOAN_TYPE_PRIVATE',
   };
   const expected = loanTypeSignal[rules.loanType];
-  const evidenceForLoanType = [
-    'loanType',
-    rules.matchedField === 'originalBeneficiary' ? 'originalBeneficiary' : 'holderName',
-  ];
+  // Whether the rules reached a verdict at all. Not the same as `expected`
+  // being set: CONVENTIONAL, FHA and VA are real classifications that simply
+  // have no signal code of their own, and on those the model must still be
+  // barred from claiming a reverse mortgage.
+  const classified = rules.loanType !== ForeclosureLoanType.UNKNOWN;
+  // A text-derived classification rests on the document's own caption, not on
+  // a party name, so it cannot cite holderName as its evidence.
+  const evidenceForLoanType =
+    rules.loanTypeSource === 'filingText'
+      ? ['loanType']
+      : ['loanType', rules.matchedField === 'originalBeneficiary' ? 'originalBeneficiary' : 'holderName'];
 
   for (const code of ['LOAN_TYPE_REVERSE', 'LOAN_TYPE_HOA', 'LOAN_TYPE_TAX', 'LOAN_TYPE_PRIVATE'] as SignalCode[]) {
     const applies = code === expected;
     out[code] = {
       required: applies,
-      forbidden: !applies,
+      // Only veto once the rules have actually classified the filing. They used
+      // to veto on UNKNOWN too, so a model that had read the document and
+      // correctly called an HOA claim of lien was overruled by a lookup table
+      // that had simply never seen that association's name. UNKNOWN means we
+      // could not tell, which is not evidence of anything.
+      forbidden: classified && !applies,
       minSeverity: 'notable',
       fallback: applies
         ? {

@@ -10,6 +10,7 @@ const reverseRules = (over: Partial<RulesResult> = {}): RulesResult => ({
   lenderName: 'Finance of America Reverse LLC',
   servicerType: 'REVERSE_SERVICER',
   matchedField: 'holderName',
+  loanTypeSource: 'profile',
   daysToHearing: 42,
   urgency: ForeclosureUrgency.MEDIUM,
   upsetBidDeadline: null,
@@ -27,6 +28,7 @@ const conventionalRules = (over: Partial<RulesResult> = {}): RulesResult => ({
   lenderName: 'Bank of America, N.A.',
   servicerType: 'BANK',
   matchedField: 'holderName',
+  loanTypeSource: 'profile',
   daysToHearing: 42,
   urgency: ForeclosureUrgency.MEDIUM,
   upsetBidDeadline: null,
@@ -343,5 +345,73 @@ describe('buildSignalsInput', () => {
   it('serializes dates as ISO strings, not Date objects', () => {
     const input = buildSignalsInput(completeFiling, reverseRules(), fullConfidence) as any;
     expect(input.filing.hearingAt).toBe('2026-09-08T18:00:00.000Z');
+  });
+});
+
+describe('loan-type preconditions when the rules could not classify', () => {
+  const unknownRules = (): RulesResult => ({
+    loanType: ForeclosureLoanType.UNKNOWN,
+    lenderName: null,
+    servicerType: null,
+    matchedField: null,
+    loanTypeSource: null,
+    daysToHearing: 30,
+    urgency: ForeclosureUrgency.HIGH,
+    upsetBidDeadline: null,
+    upsetBidOpen: false,
+    borrowerAgeFloorAtOrigination: null,
+    borrowerAgeFloorToday: null,
+    principalFigureReliable: true,
+    equitySpread: null,
+    equityPct: null,
+  });
+
+  it('forbids no loan type at all, so the model is not overruled by a blank', () => {
+    const pre = signalPreconditions(unknownRules(), {});
+    for (const code of ['LOAN_TYPE_REVERSE', 'LOAN_TYPE_HOA', 'LOAN_TYPE_TAX', 'LOAN_TYPE_PRIVATE'] as const) {
+      expect(pre[code]!.forbidden).toBe(false);
+      expect(pre[code]!.required).toBe(false);
+    }
+  });
+
+  it('keeps an HOA signal the model raised on an unclassified filing', () => {
+    // The regression: this exact signal was dropped as "contradicts the
+    // deterministic facts" when there were no deterministic facts.
+    const { signals, dropped } = reconcileSignals(
+      {
+        signals: [{
+          signal_code: 'LOAN_TYPE_HOA',
+          severity: 'notable',
+          headline: 'HOA assessment lien, not a mortgage foreclosure',
+          evidence: ['holderName'],
+          recommended_actions: [],
+        }],
+      },
+      signalPreconditions(unknownRules(), {}),
+    );
+    expect(signals.map((s) => s.signalCode)).toContain('LOAN_TYPE_HOA');
+    expect(dropped).toHaveLength(0);
+  });
+
+  it('still overrules the model when the rules DID classify differently', () => {
+    const { signals, dropped } = reconcileSignals(
+      {
+        signals: [{
+          signal_code: 'LOAN_TYPE_HOA',
+          severity: 'notable',
+          headline: 'HOA assessment lien',
+          evidence: ['holderName'],
+          recommended_actions: [],
+        }],
+      },
+      signalPreconditions(reverseRules(), {}),
+    );
+    expect(signals.map((s) => s.signalCode)).not.toContain('LOAN_TYPE_HOA');
+    expect(dropped.some((d) => d.reason === 'contradicts the deterministic facts')).toBe(true);
+  });
+
+  it('cites loanType alone when the classification came from the caption', () => {
+    const rules = { ...unknownRules(), loanType: ForeclosureLoanType.HOA_ASSESSMENT, loanTypeSource: 'filingText' as const };
+    expect(signalPreconditions(rules, {}).LOAN_TYPE_HOA!.fallback!.evidence).toEqual(['loanType']);
   });
 });

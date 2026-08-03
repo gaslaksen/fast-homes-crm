@@ -117,6 +117,25 @@ export const LENDER_PROFILE_SEED: SeedLenderProfile[] = [
   // A different animal: the debt is small relative to the property, the owner
   // may be entirely current on the mortgage, and the payoff is often modest.
   {
+    // Broad on purpose: NC associations file as "<Subdivision> Owners
+    // Association, Inc." at least as often as "Homeowners Association", and the
+    // narrower patterns below missed every one of them. Stops short of a bare
+    // "Association", which would swallow the banks that file as "Bank of
+    // America, National Association".
+    matchPattern: 'Owners Association',
+    matchType: LenderMatchType.SUBSTRING,
+    lenderName: 'HOA (association named as party)',
+    loanType: ForeclosureLoanType.HOA_ASSESSMENT,
+    priority: 50,
+  },
+  {
+    matchPattern: 'Community Association',
+    matchType: LenderMatchType.SUBSTRING,
+    lenderName: 'Community association',
+    loanType: ForeclosureLoanType.HOA_ASSESSMENT,
+    priority: 50,
+  },
+  {
     matchPattern: 'Homeowners Association',
     matchType: LenderMatchType.SUBSTRING,
     lenderName: 'HOA (association named as party)',

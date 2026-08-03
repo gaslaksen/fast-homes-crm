@@ -264,6 +264,42 @@ export function shouldAdoptFilingPrincipal(
   return confidence >= PRINCIPAL_ADOPT_CONFIDENCE;
 }
 
+/** How much of the squashed filing text the caption rules look at. */
+const FILING_TEXT_WINDOW = 4000;
+
+/**
+ * Loan type read off the filing's own words, used only when no lender profile
+ * matched. NC associations foreclose under Chapters 47A/47C/47F by filing a
+ * CLAIM OF LIEN, and the caption says exactly that even when the association's
+ * name ("Princeton at Southampton Owners Association, Inc.") matches nothing in
+ * the profile table. Chasing every association name in the state is a losing
+ * game; the instrument is named the same way every time.
+ *
+ * Deliberately narrow. It answers only when the document names both the
+ * instrument and the kind of body enforcing it, and tax is tested first because
+ * a tax filing says "assessment" too.
+ *
+ * Returns null for "cannot tell", which is not the same as UNKNOWN: null lets
+ * the caller keep looking, UNKNOWN is a verdict.
+ */
+export function loanTypeFromFilingText(text?: string | null): ForeclosureLoanType | null {
+  const t = squash(text || '').slice(0, FILING_TEXT_WINDOW);
+  if (!t) return null;
+
+  const has = (...patterns: string[]) => patterns.some((p) => t.includes(p));
+
+  if (has('inremforeclosure', 'inremjudgment', 'taxforeclosure', 'delinquenttaxes', 'unpaidtaxes')) {
+    return ForeclosureLoanType.TAX_LIEN;
+  }
+  if (
+    has('claimoflien') &&
+    has('ownersassociation', 'condominiumassociation', 'communityassociation', 'assessment')
+  ) {
+    return ForeclosureLoanType.HOA_ASSESSMENT;
+  }
+  return null;
+}
+
 /** The full deterministic read on one filing. Input to the Phase 4 signals pass. */
 export interface RulesResult {
   loanType: ForeclosureLoanType;
@@ -271,6 +307,8 @@ export interface RulesResult {
   servicerType: string | null;
   /** Which field the lender pattern hit, or null when nothing matched. */
   matchedField: 'holderName' | 'originalBeneficiary' | null;
+  /** Where loanType came from, so a signal can cite the right evidence. */
+  loanTypeSource: 'profile' | 'filingText' | null;
   daysToHearing: number | null;
   urgency: ForeclosureUrgency | null;
   upsetBidDeadline: Date | null;
@@ -293,11 +331,16 @@ export function evaluateRules(
     originalPrincipal?: number | null;
   },
   profiles: LenderProfile[],
-  context: { assessedValue?: number | null; now?: Date } = {},
+  context: { assessedValue?: number | null; now?: Date; documentText?: string | null } = {},
 ): RulesResult {
   const now = context.now || new Date();
   const match = matchLenderProfile(filing, profiles);
-  const loanType = (match?.profile.loanType as ForeclosureLoanType) || ForeclosureLoanType.UNKNOWN;
+  // A named party is the stronger signal, so the caption is only consulted
+  // when no profile matched at all.
+  const fromText = match ? null : loanTypeFromFilingText(context.documentText);
+  const loanType =
+    (match?.profile.loanType as ForeclosureLoanType) || fromText || ForeclosureLoanType.UNKNOWN;
+  const loanTypeSource = match ? 'profile' : fromText ? 'filingText' : null;
   const days = daysToHearing(filing.hearingAt, now);
   const assessedValue = context.assessedValue ?? null;
   const principal = filing.originalPrincipal ?? null;
@@ -307,6 +350,7 @@ export function evaluateRules(
     lenderName: match?.profile.lenderName ?? null,
     servicerType: match?.profile.servicerType ?? null,
     matchedField: match?.matchedField ?? null,
+    loanTypeSource,
     daysToHearing: days,
     urgency: urgencyBand(days),
     upsetBidDeadline: upsetBidDeadline(filing.saleAt),

@@ -25,6 +25,23 @@ const STREET_SUFFIXES = new Set([
   'TRL', 'TRAIL', 'PKWY', 'PARKWAY', 'TER', 'TERRACE', 'LOOP', 'RUN', 'XING', 'CROSSING',
 ]);
 
+/**
+ * Just the street line. NC OneMap's siteadd is a FULL address ("10990 PRINCETON
+ * VILLAGE DR CHARLOTTE NC"), so passing it through as `street` repeated the
+ * city and state that travel in their own fields. Trims whichever of those is
+ * hanging off the end, leaving the rest untouched when neither is.
+ */
+export function streetLineOf(siteAddress: string, city?: string, state?: string): string {
+  let out = String(siteAddress || '').trim();
+  for (const part of [state, city]) {
+    const p = String(part || '').trim();
+    if (!p) continue;
+    const re = new RegExp(`[\\s,]+${p.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}$`, 'i');
+    out = out.replace(re, '').trim();
+  }
+  return out;
+}
+
 interface ParcelAttrs {
   ownname?: string; ownname2?: string; mailadd?: string; munit?: string;
   mcity?: string; mstate?: string; mzip?: string; siteadd?: string;
@@ -97,7 +114,12 @@ export class ForeclosureSkiptraceService {
     }
 
     if (parcel) {
-      const countyOwner = [parcel.ownname, parcel.ownname2].filter(Boolean).join('; ').trim();
+      // ownname2 comes back as a single space on parcels with one owner, which
+      // is truthy, so filtering on Boolean alone left a trailing "; ".
+      const countyOwner = [parcel.ownname, parcel.ownname2]
+        .map((n) => String(n || '').trim())
+        .filter(Boolean)
+        .join('; ');
       const mail = [parcel.mailadd, parcel.munit].filter(Boolean).join(' ').trim();
       if (countyOwner) detailPatch.countyOwner = countyOwner;
       if (mail) detailPatch.mailingAddress = mail;
@@ -303,9 +325,14 @@ export class ForeclosureSkiptraceService {
     // absentee owner's out-of-state code and BatchData matched nothing. The
     // parcel record carries no site-state field because NC OneMap only covers
     // NC, which is why the mailing one was reachable and the right one was not.
-    const propertyAddress: any = { street: String(street), state: state || 'NC' };
+    const propertyAddress: any = { street: streetLineOf(street, parcel?.scity, state) };
+    propertyAddress.state = state || 'NC';
     if (parcel?.scity || city) propertyAddress.city = String(parcel?.scity || city);
-    const z = parcel?.szip || zip;
+    // The lead's zip comes from the notice itself; szip is the county's "Site
+    // Address Zip", which has been observed holding the owner's out-of-state
+    // MAILING zip instead (a Charlotte parcel carrying 79924, El Paso). Trust
+    // the notice first and keep szip only as a fallback.
+    const z = zip || parcel?.szip;
     if (z) propertyAddress.zip = String(z).slice(0, 5);
     this.logger.debug(`BatchData query: ${JSON.stringify(propertyAddress)}`);
 

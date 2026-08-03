@@ -119,11 +119,17 @@ export class ForeclosureRulesService implements OnModuleInit {
     const filing = await this.prisma.foreclosureFiling.findFirst({
       where: { leadId },
       orderBy: { createdAt: 'desc' },
+      // The stored text backs the caption rules, which catch an HOA claim of
+      // lien whose association is not in the profile table.
+      include: { document: { select: { rawText: true } } },
     });
     if (!filing) return null;
 
     const profiles = await this.loadProfiles(organizationId);
-    const result = evaluateRules(filing, profiles, { assessedValue: detail.assessedValue });
+    const result = evaluateRules(filing, profiles, {
+      assessedValue: detail.assessedValue,
+      documentText: filing.document?.rawText,
+    });
 
     // The equity math above already uses filing.originalPrincipal, so leaving
     // detail.loanAmount on the older 13-field figure makes the card contradict
