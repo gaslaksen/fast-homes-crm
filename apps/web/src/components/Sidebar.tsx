@@ -44,6 +44,12 @@ const ICON = {
       <path d="M2 4l20 16" />
     </svg>
   ),
+  probate: (
+    <svg className={iconClass} {...strokeProps}>
+      <path d="M9 21V8a3 3 0 016 0v13M5 21h14M12 3v2" />
+      <path d="M7 12h10" />
+    </svg>
+  ),
   dealSearch: (
     <svg className={iconClass} {...strokeProps}>
       <circle cx="11" cy="11" r="7" />
@@ -101,6 +107,7 @@ function buildNavGroups(badges: { needsReply: number; newLeads: number }): NavGr
       items: [
         { label: 'Leads', href: '/leads', icon: ICON.leads, badge: badges.newLeads },
         { label: 'Foreclosures', href: '/foreclosures', icon: ICON.foreclosure },
+        { label: 'Probate', href: '/probate', icon: ICON.probate },
         { label: 'Deals', href: '/deals', icon: ICON.deals },
       ],
     },

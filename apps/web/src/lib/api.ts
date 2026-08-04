@@ -155,6 +155,33 @@ export const foreclosuresAPI = {
   },
 };
 
+// Probate API. list() returns rows grouped by contact, not by lead.
+export const probateAPI = {
+  list: (params?: any) => api.get('/probate', { params }),
+  stats: () => api.get('/probate/stats'),
+  get: (id: string) => api.get(`/probate/${id}`),
+  update: (id: string, data: any) => api.patch(`/probate/${id}`, data),
+  updateContact: (contactKey: string, data: any) =>
+    api.patch(`/probate/contacts/${encodeURIComponent(contactKey)}`, data),
+  bulkDelete: (ids: string[]) => api.post('/probate/bulk-delete', { ids }),
+  importParse: (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.post('/probate/import/parse', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+  importExecute: (file: File, opts: { tier?: number | null; dryRun?: boolean } = {}) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (opts.tier != null) formData.append('tier', String(opts.tier));
+    if (opts.dryRun) formData.append('dryRun', 'true');
+    return api.post('/probate/import', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+};
+
 // Messages API
 export const messagesAPI = {
   list: (leadId: string) => api.get(`/leads/${leadId}/messages`),

@@ -1,10 +1,11 @@
 import {
-  Controller, Post, Body, Headers,
+  Controller, Get, Post, Patch, Body, Param, Query, Headers,
   UseInterceptors, UploadedFile, BadRequestException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import * as jwt from 'jsonwebtoken';
+import { ProbateService } from './probate.service';
 import { ProbateImportService } from './probate-import.service';
 
 const IMPORT_UPLOAD_OPTIONS = {
@@ -27,7 +28,10 @@ const IMPORT_UPLOAD_OPTIONS = {
 
 @Controller('probate')
 export class ProbateController {
-  constructor(private importService: ProbateImportService) {}
+  constructor(
+    private probate: ProbateService,
+    private importService: ProbateImportService,
+  ) {}
 
   private decodeToken(authHeader?: string): { userId?: string; organizationId?: string } {
     try {
@@ -37,6 +41,49 @@ export class ProbateController {
     } catch {
       return {};
     }
+  }
+
+  /** Probate leads grouped by contact, paginated by group. */
+  @Get()
+  async list(
+    @Headers('authorization') authHeader?: string,
+    @Query('search') search?: string,
+    @Query('tier') tier?: string,
+    @Query('county') county?: string,
+    @Query('city') city?: string,
+    @Query('workStatus') workStatus?: string,
+    @Query('deathWindow') deathWindow?: string,
+    @Query('absentee') absentee?: string,
+    @Query('valueMin') valueMin?: string,
+    @Query('hideDead') hideDead?: string,
+    @Query('hideDnc') hideDnc?: string,
+    @Query('sort') sort?: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.probate.list({
+      organizationId,
+      search,
+      tier,
+      county,
+      city,
+      workStatus,
+      deathWindow,
+      absentee,
+      valueMin: valueMin ? Number(valueMin) : undefined,
+      hideDead: hideDead === 'true',
+      hideDnc: hideDnc === 'true',
+      sort,
+      page: page ? Number(page) : undefined,
+      pageSize: pageSize ? Number(pageSize) : undefined,
+    });
+  }
+
+  @Get('stats')
+  async stats(@Headers('authorization') authHeader?: string) {
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.probate.stats(organizationId);
   }
 
   /** Headers, per-tier counts and a few sample rows, without writing anything. */
@@ -74,5 +121,51 @@ export class ProbateController {
       importBatch: body.importBatch || file.originalname,
       dryRun: body.dryRun === true || body.dryRun === 'true',
     });
+  }
+
+  @Post('bulk-delete')
+  async bulkDelete(
+    @Body() body: { ids: string[] },
+    @Headers('authorization') authHeader?: string,
+  ) {
+    if (!Array.isArray(body?.ids) || body.ids.length === 0) {
+      throw new BadRequestException('No lead ids provided');
+    }
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.probate.bulkDelete(body.ids, organizationId);
+  }
+
+  /**
+   * Apply a working-field change across every property one heir holds. Ticking
+   * "do not call" has to cover all of them, not just the row that was clicked.
+   */
+  @Patch('contacts/:contactKey')
+  async updateContact(
+    @Param('contactKey') contactKey: string,
+    @Body() body: { workStatus?: string; doNotCall?: boolean },
+    @Headers('authorization') authHeader?: string,
+  ) {
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.probate.updateContact(decodeURIComponent(contactKey), body, organizationId);
+  }
+
+  @Get(':id')
+  async get(@Param('id') id: string, @Headers('authorization') authHeader?: string) {
+    const { organizationId } = this.decodeToken(authHeader);
+    const lead = await this.probate.get(id, organizationId);
+    if (!lead) throw new BadRequestException('Probate lead not found');
+    return lead;
+  }
+
+  @Patch(':id')
+  async update(
+    @Param('id') id: string,
+    @Body() body: { workStatus?: string; doNotCall?: boolean; callNotes?: string },
+    @Headers('authorization') authHeader?: string,
+  ) {
+    const { organizationId } = this.decodeToken(authHeader);
+    const updated = await this.probate.update(id, body, organizationId);
+    if (!updated) throw new BadRequestException('Probate lead not found');
+    return updated;
   }
 }

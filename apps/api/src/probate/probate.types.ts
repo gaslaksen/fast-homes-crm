@@ -48,6 +48,75 @@ export interface ProbateLeadInput {
   importBatch?: string;
 }
 
+export interface ProbateListFilters {
+  organizationId?: string;
+  search?: string;
+  /** Comma-separated consensus tier numbers, e.g. "1,2". */
+  tier?: string;
+  county?: string;
+  city?: string;
+  /** Comma-separated ProbateWorkStatus values. */
+  workStatus?: string;
+  /** Months-since-death band: 'sweet' (3-9), 'fresh' (<3), 'stale' (>9). */
+  deathWindow?: string;
+  absentee?: string;
+  valueMin?: number;
+  hideDead?: boolean;
+  hideDnc?: boolean;
+  sort?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+/** One property inside a contact group. */
+export interface ProbatePropertyRow {
+  leadId: string;
+  address: string;
+  city: string;
+  zip: string;
+  estValue: number | null;
+  consensusRank: number | null;
+  consensusScore: number | null;
+  consensusTier: string | null;
+  caseNumber: string | null;
+  caseFiledDate: Date | null;
+  deceasedName: string | null;
+  whyThisLead: string | null;
+  status: string;
+  primaryContact: boolean;
+}
+
+/**
+ * Every probate lead reachable on one phone, collapsed into a single row.
+ * An heir who inherited nine houses is one conversation about nine
+ * properties, so the list is grouped that way rather than showing nine
+ * near-identical rows that all lead to the same call.
+ */
+export interface ProbateContactGroup {
+  contactKey: string;
+  /** Lead id of the one lead in this group a drip should enroll. */
+  primaryLeadId: string;
+  heirName: string;
+  heirCity: string | null;
+  phone: string;
+  phoneType: string | null;
+  email: string | null;
+  absenteeHeir: boolean;
+  deceasedNames: string[];
+  caseNumbers: string[];
+  monthsSinceDeath: number | null;
+  earliestFiled: Date | null;
+  propertyCount: number;
+  totalValue: number;
+  /** Best (lowest) consensus rank across the group, and its tier. */
+  bestRank: number | null;
+  bestTier: string | null;
+  workStatus: string | null;
+  doNotCall: boolean;
+  enrolledCampaigns: string[];
+  properties: ProbatePropertyRow[];
+}
+
 export interface ProbateImportResult {
   created: number;
   /** Rows that matched a probate lead we already hold on the same dedupeUid. */
