@@ -31,6 +31,7 @@ import { InboxModule } from './inbox/inbox.module';
 import { ExternalConversationsModule } from './external-conversations/external-conversations.module';
 import { PushModule } from './push/push.module';
 import { ForeclosuresModule } from './foreclosures/foreclosures.module';
+import { ProbateModule } from './probate/probate.module';
 import { DigestModule } from './digest/digest.module';
 
 @Module({
@@ -69,6 +70,7 @@ import { DigestModule } from './digest/digest.module';
     ExternalConversationsModule,
     PushModule,
     ForeclosuresModule,
+    ProbateModule,
     DigestModule,
   ],
 })

@@ -300,6 +300,7 @@ model Lead {
   aiCompCurations     AiCompCuration[]
   aiArvCalculations   AiArvCalculation[] @relation("LeadAiArvCalculations")
   foreclosureDetail   ForeclosureDetail?
+  probateDetail       ProbateDetail?
   foreclosureDocuments ForeclosureDocument[]
   foreclosureFilings   ForeclosureFiling[]
   foreclosureSignals   ForeclosureSignal[]
@@ -412,6 +413,86 @@ model ForeclosureDetail {
   @@index([organizationId, saleDate])
   @@index([organizationId, workStatus])
   @@map("foreclosure_details")
+}
+
+/// Probate-specific facts for a Lead with source = PROBATE. Deliberately
+/// thinner than ForeclosureDetail: a probate lead has no auction clock, no
+/// lender, and no equity math to run, so what is worth keeping is the estate
+/// (case, decedent, how long since death), the heir we are actually going to
+/// talk to, and the ranking the source list arrived with.
+model ProbateDetail {
+  id             String   @id @default(cuid())
+  leadId         String   @unique
+  lead           Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  organizationId String?
+
+  // Idempotent-ingestion key: "caseNumber|address". The case number alone
+  // cannot be it, because one estate routinely holds several properties and
+  // each is its own lead; the address alone cannot be it either, because the
+  // same house can reappear under a second estate.
+  dedupeUid      String
+  // Label for the file/list this row came in on, so a bad batch can be found
+  // and pulled without guessing at createdAt windows.
+  importBatch    String?
+
+  // Estate / case
+  caseNumber     String?
+  caseFiledDate  DateTime?
+  county         String?
+  deceasedName   String?
+  // Months between the death and when the list was built. The 3-9 month band
+  // is the window the source list scores hardest on.
+  monthsSinceDeath Float?
+
+  // Heir / petitioner: the living person the Lead's seller fields describe.
+  // heirCity is where they live. When that is not the property's city the
+  // estate is being handled from a distance, which is the absentee signal
+  // this list ranks on.
+  heirCity       String?
+  absenteeHeir   Boolean  @default(false)
+
+  // Ranking carried over from the source list, kept so the reason a lead is
+  // near the top survives the import and can be shown back on the lead.
+  consensusRank   Int?
+  consensusScore  Float?
+  consensusTier   String?
+  agreement       String?
+  eslPriority     Float?
+  eslTier         String?
+  motivationScore Float?
+  motivationTier  String?
+  whyThisLead     String?
+  estValue        Float?
+
+  // Extra contacts. Lead.sellerPhone and Lead.sellerEmail hold the best of
+  // each; the runners-up live here. moreOnFile records what the source list
+  // says it holds beyond the two it handed over.
+  phone1Type     String?
+  phone2         String?
+  phone2Type     String?
+  email2         String?
+  moreOnFile     String?
+
+  // One heir often inherits several properties, so several probate leads can
+  // share a phone and an email. contactKey groups them; primaryContact marks
+  // the single lead in each group that a drip should enroll, so a campaign
+  // does not text one grieving person sixteen times in a week.
+  contactKey     String?
+  primaryContact Boolean  @default(true)
+
+  // Workflow
+  workStatus     String?  @default("NOT_CONTACTED") // ProbateWorkStatus
+  doNotCall      Boolean  @default(false)
+  callNotes      String?
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([organizationId, dedupeUid])
+  @@index([organizationId, consensusTier])
+  @@index([organizationId, workStatus])
+  @@index([organizationId, contactKey])
+  @@map("probate_details")
 }
 
 /// One uploaded filing from a foreclosure case file. Deliberately stores the

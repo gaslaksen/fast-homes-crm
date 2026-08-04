@@ -4,7 +4,7 @@ import { useEffect, useState, useMemo, useRef, Suspense, useCallback } from 'rea
 import Link from 'next/link';
 import { useSearchParams, useRouter, usePathname } from 'next/navigation';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
-import { leadsAPI, authAPI, pipelineAPI } from '@/lib/api';
+import { leadsAPI, authAPI, pipelineAPI, campaignAPI } from '@/lib/api';
 import PropertyPhoto from '@/components/PropertyPhoto';
 import { formatPhoneDisplay, getLeadDisplayName } from '@/lib/format';
 import Avatar from '@/components/Avatar';
@@ -320,6 +320,9 @@ function LeadsPageInner() {
   const [selectedIds,   setSelectedIds]   = useState<Set<string>>(new Set());
   const [bulkStatus,    setBulkStatus]    = useState('');
   const [bulkSource,    setBulkSource]    = useState('');
+  const [bulkCampaign,  setBulkCampaign]  = useState('');
+  const [campaigns,     setCampaigns]     = useState<{ id: string; name: string }[]>([]);
+  const [enrolling,     setEnrolling]     = useState(false);
   const [showFilters,   setShowFilters]   = useState(() => {
     // Auto-show filters panel if any filter param is present in URL
     return !!(searchParams.get('band') || searchParams.get('status') || searchParams.get('source') ||
@@ -483,6 +486,13 @@ function LeadsPageInner() {
       .catch(() => {});
   }, []);
 
+  // Active campaigns, for the bulk-enroll control on the selection bar.
+  useEffect(() => {
+    campaignAPI.list()
+      .then(r => setCampaigns((r.data || []).filter((c: any) => c.isActive)))
+      .catch(() => {});
+  }, []);
+
   // List view v2: user id for localStorage-keyed sort pref
   const [currentUserId, setCurrentUserId] = useState<string | undefined>(undefined);
   useEffect(() => {
@@ -588,6 +598,36 @@ function LeadsPageInner() {
     await leadsAPI.bulkUpdateSource(Array.from(selectedIds), bulkSource);
     setBulkSource(''); setSelectedIds(new Set());
     fetchLeads();
+  };
+
+  // Enrolling starts real outbound messaging, so confirm the count first and
+  // report back what the API refused (no email, Do Not Contact) rather than
+  // leaving the user to assume all of them went in.
+  const handleBulkEnroll = async () => {
+    if (!bulkCampaign) return;
+    const campaign = campaigns.find(c => c.id === bulkCampaign);
+    if (!window.confirm(
+      `Enroll ${selectedIds.size} lead(s) in "${campaign?.name || 'this campaign'}"? ` +
+      `This starts sending on the campaign's schedule.`
+    )) return;
+
+    setEnrolling(true);
+    try {
+      const res = await campaignAPI.enrollLeads(bulkCampaign, Array.from(selectedIds));
+      const { enrolled = 0, skipped = [] } = res.data || {};
+      window.alert(
+        skipped.length === 0
+          ? `Enrolled ${enrolled} lead(s).`
+          : `Enrolled ${enrolled} lead(s). Skipped ${skipped.length}:\n` +
+            skipped.slice(0, 10).map((s: any) => `• ${s.reason}`).join('\n') +
+            (skipped.length > 10 ? `\n...and ${skipped.length - 10} more` : '')
+      );
+      setBulkCampaign(''); setSelectedIds(new Set());
+    } catch (err: any) {
+      window.alert(err?.response?.data?.message || 'Enrollment failed');
+    } finally {
+      setEnrolling(false);
+    }
   };
 
   const handleExport = async () => {
@@ -974,6 +1014,27 @@ function LeadsPageInner() {
                 </button>
               )}
             </div>
+            {campaigns.length > 0 && (
+              <div className="flex items-center gap-2">
+                <select
+                  value={bulkCampaign}
+                  onChange={e => setBulkCampaign(e.target.value)}
+                  className="text-xs border border-gray-200 dark:border-gray-700 rounded-md px-2 py-1 dark:bg-gray-800 dark:text-gray-200"
+                >
+                  <option value="">Enroll in campaign...</option>
+                  {campaigns.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+                {bulkCampaign && (
+                  <button
+                    onClick={handleBulkEnroll}
+                    disabled={enrolling}
+                    className="text-xs px-3 py-1 bg-primary-600 text-white rounded-lg font-medium disabled:opacity-50"
+                  >
+                    {enrolling ? 'Enrolling...' : 'Enroll'}
+                  </button>
+                )}
+              </div>
+            )}
             <button onClick={() => setSelectedIds(new Set())} className="text-xs text-primary-500 hover:underline ml-auto">
               Deselect
             </button>

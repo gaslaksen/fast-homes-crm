@@ -25,6 +25,7 @@ export const CITY_COUNTY: Record<string, string> = {
   STATESVILLE: 'Iredell', MOORESVILLE: 'Iredell', TROUTMAN: 'Iredell', 'SHERRILLS FRD': 'Iredell',
   SALISBURY: 'Rowan', SPENCER: 'Rowan', 'CHINA GROVE': 'Rowan', LANDIS: 'Rowan',
   MONROE: 'Union', WAXHAW: 'Union', MARSHVILLE: 'Union', WINGATE: 'Union', STALLINGS: 'Union',
+  'INDIAN TRAIL': 'Union', WEDDINGTON: 'Union', 'MINERAL SPRINGS': 'Union',
   SHELBY: 'Cleveland', 'KINGS MOUNTAIN': 'Cleveland', GROVER: 'Cleveland', MOORESBORO: 'Cleveland',
   LAWNDALE: 'Cleveland', LINCOLNTON: 'Lincoln',
   NEWTON: 'Catawba', CONOVER: 'Catawba', HICKORY: 'Catawba', MAIDEN: 'Catawba',

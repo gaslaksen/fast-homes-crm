@@ -123,6 +123,29 @@ export class CampaignEnrollmentService {
     return enrollment;
   }
 
+  /**
+   * Enroll many leads in one campaign, reporting per-lead outcomes instead of
+   * failing the batch on the first bad lead. A list import lands hundreds of
+   * leads at once and some of them will be missing an email or marked Do Not
+   * Contact; those belong in a skip list the user can read, not in a 400 that
+   * loses the other 145 enrollments.
+   */
+  async enrollLeads(leadIds: string[], campaignId: string) {
+    const enrolled: string[] = [];
+    const skipped: { leadId: string; reason: string }[] = [];
+
+    for (const leadId of leadIds) {
+      try {
+        await this.enrollLead(leadId, campaignId);
+        enrolled.push(leadId);
+      } catch (err: any) {
+        skipped.push({ leadId, reason: err?.message || 'Enrollment failed' });
+      }
+    }
+
+    return { enrolled: enrolled.length, skipped, leadIds: enrolled };
+  }
+
   async unenrollLead(enrollmentId: string) {
     const enrollment = await this.prisma.campaignEnrollment.update({
       where: { id: enrollmentId },

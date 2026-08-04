@@ -11,6 +11,7 @@ import {
   Headers,
   HttpException,
   HttpStatus,
+  BadRequestException,
 } from '@nestjs/common';
 import * as jwt from 'jsonwebtoken';
 import { CampaignsService } from './campaigns.service';
@@ -96,6 +97,18 @@ export class CampaignsController {
     @Param('leadId') leadId: string,
   ) {
     return this.enrollmentService.enrollLead(leadId, campaignId);
+  }
+
+  /** Bulk enroll. Reports per-lead skips rather than failing the whole batch. */
+  @Post('campaigns/:id/enroll')
+  async enrollLeads(
+    @Param('id') campaignId: string,
+    @Body() body: { leadIds: string[] },
+  ) {
+    if (!Array.isArray(body?.leadIds) || body.leadIds.length === 0) {
+      throw new BadRequestException('No lead ids provided');
+    }
+    return this.enrollmentService.enrollLeads(body.leadIds, campaignId);
   }
 
   @Get('campaigns/:id/enrollments')

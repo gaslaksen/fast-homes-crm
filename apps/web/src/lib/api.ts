@@ -464,6 +464,8 @@ export const campaignAPI = {
     api.patch(`/campaigns/${id}/toggle`, { isActive }),
   enrollLead: (id: string, leadId: string) =>
     api.post(`/campaigns/${id}/enroll/${leadId}`),
+  enrollLeads: (id: string, leadIds: string[]) =>
+    api.post(`/campaigns/${id}/enroll`, { leadIds }),
   unenroll: (enrollmentId: string) =>
     api.delete(`/campaigns/enrollments/${enrollmentId}`),
   pause: (enrollmentId: string) =>

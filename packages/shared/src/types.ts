@@ -42,7 +42,18 @@ export enum LeadSource {
   MANUAL = 'MANUAL',
   DEAL_SEARCH = 'DEAL_SEARCH',
   FORECLOSURE = 'FORECLOSURE',
+  PROBATE = 'PROBATE',
   OTHER = 'OTHER',
+}
+
+// Where a probate lead sits in our own working of it. Mirrors
+// ForeclosureWorkStatus so the two distress lists read the same way.
+export enum ProbateWorkStatus {
+  NOT_CONTACTED = 'NOT_CONTACTED',
+  IN_CONVERSATION = 'IN_CONVERSATION',
+  APPOINTMENT_SET = 'APPOINTMENT_SET',
+  UNDER_CONTRACT = 'UNDER_CONTRACT',
+  DEAD = 'DEAD',
 }
 
 // Foreclosure lead priority (from the pre-foreclosure notice triage rules).
