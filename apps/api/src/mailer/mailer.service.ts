@@ -14,6 +14,31 @@ import { COMPANY_NAME, COMPANY_PHONE, COMPANY_PHONE_E164, COMPANY_WEBSITE, COMPA
  * Dealcore via a per-lead Reply-To (reply+{leadId}@MAILGUN_DOMAIN) whose MX
  * points at Mailgun, which POSTs them to the inbound webhook.
  */
+/**
+ * Everything Mailgun told us about a failure, on one line.
+ *
+ * err.message alone is only the HTTP status text - a bare "Forbidden" that
+ * cannot distinguish a plan limit from an unverified domain from a recipient
+ * Mailgun refuses to touch. The API's own explanation arrives on `details`
+ * (and on some client versions `body.message`), which is the part worth
+ * having in the logs at 3am.
+ */
+export function describeMailgunError(err: any): string {
+  const status = err?.status ?? err?.statusCode ?? '';
+  const detail =
+    err?.details ||
+    err?.body?.message ||
+    err?.response?.body?.message ||
+    '';
+  const detailText =
+    typeof detail === 'string' ? detail.trim() : JSON.stringify(detail);
+  return [
+    status ? `HTTP ${status}` : '',
+    err?.message || 'unknown error',
+    detailText ? `- ${detailText}` : '',
+  ].filter(Boolean).join(' ');
+}
+
 @Injectable()
 export class MailerService {
   private readonly logger = new Logger(MailerService.name);
@@ -93,7 +118,7 @@ export class MailerService {
       // Mailgun returns id wrapped in angle brackets: <xxx@domain>
       mailgunId = (res?.id || '').replace(/^</, '').replace(/>$/, '') || null;
     } catch (err: any) {
-      this.logger.error(`Mailgun send to ${params.to} failed: ${err?.message}`);
+      this.logger.error(`Mailgun send to ${params.to} failed: ${describeMailgunError(err)}`);
       throw err;
     }
 
@@ -237,7 +262,7 @@ export class MailerService {
       const mailgunId = (res?.id || '').replace(/^</, '').replace(/>$/, '') || null;
       return { mailgunId };
     } catch (err: any) {
-      this.logger.error(`Mailgun internal send to ${params.to} failed: ${err?.message}`);
+      this.logger.error(`Mailgun internal send to ${params.to} failed: ${describeMailgunError(err)}`);
       throw err;
     }
   }

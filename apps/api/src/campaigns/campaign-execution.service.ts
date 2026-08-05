@@ -11,7 +11,7 @@ import * as os from 'os';
 import { PrismaService } from '../prisma/prisma.service';
 import { MessagesService } from '../messages/messages.service';
 import { LeadsService } from '../leads/leads.service';
-import { MailerService } from '../mailer/mailer.service';
+import { MailerService, describeMailgunError } from '../mailer/mailer.service';
 
 // Instance tag for distinguishing Railway replicas in logs.
 const INSTANCE_TAG = `${os.hostname()}/${process.pid}`;
@@ -67,6 +67,12 @@ export class CampaignExecutionService implements OnModuleInit {
       where: {
         status: 'ACTIVE',
         nextSendAt: { lte: now },
+        // A campaign toggled off stops sending. Without this the Active/Paused
+        // control on the campaign page changed a flag and nothing else, so the
+        // one obvious way to halt a campaign that is misfiring did not halt it.
+        // Enrollments keep their nextSendAt and resume when it is switched back
+        // on, so toggling off is a hold, not a cancellation.
+        campaign: { isActive: true },
       },
       include: {
         campaign: {
@@ -400,14 +406,14 @@ export class CampaignExecutionService implements OnModuleInit {
       } catch (err) {
         lastErr = err;
         this.logger.warn(
-          `Send attempt ${attempt + 1} failed [${currentStep.channel}] enrollment=${enrollment.id}: ${err?.message ?? err}`,
+          `Send attempt ${attempt + 1} failed [${currentStep.channel}] enrollment=${enrollment.id}: ${describeMailgunError(err)}`,
           err?.stack,
         );
       }
     }
     return {
       kind: 'RETRY',
-      reason: `all 3 send attempts failed: ${lastErr?.message ?? lastErr}`,
+      reason: `all 3 send attempts failed: ${describeMailgunError(lastErr)}`,
     };
   }
 
