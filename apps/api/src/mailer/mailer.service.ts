@@ -39,6 +39,53 @@ export function describeMailgunError(err: any): string {
   ].filter(Boolean).join(' ');
 }
 
+/**
+ * Whether Mailgun refused this send because of a sending limit rather than
+ * anything wrong with the message.
+ *
+ * 429 is the documented rate-limit status; 420 is the one Mailgun actually
+ * returns for the short-window recipient limit. Both arrive with an
+ * explanation naming the limit, which is matched too so a status we have not
+ * seen yet still reads as throttling rather than as a broken message we should
+ * hammer three more times.
+ */
+export function isMailgunRateLimit(err: any): boolean {
+  const status = Number(err?.status ?? err?.statusCode ?? 0);
+  if (status === 429 || status === 420) return true;
+  const text = `${err?.message ?? ''} ${describeMailgunError(err)}`;
+  return /rate limit|limit \(\d+\) exceeded|try again after|too many requests/i.test(text);
+}
+
+/**
+ * The moment Mailgun told us to come back, e.g. "...try again after Thu, 06
+ * Aug 2026 14:05:00 UTC".
+ *
+ * Worth preferring over any ceiling we maintain ourselves: it is authoritative,
+ * it covers limits we do not know about, and it stays correct when the account
+ * changes plan. Returns null when no usable time is quoted, leaving the caller
+ * to fall back on its own guess.
+ */
+export function parseMailgunRetryAfter(err: any, now: Date = new Date()): Date | null {
+  // A Retry-After header, when present, is expressed in seconds.
+  const header =
+    err?.headers?.['retry-after'] ??
+    err?.response?.headers?.['retry-after'];
+  if (header != null && String(header).trim() !== '') {
+    const secs = Number(header);
+    if (Number.isFinite(secs) && secs >= 0) {
+      return new Date(now.getTime() + secs * 1000);
+    }
+  }
+
+  const text = describeMailgunError(err);
+  const m = /try again after\s+([^,;]*?(?:,\s*)?[^,;]*?(?:UTC|GMT|Z))/i.exec(text);
+  if (!m) return null;
+  const parsed = new Date(m[1].trim());
+  if (isNaN(parsed.getTime())) return null;
+  // A quoted time already in the past tells us nothing useful.
+  return parsed > now ? parsed : null;
+}
+
 @Injectable()
 export class MailerService {
   private readonly logger = new Logger(MailerService.name);

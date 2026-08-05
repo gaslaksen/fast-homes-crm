@@ -2,13 +2,13 @@ import { CampaignExecutionService } from './campaign-execution.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 /**
- * Mailgun caps a domain at 100 messages/hour while an account is on probation
- * and disables the entire account for an hour when that is crossed, which
- * takes the daily brief and every reply down with the campaign. So the
- * interesting behaviour is what happens at the ceiling, and that a throttled
- * lead is not punished for it.
+ * A domain on a probationary Mailgun account is held to 100 requests a day
+ * plus a short-window recipient limit, and crossing either locks the domain
+ * out, taking the daily brief and every reply down with the campaign. So the
+ * interesting behaviour is what happens at each ceiling, and that a throttled
+ * lead is not punished for arriving at one.
  */
-function service(opts: { sentThisHour: number; oldestSentAt?: Date; limit?: string }) {
+function service(opts: { sentThisHour: number; oldestSentAt?: Date; limit?: string; dailyLimit?: string }) {
   const prisma = {
     email: {
       count: jest.fn(async () => opts.sentThisHour),
@@ -17,35 +17,38 @@ function service(opts: { sentThisHour: number; oldestSentAt?: Date; limit?: stri
   } as unknown as PrismaService;
 
   const config = {
-    get: (k: string) => (k === 'EMAIL_HOURLY_LIMIT' ? opts.limit : undefined),
+    get: (k: string) =>
+      k === 'EMAIL_HOURLY_LIMIT' ? opts.limit
+      : k === 'EMAIL_DAILY_LIMIT' ? (opts.dailyLimit ?? '100000')
+      : undefined,
   } as any;
 
   const svc = new CampaignExecutionService(prisma, config, {} as any, {} as any, {} as any);
   return { svc, prisma };
 }
 
-const throttle = (svc: any) => (svc as any).emailHourlyThrottle();
+const throttle = (svc: any) => (svc as any).emailThrottle();
 
-describe('email hourly throttle', () => {
+describe('email send throttle', () => {
   it('lets a send through with room to spare', async () => {
-    const { svc } = service({ sentThisHour: 40 });
+    const { svc } = service({ sentThisHour: 10, limit: '20' });
     expect(await throttle(svc)).toBeNull();
   });
 
   it('defers rather than fails once the hour is full', async () => {
-    const { svc } = service({ sentThisHour: 80 });
+    const { svc } = service({ sentThisHour: 80, limit: '80' });
     const out = await throttle(svc);
 
     // DEFERRED, not RETRY: nothing was attempted, so nothing should count
     // against the attempt budget that eventually pauses an enrollment.
     expect(out.kind).toBe('DEFERRED');
-    expect(out.reason).toContain('80/80');
+    expect(out.reason).toContain('hourly limit reached (80/80');
   });
 
   it('waits for the oldest send to age out of the window, not a flat guess', async () => {
     // Oldest send 20 minutes ago, so capacity frees 40 minutes from now.
     const oldest = new Date(Date.now() - 20 * 60 * 1000);
-    const { svc } = service({ sentThisHour: 80, oldestSentAt: oldest });
+    const { svc } = service({ sentThisHour: 80, limit: '80', oldestSentAt: oldest });
     const out: any = await throttle(svc);
 
     const expected = oldest.getTime() + 60 * 60 * 1000 + 60 * 1000;
@@ -56,6 +59,7 @@ describe('email hourly throttle', () => {
     // Oldest send is 61 minutes old, so the naive answer is in the past.
     const { svc } = service({
       sentThisHour: 80,
+      limit: '80',
       oldestSentAt: new Date(Date.now() - 61 * 60 * 1000),
     });
     const out: any = await throttle(svc);
@@ -63,7 +67,7 @@ describe('email hourly throttle', () => {
   });
 
   it('falls back to a fixed wait when the window somehow has no rows', async () => {
-    const { svc } = service({ sentThisHour: 80, oldestSentAt: undefined });
+    const { svc } = service({ sentThisHour: 80, limit: '80', oldestSentAt: undefined });
     const out: any = await throttle(svc);
     expect(out.retryAt.getTime()).toBeGreaterThan(Date.now());
   });
@@ -81,8 +85,22 @@ describe('email hourly throttle', () => {
     expect(await throttle(service({ sentThisHour: 999, limit: 'abc' }).svc)).toBeNull();
   });
 
+  it('applies the daily ceiling, and reports which window bit', async () => {
+    const { svc } = service({ sentThisHour: 95, limit: '100000', dailyLimit: '90' });
+    const out: any = await throttle(svc);
+    expect(out.kind).toBe('DEFERRED');
+    expect(out.reason).toContain('daily limit reached (95/90');
+  });
+
+  it('checks the daily ceiling before the hourly one', async () => {
+    // Over both. The daily wait is the longer and the one that matters.
+    const { svc } = service({ sentThisHour: 95, limit: '20', dailyLimit: '90' });
+    const out: any = await throttle(svc);
+    expect(out.reason).toContain('daily');
+  });
+
   it('counts every outbound email, not just this campaign or sender', async () => {
-    const { svc, prisma } = service({ sentThisHour: 10 });
+    const { svc, prisma } = service({ sentThisHour: 10, limit: '20' });
     await throttle(svc);
 
     // Mailgun's limit is per domain and all our senders share one, so the

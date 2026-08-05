@@ -11,7 +11,12 @@ import * as os from 'os';
 import { PrismaService } from '../prisma/prisma.service';
 import { MessagesService } from '../messages/messages.service';
 import { LeadsService } from '../leads/leads.service';
-import { MailerService, describeMailgunError } from '../mailer/mailer.service';
+import {
+  MailerService,
+  describeMailgunError,
+  isMailgunRateLimit,
+  parseMailgunRetryAfter,
+} from '../mailer/mailer.service';
 
 // Instance tag for distinguishing Railway replicas in logs.
 const INSTANCE_TAG = `${os.hostname()}/${process.pid}`;
@@ -19,12 +24,21 @@ const INSTANCE_TAG = `${os.hostname()}/${process.pid}`;
 // Max times we retry the same step before giving up and pausing the enrollment.
 const MAX_STEP_ATTEMPTS = 5;
 
-// Outbound email ceiling per rolling hour, across every campaign. Mailgun caps
-// a domain at 100/hour while an account is on probation and disables the whole
-// account for an hour when you cross it, so this sits deliberately below that.
-// The gap absorbs the sends that never reach the Email table and so cannot be
-// counted here: the daily brief, password resets, deal packages.
-const DEFAULT_EMAIL_HOURLY_LIMIT = 80;
+// Outbound email ceilings, across every campaign and sender, because Mailgun's
+// limits are per domain and everything we send shares one.
+//
+// The observed limits on a domain whose account is on probation are 100
+// requests a DAY plus a short-window recipient limit around 26. Both defaults
+// sit under those with room for the sends that never reach the Email table and
+// so cannot be counted here: the daily brief, password resets, deal packages.
+//
+// These are a courtesy pre-check, not the real defence. Mailgun counts
+// requests rather than delivered mail, so a failed send costs quota too and no
+// local count can track it exactly. The authority is Mailgun's own "try again
+// after", honoured in sendWithRetry. Raise both with EMAIL_DAILY_LIMIT /
+// EMAIL_HOURLY_LIMIT once the account is off probation.
+const DEFAULT_EMAIL_DAILY_LIMIT = 90;
+const DEFAULT_EMAIL_HOURLY_LIMIT = 20;
 
 type StepOutcome =
   | { kind: 'SENT'; externalId?: string }
@@ -339,17 +353,39 @@ export class CampaignExecutionService implements OnModuleInit {
    * Set EMAIL_HOURLY_LIMIT to raise this once the Mailgun account is off
    * probation and the domain is warmed.
    */
-  private async emailHourlyThrottle(): Promise<StepOutcome | null> {
-    const limit = Number(
-      this.config.get<string>('EMAIL_HOURLY_LIMIT') ?? DEFAULT_EMAIL_HOURLY_LIMIT,
+  private async emailThrottle(): Promise<StepOutcome | null> {
+    const daily = await this.emailWindowThrottle(
+      'daily', 'day',
+      24 * 60 * 60 * 1000,
+      this.config.get<string>('EMAIL_DAILY_LIMIT'),
+      DEFAULT_EMAIL_DAILY_LIMIT,
     );
+    if (daily) return daily;
+
+    return this.emailWindowThrottle(
+      'hourly', 'hour',
+      60 * 60 * 1000,
+      this.config.get<string>('EMAIL_HOURLY_LIMIT'),
+      DEFAULT_EMAIL_HOURLY_LIMIT,
+    );
+  }
+
+  /** One rolling-window ceiling. Returns DEFERRED at the limit, else null. */
+  private async emailWindowThrottle(
+    label: string,
+    windowName: string,
+    windowMs: number,
+    configured: string | undefined,
+    fallback: number,
+  ): Promise<StepOutcome | null> {
+    const limit = Number(configured ?? fallback);
     if (!Number.isFinite(limit) || limit <= 0) return null;
 
-    const windowStart = new Date(Date.now() - 60 * 60 * 1000);
-    const sentThisHour = await this.prisma.email.count({
+    const windowStart = new Date(Date.now() - windowMs);
+    const sent = await this.prisma.email.count({
       where: { direction: 'outbound', sentAt: { gte: windowStart } },
     });
-    if (sentThisHour < limit) return null;
+    if (sent < limit) return null;
 
     const oldest = await this.prisma.email.findFirst({
       where: { direction: 'outbound', sentAt: { gte: windowStart } },
@@ -357,15 +393,16 @@ export class CampaignExecutionService implements OnModuleInit {
       select: { sentAt: true },
     });
 
+    // Capacity frees when the oldest send in the window ages out of it.
     const freesAt = oldest?.sentAt
-      ? new Date(oldest.sentAt.getTime() + 60 * 60 * 1000 + 60 * 1000)
+      ? new Date(oldest.sentAt.getTime() + windowMs + 60 * 1000)
       : new Date(Date.now() + 10 * 60 * 1000);
     // Never schedule into the past, and never tighter than the cron's own tick.
     const retryAt = new Date(Math.max(freesAt.getTime(), Date.now() + 5 * 60 * 1000));
 
     return {
       kind: 'DEFERRED',
-      reason: `email hourly limit reached (${sentThisHour}/${limit} in the last hour)`,
+      reason: `email ${label} limit reached (${sent}/${limit} in the last ${windowName})`,
       retryAt,
     };
   }
@@ -417,33 +454,13 @@ export class CampaignExecutionService implements OnModuleInit {
       const dealsFrom =
         this.config.get<string>('EMAIL_DEALS_FROM') || 'deals@quickcashhomebuyers.com';
 
-      // Hourly ceiling, checked across ALL outbound email rather than just
-      // this campaign or this sender, because Mailgun's limit is per domain
-      // and every one of our senders shares one. Crossing it does not merely
-      // reject the extra message: it disables the whole account for an hour,
-      // taking the daily brief and every reply down with it.
-      const throttle = await this.emailHourlyThrottle();
+      // Daily then hourly ceilings, across ALL outbound email rather than just
+      // this campaign or this sender, because Mailgun's limits are per domain
+      // and every one of our senders shares one. Crossing them does not merely
+      // reject the extra message: it locks the domain out, taking the daily
+      // brief and every reply down with the campaign.
+      const throttle = await this.emailThrottle();
       if (throttle) return throttle;
-
-      // Daily ceiling, kept as a second line against a runaway day.
-      const startOfToday = new Date();
-      startOfToday.setHours(0, 0, 0, 0);
-      const todaySendCount = await this.prisma.email.count({
-        where: {
-          fromAddress: dealsFrom,
-          direction: 'outbound',
-          sentAt: { gte: startOfToday },
-        },
-      });
-      if (todaySendCount >= 1800) {
-        const tomorrow = new Date(startOfToday);
-        tomorrow.setDate(tomorrow.getDate() + 1);
-        return {
-          kind: 'DEFERRED',
-          reason: `deals@ daily send limit reached (${todaySendCount} sent today)`,
-          retryAt: tomorrow,
-        };
-      }
 
       const unsubUrl = this.mailerService.buildUnsubscribeUrl(lead.id);
       return this.sendWithRetry(enrollment, currentStep, async () => {
@@ -488,6 +505,30 @@ export class CampaignExecutionService implements OnModuleInit {
         return { kind: 'SENT', externalId };
       } catch (err) {
         lastErr = err;
+
+        // A sending limit is not a failure to retry into. Retrying burns more
+        // of the very quota that is exhausted (Mailgun counts requests, not
+        // just delivered mail), so stop here and come back when Mailgun says
+        // to. Its own "try again after" beats any ceiling we keep ourselves.
+        if (isMailgunRateLimit(err)) {
+          const quoted = parseMailgunRetryAfter(err);
+          const retryAt = new Date(
+            Math.max(
+              (quoted ?? new Date(Date.now() + 30 * 60 * 1000)).getTime(),
+              Date.now() + 5 * 60 * 1000,
+            ),
+          );
+          this.logger.warn(
+            `Rate limited [${currentStep.channel}] enrollment=${enrollment.id}, ` +
+            `holding until ${retryAt.toISOString()}: ${describeMailgunError(err)}`,
+          );
+          return {
+            kind: 'DEFERRED',
+            reason: `provider rate limit: ${describeMailgunError(err)}`,
+            retryAt,
+          };
+        }
+
         this.logger.warn(
           `Send attempt ${attempt + 1} failed [${currentStep.channel}] enrollment=${enrollment.id}: ${describeMailgunError(err)}`,
           err?.stack,
