@@ -254,6 +254,63 @@ export class CampaignEnrollmentService {
   }
 
   /**
+   * Put every paused enrollment on a campaign back to active and give it a
+   * fresh send time.
+   *
+   * A provider outage pauses enrollments in bulk (five failed attempts each),
+   * and clicking Resume once per lead is not a recovery plan. Their nextSendAt
+   * was cleared on pause, so it is recomputed here the same way resyncSchedule
+   * does it; anything already past its cumulative time comes back due, and the
+   * hourly throttle meters it out from there.
+   */
+  async resumeAllPaused(campaignId: string) {
+    const campaign = await this.prisma.campaign.findUnique({
+      where: { id: campaignId },
+      include: { steps: { orderBy: { stepOrder: 'asc' } } },
+    });
+    if (!campaign) throw new NotFoundException('Campaign not found');
+
+    const paused = await this.prisma.campaignEnrollment.findMany({
+      where: { campaignId, status: 'PAUSED' },
+      select: { id: true, leadId: true, enrolledAt: true, currentStepOrder: true },
+    });
+
+    let resumed = 0;
+    for (const e of paused) {
+      const nextStep = campaign.steps.find(
+        (s: any) => s.stepOrder === e.currentStepOrder + 1,
+      );
+      // Nothing left to send: complete it rather than reviving it as active.
+      if (!nextStep) {
+        await this.prisma.campaignEnrollment.update({
+          where: { id: e.id },
+          data: { status: 'COMPLETED', completedAt: new Date(), nextSendAt: null },
+        });
+        continue;
+      }
+
+      await this.prisma.campaignEnrollment.update({
+        where: { id: e.id },
+        data: {
+          status: 'ACTIVE',
+          nextSendAt: this.execution.calculateNextSendAt(nextStep, e.enrolledAt),
+        },
+      });
+      await this.logActivity(
+        e.leadId,
+        'CAMPAIGN_RESUMED',
+        `Resumed drip campaign "${campaign.name}"`,
+      );
+      resumed++;
+    }
+
+    this.logger.log(
+      `Resumed ${resumed} paused enrollment(s) on campaign ${campaign.name}`,
+    );
+    return { resumed, examined: paused.length };
+  }
+
+  /**
    * Remove all non-terminal enrollments for a lead (e.g., when lead marked DEAD).
    * Sweeps ACTIVE, PAUSED, and REPLIED so a dead lead never lingers on the campaign roster.
    */

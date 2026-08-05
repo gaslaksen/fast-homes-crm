@@ -86,6 +86,12 @@ export class CampaignsController {
     return this.enrollmentService.resyncSchedule(id);
   }
 
+  /** Recover enrollments a provider outage paused in bulk. */
+  @Post('campaigns/:id/resume-paused')
+  async resumePaused(@Param('id') id: string) {
+    return this.enrollmentService.resumeAllPaused(id);
+  }
+
   @Delete('campaigns/:id')
   async deleteCampaign(@Param('id') id: string) {
     return this.campaignsService.deleteCampaign(id);

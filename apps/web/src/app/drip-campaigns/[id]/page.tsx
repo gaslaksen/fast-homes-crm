@@ -130,6 +130,7 @@ export default function CampaignDetailPage() {
   const [enrolling, setEnrolling] = useState(false);
   const [selectedLeadId, setSelectedLeadId] = useState('');
   const [resyncing, setResyncing] = useState(false);
+  const [resuming, setResuming] = useState(false);
 
   useEffect(() => {
     loadAll();
@@ -162,6 +163,34 @@ export default function CampaignDetailPage() {
       window.alert(err?.response?.data?.message || 'Could not reschedule the queue');
     } finally {
       setResyncing(false);
+    }
+  }
+
+  /** Bring back enrollments a provider outage paused. */
+  async function handleResumePaused() {
+    const paused = enrollments.filter((e) => e.status === 'PAUSED').length;
+    if (paused === 0) {
+      window.alert('No paused enrollments on this campaign.');
+      return;
+    }
+    if (!window.confirm(
+      `Resume ${paused} paused enrollment(s)?\n\n` +
+      'Each goes back to the step it stopped on. Sending is metered to stay under the hourly email limit.'
+    )) return;
+
+    setResuming(true);
+    try {
+      const res = await campaignAPI.resumePaused(id);
+      const { resumed = 0, examined = 0 } = res.data || {};
+      window.alert(
+        `${resumed} enrollment(s) resumed` +
+        (examined > resumed ? `, ${examined - resumed} had no step left and were completed.` : '.')
+      );
+      loadAll();
+    } catch (err: any) {
+      window.alert(err?.response?.data?.message || 'Could not resume the paused enrollments');
+    } finally {
+      setResuming(false);
     }
   }
 
@@ -288,6 +317,16 @@ export default function CampaignDetailPage() {
             </p>
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
+            {enrollments.some((e) => e.status === 'PAUSED') && (
+              <button
+                onClick={handleResumePaused}
+                disabled={resuming}
+                title="Put enrollments paused by repeated send failures back on their step"
+                className="px-4 py-2 bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-900 text-amber-800 dark:text-amber-400 text-sm font-medium rounded-lg hover:bg-amber-100 dark:hover:bg-amber-900 transition-colors disabled:opacity-50"
+              >
+                {resuming ? 'Resuming...' : `Resume ${enrollments.filter((e) => e.status === 'PAUSED').length} paused`}
+              </button>
+            )}
             <button
               onClick={handleResync}
               disabled={resyncing}

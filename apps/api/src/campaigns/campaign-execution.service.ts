@@ -19,9 +19,22 @@ const INSTANCE_TAG = `${os.hostname()}/${process.pid}`;
 // Max times we retry the same step before giving up and pausing the enrollment.
 const MAX_STEP_ATTEMPTS = 5;
 
+// Outbound email ceiling per rolling hour, across every campaign. Mailgun caps
+// a domain at 100/hour while an account is on probation and disables the whole
+// account for an hour when you cross it, so this sits deliberately below that.
+// The gap absorbs the sends that never reach the Email table and so cannot be
+// counted here: the daily brief, password resets, deal packages.
+const DEFAULT_EMAIL_HOURLY_LIMIT = 80;
+
 type StepOutcome =
   | { kind: 'SENT'; externalId?: string }
+  // A send that was attempted and failed. Burns one of MAX_STEP_ATTEMPTS.
   | { kind: 'RETRY'; reason: string }
+  // A send deliberately not attempted yet, because sending now would break a
+  // rate limit. Distinct from RETRY on purpose: nothing failed, so it must not
+  // count against the attempt budget. Treating throttling as failure is how a
+  // lead ends up permanently PAUSED for the sin of being 81st in the hour.
+  | { kind: 'DEFERRED'; reason: string; retryAt: Date }
   | { kind: 'SKIPPED'; reason: string };
 
 interface LeadForTemplate {
@@ -222,6 +235,21 @@ export class CampaignExecutionService implements OnModuleInit {
       return;
     }
 
+    if (outcome.kind === 'DEFERRED') {
+      // Rate limited before we tried. Push the send out to when capacity frees
+      // and leave the attempt budget, the step and the logs untouched, so the
+      // lead is exactly where it was, just later.
+      await this.prisma.campaignEnrollment.update({
+        where: { id: enrollment.id },
+        data: { nextSendAt: outcome.retryAt },
+      });
+      this.logger.log(
+        `Enrollment ${enrollment.id} step ${currentStep.stepOrder} deferred to ` +
+        `${outcome.retryAt.toISOString()}: ${outcome.reason}`,
+      );
+      return;
+    }
+
     if (outcome.kind === 'SKIPPED') {
       // Permanent skip (missing contact field, org not connected, etc.).
       // Record a SKIPPED log row so the UI can show why nothing went out,
@@ -299,6 +327,50 @@ export class CampaignExecutionService implements OnModuleInit {
   }
 
   /**
+   * A DEFERRED outcome when the trailing hour is already at the email ceiling,
+   * or null when there is room to send.
+   *
+   * The retry time is derived rather than guessed: capacity frees when the
+   * oldest send inside the window ages out of it, so that timestamp plus an
+   * hour (plus a minute of slack for clock skew) is the first moment another
+   * message is safe. Guessing a flat "try again in 10 minutes" would either
+   * spin uselessly or idle longer than necessary.
+   *
+   * Set EMAIL_HOURLY_LIMIT to raise this once the Mailgun account is off
+   * probation and the domain is warmed.
+   */
+  private async emailHourlyThrottle(): Promise<StepOutcome | null> {
+    const limit = Number(
+      this.config.get<string>('EMAIL_HOURLY_LIMIT') ?? DEFAULT_EMAIL_HOURLY_LIMIT,
+    );
+    if (!Number.isFinite(limit) || limit <= 0) return null;
+
+    const windowStart = new Date(Date.now() - 60 * 60 * 1000);
+    const sentThisHour = await this.prisma.email.count({
+      where: { direction: 'outbound', sentAt: { gte: windowStart } },
+    });
+    if (sentThisHour < limit) return null;
+
+    const oldest = await this.prisma.email.findFirst({
+      where: { direction: 'outbound', sentAt: { gte: windowStart } },
+      orderBy: { sentAt: 'asc' },
+      select: { sentAt: true },
+    });
+
+    const freesAt = oldest?.sentAt
+      ? new Date(oldest.sentAt.getTime() + 60 * 60 * 1000 + 60 * 1000)
+      : new Date(Date.now() + 10 * 60 * 1000);
+    // Never schedule into the past, and never tighter than the cron's own tick.
+    const retryAt = new Date(Math.max(freesAt.getTime(), Date.now() + 5 * 60 * 1000));
+
+    return {
+      kind: 'DEFERRED',
+      reason: `email hourly limit reached (${sentThisHour}/${limit} in the last hour)`,
+      retryAt,
+    };
+  }
+
+  /**
    * Channel dispatch. Returns a StepOutcome describing what happened:
    *   - SENT:    message actually left the building; advance the step.
    *   - RETRY:   transient failure (network, rate limit, provider 5xx); caller
@@ -342,10 +414,18 @@ export class CampaignExecutionService implements OnModuleInit {
       if (!orgId) {
         return { kind: 'SKIPPED', reason: `lead ${lead.id} has no organizationId` };
       }
-      // Daily rate limit guard against the deals@ sender to protect domain
-      // reputation during warmup. Transient — retry tomorrow, don't skip the step.
       const dealsFrom =
         this.config.get<string>('EMAIL_DEALS_FROM') || 'deals@quickcashhomebuyers.com';
+
+      // Hourly ceiling, checked across ALL outbound email rather than just
+      // this campaign or this sender, because Mailgun's limit is per domain
+      // and every one of our senders shares one. Crossing it does not merely
+      // reject the extra message: it disables the whole account for an hour,
+      // taking the daily brief and every reply down with it.
+      const throttle = await this.emailHourlyThrottle();
+      if (throttle) return throttle;
+
+      // Daily ceiling, kept as a second line against a runaway day.
       const startOfToday = new Date();
       startOfToday.setHours(0, 0, 0, 0);
       const todaySendCount = await this.prisma.email.count({
@@ -356,9 +436,12 @@ export class CampaignExecutionService implements OnModuleInit {
         },
       });
       if (todaySendCount >= 1800) {
+        const tomorrow = new Date(startOfToday);
+        tomorrow.setDate(tomorrow.getDate() + 1);
         return {
-          kind: 'RETRY',
+          kind: 'DEFERRED',
           reason: `deals@ daily send limit reached (${todaySendCount} sent today)`,
+          retryAt: tomorrow,
         };
       }
 

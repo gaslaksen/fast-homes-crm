@@ -494,6 +494,7 @@ export const campaignAPI = {
   enrollLeads: (id: string, leadIds: string[]) =>
     api.post(`/campaigns/${id}/enroll`, { leadIds }),
   resyncSchedule: (id: string) => api.post(`/campaigns/${id}/resync-schedule`),
+  resumePaused: (id: string) => api.post(`/campaigns/${id}/resume-paused`),
   unenroll: (enrollmentId: string) =>
     api.delete(`/campaigns/enrollments/${enrollmentId}`),
   pause: (enrollmentId: string) =>
