@@ -62,9 +62,28 @@ export class CampaignsController {
     return this.campaignsService.getCampaignDetail(id);
   }
 
+  /**
+   * Edit a campaign. When the edit touched the steps, the already-enrolled
+   * queue is resynced onto the new delays: changing step 1 from "day 2" to
+   * "immediately" should move the leads already waiting, not just future
+   * enrollments. Idempotent, so a copy-only edit moves nobody.
+   */
   @Put('campaigns/:id')
   async updateCampaign(@Param('id') id: string, @Body() body: any) {
-    return this.campaignsService.updateCampaign(id, body);
+    const campaign = await this.campaignsService.updateCampaign(id, body);
+    if (body?.steps === undefined) return campaign;
+    const resync = await this.enrollmentService.resyncSchedule(id);
+    return { ...campaign, resync };
+  }
+
+  /**
+   * Bring the enrolled queue onto the campaign's current delays without
+   * editing anything. The recovery path for enrollments stranded on an older
+   * schedule by an edit made before this resync existed.
+   */
+  @Post('campaigns/:id/resync-schedule')
+  async resyncSchedule(@Param('id') id: string) {
+    return this.enrollmentService.resyncSchedule(id);
   }
 
   @Delete('campaigns/:id')

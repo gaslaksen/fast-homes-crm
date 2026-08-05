@@ -5,12 +5,16 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { CampaignExecutionService } from './campaign-execution.service';
 
 @Injectable()
 export class CampaignEnrollmentService {
   private readonly logger = new Logger(CampaignEnrollmentService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private execution: CampaignExecutionService,
+  ) {}
 
   // Enrollment changes show up in the lead's conversation timeline and the
   // Activity pane via these records (best-effort; never blocks the change).
@@ -144,6 +148,79 @@ export class CampaignEnrollmentService {
     }
 
     return { enrolled: enrolled.length, skipped, leadIds: enrolled };
+  }
+
+  /**
+   * Recompute nextSendAt for everyone already enrolled, from the campaign's
+   * CURRENT step delays.
+   *
+   * Enrollment stamps nextSendAt once, at enrollment time, so editing a
+   * campaign's delays afterwards used to leave the existing queue sitting on
+   * the old schedule - change step 1 from "day 2" to "immediately" and the
+   * leads already in the campaign still waited two days. This brings them in
+   * line without the alternative of removing and re-adding everyone, which
+   * throws away enrollment history.
+   *
+   * Safe to run at any time: nextSendAt is derived from (enrolledAt,
+   * cumulative delay), so re-deriving it is idempotent. Editing message copy
+   * moves nobody; only editing a delay does.
+   *
+   * Deliberately narrow about what it touches:
+   *   - ACTIVE only. Paused, replied, completed and removed enrollments keep
+   *     whatever state they are in.
+   *   - Never an enrollment with nextSendAt = null. That null is the cron's
+   *     in-flight claim (see CampaignExecutionService.processScheduledMessages);
+   *     writing a time back over it would hand the same step to the next tick
+   *     as well and send the message twice.
+   *   - The write is conditional on nextSendAt being unchanged since the read,
+   *     so an enrollment the cron claims mid-resync is left to the cron.
+   */
+  async resyncSchedule(campaignId: string) {
+    const campaign = await this.prisma.campaign.findUnique({
+      where: { id: campaignId },
+      include: { steps: { orderBy: { stepOrder: 'asc' } } },
+    });
+    if (!campaign) throw new NotFoundException('Campaign not found');
+
+    const enrollments = await this.prisma.campaignEnrollment.findMany({
+      where: { campaignId, status: 'ACTIVE', nextSendAt: { not: null } },
+      select: { id: true, enrolledAt: true, currentStepOrder: true, nextSendAt: true },
+    });
+
+    const now = new Date();
+    let rescheduled = 0;
+    let dueNow = 0;
+    let skipped = 0;
+
+    for (const e of enrollments) {
+      const nextStep = campaign.steps.find(
+        (s: any) => s.stepOrder === e.currentStepOrder + 1,
+      );
+      if (!nextStep) { skipped++; continue; }
+
+      const nextSendAt = this.execution.calculateNextSendAt(nextStep, e.enrolledAt);
+
+      // Within a second of where it already sits: nothing to write.
+      if (e.nextSendAt && Math.abs(nextSendAt.getTime() - e.nextSendAt.getTime()) < 1000) {
+        skipped++;
+        continue;
+      }
+
+      const claimed = await this.prisma.campaignEnrollment.updateMany({
+        where: { id: e.id, nextSendAt: e.nextSendAt },
+        data: { nextSendAt },
+      });
+      if (claimed.count === 0) { skipped++; continue; }
+
+      rescheduled++;
+      if (nextSendAt <= now) dueNow++;
+    }
+
+    this.logger.log(
+      `Resynced campaign ${campaign.name}: ${rescheduled} rescheduled ` +
+      `(${dueNow} now due), ${skipped} unchanged`,
+    );
+    return { rescheduled, dueNow, unchanged: skipped, total: enrollments.length };
   }
 
   async unenrollLead(enrollmentId: string) {

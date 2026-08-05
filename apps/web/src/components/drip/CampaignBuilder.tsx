@@ -620,7 +620,19 @@ export default function CampaignBuilder({ initial, onSave }: CampaignBuilderProp
       };
 
       if (campaign.id) {
-        await campaignAPI.update(campaign.id, payload);
+        const res = await campaignAPI.update(campaign.id, payload);
+        // Changing a step delay reschedules the leads already enrolled. That
+        // can start sends within minutes, so say so rather than redirecting
+        // silently. Unchanged timing reports nothing.
+        const resync = res?.data?.resync;
+        if (resync?.rescheduled > 0) {
+          alert(
+            `Campaign saved.\n\n${resync.rescheduled} enrolled lead(s) moved onto the new step timing.` +
+            (resync.dueNow > 0
+              ? `\n\n${resync.dueNow} are now due immediately and will start sending on the next run, within 5 minutes (50 per run).`
+              : '')
+          );
+        }
       } else {
         await campaignAPI.create(payload);
       }

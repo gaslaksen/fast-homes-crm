@@ -129,11 +129,41 @@ export default function CampaignDetailPage() {
   const [allLeads, setAllLeads] = useState<any[]>([]);
   const [enrolling, setEnrolling] = useState(false);
   const [selectedLeadId, setSelectedLeadId] = useState('');
+  const [resyncing, setResyncing] = useState(false);
 
   useEffect(() => {
     loadAll();
     leadsAPI.list({ limit: 200 }).then((res) => setAllLeads(res.data?.leads || [])).catch(() => {});
   }, [id]);
+
+  /**
+   * Pull the enrolled queue onto the campaign's current step delays. Confirmed
+   * first, and again before anything becomes due immediately, because "due
+   * now" means the cron starts texting real people within five minutes.
+   */
+  async function handleResync() {
+    if (!window.confirm(
+      'Recalculate when every enrolled lead is next due, using this campaign\'s current step delays?\n\n' +
+      'Leads already past a step keep their history. Nothing sends until the times are recalculated.'
+    )) return;
+
+    setResyncing(true);
+    try {
+      const res = await campaignAPI.resyncSchedule(id);
+      const { rescheduled = 0, dueNow = 0, unchanged = 0 } = res.data || {};
+      window.alert(
+        `${rescheduled} enrollment(s) rescheduled, ${unchanged} already correct.` +
+        (dueNow > 0
+          ? `\n\n${dueNow} are now due immediately and will begin sending on the next run, within 5 minutes (50 per run).`
+          : '')
+      );
+      loadAll();
+    } catch (err: any) {
+      window.alert(err?.response?.data?.message || 'Could not reschedule the queue');
+    } finally {
+      setResyncing(false);
+    }
+  }
 
   async function loadAll() {
     setLoading(true);
@@ -257,12 +287,22 @@ export default function CampaignDetailPage() {
               {campaign.steps?.length || 0} steps
             </p>
           </div>
-          <Link
-            href={`/drip-campaigns/${id}/edit`}
-            className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors flex-shrink-0"
-          >
-            Edit Campaign
-          </Link>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <button
+              onClick={handleResync}
+              disabled={resyncing}
+              title="Recompute when each enrolled lead is next due, using the campaign's current step delays"
+              className="px-4 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 text-sm font-medium rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50"
+            >
+              {resyncing ? 'Rescheduling...' : 'Reschedule queue'}
+            </button>
+            <Link
+              href={`/drip-campaigns/${id}/edit`}
+              className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              Edit Campaign
+            </Link>
+          </div>
         </div>
 
         {/* Stats */}
