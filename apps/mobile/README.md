@@ -48,6 +48,41 @@ notification registration will no-op there.
   Settings hits `POST /push/test`.
 - **Dialer** — placeholder; real Twilio Voice + CallKit is Phases 4-5.
 
+## Shipping a change (OTA vs a new build)
+
+The app uses **EAS Update**, so a JS-only change does not need a 25-minute build.
+
+```bash
+cd apps/mobile
+eas update --channel production --message "what changed"
+```
+
+Devices pick it up on the next cold start (checked on launch, applied the launch
+after). `eas.json` maps each build profile to a channel of the same name, so use
+`--channel preview` for internal builds and `--channel production` for TestFlight
+and the App Store.
+
+**A new build is required whenever the native runtime changes.** Adding or
+upgrading a native dependency, changing `app.json` config that touches the native
+project (plugins, `infoPlist`, permissions, bundle id), or upgrading the Expo SDK
+all mean the JS in an update would call into native code the installed binary does
+not have.
+
+### The rule that keeps this safe
+
+`runtimeVersion` uses the `appVersion` policy, so an update is only delivered to
+builds whose `version` in **app.json** matches. That is `0.1.0` today.
+
+> Whenever you make a native change, **bump `version` in app.json** and build.
+
+Forgetting is the one way to break this: the update would be delivered to older
+binaries that lack the new native code, and they crash on launch. Bumping the
+version gives the new build its own runtime version, so old binaries stop
+receiving updates meant for it. (`autoIncrement` in `eas.json` handles the iOS
+*build number* automatically, but not this version.)
+
+Only `version` matters for update targeting, not the build number.
+
 ## Project layout
 
 ```

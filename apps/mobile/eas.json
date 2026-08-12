@@ -13,14 +13,16 @@
       },
       "env": {
         "EXPO_PUBLIC_API_URL": "https://api.mydealcore.com"
-      }
+      },
+      "channel": "development"
     },
     "preview": {
       "distribution": "internal",
       "autoIncrement": true,
       "env": {
         "EXPO_PUBLIC_API_URL": "https://api.mydealcore.com"
-      }
+      },
+      "channel": "preview"
     },
     "production": {
       "autoIncrement": true,
@@ -29,7 +31,8 @@
       },
       "env": {
         "EXPO_PUBLIC_API_URL": "https://api.mydealcore.com"
-      }
+      },
+      "channel": "production"
     }
   },
   "submit": {
