@@ -431,6 +431,8 @@ export class LeadsService {
     createdBefore?: string;
     page?: number;
     limit?: number;
+    /** Return only `{ ids }` for the whole filtered set, ignoring paging. */
+    idsOnly?: boolean;
     organizationId?: string;
     tier?: number;
     propertyState?: string;
@@ -606,6 +608,20 @@ export class LeadsService {
         },
       ],
     };
+
+    // Ids for the whole filtered set, for the lead detail prev/next queue.
+    // Served off this method rather than a parallel endpoint so the queue can
+    // never select a different set than the list it was built from - and so
+    // the two dozen filter params are not duplicated in a second signature.
+    if (filters.idsOnly) {
+      const rows = await this.prisma.lead.findMany({
+        where,
+        orderBy,
+        select: { id: true },
+        take: 1000,
+      });
+      return { ids: rows.map((r) => r.id) } as any;
+    }
 
     // Run data query, count, and aggregate counts in parallel
     const [leadsRaw, total, tierGroups, bandGroups, dripActiveCount, inactiveCount, stateRows] = await Promise.all([

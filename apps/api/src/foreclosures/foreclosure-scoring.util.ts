@@ -198,6 +198,80 @@ export interface ParcelLink {
 }
 
 /**
+ * How much human work a foreclosure lead carries, for choosing which of a set
+ * of duplicates to keep. Call notes outrank everything because they are the
+ * thing that cannot be reconstructed; a moved work status is next.
+ *
+ * Ties are meant to be broken by age. Callers sort a createdAt-ascending list
+ * with a stable sort, which leaves the older row first on an equal score.
+ */
+export function dupeScore(lead: {
+  sellerPhone?: string | null;
+  foreclosureDetail?: {
+    callNotes?: string | null;
+    workStatus?: string | null;
+    doNotCall?: boolean | null;
+    touchCount?: number | null;
+    touchDays?: any;
+  } | null;
+}): number {
+  const d = lead.foreclosureDetail;
+  if (!d) return 0;
+  let s = 0;
+  if (String(d.callNotes || '').trim()) s += 8;
+  if (d.workStatus && d.workStatus !== 'NOT_CONTACTED') s += 4;
+  if (d.doNotCall) s += 2;
+  if ((d.touchCount || 0) > 0 || touchDayCount(d.touchDays) > 0) s += 2;
+  if (String(lead.sellerPhone || '').trim()) s += 1;
+  return s;
+}
+
+/** Trailing words dropped from an address key so "DR" and "DRIVE" agree. */
+const ADDRESS_SUFFIXES = new Set([
+  'RD', 'ROAD', 'DR', 'DRIVE', 'LN', 'LANE', 'CT', 'COURT', 'ST', 'STREET',
+  'PL', 'PLACE', 'WAY', 'CIR', 'CIRCLE', 'AVE', 'AVENUE', 'AV', 'BLVD', 'BOULEVARD',
+  'TRL', 'TRAIL', 'PKWY', 'PARKWAY', 'TER', 'TERRACE', 'LOOP', 'RUN', 'XING',
+  'CROSSING', 'HWY', 'HIGHWAY', 'CV', 'COVE', 'RDG', 'RIDGE', 'PT', 'POINT',
+]);
+
+/** Words that start a unit designator; everything from there on is dropped. */
+const UNIT_MARKERS = new Set(['UNIT', 'APT', 'STE', 'SUITE', 'LOT', 'BLDG', 'FLOOR', 'FL']);
+
+/**
+ * Stable key for "the same property", used to recognize a re-filed notice when
+ * it carries no case number. Uppercases, strips punctuation, cuts any unit
+ * designator, and drops one trailing street suffix, so these all agree:
+ *
+ *   "10990 Princeton Village Dr."  "10990 PRINCETON VILLAGE DRIVE"
+ *   "10990 Princeton Village Dr Unit 3"
+ *
+ * The zip rides along when known, because the street part alone collides -
+ * "120 Charlotte St" and "120 Charlotte Ave" both reduce to "120 CHARLOTTE".
+ * Exactly one suffix is dropped, never a run: "120 Park Place Drive" must not
+ * erode to "120 PARK".
+ *
+ * Returns '' when there is not enough to key on, and callers must treat that
+ * as "no match" rather than as a key that matches other empty ones.
+ */
+export function addressKeyOf(address?: string | null, zip?: string | null): string {
+  const clean = String(address || '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9 ]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!clean) return '';
+
+  let tokens = clean.split(' ');
+  const unitIdx = tokens.findIndex((t) => UNIT_MARKERS.has(t));
+  if (unitIdx > 1) tokens = tokens.slice(0, unitIdx);
+  if (tokens.length > 2 && ADDRESS_SUFFIXES.has(tokens[tokens.length - 1])) tokens = tokens.slice(0, -1);
+  if (tokens.length < 2) return '';
+
+  const z = String(zip || '').replace(/[^0-9]/g, '').slice(0, 5);
+  return z ? `${tokens.join(' ')}|${z}` : tokens.join(' ');
+}
+
+/**
  * Owner-occupied when the mailing address matches the property address on
  * house number and first street word. Deliberately loose: the two are written
  * differently often enough ("5125 Birchbark Ln" against "5125 BIRCHBARK LANE")

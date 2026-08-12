@@ -78,9 +78,11 @@ export class LeadsController {
     @Query('untouched') untouched?: string,
     @Query('sort') sort?: string,
     @Query('dir') dir?: string,
+    @Query('idsOnly') idsOnly?: string,
   ) {
     const { organizationId } = this.decodeToken(authHeader);
     return this.leadsService.listLeads({
+      idsOnly: idsOnly === 'true',
       source,
       status,
       scoreBand,

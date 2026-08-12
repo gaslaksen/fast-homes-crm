@@ -122,7 +122,9 @@ export const leadsAPI = {
 // Foreclosures API
 export const foreclosuresAPI = {
   list: (params?: any) => api.get('/foreclosures', { params }),
+  ids: (params?: any) => api.get('/foreclosures/ids', { params }),
   stats: () => api.get('/foreclosures/stats'),
+  mergeDuplicates: (apply: boolean) => api.post('/foreclosures/merge-duplicates', { apply }),
   get: (id: string) => api.get(`/foreclosures/${id}`),
   update: (id: string, data: any) => api.patch(`/foreclosures/${id}`, data),
   bulkDelete: (ids: string[]) => api.post('/foreclosures/bulk-delete', { ids }),

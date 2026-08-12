@@ -1,4 +1,4 @@
-import { ownerOccupiedFrom, parcelLinkFor } from './foreclosure-scoring.util';
+import { ownerOccupiedFrom, parcelLinkFor, addressKeyOf, dupeScore } from './foreclosure-scoring.util';
 
 describe('ownerOccupiedFrom', () => {
   it('calls it owner-occupied when house number and street word match', () => {
@@ -59,5 +59,57 @@ describe('parcelLinkFor', () => {
     const other = parcelLinkFor('123 Oak St', 'Monroe');
     expect(other.parcelType).toBe('search');
     expect(other.parcelUrl).toContain('google.com/search');
+  });
+});
+
+describe('addressKeyOf', () => {
+  it('agrees across spelling, case and punctuation of the same address', () => {
+    const a = addressKeyOf('10990 Princeton Village Dr.', '28277');
+    expect(addressKeyOf('10990 PRINCETON VILLAGE DRIVE', '28277')).toBe(a);
+    expect(addressKeyOf('10990 princeton village dr', '28277-1507')).toBe(a);
+  });
+
+  it('ignores a unit designator, which varies between filings', () => {
+    expect(addressKeyOf('900 Main St Apt 7103', '28202'))
+      .toBe(addressKeyOf('900 Main Street', '28202'));
+  });
+
+  it('separates two addresses that differ only by zip', () => {
+    expect(addressKeyOf('120 Oak St', '28202')).not.toBe(addressKeyOf('120 Oak St', '28277'));
+  });
+
+  it('drops only one trailing suffix, never a run', () => {
+    // "120 Park Place Drive" must not erode all the way to "120 PARK".
+    expect(addressKeyOf('120 Park Place Drive')).toBe('120 PARK PLACE');
+  });
+
+  it('returns empty when there is not enough to key on', () => {
+    expect(addressKeyOf('')).toBe('');
+    expect(addressKeyOf(null)).toBe('');
+    expect(addressKeyOf('Charlotte')).toBe('');
+  });
+});
+
+describe('dupeScore', () => {
+  const lead = (detail: any, sellerPhone = '') => ({ sellerPhone, foreclosureDetail: detail });
+
+  it('ranks call notes above every other kind of work', () => {
+    const withNotes = dupeScore(lead({ callNotes: 'Spoke to her Tuesday' }));
+    const withEverythingElse = dupeScore(
+      lead({ workStatus: 'IN_CONVERSATION', doNotCall: true, touchCount: 3 }, '7045551234'),
+    );
+    expect(withNotes).toBeGreaterThan(0);
+    expect(withEverythingElse).toBeGreaterThan(withNotes);
+    // ... but notes alone still beat a bare untouched row.
+    expect(withNotes).toBeGreaterThan(dupeScore(lead({ workStatus: 'NOT_CONTACTED' })));
+  });
+
+  it('scores an untouched row at zero so it loses every tie', () => {
+    expect(dupeScore(lead({ workStatus: 'NOT_CONTACTED', doNotCall: false }))).toBe(0);
+    expect(dupeScore(lead(null))).toBe(0);
+  });
+
+  it('counts this week checkmarks as work', () => {
+    expect(dupeScore(lead({ touchDays: { T: true } }))).toBeGreaterThan(0);
   });
 });

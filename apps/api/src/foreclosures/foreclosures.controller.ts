@@ -109,6 +109,48 @@ export class ForeclosuresController {
     });
   }
 
+  /**
+   * Ids for the whole filtered set, for the lead detail prev/next queue.
+   * Takes the same query params as the list so the two cannot drift apart.
+   */
+  @Get('ids')
+  async listIds(
+    @Headers('authorization') authHeader?: string,
+    @Query('search') search?: string,
+    @Query('priority') priority?: string,
+    @Query('noticeType') noticeType?: string,
+    @Query('workStatus') workStatus?: string,
+    @Query('city') city?: string,
+    @Query('county') county?: string,
+    @Query('occupancy') occupancy?: string,
+    @Query('equityBand') equityBand?: string,
+    @Query('ownedYearsMin') ownedYearsMin?: string,
+    @Query('saleWindow') saleWindow?: string,
+    @Query('valueMin') valueMin?: string,
+    @Query('hideDead') hideDead?: string,
+    @Query('hideDnc') hideDnc?: string,
+    @Query('sort') sort?: string,
+  ) {
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.foreclosures.listIds({
+      organizationId,
+      search,
+      priority,
+      noticeType,
+      workStatus,
+      city,
+      county,
+      occupancy,
+      equityBand,
+      ownedYearsMin: ownedYearsMin ? Number(ownedYearsMin) : undefined,
+      saleWindow,
+      valueMin: valueMin ? Number(valueMin) : undefined,
+      hideDead: hideDead === 'true',
+      hideDnc: hideDnc === 'true',
+      sort,
+    });
+  }
+
   @Get('stats')
   async stats(@Headers('authorization') authHeader?: string) {
     const { organizationId } = this.decodeToken(authHeader);
@@ -303,6 +345,20 @@ export class ForeclosuresController {
   async refresh(@Headers('authorization') authHeader?: string) {
     const { organizationId } = this.decodeToken(authHeader);
     return this.ingest.ingestRssFeed({ organizationId, trigger: 'manual' });
+  }
+
+  /**
+   * Fold duplicate leads for one property together. Destructive, so it
+   * previews unless the body says apply:true - call it once to read the plan,
+   * again to run it.
+   */
+  @Post('merge-duplicates')
+  async mergeDuplicates(
+    @Body() body: { apply?: boolean },
+    @Headers('authorization') authHeader?: string,
+  ) {
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.foreclosures.mergeDuplicates({ organizationId, apply: body?.apply === true });
   }
 
   @Post('bulk-skiptrace')

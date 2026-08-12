@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { foreclosuresAPI } from '@/lib/api';
 import { formatPhoneDisplay } from '@/lib/format';
+import { writeLeadQueue } from '@/lib/leadQueue';
 import { useDialer } from '@/components/dialer/DialerContext';
 import AppShell from '@/components/AppShell';
 
@@ -462,6 +463,9 @@ export default function ForeclosuresPage() {
   const [stats, setStats] = useState<Stats>({ total: 0, high: 0, soon: 0, highEquity: 0, lastPoll: null, lastCronPoll: null });
   const [loading, setLoading] = useState(true);
   const [pagination, setPagination] = useState({ page: 1, pageSize: 60, total: 0, totalPages: 1 });
+  // Filters the cards were last loaded with, replayed against /ids so the
+  // detail page's prev/next walks this whole filtered set and not one page.
+  const [queueParams, setQueueParams] = useState<Record<string, string> | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
   // Filters (mirroring the offline tracker's filter bar). Chip groups are
@@ -516,6 +520,7 @@ export default function ForeclosuresPage() {
       if (valueMin) params.valueMin = valueMin;
       if (hideDead) params.hideDead = 'true';
       if (hideDnc) params.hideDnc = 'true';
+      setQueueParams(params);
       const res = await foreclosuresAPI.list(params);
       setLeads(res.data.leads || []);
       setCities(res.data.cities || []);
@@ -764,6 +769,30 @@ export default function ForeclosuresPage() {
   };
 
   const anyFilter = search || priorities.size || workStatuses.size || noticeTypes.size || city || county || equityBand || ownedYearsMin || saleWindow || occupancy || valueMin || hideDead || hideDnc;
+
+  // Hand the lead detail page the full filtered set. Fetched as ids rather
+  // than reused from `leads`, which only ever holds the current page - that is
+  // why the counter used to read "16 of 50" against 97 matching leads.
+  useEffect(() => {
+    if (!queueParams || loading) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { page: _p, pageSize: _s, ...rest } = queueParams;
+        const res = await foreclosuresAPI.ids(rest);
+        const ids: string[] = res.data?.ids || [];
+        if (cancelled || !ids.length) return;
+        writeLeadQueue({
+          ids,
+          label: anyFilter ? 'Filtered foreclosures' : 'Foreclosures',
+          returnUrl: `${window.location.pathname}${window.location.search}`,
+        });
+      } catch {
+        // Non-fatal: without a queue the detail page simply hides prev/next.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [queueParams, loading, anyFilter]);
   const selectedLeads = leads.filter((l) => selected.has(l.id));
 
   return (

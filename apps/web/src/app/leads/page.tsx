@@ -292,6 +292,9 @@ function LeadsPageInner() {
   // Initialize filter/sort state from URL params so back-navigation restores the view
   const [leads,         setLeads]         = useState<any[]>([]);
   const [pagination,    setPagination]    = useState({ page: 1, limit: 50, total: 0, totalPages: 0 });
+  // Filters the list was last fetched with, replayed with idsOnly so the
+  // detail page's prev/next walks the whole filtered set, not one page.
+  const [queueParams,   setQueueParams]   = useState<Record<string, string> | null>(null);
   const [counts,        setCounts]        = useState<{ tiers: Record<number, number>; bands: Record<string, number>; dripActive: number; hiddenInactive: number }>({ tiers: { 1: 0, 2: 0, 3: 0 }, bands: {}, dripActive: 0, hiddenInactive: 0 });
   const [availableStates, setAvailableStates] = useState<string[]>([]);
   const [pipelineData,  setPipelineData]  = useState<Record<string, { leads: any[]; total: number }>>({});
@@ -422,6 +425,8 @@ function LeadsPageInner() {
     } else if (dateFilter === 'older') {
       params.createdBefore = new Date(Date.now() - 30 * 86400000).toISOString();
     }
+
+    setQueueParams(params);
 
     try {
       const res = await leadsAPI.list(params);
@@ -717,12 +722,30 @@ function LeadsPageInner() {
   // navigation through this exact filtered + sorted list (morning-queue flow).
   useEffect(() => {
     if (viewMode !== 'table' || loading || leads.length === 0) return;
-    writeLeadQueue({
-      ids: leads.map((l: any) => l.id),
-      label: activeView !== 'all' ? viewLabel : hasFilters ? 'Filtered leads' : 'All leads',
-      returnUrl: `${pathname}${window.location.search}`,
-    });
-  }, [leads, viewMode, loading, hasFilters, activeView, viewLabel, pathname]);
+    let cancelled = false;
+    (async () => {
+      // Ask for the whole filtered set, not `leads`, which holds only the
+      // current page - that is why the counter read "of 50" against a larger
+      // result. Falls back to the page on failure so nav still works.
+      let ids = leads.map((l: any) => l.id);
+      try {
+        if (queueParams) {
+          const { page: _p, limit: _l, ...rest } = queueParams;
+          const res = await leadsAPI.list({ ...rest, idsOnly: 'true' });
+          if (Array.isArray(res.data?.ids) && res.data.ids.length) ids = res.data.ids;
+        }
+      } catch {
+        // keep the page-sized fallback
+      }
+      if (cancelled) return;
+      writeLeadQueue({
+        ids,
+        label: activeView !== 'all' ? viewLabel : hasFilters ? 'Filtered leads' : 'All leads',
+        returnUrl: `${pathname}${window.location.search}`,
+      });
+    })();
+    return () => { cancelled = true; };
+  }, [leads, viewMode, loading, hasFilters, activeView, viewLabel, pathname, queueParams]);
 
   // ─── Pipeline (Grid view) drag-and-drop ─────────────────────────────────────
   const onDragEnd = useCallback(async (result: DropResult) => {

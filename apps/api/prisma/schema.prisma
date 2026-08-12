@@ -400,6 +400,11 @@ model ForeclosureDetail {
   phone4Type     String?
   email2         String?
 
+  /// Normalized "same property" key (see addressKeyOf). Lets a re-filed notice
+  /// carrying no case number find the lead it belongs to instead of forking a
+  /// second one when its sale date moves.
+  addressKey     String?
+
   // External links
   parcelId       String?
   parcelUrl      String?
@@ -417,6 +422,7 @@ model ForeclosureDetail {
   @@index([organizationId, priority])
   @@index([organizationId, saleDate])
   @@index([organizationId, workStatus])
+  @@index([organizationId, addressKey])
   @@map("foreclosure_details")
 }
 
@@ -1621,6 +1627,34 @@ model DigestRun {
 
   @@index([organizationId, sentAt])
   @@map("digest_runs")
+}
+
+/// A foreclosure notice the team removed, kept so it stays removed.
+///
+/// Deleting the Lead cascades its ForeclosureDetail away, and dedupeUid /
+/// noticeId / caseNumber on that row are the only memory ingestion has that a
+/// notice was ever seen. Without this tombstone the next morning's feed pull
+/// finds the same item looking brand new and recreates it, which is why
+/// deleting a lead was what brought it back.
+///
+/// Keyed the same ways the dedupe lookup is, plus the address, so a re-filed
+/// notice with a new sale date is suppressed too.
+model ForeclosureSuppression {
+  id              String   @id @default(cuid())
+  organizationId  String?
+  dedupeUid       String
+  noticeId        String?
+  caseNumber      String?
+  addressKey      String?
+  /// Human-readable, for working out later why something never appeared.
+  propertyAddress String?
+  reason          String   @default("deleted") // 'deleted' | 'merged'
+  createdAt       DateTime @default(now())
+
+  @@index([organizationId, dedupeUid])
+  @@index([organizationId, addressKey])
+  @@index([organizationId, caseNumber])
+  @@map("foreclosure_suppressions")
 }
 
 /// One run of the Mecklenburg Times feed poll, cron or manual. Exists so the

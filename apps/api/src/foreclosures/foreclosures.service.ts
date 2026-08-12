@@ -19,6 +19,8 @@ import {
   parcelLinkFor,
   splitOwnerName,
   ownerOccupiedFrom,
+  addressKeyOf,
+  dupeScore,
   looksDead,
   stateForCity,
   countyForCity,
@@ -64,13 +66,40 @@ export class ForeclosuresService {
     const loanIso = parseDateISO(input.loanDate);
     const dedupeUid = uidOf({ caseNumber: input.caseNumber, address, saleDate: saleIso });
     const caseKey = normalizeCaseNumber(input.caseNumber);
+    const addressKey = addressKeyOf(address, input.zip);
 
-    // Idempotency, in three layers. dedupeUid and noticeId identify the same
+    // A notice the team deleted must stay deleted. The tombstone outlives the
+    // cascade that takes dedupeUid away with the lead, which is what used to
+    // let the next morning's feed pull recreate it.
+    const suppressed = await this.prisma.foreclosureSuppression.findFirst({
+      where: {
+        organizationId,
+        OR: [
+          { dedupeUid },
+          ...(input.noticeId ? [{ noticeId: input.noticeId }] : []),
+          ...(caseKey ? [{ caseNumber: caseKey }] : []),
+          ...(addressKey ? [{ addressKey }] : []),
+        ],
+      },
+      select: { id: true },
+    });
+    if (suppressed) {
+      return { leadId: null, created: false, reason: 'suppressed' };
+    }
+
+    // Idempotency, in four layers. dedupeUid and noticeId identify the same
     // notice; caseNumber identifies the same CASE, which is what stops a later
     // filing (a Notice of Sale, carrying the auction date) forking a second
     // lead for a property we are already working. dedupeUid cannot do that job
     // on its own because it folds in the sale date, so it changes the moment
     // the sale is scheduled.
+    //
+    // addressKey is the backstop for the case caseNumber cannot cover: RSS
+    // blurbs frequently carry no case number at all, so a notice whose sale
+    // date moves changes its dedupeUid with nothing left to catch it. Applied
+    // ONLY when the incoming notice has no case number of its own - two
+    // different case numbers at one address are two real proceedings (an HOA
+    // lien and a mortgage default, say) and must stay separate leads.
     const existing = await this.prisma.foreclosureDetail.findFirst({
       where: {
         organizationId,
@@ -78,6 +107,7 @@ export class ForeclosuresService {
           { dedupeUid },
           ...(input.noticeId ? [{ noticeId: input.noticeId }] : []),
           ...(caseKey ? [{ caseNumber: caseKey }] : []),
+          ...(!caseKey && addressKey ? [{ addressKey }] : []),
         ],
       },
       select: {
@@ -173,6 +203,7 @@ export class ForeclosuresService {
             // Stored canonical so a later filing on the same case matches on
             // the dedupe lookup regardless of how the source spaced it.
             caseNumber: caseKey || input.caseNumber || null,
+            addressKey: addressKey || null,
             county: input.county || countyForCity(input.city),
             trustee: input.trustee || null,
             rawSnippet: input.rawSnippet || null,
@@ -338,11 +369,12 @@ export class ForeclosuresService {
     };
   }
 
-  /** List foreclosure leads (Lead joined with ForeclosureDetail) with filters. */
-  async list(filters: ForeclosureListFilters) {
-    const page = Math.max(1, filters.page || 1);
-    const pageSize = Math.min(200, filters.pageSize || 60);
-
+  /**
+   * The Prisma `where` for one set of list filters. Extracted so the ids
+   * endpoint that feeds the lead-queue nav selects exactly the same set the
+   * cards do - a queue built from a different predicate is worse than none.
+   */
+  private listWhere(filters: ForeclosureListFilters): any {
     // Chip filters arrive as comma-separated lists (multi-select).
     const asList = (v?: string) => String(v || '').split(',').map((s) => s.trim()).filter(Boolean);
 
@@ -418,6 +450,29 @@ export class ForeclosuresService {
       ];
     }
 
+    return where;
+  }
+
+  /**
+   * Every lead id matching these filters, in list order and ignoring paging.
+   * Backs the prev/next queue on the lead detail page, which was previously
+   * limited to whatever one page happened to hold.
+   */
+  async listIds(filters: ForeclosureListFilters): Promise<{ ids: string[] }> {
+    const rows = await this.prisma.lead.findMany({
+      where: this.listWhere(filters),
+      orderBy: this.orderByFor(filters.sort),
+      select: { id: true },
+      take: 1000,
+    });
+    return { ids: rows.map((r) => r.id) };
+  }
+
+  /** List foreclosure leads (Lead joined with ForeclosureDetail) with filters. */
+  async list(filters: ForeclosureListFilters) {
+    const page = Math.max(1, filters.page || 1);
+    const pageSize = Math.min(200, filters.pageSize || 60);
+    const where = this.listWhere(filters);
     const orderBy = this.orderByFor(filters.sort);
 
     const [rows, total, cityRows] = await Promise.all([
@@ -572,6 +627,42 @@ export class ForeclosuresService {
    */
   async bulkDelete(ids: string[], organizationId?: string): Promise<{ deleted: number }> {
     if (!ids?.length) return { deleted: 0 };
+
+    // Record the tombstones FIRST. The delete cascades the detail row away, and
+    // with it every identifier ingestion uses to recognize the notice, so after
+    // the delete there is nothing left to write one from.
+    const doomed = await this.prisma.lead.findMany({
+      where: {
+        id: { in: ids },
+        source: LeadSource.FORECLOSURE,
+        ...(organizationId ? { organizationId } : {}),
+      },
+      select: {
+        propertyAddress: true,
+        propertyZip: true,
+        organizationId: true,
+        foreclosureDetail: {
+          select: { dedupeUid: true, noticeId: true, caseNumber: true, addressKey: true },
+        },
+      },
+    });
+
+    const tombstones = doomed
+      .filter((l) => l.foreclosureDetail)
+      .map((l) => ({
+        organizationId: l.organizationId,
+        dedupeUid: l.foreclosureDetail!.dedupeUid,
+        noticeId: l.foreclosureDetail!.noticeId,
+        caseNumber: l.foreclosureDetail!.caseNumber,
+        addressKey:
+          l.foreclosureDetail!.addressKey || addressKeyOf(l.propertyAddress, l.propertyZip) || null,
+        propertyAddress: l.propertyAddress,
+        reason: 'deleted',
+      }));
+    if (tombstones.length) {
+      await this.prisma.foreclosureSuppression.createMany({ data: tombstones });
+    }
+
     const result = await this.prisma.lead.deleteMany({
       where: {
         id: { in: ids },
@@ -579,7 +670,181 @@ export class ForeclosuresService {
         ...(organizationId ? { organizationId } : {}),
       },
     });
+    this.logger.log(
+      `Deleted ${result.count} foreclosure lead(s), ${tombstones.length} suppressed from re-ingestion`,
+    );
     return { deleted: result.count };
+  }
+
+  /**
+   * Backfill addressKey on every foreclosure detail that has none. Cheap and
+   * idempotent; the dedupe backstop is dead weight until this has run once.
+   */
+  async backfillAddressKeys(organizationId?: string): Promise<{ updated: number }> {
+    const rows = await this.prisma.lead.findMany({
+      where: {
+        source: LeadSource.FORECLOSURE,
+        ...(organizationId ? { organizationId } : {}),
+        foreclosureDetail: { is: { addressKey: null } },
+      },
+      select: { propertyAddress: true, propertyZip: true, foreclosureDetail: { select: { id: true } } },
+    });
+
+    let updated = 0;
+    for (const r of rows) {
+      const key = addressKeyOf(r.propertyAddress, r.propertyZip);
+      if (!key || !r.foreclosureDetail) continue;
+      await this.prisma.foreclosureDetail.update({
+        where: { id: r.foreclosureDetail.id },
+        data: { addressKey: key },
+      });
+      updated++;
+    }
+    return { updated };
+  }
+
+  /**
+   * Fold duplicate foreclosure leads for one property into a single lead.
+   *
+   * These exist because a notice with no case number that came back with a new
+   * sale date used to change its dedupeUid with nothing left to catch it. The
+   * dedupe backstop stops new ones; this clears the ones already banked.
+   *
+   * Destructive, so it reports by default and only acts on apply=true. The
+   * survivor is whichever row carries the most human work - call notes, a moved
+   * work status, do-not-call, touches - because that is the one someone has
+   * actually been using. Facts the survivor is missing are filled in from the
+   * others, call notes are concatenated rather than dropped, and the losers are
+   * suppressed so ingestion does not simply re-create them tomorrow.
+   */
+  async mergeDuplicates(
+    opts: { organizationId?: string; apply?: boolean } = {},
+  ): Promise<{
+    applied: boolean;
+    groups: number;
+    duplicates: number;
+    merges: { addressKey: string; keptLeadId: string; removedLeadIds: string[]; address: string }[];
+  }> {
+    const organizationId = opts.organizationId;
+    if (opts.apply) await this.backfillAddressKeys(organizationId);
+
+    const leads = await this.prisma.lead.findMany({
+      where: {
+        source: LeadSource.FORECLOSURE,
+        ...(organizationId ? { organizationId } : {}),
+      },
+      include: { foreclosureDetail: true },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    // Group on the key each row would have, computed rather than read, so a
+    // dry run works before the backfill has been applied.
+    const byKey = new Map<string, typeof leads>();
+    for (const lead of leads) {
+      if (!lead.foreclosureDetail) continue;
+      const key =
+        lead.foreclosureDetail.addressKey || addressKeyOf(lead.propertyAddress, lead.propertyZip);
+      if (!key) continue;
+      const bucket = byKey.get(key);
+      if (bucket) bucket.push(lead);
+      else byKey.set(key, [lead]);
+    }
+
+    const merges: { addressKey: string; keptLeadId: string; removedLeadIds: string[]; address: string }[] = [];
+    let duplicates = 0;
+
+    for (const [key, group] of byKey) {
+      if (group.length < 2) continue;
+      // Two distinct case numbers at one address are two real proceedings, not
+      // a duplicate. Only fold rows that agree on the case, or have none.
+      const cases = new Set(
+        group.map((l) => l.foreclosureDetail?.caseNumber).filter(Boolean) as string[],
+      );
+      if (cases.size > 1) continue;
+
+      const ranked = [...group].sort((a, b) => dupeScore(b) - dupeScore(a));
+      const winner = ranked[0];
+      const losers = ranked.slice(1);
+      duplicates += losers.length;
+      merges.push({
+        addressKey: key,
+        keptLeadId: winner.id,
+        removedLeadIds: losers.map((l) => l.id),
+        address: winner.propertyAddress,
+      });
+
+      if (!opts.apply) continue;
+      await this.foldDuplicateGroup(winner, losers, key);
+    }
+
+    this.logger.log(
+      `Duplicate merge ${opts.apply ? 'applied' : 'preview'}: ` +
+        `${merges.length} group(s), ${duplicates} lead(s) folded in`,
+    );
+    return { applied: !!opts.apply, groups: merges.length, duplicates, merges };
+  }
+
+  /** Fill the survivor's blanks from the losers, suppress them, delete them. */
+  private async foldDuplicateGroup(winner: any, losers: any[], addressKey: string) {
+    const w = winner.foreclosureDetail;
+    const detailPatch: any = { addressKey };
+    const leadPatch: any = {};
+
+    // Court and contact facts: take a loser's value only where the survivor
+    // has none, so nothing the team recorded is overwritten.
+    const FILLABLE = [
+      'caseNumber', 'noticeId', 'noticeType', 'noticeUrl', 'trustee', 'county',
+      'saleDate', 'hearingDate', 'loanDate', 'loanAmount', 'assessedValue',
+      'equityPct', 'ownerOccupied', 'mailingAddress', 'mailCity', 'mailState',
+      'mailZip', 'countyOwner', 'skipStatus', 'parcelId', 'parcelUrl',
+      'parcelType', 'parcelLabel', 'phone2', 'phone3', 'phone4', 'email2',
+    ];
+    for (const loser of losers) {
+      const d = loser.foreclosureDetail;
+      if (!d) continue;
+      for (const field of FILLABLE) {
+        if ((w?.[field] == null || w[field] === '') && detailPatch[field] == null && d[field] != null) {
+          detailPatch[field] = d[field];
+        }
+      }
+      if (!winner.sellerPhone && loser.sellerPhone) leadPatch.sellerPhone = loser.sellerPhone;
+      if (!winner.sellerEmail && loser.sellerEmail) leadPatch.sellerEmail = loser.sellerEmail;
+    }
+
+    // Call notes are the one field worth concatenating: two people may have
+    // worked the twins separately, and losing either set is losing real work.
+    const notes = [w?.callNotes, ...losers.map((l) => l.foreclosureDetail?.callNotes)]
+      .map((n) => String(n || '').trim())
+      .filter(Boolean);
+    const uniqueNotes = Array.from(new Set(notes));
+    if (uniqueNotes.length > 1) detailPatch.callNotes = uniqueNotes.join('\n---\n');
+
+    const tombstones = losers
+      .filter((l) => l.foreclosureDetail)
+      .map((l) => ({
+        organizationId: l.organizationId,
+        dedupeUid: l.foreclosureDetail.dedupeUid,
+        noticeId: l.foreclosureDetail.noticeId,
+        caseNumber: l.foreclosureDetail.caseNumber,
+        // Deliberately NOT the addressKey: suppressing that would block the
+        // survivor's own future notices as well as the duplicate's.
+        addressKey: null,
+        propertyAddress: l.propertyAddress,
+        reason: 'merged',
+      }));
+
+    // Delete before patching. noticeId is unique per org, so copying a loser's
+    // onto the survivor collides until the loser is gone.
+    await this.prisma.$transaction([
+      this.prisma.lead.deleteMany({ where: { id: { in: losers.map((l) => l.id) } } }),
+      ...(tombstones.length
+        ? [this.prisma.foreclosureSuppression.createMany({ data: tombstones })]
+        : []),
+      this.prisma.lead.update({
+        where: { id: winner.id },
+        data: { ...leadPatch, foreclosureDetail: { update: detailPatch } },
+      }),
+    ]);
   }
 
   /** Aggregate stat tiles for the top of the Foreclosures tab. */
