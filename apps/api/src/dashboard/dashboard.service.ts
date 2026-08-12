@@ -161,6 +161,8 @@ export class DashboardService {
         ...org,
         scoreBand: { in: ['HOT', 'STRIKE_ZONE'] },
         status: { notIn: INACTIVE },
+        // Cleared off the Hot leads card by someone on the team.
+        hotDismissedAt: null,
       },
       orderBy: [{ totalScore: 'desc' }, { lastTouchedAt: 'asc' }],
       take: limit,
@@ -183,6 +185,15 @@ export class DashboardService {
         source: true,
       },
     });
+  }
+
+  /** Hide (or restore) a lead on the dashboard's Hot leads card. */
+  async setHotDismissed(leadId: string, dismissed: boolean) {
+    await this.prisma.lead.update({
+      where: { id: leadId },
+      data: { hotDismissedAt: dismissed ? new Date() : null },
+    });
+    return { success: true, dismissed };
   }
 
   async getNewLeads(limit = 10, organizationId?: string) {

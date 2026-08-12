@@ -37,8 +37,8 @@ export class InboxController {
 
   @Get('counts')
   async counts(@Headers('authorization') authHeader?: string) {
-    const { organizationId } = this.decodeToken(authHeader);
-    return this.inboxService.counts(organizationId);
+    const { userId, organizationId } = this.decodeToken(authHeader);
+    return this.inboxService.counts(organizationId, userId);
   }
 
   @Post('threads/:leadId/read')

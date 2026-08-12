@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useCall } from '@/features/calls/CallContext';
+import { CallerIdPicker } from '@/features/calls/CallerIdPicker';
 import { useRecentCalls, leadName, type RecentCall } from '@/features/calls/hooks';
 import { useLeadSearch, fullName } from '@/features/leads/leads';
 import { SearchIcon } from '@/components/icons';
@@ -54,6 +55,8 @@ export default function DialerScreen() {
           <Text style={styles.callBtnText}>Call</Text>
         </TouchableOpacity>
       </View>
+
+      <CallerIdPicker compact />
 
       <View style={styles.searchBar}>
         <SearchIcon size={18} color={colors.textMuted} />

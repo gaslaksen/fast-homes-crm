@@ -19,11 +19,14 @@ import {
   bandStyle,
   statusLabel,
   fullName,
+  BAND_OPTIONS,
 } from '@/features/leads/leads';
 import { useCall } from '@/features/calls/CallContext';
+import { useDismissHotLead } from '@/features/dashboard/dashboard';
 import { Card, SectionLabel, Chip, Stat } from '@/components/ui';
-import { PhoneIcon, MessageIcon, MailIcon, ZapIcon, PencilIcon } from '@/components/icons';
+import { PhoneIcon, MessageIcon, MailIcon, ZapIcon, PencilIcon, ChevronRight } from '@/components/icons';
 import { money, timelineLabel } from '@/lib/format';
+import { googleMapsUrl, googleSearchUrl, hasAddress, zillowUrl } from '@/lib/externalLinks';
 import { useThemed, type Colors } from '@/theme';
 
 const STATUS_OPTIONS = [
@@ -65,6 +68,24 @@ function ActionButton({
   );
 }
 
+/** One tappable row that opens an external property lookup in the browser. */
+function LinkRow({ label, hint, url }: { label: string; hint: string; url: string }) {
+  const { colors, styles } = useThemed(makeStyles);
+  return (
+    <TouchableOpacity
+      style={styles.linkRow}
+      onPress={() => Linking.openURL(url).catch(() => {})}
+      activeOpacity={0.7}
+    >
+      <View style={styles.linkText}>
+        <Text style={styles.linkLabel}>{label}</Text>
+        <Text style={styles.linkHint}>{hint}</Text>
+      </View>
+      <ChevronRight size={16} color={colors.textMuted} />
+    </TouchableOpacity>
+  );
+}
+
 function CampRow({ label, value }: { label: string; value: string | null }) {
   const { colors, styles } = useThemed(makeStyles);
   return (
@@ -84,6 +105,7 @@ export default function LeadDetailScreen() {
   const router = useRouter();
   const { data: lead, isLoading } = useLeadDetail(leadId);
   const update = useUpdateLead(leadId);
+  const dismissHot = useDismissHotLead();
   const { startCall } = useCall();
 
   if (isLoading || !lead) {
@@ -120,6 +142,34 @@ export default function LeadDetailScreen() {
     );
   }
 
+  /**
+   * Re-band the lead, or clear it off the dashboard's Hot leads card. Dismissing
+   * only hides it there: the lead keeps its score and stays in Leads.
+   */
+  function changeBand() {
+    const labels = BAND_OPTIONS.map((b) => bandStyle(b).label);
+    const dismissLabel = 'Remove from Hot leads';
+    const options = [...labels, dismissLabel, 'Cancel'];
+    ActionSheetIOS.showActionSheetWithOptions(
+      { title: 'Lead priority', options, cancelButtonIndex: options.length - 1 },
+      (i) => {
+        if (i == null || i >= options.length - 1) return;
+        if (i === labels.length) {
+          dismissHot.mutate({ leadId });
+          return;
+        }
+        update.mutate({ scoreBand: BAND_OPTIONS[i] });
+      },
+    );
+  }
+
+  const addressParts = {
+    propertyAddress: lead.propertyAddress,
+    propertyCity: lead.propertyCity,
+    propertyState: lead.propertyState,
+    propertyZip: lead.propertyZip,
+  };
+
   return (
     <View style={styles.root}>
       <Stack.Screen
@@ -145,7 +195,9 @@ export default function LeadDetailScreen() {
           <Text style={styles.name}>{name}</Text>
           {address ? <Text style={styles.address}>{address}</Text> : null}
           <View style={styles.chipRow}>
-            <Chip label={band.label} color={band.color} soft={band.soft} />
+            <TouchableOpacity onPress={changeBand} hitSlop={6}>
+              <Chip label={band.label} color={band.color} soft={band.soft} />
+            </TouchableOpacity>
             <TouchableOpacity onPress={changeStatus} hitSlop={6}>
               <Chip label={statusLabel(lead.status)} color={colors.textSecondary} soft={colors.bubbleIn} />
             </TouchableOpacity>
@@ -162,7 +214,10 @@ export default function LeadDetailScreen() {
           <ActionButton
             icon={<MessageIcon size={22} color={colors.primary} />}
             label="Message"
-            onPress={() => router.push({ pathname: '/lead/[id]', params: { id: leadId } })}
+            // `from` tells the conversation's back arrow to return here.
+            onPress={() =>
+              router.push({ pathname: '/lead/[id]', params: { id: leadId, from: 'lead' } })
+            }
           />
           <ActionButton
             icon={<MailIcon size={22} color={colors.primary} />}
@@ -229,6 +284,19 @@ export default function LeadDetailScreen() {
             </View>
           ) : null}
         </Card>
+
+        {hasAddress(addressParts) ? (
+          <>
+            <SectionLabel>Look up</SectionLabel>
+            <Card style={styles.linkCard}>
+              <LinkRow label="Zillow" hint="Listing + Zestimate" url={zillowUrl(addressParts)} />
+              <View style={styles.linkDivider} />
+              <LinkRow label="Google" hint="Everything on this address" url={googleSearchUrl(addressParts)} />
+              <View style={styles.linkDivider} />
+              <LinkRow label="Google Maps" hint="Street view + neighborhood" url={googleMapsUrl(addressParts)} />
+            </Card>
+          </>
+        ) : null}
 
         <SectionLabel>Automation</SectionLabel>
         <Card>
@@ -315,6 +383,19 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
   },
   equityLabel: { fontSize: 14, color: colors.textSecondary },
   equityValue: { fontSize: 15, fontWeight: '600', color: colors.text },
+
+  linkCard: { padding: 0, overflow: 'hidden' },
+  linkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 13,
+    gap: 10,
+  },
+  linkText: { flex: 1, gap: 2 },
+  linkLabel: { fontSize: 15, fontWeight: '600', color: colors.text },
+  linkHint: { fontSize: 12, color: colors.textSecondary },
+  linkDivider: { height: StyleSheet.hairlineWidth, backgroundColor: colors.border, marginLeft: 16 },
 
   editBtn: { paddingHorizontal: 4 },
   autoRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },

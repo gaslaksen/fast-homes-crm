@@ -1,11 +1,16 @@
 import { Keyboard, TouchableOpacity } from 'react-native';
 import { Tabs, useRouter } from 'expo-router';
 import { HomeIcon, MessageIcon, PhoneIcon, TrendingUpIcon, UsersIcon, ChevronLeft } from '@/components/icons';
+import { useInboxCounts } from '@/features/dashboard/dashboard';
 import { useColors } from '@/theme';
 
 export default function TabsLayout() {
   const colors = useColors();
   const router = useRouter();
+  // This user's own unread count. A teammate reading a thread no longer
+  // clears the marker here.
+  const { data: counts } = useInboxCounts();
+  const unread = counts?.unread ?? 0;
   return (
     <Tabs
       backBehavior="history"
@@ -31,6 +36,8 @@ export default function TabsLayout() {
         options={{
           title: 'Inbox',
           tabBarIcon: ({ color }) => <MessageIcon size={22} color={color} />,
+          tabBarBadge: unread > 0 ? (unread > 99 ? '99+' : unread) : undefined,
+          tabBarBadgeStyle: { backgroundColor: colors.danger, color: '#fff', fontSize: 11 },
         }}
       />
       <Tabs.Screen

@@ -1,8 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform } from 'react-native';
+import * as SecureStore from 'expo-secure-store';
 import { Voice, Call, CallInvite } from '@twilio/voice-react-native-sdk';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { CALLER_ID_KEY } from '@/lib/config';
+import { useCallerIds, type CallerId } from './hooks';
 import { ActiveCallScreen } from './ActiveCallScreen';
 import { CallContext, useCall, type CallState, type CallStatus } from './callState';
 
@@ -21,6 +24,25 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<string | null>(null);
 
   const { token: authToken } = useAuth();
+  const { data: callerIds = [] } = useCallerIds(!!authToken);
+  const [callerNumber, setCallerNumber] = useState<string | null>(null);
+
+  // Restore the last chosen outbound number.
+  useEffect(() => {
+    SecureStore.getItemAsync(CALLER_ID_KEY)
+      .then((v) => setCallerNumber(v || null))
+      .catch(() => {});
+  }, []);
+
+  // A stored number that is no longer on the org's list would silently fall
+  // back server-side; drop it so the UI shows what will actually be used.
+  const callerId = callerIds.find((c) => c.number === callerNumber) ?? null;
+
+  const setCallerId = useCallback((c: CallerId | null) => {
+    setCallerNumber(c?.number ?? null);
+    if (c) SecureStore.setItemAsync(CALLER_ID_KEY, c.number).catch(() => {});
+    else SecureStore.deleteItemAsync(CALLER_ID_KEY).catch(() => {});
+  }, []);
 
   const attach = useCallback((call: Call) => {
     callRef.current = call;
@@ -121,7 +143,12 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           throw new Error('Calling is not configured on the server.');
         }
         const call = await voiceRef.current!.connect(data.token, {
-          params: { To: toNumber },
+          // callerId reaches the TwiML voice webhook, which re-checks it
+          // against the org's numbers before dialling. Omitted = API default.
+          params: {
+            To: toNumber,
+            ...(callerId ? { callerId: callerId.number } : {}),
+          },
         });
         attach(call);
       } catch (e: any) {
@@ -129,7 +156,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         setStatus('ended');
       }
     },
-    [status, attach],
+    [status, attach, callerId],
   );
 
   const toggleMute = useCallback(async () => {
@@ -166,12 +193,28 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       peerName,
       connectedAt,
       error,
+      callerIds,
+      callerId,
+      setCallerId,
       startCall,
       toggleMute,
       hangUp,
       dismiss,
     }),
-    [status, muted, peerName, connectedAt, error, startCall, toggleMute, hangUp, dismiss],
+    [
+      status,
+      muted,
+      peerName,
+      connectedAt,
+      error,
+      callerIds,
+      callerId,
+      setCallerId,
+      startCall,
+      toggleMute,
+      hangUp,
+      dismiss,
+    ],
   );
 
   return (

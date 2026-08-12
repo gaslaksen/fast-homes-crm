@@ -1,7 +1,14 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
-import type { InboxFilter, InboxThreadsResponse, Message } from './types';
+import type { InboxFilter, InboxThread, InboxThreadsResponse, Message } from './types';
+
+const THREADS_PAGE_SIZE = 25;
 
 /** Ask the AI to draft a reply for this lead. Returns the suggested message. */
 export function useGenerateDraft(leadId: string) {
@@ -16,16 +23,33 @@ export function useGenerateDraft(leadId: string) {
   });
 }
 
+/**
+ * Paged conversation list. The API caps a page, so the inbox pulls the next
+ * page as you scroll rather than stopping at the first screenful, so every
+ * conversation is reachable.
+ */
 export function useThreads(filter: InboxFilter = 'all', search = '') {
   const q = search.trim();
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: ['inbox', 'threads', filter, q],
-    queryFn: async () => {
+    initialPageParam: 1,
+    queryFn: async ({ pageParam }) => {
       const { data } = await api.get<InboxThreadsResponse>('/inbox/threads', {
-        params: { filter, ...(q ? { search: q } : {}) },
+        params: {
+          filter,
+          page: pageParam,
+          limit: THREADS_PAGE_SIZE,
+          ...(q ? { search: q } : {}),
+        },
       });
       return data;
     },
+    getNextPageParam: (last) => (last.hasMore ? last.page + 1 : undefined),
+    select: (data) => ({
+      pages: data.pages,
+      pageParams: data.pageParams,
+      items: data.pages.flatMap((p) => p.items) as InboxThread[],
+    }),
   });
 }
 
@@ -83,6 +107,10 @@ export function useSendEmailReply(leadId: string) {
   });
 }
 
+/**
+ * Marks the thread read for the signed-in user only. A teammate opening the
+ * same conversation no longer clears it from your inbox.
+ */
 export function useMarkRead() {
   const qc = useQueryClient();
   return useMutation({
@@ -91,6 +119,8 @@ export function useMarkRead() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['inbox', 'threads'] });
+      // Refreshes the tab badge and the app icon badge.
+      qc.invalidateQueries({ queryKey: ['inbox', 'counts'] });
     },
   });
 }

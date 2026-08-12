@@ -266,6 +266,11 @@ model Lead {
   threadUnread         Boolean  @default(false)
   threadStarred        Boolean  @default(false)
 
+  // Hot-leads dismissal. Set when someone clears a lead off the dashboard's
+  // Hot leads card; the lead keeps its score band, it just stops surfacing
+  // there. Cleared (null) to bring it back.
+  hotDismissedAt       DateTime?
+
   // Hero strip AI insight (one-line lead-state summary, cached by state fingerprint)
   aiInsight             String?
   aiInsightGeneratedAt  DateTime?
@@ -681,6 +686,9 @@ model LenderProfile {
   @@map("lender_profiles")
 }
 
+/// Per-user read state for a lead's conversation. `viewedAt` is the last time
+/// this user opened the thread, so a thread reads as unread for one teammate
+/// while another has already caught up. Also orders the inbox "Recent" filter.
 model ConversationView {
   id        String   @id @default(cuid())
   userId    String
@@ -689,6 +697,8 @@ model ConversationView {
 
   @@unique([userId, leadId])
   @@index([userId, viewedAt])
+  // Joined lead-side when computing per-user unread across a page of threads.
+  @@index([leadId])
   @@map("conversation_views")
 }
 

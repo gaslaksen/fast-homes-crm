@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
+import { InboxService } from '../inbox/inbox.service';
 import { RegisterDeviceDto } from './dto/register-device.dto';
 
 export interface PushPayload {
@@ -35,6 +36,7 @@ export class PushService {
   constructor(
     private readonly config: ConfigService,
     private readonly prisma: PrismaService,
+    private readonly inbox: InboxService,
   ) {}
 
   isConfigured(): boolean {
@@ -232,18 +234,43 @@ export class PushService {
       if (!recipients.length) return;
       const who =
         `${lead.sellerFirstName || ''} ${lead.sellerLastName || ''}`.trim() || 'New message';
-      await this.notifyUsers(recipients, {
+      const payload: PushPayload = {
         title: who,
         body: preview.length > 140 ? `${preview.slice(0, 139)}…` : preview,
         data: { type: 'message', leadId: lead.id },
         threadId: lead.id,
-      });
+      };
+
+      // The app icon badge is each recipient's own unread count, so it has to
+      // be sent per user rather than as one fan-out.
+      await Promise.all(
+        recipients.map(async (userId) => {
+          const badge = await this.unreadBadge(userId, lead.organizationId);
+          await this.notifyUsers([userId], { ...payload, badge });
+        }),
+      );
     } catch (err: any) {
       this.logger.error(`notifyNewMessage failed for ${lead.id}: ${err.message}`);
     }
   }
 
   // ─── Internals ────────────────────────────────────────────────────────────
+
+  /**
+   * Badge number for one recipient: how many conversations are still unread
+   * for them. Never throws: a badge is not worth losing the notification over.
+   */
+  private async unreadBadge(
+    userId: string,
+    organizationId?: string | null,
+  ): Promise<number | undefined> {
+    try {
+      return await this.inbox.unreadCount(userId, organizationId ?? undefined);
+    } catch (err: any) {
+      this.logger.warn(`Badge count failed for user ${userId}: ${err.message}`);
+      return undefined;
+    }
+  }
 
   private async getProvider(): Promise<any | null> {
     if (!this.isConfigured()) return null;

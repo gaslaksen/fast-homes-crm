@@ -68,6 +68,7 @@ export interface LeadListItem {
   propertyState: string | null;
   scoreBand: string | null;
   status: string;
+  source?: string | null;
   arv: number | null;
 }
 
@@ -77,6 +78,8 @@ export function useLeadSearch(params: {
   scoreBand?: string;
   needsReply?: string;
   status?: string;
+  /** LeadSource, e.g. PROPERTY_LEADS / GOOGLE_ADS / FORECLOSURE / PROBATE. */
+  source?: string;
   sort?: string;
   dir?: string;
   limit?: number;
@@ -90,6 +93,60 @@ export function useLeadSearch(params: {
         params: { ...params, limit: params.limit ?? 50 },
       });
       return data.leads;
+    },
+  });
+}
+
+/** Fields POST /leads accepts from the app's new-lead form. */
+export interface NewLead {
+  source: string;
+  sellerFirstName: string;
+  sellerLastName: string;
+  sellerPhone: string;
+  sellerEmail?: string;
+  propertyAddress: string;
+  propertyCity: string;
+  propertyState: string;
+  propertyZip: string;
+  askingPrice?: number;
+  conditionLevel?: string;
+  /**
+   * Whether the AI may open the conversation. The API defaults new leads to
+   * true, which fires an initial outreach text; a lead keyed in by hand should
+   * not text the seller unless the person adding it asked for that.
+   */
+  autoRespond: boolean;
+}
+
+export function useCreateLead() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (lead: NewLead) => {
+      const { data } = await api.post<LeadDetail>('/leads', lead);
+      return data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['leads'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+  });
+}
+
+/**
+ * Re-band any lead by id. Unlike useUpdateLead this is not bound to one lead,
+ * so list screens can offer it per row.
+ */
+export function useSetScoreBand() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ leadId, scoreBand }: { leadId: string; scoreBand: string }) => {
+      const { data } = await api.patch<LeadDetail>(`/leads/${leadId}`, { scoreBand });
+      return data;
+    },
+    onSuccess: (_data, { leadId }) => {
+      qc.invalidateQueries({ queryKey: ['lead', leadId, 'detail'] });
+      qc.invalidateQueries({ queryKey: ['leads'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
     },
   });
 }
@@ -167,6 +224,28 @@ const BANDS: Record<string, BandStyle> = {
 
 export function bandStyle(band?: string | null): BandStyle {
   return BANDS[band || ''] || { label: band || '—', color: '#6B7280', soft: '#F3F4F6' };
+}
+
+/** Bands offerable in a picker, hottest first. Excludes the terminal DEAD_COLD. */
+export const BAND_OPTIONS = ['HOT', 'STRIKE_ZONE', 'WORKABLE', 'WARM', 'COOL', 'COLD'];
+
+// ─── Lead source (where the lead came from) ─────────────────────────────────
+
+/** Mirrors LeadSource in packages/shared. Labels match the web UI's wording. */
+export const LEAD_SOURCES: { value: string; label: string }[] = [
+  { value: 'PROPERTY_LEADS', label: 'PPL (PropertyLeads)' },
+  { value: 'GOOGLE_ADS', label: 'PPC (Google Ads)' },
+  { value: 'LEADHOUSE', label: 'Leadhouse' },
+  { value: 'FORECLOSURE', label: 'Foreclosure' },
+  { value: 'PROBATE', label: 'Probate' },
+  { value: 'DEAL_SEARCH', label: 'Deal search' },
+  { value: 'MANUAL', label: 'Manual' },
+  { value: 'OTHER', label: 'Other' },
+];
+
+export function sourceLabel(source?: string | null): string {
+  if (!source) return '';
+  return LEAD_SOURCES.find((s) => s.value === source)?.label ?? statusLabel(source);
 }
 
 export function statusLabel(status?: string | null): string {

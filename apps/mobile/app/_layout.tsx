@@ -1,13 +1,15 @@
 import { useEffect } from 'react';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { ActivityIndicator, View } from 'react-native';
+import { ActivityIndicator, TouchableOpacity, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider, useAuth } from '@/lib/auth';
 import { queryClient } from '@/lib/queryClient';
 import { usePushRegistration } from '@/features/push/usePushRegistration';
 import { useNotificationRouting } from '@/features/push/useNotificationRouting';
+import { useBadgeSync } from '@/features/push/useBadgeSync';
+import { ChevronLeft } from '@/components/icons';
 import { CallProvider } from '@/features/calls/CallContext';
 import { ThemeProvider, useColors, useThemeMode } from '@/theme';
 
@@ -21,6 +23,7 @@ function AuthGate() {
   // Register for push + handle notification taps once signed in.
   usePushRegistration(!!token);
   useNotificationRouting();
+  useBadgeSync(!!token);
 
   useEffect(() => {
     if (loading) return;
@@ -53,6 +56,18 @@ function AuthGate() {
           headerStyle: { backgroundColor: colors.surface },
           headerTintColor: colors.primary,
           headerTitleStyle: { color: colors.text, fontWeight: '600' },
+          // iOS labels the back button with the previous route's name, which
+          // here is the raw route group, "(tabs)". Use the same bare chevron
+          // the rest of the app uses instead.
+          headerLeft: () => (
+            <TouchableOpacity
+              onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))}
+              hitSlop={10}
+              style={{ paddingRight: 12 }}
+            >
+              <ChevronLeft size={26} color={colors.primary} />
+            </TouchableOpacity>
+          ),
         }}
       />
     </Stack>

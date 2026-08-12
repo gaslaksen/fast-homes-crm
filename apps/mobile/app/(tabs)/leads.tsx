@@ -10,8 +10,16 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useLeadSearch, bandStyle, fullName, statusLabel, type LeadListItem } from '@/features/leads/leads';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import {
+  useLeadSearch,
+  bandStyle,
+  fullName,
+  statusLabel,
+  sourceLabel,
+  LEAD_SOURCES,
+  type LeadListItem,
+} from '@/features/leads/leads';
 import { Chip } from '@/components/ui';
 import { SearchIcon, ChevronRight } from '@/components/icons';
 import { useThemed, type Colors } from '@/theme';
@@ -38,23 +46,26 @@ const FILTER_OPTIONS: { label: string; band?: string; needsReply?: boolean }[] =
 export default function LeadsScreen() {
   const { colors, styles } = useThemed(makeStyles);
   const router = useRouter();
-  const params = useLocalSearchParams<{ band?: string; needsReply?: string }>();
+  const params = useLocalSearchParams<{ band?: string; needsReply?: string; source?: string }>();
   const [q, setQ] = useState('');
   const [band, setBand] = useState<string | undefined>(undefined);
   const [needsReply, setNeedsReply] = useState<string | undefined>(undefined);
+  const [source, setSource] = useState<string | undefined>(undefined);
   const [sortIdx, setSortIdx] = useState(0);
 
   // Apply a filter passed in from the Home stat cards.
   useEffect(() => {
     setBand(params.band || undefined);
     setNeedsReply(params.needsReply || undefined);
-  }, [params.band, params.needsReply]);
+    setSource(params.source || undefined);
+  }, [params.band, params.needsReply, params.source]);
 
   const sortOpt = SORT_OPTIONS[sortIdx];
   const { data: leads, isLoading, isRefetching, refetch } = useLeadSearch({
     search: q,
     scoreBand: band,
     needsReply,
+    source,
     sort: sortOpt.sort,
     dir: sortOpt.dir,
     limit: 50,
@@ -65,7 +76,7 @@ export default function LeadsScreen() {
     : needsReply
       ? 'Needs reply'
       : null;
-  const hasQuery = !!(q.trim() || band || needsReply);
+  const hasQuery = !!(q.trim() || band || needsReply || source);
 
   const openSort = () => {
     ActionSheetIOS.showActionSheetWithOptions(
@@ -88,8 +99,30 @@ export default function LeadsScreen() {
     );
   };
 
+  // Lead type = where the lead came from (PPL, PPC, Foreclosure, Probate…).
+  // Kept separate from the score-band filter so the two can be combined.
+  const openSource = () => {
+    const labels = ['All types', ...LEAD_SOURCES.map((s) => s.label)];
+    ActionSheetIOS.showActionSheetWithOptions(
+      { title: 'Lead type', options: [...labels, 'Cancel'], cancelButtonIndex: labels.length },
+      (i) => {
+        if (i == null || i >= labels.length) return;
+        setSource(i === 0 ? undefined : LEAD_SOURCES[i - 1].value);
+      },
+    );
+  };
+
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
+      <Stack.Screen
+        options={{
+          headerRight: () => (
+            <TouchableOpacity onPress={() => router.push('/lead/new')} hitSlop={10}>
+              <Text style={styles.add}>＋</Text>
+            </TouchableOpacity>
+          ),
+        }}
+      />
       <View style={styles.searchBar}>
         <SearchIcon size={18} color={colors.textMuted} />
         <TextInput
@@ -122,19 +155,34 @@ export default function LeadsScreen() {
             {filterLabel ?? 'Filter'}
           </Text>
         </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.controlBtn, source && styles.controlBtnActive]}
+          onPress={openSource}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.controlText, source && styles.controlTextActive]}>
+            {source ? sourceLabel(source) : 'Type'}
+          </Text>
+        </TouchableOpacity>
       </View>
 
-      {filterLabel ? (
+      {filterLabel || source ? (
         <View style={styles.filterRow}>
-          <Chip label={filterLabel} color={colors.primary} soft={colors.primarySoft} />
+          {filterLabel ? (
+            <Chip label={filterLabel} color={colors.primary} soft={colors.primarySoft} />
+          ) : null}
+          {source ? (
+            <Chip label={sourceLabel(source)} color={colors.primary} soft={colors.primarySoft} />
+          ) : null}
           <TouchableOpacity
             onPress={() => {
               setBand(undefined);
               setNeedsReply(undefined);
+              setSource(undefined);
             }}
             hitSlop={8}
           >
-            <Text style={styles.clear}>Clear filter</Text>
+            <Text style={styles.clear}>Clear</Text>
           </TouchableOpacity>
         </View>
       ) : null}
@@ -195,8 +243,10 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
   },
   input: { flex: 1, fontSize: 16, color: colors.text },
   clear: { fontSize: 14, color: colors.primary, fontWeight: '600' },
+  add: { fontSize: 26, color: colors.primary, fontWeight: '400', paddingHorizontal: 4 },
   controls: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 10,
     paddingHorizontal: 14,
     paddingBottom: 10,
@@ -215,6 +265,7 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
   filterRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'wrap',
     gap: 12,
     paddingHorizontal: 16,
     paddingBottom: 8,

@@ -8,6 +8,9 @@ import { useColors } from '@/theme';
  * so the bottom tab bar stays visible. A single teal back chevron pops within
  * the stack; on a cold entry (no stack history) it returns to the most likely
  * origin tab — the Inbox for a conversation, Home otherwise.
+ *
+ * The conversation screen overrides this chevron with one that always returns
+ * to where it was opened from; see app/(tabs)/lead/[id].tsx.
  */
 export default function LeadStackLayout() {
   const router = useRouter();
@@ -45,6 +48,7 @@ export default function LeadStackLayout() {
       <Stack.Screen name="disposition-edit/[id]" options={{ title: 'Edit deal' }} />
       <Stack.Screen name="edit/[id]" options={{ title: 'Edit lead' }} />
       <Stack.Screen name="email/[id]" options={{ title: 'Email' }} />
+      <Stack.Screen name="new" options={{ title: 'New lead' }} />
     </Stack>
   );
 }

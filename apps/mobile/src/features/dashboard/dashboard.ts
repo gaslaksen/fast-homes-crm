@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 
 export interface ActionLead {
@@ -110,11 +110,18 @@ export interface InboxCounts {
   starred: number;
 }
 
-export function useInboxCounts() {
+/**
+ * Unread/starred totals. `unread` is this user's own count, so it also drives
+ * the Inbox tab badge and the app icon badge. Polled so a message arriving
+ * while the app is open lights the badge without a pull-to-refresh.
+ */
+export function useInboxCounts(enabled = true) {
   return useQuery({
     queryKey: ['inbox', 'counts'],
     queryFn: async () => (await api.get<InboxCounts>('/inbox/counts')).data,
     staleTime: 30_000,
+    refetchInterval: 60_000,
+    enabled,
   });
 }
 
@@ -128,6 +135,24 @@ export function useHotLeads(limit = 6) {
       return data;
     },
     staleTime: 60_000,
+  });
+}
+
+/**
+ * Clear a lead off the Hot leads card (or put it back). Hiding is team-wide and
+ * leaves the lead's score band alone. It stays in Leads, it just stops
+ * crowding the dashboard.
+ */
+export function useDismissHotLead() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ leadId, dismissed = true }: { leadId: string; dismissed?: boolean }) => {
+      await api.post(`/dashboard/hot-leads/${leadId}/dismiss`, { dismissed });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['dashboard', 'hot-leads'] });
+      qc.invalidateQueries({ queryKey: ['dashboard', 'stats'] });
+    },
   });
 }
 

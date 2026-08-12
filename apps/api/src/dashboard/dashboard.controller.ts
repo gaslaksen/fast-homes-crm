@@ -1,4 +1,4 @@
-import { Controller, Get, Query, Headers } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, Headers } from '@nestjs/common';
 import { DashboardService } from './dashboard.service';
 import * as jwt from 'jsonwebtoken';
 
@@ -53,6 +53,18 @@ export class DashboardController {
       limit ? parseInt(limit) : undefined,
       this.decodeOrg(authHeader),
     );
+  }
+
+  /**
+   * Clear a lead off the Hot leads card (or put it back with dismissed:false).
+   * The lead's score band is untouched: this only hides it from the dashboard.
+   */
+  @Post('hot-leads/:id/dismiss')
+  async dismissHotLead(
+    @Param('id') id: string,
+    @Body() body?: { dismissed?: boolean },
+  ) {
+    return this.dashboardService.setHotDismissed(id, body?.dismissed !== false);
   }
 
   @Get('new-leads')

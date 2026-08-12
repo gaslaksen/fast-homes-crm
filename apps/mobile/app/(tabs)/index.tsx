@@ -1,5 +1,6 @@
 import type { ReactElement } from 'react';
 import {
+  ActionSheetIOS,
   ActivityIndicator,
   Alert,
   RefreshControl,
@@ -14,6 +15,7 @@ import { useRouter } from 'expo-router';
 import {
   useActionQueue,
   useDashboardStats,
+  useDismissHotLead,
   useHotLeads,
   useInboxCounts,
   actionMeta,
@@ -21,7 +23,7 @@ import {
   type HotLead,
 } from '@/features/dashboard/dashboard';
 import { useDealsSummary } from '@/features/deals/deals';
-import { bandStyle, fullName } from '@/features/leads/leads';
+import { bandStyle, fullName, useSetScoreBand, BAND_OPTIONS } from '@/features/leads/leads';
 import { useAuth } from '@/lib/auth';
 import { Logo } from '@/components/Logo';
 import { Card, SectionLabel, Chip } from '@/components/ui';
@@ -85,12 +87,20 @@ function ActionRow({ item, onPress }: { item: ActionItem; onPress: () => void })
   );
 }
 
-function HotLeadRow({ lead, onPress }: { lead: HotLead; onPress: () => void }) {
+function HotLeadRow({
+  lead,
+  onPress,
+  onLongPress,
+}: {
+  lead: HotLead;
+  onPress: () => void;
+  onLongPress: () => void;
+}) {
   const { colors, styles } = useThemed(makeStyles);
   const band = bandStyle(lead.scoreBand);
   const addr = [lead.propertyAddress, lead.propertyCity].filter(Boolean).join(', ');
   return (
-    <TouchableOpacity style={styles.row} onPress={onPress}>
+    <TouchableOpacity style={styles.row} onPress={onPress} onLongPress={onLongPress} delayLongPress={300}>
       <View style={styles.rowMain}>
         <Text style={styles.hotName} numberOfLines={1}>
           {fullName(lead)}
@@ -116,6 +126,8 @@ export default function HomeScreen() {
   const hot = useHotLeads(5);
   const counts = useInboxCounts();
   const summary = useDealsSummary();
+  const dismissHot = useDismissHotLead();
+  const setBand = useSetScoreBand();
 
   const refreshing =
     stats.isRefetching || actions.isRefetching || hot.isRefetching || counts.isRefetching;
@@ -131,6 +143,32 @@ export default function HomeScreen() {
   const hotCount = stats.data?.leadsByBand?.HOT ?? hot.data?.length ?? 0;
   const dealsValue = summary.data?.expected.sum ?? 0;
   const unread = counts.data?.unread ?? 0;
+
+  /**
+   * Long-press a hot lead to re-rank it or clear it off this card. Dismissing
+   * hides it from the dashboard only: the lead keeps its band and stays in Leads.
+   */
+  function openHotLeadActions(lead: HotLead) {
+    const labels = BAND_OPTIONS.map((b) => bandStyle(b).label);
+    const options = [...labels, 'Remove from Hot leads', 'Cancel'];
+    ActionSheetIOS.showActionSheetWithOptions(
+      {
+        title: fullName(lead),
+        message: 'Change priority, or clear it off the dashboard.',
+        options,
+        destructiveButtonIndex: labels.length,
+        cancelButtonIndex: options.length - 1,
+      },
+      (i) => {
+        if (i == null || i >= options.length - 1) return;
+        if (i === labels.length) {
+          dismissHot.mutate({ leadId: lead.id });
+          return;
+        }
+        setBand.mutate({ leadId: lead.id, scoreBand: BAND_OPTIONS[i] });
+      },
+    );
+  }
 
   function openAction(item: ActionItem) {
     const meta = actionMeta(item.type);
@@ -233,6 +271,7 @@ export default function HomeScreen() {
                 <HotLeadRow
                   lead={l}
                   onPress={() => router.push({ pathname: '/lead/detail/[id]', params: { id: l.id } })}
+                  onLongPress={() => openHotLeadActions(l)}
                 />
               </View>
             ))

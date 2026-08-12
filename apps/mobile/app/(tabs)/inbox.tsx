@@ -41,7 +41,17 @@ export default function InboxScreen() {
   const { colors, styles } = useThemed(makeStyles);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<InboxFilter>('all');
-  const { data, isLoading, isRefetching, refetch, error } = useThreads(filter, search);
+  const {
+    data,
+    isLoading,
+    isRefetching,
+    refetch,
+    error,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useThreads(filter, search);
+  const threads = data?.items ?? [];
 
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
@@ -80,11 +90,20 @@ export default function InboxScreen() {
       </View>
 
       <FlatList
-        data={data?.items ?? []}
+        data={threads}
         keyExtractor={(t) => t.leadId}
         keyboardShouldPersistTaps="handled"
         refreshControl={
           <RefreshControl refreshing={isRefetching} onRefresh={() => refetch()} tintColor={colors.textMuted} />
+        }
+        // The API pages the thread list; pull the next page as the user nears
+        // the end so every conversation is reachable, not just the first screen.
+        onEndReached={() => {
+          if (hasNextPage && !isFetchingNextPage) fetchNextPage();
+        }}
+        onEndReachedThreshold={0.4}
+        ListFooterComponent={
+          isFetchingNextPage ? <ActivityIndicator style={styles.footer} /> : null
         }
         ListEmptyComponent={
           <View style={styles.center}>
@@ -141,6 +160,7 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 8, backgroundColor: colors.surface },
   muted: { color: colors.textSecondary, fontSize: 15 },
+  footer: { paddingVertical: 18 },
   retry: { color: colors.primary, fontWeight: '600', marginTop: 8 },
 
   searchBar: {

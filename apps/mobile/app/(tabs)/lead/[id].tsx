@@ -18,7 +18,7 @@ import { useCommunications, type TimelineItem } from '@/features/inbox/timeline'
 import { TimelineRow, DateSeparator } from '@/features/inbox/TimelineRow';
 import { useLeadDetail, useUpdateLead, fullName } from '@/features/leads/leads';
 import { useCall } from '@/features/calls/CallContext';
-import { SparkleIcon, PhoneIcon, MessageIcon, MailIcon } from '@/components/icons';
+import { SparkleIcon, PhoneIcon, MessageIcon, MailIcon, ChevronLeft } from '@/components/icons';
 import { sameDay } from '@/lib/format';
 import { useThemed, type Colors } from '@/theme';
 
@@ -58,7 +58,7 @@ function ThreadCallButton({ phone, name }: { phone: string | null; name: string 
 
 export default function ThreadScreen() {
   const { colors, styles } = useThemed(makeStyles);
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, from } = useLocalSearchParams<{ id: string; from?: string }>();
   const leadId = String(id);
   const router = useRouter();
   const { data, isLoading } = useCommunications(leadId);
@@ -76,6 +76,19 @@ export default function ThreadScreen() {
   useEffect(() => {
     if (leadId) markRead.mutate(leadId);
   }, [leadId]);
+
+  /**
+   * Back always returns to the list this conversation was opened from, the
+   * Inbox unless a caller said otherwise. Popping the stack instead walked you
+   * back through previously-read conversations one at a time.
+   */
+  function goBack() {
+    if (from === 'lead') {
+      router.replace({ pathname: '/lead/detail/[id]', params: { id: leadId } });
+      return;
+    }
+    router.replace(from === 'leads' ? '/leads' : '/inbox');
+  }
 
   async function onSend() {
     const body = draft.trim();
@@ -102,6 +115,11 @@ export default function ThreadScreen() {
     <SafeAreaView style={styles.safe} edges={['bottom']}>
       <Stack.Screen
         options={{
+          headerLeft: () => (
+            <TouchableOpacity onPress={goBack} hitSlop={10} style={styles.headerBack}>
+              <ChevronLeft size={26} color={colors.primary} />
+            </TouchableOpacity>
+          ),
           headerTitle: () => (
             <TouchableOpacity
               style={styles.headerWrap}
@@ -210,6 +228,7 @@ export default function ThreadScreen() {
 const makeStyles = (colors: Colors) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
   headerIcon: { paddingHorizontal: 4 },
+  headerBack: { paddingRight: 12 },
   headerWrap: { flexDirection: 'row', alignItems: 'center', gap: 9 },
   headerTextCol: { justifyContent: 'center' },
   headerName: { fontSize: 16, fontWeight: '600', color: colors.text },

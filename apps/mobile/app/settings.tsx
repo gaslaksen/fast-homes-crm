@@ -8,6 +8,9 @@ import {
 } from 'react-native';
 import { useAuth } from '@/lib/auth';
 import { sendTestPush } from '@/features/push/usePushRegistration';
+import { CallerIdPicker } from '@/features/calls/CallerIdPicker';
+import { useCall } from '@/features/calls/callState';
+import { prettyPhone } from '@/features/calls/hooks';
 import { CheckIcon } from '@/components/icons';
 import { useThemed, useThemeMode, type Colors, type ThemeMode } from '@/theme';
 
@@ -21,6 +24,7 @@ export default function SettingsScreen() {
   const { user, signOut } = useAuth();
   const { colors, styles } = useThemed(makeStyles);
   const { mode, setMode } = useThemeMode();
+  const { callerIds } = useCall();
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -30,6 +34,24 @@ export default function SettingsScreen() {
           {[user?.firstName, user?.lastName].filter(Boolean).join(' ') || user?.email}
         </Text>
         <Text style={styles.email}>{user?.email}</Text>
+      </View>
+
+      <Text style={styles.sectionHeading}>Calling</Text>
+      <View style={styles.group}>
+        {callerIds.length > 1 ? (
+          <CallerIdPicker />
+        ) : (
+          <View style={styles.optionRow}>
+            <View style={styles.optionText}>
+              <Text style={styles.optionLabel}>Calling from</Text>
+              <Text style={styles.optionHint}>
+                {callerIds.length === 1
+                  ? prettyPhone(callerIds[0].number)
+                  : 'No calling numbers are set up for your team yet.'}
+              </Text>
+            </View>
+          </View>
+        )}
       </View>
 
       <Text style={styles.sectionHeading}>Appearance</Text>
