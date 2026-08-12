@@ -16,6 +16,20 @@ interface FromOption {
   lastUsed: boolean;
 }
 
+/**
+ * One of the seller's numbers. Foreclosure and probate skip traces attach up to
+ * four, and the one on the lead is often a landline nobody answers, so the
+ * composer lets the agent pick which one this text goes to.
+ */
+interface ToOption {
+  number: string;
+  /** "Primary", "Phone 2", ... */
+  label: string;
+  /** 'Mobile' | 'Landline' | null */
+  type: string | null;
+  isPrimary: boolean;
+}
+
 const prettyPhone = (raw?: string | null) => (raw ? formatPhoneDisplay(raw) : '');
 
 interface TeamMember {
@@ -98,6 +112,12 @@ export default function MessageComposer({
   const [fromOptions, setFromOptions] = useState<FromOption[]>([]);
   const [fromPickerOpen, setFromPickerOpen] = useState(false);
 
+  // Which of the seller's numbers this text goes to. The server preselects the
+  // one they last replied from, so an answer lands on the phone in their hand.
+  const [toNumber, setToNumber] = useState<string>('');
+  const [toOptions, setToOptions] = useState<ToOption[]>([]);
+  const [toPickerOpen, setToPickerOpen] = useState(false);
+
   // @mention state (comment mode)
   const [mentions, setMentions] = useState<string[]>([]);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
@@ -125,6 +145,25 @@ export default function MessageComposer({
       .catch(() => {
         // Picker stays hidden; the server picks the number on its own.
         if (!cancelled) setFromOptions([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [leadId]);
+
+  // Load the seller's numbers. Same shape as the From list: on failure the
+  // picker stays hidden and the server sends to the primary.
+  useEffect(() => {
+    let cancelled = false;
+    messagesAPI
+      .toOptions(leadId)
+      .then((res) => {
+        if (cancelled) return;
+        setToOptions(res.data?.numbers || []);
+        setToNumber(res.data?.selected || '');
+      })
+      .catch(() => {
+        if (!cancelled) setToOptions([]);
       });
     return () => {
       cancelled = true;
@@ -205,7 +244,13 @@ export default function MessageComposer({
     try {
       if (channel === 'sms') {
         if (!body.trim()) return;
-        await messagesAPI.send(leadId, body, currentUser?.id, fromNumber || undefined);
+        await messagesAPI.send(
+          leadId,
+          body,
+          currentUser?.id,
+          fromNumber || undefined,
+          toNumber || undefined,
+        );
       } else if (channel === 'email') {
         const recipient = emailMode === 'forward' ? emailTo.trim() : sellerEmail || '';
         if (!emailSubject.trim() || htmlIsEmpty(emailBodyHtml) || !recipient || !currentUser?.id) return;
@@ -234,6 +279,7 @@ export default function MessageComposer({
     }
   };
 
+  const selectedTo = toOptions.find((o) => o.number === toNumber);
   const blockedBySms = channel === 'sms' && doNotContact;
   const isComment = channel === 'comment';
 
@@ -293,11 +339,14 @@ export default function MessageComposer({
         )}
       </div>
 
-      {/* From / To. Only shown when there is a real choice to make. */}
-      {channel === 'sms' && fromOptions.length > 1 && (
+      {/* From / To. Only shown when there is a real choice to make on one side
+          or the other: one sending number and one seller number is not a
+          decision worth a row of chrome. */}
+      {channel === 'sms' && (fromOptions.length > 1 || toOptions.length > 1) && (
         <div className="flex items-center gap-3 text-xs">
           <div className="relative flex items-center gap-1.5">
             <span className="text-gray-400">From:</span>
+            {fromOptions.length > 1 ? (
             <button
               type="button"
               onClick={() => setFromPickerOpen((o) => !o)}
@@ -306,6 +355,11 @@ export default function MessageComposer({
               {prettyPhone(fromNumber)}
               <span className="text-gray-400">▾</span>
             </button>
+            ) : (
+              <span className="font-medium text-gray-700 dark:text-gray-200">
+                {prettyPhone(fromNumber) || '-'}
+              </span>
+            )}
             {fromPickerOpen && (
               <div className="absolute z-50 bottom-full mb-1 left-0 w-72 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg py-1">
                 {fromOptions.map((o) => (
@@ -352,11 +406,71 @@ export default function MessageComposer({
 
           <span className="h-3 w-px bg-gray-200 dark:bg-gray-700" />
 
-          <div className="flex items-center gap-1.5 min-w-0">
+          <div className="relative flex items-center gap-1.5 min-w-0">
             <span className="text-gray-400">To:</span>
-            <span className="font-medium text-gray-700 dark:text-gray-200 truncate">
-              {prettyPhone(sellerPhone) || '-'}
-            </span>
+            {toOptions.length > 1 ? (
+              <button
+                type="button"
+                onClick={() => setToPickerOpen((o) => !o)}
+                className="flex items-center gap-1 font-medium text-gray-700 dark:text-gray-200 hover:text-gray-900 dark:hover:text-white"
+              >
+                {prettyPhone(toNumber) || prettyPhone(sellerPhone) || '-'}
+                {/* Texting anything but the primary is the exception, so say so
+                    in the collapsed state rather than only inside the picker. */}
+                {selectedTo && !selectedTo.isPrimary && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400">
+                    {selectedTo.label}
+                  </span>
+                )}
+                <span className="text-gray-400">▾</span>
+              </button>
+            ) : (
+              <span className="font-medium text-gray-700 dark:text-gray-200 truncate">
+                {prettyPhone(toNumber) || prettyPhone(sellerPhone) || '-'}
+              </span>
+            )}
+            {toPickerOpen && (
+              <div className="absolute z-50 bottom-full mb-1 left-0 w-72 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg py-1">
+                {toOptions.map((o) => (
+                  <button
+                    key={o.number}
+                    type="button"
+                    onClick={() => {
+                      setToNumber(o.number);
+                      setToPickerOpen(false);
+                    }}
+                    className="w-full text-left px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span
+                        className={`text-sm ${
+                          o.number === toNumber
+                            ? 'text-teal-700 dark:text-teal-400 font-semibold'
+                            : 'text-gray-800 dark:text-gray-200'
+                        }`}
+                      >
+                        {prettyPhone(o.number)}
+                      </span>
+                      <span className="flex items-center gap-1 shrink-0">
+                        {/* Line type is the one thing that predicts whether a
+                            text will arrive at all. */}
+                        {o.type && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400">
+                            {o.type}
+                          </span>
+                        )}
+                        {o.isPrimary && (
+                          <span className="text-[10px] font-semibold text-teal-600 dark:text-teal-400">
+                            Primary
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-gray-400 mt-0.5">{o.label}</div>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}

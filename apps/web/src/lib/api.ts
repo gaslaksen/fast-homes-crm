@@ -78,6 +78,9 @@ export const leadsAPI = {
     api.patch(`/leads/${id}/auto-respond`, { autoRespond }),
   refreshPropertyDetails: (id: string) =>
     api.post(`/leads/${id}/property-details/refresh`),
+  // Promote a skip-traced number to primary, so drip and the AI use it too
+  setPrimaryPhone: (id: string, number: string) =>
+    api.patch(`/leads/${id}/primary-phone`, { number }),
   assign: (id: string, userId: string, stage: string) =>
     api.patch(`/leads/${id}/assign`, { userId, stage }),
   unassign: (id: string) =>
@@ -189,9 +192,11 @@ export const messagesAPI = {
   list: (leadId: string) => api.get(`/leads/${leadId}/messages`),
   draft: (leadId: string, context?: string) =>
     api.post(`/leads/${leadId}/messages/draft`, { context }),
-  send: (leadId: string, message: string, userId?: string, from?: string) =>
-    api.post(`/leads/${leadId}/messages/send`, { message, userId, from }),
+  send: (leadId: string, message: string, userId?: string, from?: string, to?: string) =>
+    api.post(`/leads/${leadId}/messages/send`, { message, userId, from, to }),
   fromOptions: (leadId: string) => api.get(`/leads/${leadId}/messages/from-options`),
+  // The seller's own numbers (skip trace attaches up to four) plus the one to preselect
+  toOptions: (leadId: string) => api.get(`/leads/${leadId}/messages/to-options`),
   // Send an email (reply or forward) from the logged-in user, via Mailgun
   sendEmail: (
     leadId: string,

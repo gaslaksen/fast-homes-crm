@@ -10,6 +10,7 @@ import { MailerService } from '../mailer/mailer.service';
 import { PushService } from '../push/push.service';
 import { ComplianceService } from './compliance.service';
 import { PhoneNumbersService } from '../phone-numbers/phone-numbers.service';
+import { LeadPhonesService } from '../phone-numbers/lead-phones.service';
 import { formatPhoneNumber, isOptOutMessage } from '@fast-homes/shared';
 import { dealFitFlags, propertyContextForPrompt } from '../leads/property-fit.util';
 import { htmlToText, normalizeEditorHtml } from './html-to-text.util';
@@ -112,6 +113,7 @@ export class MessagesService {
     private pushService: PushService,
     private complianceService: ComplianceService,
     private phoneNumbers: PhoneNumbersService,
+    private leadPhones: LeadPhonesService,
   ) {
     this.smsProvider = createSmsProvider(this.config);
     this.twilioNumber = this.config.get<string>('TWILIO_PHONE_NUMBER') || '';
@@ -176,8 +178,21 @@ export class MessagesService {
    * is resolved per lead: replies stick to whichever of our numbers that seller
    * already knows, and only a brand-new lead falls through to the default.
    * Anything supplied is validated against the allowlist, never used directly.
+   *
+   * `toNumber` is the composer's choice of which of the seller's numbers to
+   * text. Foreclosure and probate skip traces attach up to four, and the one on
+   * the Lead is not always the one that answers. Left undefined it is the
+   * primary, which is what every automated path (drip, campaigns, auto-response)
+   * uses. A value that is not on file for this lead is rejected rather than
+   * redirected, so a stale picker cannot text a stranger.
    */
-  async sendMessage(leadId: string, body: string, userId?: string, fromNumber?: string) {
+  async sendMessage(
+    leadId: string,
+    body: string,
+    userId?: string,
+    fromNumber?: string,
+    toNumber?: string,
+  ) {
     const lead = await this.prisma.lead.findUnique({
       where: { id: leadId },
     });
@@ -190,7 +205,9 @@ export class MessagesService {
       throw new Error('Lead is marked as Do Not Contact');
     }
 
-    const to = formatPhoneNumber(lead.sellerPhone);
+    const to = toNumber
+      ? await this.leadPhones.resolveTo(leadId, toNumber)
+      : formatPhoneNumber(lead.sellerPhone);
     const from =
       (await this.phoneNumbers.resolveForLead(leadId, fromNumber).catch(() => null)) ||
       this.twilioNumber;
@@ -285,6 +302,24 @@ export class MessagesService {
       });
 
       throw new Error(`Failed to send message: ${error.message}`);
+    }
+  }
+
+  /**
+   * The number an automated reply should go to: whichever of the seller's
+   * numbers last wrote in, else the primary. Never throws, and returns
+   * undefined on any failure so sendMessage falls back to the primary rather
+   * than the reply being lost.
+   *
+   * Only replies use this. Initial outreach, drip and campaigns still start on
+   * the primary, since nothing has come in yet to reply to.
+   */
+  private async replyToFor(leadId: string): Promise<string | undefined> {
+    try {
+      return (await this.leadPhones.selectedToFor(leadId)) || undefined;
+    } catch (err: any) {
+      this.logger.warn(`Reply-to lookup failed for ${leadId}: ${err.message}`);
+      return undefined;
     }
   }
 
@@ -602,7 +637,10 @@ You decide the right approach based on the conversation flow.${photoNudge}`.trim
         this.logger.log(`🔕 Auto-respond disabled for lead ${leadId} — CAMP complete, closing message sent`);
       }
 
-      await this.sendMessage(leadId, messageBody);
+      // Answer on the number the seller wrote in from. Skip trace gives us up to
+      // four, and replying on the primary when they texted from another one
+      // sends the answer to a phone they are not holding.
+      await this.sendMessage(leadId, messageBody, undefined, undefined, await this.replyToFor(leadId));
       await this.incrementAutoResponseCount(leadId);
 
       // Stamp expectations-set timestamp once the message has actually been
@@ -871,16 +909,18 @@ You decide the right approach based on the conversation flow.${photoNudge}`.trim
 
     this.logger.log(`📥 Inbound message from ${from}: "${body.substring(0, 80)}"`);
 
-    // Find lead by phone number — try E.164 first, then 10-digit fallback
-    const stripped = from.replace(/\D/g, '').replace(/^1/, ''); // → 10 digits
-    const lead = await this.prisma.lead.findFirst({
-      where: {
-        OR: [
-          { sellerPhone: from },           // +17046812994
-          { sellerPhone: stripped },        // 7046812994
-          { sellerPhone: `1${stripped}` },  // 17046812994
-        ],
-      },
+    // Find the lead by any number we hold for it, not just Lead.sellerPhone.
+    // An agent can text a skip-traced second or third number, and the reply
+    // comes back from that number: matching on the primary alone would drop it.
+    const match = await this.leadPhones.findLeadByPhone(from);
+
+    if (!match) {
+      console.warn(`No lead found for phone: ${from}`);
+      return { success: false, reason: 'Lead not found' };
+    }
+
+    const lead = await this.prisma.lead.findUnique({
+      where: { id: match.leadId },
       include: {
         messages: {
           orderBy: { createdAt: 'desc' },
@@ -893,6 +933,12 @@ You decide the right approach based on the conversation flow.${photoNudge}`.trim
     if (!lead) {
       console.warn(`No lead found for phone: ${from}`);
       return { success: false, reason: 'Lead not found' };
+    }
+
+    if (!match.isPrimary) {
+      this.logger.log(
+        `📱 Lead ${lead.id} replied from a secondary number (${from}), not ${lead.sellerPhone}`,
+      );
     }
 
     // Check for opt-out
@@ -1099,7 +1145,7 @@ You decide the right approach based on the conversation flow.${photoNudge}`.trim
         if (lead) {
           const businessName = (lead as any).organization?.name || 'Quick Cash Home Buyers';
           const ack = buildAfterHoursAck(lead.sellerFirstName, businessName);
-          await this.sendMessage(leadId, ack);
+          await this.sendMessage(leadId, ack, undefined, undefined, await this.replyToFor(leadId));
           this.logger.log(`🌙 After-hours ack sent for lead ${leadId}`);
         }
       } catch (err) {

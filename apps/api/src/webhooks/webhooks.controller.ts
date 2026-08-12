@@ -14,6 +14,7 @@ import { CompAnalysisService } from '../comps/comp-analysis.service';
 import { CampaignEnrollmentService } from '../campaigns/campaign-enrollment.service';
 import { SlackLeadService } from './slack-lead.service';
 import { InvestorFuseService } from './investorfuse.service';
+import { LeadPhonesService } from '../phone-numbers/lead-phones.service';
 import { formatPhoneNumber, LeadSource } from '@fast-homes/shared';
 import { normalizeLeadAddressAsync } from './address-parser';
 
@@ -31,6 +32,7 @@ export class WebhooksController {
     private campaignEnrollmentService: CampaignEnrollmentService,
     private slackLeadService: SlackLeadService,
     private investorFuseService: InvestorFuseService,
+    private leadPhones: LeadPhonesService,
     private config: ConfigService,
   ) {}
 
@@ -751,35 +753,39 @@ export class WebhooksController {
   }
 
   // ─── Helper: STOP / opt-out - mark all leads with this phone as DNT ───
+  // Matches secondary numbers too. We now text skip-traced numbers, so a STOP
+  // can arrive from a number that is not the lead's sellerPhone, and honouring
+  // it is not optional.
   private async markDoNotText(rawPhone: string, reason: string) {
     const phone = formatPhoneNumber(rawPhone || '');
     if (!phone) return;
 
-    const affected = await this.leadsService['prisma'].lead.findMany({
-      where: { sellerPhone: phone },
-      select: { id: true },
-    });
+    const leadIds = await this.leadPhones.findLeadIdsByPhone(phone);
+    if (!leadIds.length) {
+      console.log(`🚫 DNT (STOP): ${phone} - ${reason} (no matching lead)`);
+      return;
+    }
     // status: 'DNC' matters as well as the doNotContact flag, because the
     // pipeline and list views filter on status. The old provider's dedicated
     // DNC webhook set it; Twilio only gives us the STOP keyword, so we set it
     // here or opted-out leads keep showing up as active.
     await this.leadsService['prisma'].lead.updateMany({
-      where: { sellerPhone: phone },
+      where: { id: { in: leadIds } },
       data: { doNotContact: true, unsubscribedAt: new Date(), status: 'DNC' },
     });
-    for (const lead of affected) {
+    for (const leadId of leadIds) {
       try {
-        await this.campaignEnrollmentService.removeAllActive(lead.id);
+        await this.campaignEnrollmentService.removeAllActive(leadId);
       } catch (err: any) {
-        this.logger.error(`Failed to remove campaign enrollments for lead ${lead.id}: ${err.message}`);
+        this.logger.error(`Failed to remove campaign enrollments for lead ${leadId}: ${err.message}`);
       }
       try {
-        await this.dripService.cancelByLeadId(lead.id, reason);
+        await this.dripService.cancelByLeadId(leadId, reason);
       } catch {
         // Drip may not exist - fine
       }
     }
-    console.log(`🚫 DNT (STOP): ${phone} - ${reason} (cleaned ${affected.length} lead(s))`);
+    console.log(`🚫 DNT (STOP): ${phone} - ${reason} (cleaned ${leadIds.length} lead(s))`);
   }
 
   // ─── Helper: START / re-subscribe - clear DNT flag ───
@@ -787,8 +793,11 @@ export class WebhooksController {
     const phone = formatPhoneNumber(rawPhone || '');
     if (!phone) return;
 
+    const leadIds = await this.leadPhones.findLeadIdsByPhone(phone);
+    if (!leadIds.length) return;
+
     await this.leadsService['prisma'].lead.updateMany({
-      where: { sellerPhone: phone },
+      where: { id: { in: leadIds } },
       data: { doNotContact: false },
     });
     console.log(`✅ DNT removed (START): ${phone}`);

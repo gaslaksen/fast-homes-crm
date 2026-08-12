@@ -423,6 +423,11 @@ model ForeclosureDetail {
   @@index([organizationId, saleDate])
   @@index([organizationId, workStatus])
   @@index([organizationId, addressKey])
+  // Inbound texts and calls arrive with only a number, and a seller may answer
+  // from any of the four. These make that reverse lookup an index hit.
+  @@index([phone2])
+  @@index([phone3])
+  @@index([phone4])
   @@map("foreclosure_details")
 }
 
@@ -503,6 +508,8 @@ model ProbateDetail {
   @@index([organizationId, consensusTier])
   @@index([organizationId, workStatus])
   @@index([organizationId, contactKey])
+  // Reverse lookup for an inbound message from the heir's second number.
+  @@index([phone2])
   @@map("probate_details")
 }
 

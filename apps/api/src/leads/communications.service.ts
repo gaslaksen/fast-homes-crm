@@ -18,6 +18,10 @@ const TIMELINE_EVENT_TYPES = new Set([
   'DEAL_SHARED',
 ]);
 
+/** Last 10 digits, so +17045551234 and 7045551234 compare equal. */
+const phoneKey = (raw: string | null | undefined): string =>
+  (raw || '').replace(/\D/g, '').slice(-10);
+
 type Actor =
   | { type: 'user'; name: string; avatarUrl: string | null }
   | { type: 'seller'; name: string }
@@ -31,7 +35,7 @@ export class CommunicationsService {
   async getCommunications(leadId: string) {
     const lead = await this.prisma.lead.findUnique({
       where: { id: leadId },
-      select: { id: true, sellerFirstName: true, sellerLastName: true },
+      select: { id: true, sellerFirstName: true, sellerLastName: true, sellerPhone: true },
     });
     if (!lead) throw new Error('Lead not found');
 
@@ -85,15 +89,27 @@ export class CommunicationsService {
 
     const timeline: any[] = [];
 
+    // The seller's number, so the timeline can tell a text sent to the primary
+    // from one sent to a skip-traced second number. Only the exception is worth
+    // showing, so the decision of what to render is left to the client.
+    const primaryKey = phoneKey(lead.sellerPhone);
+
     for (const m of messages as any[]) {
       const media = Array.isArray(m.mediaUrls) ? m.mediaUrls : [];
+      // For outbound the seller's number is `to`; for inbound it is `from`.
+      const sellerNumber = m.direction === 'INBOUND' ? m.from : m.to;
       timeline.push({
         id: `sms_${m.id}`,
         kind: 'sms',
         direction: m.direction,
         at: m.createdAt,
         actor: commActor(m.direction, m.sentByUserId),
-        payload: { body: m.body, media },
+        payload: {
+          body: m.body,
+          media,
+          sellerNumber: sellerNumber || null,
+          onPrimaryNumber: !sellerNumber || !primaryKey || phoneKey(sellerNumber) === primaryKey,
+        },
       });
     }
 

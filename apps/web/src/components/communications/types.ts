@@ -11,7 +11,14 @@ export type TimelineItem =
       direction: 'INBOUND' | 'OUTBOUND';
       at: string;
       actor: Actor;
-      payload: { body: string; media?: { url: string; thumbnailUrl: string }[] };
+      payload: {
+        body: string;
+        media?: { url: string; thumbnailUrl: string }[];
+        /** The seller's end of this text: `to` outbound, `from` inbound. */
+        sellerNumber?: string | null;
+        /** False when it is one of the skip-traced numbers, not Lead.sellerPhone. */
+        onPrimaryNumber?: boolean;
+      };
     }
   | {
       id: string;

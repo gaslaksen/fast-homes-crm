@@ -6,6 +6,7 @@ import { LeadsService } from './leads.service';
 import { CommunicationsService } from './communications.service';
 import { LeadImportService, IMPORTABLE_FIELDS } from './lead-import.service';
 import { AiInsightService } from './ai-insight.service';
+import { LeadPhonesService } from '../phone-numbers/lead-phones.service';
 import { LeadStatus, LeadSource } from '@fast-homes/shared';
 import * as jwt from 'jsonwebtoken';
 
@@ -34,6 +35,7 @@ export class LeadsController {
     private leadImportService: LeadImportService,
     private aiInsightService: AiInsightService,
     private communicationsService: CommunicationsService,
+    private leadPhones: LeadPhonesService,
   ) {}
 
   private decodeToken(authHeader?: string): { userId?: string; organizationId?: string; role?: string } {
@@ -323,6 +325,17 @@ export class LeadsController {
     @Body() body: { autoRespond: boolean },
   ) {
     return this.leadsService.updateLead(id, { autoRespond: body.autoRespond });
+  }
+
+  /**
+   * Promote one of the seller's skip-traced numbers to primary. Everything
+   * automated sends to the primary, so this is how a number that actually
+   * answers becomes the one the drip and the AI use.
+   */
+  @Patch(':id/primary-phone')
+  async setPrimaryPhone(@Param('id') id: string, @Body() body: { number: string }) {
+    const numbers = await this.leadPhones.setPrimary(id, body.number);
+    return { numbers };
   }
 
   @Post(':id/property-details/refresh')

@@ -1,12 +1,14 @@
 import { Controller, Get, Post, Body, Param } from '@nestjs/common';
 import { MessagesService } from './messages.service';
 import { PhoneNumbersService, numberKey } from '../phone-numbers/phone-numbers.service';
+import { LeadPhonesService } from '../phone-numbers/lead-phones.service';
 
 @Controller('leads/:leadId/messages')
 export class MessagesController {
   constructor(
     private messagesService: MessagesService,
     private phoneNumbers: PhoneNumbersService,
+    private leadPhones: LeadPhonesService,
   ) {}
 
   @Get()
@@ -25,9 +27,9 @@ export class MessagesController {
   @Post('send')
   async sendMessage(
     @Param('leadId') leadId: string,
-    @Body() body: { message: string; userId?: string; from?: string },
+    @Body() body: { message: string; userId?: string; from?: string; to?: string },
   ) {
-    return this.messagesService.sendMessage(leadId, body.message, body.userId, body.from);
+    return this.messagesService.sendMessage(leadId, body.message, body.userId, body.from, body.to);
   }
 
   /**
@@ -51,6 +53,20 @@ export class MessagesController {
         lastUsed: !!sticky && numberKey(sticky) === numberKey(n.number),
       })),
     };
+  }
+
+  /**
+   * The seller's own numbers, and which one the composer should preselect.
+   * Skip trace attaches up to four, so the picker needs the whole set plus the
+   * line type, which is what tells an agent a text will land at all.
+   */
+  @Get('to-options')
+  async getToOptions(@Param('leadId') leadId: string) {
+    const [numbers, selected] = await Promise.all([
+      this.leadPhones.listForLead(leadId),
+      this.leadPhones.selectedToFor(leadId),
+    ]);
+    return { selected, numbers };
   }
 
   @Get('emails')

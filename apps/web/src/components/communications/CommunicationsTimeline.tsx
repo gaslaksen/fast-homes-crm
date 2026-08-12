@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { format } from 'date-fns';
 import Avatar from '@/components/Avatar';
 import LightboxOverlay, { type LightboxPhoto } from '@/components/LightboxOverlay';
+import { formatPhoneDisplay } from '@/lib/format';
 import type { Actor, TimelineItem } from './types';
 import type { EmailAction } from './MessageComposer';
 
@@ -116,6 +117,23 @@ function MetaLine({ actor, at }: { actor: Actor; at: string }) {
   return (
     <span className="text-[10px] text-gray-500 dark:text-gray-400 uppercase tracking-wide">
       {actor.name} • {format(new Date(at), 'MMM d, h:mm a')}
+    </span>
+  );
+}
+
+/**
+ * Which of the seller's numbers a text used, shown only when it is not the
+ * primary. On a foreclosure or probate lead with four numbers on file, "who did
+ * this actually reach" is the question the thread otherwise cannot answer;
+ * tagging every message would just be noise.
+ */
+function NumberBadge({ number, outbound }: { number: string; outbound: boolean }) {
+  return (
+    <span
+      className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400"
+      title={outbound ? 'Sent to an alternate number' : 'Replied from an alternate number'}
+    >
+      {outbound ? 'To' : 'From'} {formatPhoneDisplay(number)}
     </span>
   );
 }
@@ -242,9 +260,12 @@ export default function CommunicationsTimeline({
                   outbound ? 'bg-primary-50 dark:bg-primary-900/30' : 'bg-gray-100 dark:bg-gray-800'
                 }`}
               >
-                <div className="flex items-center gap-1.5 mb-1">
+                <div className="flex items-center gap-1.5 mb-1 flex-wrap">
                   <ChannelBadge kind="sms" />
                   <MetaLine actor={item.actor} at={item.at} />
+                  {item.payload.onPrimaryNumber === false && item.payload.sellerNumber && (
+                    <NumberBadge number={item.payload.sellerNumber} outbound={outbound} />
+                  )}
                 </div>
                 {media.length > 0 && (
                   <div className="flex flex-wrap gap-1.5 mb-1.5">

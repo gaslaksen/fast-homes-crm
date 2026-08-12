@@ -110,6 +110,8 @@ export default function LeadRail({ lead, onLeadPatch, onMarkDead, hideNav }: Pro
   const [savingStatus, setSavingStatus] = useState(false);
   const [savingTier, setSavingTier] = useState(false);
   const [savingAutoRespond, setSavingAutoRespond] = useState(false);
+  const [promotingSlot, setPromotingSlot] = useState<string | null>(null);
+  const [callPickerOpen, setCallPickerOpen] = useState(false);
   const [initiatingCall, setInitiatingCall] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -197,6 +199,47 @@ export default function LeadRail({ lead, onLeadPatch, onMarkDead, hideNav }: Pro
   };
 
   const refreshTasks = () => leadsAPI.getTasks(leadId).then((res) => setTasks(res.data || [])).catch(() => {});
+
+  // Skip trace attaches up to four numbers on a foreclosure lead and two on a
+  // probate one. Lead.sellerPhone holds the first; these are the rest.
+  const detailKey: 'foreclosureDetail' | 'probateDetail' = lead.foreclosureDetail
+    ? 'foreclosureDetail'
+    : 'probateDetail';
+  const phoneDetail: any = lead[detailKey];
+  const altPhones = ([
+    { slot: 'phone2' as const, label: 'Phone 2' },
+    { slot: 'phone3' as const, label: 'Phone 3' },
+    { slot: 'phone4' as const, label: 'Phone 4' },
+  ])
+    .map((p) => ({ ...p, num: phoneDetail?.[p.slot], type: phoneDetail?.[`${p.slot}Type`] }))
+    .filter((p) => p.num);
+
+  const handleMakePrimary = async (slot: 'phone2' | 'phone3' | 'phone4') => {
+    const promoted = phoneDetail?.[slot];
+    if (!promoted || promotingSlot) return;
+    setPromotingSlot(slot);
+    try {
+      await leadsAPI.setPrimaryPhone(leadId, promoted);
+      // The server swaps the two numbers and their line types. Mirror that here
+      // rather than refetching, so the rail does not flicker back to the old
+      // order for a beat.
+      const demoted = (lead.sellerPhone || '').replace(/\D/g, '').slice(-10) || null;
+      onLeadPatch({
+        sellerPhone: promoted,
+        [detailKey]: {
+          ...phoneDetail,
+          [slot]: demoted,
+          [`${slot}Type`]: phoneDetail?.phone1Type ?? null,
+          phone1Type: phoneDetail?.[`${slot}Type`] ?? null,
+        },
+      } as any);
+    } catch (err) {
+      console.error('Failed to set primary phone', err);
+      alert('Could not make that the primary number');
+    } finally {
+      setPromotingSlot(null);
+    }
+  };
 
   const handleStatusChange = async (status: string) => {
     setSavingStatus(true);
@@ -433,9 +476,48 @@ export default function LeadRail({ lead, onLeadPatch, onMarkDead, hideNav }: Pro
           <IconBtn title="Send SMS" onClick={() => router.push(`/leads/${leadId}?tab=communications&action=reply`)} disabled={isDead}>
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" /></svg>
           </IconBtn>
-          <IconBtn title="Call seller" onClick={() => dialer.startCall({ name: getLeadDisplayName(lead), phone: lead.sellerPhone, leadId })} disabled={contactDisabled}>
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" /></svg>
-          </IconBtn>
+          {/* With several numbers on file the button asks which one; with only
+              the primary it dials straight through, as it always has. */}
+          <div className="relative">
+            <IconBtn
+              title={altPhones.length ? 'Call seller: pick a number' : 'Call seller'}
+              onClick={() =>
+                altPhones.length
+                  ? setCallPickerOpen((o) => !o)
+                  : dialer.startCall({ name: getLeadDisplayName(lead), phone: lead.sellerPhone, leadId })
+              }
+              disabled={contactDisabled}
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" /></svg>
+            </IconBtn>
+            {callPickerOpen && (
+              <div className="absolute z-50 top-full mt-1 left-0 w-56 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg py-1">
+                {[
+                  { num: lead.sellerPhone, label: 'Primary', type: phoneDetail?.phone1Type },
+                  ...altPhones,
+                ]
+                  .filter((p) => p.num)
+                  .map((p) => (
+                    <button
+                      key={p.label}
+                      type="button"
+                      onClick={() => {
+                        setCallPickerOpen(false);
+                        dialer.startCall({ name: getLeadDisplayName(lead), phone: p.num, leadId });
+                      }}
+                      className="w-full text-left px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800 flex items-center justify-between gap-2"
+                    >
+                      <span className="text-sm text-gray-800 dark:text-gray-200">
+                        {formatPhoneDisplay(p.num)}
+                      </span>
+                      <span className="text-[10px] text-gray-400 shrink-0">
+                        {[p.label, p.type].filter(Boolean).join(' • ')}
+                      </span>
+                    </button>
+                  ))}
+              </div>
+            )}
+          </div>
           <IconBtn title="Start AI call" onClick={handleAiCall} disabled={contactDisabled || initiatingCall}>
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
           </IconBtn>
@@ -513,33 +595,39 @@ export default function LeadRail({ lead, onLeadPatch, onMarkDead, hideNav }: Pro
             href={lead.sellerEmail ? `mailto:${lead.sellerEmail}` : undefined}
             onSave={saveField('sellerEmail')}
           />
-          {/* Extra foreclosure contacts (skip-trace). Read-only here; edit them
-              on the Foreclosures tab. Phones dial through the Dealcore dialer. */}
-          {[
-            { num: lead.foreclosureDetail?.phone2, type: lead.foreclosureDetail?.phone2Type },
-            { num: lead.foreclosureDetail?.phone3, type: lead.foreclosureDetail?.phone3Type },
-            { num: lead.foreclosureDetail?.phone4, type: lead.foreclosureDetail?.phone4Type },
-          ]
-            .filter((p) => p.num)
-            .map((p, i) => (
-              <ContactRow key={`ph${i}`} label={`Phone ${i + 2}`}>
-                <button
-                  type="button"
-                  onClick={() =>
-                    !lead.doNotContact &&
-                    dialer.startCall({ name: getLeadDisplayName(lead), phone: p.num, leadId })
-                  }
-                  disabled={lead.doNotContact}
-                  title={lead.doNotContact ? 'Do Not Contact is on' : 'Call with the Dealcore dialer'}
-                  className="truncate text-gray-800 dark:text-gray-200 hover:text-primary-600 hover:underline disabled:text-gray-400 disabled:no-underline disabled:cursor-not-allowed"
-                >
-                  {formatPhoneDisplay(p.num)}
-                </button>
-                {p.type && (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400">{p.type}</span>
-                )}
-              </ContactRow>
-            ))}
+          {/* Extra skip-traced contacts, on foreclosure and probate leads alike.
+              Read-only here; edit them on their own tab. Phones dial through the
+              Dealcore dialer, and can be promoted to primary once one answers. */}
+          {altPhones.map((p) => (
+            <ContactRow key={p.slot} label={p.label}>
+              <button
+                type="button"
+                onClick={() =>
+                  !lead.doNotContact &&
+                  dialer.startCall({ name: getLeadDisplayName(lead), phone: p.num, leadId })
+                }
+                disabled={lead.doNotContact}
+                title={lead.doNotContact ? 'Do Not Contact is on' : 'Call with the Dealcore dialer'}
+                className="truncate text-gray-800 dark:text-gray-200 hover:text-primary-600 hover:underline disabled:text-gray-400 disabled:no-underline disabled:cursor-not-allowed"
+              >
+                {formatPhoneDisplay(p.num)}
+              </button>
+              {p.type && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400">{p.type}</span>
+              )}
+              {/* Drip, campaigns and the AI all text the primary, so promoting
+                  is what points the automation at a number that answers. */}
+              <button
+                type="button"
+                onClick={() => handleMakePrimary(p.slot)}
+                disabled={promotingSlot !== null}
+                title="Make this the primary number, used by drip and the AI"
+                className="ml-auto shrink-0 text-[10px] text-gray-400 hover:text-primary-600 disabled:opacity-50"
+              >
+                {promotingSlot === p.slot ? '…' : 'Make primary'}
+              </button>
+            </ContactRow>
+          ))}
           {lead.foreclosureDetail?.email2 && (
             <ContactRow label="Email 2">
               <a href={`mailto:${lead.foreclosureDetail.email2}`} className="truncate text-gray-800 dark:text-gray-200 hover:text-primary-600 hover:underline">

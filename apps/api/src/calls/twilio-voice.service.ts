@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CallsService } from './calls.service';
 import { formatPhoneNumber } from '@fast-homes/shared';
 import { PhoneNumbersService } from '../phone-numbers/phone-numbers.service';
+import { LeadPhonesService } from '../phone-numbers/lead-phones.service';
 
 const AccessToken = Twilio.jwt.AccessToken;
 const VoiceGrant = AccessToken.VoiceGrant;
@@ -32,6 +33,7 @@ export class TwilioVoiceService {
     @Inject(forwardRef(() => CallsService))
     private readonly callsService: CallsService,
     private readonly phoneNumbers: PhoneNumbersService,
+    private readonly leadPhones: LeadPhonesService,
   ) {}
 
   /**
@@ -664,19 +666,18 @@ export class TwilioVoiceService {
     return users.map((u) => u.id);
   }
 
+  /**
+   * Identify an inbound caller. Matches any number on file for the lead, not
+   * just Lead.sellerPhone: a seller we reached on a skip-traced second number
+   * calls back from that number, and screen-popping "unknown caller" for a lead
+   * we are actively working is the same bug as dropping their text.
+   */
   private async findLeadByPhone(phone: string) {
     if (!phone) return null;
-    const stripped = phone.replace(/\D/g, '').replace(/^1/, '');
-    if (!stripped) return null;
-    return this.prisma.lead.findFirst({
-      where: {
-        OR: [
-          { sellerPhone: phone },
-          { sellerPhone: stripped },
-          { sellerPhone: `1${stripped}` },
-          { sellerPhone: `+1${stripped}` },
-        ],
-      },
+    const match = await this.leadPhones.findLeadByPhone(phone);
+    if (!match) return null;
+    return this.prisma.lead.findUnique({
+      where: { id: match.leadId },
       select: { id: true, sellerFirstName: true, sellerLastName: true },
     });
   }

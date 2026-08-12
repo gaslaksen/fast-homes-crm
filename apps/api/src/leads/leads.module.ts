@@ -15,9 +15,10 @@ import { PipelineModule } from '../pipeline/pipeline.module';
 import { DripModule } from '../drip/drip.module';
 import { CampaignsModule } from '../campaigns/campaigns.module';
 import { PushModule } from '../push/push.module';
+import { PhoneNumbersModule } from '../phone-numbers/phone-numbers.module';
 
 @Module({
-  imports: [ScoringModule, forwardRef(() => MessagesModule), PhotosModule, forwardRef(() => CompsModule), PipelineModule, forwardRef(() => DripModule), forwardRef(() => CampaignsModule), PushModule],
+  imports: [ScoringModule, forwardRef(() => MessagesModule), PhotosModule, forwardRef(() => CompsModule), PipelineModule, forwardRef(() => DripModule), forwardRef(() => CampaignsModule), PushModule, PhoneNumbersModule],
   controllers: [LeadsController, TasksController, DealMathController],
   providers: [LeadsService, CommunicationsService, LeadImportService, AiInsightService, ProfitCalculationService, DealMathService],
   exports: [LeadsService, AiInsightService, ProfitCalculationService, DealMathService],
