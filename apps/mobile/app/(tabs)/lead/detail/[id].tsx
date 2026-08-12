@@ -22,6 +22,13 @@ import {
   BAND_OPTIONS,
 } from '@/features/leads/leads';
 import { useCall } from '@/features/calls/CallContext';
+import { prettyPhone } from '@/features/calls/hooks';
+import {
+  useLeadPhones,
+  useSetPrimaryPhone,
+  showPhoneSheet,
+  phoneSubtitle,
+} from '@/features/leads/leadPhones';
 import { useDismissHotLead } from '@/features/dashboard/dashboard';
 import { Card, SectionLabel, Chip, Stat } from '@/components/ui';
 import { PhoneIcon, MessageIcon, MailIcon, ZapIcon, PencilIcon, ChevronRight } from '@/components/icons';
@@ -107,6 +114,9 @@ export default function LeadDetailScreen() {
   const update = useUpdateLead(leadId);
   const dismissHot = useDismissHotLead();
   const { startCall } = useCall();
+  const { data: phones } = useLeadPhones(leadId);
+  const makePrimary = useSetPrimaryPhone(leadId);
+  const numbers = phones?.numbers ?? [];
 
   if (isLoading || !lead) {
     return (
@@ -208,8 +218,17 @@ export default function LeadDetailScreen() {
           <ActionButton
             icon={<PhoneIcon size={22} color={colors.primary} />}
             label="Call"
-            onPress={() => lead.sellerPhone && startCall(lead.sellerPhone, name)}
-            disabled={!lead.sellerPhone}
+            onPress={() =>
+              numbers.length > 1
+                ? showPhoneSheet({
+                    title: 'Call',
+                    message: `Which number should we dial for ${name}?`,
+                    numbers,
+                    onSelect: (p) => startCall(p.number, name),
+                  })
+                : lead.sellerPhone && startCall(lead.sellerPhone, name)
+            }
+            disabled={!lead.sellerPhone && numbers.length === 0}
           />
           <ActionButton
             icon={<MessageIcon size={22} color={colors.primary} />}
@@ -226,6 +245,43 @@ export default function LeadDetailScreen() {
             disabled={!lead.sellerEmail}
           />
         </View>
+
+        {/* Skip trace attaches up to four numbers to a foreclosure lead and two
+            to a probate one. Tap to call one; promote the one that answers so
+            the drip and the AI use it too. */}
+        {numbers.length > 1 ? (
+          <>
+            <SectionLabel>Numbers</SectionLabel>
+            <Card style={styles.phoneCard}>
+              {numbers.map((p) => (
+                <View key={p.number} style={styles.phoneRow}>
+                  <TouchableOpacity
+                    style={styles.phoneMain}
+                    onPress={() => startCall(p.number, name)}
+                    activeOpacity={0.7}
+                  >
+                    <PhoneIcon size={15} color={colors.primary} />
+                    <View style={styles.phoneText}>
+                      <Text style={styles.phoneNumber}>{prettyPhone(p.number)}</Text>
+                      <Text style={styles.phoneSub}>{phoneSubtitle(p)}</Text>
+                    </View>
+                  </TouchableOpacity>
+                  {p.isPrimary ? (
+                    <Text style={styles.phonePrimary}>Primary</Text>
+                  ) : (
+                    <TouchableOpacity
+                      onPress={() => makePrimary.mutate(p.number)}
+                      disabled={makePrimary.isPending}
+                      hitSlop={8}
+                    >
+                      <Text style={styles.phonePromote}>Make primary</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              ))}
+            </Card>
+          </>
+        ) : null}
 
         <SectionLabel>Deal</SectionLabel>
         <Card style={styles.dealCard}>
@@ -347,6 +403,15 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
   actionLabel: { fontSize: 13, fontWeight: '600', color: colors.text },
 
   dealCard: { backgroundColor: colors.primaryTint, borderColor: colors.primarySoft, gap: 14 },
+
+  phoneCard: { gap: 12 },
+  phoneRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  phoneMain: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  phoneText: { flex: 1 },
+  phoneNumber: { fontSize: 15, fontWeight: '600', color: colors.text },
+  phoneSub: { fontSize: 11, color: colors.textMuted, marginTop: 1 },
+  phonePrimary: { fontSize: 11, fontWeight: '700', color: colors.primary },
+  phonePromote: { fontSize: 11, fontWeight: '600', color: colors.textSecondary },
   dealHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   dealStrategy: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   dealStrategyText: { fontSize: 14, fontWeight: '700', color: colors.primaryDark },

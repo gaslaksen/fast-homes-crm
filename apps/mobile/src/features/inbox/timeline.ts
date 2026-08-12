@@ -13,6 +13,10 @@ export type Direction = 'INBOUND' | 'OUTBOUND' | null;
 export interface SmsPayload {
   body: string;
   media: MessageMedia[] | null;
+  /** The seller's end of this text: `to` outbound, `from` inbound. */
+  sellerNumber?: string | null;
+  /** False when it is one of the skip-traced numbers, not the lead's primary. */
+  onPrimaryNumber?: boolean;
 }
 export interface CallPayload {
   status: string | null;

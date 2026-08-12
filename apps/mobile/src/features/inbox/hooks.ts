@@ -69,11 +69,14 @@ export function useSendMessage(leadId: string) {
   const qc = useQueryClient();
   const { user } = useAuth();
   return useMutation({
-    mutationFn: async (message: string) => {
+    // `to` picks which of the seller's numbers this goes to. Omitted, the API
+    // sends to the primary, which is what every automated path uses.
+    mutationFn: async ({ message, to }: { message: string; to?: string }) => {
       // Pass userId so the message is attributed to the sender (not AI).
       const { data } = await api.post(`/leads/${leadId}/messages/send`, {
         message,
         userId: user?.id,
+        to,
       });
       return data;
     },

@@ -18,7 +18,21 @@ import { useCommunications, type TimelineItem } from '@/features/inbox/timeline'
 import { TimelineRow, DateSeparator } from '@/features/inbox/TimelineRow';
 import { useLeadDetail, useUpdateLead, fullName } from '@/features/leads/leads';
 import { useCall } from '@/features/calls/CallContext';
-import { SparkleIcon, PhoneIcon, MessageIcon, MailIcon, ChevronLeft } from '@/components/icons';
+import { prettyPhone } from '@/features/calls/hooks';
+import {
+  useLeadPhones,
+  showPhoneSheet,
+  phoneSubtitle,
+  type LeadPhone,
+} from '@/features/leads/leadPhones';
+import {
+  SparkleIcon,
+  PhoneIcon,
+  MessageIcon,
+  MailIcon,
+  ChevronLeft,
+  ChevronRight,
+} from '@/components/icons';
 import { sameDay } from '@/lib/format';
 import { useThemed, type Colors } from '@/theme';
 
@@ -45,12 +59,39 @@ function HeaderAvatar({ name, kind }: { name: string; kind?: string }) {
   );
 }
 
-function ThreadCallButton({ phone, name }: { phone: string | null; name: string }) {
+/**
+ * Header call button. With several numbers on file it asks which one to dial,
+ * since the number on the lead is often the one that never answers.
+ */
+function ThreadCallButton({
+  phone,
+  name,
+  numbers,
+}: {
+  phone: string | null;
+  name: string;
+  numbers: LeadPhone[];
+}) {
   const { colors, styles } = useThemed(makeStyles);
   const { startCall } = useCall();
-  if (!phone) return null;
+  if (!phone && !numbers.length) return null;
+
+  function onPress() {
+    if (numbers.length < 2) {
+      const only = numbers[0]?.number ?? phone;
+      if (only) startCall(only, name);
+      return;
+    }
+    showPhoneSheet({
+      title: 'Call',
+      message: `Which number should we dial for ${name}?`,
+      numbers,
+      onSelect: (p) => startCall(p.number, name),
+    });
+  }
+
   return (
-    <TouchableOpacity onPress={() => startCall(phone, name)} hitSlop={10} style={styles.headerIcon}>
+    <TouchableOpacity onPress={onPress} hitSlop={10} style={styles.headerIcon}>
       <PhoneIcon size={22} color={colors.primary} />
     </TouchableOpacity>
   );
@@ -69,6 +110,18 @@ export default function ThreadScreen() {
   const markRead = useMarkRead();
   const [draft, setDraft] = useState('');
   const listRef = useRef<FlatList<TimelineItem>>(null);
+
+  // Which of the seller's numbers this text goes to. Starts on whichever the
+  // API preselects (the one they last replied from) and stays put after that,
+  // so a poll refresh cannot move the recipient out from under a half-typed
+  // message.
+  const { data: phones } = useLeadPhones(leadId);
+  const numbers = phones?.numbers ?? [];
+  const [to, setTo] = useState('');
+  useEffect(() => {
+    if (phones?.selected) setTo((cur) => cur || phones.selected);
+  }, [phones?.selected]);
+  const selectedTo = numbers.find((n) => n.number === to);
 
   const timeline = data?.timeline ?? [];
   const name = lead ? fullName(lead) : 'Conversation';
@@ -95,7 +148,7 @@ export default function ThreadScreen() {
     if (!body || send.isPending) return;
     setDraft('');
     try {
-      await send.mutateAsync(body);
+      await send.mutateAsync({ message: body, to: to || undefined });
     } catch {
       setDraft(body);
     }
@@ -135,7 +188,9 @@ export default function ThreadScreen() {
               </View>
             </TouchableOpacity>
           ),
-          headerRight: () => <ThreadCallButton phone={lead?.sellerPhone ?? null} name={name} />,
+          headerRight: () => (
+            <ThreadCallButton phone={lead?.sellerPhone ?? null} name={name} numbers={numbers} />
+          ),
         }}
       />
       {isLoading ? (
@@ -184,6 +239,33 @@ export default function ThreadScreen() {
                 trackColor={{ true: colors.primary, false: colors.border }}
               />
             </View>
+          ) : null}
+
+          {/* Only shown when there is a real choice. One number on file is not
+              a decision worth a row above the keyboard. */}
+          {numbers.length > 1 ? (
+            <TouchableOpacity
+              style={styles.toBar}
+              activeOpacity={0.7}
+              onPress={() =>
+                showPhoneSheet({
+                  title: 'Send to',
+                  message: 'Which of their numbers should this text go to?',
+                  numbers,
+                  onSelect: (p) => setTo(p.number),
+                })
+              }
+            >
+              <Text style={styles.toLabel}>To</Text>
+              <Text style={styles.toValue} numberOfLines={1}>
+                {prettyPhone(to || phones?.selected)}
+              </Text>
+              {selectedTo && !selectedTo.isPrimary ? (
+                <Text style={styles.toAlt}>{phoneSubtitle(selectedTo)}</Text>
+              ) : null}
+              <View style={styles.spacer} />
+              <ChevronRight size={15} color={colors.textMuted} />
+            </TouchableOpacity>
           ) : null}
 
           <View style={styles.composer}>
@@ -271,6 +353,20 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
   },
   aiText: { fontSize: 13, color: colors.textSecondary, fontWeight: '500' },
   spacer: { flex: 1 },
+
+  toBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    backgroundColor: colors.bg,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+  },
+  toLabel: { fontSize: 12, color: colors.textMuted },
+  toValue: { fontSize: 13, fontWeight: '600', color: colors.text },
+  toAlt: { fontSize: 11, color: colors.primary, fontWeight: '600' },
 
   composer: {
     flexDirection: 'row',

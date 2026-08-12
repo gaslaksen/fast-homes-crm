@@ -3,6 +3,7 @@ import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useThemed, type Colors } from '@/theme';
 import { RecordingPlayer } from '@/features/calls/RecordingPlayer';
+import { prettyPhone } from '@/features/calls/hooks';
 import { ChevronRight } from '@/components/icons';
 import { clockTime, dayLabel } from '@/lib/format';
 import type { TimelineItem } from './timeline';
@@ -29,11 +30,24 @@ export function DateSeparator({ date }: { date: string }) {
   );
 }
 
-function Meta({ name, channel, at, right }: { name: string; channel: string; at: string; right?: boolean }) {
+function Meta({
+  name,
+  channel,
+  at,
+  right,
+  suffix,
+}: {
+  name: string;
+  channel: string;
+  at: string;
+  right?: boolean;
+  suffix?: string;
+}) {
   const { styles } = useThemed(makeStyles);
   return (
     <Text style={[styles.meta, right && styles.metaRight]} numberOfLines={1}>
       {name} · {channel} · {clockTime(at)}
+      {suffix ? ` · ${suffix}` : ''}
     </Text>
   );
 }
@@ -54,9 +68,16 @@ export const TimelineRow = memo(function TimelineRow({
 
   if (item.kind === 'sms') {
     const media = item.payload.media ?? [];
+    // On a lead with four numbers on file, "which one did this reach" is the
+    // question the thread otherwise cannot answer. Only the exception is
+    // labelled; tagging every message would just be noise.
+    const altNumber =
+      item.payload.onPrimaryNumber === false && item.payload.sellerNumber
+        ? `${outbound ? 'To' : 'From'} ${prettyPhone(item.payload.sellerNumber)}`
+        : undefined;
     return (
       <View style={wrap}>
-        <Meta name={item.actor.name} channel="SMS" at={item.at} right={outbound} />
+        <Meta name={item.actor.name} channel="SMS" at={item.at} right={outbound} suffix={altNumber} />
         <View style={[styles.bubble, outbound ? styles.outbound : styles.inbound]}>
           {media.map((m, i) => (
             <Image
