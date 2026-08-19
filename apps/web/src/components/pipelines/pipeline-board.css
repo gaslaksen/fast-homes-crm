@@ -1,0 +1,347 @@
+/*
+ * Shared chrome for the Tax Sales and Surplus Funds boards.
+ *
+ * Ported from the standalone prototype, with one change that matters: every
+ * colour is a token, and the tokens are redefined under `.dark`. The prototype
+ * was dark-only and hard-coded its palette inline, which would have left these
+ * two pages black while the rest of Dealcore was in light mode.
+ *
+ * Scoped to `.dc-board` so nothing here escapes into the rest of the app.
+ * Everything is prefixed `dc-` for the same reason.
+ */
+
+.dc-board {
+  /* Light. Surfaces climb toward white, insets sit slightly grey so a panel
+     inside a card still reads as recessed the way it does in the dark theme. */
+  --bg: #F6F7F9;
+  --bg2: #F1F4F8;
+  --surface: #FFFFFF;
+  --surface2: #F4F6F9;
+  --surface3: #E9EDF3;
+  --border: #E2E7EE;
+  --border2: #CFD7E2;
+
+  --text: #0F172A;
+  --dim: #55617A;
+  --faint: #7C8699;
+
+  --mint: #0E9F7E;
+  --mint2: #0B8368;
+  --mintInk: #FFFFFF;
+  --mintGhost: rgba(14, 159, 126, 0.09);
+
+  --red: #D93A34;
+  --redGhost: rgba(217, 58, 52, 0.09);
+  /* On a tinted panel the headline carries the signal and the body stays
+     high-contrast against the tint. Dark mode flips both. */
+  --redHead: #A61C17;
+  --redBody: #6B1512;
+  --amberBody: #6B3A05;
+
+  --amber: #B45309;
+  --blue: #0B72C4;
+  --violet: #6D28D9;
+  --pink: #C0246B;
+  --lime: #4D7C0F;
+
+  /* Semantic chip pairs. Card chips, tiers and stages all pick from these
+     rather than carrying literal colours, so a chip themes with the page. */
+  --chip-red-fg: #B3251F;      --chip-red-bg: rgba(217, 58, 52, 0.12);
+  --chip-amber-fg: #92400E;    --chip-amber-bg: rgba(180, 83, 9, 0.13);
+  --chip-blue-fg: #0B5D9E;     --chip-blue-bg: rgba(11, 114, 196, 0.12);
+  --chip-violet-fg: #5B21B6;   --chip-violet-bg: rgba(109, 40, 217, 0.12);
+  --chip-pink-fg: #9D174D;     --chip-pink-bg: rgba(192, 36, 107, 0.12);
+  --chip-mint-fg: #0B7A60;     --chip-mint-bg: rgba(14, 159, 126, 0.13);
+  --chip-slate-fg: #47536B;    --chip-slate-bg: rgba(85, 97, 122, 0.12);
+
+  --r: 12px;
+  --r2: 9px;
+
+  color: var(--text);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+.dark .dc-board {
+  --bg: #0A0E16;
+  --bg2: #0C111B;
+  --surface: #121927;
+  --surface2: #161E2E;
+  --surface3: #1B2434;
+  --border: #1F2938;
+  --border2: #2A3547;
+
+  --text: #F2F5F9;
+  --dim: #8A94A8;
+  --faint: #5A6478;
+
+  --mint: #2FDDB6;
+  --mint2: #25B896;
+  --mintInk: #04251E;
+  --mintGhost: rgba(47, 221, 182, 0.10);
+
+  --red: #F0524D;
+  --redGhost: rgba(240, 82, 77, 0.12);
+  --redHead: #FF7B76;
+  --redBody: #FFFFFF;
+  --amberBody: #FFFFFF;
+
+  --amber: #F5A524;
+  --blue: #4CC2FF;
+  --violet: #A78BFA;
+  --pink: #F472B6;
+  --lime: #A3E635;
+
+  --chip-red-fg: #F0524D;      --chip-red-bg: rgba(240, 82, 77, 0.15);
+  --chip-amber-fg: #F5A524;    --chip-amber-bg: rgba(245, 165, 36, 0.15);
+  --chip-blue-fg: #4CC2FF;     --chip-blue-bg: rgba(76, 194, 255, 0.15);
+  --chip-violet-fg: #A78BFA;   --chip-violet-bg: rgba(167, 139, 250, 0.15);
+  --chip-pink-fg: #F472B6;     --chip-pink-bg: rgba(244, 114, 182, 0.15);
+  --chip-mint-fg: #2FDDB6;     --chip-mint-bg: rgba(47, 221, 182, 0.13);
+  --chip-slate-fg: #8A94A8;    --chip-slate-bg: rgba(138, 148, 168, 0.15);
+}
+
+.dc-board * { box-sizing: border-box; }
+.dc-board button { font-family: inherit; font-size: inherit; cursor: pointer; border: none; background: none; color: inherit; }
+.dc-board a { color: inherit; text-decoration: none; }
+.dc-board input, .dc-board textarea, .dc-board select { font-family: inherit; font-size: inherit; }
+
+/* ── Headings and primitives ───────────────────────────────────────────── */
+
+.dc-h1 { font-size: 29px; font-weight: 700; letter-spacing: -0.6px; }
+.dc-sub { color: var(--dim); margin-top: 5px; }
+.dc-lbl { font-size: 10.5px; letter-spacing: 1px; color: var(--faint); font-weight: 700; text-transform: uppercase; }
+
+.dc-btn {
+  background: var(--surface2); border: 1px solid var(--border2); border-radius: var(--r2);
+  padding: 9px 15px; font-weight: 600; color: var(--text); transition: 0.12s;
+  display: inline-flex; align-items: center; gap: 8px; white-space: nowrap;
+}
+.dc-btn:hover:not(:disabled) { background: var(--surface3); }
+.dc-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.dc-btn.pri { background: var(--mint); color: var(--mintInk); border-color: var(--mint); }
+.dc-btn.pri:hover:not(:disabled) { background: var(--mint2); border-color: var(--mint2); }
+.dc-btn.sm { padding: 6px 11px; font-size: 12.5px; border-radius: 8px; }
+.dc-btn.xs { padding: 4px 9px; font-size: 11.5px; border-radius: 7px; }
+.dc-btn.dngr { color: var(--red); border-color: transparent; background: transparent; }
+.dc-btn.dngr:hover:not(:disabled) { background: var(--redGhost); }
+
+.dc-in {
+  width: 100%; background: var(--bg2); border: 1px solid var(--border2);
+  border-radius: var(--r2); padding: 9px 12px; color: var(--text); outline: none;
+}
+.dc-in:focus { border-color: var(--mint); }
+
+.dc-search {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+  padding: 13px 16px; color: var(--dim); display: flex; align-items: center; gap: 10px;
+}
+.dc-search input { background: none; border: none; outline: none; color: var(--text); flex: 1; min-width: 0; }
+.dc-search input::placeholder { color: var(--faint); }
+
+.dc-tab {
+  border-radius: 999px; padding: 8px 17px; font-weight: 500; color: var(--text);
+  font-size: 13px; border: 1px solid var(--border2); background: var(--surface2);
+}
+.dc-tab.on { background: var(--mint); color: var(--mintInk); border-color: var(--mint); font-weight: 600; }
+.dc-flabel {
+  color: var(--dim); font-size: 12.5px; font-weight: 500; letter-spacing: 0.3px;
+  text-transform: uppercase; white-space: nowrap;
+}
+.dc-sep { width: 1px; height: 20px; background: var(--border2); flex: 0 0 1px; }
+.dc-active {
+  display: inline-flex; align-items: center; gap: 7px; border-radius: 999px;
+  padding: 6px 10px 6px 13px; font-size: 12.5px; font-weight: 600; border: 1px solid transparent;
+}
+.dc-active button { opacity: 0.75; font-size: 12px; line-height: 1; }
+
+.dc-danger {
+  border-radius: 20px; padding: 7px 15px; font-weight: 600; font-size: 13px;
+  border: 1px solid transparent; background: var(--red); color: #fff;
+}
+.dc-danger.off { background: var(--surface); color: var(--dim); border-color: var(--border); }
+
+/* ── Stat tiles ────────────────────────────────────────────────────────── */
+
+.dc-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 16px; margin: 0 0 26px; }
+.dc-stat {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+  padding: 20px 22px; text-align: left; transition: 0.12s;
+}
+.dc-stat.on { border-color: var(--mint); background: var(--mintGhost); }
+.dc-stat .k { font-size: 11px; letter-spacing: 1.2px; color: var(--dim); font-weight: 600; text-transform: uppercase; }
+.dc-stat .v { font-size: 38px; font-weight: 700; margin-top: 8px; letter-spacing: -1px; line-height: 1; }
+
+/* ── The lead card ─────────────────────────────────────────────────────── */
+
+/* Every card is the same box. Content that does not fit scrolls INSIDE it, so
+   a card with five compliance warnings is the same height as one with none and
+   a long card never shoves its neighbours around. */
+.dc-lead {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--r);
+  padding: 15px 15px 13px; display: flex; flex-direction: column; gap: 10px;
+  position: relative; border-top-width: 3px; border-top-style: solid;
+  transition: border-color 0.12s; height: 600px; align-self: start;
+}
+.dc-lead:hover { border-color: var(--border2); }
+.dc-lead.pick { box-shadow: 0 0 0 1px var(--mint); }
+
+.dc-cardbody {
+  flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;
+  display: flex; flex-direction: column; gap: 10px;
+  margin-right: -6px; padding-right: 6px;
+  scrollbar-width: thin; scrollbar-color: var(--border2) transparent;
+}
+.dc-cardbody::-webkit-scrollbar { width: 6px; }
+.dc-cardbody::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 6px; }
+.dc-cardbody::-webkit-scrollbar-track { background: transparent; }
+
+.dc-score {
+  border-radius: 10px; padding: 6px 10px; text-align: center; min-width: 52px;
+  border: 1.5px solid var(--border2); background: transparent; flex: 0 0 auto;
+}
+.dc-score b { display: block; font-size: 19px; font-weight: 800; line-height: 1.05; }
+.dc-score span { display: block; font-size: 8.5px; letter-spacing: 1.2px; color: var(--faint); font-weight: 700; margin-top: 1px; }
+
+.dc-contact { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; padding: 10px 11px; }
+.dc-crow { display: flex; align-items: center; gap: 7px; padding: 3px 0; font-size: 12.5px; }
+.dc-copy {
+  width: 22px; height: 22px; border-radius: 6px; border: 1px solid var(--border2);
+  background: var(--surface2); color: var(--faint); font-size: 10px; flex: 0 0 22px;
+  display: grid; place-items: center;
+}
+.dc-copy:hover { color: var(--mint); border-color: var(--mint); }
+
+.dc-tile {
+  flex: 1; background: var(--bg2); border: 1px solid var(--border); border-radius: 10px;
+  padding: 9px 6px; text-align: center; min-width: 0;
+}
+.dc-tile b { display: block; font-size: 12px; font-weight: 700; }
+.dc-tile span { display: block; font-size: 10px; color: var(--faint); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.dc-tag {
+  display: inline-flex; align-items: center; border-radius: 7px; padding: 5px 10px;
+  font-size: 12px; font-weight: 600; white-space: nowrap; line-height: 1.25;
+  border: 1px solid transparent;
+}
+.dc-tag.up { font-weight: 800; letter-spacing: 0.5px; }
+button.dc-tag { cursor: pointer; transition: 0.12s; }
+button.dc-tag:hover { filter: brightness(1.08); }
+.dark button.dc-tag:hover { filter: brightness(1.25); }
+button.dc-tag.picked { border-color: currentColor; }
+
+.dc-daybox {
+  width: 28px; height: 28px; border-radius: 7px; border: 1px solid var(--border2);
+  background: var(--bg2); display: grid; place-items: center; font-size: 13px;
+  font-weight: 800; color: transparent;
+}
+.dc-daybox.on { background: var(--mint); border-color: var(--mint); color: var(--mintInk); }
+.dc-daylbl { font-size: 12px; font-weight: 800; color: var(--dim); text-align: center; margin-top: 5px; }
+
+.dc-bar { height: 6px; border-radius: 6px; background: var(--surface3); overflow: hidden; }
+.dc-bar i { display: block; height: 100%; border-radius: 6px; transition: width 0.2s; }
+
+.dc-check {
+  width: 15px; height: 15px; border-radius: 4px; flex: 0 0 15px; display: grid;
+  place-items: center; font-size: 10px; font-weight: 800;
+  background: var(--surface3); color: transparent;
+}
+.dc-check.on { background: var(--mint); color: var(--mintInk); }
+.dc-check.want { background: var(--redGhost); }
+
+.dc-meta {
+  display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid var(--border);
+  margin: 4px -15px -13px;
+}
+.dc-meta > div { padding: 6px 12px; border-bottom: 1px solid var(--border); min-width: 0; }
+.dc-meta > div:nth-child(odd) { border-right: 1px solid var(--border); }
+.dc-meta .k { font-size: 8.5px; letter-spacing: 0.5px; color: var(--faint); font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dc-meta .v { font-size: 12.5px; font-weight: 700; margin-top: 1px; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.dc-panel { border-radius: 10px; padding: 10px 12px; border: 1px solid transparent; }
+.dc-panel.ok { background: var(--mintGhost); border-color: var(--mint); }
+.dc-panel.bad { background: var(--redGhost); border-color: var(--red); }
+.dc-panel .head { display: flex; align-items: center; gap: 7px; font-weight: 700; font-size: 12.5px; }
+.dc-panel .note { font-size: 11.5px; line-height: 1.55; padding-left: 20px; }
+
+.dc-rule { padding: 13px; border-radius: 10px; background: var(--surface2); border: 1px solid var(--border); }
+.dc-empty { text-align: center; padding: 64px 20px; color: var(--dim); background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); }
+.dc-warnbar {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  background: rgba(180, 83, 9, 0.09); border: 1px solid var(--amber);
+  border-radius: 10px; padding: 11px 14px;
+}
+
+/* ── The rack ──────────────────────────────────────────────────────────── */
+
+.dc-leads { display: grid; grid-template-columns: repeat(auto-fill, minmax(344px, 1fr)); gap: 16px; align-items: start; }
+.dc-viewport { overflow: hidden; padding: 4px 2px 16px; cursor: grab; touch-action: pan-y; }
+.dc-viewport.grabbing { cursor: grabbing; user-select: none; }
+.dc-belt {
+  display: flex; gap: 14px; align-items: flex-start; will-change: transform;
+  transform: translate3d(0, 0, 0); backface-visibility: hidden;
+}
+.dc-belt > * { flex: 0 0 344px; }
+.dc-belt .dc-lead { contain: layout style; }
+
+.dc-rackwrap { position: relative; }
+.dc-rackwrap .fade { position: absolute; top: 0; bottom: 16px; width: 52px; pointer-events: none; transition: opacity 0.2s; z-index: 2; }
+.dc-rackwrap .fade.l { left: 0; background: linear-gradient(90deg, var(--bg), transparent); }
+.dc-rackwrap .fade.r { right: 0; background: linear-gradient(270deg, var(--bg), transparent); }
+
+.dc-slider {
+  position: relative; height: 20px; border-radius: 999px; background: var(--bg2);
+  border: 1px solid var(--border); cursor: pointer; user-select: none;
+  touch-action: none; flex: 1 1 auto; min-width: 90px;
+}
+.dc-slider i {
+  position: absolute; top: 1px; bottom: 1px; border-radius: 999px; min-width: 56px;
+  background: linear-gradient(180deg, var(--mint), var(--mint2));
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25); transition: background 0.12s;
+}
+.dc-slider.on i { transition: none; filter: brightness(1.1); }
+.dc-slider:focus-visible { outline: 2px solid var(--mint); outline-offset: 2px; }
+.dc-slidewrap { display: flex; align-items: center; gap: 10px; flex: 1 1 260px; min-width: 170px; max-width: 560px; }
+.dc-slidecount { font-size: 11.5px; color: var(--faint); font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+/* Grid view gets its own scroll region with a tall rail on the left, so a long
+   list can be worked without scrolling the whole page. */
+.dc-gridwrap { display: flex; gap: 14px; align-items: stretch; }
+.dc-vrail { flex: 0 0 52px; display: flex; flex-direction: column; align-items: center; gap: 9px; padding: 2px 0 18px; }
+/* The grabbable area is the full column. The groove and thumb are drawn inside
+   it, so the bar looks slim without making you hit a 14px target. */
+.dc-vtrack { position: relative; flex: 1; width: 100%; min-height: 120px; cursor: pointer; touch-action: none; background: transparent; border: none; }
+.dc-vtrack::before {
+  content: ""; position: absolute; top: 0; bottom: 0; left: 50%; width: 24px;
+  margin-left: -12px; border-radius: 999px; background: var(--bg2); border: 1px solid var(--border);
+}
+.dc-vtrack:focus-visible { outline: 2px solid var(--mint); outline-offset: 2px; border-radius: 12px; }
+.dc-vtrack i {
+  position: absolute; left: 50%; width: 22px; margin-left: -11px; border-radius: 999px;
+  min-height: 56px; background: linear-gradient(90deg, var(--mint), var(--mint2));
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25); transition: background 0.12s;
+}
+.dc-vtrack.on i { transition: none; filter: brightness(1.1); }
+.dc-gridscroll {
+  flex: 1; min-width: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain;
+  max-height: calc(100vh - 300px); padding-right: 4px; scrollbar-width: none;
+}
+.dc-gridscroll::-webkit-scrollbar { width: 0; }
+
+.dc-seg { display: inline-flex; background: var(--bg2); border: 1px solid var(--border2); border-radius: 9px; padding: 2px; }
+.dc-seg button { padding: 5px 12px; border-radius: 7px; font-size: 12.5px; font-weight: 600; color: var(--dim); }
+.dc-seg button.on { background: var(--mint); color: var(--mintInk); }
+
+.dc-nudge {
+  width: 32px; height: 32px; border-radius: 9px; border: 1px solid var(--border2);
+  background: var(--surface2); color: var(--text); display: grid; place-items: center;
+  font-size: 14px; font-weight: 700;
+}
+.dc-nudge:disabled { opacity: 0.35; cursor: not-allowed; }
+
+.dc-modal { position: fixed; inset: 0; background: rgba(4, 7, 12, 0.6); display: grid; place-items: center; z-index: 90; padding: 22px; backdrop-filter: blur(3px); }
+.dc-sheet { background: var(--surface); border: 1px solid var(--border2); border-radius: 15px; width: 100%; max-width: 560px; max-height: 90vh; overflow-y: auto; }
+
+@media (max-width: 860px) {
+  .dc-belt > * { flex: 0 0 300px; }
+}

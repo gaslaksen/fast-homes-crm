@@ -43,6 +43,8 @@ export enum LeadSource {
   DEAL_SEARCH = 'DEAL_SEARCH',
   FORECLOSURE = 'FORECLOSURE',
   PROBATE = 'PROBATE',
+  TAX_SALE = 'TAX_SALE',
+  SURPLUS = 'SURPLUS',
   OTHER = 'OTHER',
 }
 
@@ -111,6 +113,96 @@ export enum ForeclosureWorkStatus {
   APPOINTMENT_SET = 'APPOINTMENT_SET',
   UNDER_CONTRACT = 'UNDER_CONTRACT',
   DEAD = 'DEAD',
+}
+
+// ── Tax Sales ───────────────────────────────────────────────────────────────
+// NC delinquent tax foreclosures run on two tracks and the difference decides
+// who conducts the sale and what deed the buyer gets:
+//   IN_REM, NCGS 105-375  -> clerk-docketed judgment, Sheriff sells, Sheriff's Deed.
+//   JUDICIAL, NCGS 105-374 -> full civil action, a commissioner sells, Commissioner's Deed.
+export enum TaxSaleMethod {
+  IN_REM = 'IN_REM',
+  JUDICIAL = 'JUDICIAL',
+}
+
+// Where the filing sits. REDEEMED is terminal: the owner paid the county off
+// before confirmation and the property came out of the sale, which kills the
+// lead outright rather than parking it.
+export enum TaxSaleStage {
+  JUDGMENT_DOCKETED = 'JUDGMENT_DOCKETED',
+  SALE_SCHEDULED = 'SALE_SCHEDULED',
+  UPSET_BID_PERIOD = 'UPSET_BID_PERIOD',
+  REDEEMED = 'REDEEMED',
+}
+
+// Per-lead work status on the Tax Sales board. Carries ATTEMPTED, which the
+// foreclosure and probate boards do not: a tax sale lead is usually cold-called
+// off a public filing, so "we dialed and got nothing" is a real state.
+export enum TaxSaleWorkStatus {
+  NOT_CONTACTED = 'NOT_CONTACTED',
+  ATTEMPTED = 'ATTEMPTED',
+  IN_CONVERSATION = 'IN_CONVERSATION',
+  APPOINTMENT_SET = 'APPOINTMENT_SET',
+  UNDER_CONTRACT = 'UNDER_CONTRACT',
+  DEAD = 'DEAD',
+}
+
+export enum TaxSaleOccupancy {
+  OWNER_OCCUPIED = 'OWNER_OCCUPIED',
+  ABSENTEE = 'ABSENTEE',
+  VACANT = 'VACANT',
+  UNKNOWN = 'UNKNOWN',
+}
+
+// Why a number must not be dialed. Federal and state registries are the bulk of
+// it; a litigator flag is a serial TCPA plaintiff and is never worth the risk.
+export enum DncRegistry {
+  FEDERAL = 'federal',
+  STATE = 'state',
+  LITIGATOR = 'litigator',
+}
+
+// ── Surplus Funds ───────────────────────────────────────────────────────────
+// Florida only. NC requires an attorney to petition for surplus and certify
+// title and priority, so NC is a referral at best and is not modelled here.
+export enum SurplusType {
+  TAX_DEED = 'tax_deed',
+  MORTGAGE_FORECLOSURE = 'mortgage_foreclosure',
+}
+
+// Who is holding the money. Once funds escheat to DFS the whole regime changes:
+// Chapter 717 applies, a registered representative is required, and the fee cap
+// is not something we have confirmed.
+export enum SurplusFundLocation {
+  CLERK = 'clerk',
+  STATE_ESCHEATED = 'state_escheated',
+}
+
+export enum SurplusClaimantType {
+  PREVIOUS_OWNER = 'previous_owner',
+  HEIR_ESTATE = 'heir_estate',
+  LIENHOLDER = 'lienholder',
+}
+
+export enum SurplusStage {
+  NEW = 'New',
+  CONTACTED = 'Contacted',
+  AGREEMENT_SIGNED = 'Agreement Signed',
+  ASSIGNMENT_NOTARIZED = 'Assignment Notarized',
+  CLAIM_FILED = 'Claim Filed',
+  PAID = 'Paid',
+  DEAD = 'Dead',
+}
+
+// Banding from the surplus spec. It leaves two gaps on purpose: a living owner
+// at $25k+ who already has a competing lien filed, and a deceased owner under
+// $25k. Neither matches a band, so both land in UNBANDED rather than being
+// dropped or forced into a tier they do not belong in.
+export enum SurplusTier {
+  A = 'A',
+  B = 'B',
+  C = 'C',
+  UNBANDED = 'U',
 }
 
 // Score Bands (Council Model)

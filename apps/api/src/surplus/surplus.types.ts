@@ -1,0 +1,76 @@
+/** Shapes the Surplus Funds controller, service, and importer pass between them. */
+
+import { SurplusLien } from './surplus.util';
+
+export interface SurplusPhoneInput {
+  number: string;
+  type?: string | null;
+}
+
+/** One normalized row, whether it came off a county list or the Add lead form. */
+export interface SurplusLeadInput {
+  /** The property that sold. There is nothing to buy here, but it identifies the case. */
+  address: string;
+  city?: string;
+  state?: string;
+  zip?: string;
+  county?: string;
+  parcelId?: string;
+  caseNumber?: string;
+
+  /** The person owed the money. */
+  claimant?: string;
+  claimantType?: string;
+  deceased?: boolean;
+  heirsRequired?: boolean;
+  competingLien?: boolean;
+
+  surplusType?: string;
+  fundLocation?: string;
+
+  saleDate?: string | null;
+  salePrice?: number | null;
+  noticeDate?: string | null;
+  noticeConfirmed?: boolean;
+  certOfDisbursements?: string | null;
+
+  grossSurplus?: number | null;
+  liens?: SurplusLien[];
+
+  arrangement?: string;
+  totalConsideration?: number | null;
+  licensedRepId?: string | null;
+
+  stage?: string;
+  notes?: string;
+
+  phones?: SurplusPhoneInput[];
+  emails?: string[];
+
+  importBatch?: string;
+}
+
+export interface SurplusListFilters {
+  organizationId?: string | null;
+  search?: string;
+  /** Comma-separated SurplusTier values. */
+  tier?: string;
+  stage?: string;
+  claimantType?: string;
+  /** 'active' (default), 'all', or one county name. */
+  county?: string;
+  /** '15-25' | '25-50' | '50+' */
+  band?: string;
+  /** '0-7' | '8-30' | '31-120' | '120+' */
+  noticeAge?: string;
+  /** 'open' | 'closed' */
+  lienWindow?: string;
+  /** Only leads whose contract send is blocked. */
+  blockedOnly?: boolean;
+  hideDead?: boolean;
+  hideDnc?: boolean;
+  /** 'notice' | 'surplus' | 'net' | 'tier' */
+  sort?: string;
+  page?: number;
+  pageSize?: number;
+}

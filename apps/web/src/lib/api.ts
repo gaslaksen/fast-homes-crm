@@ -160,6 +160,58 @@ export const foreclosuresAPI = {
   },
 };
 
+// Tax Sales API. One card per delinquent tax foreclosure filing.
+export const taxSalesAPI = {
+  list: (params?: any) => api.get('/tax-sales', { params }),
+  stats: () => api.get('/tax-sales/stats'),
+  get: (id: string) => api.get(`/tax-sales/${id}`),
+  create: (data: any) => api.post('/tax-sales', data),
+  update: (id: string, data: any) => api.patch(`/tax-sales/${id}`, data),
+  bulkDelete: (ids: string[]) => api.post('/tax-sales/bulk-delete', { ids }),
+  importParse: (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.post('/tax-sales/import/parse', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+  importExecute: (file: File, options?: any) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (options) Object.entries(options).forEach(([k, v]) => formData.append(k, String(v)));
+    return api.post('/tax-sales/import', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+};
+
+// Surplus Funds API. Florida overage claims; every row carries a compliance
+// verdict, because whether a contract may be sent is a server decision.
+export const surplusAPI = {
+  list: (params?: any) => api.get('/surplus', { params }),
+  stats: () => api.get('/surplus/stats'),
+  complianceRules: () => api.get('/surplus/compliance-rules'),
+  get: (id: string) => api.get(`/surplus/${id}`),
+  create: (data: any) => api.post('/surplus', data),
+  update: (id: string, data: any) => api.patch(`/surplus/${id}`, data),
+  bulkDelete: (ids: string[]) => api.post('/surplus/bulk-delete', { ids }),
+  importParse: (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.post('/surplus/import/parse', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+  importExecute: (file: File, options?: any) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (options) Object.entries(options).forEach(([k, v]) => formData.append(k, String(v)));
+    return api.post('/surplus/import', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+};
+
 // Probate API. list() returns rows grouped by contact, not by lead.
 export const probateAPI = {
   list: (params?: any) => api.get('/probate', { params }),

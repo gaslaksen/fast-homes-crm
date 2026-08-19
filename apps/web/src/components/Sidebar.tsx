@@ -50,6 +50,18 @@ const ICON = {
       <path d="M7 12h10" />
     </svg>
   ),
+  taxSale: (
+    <svg className={iconClass} {...strokeProps}>
+      <path d="M3 21h18M5 21V9l7-5 7 5v12" />
+      <path d="M9 21v-5h6v5M9 12h6" />
+    </svg>
+  ),
+  surplus: (
+    <svg className={iconClass} {...strokeProps}>
+      <circle cx="12" cy="12" r="8" />
+      <path d="M12 7v10M14.5 9.5a2.5 2.5 0 00-5 .6c0 2.6 5 1.6 5 4.2a2.5 2.5 0 01-5 .3" />
+    </svg>
+  ),
   dealSearch: (
     <svg className={iconClass} {...strokeProps}>
       <circle cx="11" cy="11" r="7" />
@@ -108,6 +120,8 @@ function buildNavGroups(badges: { needsReply: number; newLeads: number }): NavGr
         { label: 'Leads', href: '/leads', icon: ICON.leads, badge: badges.newLeads },
         { label: 'Foreclosures', href: '/foreclosures', icon: ICON.foreclosure },
         { label: 'Probate', href: '/probate', icon: ICON.probate },
+        { label: 'Tax Sales', href: '/tax-sales', icon: ICON.taxSale },
+        { label: 'Surplus Funds', href: '/surplus-funds', icon: ICON.surplus },
         { label: 'Deals', href: '/deals', icon: ICON.deals },
       ],
     },

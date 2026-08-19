@@ -32,6 +32,8 @@ import { ExternalConversationsModule } from './external-conversations/external-c
 import { PushModule } from './push/push.module';
 import { ForeclosuresModule } from './foreclosures/foreclosures.module';
 import { ProbateModule } from './probate/probate.module';
+import { TaxSalesModule } from './tax-sales/tax-sales.module';
+import { SurplusModule } from './surplus/surplus.module';
 import { DigestModule } from './digest/digest.module';
 
 @Module({
@@ -71,6 +73,8 @@ import { DigestModule } from './digest/digest.module';
     PushModule,
     ForeclosuresModule,
     ProbateModule,
+    TaxSalesModule,
+    SurplusModule,
     DigestModule,
   ],
 })

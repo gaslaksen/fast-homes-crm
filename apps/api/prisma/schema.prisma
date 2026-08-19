@@ -306,6 +306,8 @@ model Lead {
   aiArvCalculations   AiArvCalculation[] @relation("LeadAiArvCalculations")
   foreclosureDetail   ForeclosureDetail?
   probateDetail       ProbateDetail?
+  taxSaleDetail       TaxSaleDetail?
+  surplusDetail       SurplusDetail?
   foreclosureDocuments ForeclosureDocument[]
   foreclosureFilings   ForeclosureFiling[]
   foreclosureSignals   ForeclosureSignal[]
@@ -511,6 +513,254 @@ model ProbateDetail {
   // Reverse lookup for an inbound message from the heir's second number.
   @@index([phone2])
   @@map("probate_details")
+}
+
+/// Tax-sale-specific facts for a Lead with source = TAX_SALE. A delinquent tax
+/// foreclosure is not a mortgage foreclosure: there is no lender debt to net
+/// against, the number that decides the deal is the REDEMPTION PAYOFF (taxes
+/// plus interest, fees and costs), and the owner can pay it any time before the
+/// court confirms the sale, which withdraws the property and kills the lead.
+/// So redemptionAmount is a first-class column, not something derived later.
+model TaxSaleDetail {
+  id             String  @id @default(cuid())
+  leadId         String  @unique
+  lead           Lead    @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  organizationId String?
+
+  /// Idempotent-ingestion key: "fileNumber|address". The file number alone is
+  /// not enough because one judicial action can cover several parcels, and the
+  /// address alone is not enough because a property that redeems and falls
+  /// delinquent again comes back under a new file.
+  dedupeUid   String
+  importBatch String?
+
+  // ── The filing ────────────────────────────────────────────────────────────
+  fileNumber String?
+  method     String? // TaxSaleMethod: IN_REM | JUDICIAL
+  /// "105-375" for in rem, "105-374" for judicial. Stored rather than derived
+  /// from method so a county that files unusually is recorded as it filed.
+  statute    String?
+  deedType   String? // "Sheriff's Deed" | "Commissioner's Deed"
+  filedBy    String? // county attorney or the outside firm handling it
+  county     String?
+  parcelId   String?
+
+  // ── Property and owner ────────────────────────────────────────────────────
+  countyOwner  String? // owner exactly as the county lists it
+  propertyType String?
+  acreage      Float?
+  ownedSince   String?
+  occupancy    String? @default("UNKNOWN") // TaxSaleOccupancy
+
+  // ── Clocks ────────────────────────────────────────────────────────────────
+  saleDate      DateTime?
+  /// End of the 10-day upset bid window that runs from the report of sale.
+  upsetDeadline DateTime?
+
+  // ── Money ─────────────────────────────────────────────────────────────────
+  assessedValue    Float?
+  taxesOwed        Float?
+  /// Everything the owner must pay to redeem: taxes plus interest, fees, and
+  /// costs. Always >= taxesOwed; the difference is what the card shows as
+  /// "interest, fees, and costs" in the payoff waterfall.
+  redemptionAmount Float?
+  openingBid       Float?
+  currentBid       Float?
+  depositPct       Float?  @default(20)
+  /// The tax years actually behind, e.g. [2019, 2020, 2021]. Length is the
+  /// "years delinquent" figure the board filters on.
+  delinquentYears  Json?
+  /// City taxes are owed on top of the county's, which raises the payoff.
+  cityTaxes        Boolean @default(false)
+  /// A lender on title usually redeems to protect its own lien, which is the
+  /// single biggest reason a tax sale lead goes nowhere.
+  hasMortgage      Boolean @default(false)
+  /// An IRS lien carries a 120-day federal right of redemption AFTER the sale.
+  hasIrsLien       Boolean @default(false)
+
+  // ── Derived ───────────────────────────────────────────────────────────────
+  stage        String? @default("JUDGMENT_DOCKETED") // TaxSaleStage
+  priority     String? @default("LOW") // ForeclosurePriority
+  leadScore    Int     @default(0)
+  equityPct    Float?
+  equitySpread Float?
+
+  // ── Working the lead ──────────────────────────────────────────────────────
+  workStatus String? @default("NOT_CONTACTED") // TaxSaleWorkStatus
+  doNotCall  Boolean @default(false)
+  callNotes  String?
+  /// Free-text card chips: "Owner-occupied", "Title complexity", "Estate",
+  /// "Heirs required". Descriptive, and each doubles as a board filter.
+  tags       Json?
+  /// { title, owner, occupancy, drive } - the workup checklist that gates
+  /// outreach. All four must be ticked before the board will queue a call.
+  workup     Json?
+  touchDays  Json?
+  touchWeek  String?
+  touchCount Int     @default(0)
+
+  // ── Contacts and DNC ──────────────────────────────────────────────────────
+  // Lead.sellerPhone holds phone1 and Lead.sellerEmail holds email1; the rest
+  // live here so a skip trace can attach up to 4 phones and 2 emails.
+  phone2        String?
+  phone3        String?
+  phone4        String?
+  phone1Type    String?
+  phone2Type    String?
+  phone3Type    String?
+  phone4Type    String?
+  email2        String?
+  /// Per-number DncRegistry ('federal' | 'state' | 'litigator'), null when the
+  /// number came back clean. Registered numbers are roughly a $500-$1,500
+  /// problem per call, trebled if willful, so this is stored per number rather
+  /// than collapsed into one flag on the lead.
+  phone1Dnc     String?
+  phone2Dnc     String?
+  phone3Dnc     String?
+  phone4Dnc     String?
+  /// When the numbers were last run against the registries. A scrub older than
+  /// 31 days does not count as scrubbed, because people register in between.
+  dncScrubbedAt DateTime?
+
+  // ── External links ────────────────────────────────────────────────────────
+  parcelUrl    String?
+  zillowUrl    String?
+  realtorQuery String?
+  realtorZip   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organizationId, dedupeUid])
+  @@index([organizationId, priority])
+  @@index([organizationId, saleDate])
+  @@index([organizationId, stage])
+  @@index([organizationId, workStatus])
+  @@index([organizationId, county])
+  // An inbound text or call arrives with only a number and the owner may use
+  // any of the four, so these make that reverse lookup an index hit.
+  @@index([phone2])
+  @@index([phone3])
+  @@index([phone4])
+  @@map("tax_sale_details")
+}
+
+/// Surplus-funds facts for a Lead with source = SURPLUS. Florida only, and
+/// structurally unlike every other pipeline here: the lead is a FORMER owner
+/// with money already sitting at a clerk, not a homeowner facing a sale. There
+/// is no property to buy. What is being worked is a claim, and whether we can
+/// be paid for filing it is a compliance question that gates the contract.
+model SurplusDetail {
+  id             String  @id @default(cuid())
+  leadId         String  @unique
+  lead           Lead    @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  organizationId String?
+
+  /// Idempotent-ingestion key: "county|caseNumber|claimant". A single sale can
+  /// produce several claimants against one surplus (an owner and two
+  /// lienholders), and each is its own lead.
+  dedupeUid   String
+  importBatch String?
+
+  // ── The case ──────────────────────────────────────────────────────────────
+  county     String?
+  caseNumber String?
+  parcelId   String?
+
+  // ── The claimant ──────────────────────────────────────────────────────────
+  claimantType  String? @default("previous_owner") // SurplusClaimantType
+  /// Either flag routes the lead onto the heir/estate drip and drops it out of
+  /// Tier A, because an estate claim needs letters and a death certificate
+  /// before it can be filed at all.
+  deceased      Boolean @default(false)
+  heirsRequired Boolean @default(false)
+  /// Informational, not a block: a competing lien does not stop outreach, but
+  /// the payout may land under the posted surplus.
+  competingLien Boolean @default(false)
+
+  // ── The regime ────────────────────────────────────────────────────────────
+  // These two fields together select the compliance rule, which sets the fee
+  // cap, whether a licensed representative is required, and the claim window.
+  surplusType  String? @default("tax_deed") // SurplusType
+  fundLocation String? @default("clerk") // SurplusFundLocation
+
+  // ── Clocks ────────────────────────────────────────────────────────────────
+  saleDate            DateTime?
+  salePrice           Float?
+  /// The claim window runs from the MAILED NOTICE of surplus, not the sale.
+  noticeDate          DateTime?
+  /// Until the notice date is confirmed with the clerk the countdown is a
+  /// guess, and the card says so rather than showing a confident number.
+  noticeConfirmed     Boolean   @default(false)
+  /// Starts the separate 60-day clock for filing the assignment.
+  certOfDisbursements DateTime?
+
+  // ── Money ─────────────────────────────────────────────────────────────────
+  grossSurplus Float?
+  /// [{ type, holder, amount, priority, governmental }]. Governmental units
+  /// other than federal or ad valorem are paid before nongovernmental
+  /// claimants, so they come off the top of the waterfall regardless of
+  /// recording order. Net to claimant is gross minus all of these.
+  liens        Json?
+
+  // ── The arrangement ───────────────────────────────────────────────────────
+  arrangement        String? @default("assignment") // assignment | limited_poa
+  /// Measured against TOTAL consideration, not a line item labelled "fee",
+  /// because FS 45.033(3)(d) reaches anything paid or payable, earned or
+  /// expected to be earned.
+  totalConsideration Float?  @default(0)
+  /// Required once funds escheat: Chapter 717 needs a representative
+  /// registered with Florida DFS, and without one the contract is blocked.
+  licensedRepId      String?
+
+  // ── Pipeline ──────────────────────────────────────────────────────────────
+  stage String? @default("New") // SurplusStage
+  /// Cached band so the board can sort and count without recomputing over
+  /// every row. Derived from gross surplus, deceased/heirs, competing lien.
+  tier  String? @default("U") // SurplusTier
+
+  // ── Qualification gate ────────────────────────────────────────────────────
+  // All three must be true before the stage can advance to Agreement Signed.
+  // A hard gate, not a warning, so a stage change cannot skip past it.
+  entitlementVerified Boolean @default(false)
+  titleSearchComplete Boolean @default(false)
+  /// { financial, noAttorneyNeeded, allConsideration } - the disclosures the
+  /// governing rule requires in the contract. Any missing one blocks the send.
+  disclosures         Json?
+  /// { claimForm, photoId, proofOwnership, w9, feeAgreement, titleSearch,
+  /// deathCert, letters } - what has actually been collected.
+  docs                Json?
+
+  // ── Working the lead ──────────────────────────────────────────────────────
+  doNotCall  Boolean @default(false)
+  callNotes  String?
+  touchDays  Json?
+  touchWeek  String?
+  touchCount Int     @default(0)
+
+  // ── Contacts ──────────────────────────────────────────────────────────────
+  phone2     String?
+  phone3     String?
+  phone4     String?
+  phone1Type String?
+  phone2Type String?
+  phone3Type String?
+  phone4Type String?
+  email2     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organizationId, dedupeUid])
+  @@index([organizationId, stage])
+  @@index([organizationId, tier])
+  @@index([organizationId, county])
+  @@index([organizationId, noticeDate])
+  @@index([organizationId, grossSurplus])
+  @@index([phone2])
+  @@index([phone3])
+  @@index([phone4])
+  @@map("surplus_details")
 }
 
 /// One uploaded filing from a foreclosure case file. Deliberately stores the

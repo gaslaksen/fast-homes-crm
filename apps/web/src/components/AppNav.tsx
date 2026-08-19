@@ -14,6 +14,8 @@ const NAV_ITEMS = [
   { label: 'Leads',     href: '/leads' },
   { label: 'Foreclosures', href: '/foreclosures' },
   { label: 'Probate', href: '/probate' },
+  { label: 'Tax Sales', href: '/tax-sales' },
+  { label: 'Surplus Funds', href: '/surplus-funds' },
   { label: 'Drip Campaigns', href: '/drip-campaigns' },
   { label: 'Deal Search', href: '/deal-search' },
   { label: 'Partners',  href: '/settings/partners' },
