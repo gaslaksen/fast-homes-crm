@@ -230,12 +230,12 @@ button.dc-tag:hover { filter: brightness(1.08); }
 .dark button.dc-tag:hover { filter: brightness(1.25); }
 button.dc-tag.picked { border-color: currentColor; }
 
-.dc-daybox {
+button.dc-daybox {
   width: 28px; height: 28px; border-radius: 7px; border: 1px solid var(--border2);
   background: var(--bg2); display: grid; place-items: center; font-size: 13px;
   font-weight: 800; color: transparent;
 }
-.dc-daybox.on { background: var(--mint); border-color: var(--mint); color: var(--mintInk); }
+button.dc-daybox.on { background: var(--mint); border-color: var(--mint); color: var(--mintInk); }
 .dc-daylbl { font-size: 12px; font-weight: 800; color: var(--dim); text-align: center; margin-top: 5px; }
 
 .dc-bar { height: 6px; border-radius: 6px; background: var(--surface3); overflow: hidden; }
