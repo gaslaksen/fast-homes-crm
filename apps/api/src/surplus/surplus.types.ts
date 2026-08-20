@@ -5,6 +5,8 @@ import { SurplusLien } from './surplus.util';
 export interface SurplusPhoneInput {
   number: string;
   type?: string | null;
+  /** DncRegistry value, or null when the number came back clean. */
+  dnc?: string | null;
 }
 
 /** One normalized row, whether it came off a county list or the Add lead form. */
@@ -46,6 +48,10 @@ export interface SurplusLeadInput {
 
   phones?: SurplusPhoneInput[];
   emails?: string[];
+  dncScrubbedAt?: string | null;
+  /** True when a skip trace returned somebody other than the claimant. */
+  contactMismatch?: boolean;
+  mismatchedName?: string | null;
 
   importBatch?: string;
 }

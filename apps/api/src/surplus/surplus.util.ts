@@ -298,19 +298,75 @@ export function complianceGate(lead: SurplusFacts, now = new Date()): Compliance
 // ─── Ingestion helpers ──────────────────────────────────────────────────────
 
 /**
- * Dedupe key: county | caseNumber | claimant. A single sale can produce several
- * claimants against one surplus (an owner and two lienholders) and each is its
- * own lead, so the case alone would collapse them.
+ * Dedupe key: county | case-or-parcel | claimant. A single sale can produce
+ * several claimants against one surplus (an owner and two lienholders) and each
+ * is its own lead, so the case alone would collapse them.
+ *
+ * The parcel stands in when a list ships no case number, which clerk exports
+ * often do not. Without that fallback one owner holding two properties in the
+ * same county collapses into a single lead and the second surplus disappears.
  */
 export function surplusUidOf(o: {
   county?: string | null;
   caseNumber?: string | null;
+  parcelId?: string | null;
   claimant?: string | null;
 }): string {
   const norm = (v?: string | null) =>
     String(v || '').toUpperCase().replace(/\s+/g, '_').trim();
-  const base = `${norm(o.county)}|${norm(o.caseNumber)}|${norm(o.claimant)}`;
+  const property = norm(o.caseNumber) || norm(o.parcelId);
+  const base = `${norm(o.county)}|${property}|${norm(o.claimant)}`;
   return base === '||' ? '' : base.slice(0, 160);
+}
+
+/**
+ * Does a skip trace's returned name actually belong to the claimant?
+ *
+ * This is a gate, not a nicety. Vendor lists come back with `matched: true` on
+ * rows where the returned person is a complete stranger: a Marion County export
+ * sampled 2026-08-19 had 3 of 11 matched rows return a different name entirely,
+ * carrying 14 phone numbers between them. Attaching those to the claimant means
+ * calling an uninvolved person about someone else's money, which is a wrong
+ * party TCPA problem and a privacy problem in one.
+ *
+ * Surnames are compared, not full names. A trace routinely returns a spouse,
+ * an adult child, or a maiden name at the same household, and those are the
+ * right household to reach; a different surname is not. Any shared surname
+ * token counts, so "Smith-Jones" still matches "Jones".
+ *
+ * Returns true when nothing was returned to check: an empty trace attaches no
+ * contacts anyway, and calling that a mismatch would be misleading.
+ */
+export function nameMatchesClaimant(
+  claimantLast?: string | null,
+  tracedLast?: string | null,
+): boolean {
+  const tokens = (v?: string | null) =>
+    String(v || '')
+      .toLowerCase()
+      // Apostrophes and periods are dropped rather than split on, so O'Brien
+      // still matches a vendor that returned OBrien. Spaces and hyphens do
+      // split, so Smith-Jones matches Jones.
+      .replace(/['\u2019.]/g, '')
+      .split(/[^a-z]+/i)
+      .map((t) => t.trim())
+      .filter((t) => t.length >= 2);
+
+  const traced = tokens(tracedLast);
+  if (!traced.length) return true; // nothing came back, nothing to reject
+
+  const claimant = tokens(claimantLast);
+  if (!claimant.length) return false; // cannot vouch for it, so do not
+
+  return traced.some((t) => claimant.includes(t));
+}
+
+/** Surname out of "HILL TAMMIE LEE" or "Tammie Hill". Best effort. */
+export function surnameOf(first?: string | null, last?: string | null): string {
+  const l = String(last || '').trim();
+  if (l) return l;
+  const parts = String(first || '').trim().split(/\s+/).filter(Boolean);
+  return parts.length > 1 ? parts[parts.length - 1] : parts[0] || '';
 }
 
 export function claimantTypeFromText(raw?: string | null): SurplusClaimantType {

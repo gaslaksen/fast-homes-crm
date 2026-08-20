@@ -10,6 +10,7 @@ import {
   CHIP,
   CLAIMANT_TYPE_LABEL,
   DAYS,
+  DNC_STATE,
   DOC_LABEL,
   DRIP_TRACK_COLOR,
   SURPLUS_STAGES,
@@ -27,6 +28,8 @@ import {
 interface Phone {
   number: string;
   type: string | null;
+  /** DncRegistry value, or null when the number came back clean. */
+  dnc: string | null;
 }
 
 interface Lien {
@@ -114,6 +117,10 @@ interface SurplusLead {
 
   phones: Phone[];
   emails: string[];
+  cleanPhoneCount: number;
+  /** A skip trace returned somebody other than the claimant, so it was discarded. */
+  contactMismatch: boolean;
+  mismatchedName: string | null;
   doNotCall: boolean;
   callNotes: string;
   touchDays: Record<string, boolean>;
@@ -261,12 +268,18 @@ export default function SurplusFundsPage() {
     try {
       const res = await surplusAPI.importExecute(f, { importBatch: f.name });
       const r = res.data;
+      const mismatches = r.contactMismatches?.length || 0;
       say(
         `Imported ${r.created} lead${r.created === 1 ? '' : 's'} from ${f.name}` +
           (r.duplicates ? `, ${r.duplicates} already on file` : '') +
           (r.belowFloor ? `, ${r.belowFloor} under the ${money(floor)} floor` : '') +
           (r.errors?.length ? `, ${r.errors.length} row${r.errors.length === 1 ? '' : 's'} skipped` : '') +
-          '.',
+          '.' +
+          // Worth its own sentence: these leads landed WITHOUT contacts, and a
+          // count buried in a list reads as a rounding detail rather than work.
+          (mismatches
+            ? ` ${mismatches} skip trace${mismatches === 1 ? '' : 's'} came back as a different person, so those contacts were discarded.`
+            : ''),
       );
       fetchRows();
       fetchStats();
@@ -801,7 +814,7 @@ function SurplusCard({ r, picked, onPick, editing, onEditing, disclosureLabels, 
                 <button
                   className="dc-btn sm"
                   style={{ marginBottom: 10 }}
-                  onClick={() => patch(r.id, { phones: r.phones.concat([{ number: '', type: 'Mobile' }]) })}
+                  onClick={() => patch(r.id, { phones: r.phones.concat([{ number: '', type: 'Mobile', dnc: null }]) })}
                 >
                   + Add number
                 </button>
@@ -832,21 +845,54 @@ function SurplusCard({ r, picked, onPick, editing, onEditing, disclosureLabels, 
             </>
           ) : (
             <>
-              {r.phones.length === 0 && r.emails.length === 0 && (
+              {r.phones.length === 0 && r.emails.length === 0 && !r.contactMismatch && (
                 <div style={{ color: 'var(--faint)', fontSize: 12.5, paddingBottom: 6 }}>No contact details yet.</div>
               )}
-              {r.phones.map((ph, i) => (
-                <div key={i} className="dc-crow">
-                  <span style={{ color: 'var(--faint)' }}>☏</span>
-                  <span style={{ flex: 1, fontWeight: 600 }}>{phoneDisplay(ph.number) || '-'}</span>
-                  <button className="dc-copy" onClick={() => copy(phoneDisplay(ph.number))}>
-                    ⧉
-                  </button>
-                  <span className="dc-tag" style={{ background: 'var(--surface3)', color: 'var(--dim)', fontSize: 11.5, padding: '4px 9px' }}>
-                    {ph.type || 'Unknown'}
-                  </span>
+              {r.contactMismatch && (
+                <div
+                  style={{
+                    color: 'var(--amberBody)', background: 'rgba(180,83,9,.12)',
+                    border: '1px solid var(--amber)', borderRadius: 8,
+                    padding: '8px 10px', fontSize: 11.5, lineHeight: 1.5, marginBottom: 8, fontWeight: 600,
+                  }}
+                >
+                  Skip trace came back as {r.mismatchedName || 'a different person'}, not {r.claimant}. Those
+                  contacts were discarded rather than stored. Re-trace or find the claimant by hand.
                 </div>
-              ))}
+              )}
+              {r.phones.map((ph, i) => {
+                const flag = ph.dnc ? DNC_STATE[ph.dnc] : null;
+                return (
+                  <div key={i} className="dc-crow">
+                    <span style={{ color: flag ? 'var(--red)' : 'var(--faint)' }}>{flag ? '⊘' : '☏'}</span>
+                    <span
+                      style={{
+                        flex: 1,
+                        fontWeight: 600,
+                        color: flag ? 'var(--dim)' : 'var(--text)',
+                        textDecoration: flag ? 'line-through' : 'none',
+                      }}
+                    >
+                      {phoneDisplay(ph.number) || '-'}
+                    </span>
+                    <button className="dc-copy" onClick={() => copy(phoneDisplay(ph.number))}>
+                      ⧉
+                    </button>
+                    <span
+                      className="dc-tag"
+                      style={{
+                        background: flag ? flag.bg : 'var(--surface3)',
+                        color: flag ? flag.fg : 'var(--dim)',
+                        fontSize: 11.5,
+                        padding: '4px 9px',
+                      }}
+                      title={flag ? 'Do not dial this number' : ph.type || ''}
+                    >
+                      {flag ? flag.label : ph.type || 'Unknown'}
+                    </span>
+                  </div>
+                );
+              })}
               {r.emails.map((em, i) => (
                 <div key={i} className="dc-crow">
                   <span style={{ color: 'var(--faint)' }}>✉</span>

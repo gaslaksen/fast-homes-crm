@@ -123,6 +123,8 @@ export class SurplusController {
       organizationId: body.organizationId || organizationId || null,
       importBatch: body.importBatch || file.originalname,
       dryRun: body.dryRun === true || body.dryRun === 'true',
+      // Optional: names the county for a file that does not carry one.
+      county: body.county || undefined,
     });
   }
 

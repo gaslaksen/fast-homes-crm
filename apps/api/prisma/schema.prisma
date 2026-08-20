@@ -747,6 +747,23 @@ model SurplusDetail {
   phone3Type String?
   phone4Type String?
   email2     String?
+  /// Per-number DncRegistry ('federal' | 'state' | 'litigator'), null when the
+  /// number came back clean. Skip-traced surplus lists routinely come back with
+  /// half their numbers already on a registry, so the flag has to survive
+  /// import: a number shown without it is a number somebody will dial.
+  phone1Dnc  String?
+  phone2Dnc  String?
+  phone3Dnc  String?
+  phone4Dnc  String?
+  /// When the numbers were last run against the registries.
+  dncScrubbedAt DateTime?
+  /// Set when a skip trace came back with contacts that do NOT belong to the
+  /// claimant. The contacts are discarded rather than stored, and this records
+  /// why the lead has none, so nobody re-runs the same trace expecting a hit.
+  contactMismatch Boolean @default(false)
+  /// The name the trace actually returned, kept only when it was rejected as a
+  /// mismatch, so the rejection can be audited rather than just trusted.
+  mismatchedName  String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

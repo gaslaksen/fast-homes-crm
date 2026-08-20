@@ -124,6 +124,7 @@ export class SurplusService {
     const dedupeUid = surplusUidOf({
       county,
       caseNumber: input.caseNumber,
+      parcelId: input.parcelId,
       claimant,
     });
     const existing = await this.prisma.surplusDetail.findFirst({
@@ -221,7 +222,14 @@ export class SurplusService {
             phone2Type: phones[1]?.type || null,
             phone3Type: phones[2]?.type || null,
             phone4Type: phones[3]?.type || null,
+            phone1Dnc: phones[0]?.dnc || null,
+            phone2Dnc: phones[1]?.dnc || null,
+            phone3Dnc: phones[2]?.dnc || null,
+            phone4Dnc: phones[3]?.dnc || null,
             email2: emails[1] || null,
+            dncScrubbedAt: isoToDate(cellText(input.dncScrubbedAt)),
+            contactMismatch: !!input.contactMismatch,
+            mismatchedName: input.mismatchedName || null,
           },
         },
       },
@@ -236,8 +244,12 @@ export class SurplusService {
       .map((p) => ({
         number: normalizePhoneDigits(p?.number) || '',
         type: phoneTypeOf(p?.type) || (p?.type ? cellText(p.type) : null),
+        dnc: p?.dnc || null,
       }))
       .filter((p) => p.number)
+      // Only four fit. Clean numbers are kept ahead of registered ones so a
+      // dialable number is never crowded out by one nobody may call.
+      .sort((a, b) => (a.dnc ? 1 : 0) - (b.dnc ? 1 : 0))
       .slice(0, 4);
   }
 
@@ -328,6 +340,15 @@ export class SurplusService {
       detailPatch.phone2Type = phones[1]?.type || null;
       detailPatch.phone3Type = phones[2]?.type || null;
       detailPatch.phone4Type = phones[3]?.type || null;
+      detailPatch.phone1Dnc = phones[0]?.dnc || null;
+      detailPatch.phone2Dnc = phones[1]?.dnc || null;
+      detailPatch.phone3Dnc = phones[2]?.dnc || null;
+      detailPatch.phone4Dnc = phones[3]?.dnc || null;
+      // A hand-entered number has not been scrubbed, and once somebody has
+      // supplied the right contact the old mismatch no longer describes it.
+      if (patch.dncScrubbedAt === undefined) detailPatch.dncScrubbedAt = null;
+      detailPatch.contactMismatch = false;
+      detailPatch.mismatchedName = null;
     }
     if (patch.emails !== undefined) {
       const emails = (patch.emails || []).map((e: any) => cellText(e)).filter(Boolean);
@@ -551,10 +572,10 @@ export class SurplusService {
     const d = lead.surplusDetail;
 
     const phones = [
-      { number: normalizePhoneDigits(lead.sellerPhone) || '', type: d.phone1Type },
-      { number: normalizePhoneDigits(d.phone2) || '', type: d.phone2Type },
-      { number: normalizePhoneDigits(d.phone3) || '', type: d.phone3Type },
-      { number: normalizePhoneDigits(d.phone4) || '', type: d.phone4Type },
+      { number: normalizePhoneDigits(lead.sellerPhone) || '', type: d.phone1Type, dnc: d.phone1Dnc },
+      { number: normalizePhoneDigits(d.phone2) || '', type: d.phone2Type, dnc: d.phone2Dnc },
+      { number: normalizePhoneDigits(d.phone3) || '', type: d.phone3Type, dnc: d.phone3Dnc },
+      { number: normalizePhoneDigits(d.phone4) || '', type: d.phone4Type, dnc: d.phone4Dnc },
     ].filter((p) => p.number);
     const emails = [lead.sellerEmail, d.email2].map((e) => cellText(e)).filter(Boolean);
 
@@ -650,6 +671,10 @@ export class SurplusService {
 
       phones,
       emails,
+      cleanPhoneCount: phones.filter((p) => !p.dnc).length,
+      dncScrubbedAt: d.dncScrubbedAt,
+      contactMismatch: d.contactMismatch,
+      mismatchedName: d.mismatchedName,
       doNotCall: d.doNotCall,
       callNotes: d.callNotes || '',
       touchDays,

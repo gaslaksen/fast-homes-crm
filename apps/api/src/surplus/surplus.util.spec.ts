@@ -1,5 +1,7 @@
 import {
   surplusUidOf,
+  nameMatchesClaimant,
+  surnameOf,
   claimantTypeFromText,
   stageFromText,
   tierOf,
@@ -64,6 +66,77 @@ describe('surplusUidOf', () => {
 
   it('is empty when there is nothing to key on', () => {
     expect(surplusUidOf({})).toBe('');
+  });
+
+  it('falls back to the parcel when a clerk list ships no case number', () => {
+    expect(surplusUidOf({ county: 'Marion', parcelId: '06510-000-00', claimant: 'Tammie Hill' })).toBe(
+      'MARION|06510-000-00|TAMMIE_HILL',
+    );
+  });
+
+  it('keeps two properties held by one owner in a county apart without a case number', () => {
+    const a = surplusUidOf({ county: 'Marion', parcelId: '111', claimant: 'Donald Gates' });
+    const b = surplusUidOf({ county: 'Marion', parcelId: '222', claimant: 'Donald Gates' });
+    expect(a).not.toBe(b);
+  });
+
+  it('prefers the case number over the parcel when both are present', () => {
+    expect(
+      surplusUidOf({ county: 'Lee', caseNumber: '26-TD-1', parcelId: '999', claimant: 'A B' }),
+    ).toBe('LEE|26-TD-1|A_B');
+  });
+});
+
+describe('nameMatchesClaimant', () => {
+  it('accepts a trace that returned the same surname', () => {
+    expect(nameMatchesClaimant('BARR', 'Barr')).toBe(true);
+  });
+
+  it('accepts a different first name at the same surname, which is the household', () => {
+    // Gordon Samanie's trace came back as John Samanie: a relative at the same
+    // address, and the right household to reach.
+    expect(nameMatchesClaimant('SAMANIE', 'Samanie')).toBe(true);
+  });
+
+  it('rejects an outright different person', () => {
+    // The three real rejections from the Marion County export.
+    expect(nameMatchesClaimant('HILL', 'Martin')).toBe(false);
+    expect(nameMatchesClaimant('HUNT', 'Tolmo')).toBe(false);
+    expect(nameMatchesClaimant('ROSS', 'Filkins')).toBe(false);
+  });
+
+  it('accepts a hyphenated surname sharing one half', () => {
+    expect(nameMatchesClaimant('Smith-Jones', 'Jones')).toBe(true);
+    expect(nameMatchesClaimant('Jones', 'Smith-Jones')).toBe(true);
+  });
+
+  it('accepts when the trace returned nothing, since there is nothing to reject', () => {
+    expect(nameMatchesClaimant('HILL', '')).toBe(true);
+    expect(nameMatchesClaimant('HILL', null)).toBe(true);
+  });
+
+  it('refuses to vouch for a trace when the claimant surname is unknown', () => {
+    expect(nameMatchesClaimant('', 'Martin')).toBe(false);
+  });
+
+  it('ignores initials and punctuation rather than matching on them', () => {
+    // A single letter is not evidence of anything.
+    expect(nameMatchesClaimant('B', 'Barr')).toBe(false);
+    expect(nameMatchesClaimant("O'Brien", 'OBrien')).toBe(true);
+  });
+});
+
+describe('surnameOf', () => {
+  it('takes the last-name column when there is one', () => {
+    expect(surnameOf('Tammie', 'Hill')).toBe('Hill');
+  });
+
+  it('falls back to the final word of a full name', () => {
+    expect(surnameOf('Tammie Lee Hill', '')).toBe('Hill');
+  });
+
+  it('returns a single word unchanged', () => {
+    expect(surnameOf('Hill', '')).toBe('Hill');
   });
 });
 
