@@ -769,18 +769,38 @@ function SurplusCard({ r, picked, onPick, editing, onEditing, disclosureLabels, 
             <span>{g.clear ? '✓' : '⛔'}</span>
             {g.clear
               ? 'Clear to send a contract'
-              : `Contract send blocked, ${g.blocks.length} issue${g.blocks.length === 1 ? '' : 's'}`}
+              : `Contract send blocked, ${g.blocks.length} blocker${g.blocks.length === 1 ? '' : 's'}`}
           </div>
-          {g.blocks.map((b, i) => (
-            <div key={i} className="note" style={{ color: 'var(--redBody)' }}>
-              · {b}
-            </div>
-          ))}
-          {g.warns.map((w, i) => (
-            <div key={i} className="note" style={{ color: 'var(--amberBody)' }}>
-              · {w}
-            </div>
-          ))}
+          {/* Blockers and warnings used to render as near-identical bullets, so a
+              header reading "1 issue" sat above three lines and looked like a
+              miscount. Label each group and say plainly which one stops a send. */}
+          {g.blocks.length > 0 && (
+            <>
+              <div className="dc-gate-lbl" style={{ color: 'var(--redHead)' }}>
+                Must fix to send
+              </div>
+              {g.blocks.map((b, i) => (
+                <div key={i} className="note" style={{ color: 'var(--redBody)' }}>
+                  · {b}
+                </div>
+              ))}
+            </>
+          )}
+          {g.warns.length > 0 && (
+            <>
+              <div
+                className="dc-gate-lbl"
+                style={{ color: 'var(--amberBody)', marginTop: g.blocks.length ? 9 : 0 }}
+              >
+                Heads up, does not block sending
+              </div>
+              {g.warns.map((w, i) => (
+                <div key={i} className="note" style={{ color: 'var(--amberBody)' }}>
+                  · {w}
+                </div>
+              ))}
+            </>
+          )}
         </div>
 
         <div className="dc-contact">

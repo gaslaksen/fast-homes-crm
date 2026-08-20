@@ -263,6 +263,12 @@ button.dc-daybox.on { background: var(--mint); border-color: var(--mint); color:
 .dc-panel.bad { background: var(--redGhost); border-color: var(--red); }
 .dc-panel .head { display: flex; align-items: center; gap: 7px; font-weight: 700; font-size: 12.5px; }
 .dc-panel .note { font-size: 11.5px; line-height: 1.55; padding-left: 20px; }
+/* Group heading inside the compliance gate. Separates the blockers that stop a
+   send from the advisories that only inform, which otherwise read as one list. */
+.dc-panel .dc-gate-lbl {
+  font-size: 10px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase;
+  padding-left: 20px; margin-bottom: 2px; opacity: 0.85;
+}
 
 .dc-rule { padding: 13px; border-radius: 10px; background: var(--surface2); border: 1px solid var(--border); }
 .dc-empty { text-align: center; padding: 64px 20px; color: var(--dim); background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); }
