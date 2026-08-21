@@ -6,11 +6,11 @@ A production-ready property wholesaling CRM with AI-assisted texting, lead scori
 
 - **Lead Management**: Complete CRM pipeline from acquisition to closing
 - **Council Model Scoring**: CHAMP-based lead scoring (0-12 scale, 4 bands)
-- **AI-Assisted Texting**: Generate message drafts with human-in-the-loop approval
-- **Auto-Extraction**: AI extracts signals from conversations to update lead data
-- **Comps Integration**: ChatARV.ai integration + placeholder mode
+- **AI-Assisted Texting**: Claude-generated message drafts with human-in-the-loop approval
+- **Auto-Extraction**: Claude extracts signals from conversations to update lead data
+- **Comps Integration**: RentCast and ATTOM comps with a placeholder fallback
 - **Twilio SMS**: Full inbound/outbound messaging with webhooks
-- **Multi-Source Ingestion**: PropertyLeads.com, Google Ads, manual entry
+- **Multi-Source Ingestion**: PropertyLeads.com, Google Ads, foreclosure, probate, tax sales, surplus funds, manual entry
 - **Dashboard & Reporting**: Stats, hot leads, tasks, activity tracking
 - **Complete Audit Trail**: Activity logging for all key events
 
@@ -33,9 +33,10 @@ fast-homes-crm/
 **Backend:**
 - NestJS (TypeScript)
 - PostgreSQL + Prisma ORM
-- Twilio SMS
-- OpenAI API
-- BullMQ/Redis (optional)
+- Twilio (SMS provider) + Vapi (AI voice calling)
+- Anthropic Claude (AI drafts, extraction, scoring)
+- Mailgun (inbound + outbound email)
+- BullMQ/Redis (drip sequences)
 
 **Frontend:**
 - Next.js 14 (App Router)
@@ -44,6 +45,9 @@ fast-homes-crm/
 - Axios
 
 ## 🚀 Quick Start
+
+> New contributor? See [CONTRIBUTING.md](CONTRIBUTING.md) for the full onboarding
+> guide: access, environment setup, the branch/PR workflow, and the house rules.
 
 ### Prerequisites
 - Node.js 18+
@@ -78,9 +82,9 @@ cp apps/api/.env.example apps/api/.env
 
 # Edit apps/api/.env with your credentials:
 # - DATABASE_URL (default is fine for local)
-# - TWILIO credentials (optional for development)
-# - OPENAI_API_KEY (optional for AI features)
-# - CHATARV_API_KEY (optional for real comps)
+# - TWILIO credentials (SMS provider; set SMS_TEST_MODE=true locally)
+# - ANTHROPIC_API_KEY (powers all AI features)
+# - RENTCAST_API_KEY / ATTOM_API_KEY (optional, for real comps)
 ```
 
 ### 4. Setup Database
@@ -210,16 +214,20 @@ Keywords like "STOP", "UNSUBSCRIBE" automatically mark leads as DNC.
 
 ## 📊 Comps Integration
 
-### ChatARV.ai Mode
-Set `CHATARV_API_KEY` in `.env`:
+Comps and ARV come from a fallback chain: RentCast, then ChatARV, then
+placeholder. RentCast is the primary source (`GET /avm/value` returns ARV plus
+comparables in one call, cached 24h). ATTOM is available as an explicit comp
+source and powers Deal Search. Set the keys you use in `.env`:
+
 ```bash
-CHATARV_API_KEY="your-api-key"
+RENTCAST_API_KEY="your-api-key"
+ATTOM_API_KEY="your-api-key"
+CHATARV_API_KEY="your-api-key"   # optional
 ```
 
-The system will fetch real comps via ChatARV.ai API.
-
 ### Placeholder Mode
-If ChatARV not configured, system generates realistic placeholder comps for demo/development.
+If no comp provider is configured, the system generates realistic placeholder
+comps for demo/development.
 
 ## 🔧 Configuration
 
@@ -234,9 +242,11 @@ TWILIO_AUTH_TOKEN="your-token"
 TWILIO_PHONE_NUMBER="+15555551234"
 ```
 
-### OpenAI Setup
+### Anthropic Claude Setup
+All AI features (message drafts, signal extraction, CAMP scoring, ARV, foreclosure
+parsing) run on Claude. Without this key the app falls back to non-AI templates.
 ```bash
-OPENAI_API_KEY="sk-xxxxx"
+ANTHROPIC_API_KEY="sk-ant-xxxxx"
 ```
 
 ### PropertyLeads Setup
@@ -270,12 +280,22 @@ JWT_SECRET="generate-strong-secret"
 TWILIO_ACCOUNT_SID="..."
 TWILIO_AUTH_TOKEN="..."
 TWILIO_PHONE_NUMBER="..."
-OPENAI_API_KEY="..."
-CHATARV_API_KEY="..."
+ANTHROPIC_API_KEY="..."
+RENTCAST_API_KEY="..."
+MAILGUN_API_KEY="..."
 
 # Frontend URL (for CORS)
 FRONTEND_URL="https://your-domain.com"
 ```
+
+See `apps/api/.env.example` for the full, authoritative list of variables.
+
+### Production Deploy
+Deploys are automatic. Merging to `master` triggers a production deploy: Railway
+builds and runs the API (plus Postgres and Redis), Vercel builds the web
+frontend. Schema changes require a committed Prisma migration file, or Railway's
+`prisma migrate deploy` silently no-ops and production drifts. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for the branch and PR workflow.
 
 ### Docker Build
 ```bash
@@ -302,7 +322,7 @@ The frontend is fully responsive and works on mobile devices.
 - Change `JWT_SECRET` in production
 - Use environment variables for all secrets
 - Enable rate limiting on webhooks
-- Validate Twilio signatures (TODO: implement)
+- Twilio webhook signatures are validated (`TWILIO_VALIDATE_WEBHOOKS=true`)
 - Use HTTPS in production
 
 ## 📈 Roadmap / TODOs
