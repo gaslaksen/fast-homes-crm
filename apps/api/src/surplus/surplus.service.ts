@@ -492,8 +492,18 @@ export class SurplusService {
 
     let rows = leads.filter((l) => l.surplusDetail).map((l) => this.toRow(l));
 
-    // Both of these read the compliance gate or a derived clock, neither of
-    // which is a column, so they are the only passes done in memory.
+    // These read the compliance gate, a derived clock, or the per-number DNC
+    // flags, none of which is a single column, so they are the passes done in
+    // memory.
+    // A skip trace flags DNC per number, so a lead is uncallable when every
+    // number it has is on a registry. The detail-level doNotCall flag only
+    // catches leads somebody marked by hand, which is why hiding DNC appeared
+    // to do nothing on imported rows. A lead with no numbers at all is not
+    // do-not-call, it is un-traced, and hiding it would bury the mismatches
+    // that need a manual re-trace.
+    if (filters.hideDnc) {
+      rows = rows.filter((r) => !(r.phones.length > 0 && r.cleanPhoneCount === 0));
+    }
     if (filters.lienWindow === 'open') rows = rows.filter((r) => r.lienWindowOpen);
     if (filters.lienWindow === 'closed') rows = rows.filter((r) => !r.lienWindowOpen);
     if (filters.blockedOnly) rows = rows.filter((r) => !r.compliance.clear);

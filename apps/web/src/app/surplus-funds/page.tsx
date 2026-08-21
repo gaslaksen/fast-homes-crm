@@ -23,6 +23,15 @@ import {
   phoneDisplay,
 } from '@/components/pipelines/format';
 
+/**
+ * Contract sending is not built. The button below only advanced the stage and
+ * showed a toast, which reads as "sent" without anything having been sent, and
+ * the compliance gate exists to guard that send. Until there is a real send,
+ * both are hidden rather than deleted, so the FL disclosure and fee-cap work
+ * survives intact. Flip this to true when contracts are wired up.
+ */
+const CONTRACTS_ENABLED = false;
+
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 interface Phone {
@@ -419,10 +428,12 @@ export default function SurplusFundsPage() {
               <div className="k">Tier A</div>
               <div className="v" style={{ color: 'var(--amber)' }}>{stats.tierA}</div>
             </button>
-            <div className="dc-stat">
-              <div className="k">Compliance blocked</div>
-              <div className="v" style={{ color: 'var(--red)' }}>{stats.complianceBlocked}</div>
-            </div>
+            {CONTRACTS_ENABLED && (
+              <div className="dc-stat">
+                <div className="k">Compliance blocked</div>
+                <div className="v" style={{ color: 'var(--red)' }}>{stats.complianceBlocked}</div>
+              </div>
+            )}
             <div className="dc-stat">
               <div className="k">Net in pipeline</div>
               <div className="v" style={{ color: 'var(--mint)', fontSize: 24 }}>{money(stats.netInPipeline)}</div>
@@ -761,47 +772,49 @@ function SurplusCard({ r, picked, onPick, editing, onEditing, disclosureLabels, 
         </div>
 
         {/* Compliance strip. This is the gate, not a warning. */}
-        <div className={`dc-panel ${g.clear ? 'ok' : 'bad'}`}>
-          <div
-            className="head"
-            style={{ color: g.clear ? 'var(--mint)' : 'var(--redHead)', marginBottom: g.blocks.length || g.warns.length ? 7 : 0 }}
-          >
-            <span>{g.clear ? '✓' : '⛔'}</span>
-            {g.clear
-              ? 'Clear to send a contract'
-              : `Contract send blocked, ${g.blocks.length} blocker${g.blocks.length === 1 ? '' : 's'}`}
+        {CONTRACTS_ENABLED && (
+          <div className={`dc-panel ${g.clear ? 'ok' : 'bad'}`}>
+            <div
+              className="head"
+              style={{ color: g.clear ? 'var(--mint)' : 'var(--redHead)', marginBottom: g.blocks.length || g.warns.length ? 7 : 0 }}
+            >
+              <span>{g.clear ? '✓' : '⛔'}</span>
+              {g.clear
+                ? 'Clear to send a contract'
+                : `Contract send blocked, ${g.blocks.length} blocker${g.blocks.length === 1 ? '' : 's'}`}
+            </div>
+            {/* Blockers and warnings used to render as near-identical bullets, so a
+                header reading "1 issue" sat above three lines and looked like a
+                miscount. Label each group and say plainly which one stops a send. */}
+            {g.blocks.length > 0 && (
+              <>
+                <div className="dc-gate-lbl" style={{ color: 'var(--redHead)' }}>
+                  Must fix to send
+                </div>
+                {g.blocks.map((b, i) => (
+                  <div key={i} className="note" style={{ color: 'var(--redBody)' }}>
+                    · {b}
+                  </div>
+                ))}
+              </>
+            )}
+            {g.warns.length > 0 && (
+              <>
+                <div
+                  className="dc-gate-lbl"
+                  style={{ color: 'var(--amberBody)', marginTop: g.blocks.length ? 9 : 0 }}
+                >
+                  Heads up, does not block sending
+                </div>
+                {g.warns.map((w, i) => (
+                  <div key={i} className="note" style={{ color: 'var(--amberBody)' }}>
+                    · {w}
+                  </div>
+                ))}
+              </>
+            )}
           </div>
-          {/* Blockers and warnings used to render as near-identical bullets, so a
-              header reading "1 issue" sat above three lines and looked like a
-              miscount. Label each group and say plainly which one stops a send. */}
-          {g.blocks.length > 0 && (
-            <>
-              <div className="dc-gate-lbl" style={{ color: 'var(--redHead)' }}>
-                Must fix to send
-              </div>
-              {g.blocks.map((b, i) => (
-                <div key={i} className="note" style={{ color: 'var(--redBody)' }}>
-                  · {b}
-                </div>
-              ))}
-            </>
-          )}
-          {g.warns.length > 0 && (
-            <>
-              <div
-                className="dc-gate-lbl"
-                style={{ color: 'var(--amberBody)', marginTop: g.blocks.length ? 9 : 0 }}
-              >
-                Heads up, does not block sending
-              </div>
-              {g.warns.map((w, i) => (
-                <div key={i} className="note" style={{ color: 'var(--amberBody)' }}>
-                  · {w}
-                </div>
-              ))}
-            </>
-          )}
-        </div>
+        )}
 
         <div className="dc-contact">
           {editing ? (
@@ -936,20 +949,22 @@ function SurplusCard({ r, picked, onPick, editing, onEditing, disclosureLabels, 
             <button className="dc-btn sm" disabled title="Skip trace is not wired up for surplus funds yet">
               ↻ Skip trace
             </button>
-            <button
-              className="dc-btn sm pri"
-              style={{ flex: 1, justifyContent: 'center' }}
-              disabled={!g.clear}
-              title={g.clear ? 'Send the fee agreement' : 'Blocked by compliance'}
-              onClick={() => {
-                // Sending is not signing. The pipeline only advances to
-                // Agreement Signed when it actually comes back executed.
-                if (r.stage === 'New') patch(r.id, { stage: 'Contacted' });
-                say('Agreement queued for signature.');
-              }}
-            >
-              Send contract
-            </button>
+            {CONTRACTS_ENABLED && (
+              <button
+                className="dc-btn sm pri"
+                style={{ flex: 1, justifyContent: 'center' }}
+                disabled={!g.clear}
+                title={g.clear ? 'Send the fee agreement' : 'Blocked by compliance'}
+                onClick={() => {
+                  // Sending is not signing. The pipeline only advances to
+                  // Agreement Signed when it actually comes back executed.
+                  if (r.stage === 'New') patch(r.id, { stage: 'Contacted' });
+                  say('Agreement queued for signature.');
+                }}
+              >
+                Send contract
+              </button>
+            )}
           </div>
         </div>
 
@@ -1103,6 +1118,9 @@ function SurplusCard({ r, picked, onPick, editing, onEditing, disclosureLabels, 
                 Requires a representative registered with {g.rule.registrationBody}: {g.rule.licenseTypes.join(', ')}.
               </div>
             )}
+            {/* Only reachable state for these is "ticked so a send unblocks",
+                so they follow the send rather than standing on their own. */}
+            {CONTRACTS_ENABLED && (
             <div style={{ marginTop: 10 }}>
               <Lbl style={{ marginBottom: 6 }}>Required disclosures</Lbl>
               {g.rule.requiredDisclosures.map((d) => {
@@ -1123,6 +1141,7 @@ function SurplusCard({ r, picked, onPick, editing, onEditing, disclosureLabels, 
                 );
               })}
             </div>
+            )}
           </div>
         )}
 
