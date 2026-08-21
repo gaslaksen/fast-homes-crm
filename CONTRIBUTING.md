@@ -18,8 +18,10 @@ production. Read it once end to end before your first change.
 
 - Node.js 18 or newer
 - pnpm 8 (the repo pins `pnpm@8.15.0`)
-- PostgreSQL running locally
-- Redis running locally (optional, used by BullMQ for drip sequences)
+- Git
+- Docker Desktop (runs local Postgres and Redis via `docker-compose`, so you do
+  not install them yourself). Native Postgres and Redis work too if you prefer,
+  see the database step below.
 
 ## First-time setup
 
@@ -57,15 +59,31 @@ production. Read it once end to end before your first change.
    NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=...
    ```
 
-5. **Set up the database**:
+5. **Start Postgres and Redis**. The easiest path is Docker (Docker Desktop
+   must be running):
 
    ```bash
-   # create a local db named fast_homes_crm, then:
-   pnpm db:migrate   # applies all Prisma migrations
-   pnpm db:seed      # seeds AI prompt templates and starter data
+   docker-compose up -d   # starts Postgres (:5432) and Redis (:6379)
+   docker-compose ps      # confirm both are up and healthy
    ```
 
-6. **Run everything**:
+   The Postgres container uses user `postgres`, password `postgres`, database
+   `fast_homes_crm`, which matches the default `DATABASE_URL` in
+   `.env.example`, so you do not have to change it. If you would rather run a
+   native Postgres, create a database named `fast_homes_crm` and point
+   `DATABASE_URL` at it instead.
+
+6. **Create the schema and seed data**:
+
+   ```bash
+   pnpm db:migrate   # creates all tables from the Prisma schema
+   pnpm db:seed      # seeds AI prompt templates, sample leads, and a demo user
+   ```
+
+   The seed creates a login you can use once the app is running: email
+   `demo@fasthomes.com`, password `password123`.
+
+7. **Run everything**:
 
    ```bash
    pnpm dev          # starts api (:3001) and web (:3000) via Turborepo
@@ -79,6 +97,12 @@ production. Read it once end to end before your first change.
    pnpm test         # run the test suites
    pnpm lint         # lint
    ```
+
+   Note on testing: the automated tests (`pnpm test`) mock the database, so they
+   need no Postgres and no separate test database. The local database is for
+   running and manually testing the app in the browser. If a migration ever
+   fails on a messy local database, the fastest reset is `docker-compose down -v`
+   (this deletes local data), then `docker-compose up -d` and `pnpm db:migrate`.
 
 ## Environment variables
 
