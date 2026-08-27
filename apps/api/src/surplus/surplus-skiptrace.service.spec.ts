@@ -196,6 +196,36 @@ describe('SurplusSkiptraceService', () => {
     expect(r.submitted).toBe(2);
   });
 
+  it('reports WHAT the vendor said, not just that something failed', async () => {
+    // A bare "errors: 1" is not actionable when the run costs money and the
+    // fix might be a one word path change.
+    const { svc } = harness([lead()]);
+    mockedAxios.post.mockRejectedValue({
+      response: { status: 404, data: { message: 'Not Found' } },
+    });
+
+    const r = await svc.traceLeads({ organizationId: 'org' });
+
+    expect(r.errors).toBe(1);
+    expect(r.message).toMatch(/404/);
+    expect(r.message).toMatch(/Not Found/);
+    expect(r.message).toMatch(/api\/v3/);
+  });
+
+  it('stops the batch on a refusal instead of repeating it per address', async () => {
+    const { svc } = harness([
+      lead({ id: 'a', detailId: 'da', street: '1 FIRST ST', caseNumber: 'c1' }),
+      lead({ id: 'b', detailId: 'db', street: '2 SECOND ST', caseNumber: 'c2' }),
+      lead({ id: 'c', detailId: 'dc', street: '3 THIRD ST', caseNumber: 'c3' }),
+    ]);
+    mockedAxios.post.mockRejectedValue({ response: { status: 403 } });
+
+    const r = await svc.traceLeads({ organizationId: 'org' });
+
+    expect(mockedAxios.post).toHaveBeenCalledTimes(1);
+    expect(r.message).toMatch(/403/);
+  });
+
   it('stops immediately when the account runs out of credits', async () => {
     const { svc } = harness([
       lead({ id: 'a', detailId: 'da', street: '1 FIRST ST', caseNumber: 'c1' }),

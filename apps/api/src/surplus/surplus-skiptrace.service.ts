@@ -265,10 +265,13 @@ export class SurplusSkiptraceService {
       } catch (e: any) {
         result.errors += 1;
         this.logger.warn(`Surplus skip trace failed for ${group[0].claimant}: ${e.message}`);
-        if (/credits/i.test(e.message)) {
-          result.message = e.message;
-          break; // stop burning calls once the account is out
-        }
+        // Keep the FIRST failure. A run that errors on every address usually
+        // errors for one reason, and the caller needs to see it rather than a
+        // bare count.
+        if (!result.message) result.message = e.message;
+        // Out of credits or refused outright: every further call fails the same
+        // way, so stop instead of burning the batch discovering that.
+        if (/credits/i.test(e.message) || /\b40[13]\b/.test(e.message)) break;
       }
       await this.pause(CALL_DELAY_MS);
     }
@@ -337,7 +340,17 @@ export class SurplusSkiptraceService {
         );
       }
       if (status === 402) throw new Error('BatchData: out of skip-trace credits');
-      throw err;
+      // Anything else: say what the vendor actually returned. A bare rethrow
+      // left "errors: 1" and nothing else, which is not enough to act on when
+      // the run costs money and the fix might be a one word path change.
+      const body = err?.response?.data;
+      const detail =
+        typeof body === 'string'
+          ? body.slice(0, 300)
+          : body
+            ? JSON.stringify(body).slice(0, 300)
+            : err.message;
+      throw new Error(`BatchData ${status || 'request failed'} at ${this.batchBaseUrl}: ${detail}`);
     }
 
     const item = resp.data?.result?.data?.[0];
