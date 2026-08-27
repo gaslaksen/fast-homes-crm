@@ -120,6 +120,14 @@ interface TracedPerson {
   propertyOwner: boolean;
 }
 
+/** Strongest identity first. Shared by the matcher and the assignment order. */
+const VERDICT_RANK: Record<TraceVerdict, number> = {
+  same_person: 3,
+  relative: 2,
+  unverified: 1,
+  stranger: 0,
+};
+
 const ENTITY = /\b(LLC|L\.L\.C|INC|CORP|CORPORATION|COMPANY|LP|LLP|LLLP|LTD|TRUST|ASSOCIATION|CHURCH|BANK|PARTNERS|HOLDINGS)\b/i;
 
 @Injectable()
@@ -417,56 +425,75 @@ export class SurplusSkiptraceService {
    * second, an unnamed result last. A stranger is never attached, and the
    * rejection is recorded on the lead so it can be audited instead of trusted.
    */
+  /**
+   * The best unclaimed person for this claimant, or null when none is left.
+   *
+   * Checks every alias the vendor holds, not just the primary name: counties
+   * and vendors disagree on given names constantly, and an alias is the vendor
+   * stating outright that two spellings are one person.
+   */
+  private bestPersonFor(
+    c: Candidate,
+    persons: TracedPerson[],
+    taken: Set<TracedPerson>,
+  ): { person: TracedPerson; verdict: TraceVerdict; reason: string } | null {
+    let best: { person: TracedPerson; verdict: TraceVerdict; reason: string } | null = null;
+    for (const p of persons) {
+      if (taken.has(p)) continue;
+      const candidates = [{ first: p.first, last: p.last }, ...p.akas];
+      let check = candidates
+        .map((n) => verifyTracedName(c.claimant, n.first, n.last))
+        .reduce((a, b) => (VERDICT_RANK[b.verdict] > VERDICT_RANK[a.verdict] ? b : a));
+
+      // An address history containing the parcel is EVIDENCE that this person
+      // is tied to the surplus. It is not evidence of WHICH person they are.
+      // Promoting a surname match on that basis handed Ruth M Johnson her
+      // co-owner Calvin's phone numbers: they both lived at 4117 Santee Rd,
+      // which is precisely why they are co-claimants.
+      if (p.livedAtProperty) {
+        check = {
+          ...check,
+          reason: `${check.reason} Their address history includes the property that sold.`,
+        };
+      }
+
+      if (!best || VERDICT_RANK[check.verdict] > VERDICT_RANK[best.verdict]) {
+        best = { person: p, verdict: check.verdict, reason: check.reason };
+      }
+    }
+    // A stranger is never worth claiming, and holding one would starve another
+    // claimant of a person they might legitimately match.
+    return best && best.verdict !== 'stranger' ? best : best;
+  }
+
   private async applyToGroup(
     group: Candidate[],
     persons: TracedPerson[],
     result: SurplusTraceResult,
   ): Promise<void> {
-    const rank: Record<TraceVerdict, number> = {
-      same_person: 3,
-      relative: 2,
-      unverified: 1,
-      stranger: 0,
-    };
-
     const where =
       group[0].addressSource === 'notice'
         ? `at ${group[0].street}, ${group[0].city || ''}`.trim().replace(/,$/, '')
         : 'at the property';
 
-    for (const c of group) {
-      let best: { person: TracedPerson; verdict: TraceVerdict; reason: string } | null = null;
-      for (const p of persons) {
-        // Check every spelling the vendor holds, not just the primary. Counties
-        // and vendors disagree constantly on given names, and an alias is the
-        // vendor telling us outright that two spellings are one person.
-        const candidates = [{ first: p.first, last: p.last }, ...p.akas];
-        let check = candidates
-          .map((n) => verifyTracedName(c.claimant, n.first, n.last))
-          .reduce((a, b) => (rank[b.verdict] > rank[a.verdict] ? b : a));
+    // A returned person may be claimed by ONE lead. Without this, a property
+    // whose trace returns fewer people than it has claimants hands the same
+    // person to all of them: Santee Rd returned Calvin Johnson and both he and
+    // Ruth ended up with his numbers, hers labelled as a confirmed match.
+    //
+    // Claimants are worked strongest-match-first so the best pairing is made
+    // before a weaker one can consume the person.
+    const taken = new Set<TracedPerson>();
+    const scored = group
+      .map((c) => ({ c, best: this.bestPersonFor(c, persons, taken) }))
+      .sort(
+        (a, b) =>
+          VERDICT_RANK[b.best?.verdict || 'stranger'] - VERDICT_RANK[a.best?.verdict || 'stranger'],
+      );
 
-        // The course's confirmation, and the vendor can answer it directly: if
-        // this person's address history includes the parcel that sold, they are
-        // tied to the surplus. That outranks a surname-only guess.
-        if (p.livedAtProperty && check.verdict === 'relative') {
-          check = {
-            verdict: 'same_person',
-            reason:
-              'Surname matches and this person\'s address history includes the property that sold, which ties them to the surplus.',
-          };
-        }
-        if (p.livedAtProperty && check.verdict === 'stranger') {
-          check = {
-            verdict: 'unverified',
-            reason:
-              'The name does not match, but this person\'s address history includes the property that sold. Worth a look by hand before discarding.',
-          };
-        }
-
-        if (!best || rank[check.verdict] > rank[best.verdict]) {
-          best = { person: p, verdict: check.verdict, reason: check.reason };
-        }
-      }
+    for (const { c } of scored) {
+      const best = this.bestPersonFor(c, persons, taken);
+      if (best) taken.add(best.person);
 
       if (!best) {
         await this.note(c.detailId, `Skip trace returned no matched person ${where}.`);

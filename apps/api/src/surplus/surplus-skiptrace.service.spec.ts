@@ -411,9 +411,10 @@ describe('BatchData V3', () => {
     expect(r.mismatched).toBe(0);
   });
 
-  it('promotes a relative to the claimant when they lived at the property', async () => {
-    // The course's confirmation, answered by the vendor: an address history
-    // containing the parcel that sold ties the person to the surplus.
+  it('records the property tie as evidence but does NOT call a relative the claimant', async () => {
+    // Living at the property does not identify WHICH person you are. Promoting
+    // on it handed Ruth M Johnson her co-owner Calvin's phone numbers: both
+    // lived at 4117 Santee Rd, which is exactly why they are co-claimants.
     const { svc, detailUpdates } = harness([
       lead({
         first: 'Myrtis', last: 'Griffin',
@@ -429,7 +430,46 @@ describe('BatchData V3', () => {
 
     const r = await svc.traceLeads({ organizationId: 'org' });
     expect(r.contacted).toBe(1);
+    // Kept and usable, but labelled as the household rather than the claimant.
+    expect(detailUpdates[0].data.callNotes).toMatch(/not the claimant/i);
     expect(detailUpdates[0].data.callNotes).toMatch(/address history includes the property/i);
+  });
+
+  it('never hands the same returned person to two claimants', async () => {
+    // The Santee Rd failure. One person came back for a property with two
+    // co-owners, and both leads were given his numbers, hers labelled a
+    // confirmed match.
+    const { svc, leadUpdates, detailUpdates } = harness([
+      lead({ id: 'a', detailId: 'da', first: 'Calvin', last: 'Johnson' }),
+      lead({ id: 'b', detailId: 'db', first: 'Ruth', last: 'Johnson' }),
+    ]);
+    respond([person('Calvin', 'Johnson', ['9043181919'])]);
+
+    await svc.traceLeads({ organizationId: 'org' });
+
+    // Calvin gets the person. Ruth gets nothing rather than his numbers.
+    const phones = leadUpdates.map((u) => u.data.sellerPhone).filter(Boolean);
+    expect(phones).toEqual(['+19043181919']);
+    expect(leadUpdates.map((u) => u.where.id)).toEqual(['a']);
+    const ruth = detailUpdates.find((u) => u.where.id === 'db');
+    expect(ruth.data.callNotes).toMatch(/no matched person|returned no/i);
+  });
+
+  it('pairs each co-owner with their own person when both come back', async () => {
+    const { svc, leadUpdates } = harness([
+      lead({ id: 'a', detailId: 'da', first: 'Calvin', last: 'Johnson' }),
+      lead({ id: 'b', detailId: 'db', first: 'Ruth', last: 'Johnson' }),
+    ]);
+    respond([
+      person('Calvin', 'Johnson', ['9045551111']),
+      person('Ruth', 'Johnson', ['9045552222']),
+    ]);
+
+    await svc.traceLeads({ organizationId: 'org' });
+
+    const byLead = Object.fromEntries(leadUpdates.map((u) => [u.where.id, u.data.sellerPhone]));
+    expect(byLead.a).toBe('+19045551111');
+    expect(byLead.b).toBe('+19045552222');
   });
 
   it('treats an unmatched property as no persons at all', async () => {
