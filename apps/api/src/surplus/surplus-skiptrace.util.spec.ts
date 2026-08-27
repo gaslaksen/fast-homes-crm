@@ -119,6 +119,23 @@ describe('traceEligibility', () => {
     expect(r.reason).toBe('no_house_number');
   });
 
+  it('refuses a vacant-lot placeholder address', () => {
+    // "0 HARDEE ST" starts with a digit so the house-number check passes it,
+    // but it is the tax roll's stand-in for a parcel with no street number.
+    // Two of the first three Duval submissions were these; both wasted a credit
+    // and came back a stranger.
+    for (const street of ['0 HARDEE ST', '0 PLACEDA ST', '00 SOMEWHERE RD']) {
+      const r = traceEligibility({ ...ok, street });
+      expect(r.ok).toBe(false);
+      expect(r.reason).toBe('placeholder_address');
+    }
+  });
+
+  it('still accepts a real house number', () => {
+    expect(traceEligibility({ ...ok, street: '10 MAIN ST' }).ok).toBe(true);
+    expect(traceEligibility({ ...ok, street: '2817 EAVERSON ST' }).ok).toBe(true);
+  });
+
   it('refuses a ZIP that does not belong to the state', () => {
     // Caught on a real row carrying state AL against a Florida ZIP.
     const r = traceEligibility({ ...ok, zip: '79924' });

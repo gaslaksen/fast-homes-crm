@@ -161,6 +161,7 @@ export interface TraceCandidate {
 export type TraceSkipReason =
   | 'no_address'
   | 'no_house_number'
+  | 'placeholder_address'
   | 'zip_state_mismatch'
   | 'entity'
   | 'shared_address';
@@ -216,6 +217,20 @@ export function traceEligibility(
       ok: false,
       reason: 'no_house_number',
       detail: `The case lists "${street}" with no house number, so an address match would be a guess. The number is on the mailed notice.`,
+    };
+  }
+
+  // A leading "0" is the tax roll's placeholder for a parcel with no assigned
+  // street number, which is what vacant land looks like. It starts with a digit
+  // so the check above waves it through, and it is guaranteed to match nothing.
+  // Two of the first three Duval addresses submitted were "0 HARDEE ST" and
+  // "0 PLACEDA ST"; both burned a credit, came back a stranger, and then wore a
+  // contact-mismatch flag they had not earned.
+  if (/^0+\d*(\s|$)/.test(street) && !/^[1-9]/.test(street)) {
+    return {
+      ok: false,
+      reason: 'placeholder_address',
+      detail: `"${street}" is a tax roll placeholder for a parcel with no street number, usually vacant land. There is no household here to trace.`,
     };
   }
 

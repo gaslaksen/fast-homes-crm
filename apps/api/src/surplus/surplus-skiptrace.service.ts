@@ -130,7 +130,11 @@ export class SurplusSkiptraceService {
       where: {
         source: LeadSource.SURPLUS,
         ...(opts.organizationId ? { organizationId: opts.organizationId } : {}),
-        ...(opts.leadIds?.length ? { id: { in: opts.leadIds } } : {}),
+        // An EMPTY array means "these zero leads", not "every lead". Treating
+        // it as no-filter turned a probe carrying {"leadIds":[]} into a full
+        // run against the whole board and spent credits nobody asked for.
+        // `undefined` is the only thing that means "no filter".
+        ...(opts.leadIds ? { id: { in: opts.leadIds } } : {}),
         // Untraced only, unless asked otherwise. A lead that already has a
         // number does not need a second credit spent on it.
         ...(opts.includeTraced ? {} : { sellerPhone: '' }),
