@@ -3,7 +3,25 @@ FROM node:20-slim AS base
 # Install OpenSSL required by Prisma
 RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
 
-RUN npm install -g pnpm
+# Pin pnpm. Do NOT change this to an unpinned `npm install -g pnpm`.
+#
+# `npm install -g pnpm` installs whatever is current (pnpm 12 at the time of
+# writing). That pnpm then self-switches to 8.15.0 because package.json declares
+# "packageManager": "pnpm@8.15.0", so `pnpm --version` reports 8.15.0 and the
+# build looks correct. It is not: under the self-switch, pnpm silently skips
+# optional dependencies that declare an `engines` field.
+#
+# The casualty is sharp. Its platform binding @img/sharp-linux-x64 declares
+# engines and gets skipped, while @img/sharp-libvips-linux-x64, which declares
+# none, installs normally. sharp's own install script still runs and reports
+# success, so the build passes and the API then crash-loops on boot with
+# "Could not load the sharp module using the linux-x64 runtime".
+#
+# Verified by building this image both ways: pinned installs
+# @img/sharp-linux-x64, unpinned does not. This layer rebuilds only
+# occasionally, which is why a repo that had not changed suddenly stopped
+# booting.
+RUN npm install -g pnpm@8.15.0
 
 WORKDIR /app
 

@@ -1,0 +1,17 @@
+# Docker only honours a .dockerignore at the ROOT of the build context, so
+# apps/api/.dockerignore was never being applied. Without this, `COPY apps/api
+# ./apps/api` copies the host's node_modules over the ones just installed in the
+# image, which on a macOS host means darwin binaries in a linux image.
+node_modules
+**/node_modules
+dist
+**/dist
+.git
+.next
+**/.next
+*.log
+.env
+.env.*
+!.env.example
+.turbo
+**/.turbo
