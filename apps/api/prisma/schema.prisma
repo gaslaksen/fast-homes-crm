@@ -731,6 +731,39 @@ model SurplusDetail {
   /// deathCert, letters } - what has actually been collected.
   docs                Json?
 
+  // ── Where the money stands ────────────────────────────────────────────────
+  /// SurplusClaimStatus. A different axis from `tier`, which bands dollars.
+  /// Read off the case document list, never off the posted balance: Duval case
+  /// 2025-0774TD carries three Surplus Distribution filings and the search grid
+  /// still shows the full $27,929.98.
+  claimStatus     String? @default("unknown")
+  /// The surplus the clerk stated in the mailed notice. Differs from
+  /// grossSurplus, which is what is left today: Duval 2026-0004TD was noticed at
+  /// $22,774.71 and now posts $22,421.18. The notice figure is what the claimant
+  /// was told they are owed and is the number to use in conversation; the
+  /// current balance is what to underwrite against.
+  surplusAtNotice Float?
+  /// Verdict from the clerk's own returned-mail filings: 'delivered',
+  /// 'undeliverable', 'unclaimed', 'mixed'. UNCLAIMED means delivery was
+  /// attempted and notices were left, so the address is live and worth a call.
+  /// Undeliverable means it is not. Collapsing the two loses real leads.
+  mailVerdict     String?
+  /// Every document on the case, newest last: [{ title, kind, docId, url }].
+  /// Persisted so a classifier change can be re-run over history without
+  /// re-fetching the county, which is the expensive and rate-limited half.
+  claimLedger     Json?
+
+  // ── Provenance ────────────────────────────────────────────────────────────
+  /// 'duval_taxdeed' | 'realtdm' | 'import' | 'manual'. Counties name things
+  /// differently and a classifier carried across sources has been wrong every
+  /// time, so the source travels with the row.
+  sourceSystem String?
+  /// The county's own case id, for re-fetch. Duval: the integer behind
+  /// /Home/Details?id=NNN.
+  sourceCaseId String?
+  sourceUrl    String?
+  lastPolledAt DateTime?
+
   // ── Working the lead ──────────────────────────────────────────────────────
   doNotCall  Boolean @default(false)
   callNotes  String?
@@ -774,6 +807,7 @@ model SurplusDetail {
   @@index([organizationId, county])
   @@index([organizationId, noticeDate])
   @@index([organizationId, grossSurplus])
+  @@index([organizationId, claimStatus])
   @@index([phone2])
   @@index([phone3])
   @@index([phone4])
@@ -1951,4 +1985,30 @@ model ForeclosurePollRun {
 
   @@index([startedAt])
   @@map("foreclosure_poll_runs")
+}
+
+/// One run of the surplus county poll, mirroring ForeclosurePollRun so the two
+/// boards report health the same way. `classified` counts cases whose claim
+/// status was resolved from the document list; `dead` counts those the classifier
+/// retired (distributed or already assigned) rather than surfacing as leads.
+model SurplusPollRun {
+  id             String    @id @default(cuid())
+  organizationId String?
+  trigger        String                       // 'cron' | 'manual'
+  source         String?                      // 'duval_taxdeed' | 'realtdm'
+  startedAt      DateTime  @default(now())
+  finishedAt     DateTime?
+  ok             Boolean   @default(false)
+  scanned        Int       @default(0)
+  created        Int       @default(0)
+  updated        Int       @default(0)
+  skipped        Int       @default(0)
+  belowFloor     Int       @default(0)
+  classified     Int       @default(0)
+  dead           Int       @default(0)
+  errors         Int       @default(0)
+  message        String?
+
+  @@index([startedAt])
+  @@map("surplus_poll_runs")
 }

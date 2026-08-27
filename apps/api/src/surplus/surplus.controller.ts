@@ -7,6 +7,7 @@ import { memoryStorage } from 'multer';
 import * as jwt from 'jsonwebtoken';
 import { SurplusService } from './surplus.service';
 import { SurplusImportService } from './surplus-import.service';
+import { SurplusIngestService } from './surplus-ingest.service';
 import { COMPLIANCE_RULES, DISCLOSURE_LABELS, FL_COUNTIES, SURPLUS_FLOOR } from './surplus-compliance';
 
 const IMPORT_UPLOAD_OPTIONS = {
@@ -32,6 +33,7 @@ export class SurplusController {
   constructor(
     private surplus: SurplusService,
     private importService: SurplusImportService,
+    private ingest: SurplusIngestService,
   ) {}
 
   private decodeToken(authHeader?: string): { userId?: string; organizationId?: string } {
@@ -55,6 +57,8 @@ export class SurplusController {
     @Query('band') band?: string,
     @Query('noticeAge') noticeAge?: string,
     @Query('lienWindow') lienWindow?: string,
+    @Query('claimStatus') claimStatus?: string,
+    @Query('hideRetired') hideRetired?: string,
     @Query('blockedOnly') blockedOnly?: string,
     @Query('hideDead') hideDead?: string,
     @Query('hideDnc') hideDnc?: string,
@@ -74,6 +78,8 @@ export class SurplusController {
       band,
       noticeAge,
       lienWindow,
+      claimStatus,
+      hideRetired: hideRetired !== 'false',
       blockedOnly: blockedOnly === 'true',
       hideDead: hideDead === 'true',
       hideDnc: hideDnc === 'true',
@@ -101,6 +107,42 @@ export class SurplusController {
       counties: FL_COUNTIES,
       surplusFloor: SURPLUS_FLOOR,
     };
+  }
+
+  /**
+   * The last few county poll runs, for the health strip on the board. A poll
+   * that has been failing for a week should be visible without reading logs.
+   */
+  @Get('poll-runs')
+  async pollRuns(@Headers('authorization') authHeader?: string) {
+    const { organizationId } = this.decodeToken(authHeader);
+    return {
+      runs: await this.ingest.recentRuns(organizationId),
+      sources: this.ingest.adapters().map((a) => ({ key: a.key, county: a.county })),
+    };
+  }
+
+  /**
+   * Run a county ingest now. `limit` caps the detail fetches, which is what a
+   * discovery pass on a new county wants: pull ten cases, look at what came
+   * back, and only then let the cron loose on the whole docket.
+   */
+  @Post('poll')
+  async poll(@Body() body: any, @Headers('authorization') authHeader?: string) {
+    const { organizationId } = this.decodeToken(authHeader);
+    const source = body?.source || 'duval_taxdeed';
+    if (!this.ingest.adapterFor(source)) {
+      throw new BadRequestException(`Unknown surplus source "${source}"`);
+    }
+    const limit = body?.limit == null ? undefined : Number(body.limit);
+    if (limit != null && (!Number.isFinite(limit) || limit < 1)) {
+      throw new BadRequestException('limit must be a positive number');
+    }
+    return this.ingest.ingestCounty(source, {
+      organizationId: body?.organizationId || organizationId || null,
+      trigger: 'manual',
+      limit,
+    });
   }
 
   @Post('import/parse')

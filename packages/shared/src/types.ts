@@ -184,6 +184,38 @@ export enum SurplusClaimantType {
   LIENHOLDER = 'lienholder',
 }
 
+/**
+ * Where the money stands on the clerk's docket, which is a different axis from
+ * SurplusTier. Tier bands the DOLLARS; this bands whether anybody else has a
+ * hand on them. Both matter and neither substitutes for the other.
+ *
+ * Read off the case document list, not off the posted balance: Duval case
+ * 2025-0774TD carries three Surplus Distribution filings and the search grid
+ * still shows the full $27,929.98, so a balance is not evidence the money is
+ * still there.
+ */
+export enum SurplusClaimStatus {
+  /// Notice of surplus mailed, nothing filed against it. Chase these first.
+  OPEN = 'open',
+  /// Only a governmental or ad valorem lien has filed. That takes a slice off
+  /// the top; the owner residual is still unclaimed and still ours to win.
+  GOV_LIEN = 'gov_lien',
+  /// Somebody filed and the clerk denied it, and no distribution followed. The
+  /// money is still there AND a motivated claimant has already identified
+  /// themselves. The single best state in this enum, not a contested one.
+  DENIED = 'denied',
+  /// A claim is on file with no denial and no distribution yet. Contestable.
+  PENDING = 'pending',
+  /// A claim filed by an assignee OF the owner, so the owner has already signed
+  /// with somebody else. Dead to us even though the money has not moved.
+  ASSIGNED = 'assigned',
+  /// Surplus Distribution filings are on the docket. The money is gone.
+  DISTRIBUTED = 'distributed',
+  /// Not yet classified, or classified from a source that does not publish a
+  /// document list. Never treat as OPEN.
+  UNKNOWN = 'unknown',
+}
+
 export enum SurplusStage {
   NEW = 'New',
   CONTACTED = 'Contacted',

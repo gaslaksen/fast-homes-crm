@@ -1,4 +1,6 @@
 import {
+  workScore,
+  workReason,
   surplusUidOf,
   nameMatchesClaimant,
   surnameOf,
@@ -25,7 +27,12 @@ import {
   complianceGate,
   SurplusFacts,
 } from './surplus.util';
-import { SurplusClaimantType, SurplusStage, SurplusTier } from '@fast-homes/shared';
+import {
+  SurplusClaimantType,
+  SurplusClaimStatus,
+  SurplusStage,
+  SurplusTier,
+} from '@fast-homes/shared';
 
 /** Fixed "now" so nothing here depends on the day the suite runs. */
 const NOW = new Date('2026-08-19T12:00:00');
@@ -380,5 +387,117 @@ describe('canQualify', () => {
     expect(canQualify({ ...clean, titleSearchComplete: false })).toBe(false);
     expect(canQualify({ ...clean, noticeConfirmed: false })).toBe(false);
     expect(canQualify({ ...clean, entitlementVerified: false })).toBe(false);
+  });
+});
+
+describe('workScore', () => {
+  const base = {
+    claimStatus: SurplusClaimStatus.OPEN,
+    netToClaimant: 20000,
+    cleanPhoneCount: 1,
+    mailVerdict: 'mixed',
+    daysRemaining: 90,
+  };
+
+  it('scores a retired case at zero however big it is', () => {
+    // Duval 2025-0774TD posts $27,929.98 and was paid out in full. It must not
+    // appear anywhere near the top of a call list.
+    expect(workScore({ ...base, claimStatus: SurplusClaimStatus.DISTRIBUTED, netToClaimant: 500000 }))
+      .toBe(0);
+    expect(workScore({ ...base, claimStatus: SurplusClaimStatus.ASSIGNED, netToClaimant: 500000 }))
+      .toBe(0);
+  });
+
+  it('scores a do-not-call lead at zero', () => {
+    expect(workScore({ ...base, doNotCall: true })).toBe(0);
+  });
+
+  it('puts a denied claim above an untouched one', () => {
+    // The whole point of the ranking. A denied claimant has already raised a
+    // hand and failed on paperwork, which is the easiest conversation there is.
+    expect(workScore({ ...base, claimStatus: SurplusClaimStatus.DENIED }))
+      .toBeGreaterThan(workScore({ ...base, claimStatus: SurplusClaimStatus.OPEN }));
+  });
+
+  it('lets contactability beat money', () => {
+    // A reachable $16k lead outranks an unreachable $60k one, because the
+    // second one is not a lead until somebody finds a number for it.
+    const reachable = workScore({ ...base, netToClaimant: 16000, cleanPhoneCount: 2 });
+    const unreachable = workScore({
+      ...base,
+      netToClaimant: 60000,
+      cleanPhoneCount: 0,
+      mailVerdict: 'undeliverable',
+    });
+    expect(reachable).toBeGreaterThan(unreachable);
+  });
+
+  it('never lets money outrank claim status', () => {
+    const richPending = workScore({
+      ...base,
+      claimStatus: SurplusClaimStatus.PENDING,
+      netToClaimant: 1000000,
+    });
+    const poorOpen = workScore({ ...base, claimStatus: SurplusClaimStatus.OPEN, netToClaimant: 5001 });
+    expect(poorOpen).toBeGreaterThan(richPending);
+  });
+
+  it('penalises a skip trace that returned a stranger', () => {
+    expect(workScore({ ...base, contactMismatch: true, cleanPhoneCount: 0 }))
+      .toBeLessThan(workScore({ ...base, cleanPhoneCount: 0 }));
+  });
+
+  it('lifts a lead whose lien window is nearly closed', () => {
+    expect(workScore({ ...base, daysRemaining: 12 }))
+      .toBeGreaterThan(workScore({ ...base, daysRemaining: 200 }));
+  });
+
+  it('does not treat a long-closed window as urgent', () => {
+    // Most of the live Duval docket is months past the 120 day mark. Giving
+    // those the closing-soon bonus put the stalest leads at the top of the
+    // call list, which is the opposite of what the ranking is for.
+    expect(workScore({ ...base, daysRemaining: -322 }))
+      .toBeLessThan(workScore({ ...base, daysRemaining: 12 }));
+    expect(workScore({ ...base, daysRemaining: -322 }))
+      .toBe(workScore({ ...base, daysRemaining: 200 }));
+  });
+});
+
+describe('workReason clock wording', () => {
+  it('never renders a closed window as negative days left', () => {
+    const r = workReason({
+      claimStatus: SurplusClaimStatus.OPEN,
+      cleanPhoneCount: 1,
+      daysRemaining: -322,
+    });
+    expect(r).not.toContain('-322 days left');
+    expect(r).toContain('lien window closed');
+  });
+
+  it('counts down a window that is still open', () => {
+    expect(
+      workReason({ claimStatus: SurplusClaimStatus.OPEN, cleanPhoneCount: 1, daysRemaining: 12 }),
+    ).toContain('12 days left');
+  });
+});
+
+describe('workReason', () => {
+  it('names the retirement rather than pretending to rank it', () => {
+    expect(workReason({ claimStatus: SurplusClaimStatus.DISTRIBUTED })).toBe('Paid out');
+  });
+
+  it('says why a lead is unreachable instead of just scoring it low', () => {
+    const r = workReason({
+      claimStatus: SurplusClaimStatus.OPEN,
+      cleanPhoneCount: 0,
+      mailVerdict: 'undeliverable',
+    });
+    expect(r).toContain('no callable number yet');
+    expect(r).toContain('clerk mail all returned');
+  });
+
+  it('calls out a mismatched skip trace by name', () => {
+    expect(workReason({ claimStatus: SurplusClaimStatus.OPEN, cleanPhoneCount: 0, contactMismatch: true }))
+      .toContain('somebody else');
   });
 });
