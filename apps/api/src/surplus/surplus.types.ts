@@ -92,6 +92,8 @@ export interface SurplusListFilters {
   noticeAge?: string;
   /** 'open' | 'closed' */
   lienWindow?: string;
+  /** 'property' (default) groups claimants by subject property; 'lead' does not. */
+  group?: string;
   /** Comma-separated SurplusClaimStatus values. */
   claimStatus?: string;
   /**

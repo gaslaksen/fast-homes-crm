@@ -396,3 +396,56 @@ select.dc-wp-sel:disabled { opacity: 0.45; cursor: not-allowed; }
 .dc-wp a.dc-wp-link { color: var(--mint); text-decoration: underline; }
 .dc-wp a.dc-wp-doc { color: var(--dim); text-decoration: underline; }
 .dc-wp a.dc-wp-doc:hover { color: var(--text); }
+
+/* ── Surplus property card ──────────────────────────────────────────────────
+ *
+ * Deliberately sparse. The old surplus card carried the clock, the money
+ * breakdown, the stage select, the touch grid, the document checklist, the
+ * compliance panel and every phone number, which is legible at three leads and
+ * unreadable at seventy. This answers four questions and sends the rest to the
+ * work panel: who else is on the money, how much, whose is it and where are
+ * they, and can we reach them.
+ *
+ * Interactive selectors are element-qualified for the same reason as
+ * button.dc-daybox: `.dc-board button` at (0,1,1) beats a bare class at (0,1,0)
+ * and strips border, background and colour.
+ */
+.dc-pcard {
+  background: var(--surface); border: 1px solid var(--border);
+  border-left: 3px solid var(--border2);
+  border-radius: var(--r2); padding: 13px 15px; cursor: pointer;
+  transition: 0.12s; display: flex; flex-direction: column; gap: 5px;
+}
+.dc-pcard:hover { border-color: var(--border2); background: var(--surface2); }
+.dc-pcard.pick { box-shadow: inset 0 0 0 1px var(--mint); }
+
+.dc-pcard-top { display: flex; align-items: center; gap: 7px; }
+.dc-pcard-top input[type='checkbox'] { width: 14px; height: 14px; accent-color: var(--mint); flex: 0 0 14px; }
+.dc-pcard-money { margin-left: auto; font-size: 18px; font-weight: 700; letter-spacing: -0.3px; }
+
+.dc-pcard-addr { font-size: 14.5px; font-weight: 700; line-height: 1.25; }
+.dc-pcard-sub { font-size: 11.5px; color: var(--faint); }
+/* The address the surplus notice was actually mailed to. */
+.dc-pcard-owner { font-size: 12px; color: var(--mint); margin-top: 1px; }
+.dc-pcard-names { font-size: 12.5px; color: var(--dim); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.dc-pcard-count {
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px;
+  background: var(--surface3); color: var(--dim); border-radius: 4px; padding: 1px 5px;
+}
+.dc-pcard-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; margin-top: 3px; font-size: 11.5px;
+}
+button.dc-pcard-btn {
+  background: var(--surface2); border: 1px solid var(--border2); border-radius: 8px;
+  padding: 5px 12px; font-size: 12px; font-weight: 600; color: var(--text); transition: 0.12s;
+}
+button.dc-pcard-btn:hover { background: var(--mint); border-color: var(--mint); color: var(--mintInk); }
+
+/* Claimant switcher inside the work panel. */
+button.dc-wp-claimant {
+  background: var(--surface2); border: 1px solid var(--border2); border-radius: 8px;
+  padding: 6px 11px; font-size: 12px; font-weight: 600; color: var(--text); text-align: left;
+}
+button.dc-wp-claimant.on { background: var(--mint); border-color: var(--mint); color: var(--mintInk); }
+button.dc-wp-claimant .sub { display: block; font-size: 10.5px; font-weight: 500; opacity: 0.8; }

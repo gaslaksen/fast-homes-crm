@@ -101,7 +101,8 @@ export interface SurplusPanelLead {
 }
 
 interface Props {
-  lead: SurplusPanelLead;
+  /** The subject property, with every claimant owed on it. */
+  property: any;
   currentUser: any;
   onClose: () => void;
   /** Refresh the board row after something changes here. */
@@ -109,8 +110,29 @@ interface Props {
   say: (msg: string) => void;
 }
 
-export default function SurplusWorkPanel({ lead, currentUser, onClose, onChanged, say }: Props) {
+export default function SurplusWorkPanel({
+  property,
+  currentUser,
+  onClose,
+  onChanged,
+  say,
+}: Props) {
   const [tab, setTab] = useState<Tab>('case');
+  /**
+   * Which claimant's conversation is open. Shared facts (the property, the
+   * money, the docket) belong to the case; the conversation, the notes and the
+   * contacts belong to one person, because each claimant files their own claim.
+   */
+  const [claimantId, setClaimantId] = useState<string>(property.claimants[0]?.id);
+  const lead: SurplusPanelLead =
+    property.claimants.find((c: any) => c.id === claimantId) || property.claimants[0];
+
+  // A refresh can reorder or replace claimants; keep the selection valid.
+  useEffect(() => {
+    if (!property.claimants.some((c: any) => c.id === claimantId)) {
+      setClaimantId(property.claimants[0]?.id);
+    }
+  }, [property.claimants, claimantId]);
   const [comms, setComms] = useState<{ timeline: TimelineItem[]; notes: NoteItem[] }>({
     timeline: [],
     notes: [],
@@ -234,8 +256,8 @@ export default function SurplusWorkPanel({ lead, currentUser, onClose, onChanged
     }
   };
 
-  const ledger = lead.claimLedger || [];
-  const tone = CLAIM_STATUS_TONE[lead.claimStatus] || 'var(--dim)';
+  const ledger = property.claimLedger || [];
+  const tone = CLAIM_STATUS_TONE[property.claimStatus] || 'var(--dim)';
 
   return (
     // The panel is fixed-position, so where it sits in the DOM is irrelevant to
@@ -248,7 +270,7 @@ export default function SurplusWorkPanel({ lead, currentUser, onClose, onChanged
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 17, fontWeight: 700 }}>{lead.claimant}</span>
+                <span style={{ fontSize: 17, fontWeight: 700 }}>{property.address}</span>
                 <span
                   style={{
                     fontSize: 11,
@@ -259,9 +281,9 @@ export default function SurplusWorkPanel({ lead, currentUser, onClose, onChanged
                     padding: '1px 6px',
                   }}
                 >
-                  {lead.claimStatusLabel}
+                  {property.claimStatusLabel}
                 </span>
-                {lead.isDeceased && (
+                {property.anyDeceased && (
                   <span style={{ fontSize: 11, color: 'var(--amber)' }}>Estate</span>
                 )}
                 {lead.doNotCall && (
@@ -269,17 +291,20 @@ export default function SurplusWorkPanel({ lead, currentUser, onClose, onChanged
                 )}
               </div>
               <div style={{ fontSize: 12, color: 'var(--dim)', marginTop: 3 }}>
-                {lead.address}
-                {lead.city ? `, ${lead.city}` : ''} {lead.zip}
+                {[property.city, property.zip].filter(Boolean).join(' ')} ·{' '}
+                {money(property.grossSurplus)} surplus ·{' '}
+                {property.claimantCount === 1
+                  ? '1 claimant'
+                  : `${property.claimantCount} claimants`}
               </div>
               <div style={{ fontSize: 12, color: 'var(--faint, #7a828e)', marginTop: 2 }}>
-                {lead.county} County
-                {lead.caseNumber ? ` - case ${lead.caseNumber}` : ''}
-                {lead.sourceUrl && (
+                {property.county} County
+                {property.caseNumber ? ` - case ${property.caseNumber}` : ''}
+                {property.sourceUrl && (
                   <>
                     {' '}
                     <a
-                      href={lead.sourceUrl}
+                      href={property.sourceUrl}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="dc-wp-link"
@@ -306,8 +331,32 @@ export default function SurplusWorkPanel({ lead, currentUser, onClose, onChanged
               color: 'var(--dim)',
             }}
           >
-            <strong style={{ color: tone }}>Rank {lead.workScore}</strong> {lead.workReason}
+            <strong style={{ color: tone }}>Rank {property.workScore}</strong> {property.workReason}
           </div>
+
+          {/* One property, several claims. Each claimant is contacted separately,
+              so the conversation and notes tabs follow this selection. */}
+          {property.claimantCount > 1 && (
+            <div style={{ display: 'flex', gap: 6, marginTop: 11, flexWrap: 'wrap' }}>
+              {property.claimants.map((c: any) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  className={`dc-wp-claimant${c.id === lead.id ? ' on' : ''}`}
+                  onClick={() => setClaimantId(c.id)}
+                >
+                  {c.claimant}
+                  <span className="sub">
+                    {c.cleanPhoneCount > 0
+                      ? `${c.cleanPhoneCount} callable`
+                      : c.contactMismatch
+                        ? 'trace mismatched'
+                        : 'no number'}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
 
           <div style={{ display: 'flex', gap: 6, marginTop: 12 }}>
             {(['case', 'conversation', 'notes'] as Tab[]).map((t) => (
@@ -327,7 +376,13 @@ export default function SurplusWorkPanel({ lead, currentUser, onClose, onChanged
 
         <div className="dc-wp-body">
           {tab === 'case' && (
-            <CaseTab lead={lead} ledger={ledger} onTrace={trace} tracing={tracing} />
+            <CaseTab
+              lead={lead}
+              property={property}
+              ledger={ledger}
+              onTrace={trace}
+              tracing={tracing}
+            />
           )}
 
           {tab === 'conversation' && (
@@ -423,11 +478,13 @@ export default function SurplusWorkPanel({ lead, currentUser, onClose, onChanged
 
 function CaseTab({
   lead,
+  property,
   ledger,
   onTrace,
   tracing,
 }: {
   lead: SurplusPanelLead;
+  property: any;
   ledger: LedgerDoc[];
   onTrace: () => void;
   tracing: boolean;
@@ -444,36 +501,36 @@ function CaseTab({
   return (
     <div style={{ display: 'grid', gap: 16 }}>
       <Section title="The money">
-        <Row k="Surplus posted today" v={money(lead.grossSurplus)} />
-        {lead.surplusAtNotice != null && lead.surplusAtNotice !== lead.grossSurplus && (
+        <Row k="Surplus posted today" v={money(property.grossSurplus)} />
+        {property.surplusAtNotice != null && property.surplusAtNotice !== property.grossSurplus && (
           <Row
             k="Stated in the mailed notice"
-            v={money(lead.surplusAtNotice)}
+            v={money(property.surplusAtNotice)}
             note="What the claimant was told they are owed. Use this number on a call."
           />
         )}
-        <Row k="Net to claimant" v={money(lead.netToClaimant)} />
-        {lead.estFee != null && <Row k="Fee at the cap" v={money(lead.estFee)} />}
+        <Row k="Net to claimant" v={money(property.netToClaimant)} />
+        {property.estFee != null && <Row k="Fee at the cap" v={money(property.estFee)} />}
       </Section>
 
       <Section title="The clock">
-        <Row k="Sale" v={lead.saleDate ? fmtDate(lead.saleDate) : 'unknown'} />
+        <Row k="Sale" v={property.saleDate ? fmtDate(property.saleDate) : 'unknown'} />
         <Row
           k="Notice mailed"
-          v={lead.noticeDate ? fmtDate(lead.noticeDate) : 'unknown'}
+          v={property.noticeDate ? fmtDate(property.noticeDate) : 'unknown'}
           note={
-            lead.noticeConfirmed
+            property.noticeConfirmed
               ? undefined
               : 'Estimated from the sale date. Duval publishes no filing dates and its notice is a scan, so this is a floor, not a confirmed date.'
           }
         />
-        {lead.daysRemaining != null && (
+        {property.daysRemaining != null && (
           <Row
             k="Lien window"
             v={
-              lead.daysRemaining > 0
-                ? `${lead.daysRemaining} days left`
-                : `closed ${Math.abs(lead.daysRemaining)} days ago`
+              property.daysRemaining > 0
+                ? `${property.daysRemaining} days left`
+                : `closed ${Math.abs(property.daysRemaining)} days ago`
             }
             note="Whether another lienholder can still appear and shrink the payout. A previous owner is not barred by it."
           />
@@ -485,21 +542,21 @@ function CaseTab({
           where the clerk actually wrote to the owner, and it is what gets
           traced. On case 2025-0023TD those are Jacksonville and Hartford. */}
       <Section title="Addresses">
-        <Row k="Property that sold" v={[lead.address, lead.city, lead.zip].filter(Boolean).join(', ')} />
-        {lead.ownerMailingStreet ? (
+        <Row k="Property that sold" v={[property.address, property.city, property.zip].filter(Boolean).join(', ')} />
+        {property.ownerMailingStreet ? (
           <Row
             k="Owner, per the notice"
             v={[
-              lead.ownerMailingStreet,
-              lead.ownerMailingCity,
-              [lead.ownerMailingState, lead.ownerMailingZip].filter(Boolean).join(' '),
+              property.ownerMailingStreet,
+              property.ownerMailingCity,
+              [property.ownerMailingState, property.ownerMailingZip].filter(Boolean).join(' '),
             ]
               .filter(Boolean)
               .join(', ')}
             tone="var(--mint)"
             note={
-              lead.noticeRecipient && lead.noticeRecipient !== lead.claimant
-                ? `Addressed to ${lead.noticeRecipient}. This is the address that gets skip traced.`
+              property.noticeRecipient && property.noticeRecipient !== lead.claimant
+                ? `Addressed to ${property.noticeRecipient}. This is the address that gets skip traced.`
                 : 'This is the address that gets skip traced.'
             }
           />
@@ -526,8 +583,8 @@ function CaseTab({
               </button>
             </div>
             <div style={{ marginTop: 4, fontSize: 11 }}>
-              {lead.ownerMailingStreet
-                ? `Traces ${lead.ownerMailingStreet}, ${lead.ownerMailingCity || ''} ${lead.ownerMailingState || ''}, the address the surplus notice was mailed to.`
+              {property.ownerMailingStreet
+                ? `Traces ${property.ownerMailingStreet}, ${property.ownerMailingCity || ''} ${property.ownerMailingState || ''}, the address the surplus notice was mailed to.`
                 : `No owner address recovered, so this would trace the property at ${lead.address}, which is usually not where the owner is.`}
             </div>
           </div>
@@ -544,21 +601,21 @@ function CaseTab({
         {lead.emails.map((e) => (
           <Row key={e} k="Email" v={e} />
         ))}
-        {lead.mailVerdict && (
+        {property.mailVerdict && (
           <Row
             k="Clerk mail"
             v={
-              lead.mailVerdict === 'undeliverable'
+              property.mailVerdict === 'undeliverable'
                 ? 'every mailing returned'
-                : lead.mailVerdict === 'delivered'
+                : property.mailVerdict === 'delivered'
                   ? 'delivered'
-                  : lead.mailVerdict === 'mixed'
+                  : property.mailVerdict === 'mixed'
                     ? 'some delivered, some returned'
                     : 'unknown'
             }
-            tone={lead.mailVerdict === 'undeliverable' ? 'var(--red)' : undefined}
+            tone={property.mailVerdict === 'undeliverable' ? 'var(--red)' : undefined}
             note={
-              lead.mailVerdict === 'undeliverable'
+              property.mailVerdict === 'undeliverable'
                 ? 'The address of record is dead, so this lead lives or dies on the skip trace.'
                 : undefined
             }
@@ -569,8 +626,8 @@ function CaseTab({
       <Section
         title="The docket"
         note={
-          lead.lastPolledAt
-            ? `Last checked ${fmtDate(lead.lastPolledAt)}`
+          property.lastPolledAt
+            ? `Last checked ${fmtDate(property.lastPolledAt)}`
             : 'Not yet pulled from the county'
         }
       >

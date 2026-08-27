@@ -549,11 +549,39 @@ export class SurplusService {
       rows.sort((a, b) => order.indexOf(a.tier) - order.indexOf(b.tier));
     }
 
+    // ── Group by subject property ────────────────────────────────────────────
+    // One sale owes several people, and each is its own lead with its own claim
+    // and its own conversation. On the board that read as duplicate cards for
+    // one house: Myrtis Griffin and Jessie Hall are both owed on 0 Hardee St,
+    // and a reviewer sees the same address twice and cannot tell why.
+    //
+    // Grouping happens HERE and not in the browser because the board pages. Two
+    // claimants on one property can land either side of a page boundary, and a
+    // client-side group would then split them and show the duplicate anyway.
+    if (filters.group !== 'lead') {
+      const groups = groupByProperty(rows);
+      const total = groups.length;
+      const start = (page - 1) * pageSize;
+      return {
+        data: groups.slice(start, start + pageSize),
+        grouped: true,
+        total,
+        leadCount: rows.length,
+        page,
+        pageSize,
+        counties: { active: FL_COUNTIES.active, candidate: FL_COUNTIES.candidate },
+        surplusFloor: SURPLUS_FLOOR,
+        disclosureLabels: DISCLOSURE_LABELS,
+      };
+    }
+
     const total = rows.length;
     const start = (page - 1) * pageSize;
 
     return {
       data: rows.slice(start, start + pageSize),
+      grouped: false,
+      leadCount: rows.length,
       total,
       page,
       pageSize,
@@ -763,4 +791,98 @@ export class SurplusService {
     };
     return { workScore: workScore(wf), workReason: workReason(wf) };
   }
+}
+
+/**
+ * Collapse per-claimant lead rows into one entry per subject property.
+ *
+ * A group is a CASE, not an address: two parcels can share a street line
+ * ("0 HARDEE ST" is a placeholder the tax roll reuses), and two separate sales
+ * of the same parcel in different years are two different pots of money. The
+ * case number is the thing that identifies one surplus, with the parcel and
+ * then the address as fallbacks for sources that ship no case number.
+ *
+ * Shared facts (the property, the money, the clock, the claim status) come off
+ * the case and are identical across its claimants, so they are lifted to the
+ * group. Per-person facts (phones, mismatch flags, touches) stay on each
+ * claimant and are worked in the panel.
+ */
+export function groupByProperty(rows: any[]): any[] {
+  const norm = (v: any) => String(v || '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
+  const byKey = new Map<string, any[]>();
+
+  for (const r of rows) {
+    const key =
+      norm(r.county) + '|' + (norm(r.caseNumber) || norm(r.parcelId) || norm(r.address));
+    byKey.set(key, [...(byKey.get(key) || []), r]);
+  }
+
+  return [...byKey.entries()].map(([key, members]) => {
+    // The best-ranked claimant leads the group: it is the one that decides where
+    // the property sorts, and the one whose reason explains the placement.
+    const ranked = [...members].sort((a, b) => b.workScore - a.workScore);
+    const head = ranked[0];
+    return {
+      key,
+      // ── Shared: the case ──
+      county: head.county,
+      caseNumber: head.caseNumber,
+      parcelId: head.parcelId,
+      address: head.address,
+      city: head.city,
+      state: head.state,
+      zip: head.zip,
+      sourceUrl: head.sourceUrl,
+      sourceSystem: head.sourceSystem,
+      lastPolledAt: head.lastPolledAt,
+
+      // ── Shared: where the notice went ──
+      noticeRecipient: head.noticeRecipient,
+      ownerMailingStreet: head.ownerMailingStreet,
+      ownerMailingCity: head.ownerMailingCity,
+      ownerMailingState: head.ownerMailingState,
+      ownerMailingZip: head.ownerMailingZip,
+      ownerAddressSource: head.ownerAddressSource,
+
+      // ── Shared: the money and the clock ──
+      grossSurplus: head.grossSurplus,
+      surplusAtNotice: head.surplusAtNotice,
+      netToClaimant: head.netToClaimant,
+      estFee: head.estFee,
+      saleDate: head.saleDate,
+      noticeDate: head.noticeDate,
+      noticeConfirmed: head.noticeConfirmed,
+      daysRemaining: head.daysRemaining,
+      windowElapsedPct: head.windowElapsedPct,
+      lienWindowOpen: head.lienWindowOpen,
+
+      // ── Shared: how the case stands ──
+      claimStatus: head.claimStatus,
+      claimStatusLabel: head.claimStatusLabel,
+      mailVerdict: head.mailVerdict,
+      claimLedger: head.claimLedger,
+      tier: head.tier,
+      dripTrack: head.dripTrack,
+      surplusType: head.surplusType,
+      fundLocation: head.fundLocation,
+      compliance: head.compliance,
+
+      // The property sorts on its best claimant, and says why.
+      workScore: head.workScore,
+      workReason: head.workReason,
+
+      // ── Per person ──
+      claimants: ranked,
+      claimantCount: ranked.length,
+      /** Names for the card, so the group reads as one property with N owners. */
+      claimantNames: ranked.map((m) => m.claimant),
+      /** Rolled up so the card can show contact state without opening. */
+      anyContactable: ranked.some((m) => m.cleanPhoneCount > 0),
+      anyMismatch: ranked.some((m) => m.contactMismatch),
+      allDeceased: ranked.every((m) => m.isDeceased),
+      anyDeceased: ranked.some((m) => m.isDeceased),
+      // The stage the property is furthest along on.
+      stage: head.stage,
+    };
+  });
 }
