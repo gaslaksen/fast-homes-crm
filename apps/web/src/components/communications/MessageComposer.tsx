@@ -76,6 +76,7 @@ export default function MessageComposer({
   doNotContact,
   seedBody,
   emailAction,
+  composeIntent,
   onSent,
 }: {
   leadId: string;
@@ -87,6 +88,12 @@ export default function MessageComposer({
   doNotContact?: boolean;
   seedBody?: string;
   emailAction?: EmailAction | null;
+  /**
+   * Open on a particular channel and recipient, raised by clicking a phone
+   * number or an email address elsewhere on the page. `nonce` changes on every
+   * request so clicking the same number twice re-applies.
+   */
+  composeIntent?: { nonce: number; channel: Channel; to?: string } | null;
   onSent: () => void | Promise<void>;
 }) {
   const [channel, setChannel] = useState<Channel>('sms');
@@ -278,6 +285,15 @@ export default function MessageComposer({
       setSending(false);
     }
   };
+
+  // Clicking a number or an email elsewhere on the page opens the composer on
+  // that channel with that recipient, rather than making somebody re-pick what
+  // they just clicked.
+  useEffect(() => {
+    if (!composeIntent) return;
+    setChannel(composeIntent.channel);
+    if (composeIntent.channel === 'sms' && composeIntent.to) setToNumber(composeIntent.to);
+  }, [composeIntent?.nonce]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const selectedTo = toOptions.find((o) => o.number === toNumber);
   const blockedBySms = channel === 'sms' && doNotContact;

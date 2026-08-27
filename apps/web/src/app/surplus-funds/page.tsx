@@ -239,6 +239,35 @@ const SURPLUS_COLUMNS: PipelineColumn<any>[] = [
       ),
   },
   {
+    key: 'age',
+    label: 'Days since sale',
+    align: 'right',
+    width: '110px',
+    // Sorts oldest-first on the first click, which is the useful direction: a
+    // stale case is either already worked by somebody else or close to the end
+    // of its window.
+    sortValue: (r) => r.daysSinceSale ?? -1,
+    render: (r) =>
+      r.daysSinceSale == null ? (
+        <span style={{ color: 'var(--faint)' }}>unknown</span>
+      ) : (
+        <span
+          style={{
+            color:
+              r.daysSinceSale > 365
+                ? 'var(--red)'
+                : r.daysSinceSale > 120
+                  ? 'var(--amber)'
+                  : 'var(--mint)',
+            fontWeight: 600,
+          }}
+          title={r.saleDate ? `Sold ${fmtDate(r.saleDate)}` : undefined}
+        >
+          {r.daysSinceSale}d
+        </span>
+      ),
+  },
+  {
     key: 'contact',
     label: 'Reach',
     width: '150px',

@@ -31,6 +31,7 @@ import {
   dripTrack,
   isDeceased,
   noticeAge,
+  daysSinceSale,
   claimDeadline,
   daysRemaining,
   windowElapsedPct,
@@ -722,6 +723,7 @@ export class SurplusService {
       dripTrack: dripTrack(facts),
 
       saleDate: d.saleDate,
+      daysSinceSale: daysSinceSale({ saleDate: d.saleDate }),
       salePrice: d.salePrice,
       noticeDate: d.noticeDate,
       noticeConfirmed: d.noticeConfirmed,
@@ -884,6 +886,7 @@ export function groupByProperty(rows: any[]): any[] {
       netToClaimant: head.netToClaimant,
       estFee: head.estFee,
       saleDate: head.saleDate,
+      daysSinceSale: head.daysSinceSale,
       noticeDate: head.noticeDate,
       noticeConfirmed: head.noticeConfirmed,
       daysRemaining: head.daysRemaining,

@@ -37,6 +37,7 @@ export interface SurplusLien {
 }
 
 export interface SurplusFacts {
+  saleDate?: Date | string | null;
   surplusType?: string | null;
   fundLocation?: string | null;
   claimantType?: string | null;
@@ -78,6 +79,20 @@ export function addDays(v?: Date | string | null, n = 0): Date | null {
   const out = new Date(d.getTime());
   out.setDate(out.getDate() + n);
   return out;
+}
+
+/**
+ * Days since the property sold at auction.
+ *
+ * A separate clock from the notice, and the one the team counts in practice:
+ * the sale is a hard, published date on every case, whereas the notice date has
+ * to be read off a scanned letter and is an estimate wherever that read failed.
+ * Older sales are colder, and a case that sold two years ago has usually been
+ * worked by somebody else already.
+ */
+export function daysSinceSale(lead: SurplusFacts & { saleDate?: Date | string | null }, now = new Date()): number | null {
+  const d = asDate(lead.saleDate);
+  return d ? dayDiff(startOfToday(now), d) : null;
 }
 
 /** Days since the notice was mailed. null when there is no notice date. */

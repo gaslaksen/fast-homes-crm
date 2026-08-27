@@ -1,4 +1,5 @@
 import {
+  daysSinceSale,
   workScore,
   workReason,
   surplusUidOf,
@@ -499,5 +500,21 @@ describe('workReason', () => {
   it('calls out a mismatched skip trace by name', () => {
     expect(workReason({ claimStatus: SurplusClaimStatus.OPEN, cleanPhoneCount: 0, contactMismatch: true }))
       .toContain('somebody else');
+  });
+});
+
+describe('daysSinceSale', () => {
+  it('counts forward from the sale, which is the clock the team uses', () => {
+    // The sale is published on every case. The notice date has to be read off a
+    // scanned letter and is an estimate wherever that read failed.
+    const now = new Date(2026, 7, 27);
+    expect(daysSinceSale({ saleDate: '2026-08-27' }, now)).toBe(0);
+    expect(daysSinceSale({ saleDate: '2026-08-20' }, now)).toBe(7);
+    expect(daysSinceSale({ saleDate: '2025-06-11' }, now)).toBe(442);
+  });
+
+  it('is null when there is no sale date rather than pretending it is today', () => {
+    expect(daysSinceSale({ saleDate: null })).toBeNull();
+    expect(daysSinceSale({})).toBeNull();
   });
 });

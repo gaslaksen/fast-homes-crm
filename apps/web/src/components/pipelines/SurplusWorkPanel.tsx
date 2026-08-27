@@ -6,6 +6,8 @@ import MessageComposer, { type EmailAction } from '@/components/communications/M
 import NotesPanel from '@/components/communications/NotesPanel';
 import type { NoteItem, TimelineItem } from '@/components/communications/types';
 import { authAPI, campaignsAPI, leadsAPI, surplusAPI } from '@/lib/api';
+import { useDialer } from '@/components/dialer/DialerContext';
+import { DNC_STATE } from './format';
 import { fmtDate, money, phoneDisplay } from './format';
 
 /**
@@ -95,6 +97,7 @@ export interface SurplusPanelLead {
   netToClaimant: number;
   estFee: number | null;
   saleDate: string | null;
+  daysSinceSale: number | null;
   noticeDate: string | null;
   noticeConfirmed: boolean;
   daysRemaining: number | null;
@@ -148,6 +151,9 @@ export default function SurplusWorkPanel({
   const [campaigns, setCampaigns] = useState<{ id: string; name: string }[]>([]);
   const [enrolling, setEnrolling] = useState(false);
   const [tracing, setTracing] = useState(false);
+  /** Raised by clicking a number or an email, consumed by the composer. */
+  const [composeIntent, setComposeIntent] = useState<any>(null);
+  const dialer = useDialer();
   const [fullLead, setFullLead] = useState<any>(null);
   /** Needed by the composer for @mentions on internal comments. */
   const [teamMembers, setTeamMembers] = useState<any[]>([]);
@@ -261,6 +267,26 @@ export default function SurplusWorkPanel({
     } finally {
       setTracing(false);
     }
+  };
+
+  /**
+   * Call a number straight from the panel. The dialer is app-wide, so this is
+   * the same call path as the lead page and the floating dialer, and the call
+   * is attributed to this lead rather than appearing as an anonymous dial.
+   */
+  const call = (number: string) => dialer.startCall({ name: lead.claimant, phone: number, leadId: lead.id });
+
+  /** Open the conversation on SMS with this number already selected. */
+  const message = (number: string) => {
+    setComposeIntent({ nonce: Date.now(), channel: 'sms', to: number });
+    setTab('conversation');
+  };
+
+  /** Open the conversation on email, addressed to this address. */
+  const mail = (address: string) => {
+    setComposeIntent({ nonce: Date.now(), channel: 'email', to: address });
+    setEmailAction({ nonce: Date.now(), mode: 'reply', subject: '', bodyHtml: '', to: address });
+    setTab('conversation');
   };
 
   const ledger = property.claimLedger || [];
@@ -389,6 +415,9 @@ export default function SurplusWorkPanel({
               ledger={ledger}
               onTrace={trace}
               tracing={tracing}
+              onCall={call}
+              onText={message}
+              onEmail={mail}
             />
           )}
 
@@ -429,6 +458,7 @@ export default function SurplusWorkPanel({
                 teamMembers={teamMembers}
                 doNotContact={fullLead.doNotContact}
                 emailAction={emailAction}
+                composeIntent={composeIntent}
                 onSent={() => {
                   loadComms();
                   onChanged();
@@ -489,12 +519,18 @@ function CaseTab({
   ledger,
   onTrace,
   tracing,
+  onCall,
+  onText,
+  onEmail,
 }: {
   lead: SurplusPanelLead;
   property: any;
   ledger: LedgerDoc[];
   onTrace: () => void;
   tracing: boolean;
+  onCall: (number: string) => void;
+  onText: (number: string) => void;
+  onEmail: (address: string) => void;
 }) {
   const grouped = LEDGER_GROUPS.map((g) => ({
     ...g,
@@ -521,7 +557,14 @@ function CaseTab({
       </Section>
 
       <Section title="The clock">
-        <Row k="Sale" v={property.saleDate ? fmtDate(property.saleDate) : 'unknown'} />
+        <Row
+          k="Sale"
+          v={
+            property.saleDate
+              ? `${fmtDate(property.saleDate)}${property.daysSinceSale != null ? ` (${property.daysSinceSale} days ago)` : ''}`
+              : 'unknown'
+          }
+        />
         <Row
           k="Notice mailed"
           v={property.noticeDate ? fmtDate(property.noticeDate) : 'unknown'}
@@ -596,17 +639,42 @@ function CaseTab({
             </div>
           </div>
         )}
-        {lead.phones.map((p) => (
-          <Row
-            key={p.number}
-            k={p.type || 'Phone'}
-            v={phoneDisplay(p.number)}
-            note={p.dnc ? `On the ${p.dnc} registry` : undefined}
-            tone={p.dnc ? 'var(--red)' : undefined}
-          />
-        ))}
+        {/* Clickable: dial it, or open the conversation already addressed to it.
+            A flagged number still shows and is still clickable, because the
+            decision belongs to the person making the call, but the flag is
+            loud enough that it cannot be missed. */}
+        {lead.phones.map((p) => {
+          const flag = p.dnc ? DNC_STATE[p.dnc] : null;
+          return (
+            <div key={p.number} className="dc-wp-contact">
+              <div className="dc-wp-contact-main">
+                <span className="num">{phoneDisplay(p.number)}</span>
+                <span className="meta">{p.type || 'Phone'}</span>
+                {flag && <span className="flag">{flag.label}</span>}
+              </div>
+              <div className="dc-wp-contact-actions">
+                <button type="button" className="dc-wp-btn" onClick={() => onCall(p.number)}>
+                  Call
+                </button>
+                <button type="button" className="dc-wp-btn" onClick={() => onText(p.number)}>
+                  Text
+                </button>
+              </div>
+            </div>
+          );
+        })}
         {lead.emails.map((e) => (
-          <Row key={e} k="Email" v={e} />
+          <div key={e} className="dc-wp-contact">
+            <div className="dc-wp-contact-main">
+              <span className="num">{e}</span>
+              <span className="meta">Email</span>
+            </div>
+            <div className="dc-wp-contact-actions">
+              <button type="button" className="dc-wp-btn" onClick={() => onEmail(e)}>
+                Email
+              </button>
+            </div>
+          </div>
         ))}
         {property.mailVerdict && (
           <Row
