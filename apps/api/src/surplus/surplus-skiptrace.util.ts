@@ -50,6 +50,59 @@ export interface TraceCheck {
   reason: string;
 }
 
+/**
+ * Are these the same given name, allowing for how the record was written down?
+ *
+ * Exact comparison called the real Duval hit a relative rather than the
+ * claimant: the county wrote MYRTIS GRIFFIN and the vendor returned
+ * "Mertis Griffin", one character apart. The contacts were kept either way,
+ * because a surname match is enough for that, but the lead was labelled "not
+ * the claimant" when it was plainly her.
+ *
+ * Two allowances, both narrow:
+ *   - an initial against a full name ("R" and "Robert"), which is how counties
+ *     abbreviate
+ *   - a single character of difference on a name of five or more, which covers
+ *     a transcription slip without letting short names collide (Jon and Ron,
+ *     Dan and Dana are NOT the same person)
+ */
+export function sameGivenName(a: string, b: string): boolean {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  // An initial standing in for the full name.
+  if (a.length === 1 || b.length === 1) return a[0] === b[0];
+  // Too short to risk a fuzzy match on.
+  if (a.length < 5 || b.length < 5) return false;
+  if (Math.abs(a.length - b.length) > 1) return false;
+  return editDistanceWithin1(a, b);
+}
+
+/** True when `a` and `b` are at most one substitution, insertion or deletion apart. */
+function editDistanceWithin1(a: string, b: string): boolean {
+  if (a.length === b.length) {
+    let diff = 0;
+    for (let i = 0; i < a.length; i += 1) {
+      if (a[i] !== b[i] && (diff += 1) > 1) return false;
+    }
+    return diff === 1;
+  }
+  const [short, long] = a.length < b.length ? [a, b] : [b, a];
+  let i = 0;
+  let j = 0;
+  let skipped = false;
+  while (i < short.length && j < long.length) {
+    if (short[i] === long[j]) {
+      i += 1;
+      j += 1;
+      continue;
+    }
+    if (skipped) return false;
+    skipped = true;
+    j += 1;
+  }
+  return true;
+}
+
 function tokens(v?: string | null): string[] {
   return String(v || '')
     .toLowerCase()
@@ -126,7 +179,7 @@ export function verifyTracedName(
     !!traced.surname &&
     (traced.surname === want.surname || claimantAll.includes(traced.surname));
   const givenHit = traced.given.some(
-    (g) => want.given.includes(g) || g === want.surname,
+    (g) => want.given.some((w) => sameGivenName(g, w)) || sameGivenName(g, want.surname),
   );
 
   if (surnameHit && givenHit) {

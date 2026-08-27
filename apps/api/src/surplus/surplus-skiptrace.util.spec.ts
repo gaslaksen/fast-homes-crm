@@ -1,4 +1,5 @@
 import {
+  sameGivenName,
   splitClaimantName,
   verifyTracedName,
   traceEligibility,
@@ -56,6 +57,22 @@ describe('verifyTracedName', () => {
     const r = verifyTracedName('DANNIE LESTER STEWART', 'Bertha', 'Stewart');
     expect(r.verdict).toBe('relative');
     expect(r.reason).toMatch(/household/i);
+  });
+
+  it('reads a one-character spelling slip as the same person', () => {
+    // The real Duval hit. The county wrote MYRTIS GRIFFIN, the vendor returned
+    // "Mertis Griffin". Exact matching called her a relative and labelled the
+    // lead "not the claimant" when it was plainly her.
+    expect(verifyTracedName('MYRTIS GRIFFIN', 'Mertis', 'Griffin').verdict).toBe('same_person');
+  });
+
+  it('accepts an initial standing in for the full given name', () => {
+    expect(verifyTracedName('R PITTARD', 'Robert', 'Pittard').verdict).toBe('same_person');
+  });
+
+  it('still calls a genuinely different household member a relative', () => {
+    // The fuzzy allowance must not swallow this: Dorothy is not Robert.
+    expect(verifyTracedName('ROBERT PITTARD', 'Dorothy', 'Pittard').verdict).toBe('relative');
   });
 
   it('discards a stranger who merely shares a first name', () => {
@@ -189,5 +206,38 @@ describe('addressCaseCounts', () => {
     ]);
     expect(counts.get('A')).toBe(1);
     expect(counts.get('B')).toBe(3);
+  });
+});
+
+describe('sameGivenName', () => {
+  it('accepts a single character slip on a long enough name', () => {
+    expect(sameGivenName('myrtis', 'mertis')).toBe(true);
+    expect(sameGivenName('kathryn', 'katheryn')).toBe(true); // one insertion
+  });
+
+  it('accepts an initial against a full name', () => {
+    expect(sameGivenName('r', 'robert')).toBe(true);
+    expect(sameGivenName('calvin', 'c')).toBe(true);
+  });
+
+  it('refuses a fuzzy match on a SHORT name, where one letter is a different person', () => {
+    // The reason the allowance is length-gated. These are not slips.
+    expect(sameGivenName('jon', 'ron')).toBe(false);
+    expect(sameGivenName('dan', 'dana')).toBe(false);
+    expect(sameGivenName('ann', 'ana')).toBe(false);
+  });
+
+  it('refuses two characters of difference', () => {
+    expect(sameGivenName('robert', 'rupert')).toBe(false);
+    expect(sameGivenName('dorothy', 'timothy')).toBe(false);
+  });
+
+  it('refuses names of clearly different length', () => {
+    expect(sameGivenName('robert', 'bob')).toBe(false);
+  });
+
+  it('handles empties', () => {
+    expect(sameGivenName('', 'robert')).toBe(false);
+    expect(sameGivenName('robert', '')).toBe(false);
   });
 });

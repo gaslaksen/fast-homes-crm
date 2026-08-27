@@ -317,6 +317,11 @@ export class SurplusSkiptraceService {
       stranger: 0,
     };
 
+    const where =
+      group[0].addressSource === 'notice'
+        ? `at ${group[0].street}, ${group[0].city || ''}`.trim().replace(/,$/, '')
+        : 'at the property';
+
     for (const c of group) {
       let best: { person: TracedPerson; verdict: TraceVerdict; reason: string } | null = null;
       for (const p of persons) {
@@ -327,7 +332,7 @@ export class SurplusSkiptraceService {
       }
 
       if (!best) {
-        await this.note(c.detailId, 'Skip trace returned no matched person at this address.');
+        await this.note(c.detailId, `Skip trace returned no matched person ${where}.`);
         continue;
       }
 
@@ -345,7 +350,7 @@ export class SurplusSkiptraceService {
             dncScrubbedAt: null,
             callNotes: this.appendNote(
               null,
-              `Skip trace returned ${name || 'an unnamed person'} at the property. ${best.reason} Contacts discarded. The claimant needs a name based route: Sunbiz for an entity, official records for a later deed, or an obituary if deceased.`,
+              `Skip trace returned ${name || 'an unnamed person'} ${where}. ${best.reason} Contacts discarded. The claimant needs a name based route: Sunbiz for an entity, official records for a later deed, or an obituary if deceased.`,
             ),
           },
         });
