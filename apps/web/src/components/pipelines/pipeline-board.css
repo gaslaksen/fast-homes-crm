@@ -449,3 +449,18 @@ button.dc-wp-claimant {
 }
 button.dc-wp-claimant.on { background: var(--mint); border-color: var(--mint); color: var(--mintInk); }
 button.dc-wp-claimant .sub { display: block; font-size: 10.5px; font-weight: 500; opacity: 0.8; }
+
+/* One-click name searches in the work panel. These are links to the sites'
+ * own search pages, not integrations: none of these people-search services
+ * publishes an API and their terms prohibit automated querying. */
+.dc-wp a.dc-wp-searchlink {
+  display: inline-flex; align-items: center; gap: 5px;
+  background: var(--surface2); border: 1px solid var(--border2); border-radius: 8px;
+  padding: 5px 10px; font-size: 11.5px; font-weight: 600; color: var(--text); text-decoration: none;
+}
+.dc-wp a.dc-wp-searchlink:hover { background: var(--mint); border-color: var(--mint); color: var(--mintInk); }
+.dc-wp a.dc-wp-searchlink .free {
+  font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.4px;
+  background: var(--mintGhost); color: var(--mint); border-radius: 3px; padding: 1px 4px;
+}
+.dc-wp a.dc-wp-searchlink:hover .free { background: rgba(255,255,255,0.25); color: var(--mintInk); }

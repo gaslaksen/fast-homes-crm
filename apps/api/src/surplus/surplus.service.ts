@@ -10,6 +10,7 @@ import {
   SurplusClaimStatus,
 } from '@fast-homes/shared';
 import { CLAIM_STATUS_LABEL } from './surplus-classify.util';
+import { nameSearchPlan } from './surplus-name-search.util';
 import {
   normalizePhoneDigits,
   isoWeekKey,
@@ -738,6 +739,19 @@ export class SurplusService {
         warns: gate.warns,
         rule: gate.rule,
       },
+
+      // The name-first route, for when the address route is exhausted. Built
+      // per claimant because it keys on their name and their state.
+      nameSearch: nameSearchPlan({
+        claimant: `${lead.sellerFirstName || ''} ${lead.sellerLastName || ''}`.trim(),
+        ownerState: d.ownerMailingState || lead.propertyState,
+        propertyAddress: lead.propertyAddress,
+        propertyCity: lead.propertyCity,
+        isEntity: /\b(LLC|L\.L\.C|INC|CORP|CORPORATION|COMPANY|LP|LLP|LLLP|LTD|TRUST|ASSOCIATION|CHURCH|BANK|PARTNERS|HOLDINGS)\b/i.test(
+          `${lead.sellerFirstName || ''} ${lead.sellerLastName || ''}`,
+        ),
+        mailVerdict: d.mailVerdict,
+      }),
 
       claimStatus: d.claimStatus || SurplusClaimStatus.UNKNOWN,
       claimStatusLabel: CLAIM_STATUS_LABEL[(d.claimStatus || SurplusClaimStatus.UNKNOWN) as SurplusClaimStatus],

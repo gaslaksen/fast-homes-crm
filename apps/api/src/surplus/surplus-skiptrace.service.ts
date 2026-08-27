@@ -198,11 +198,10 @@ export class SurplusSkiptraceService {
       const elig = traceEligibility(c, {
         isEntity: c.isEntity,
         addressCaseCount: caseCounts.get(c.addressKey) || 0,
-        // Falling back to the property is only worth a credit when the clerk's
-        // own mail to it was not returned. An undeliverable verdict is direct
-        // evidence the owner was already gone before we started looking.
-        propertyFallbackMailVerdict:
-          c.addressSource === 'property' ? mailVerdicts.get(c.detailId) : undefined,
+        // Applies to the notice address too, not just the property fallback.
+        // The notice IS what went to the owner's mailing address, so a returned
+        // verdict says that address is dead.
+        mailVerdict: mailVerdicts.get(c.detailId),
       });
       if (!elig.ok) {
         const reason = elig.reason || 'ineligible';

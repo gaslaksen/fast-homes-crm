@@ -160,6 +160,22 @@ describe('traceEligibility', () => {
     expect(r.reason).toBe('zip_state_mismatch');
   });
 
+  it('refuses ANY address whose clerk mail was returned, not just the property', () => {
+    // Every submission against a returned address came back a stranger: six on
+    // property addresses, then Maxine Fletcher at a Bronx mailing address and
+    // Kelli Grimes at a Jacksonville one. Not one produced a contact.
+    const r = traceEligibility(ok, { mailVerdict: 'undeliverable' });
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe('mail_returned');
+    expect(r.detail).toMatch(/name/i);
+  });
+
+  it('still submits when the mail was delivered or mixed', () => {
+    expect(traceEligibility(ok, { mailVerdict: 'delivered' }).ok).toBe(true);
+    expect(traceEligibility(ok, { mailVerdict: 'mixed' }).ok).toBe(true);
+    expect(traceEligibility(ok, { mailVerdict: null }).ok).toBe(true);
+  });
+
   it('refuses an address shared across several cases', () => {
     // A professional address. One household comes back and attributing those
     // phones to every claimant on it is wrong more often than it is right.

@@ -85,6 +85,13 @@ export interface SurplusPanelLead {
   ownerMailingState: string | null;
   ownerMailingZip: string | null;
   ownerAddressSource: string | null;
+  nameSearch: {
+    query: string;
+    state: string | null;
+    verifyAgainst: string | null;
+    reason?: string;
+    links: { site: string; url: string; free: boolean }[];
+  } | null;
   netToClaimant: number;
   estFee: number | null;
   saleDate: string | null;
@@ -622,6 +629,44 @@ function CaseTab({
           />
         )}
       </Section>
+
+      {/* When the address route is exhausted, the name route is what is left.
+          The course teaches searching NAME plus STATE and confirming against
+          the property that was sold, which is the inverse of what BatchData
+          does and is why the two complement each other. */}
+      {lead.nameSearch && (
+        <Section title="Find them by name">
+          {lead.nameSearch.reason && (
+            <div style={{ fontSize: 11.5, color: 'var(--amber)', marginBottom: 4 }}>
+              {lead.nameSearch.reason}
+            </div>
+          )}
+          <Row k="Search for" v={lead.nameSearch.query} />
+          {lead.nameSearch.state && <Row k="In state" v={lead.nameSearch.state} />}
+          {lead.nameSearch.verifyAgainst && (
+            <Row
+              k="Confirm against"
+              v={lead.nameSearch.verifyAgainst}
+              tone="var(--mint)"
+              note="A result whose address history includes this property is your claimant. One that does not is a different person with the same name."
+            />
+          )}
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
+            {lead.nameSearch.links.map((l: any) => (
+              <a
+                key={l.site}
+                href={l.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="dc-wp-searchlink"
+              >
+                {l.site}
+                {l.free && <span className="free">free</span>}
+              </a>
+            ))}
+          </div>
+        </Section>
+      )}
 
       <Section
         title="The docket"

@@ -218,7 +218,7 @@ export type TraceSkipReason =
   | 'zip_state_mismatch'
   | 'entity'
   | 'shared_address'
-  | 'property_mail_returned';
+  | 'mail_returned';
 
 export interface TraceEligibility {
   ok: boolean;
@@ -247,11 +247,12 @@ export function traceEligibility(
     isEntity?: boolean;
     addressCaseCount?: number;
     /**
-     * Set only when this candidate is falling back to the PROPERTY address
-     * because no mailing address was recovered. Carries the clerk's own mail
-     * verdict for that property.
+     * The clerk's own verdict on mail to this claimant, from the returned-mail
+     * filings on the docket. Applies to WHICHEVER address we are about to
+     * submit: the notice went to the owner's mailing address, so a returned
+     * verdict condemns that address, not just the property.
      */
-    propertyFallbackMailVerdict?: string | null;
+    mailVerdict?: string | null;
   } = {},
 ): TraceEligibility {
   // An entity has no consumer identity to find. 37 of 204 targets on a sampled
@@ -321,15 +322,24 @@ export function traceEligibility(
     };
   }
 
-  // The clerk already mailed this exact address and it came back. Tracing it
-  // returns whoever lives there now, which on a sold tax deed parcel is very
-  // often the purchaser. Six of six such submissions came back strangers.
-  if (opts.propertyFallbackMailVerdict === 'undeliverable') {
+  // The clerk already wrote to this claimant and it came back. Whatever address
+  // we have for them is the one that bounced, so a trace of it returns whoever
+  // is there NOW rather than the claimant.
+  //
+  // The evidence is unambiguous. Every submission against an address whose mail
+  // had already been returned came back a stranger: six of six on the property
+  // addresses, then Maxine Fletcher at the Bronx mailing address and Kelli
+  // Grimes at the Bradford St one. Not one produced a contact.
+  //
+  // These claimants are not unreachable, they are unreachable BY ADDRESS. They
+  // need a name-first search, which is what the surplus course teaches and what
+  // `nameSearchLinks` exists for.
+  if (opts.mailVerdict === 'undeliverable') {
     return {
       ok: false,
-      reason: 'property_mail_returned',
+      reason: 'mail_returned',
       detail:
-        'No mailing address recovered from the notice, and the clerk\'s own mail to the property was returned undelivered. Tracing it would return the current occupant. Read the Notice of Surplus Funds for the owner\'s address.',
+        "The clerk's own mail to this address was returned undelivered, so a skip trace of it returns whoever is there now rather than the claimant. Search by NAME instead and confirm against the property address.",
     };
   }
 

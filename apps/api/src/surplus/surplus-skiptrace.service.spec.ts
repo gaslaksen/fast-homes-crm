@@ -260,13 +260,17 @@ describe('choosing which address to submit', () => {
     // Direct evidence the owner was gone before we started looking. Six of six
     // such submissions came back strangers on the first live run.
     const { svc } = harness([
-      lead({ street: '2817 EAVERSON ST', mailVerdict: 'undeliverable' }),
+      lead({
+        street: '2817 EAVERSON ST',
+        mailStreet: '1228 ADEE AVENUE', mailCity: 'BRONX', mailState: 'NY', mailZip: '10469',
+        mailVerdict: 'undeliverable',
+      }),
     ]);
 
     const r = await svc.traceLeads({ organizationId: 'org' });
 
     expect(mockedAxios.post).not.toHaveBeenCalled();
-    expect(r.skipped.property_mail_returned).toBe(1);
+    expect(r.skipped.mail_returned).toBe(1);
   });
 
   it('still allows the property fallback when the mail was delivered', async () => {
