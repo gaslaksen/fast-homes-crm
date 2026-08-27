@@ -165,15 +165,22 @@ export function ruleFor(
  * `candidate` is the expansion list. Adding one is a line here, not a rebuild.
  */
 export const FL_COUNTIES = {
-  active: ['Lee', 'Santa Rosa', 'Marion'],
-  candidate: ['Volusia', 'Duval', 'Osceola', 'St. Johns', 'Brevard'],
+  active: ['Duval', 'Lee', 'Santa Rosa', 'Marion'],
+  candidate: ['Volusia', 'Osceola', 'St. Johns', 'Brevard'],
 };
 
 export const ALL_FL_COUNTIES = FL_COUNTIES.active.concat(FL_COUNTIES.candidate);
 
 /**
  * Below this a surplus never reaches the feed at all. It is a floor on
- * ingestion, not a filter on a view: the fee on a $12k surplus does not cover
- * the title search and the filing.
+ * ingestion, not a filter on a view.
+ *
+ * Was 15000 on the theory that the fee on a smaller surplus does not cover the
+ * title search and the filing. Lowered to 5000 on 2026-08-27: acquisitions
+ * worked a $12,445.68 Duval case (2025-0829TD, Ella Clowers estate) by hand and
+ * called it a four to five thousand dollar win, which the old floor would have
+ * discarded at ingestion. Across the live Duval surplus docket the change adds
+ * 25 cases and about $232k of gross surplus on top of the 48 cases already over
+ * 15k.
  */
-export const SURPLUS_FLOOR = 15000;
+export const SURPLUS_FLOOR = 5000;

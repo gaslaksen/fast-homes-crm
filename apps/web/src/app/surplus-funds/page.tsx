@@ -4,7 +4,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import LeadRack, { RackView } from '@/components/pipelines/LeadRack';
 import AddLeadSheet, { SURPLUS_FIELDS } from '@/components/pipelines/AddLeadSheet';
-import { surplusAPI } from '@/lib/api';
+import SurplusWorkPanel from '@/components/pipelines/SurplusWorkPanel';
+import { authAPI, surplusAPI } from '@/lib/api';
 import '@/components/pipelines/pipeline-board.css';
 import {
   CHIP,
@@ -134,7 +135,33 @@ interface SurplusLead {
   callNotes: string;
   touchDays: Record<string, boolean>;
   totalTouches: number;
+
+  // ── From the county poll ──────────────────────────────────────────────────
+  /** SurplusClaimStatus: where the money stands on the clerk's docket. */
+  claimStatus: string;
+  claimStatusLabel: string;
+  /** Call-now ranking. Claim status dominates, then contactability, then money. */
+  workScore: number;
+  workReason: string;
+  surplusAtNotice: number | null;
+  mailVerdict: string | null;
+  claimLedger: { title: string; kind: string; docId?: string | null; url?: string | null }[] | null;
+  sourceSystem: string | null;
+  sourceCaseId: string | null;
+  sourceUrl: string | null;
+  lastPolledAt: string | null;
 }
+
+/** Tone for each claim status, matching the panel. */
+const CLAIM_STATUS_CHIP: Record<string, { fg: string; bg: string }> = {
+  denied: CHIP.mint,
+  open: CHIP.mint,
+  gov_lien: CHIP.amber,
+  pending: CHIP.amber,
+  assigned: CHIP.red,
+  distributed: CHIP.red,
+  unknown: CHIP.slate,
+};
 
 // ─── Page ───────────────────────────────────────────────────────────────────
 
@@ -160,7 +187,10 @@ export default function SurplusFundsPage() {
   const [toast, setToast] = useState<string | null>(null);
 
   const [q, setQ] = useState('');
-  const [sort, setSort] = useState('notice');
+  // The board opens on the call-now order. Tier alone does not answer "who do
+  // I ring first": it bands the dollars, and a big surplus whose owner already
+  // signed with a competitor is worth less than a small one with a live number.
+  const [sort, setSort] = useState('work');
   const [tierQ, setTierQ] = useState<string | null>(null);
   const [chipQ, setChipQ] = useState<string | null>(null);
   const [stageQ, setStageQ] = useState<string | null>(null);
@@ -175,6 +205,9 @@ export default function SurplusFundsPage() {
   const [picked, setPicked] = useState<Record<string, boolean>>({});
   const [editing, setEditing] = useState<Record<string, boolean>>({});
   const [view, setView] = useState<RackView>('rack');
+  /** The lead whose work panel is open, or null. */
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [currentUser, setCurrentUser] = useState<any>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -239,6 +272,23 @@ export default function SurplusFundsPage() {
   useEffect(() => {
     fetchStats();
   }, [fetchStats]);
+
+  // The work panel composes messages as the logged-in user, and notes are
+  // attributed to them.
+  useEffect(() => {
+    authAPI.getMe().then((res) => setCurrentUser(res.data)).catch(() => {});
+  }, []);
+
+  // The open row is read out of `rows` rather than held in its own state, so a
+  // refresh after sending a message or enrolling a campaign flows straight into
+  // the panel instead of leaving it showing a stale case.
+  const openLead = openId ? rows.find((r) => r.id === openId) || null : null;
+
+  // A lead that drops out of the current filter while its panel is open would
+  // otherwise leave the panel mounted with nothing behind it.
+  useEffect(() => {
+    if (openId && !loading && !rows.some((r) => r.id === openId)) setOpenId(null);
+  }, [openId, rows, loading]);
 
   /* Optimistic, then reconciled. The server recomputes the tier and re-runs the
      compliance gate on every write, so a card that only echoed the local change
@@ -458,6 +508,7 @@ export default function SurplusFundsPage() {
               v={sort}
               set={setSort}
               opts={[
+                ['work', 'Sort: Call first'],
                 ['notice', 'Sort: Newest notice'],
                 ['surplus', 'Sort: Surplus size'],
                 ['net', 'Sort: Net to claimant'],
@@ -607,6 +658,7 @@ export default function SurplusFundsPage() {
             renderItem={(r) => (
               <SurplusCard
                 r={r}
+                onOpen={() => setOpenId(r.id)}
                 picked={!!picked[r.id]}
                 onPick={(on) => setPicked({ ...picked, [r.id]: on })}
                 editing={!!editing[r.id]}
@@ -621,6 +673,19 @@ export default function SurplusFundsPage() {
 
           <div style={{ height: 34 }} />
         </div>
+
+        {openLead && (
+          <SurplusWorkPanel
+            lead={openLead as any}
+            currentUser={currentUser}
+            onClose={() => setOpenId(null)}
+            onChanged={() => {
+              fetchRows();
+              fetchStats();
+            }}
+            say={say}
+          />
+        )}
 
         {toast && (
           <div
@@ -669,6 +734,7 @@ function Lbl({ children, style }: { children: React.ReactNode; style?: React.CSS
 
 interface CardProps {
   r: SurplusLead;
+  onOpen: () => void;
   picked: boolean;
   onPick: (on: boolean) => void;
   editing: boolean;
@@ -679,7 +745,7 @@ interface CardProps {
   say: (t: string) => void;
 }
 
-function SurplusCard({ r, picked, onPick, editing, onEditing, disclosureLabels, patch, copy, say }: CardProps) {
+function SurplusCard({ r, onOpen, picked, onPick, editing, onEditing, disclosureLabels, patch, copy, say }: CardProps) {
   const tier = TIER[r.tier] || TIER.U;
   const stageColor = SURPLUS_STAGE_COLOR[r.stage] || CHIP.slate;
   const dripColor = DRIP_TRACK_COLOR[r.dripTrack] || CHIP.blue;
@@ -695,6 +761,7 @@ function SurplusCard({ r, picked, onPick, editing, onEditing, disclosureLabels, 
           ? 'var(--amber)'
           : 'var(--mint)';
   const barColor = rem !== null && rem < 30 ? 'var(--red)' : rem !== null && rem <= 60 ? 'var(--amber)' : 'var(--mint)';
+  const claimChip = CLAIM_STATUS_CHIP[r.claimStatus] || CHIP.slate;
 
   const setPhone = (i: number, next: Partial<Phone>) => {
     const nx = r.phones.map((p, k) => (k === i ? { ...p, ...next } : p));
@@ -723,11 +790,20 @@ function SurplusCard({ r, picked, onPick, editing, onEditing, disclosureLabels, 
             {r.address}, {r.city} · {r.county} County
           </div>
         </div>
-        <div className="dc-score" style={{ borderColor: tier.fg }}>
-          <b style={{ color: tier.fg, fontSize: 15 }}>{tier.icon}</b>
-          <span>Tier {r.tier}</span>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 5 }}>
+          <div className="dc-score" style={{ borderColor: tier.fg }}>
+            <b style={{ color: tier.fg, fontSize: 15 }}>{tier.icon}</b>
+            <span>Tier {r.tier}</span>
+          </div>
+          <button className="dc-btn xs" onClick={onOpen} title={r.workReason}>
+            Work it
+          </button>
         </div>
       </div>
+
+      {/* Why this lead ranks where it does. The order has to be auditable, so
+          the reason travels with the card rather than living in the sort. */}
+      <div style={{ fontSize: 11.5, color: 'var(--faint)', marginTop: 6 }}>{r.workReason}</div>
 
       <div className="dc-cardbody">
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -736,6 +812,13 @@ function SurplusCard({ r, picked, onPick, editing, onEditing, disclosureLabels, 
           </span>
           <span className="dc-tag" style={{ background: dripColor.bg, color: dripColor.fg }}>
             {r.dripTrack}
+          </span>
+          <span
+            className="dc-tag"
+            style={{ background: claimChip.bg, color: claimChip.fg }}
+            title={r.workReason}
+          >
+            {r.claimStatusLabel}
           </span>
           <span className="dc-tag" style={{ background: 'var(--surface3)', color: 'var(--text)' }}>
             {r.surplusType === 'tax_deed' ? 'Tax deed' : 'Mortgage FC'}

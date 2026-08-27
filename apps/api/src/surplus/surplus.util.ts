@@ -7,7 +7,13 @@
  * one implementation of the math that the money depends on.
  */
 
-import { SurplusClaimantType, SurplusStage, SurplusTier } from '@fast-homes/shared';
+import {
+  SurplusClaimantType,
+  SurplusClaimStatus,
+  SurplusStage,
+  SurplusTier,
+} from '@fast-homes/shared';
+import { CLAIM_STATUS_LABEL, CLAIM_STATUS_RANK, isWorkable } from './surplus-classify.util';
 import {
   ComplianceRule,
   ruleFor,
@@ -196,6 +202,85 @@ export function tierOf(lead: SurplusFacts): SurplusTier {
   if (surplus >= 10000 && surplus < 25000 && !dead) return SurplusTier.B;
   if (surplus >= 25000 && dead) return SurplusTier.C;
   return SurplusTier.UNBANDED;
+}
+
+/**
+ * Who to call now, as one number, highest first.
+ *
+ * This exists because "Tier A" does not answer the question. Tier bands the
+ * DOLLARS, and a $40k case whose owner already signed with a competitor is
+ * worth nothing while a $16k case with a denied heir and a live mobile is worth
+ * calling this morning. The board sorts on this and shows workReason() beside
+ * it, so the order is auditable rather than a mystery ranking.
+ *
+ * Weights are deliberately coarse and separated by an order of magnitude, so
+ * claim status dominates contactability, contactability dominates money, and
+ * money only breaks ties. Anything the team cannot act on scores zero.
+ */
+export interface WorkFacts {
+  claimStatus?: string | null;
+  netToClaimant?: number | null;
+  cleanPhoneCount?: number | null;
+  mailVerdict?: string | null;
+  daysRemaining?: number | null;
+  contactMismatch?: boolean | null;
+  doNotCall?: boolean | null;
+}
+
+export function workScore(f: WorkFacts): number {
+  const status = (f.claimStatus || SurplusClaimStatus.UNKNOWN) as SurplusClaimStatus;
+
+  // Nothing to do here. A paid-out or already-assigned case is not a lead, and
+  // a do-not-call lead is not one either whatever the docket says.
+  if (!isWorkable(status) || f.doNotCall) return 0;
+
+  let score = (CLAIM_STATUS_RANK[status] ?? 0) * 100;
+
+  // Can we actually reach them. On a surplus file this is most of the triage:
+  // the owner moved years ago and the record address is usually dead.
+  if ((f.cleanPhoneCount || 0) > 0) score += 40;
+  if (f.contactMismatch) score -= 20;
+  if (f.mailVerdict === 'delivered') score += 10;
+  else if (f.mailVerdict === 'mixed') score += 5;
+
+  // The clock. A previous owner is exempt from the 120 day bar, so this is
+  // urgency, not a cliff.
+  //
+  // The bonus applies only to a window still OPEN. A window that closed months
+  // ago is not urgent, it is settled: no new lienholder can appear, so the
+  // surplus figure is final. Without the `d > 0` guard every long-closed case
+  // scored as if it were about to expire, which put the stalest leads on the
+  // board at the top of the call list.
+  const d = f.daysRemaining;
+  if (d != null && d > 0 && d <= 30) score += 15;
+  else if (d != null && d > 0 && d <= 60) score += 8;
+
+  // Money breaks ties and never leads. Capped so one huge case cannot outrank
+  // a whole band of workable ones.
+  score += Math.min(10, Math.max(0, (f.netToClaimant || 0) / 10000));
+
+  return Math.round(score * 10) / 10;
+}
+
+/** One line saying why this lead sits where it does. Shown on the card. */
+export function workReason(f: WorkFacts): string {
+  const status = (f.claimStatus || SurplusClaimStatus.UNKNOWN) as SurplusClaimStatus;
+  if (!isWorkable(status)) return CLAIM_STATUS_LABEL[status];
+  if (f.doNotCall) return 'Marked do not call';
+
+  const bits: string[] = [CLAIM_STATUS_LABEL[status]];
+  if ((f.cleanPhoneCount || 0) > 0) {
+    bits.push(`${f.cleanPhoneCount} callable number${f.cleanPhoneCount === 1 ? '' : 's'}`);
+  } else if (f.contactMismatch) {
+    bits.push('skip trace returned somebody else');
+  } else {
+    bits.push('no callable number yet');
+  }
+  if (f.mailVerdict === 'undeliverable') bits.push('clerk mail all returned');
+  const d = f.daysRemaining;
+  if (d != null && d > 0 && d <= 30) bits.push(`${d} days left on the lien window`);
+  else if (d != null && d <= 0) bits.push('lien window closed, so the surplus figure is final');
+  return bits.join(', ');
 }
 
 export type DripTrack = 'Heir/Estate' | 'Urgent' | 'Compressed' | 'Standard';

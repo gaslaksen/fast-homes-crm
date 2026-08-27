@@ -7,7 +7,9 @@ import {
   SurplusType,
   SurplusFundLocation,
   SurplusTier,
+  SurplusClaimStatus,
 } from '@fast-homes/shared';
+import { CLAIM_STATUS_LABEL } from './surplus-classify.util';
 import {
   normalizePhoneDigits,
   isoWeekKey,
@@ -20,6 +22,8 @@ import {
 import { cellText, normalizeZip, phoneTypeOf, isoToDate } from '../probate/probate.util';
 import {
   surplusUidOf,
+  workScore,
+  workReason,
   claimantTypeFromText,
   stageFromText,
   tierOf,
@@ -100,8 +104,9 @@ export class SurplusService {
    * out until a surplus campaign is written and enrolled by hand.
    *
    * A surplus below SURPLUS_FLOOR is refused at ingestion rather than filtered
-   * out of a view. The fee on a $12k surplus does not cover the title search
-   * and the filing, so the lead should not exist.
+   * out of a view: under the floor the fee does not cover the title search and
+   * the filing, so the lead should not exist. See surplus-compliance.ts for
+   * where the floor currently sits and why it moved.
    */
   async createSurplusLead(
     input: SurplusLeadInput,
@@ -230,6 +235,14 @@ export class SurplusService {
             dncScrubbedAt: isoToDate(cellText(input.dncScrubbedAt)),
             contactMismatch: !!input.contactMismatch,
             mismatchedName: input.mismatchedName || null,
+            claimStatus: input.claimStatus || SurplusClaimStatus.UNKNOWN,
+            surplusAtNotice: input.surplusAtNotice ?? null,
+            mailVerdict: input.mailVerdict || null,
+            claimLedger: (input.claimLedger as any) ?? null,
+            sourceSystem: input.sourceSystem || null,
+            sourceCaseId: input.sourceCaseId || null,
+            sourceUrl: input.sourceUrl || null,
+            lastPolledAt: input.sourceSystem ? new Date() : null,
           },
         },
       },
@@ -504,6 +517,15 @@ export class SurplusService {
     if (filters.hideDnc) {
       rows = rows.filter((r) => !(r.phones.length > 0 && r.cleanPhoneCount === 0));
     }
+    // Retired cases are hidden by default. A distributed or already-assigned
+    // case is not a lead, and the board is a call list before it is an archive.
+    if (filters.claimStatus) {
+      const wanted = asList(filters.claimStatus);
+      rows = rows.filter((r) => wanted.includes(r.claimStatus));
+    } else if (filters.hideRetired !== false) {
+      rows = rows.filter((r) => r.workScore > 0 || r.stage === SurplusStage.DEAD);
+    }
+
     if (filters.lienWindow === 'open') rows = rows.filter((r) => r.lienWindowOpen);
     if (filters.lienWindow === 'closed') rows = rows.filter((r) => !r.lienWindowOpen);
     if (filters.blockedOnly) rows = rows.filter((r) => !r.compliance.clear);
@@ -512,6 +534,10 @@ export class SurplusService {
       rows.sort((a, b) => (a.noticeAge ?? 9999) - (b.noticeAge ?? 9999));
     }
     if (filters.sort === 'net') rows.sort((a, b) => b.netToClaimant - a.netToClaimant);
+    // The default the board opens on: who to call first.
+    if (!filters.sort || filters.sort === 'work') {
+      rows.sort((a, b) => b.workScore - a.workScore || b.netToClaimant - a.netToClaimant);
+    }
     if (filters.sort === 'tier') {
       const order = [SurplusTier.A, SurplusTier.B, SurplusTier.C, SurplusTier.UNBANDED];
       rows.sort((a, b) => order.indexOf(a.tier) - order.indexOf(b.tier));
@@ -679,6 +705,16 @@ export class SurplusService {
         rule: gate.rule,
       },
 
+      claimStatus: d.claimStatus || SurplusClaimStatus.UNKNOWN,
+      claimStatusLabel: CLAIM_STATUS_LABEL[(d.claimStatus || SurplusClaimStatus.UNKNOWN) as SurplusClaimStatus],
+      surplusAtNotice: d.surplusAtNotice,
+      mailVerdict: d.mailVerdict,
+      claimLedger: d.claimLedger || null,
+      sourceSystem: d.sourceSystem,
+      sourceCaseId: d.sourceCaseId,
+      sourceUrl: d.sourceUrl,
+      lastPolledAt: d.lastPolledAt,
+
       phones,
       emails,
       cleanPhoneCount: phones.filter((p) => !p.dnc).length,
@@ -691,6 +727,28 @@ export class SurplusService {
       totalTouches,
 
       createdAt: lead.createdAt,
+      ...this.workRank(d, facts, phones),
     };
+  }
+
+  /**
+   * The call-now ranking. Computed here rather than stored so a weighting
+   * change takes effect on the next page load instead of needing a backfill.
+   */
+  private workRank(
+    d: any,
+    facts: Parameters<typeof netToClaimant>[0],
+    phones: { dnc?: string | null }[],
+  ) {
+    const wf = {
+      claimStatus: d.claimStatus,
+      netToClaimant: netToClaimant(facts),
+      cleanPhoneCount: phones.filter((p) => !p.dnc).length,
+      mailVerdict: d.mailVerdict,
+      daysRemaining: daysRemaining(facts),
+      contactMismatch: d.contactMismatch,
+      doNotCall: d.doNotCall,
+    };
+    return { workScore: workScore(wf), workReason: workReason(wf) };
   }
 }

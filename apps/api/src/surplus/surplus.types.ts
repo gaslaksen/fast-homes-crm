@@ -53,6 +53,19 @@ export interface SurplusLeadInput {
   contactMismatch?: boolean;
   mismatchedName?: string | null;
 
+  // ── From a county ingest ──────────────────────────────────────────────────
+  /** SurplusClaimStatus, read off the case document list. */
+  claimStatus?: string | null;
+  /** What the clerk's mailed notice said, as against the balance posted today. */
+  surplusAtNotice?: number | null;
+  /** 'delivered' | 'undeliverable' | 'mixed' | 'unknown'. */
+  mailVerdict?: string | null;
+  /** The classified document list, kept so the classifier can be re-run. */
+  claimLedger?: unknown;
+  sourceSystem?: string | null;
+  sourceCaseId?: string | null;
+  sourceUrl?: string | null;
+
   importBatch?: string;
 }
 
@@ -71,6 +84,13 @@ export interface SurplusListFilters {
   noticeAge?: string;
   /** 'open' | 'closed' */
   lienWindow?: string;
+  /** Comma-separated SurplusClaimStatus values. */
+  claimStatus?: string;
+  /**
+   * Retired cases (paid out, or the owner already signed) are out of the board
+   * by default. Pass false to see them.
+   */
+  hideRetired?: boolean;
   /** Only leads whose contract send is blocked. */
   blockedOnly?: boolean;
   hideDead?: boolean;
