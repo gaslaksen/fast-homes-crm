@@ -2,10 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import AppShell from '@/components/AppShell';
-import LeadRack, { RackView } from '@/components/pipelines/LeadRack';
+import PipelineBoard, { type PipelineView } from '@/components/pipelines/PipelineBoard';
 import AddLeadSheet, { SURPLUS_FIELDS } from '@/components/pipelines/AddLeadSheet';
 import SurplusWorkPanel from '@/components/pipelines/SurplusWorkPanel';
-import SurplusPropertyCard from '@/components/pipelines/SurplusPropertyCard';
+import SurplusPropertyCard, { STATUS_ACCENT } from '@/components/pipelines/SurplusPropertyCard';
+import type { PipelineColumn, PipelineStage } from '@/components/pipelines/PipelineBoard';
 import { authAPI, surplusAPI } from '@/lib/api';
 import '@/components/pipelines/pipeline-board.css';
 import {
@@ -170,6 +171,104 @@ const CLAIM_STATUS_CHIP: Record<string, { fg: string; bg: string }> = {
   unknown: CHIP.slate,
 };
 
+/**
+ * The table, in the order somebody triages: is anyone else on this money, how
+ * much, whose is it, where are they, can we reach them. Same question order as
+ * the card, so switching views does not switch mental models.
+ */
+const SURPLUS_COLUMNS: PipelineColumn<any>[] = [
+  {
+    key: 'claimStatus',
+    label: 'Status',
+    width: '150px',
+    sortValue: (r) => r.workScore,
+    render: (r) => {
+      const c = CLAIM_STATUS_CHIP[r.claimStatus] || CHIP.slate;
+      return (
+        <span className="dc-tag" style={{ background: c.bg, color: c.fg }}>
+          {r.claimStatusLabel}
+        </span>
+      );
+    },
+  },
+  {
+    key: 'surplus',
+    label: 'Surplus',
+    align: 'right',
+    width: '110px',
+    sortValue: (r) => r.grossSurplus,
+    render: (r) => <b>{money(r.grossSurplus)}</b>,
+  },
+  {
+    key: 'property',
+    label: 'Property',
+    sortValue: (r) => r.address || '',
+    render: (r) => (
+      <div>
+        <div style={{ fontWeight: 600 }}>{r.address}</div>
+        <div style={{ fontSize: 11.5, color: 'var(--faint)' }}>
+          {[r.city, r.zip].filter(Boolean).join(' ')} · {r.county} · {r.caseNumber}
+        </div>
+      </div>
+    ),
+  },
+  {
+    key: 'claimants',
+    label: 'Claimants',
+    sortValue: (r) => r.claimantNames[0] || '',
+    render: (r) => (
+      <div>
+        <div>{r.claimantNames.slice(0, 2).join(', ')}</div>
+        {r.claimantCount > 2 && (
+          <div style={{ fontSize: 11.5, color: 'var(--faint)' }}>+{r.claimantCount - 2} more</div>
+        )}
+      </div>
+    ),
+  },
+  {
+    key: 'owner',
+    label: 'Owner address',
+    sortValue: (r) => r.ownerMailingState || '',
+    render: (r) =>
+      r.ownerMailingStreet ? (
+        <span style={{ color: 'var(--mint)', fontSize: 12 }}>
+          {[r.ownerMailingCity, r.ownerMailingState].filter(Boolean).join(', ')}
+        </span>
+      ) : (
+        <span style={{ color: 'var(--faint)', fontSize: 12 }}>not recovered</span>
+      ),
+  },
+  {
+    key: 'contact',
+    label: 'Reach',
+    width: '150px',
+    // Sorts contactable to the top: a lead you can call outranks one you cannot.
+    sortValue: (r) => (r.anyContactable ? 2 : r.anyMismatch ? 0 : 1),
+    render: (r) =>
+      r.anyContactable ? (
+        <span style={{ color: 'var(--mint)', fontSize: 12 }}>☏ callable</span>
+      ) : r.anyMismatch ? (
+        <span style={{ color: 'var(--red)', fontSize: 12 }}>⚠ wrong person</span>
+      ) : (
+        <span style={{ color: 'var(--faint)', fontSize: 12 }}>no number</span>
+      ),
+  },
+  {
+    key: 'open',
+    label: '',
+    align: 'right',
+    width: '80px',
+    render: () => <span style={{ color: 'var(--mint)', fontWeight: 600, fontSize: 12 }}>Work it</span>,
+  },
+];
+
+/** Kanban columns. Dead is deliberately last and unhighlighted. */
+const SURPLUS_KANBAN: PipelineStage[] = SURPLUS_STAGES.map((st) => ({
+  key: st,
+  label: st,
+  tone: (SURPLUS_STAGE_COLOR[st] || CHIP.slate).fg,
+})).concat([{ key: 'Dead', label: 'Dead', tone: 'var(--border2)' }]);
+
 // ─── Page ───────────────────────────────────────────────────────────────────
 
 export default function SurplusFundsPage() {
@@ -216,7 +315,8 @@ export default function SurplusFundsPage() {
 
   const [picked, setPicked] = useState<Record<string, boolean>>({});
   const [editing, setEditing] = useState<Record<string, boolean>>({});
-  const [view, setView] = useState<RackView>('rack');
+  /** Table by default: seventy properties are scanned before they are worked. */
+  const [view, setView] = useState<PipelineView>('table');
   /** The lead whose work panel is open, or null. */
   const [openId, setOpenId] = useState<string | null>(null);
   /** Total claimant leads behind the properties on screen. */
@@ -504,9 +604,7 @@ export default function SurplusFundsPage() {
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, flexWrap: 'wrap' }}>
             <div style={{ flex: 1, minWidth: 260 }}>
               <h1 className="dc-h1">Surplus Funds</h1>
-              <div className="dc-sub">
-                Florida tax deed and mortgage foreclosure overages. Contract send is gated on the fee cap, not warned about.
-              </div>
+
             </div>
             <div style={{ display: 'flex', gap: 9, flexWrap: 'wrap' }}>
               <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls" style={{ display: 'none' }} onChange={onFile} />
@@ -522,17 +620,7 @@ export default function SurplusFundsPage() {
             </div>
           </div>
 
-          <div style={{ color: 'var(--dim)', fontSize: 13, margin: '18px 0 16px' }}>
-            {loading ? (
-              'Loading from Dealcore...'
-            ) : (
-              <>
-                {stats.openClaims} surplus claim{stats.openClaims === 1 ? '' : 's'} across{' '}
-                {rows.length} propert{rows.length === 1 ? 'y' : 'ies'}
-                {stats.belowFloor > 0 && <>, {stats.belowFloor} below the {money(floor)} floor</>}
-              </>
-            )}
-          </div>
+
 
           {error && (
             <div className="dc-panel bad" style={{ marginBottom: 16 }}>
@@ -683,22 +771,52 @@ export default function SurplusFundsPage() {
             />
           )}
 
-          <LeadRack
-            items={rows}
+          <PipelineBoard
+            rows={rows}
             keyOf={(r) => r.key}
+            columns={SURPLUS_COLUMNS}
+            stages={SURPLUS_KANBAN}
+            stageOf={(r) => r.stage}
+            onStageChange={(r, stage) => {
+              // Dragging a property restages every claim on it, which is what
+              // the column means: the house has been worked, not one owner.
+              surplusAPI
+                .bulkStage(r.claimants.map((c: any) => c.id), stage)
+                .then(() => {
+                  say(`Moved ${r.address} to ${stage}`);
+                  fetchRows();
+                  fetchStats();
+                })
+                .catch(() => say('That stage change could not be saved.'));
+            }}
             view={view}
             onViewChange={setView}
+            selected={picked}
+            onSelect={(k, on) => setPicked({ ...picked, [k]: on })}
+            onSelectAll={(on) => {
+              if (!on) return setPicked({});
+              const n: Record<string, boolean> = {};
+              rows.forEach((r) => { n[r.key] = true; });
+              setPicked(n);
+            }}
+            onOpen={(r) => setOpenId(r.key)}
+            accentOf={(r) => STATUS_ACCENT[r.claimStatus] || 'var(--border2)'}
+            loading={loading}
+            renderCard={(r) => (
+              <SurplusPropertyCard
+                p={r}
+                picked={!!picked[r.key]}
+                onPick={(on) => setPicked({ ...picked, [r.key]: on })}
+                onOpen={() => setOpenId(r.key)}
+              />
+            )}
             empty={
-              <div className="dc-empty">
-                {loading
-                  ? 'Loading...'
-                  : stats.total === 0
-                    ? 'No surplus leads yet. Import a county list to get started.'
-                    : 'Nothing matches those filters.'}
-              </div>
+              stats.total === 0
+                ? 'No surplus leads yet. Import a county list to get started.'
+                : 'Nothing matches those filters.'
             }
             toolbarLeft={
-              <span style={{ color: 'var(--dim)', fontSize: 13 }}>
+              <span>
                 {rows.length} propert{rows.length === 1 ? 'y' : 'ies'}
                 {leadCount !== rows.length && `, ${leadCount} claimants`}
                 {chosenKeys.length > 0 && (
@@ -710,42 +828,12 @@ export default function SurplusFundsPage() {
             }
             toolbarRight={
               <>
-                <div className="dc-seg" title="Select or clear every card currently shown">
-                  <button
-                    className={rows.length > 0 && rows.every((r) => picked[r.key]) ? 'on' : ''}
-                    onClick={() => {
-                      const n: Record<string, boolean> = {};
-                      rows.forEach((r) => {
-                        n[r.key] = true;
-                      });
-                      setPicked(n);
-                    }}
-                  >
-                    Select all
-                  </button>
-                  <button className={chosen.length === 0 ? 'on' : ''} onClick={() => setPicked({})}>
-                    Deselect
-                  </button>
-                </div>
-                {/* Bulk actions operate on the CLAIMANTS under the selected
-                    properties, because a stage and a deletion both belong to a
-                    claim rather than to a house. */}
                 {chosenKeys.length > 0 && (
                   <>
-                    <button
-                      className="dc-btn sm"
-                      disabled={busy}
-                      onClick={() => bulkStage('Dead')}
-                      title="Mark every claimant on the selected properties as dead"
-                    >
+                    <button className="dc-btn sm" disabled={busy} onClick={() => bulkStage('Dead')}>
                       Mark dead
                     </button>
-                    <button
-                      className="dc-btn sm dngr"
-                      disabled={busy}
-                      onClick={bulkDelete}
-                      title="Permanently delete these leads"
-                    >
+                    <button className="dc-btn sm dngr" disabled={busy} onClick={bulkDelete}>
                       Delete
                     </button>
                   </>
@@ -755,14 +843,6 @@ export default function SurplusFundsPage() {
                 </button>
               </>
             }
-            renderItem={(r) => (
-              <SurplusPropertyCard
-                p={r}
-                picked={!!picked[r.key]}
-                onPick={(on) => setPicked({ ...picked, [r.key]: on })}
-                onOpen={() => setOpenId(r.key)}
-              />
-            )}
           />
 
           <div style={{ height: 34 }} />

@@ -46,7 +46,7 @@ const STATUS_CHIP: Record<string, { fg: string; bg: string }> = {
  * whether a property is worth a call, so it is the thing the eye lands on when
  * skimming a rack of seventy.
  */
-const STATUS_ACCENT: Record<string, string> = {
+export const STATUS_ACCENT: Record<string, string> = {
   denied: 'var(--mint)',
   open: 'var(--mint)',
   gov_lien: 'var(--amber)',

@@ -464,3 +464,64 @@ button.dc-wp-claimant .sub { display: block; font-size: 10.5px; font-weight: 500
   background: var(--mintGhost); color: var(--mint); border-radius: 3px; padding: 1px 4px;
 }
 .dc-wp a.dc-wp-searchlink:hover .free { background: rgba(255,255,255,0.25); color: var(--mintInk); }
+
+/* ── Shared pipeline board ──────────────────────────────────────────────────
+ *
+ * Table, kanban and cards for every acquisition pipeline. Interactive
+ * selectors are element-qualified for the reason documented on
+ * button.dc-daybox: `.dc-board button` at (0,1,1) beats a bare class.
+ */
+.dc-pb-toolbar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin: 4px 0 12px; font-size: 13px;
+}
+.dc-pb-toolbar-left { color: var(--dim); }
+.dc-pb-toolbar-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.dc-pb-empty { padding: 40px 0; text-align: center; color: var(--faint); font-size: 13.5px; }
+
+/* Table */
+.dc-pb-tablewrap {
+  border: 1px solid var(--border); border-radius: var(--r2);
+  background: var(--surface); overflow-x: auto;
+}
+.dc-pb-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.dc-pb-table thead th {
+  text-align: left; padding: 9px 12px; font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.5px; color: var(--faint);
+  border-bottom: 1px solid var(--border); white-space: nowrap; background: var(--surface2);
+}
+.dc-pb-table thead th.sortable { cursor: pointer; user-select: none; }
+.dc-pb-table thead th.sortable:hover { color: var(--text); }
+.dc-pb-table thead th .dir { color: var(--mint); }
+.dc-pb-table tbody tr { border-bottom: 1px solid var(--border); cursor: pointer; }
+.dc-pb-table tbody tr:last-child { border-bottom: none; }
+.dc-pb-table tbody tr:hover { background: var(--surface2); }
+.dc-pb-table tbody tr.pick { background: var(--mintGhost); }
+.dc-pb-table td { padding: 10px 12px; vertical-align: middle; }
+.dc-pb-table input[type='checkbox'] { width: 14px; height: 14px; accent-color: var(--mint); }
+
+/* Kanban */
+.dc-pb-kanban {
+  display: flex; gap: 12px; overflow-x: auto; padding-bottom: 10px; align-items: flex-start;
+}
+.dc-pb-col {
+  flex: 0 0 300px; background: var(--bg2); border: 1px solid var(--border);
+  border-radius: var(--r2); display: flex; flex-direction: column; max-height: 72vh;
+}
+.dc-pb-col.over { border-color: var(--mint); background: var(--mintGhost); }
+.dc-pb-colhead {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 9px 12px; border-top: 3px solid var(--border2);
+  border-top-left-radius: var(--r2); border-top-right-radius: var(--r2);
+  font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+  color: var(--dim); border-bottom: 1px solid var(--border);
+}
+.dc-pb-colhead b { color: var(--text); font-size: 12.5px; }
+.dc-pb-colbody { padding: 9px; display: flex; flex-direction: column; gap: 9px; overflow-y: auto; }
+.dc-pb-colbody .dragging { opacity: 0.9; }
+
+/* Cards */
+.dc-pb-cards {
+  display: grid; gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+}
