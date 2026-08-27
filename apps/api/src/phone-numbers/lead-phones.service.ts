@@ -18,6 +18,14 @@ export interface LeadPhone {
    * use this one, so it is the number the seller hears from unprompted.
    */
   isPrimary: boolean;
+  /**
+   * DncRegistry value when there is a reason not to dial this number, null when
+   * it came back clean. Surfaced so the composer and the dialer can warn before
+   * a send rather than after: surplus skip traces routinely return numbers
+   * flagged federal DNC, TCPA or litigator, and a number offered without the
+   * flag is one somebody will dial.
+   */
+  dnc: string | null;
 }
 
 /** Where a match on an inbound number came from. */
@@ -67,22 +75,51 @@ export class LeadPhonesService {
         probateDetail: {
           select: { phone1Type: true, phone2: true, phone2Type: true },
         },
+        // Surplus leads carry up to four numbers with a per-number DNC flag.
+        // Omitting this is why a surplus conversation only ever offered the
+        // primary: the composer shows a picker when there is more than one
+        // number, and there never was.
+        surplusDetail: {
+          select: {
+            phone1Type: true, phone1Dnc: true,
+            phone2: true, phone2Type: true, phone2Dnc: true,
+            phone3: true, phone3Type: true, phone3Dnc: true,
+            phone4: true, phone4Type: true, phone4Dnc: true,
+          },
+        },
       },
     });
     if (!lead) return [];
 
     const f = lead.foreclosureDetail;
     const p = lead.probateDetail;
+    const s = lead.surplusDetail;
 
-    const raw: { value: string | null; label: string; type: string | null }[] = [
+    const raw: { value: string | null; label: string; type: string | null; dnc: string | null }[] = [
       {
         value: lead.sellerPhone,
         label: 'Primary',
-        type: f?.phone1Type ?? p?.phone1Type ?? null,
+        type: f?.phone1Type ?? p?.phone1Type ?? s?.phone1Type ?? null,
+        dnc: s?.phone1Dnc ?? null,
       },
-      { value: f?.phone2 ?? p?.phone2 ?? null, label: 'Phone 2', type: f?.phone2Type ?? p?.phone2Type ?? null },
-      { value: f?.phone3 ?? null, label: 'Phone 3', type: f?.phone3Type ?? null },
-      { value: f?.phone4 ?? null, label: 'Phone 4', type: f?.phone4Type ?? null },
+      {
+        value: f?.phone2 ?? p?.phone2 ?? s?.phone2 ?? null,
+        label: 'Phone 2',
+        type: f?.phone2Type ?? p?.phone2Type ?? s?.phone2Type ?? null,
+        dnc: s?.phone2Dnc ?? null,
+      },
+      {
+        value: f?.phone3 ?? s?.phone3 ?? null,
+        label: 'Phone 3',
+        type: f?.phone3Type ?? s?.phone3Type ?? null,
+        dnc: s?.phone3Dnc ?? null,
+      },
+      {
+        value: f?.phone4 ?? s?.phone4 ?? null,
+        label: 'Phone 4',
+        type: f?.phone4Type ?? s?.phone4Type ?? null,
+        dnc: s?.phone4Dnc ?? null,
+      },
     ];
 
     const out: LeadPhone[] = [];
@@ -93,7 +130,13 @@ export class LeadPhonesService {
       const key = numberKey(e164);
       if (seen.has(key)) continue;
       seen.add(key);
-      out.push({ number: e164, label: r.label, type: r.type, isPrimary: r.label === 'Primary' });
+      out.push({
+        number: e164,
+        label: r.label,
+        type: r.type,
+        isPrimary: r.label === 'Primary',
+        dnc: r.dnc,
+      });
     }
     return out;
   }

@@ -117,7 +117,7 @@ function buildNavGroups(badges: { needsReply: number; newLeads: number }): NavGr
     {
       label: 'Pipeline',
       items: [
-        { label: 'Leads', href: '/leads', icon: ICON.leads, badge: badges.newLeads },
+        { label: 'Property Leads', href: '/leads', icon: ICON.leads, badge: badges.newLeads },
         { label: 'Foreclosures', href: '/foreclosures', icon: ICON.foreclosure },
         { label: 'Probate', href: '/probate', icon: ICON.probate },
         { label: 'Tax Sales', href: '/tax-sales', icon: ICON.taxSale },

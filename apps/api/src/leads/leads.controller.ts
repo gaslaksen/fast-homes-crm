@@ -59,6 +59,7 @@ export class LeadsController {
   async listLeads(
     @Headers('authorization') authHeader?: string,
     @Query('source') source?: LeadSource,
+    @Query('includePipelines') includePipelines?: string,
     @Query('status') status?: LeadStatus,
     @Query('scoreBand') scoreBand?: string,
     @Query('assignedToUserId') assignedToUserId?: string,
@@ -86,6 +87,7 @@ export class LeadsController {
     return this.leadsService.listLeads({
       idsOnly: idsOnly === 'true',
       source,
+      includePipelines: includePipelines === 'true',
       status,
       scoreBand,
       assignedToUserId,

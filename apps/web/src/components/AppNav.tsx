@@ -11,7 +11,7 @@ import { useDialer } from '@/components/dialer/DialerContext';
 
 const NAV_ITEMS = [
   { label: 'Dashboard', href: '/dashboard' },
-  { label: 'Leads',     href: '/leads' },
+  { label: 'Property Leads', href: '/leads' },
   { label: 'Foreclosures', href: '/foreclosures' },
   { label: 'Probate', href: '/probate' },
   { label: 'Tax Sales', href: '/tax-sales' },
@@ -25,7 +25,7 @@ const NAV_ITEMS = [
 
 const BOTTOM_NAV_ITEMS = [
   { label: 'Dashboard', href: '/dashboard', icon: '📊' },
-  { label: 'Leads',     href: '/leads',     icon: '🏠' },
+  { label: 'Property Leads', href: '/leads', icon: '🏠' },
   { label: 'Campaigns', href: '/drip-campaigns', icon: '🔁' },
   { label: 'Search',    href: '/deal-search', icon: '🔍' },
   { label: 'Settings',  href: '/settings',  icon: '⚙️' },

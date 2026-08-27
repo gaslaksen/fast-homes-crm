@@ -55,9 +55,9 @@ describe('LeadPhonesService.listForLead', () => {
     const numbers = await service.listForLead('lead-1');
 
     expect(numbers).toEqual([
-      { number: '+17046082100', label: 'Primary', type: 'Landline', isPrimary: true },
-      { number: '+17049072850', label: 'Phone 2', type: 'Mobile', isPrimary: false },
-      { number: '+17043929100', label: 'Phone 3', type: 'Landline', isPrimary: false },
+      { number: '+17046082100', label: 'Primary', type: 'Landline', isPrimary: true, dnc: null },
+      { number: '+17049072850', label: 'Phone 2', type: 'Mobile', isPrimary: false, dnc: null },
+      { number: '+17043929100', label: 'Phone 3', type: 'Landline', isPrimary: false, dnc: null },
     ]);
   });
 
@@ -68,6 +68,48 @@ describe('LeadPhonesService.listForLead', () => {
 
     const numbers = await service.listForLead('lead-1');
     expect(numbers.map((n) => n.number)).toEqual(['+17046082100', '+17049072850']);
+  });
+
+  it('reads surplus leads, which is why a surplus conversation offered one number', async () => {
+    // listForLead knew about foreclosure and probate details and not surplus,
+    // so a surplus lead only ever returned sellerPhone. The composer shows a
+    // To: picker when there is more than one number, and there never was.
+    const { service } = buildService({
+      sellerPhone: '+1 (904) 318-1919',
+      foreclosureDetail: null,
+      probateDetail: null,
+      surplusDetail: {
+        phone1Type: 'Mobile', phone1Dnc: 'federal',
+        phone2: '9047662977', phone2Type: 'Land Line', phone2Dnc: 'federal',
+        phone3: '9047813584', phone3Type: 'Land Line', phone3Dnc: null,
+        phone4: '9046478565', phone4Type: 'Land Line', phone4Dnc: null,
+      },
+    });
+
+    const numbers = await service.listForLead('lead-1');
+    expect(numbers.map((n) => n.number)).toEqual([
+      '+19043181919', '+19047662977', '+19047813584', '+19046478565',
+    ]);
+  });
+
+  it('carries the per-number DNC flag so a send can be warned about', async () => {
+    // Surplus traces routinely return numbers flagged federal DNC, TCPA or
+    // litigator. A number offered without the flag is one somebody will dial.
+    const { service } = buildService({
+      sellerPhone: '+1 (904) 318-1919',
+      foreclosureDetail: null,
+      probateDetail: null,
+      surplusDetail: {
+        phone1Type: 'Mobile', phone1Dnc: 'litigator',
+        phone2: '9047813584', phone2Type: 'Land Line', phone2Dnc: null,
+        phone3: null, phone3Type: null, phone3Dnc: null,
+        phone4: null, phone4Type: null, phone4Dnc: null,
+      },
+    });
+
+    const numbers = await service.listForLead('lead-1');
+    expect(numbers[0].dnc).toBe('litigator');
+    expect(numbers[1].dnc).toBeNull();
   });
 
   it('reads probate leads, which carry only a second number', async () => {

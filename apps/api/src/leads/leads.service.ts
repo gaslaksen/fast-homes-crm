@@ -19,6 +19,25 @@ const INITIAL_OUTREACH_DELAY_MS = 60_000; // 1 minute
 const DEMO_OUTREACH_DELAY_MS = 3_000;     // 3 seconds in demo mode
 
 
+/**
+ * Sources that have their own dedicated board.
+ *
+ * Foreclosure, probate, tax sale and surplus leads each live on a pipeline of
+ * their own with their own columns, compliance rules and outreach posture. They
+ * are Lead rows so the conversation stack works on them, but mixing them into
+ * the Property Leads list buries the leads that list exists for: on a board of
+ * seventy surplus claimants, the handful of actual property leads disappear.
+ *
+ * Excluded by default from the general lead list and reachable by asking for
+ * that source explicitly.
+ */
+export const PIPELINE_SOURCES: LeadSource[] = [
+  LeadSource.FORECLOSURE,
+  LeadSource.PROBATE,
+  LeadSource.TAX_SALE,
+  LeadSource.SURPLUS,
+];
+
 @Injectable()
 export class LeadsService {
   private readonly logger = new Logger(LeadsService.name);
@@ -420,6 +439,8 @@ export class LeadsService {
    */
   async listLeads(filters: {
     source?: LeadSource;
+    /** Include foreclosure/probate/tax sale/surplus leads, which have their own boards. */
+    includePipelines?: boolean;
     status?: LeadStatus;
     scoreBand?: string;
     assignedToUserId?: string;
@@ -457,6 +478,8 @@ export class LeadsService {
     const where: Prisma.LeadWhereInput = { ...baseWhere };
 
     if (filters.source) where.source = filters.source;
+    // Pipeline leads have their own boards; asking for one by name still works.
+    else if (filters.includePipelines !== true) where.source = { notIn: PIPELINE_SOURCES };
     if (filters.status) where.status = filters.status;
     if (filters.scoreBand) where.scoreBand = filters.scoreBand as any;
     if (filters.assignedToUserId === 'none') {
@@ -1199,6 +1222,8 @@ export class LeadsService {
    */
   async exportCsv(filters: {
     source?: LeadSource;
+    /** Include foreclosure/probate/tax sale/surplus leads, which have their own boards. */
+    includePipelines?: boolean;
     status?: LeadStatus;
     scoreBand?: string;
     search?: string;
@@ -1207,6 +1232,8 @@ export class LeadsService {
   }): Promise<string> {
     const where: Prisma.LeadWhereInput = {};
     if (filters.source) where.source = filters.source;
+    // Pipeline leads have their own boards; asking for one by name still works.
+    else if (filters.includePipelines !== true) where.source = { notIn: PIPELINE_SOURCES };
     if (filters.status) where.status = filters.status;
     if (filters.scoreBand) where.scoreBand = filters.scoreBand as any;
     if (filters.search) {
@@ -1296,6 +1323,8 @@ export class LeadsService {
   async exportLeads(
     filters: {
       source?: LeadSource;
+      /** Include foreclosure/probate/tax sale/surplus leads, which have their own boards. */
+      includePipelines?: boolean;
       status?: LeadStatus;
       scoreBand?: string;
       search?: string;
@@ -1307,6 +1336,8 @@ export class LeadsService {
   ): Promise<string | Buffer> {
     const where: Prisma.LeadWhereInput = {};
     if (filters.source) where.source = filters.source;
+    // Pipeline leads have their own boards; asking for one by name still works.
+    else if (filters.includePipelines !== true) where.source = { notIn: PIPELINE_SOURCES };
     if (filters.status) where.status = filters.status;
     if (filters.scoreBand) where.scoreBand = filters.scoreBand as any;
     if (filters.search) {

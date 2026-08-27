@@ -218,6 +218,23 @@ export class SurplusController {
     return this.surplus.bulkDelete(body.ids, organizationId);
   }
 
+  /**
+   * Bulk stage change, including marking dead. The board can select a rack of
+   * properties and clear them in one call.
+   */
+  @Post('bulk-stage')
+  async bulkStage(
+    @Body() body: { ids: string[]; stage: string },
+    @Headers('authorization') authHeader?: string,
+  ) {
+    if (!Array.isArray(body?.ids) || body.ids.length === 0) {
+      throw new BadRequestException('No lead ids provided');
+    }
+    if (!body?.stage) throw new BadRequestException('stage is required');
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.surplus.bulkStage(body.ids, body.stage, organizationId);
+  }
+
   @Get(':id')
   async get(@Param('id') id: string, @Headers('authorization') authHeader?: string) {
     const { organizationId } = this.decodeToken(authHeader);

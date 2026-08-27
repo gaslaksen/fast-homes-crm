@@ -480,3 +480,33 @@ describe('BatchData V3', () => {
     expect(r.contacted).toBe(0);
   });
 });
+
+describe('trace notes', () => {
+  it('replaces the previous trace result instead of stacking a contradiction', async () => {
+    // A re-trace left Calvin Johnson saying both "matched Calvin Johnson" and
+    // "returned no matched person". Only the latest trace is true.
+    const { svc, prisma, detailUpdates } = harness([lead()]);
+    prisma.surplusDetail.findUnique.mockResolvedValue({
+      callNotes: 'Skip trace returned no matched person at 4117 SANTEE RD.',
+    });
+    respond([person('Myrtis', 'Griffin', ['9045551234'])]);
+
+    await svc.traceLeads({ organizationId: 'org' });
+
+    const note = detailUpdates[0].data.callNotes;
+    expect(note).not.toMatch(/no matched person/i);
+    expect(note).toMatch(/matched Myrtis Griffin/);
+  });
+
+  it('keeps a note a human wrote', async () => {
+    const { svc, prisma, detailUpdates } = harness([lead()]);
+    prisma.surplusDetail.findUnique.mockResolvedValue({
+      callNotes: 'Spoke to the neighbour, said she moved to Georgia.',
+    });
+    respond([]);
+
+    await svc.traceLeads({ organizationId: 'org' });
+
+    expect(detailUpdates[0].data.callNotes).toMatch(/neighbour/);
+  });
+});

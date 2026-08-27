@@ -405,6 +405,26 @@ export class SurplusService {
     return this.get(id, organizationId);
   }
 
+  /**
+   * Move several claimants to one stage at once, for clearing a board.
+   *
+   * Separate from update() so marking forty leads dead is one round trip rather
+   * than forty, and so the stage is validated once against the enum instead of
+   * trusting whatever the client sent.
+   */
+  async bulkStage(ids: string[], stage: string, organizationId?: string | null) {
+    const target = stageFromText(stage);
+    const where: any = { id: { in: ids }, source: LeadSource.SURPLUS };
+    if (organizationId) where.organizationId = organizationId;
+    const leads = await this.prisma.lead.findMany({ where, select: { id: true } });
+    if (!leads.length) return { updated: 0, stage: target };
+    const res = await this.prisma.surplusDetail.updateMany({
+      where: { leadId: { in: leads.map((l) => l.id) } },
+      data: { stage: target },
+    });
+    return { updated: res.count, stage: target };
+  }
+
   async bulkDelete(ids: string[], organizationId?: string) {
     const leads = await this.prisma.lead.findMany({
       where: {

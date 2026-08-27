@@ -404,6 +404,56 @@ export default function SurplusFundsPage() {
     setHideDnc(true);
   };
 
+  /**
+   * Move every claimant on the selected properties to one stage.
+   *
+   * Dead is the common case: a board is cleared by retiring what has been
+   * worked, not by deleting it, so the classifier's verdict and the trace
+   * history survive for the next poll to compare against.
+   */
+  const bulkStage = async (stage: string) => {
+    if (!chosen.length || busy) return;
+    setBusy(true);
+    try {
+      const res = await surplusAPI.bulkStage(chosen, stage);
+      say(`Moved ${res.data?.updated ?? chosen.length} claimant${chosen.length === 1 ? '' : 's'} to ${stage}`);
+      setPicked({});
+      fetchRows();
+      fetchStats();
+    } catch (err: any) {
+      say(err?.response?.data?.message || 'Those leads could not be updated.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /**
+   * Permanent, and confirmed first. Ingestion is idempotent on dedupeUid, so a
+   * deleted lead comes straight back on the next poll; marking it Dead is
+   * usually what somebody actually wants.
+   */
+  const bulkDelete = async () => {
+    if (!chosen.length || busy) return;
+    const n = chosen.length;
+    const ok = window.confirm(
+      `Permanently delete ${n} claimant lead${n === 1 ? '' : 's'} across ${chosenKeys.length} propert${chosenKeys.length === 1 ? 'y' : 'ies'}?\n\n` +
+        'The next county poll will re-create anything still on the docket. To retire a lead for good, mark it Dead instead.',
+    );
+    if (!ok) return;
+    setBusy(true);
+    try {
+      await surplusAPI.bulkDelete(chosen);
+      say(`Deleted ${n} lead${n === 1 ? '' : 's'}`);
+      setPicked({});
+      fetchRows();
+      fetchStats();
+    } catch (err: any) {
+      say(err?.response?.data?.message || 'Those leads could not be deleted.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const csv = () => {
     // One row per CLAIMANT, not per property: a claim is filed per person, and
     // a downstream call list is dialled per person.
@@ -677,8 +727,31 @@ export default function SurplusFundsPage() {
                     Deselect
                   </button>
                 </div>
+                {/* Bulk actions operate on the CLAIMANTS under the selected
+                    properties, because a stage and a deletion both belong to a
+                    claim rather than to a house. */}
+                {chosenKeys.length > 0 && (
+                  <>
+                    <button
+                      className="dc-btn sm"
+                      disabled={busy}
+                      onClick={() => bulkStage('Dead')}
+                      title="Mark every claimant on the selected properties as dead"
+                    >
+                      Mark dead
+                    </button>
+                    <button
+                      className="dc-btn sm dngr"
+                      disabled={busy}
+                      onClick={bulkDelete}
+                      title="Permanently delete these leads"
+                    >
+                      Delete
+                    </button>
+                  </>
+                )}
                 <button style={{ color: 'var(--mint)', fontWeight: 600, fontSize: 13 }} onClick={csv}>
-                  Download {chosen.length ? 'selected' : 'shown'} as CSV
+                  Download {chosenKeys.length ? 'selected' : 'shown'} as CSV
                 </button>
               </>
             }

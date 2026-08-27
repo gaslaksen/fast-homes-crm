@@ -195,6 +195,7 @@ export const surplusAPI = {
   create: (data: any) => api.post('/surplus', data),
   update: (id: string, data: any) => api.patch(`/surplus/${id}`, data),
   bulkDelete: (ids: string[]) => api.post('/surplus/bulk-delete', { ids }),
+  bulkStage: (ids: string[], stage: string) => api.post('/surplus/bulk-stage', { ids, stage }),
   // `limit` caps the ADDRESSES submitted, which is what costs BatchData credits.
   // Co-owners at one property share a submission because the vendor matches on
   // address and ignores names.

@@ -128,6 +128,13 @@ const VERDICT_RANK: Record<TraceVerdict, number> = {
   stranger: 0,
 };
 
+/**
+ * Lines this service wrote itself, so a re-trace can retire the previous
+ * result instead of leaving two contradictory ones on one lead.
+ */
+const TRACE_NOTE =
+  /^(Skip trace |Entity owner\.|The clerk's own mail|No mailing address|"[^"]*" is a tax roll)/;
+
 const ENTITY = /\b(LLC|L\.L\.C|INC|CORP|CORPORATION|COMPANY|LP|LLP|LLLP|LTD|TRUST|ASSOCIATION|CHURCH|BANK|PARTNERS|HOLDINGS)\b/i;
 
 @Injectable()
@@ -586,9 +593,21 @@ export class SurplusSkiptraceService {
     });
   }
 
+  /**
+   * Replace the previous trace note rather than stacking another one.
+   *
+   * Appending left Calvin Johnson's lead saying both "Skip trace matched Calvin
+   * Johnson" and "Skip trace returned no matched person", because a re-trace
+   * added its result without retiring the earlier one. Only the latest trace is
+   * true, so lines this service wrote before are dropped and anything a human
+   * typed is kept.
+   */
   private appendNote(existing: string | null | undefined, text: string): string {
-    const prev = String(existing || '').trim();
-    return prev.includes(text) ? prev : [prev, text].filter(Boolean).join('\n');
+    const kept = String(existing || '')
+      .split('\n')
+      .filter((line) => line.trim() && !TRACE_NOTE.test(line.trim()))
+      .join('\n');
+    return [kept, text].filter(Boolean).join('\n');
   }
 
   private pause(ms: number): Promise<void> {
