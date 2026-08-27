@@ -207,6 +207,7 @@ export default function SurplusFundsPage() {
   const [view, setView] = useState<RackView>('rack');
   /** The lead whose work panel is open, or null. */
   const [openId, setOpenId] = useState<string | null>(null);
+  const [tracingId, setTracingId] = useState<Record<string, boolean>>({});
   const [currentUser, setCurrentUser] = useState<any>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
@@ -289,6 +290,32 @@ export default function SurplusFundsPage() {
   useEffect(() => {
     if (openId && !loading && !rows.some((r) => r.id === openId)) setOpenId(null);
   }, [openId, rows, loading]);
+
+  /**
+   * Skip trace one claimant. The submitted address is the PROPERTY, because
+   * that is where the clerk mailed the Notice of Surplus Funds, so it is the
+   * last address the owner is known to have been reachable at.
+   */
+  const trace = useCallback(
+    async (id: string) => {
+      setTracingId((t) => ({ ...t, [id]: true }));
+      try {
+        const res = await surplusAPI.skipTrace({ leadIds: [id] });
+        const d = res.data || {};
+        if (d.contacted) say('Skip trace found contacts');
+        else if (d.mismatched) say('Skip trace returned somebody else, so nothing was attached');
+        else if (Object.keys(d.skipped || {}).length) say('Not eligible for skip trace, see the notes');
+        else say(d.message || 'Skip trace found nothing at that address');
+        fetchRows();
+      } catch (err: any) {
+        say(err?.response?.data?.message || 'Skip trace failed');
+      } finally {
+        setTracingId((t) => ({ ...t, [id]: false }));
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
 
   /* Optimistic, then reconciled. The server recomputes the tier and re-runs the
      compliance gate on every write, so a card that only echoed the local change
@@ -659,6 +686,8 @@ export default function SurplusFundsPage() {
               <SurplusCard
                 r={r}
                 onOpen={() => setOpenId(r.id)}
+                onTrace={() => trace(r.id)}
+                tracing={!!tracingId[r.id]}
                 picked={!!picked[r.id]}
                 onPick={(on) => setPicked({ ...picked, [r.id]: on })}
                 editing={!!editing[r.id]}
@@ -735,6 +764,8 @@ function Lbl({ children, style }: { children: React.ReactNode; style?: React.CSS
 interface CardProps {
   r: SurplusLead;
   onOpen: () => void;
+  onTrace: () => void;
+  tracing: boolean;
   picked: boolean;
   onPick: (on: boolean) => void;
   editing: boolean;
@@ -745,7 +776,7 @@ interface CardProps {
   say: (t: string) => void;
 }
 
-function SurplusCard({ r, onOpen, picked, onPick, editing, onEditing, disclosureLabels, patch, copy, say }: CardProps) {
+function SurplusCard({ r, onOpen, onTrace, tracing, picked, onPick, editing, onEditing, disclosureLabels, patch, copy, say }: CardProps) {
   const tier = TIER[r.tier] || TIER.U;
   const stageColor = SURPLUS_STAGE_COLOR[r.stage] || CHIP.slate;
   const dripColor = DRIP_TRACK_COLOR[r.dripTrack] || CHIP.blue;
@@ -1026,11 +1057,17 @@ function SurplusCard({ r, onOpen, picked, onPick, editing, onEditing, disclosure
             <button className={`dc-btn sm${editing ? ' pri' : ''}`} onClick={() => onEditing(!editing)}>
               {editing ? 'Done' : '✎ Edit'}
             </button>
-            {/* Skip trace is not wired for this pipeline yet. The existing
-                enricher is bound to LeadSource.FORECLOSURE and to NC OneMap,
-                which does not cover Florida at all. */}
-            <button className="dc-btn sm" disabled title="Skip trace is not wired up for surplus funds yet">
-              ↻ Skip trace
+            {/* Traces the PROPERTY address, because that is where the clerk
+                mailed the Notice of Surplus Funds. The property has since sold
+                at auction, so the trace often returns the new occupant; the
+                name check discards those rather than attaching them. */}
+            <button
+              className="dc-btn sm"
+              onClick={onTrace}
+              disabled={tracing}
+              title={`Skip trace ${r.address} , the address the surplus notice was mailed to`}
+            >
+              {tracing ? '↻ Tracing...' : '↻ Skip trace'}
             </button>
             {CONTRACTS_ENABLED && (
               <button

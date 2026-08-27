@@ -5,7 +5,7 @@ import CommunicationsTimeline from '@/components/communications/CommunicationsTi
 import MessageComposer, { type EmailAction } from '@/components/communications/MessageComposer';
 import NotesPanel from '@/components/communications/NotesPanel';
 import type { NoteItem, TimelineItem } from '@/components/communications/types';
-import { authAPI, campaignsAPI, leadsAPI } from '@/lib/api';
+import { authAPI, campaignsAPI, leadsAPI, surplusAPI } from '@/lib/api';
 import { fmtDate, money, phoneDisplay } from './format';
 
 /**
@@ -112,6 +112,7 @@ export default function SurplusWorkPanel({ lead, currentUser, onClose, onChanged
   const [emailAction, setEmailAction] = useState<EmailAction | null>(null);
   const [campaigns, setCampaigns] = useState<{ id: string; name: string }[]>([]);
   const [enrolling, setEnrolling] = useState(false);
+  const [tracing, setTracing] = useState(false);
   const [fullLead, setFullLead] = useState<any>(null);
   /** Needed by the composer for @mentions on internal comments. */
   const [teamMembers, setTeamMembers] = useState<any[]>([]);
@@ -201,6 +202,29 @@ export default function SurplusWorkPanel({ lead, currentUser, onClose, onChanged
       say(e?.response?.data?.message || 'Could not enrol this lead');
     } finally {
       setEnrolling(false);
+    }
+  };
+
+  /**
+   * Trace the PROPERTY address, which is where the clerk mailed the Notice of
+   * Surplus Funds. The property has since sold at auction, so this often
+   * returns the current occupant instead; the name check on the server
+   * discards those rather than attaching a stranger's number to the claimant.
+   */
+  const trace = async () => {
+    if (tracing) return;
+    setTracing(true);
+    try {
+      const res = await surplusAPI.skipTrace({ leadIds: [lead.id] });
+      const d = res.data || {};
+      if (d.contacted) say('Skip trace found contacts');
+      else if (d.mismatched) say('Skip trace returned somebody else, so nothing was attached');
+      else say(d.message || 'Skip trace found nothing at that address');
+      onChanged();
+    } catch (e: any) {
+      say(e?.response?.data?.message || 'Skip trace failed');
+    } finally {
+      setTracing(false);
     }
   };
 
@@ -297,7 +321,7 @@ export default function SurplusWorkPanel({ lead, currentUser, onClose, onChanged
 
         <div className="dc-wp-body">
           {tab === 'case' && (
-            <CaseTab lead={lead} ledger={ledger} />
+            <CaseTab lead={lead} ledger={ledger} onTrace={trace} tracing={tracing} />
           )}
 
           {tab === 'conversation' && (
@@ -391,7 +415,17 @@ export default function SurplusWorkPanel({ lead, currentUser, onClose, onChanged
 
 // ─── Case tab ───────────────────────────────────────────────────────────────
 
-function CaseTab({ lead, ledger }: { lead: SurplusPanelLead; ledger: LedgerDoc[] }) {
+function CaseTab({
+  lead,
+  ledger,
+  onTrace,
+  tracing,
+}: {
+  lead: SurplusPanelLead;
+  ledger: LedgerDoc[];
+  onTrace: () => void;
+  tracing: boolean;
+}) {
   const grouped = LEDGER_GROUPS.map((g) => ({
     ...g,
     docs: ledger.filter((d) => d.kind === g.kind),
@@ -445,8 +479,16 @@ function CaseTab({ lead, ledger }: { lead: SurplusPanelLead; ledger: LedgerDoc[]
           <div style={{ fontSize: 12, color: 'var(--faint)' }}>
             No numbers yet.{' '}
             {lead.contactMismatch
-              ? `A skip trace returned ${lead.mismatchedName || 'somebody else'}, so its contacts were discarded rather than attached.`
+              ? `A skip trace returned ${lead.mismatchedName || 'somebody else'}, so its contacts were discarded rather than attached. This claimant needs a name based route: Sunbiz for an entity, official records for a later deed, or an obituary if deceased.`
               : 'Not skip traced yet.'}
+            <div style={{ marginTop: 6 }}>
+              <button type="button" className="dc-wp-btn" onClick={onTrace} disabled={tracing}>
+                {tracing ? 'Tracing...' : lead.contactMismatch ? 'Re-run skip trace' : 'Skip trace'}
+              </button>
+            </div>
+            <div style={{ marginTop: 4, fontSize: 11 }}>
+              Traces {lead.address}, the address the surplus notice was mailed to.
+            </div>
           </div>
         )}
         {lead.phones.map((p) => (

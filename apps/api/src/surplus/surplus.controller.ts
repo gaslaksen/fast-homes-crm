@@ -8,6 +8,7 @@ import * as jwt from 'jsonwebtoken';
 import { SurplusService } from './surplus.service';
 import { SurplusImportService } from './surplus-import.service';
 import { SurplusIngestService } from './surplus-ingest.service';
+import { SurplusSkiptraceService } from './surplus-skiptrace.service';
 import { COMPLIANCE_RULES, DISCLOSURE_LABELS, FL_COUNTIES, SURPLUS_FLOOR } from './surplus-compliance';
 
 const IMPORT_UPLOAD_OPTIONS = {
@@ -34,6 +35,7 @@ export class SurplusController {
     private surplus: SurplusService,
     private importService: SurplusImportService,
     private ingest: SurplusIngestService,
+    private skiptrace: SurplusSkiptraceService,
   ) {}
 
   private decodeToken(authHeader?: string): { userId?: string; organizationId?: string } {
@@ -142,6 +144,32 @@ export class SurplusController {
       organizationId: body?.organizationId || organizationId || null,
       trigger: 'manual',
       limit,
+    });
+  }
+
+  /**
+   * Skip trace surplus claimants through BatchData.
+   *
+   * `limit` caps the number of ADDRESSES submitted, which is what costs credits,
+   * not the number of leads touched: co-owners at one property share a single
+   * submission because BatchData matches on address and ignores names.
+   *
+   * Deliberately a manual call rather than something ingestion does on its own.
+   * Every submission spends money, and a trace of a property that has just sold
+   * at auction often returns the new occupant rather than the former owner.
+   */
+  @Post('skip-trace')
+  async skipTrace(@Body() body: any, @Headers('authorization') authHeader?: string) {
+    const { organizationId } = this.decodeToken(authHeader);
+    const limit = body?.limit == null ? undefined : Number(body.limit);
+    if (limit != null && (!Number.isFinite(limit) || limit < 1)) {
+      throw new BadRequestException('limit must be a positive number');
+    }
+    return this.skiptrace.traceLeads({
+      organizationId: body?.organizationId || organizationId || null,
+      leadIds: Array.isArray(body?.leadIds) ? body.leadIds : undefined,
+      limit,
+      includeTraced: body?.includeTraced === true,
     });
   }
 

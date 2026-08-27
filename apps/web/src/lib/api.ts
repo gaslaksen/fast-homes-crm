@@ -195,6 +195,13 @@ export const surplusAPI = {
   create: (data: any) => api.post('/surplus', data),
   update: (id: string, data: any) => api.patch(`/surplus/${id}`, data),
   bulkDelete: (ids: string[]) => api.post('/surplus/bulk-delete', { ids }),
+  // `limit` caps the ADDRESSES submitted, which is what costs BatchData credits.
+  // Co-owners at one property share a submission because the vendor matches on
+  // address and ignores names.
+  skipTrace: (body: { leadIds?: string[]; limit?: number; includeTraced?: boolean }) =>
+    api.post('/surplus/skip-trace', body),
+  poll: (body: { source?: string; limit?: number }) => api.post('/surplus/poll', body),
+  pollRuns: () => api.get('/surplus/poll-runs'),
   importParse: (file: File) => {
     const formData = new FormData();
     formData.append('file', file);
