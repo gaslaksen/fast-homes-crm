@@ -6,6 +6,7 @@ import { SurplusIngestService } from './surplus-ingest.service';
 import { SurplusPollService } from './surplus-poll.service';
 import { DuvalTaxDeedAdapter } from './duval-taxdeed.adapter';
 import { SurplusSkiptraceService } from './surplus-skiptrace.service';
+import { SurplusNoticeService } from './surplus-notice.service';
 
 @Module({
   controllers: [SurplusController],
@@ -16,6 +17,7 @@ import { SurplusSkiptraceService } from './surplus-skiptrace.service';
     SurplusPollService,
     DuvalTaxDeedAdapter,
     SurplusSkiptraceService,
+    SurplusNoticeService,
   ],
   exports: [SurplusService, SurplusImportService, SurplusIngestService, SurplusSkiptraceService],
 })

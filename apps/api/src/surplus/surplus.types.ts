@@ -62,6 +62,14 @@ export interface SurplusLeadInput {
   mailVerdict?: string | null;
   /** The classified document list, kept so the classifier can be re-run. */
   claimLedger?: unknown;
+  /** Read off the Notice of Surplus Funds. The skip-trace target. */
+  noticeRecipient?: string | null;
+  ownerMailingStreet?: string | null;
+  ownerMailingCity?: string | null;
+  ownerMailingState?: string | null;
+  ownerMailingZip?: string | null;
+  ownerAddressSource?: string | null;
+
   sourceSystem?: string | null;
   sourceCaseId?: string | null;
   sourceUrl?: string | null;

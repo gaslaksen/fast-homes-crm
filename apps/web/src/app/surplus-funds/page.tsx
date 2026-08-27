@@ -144,6 +144,12 @@ interface SurplusLead {
   workScore: number;
   workReason: string;
   surplusAtNotice: number | null;
+  noticeRecipient: string | null;
+  ownerMailingStreet: string | null;
+  ownerMailingCity: string | null;
+  ownerMailingState: string | null;
+  ownerMailingZip: string | null;
+  ownerAddressSource: string | null;
   mailVerdict: string | null;
   claimLedger: { title: string; kind: string; docId?: string | null; url?: string | null }[] | null;
   sourceSystem: string | null;
@@ -820,6 +826,13 @@ function SurplusCard({ r, onOpen, onTrace, tracing, picked, onPick, editing, onE
           <div style={{ color: 'var(--dim)', fontSize: 12.5, marginTop: 2 }}>
             {r.address}, {r.city} · {r.county} County
           </div>
+          {/* Where the notice actually went. Usually not the property, and it
+              is what the skip trace uses. */}
+          {r.ownerMailingStreet && (
+            <div style={{ color: 'var(--mint)', fontSize: 12, marginTop: 1 }}>
+              ✉ {r.ownerMailingStreet}, {r.ownerMailingCity} {r.ownerMailingState} {r.ownerMailingZip}
+            </div>
+          )}
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 5 }}>
           <div className="dc-score" style={{ borderColor: tier.fg }}>
@@ -1065,7 +1078,11 @@ function SurplusCard({ r, onOpen, onTrace, tracing, picked, onPick, editing, onE
               className="dc-btn sm"
               onClick={onTrace}
               disabled={tracing}
-              title={`Skip trace ${r.address} , the address the surplus notice was mailed to`}
+              title={
+                r.ownerMailingStreet
+                  ? `Skip trace ${r.ownerMailingStreet}, ${r.ownerMailingCity || ''}, the address the surplus notice was mailed to`
+                  : `No owner address recovered from the notice, so this traces the property at ${r.address}`
+              }
             >
               {tracing ? '↻ Tracing...' : '↻ Skip trace'}
             </button>

@@ -21,6 +21,7 @@ import {
 } from '@fast-homes/shared';
 import { SurplusService } from './surplus.service';
 import { DuvalTaxDeedAdapter } from './duval-taxdeed.adapter';
+import { SurplusNoticeService, NoticeExtract } from './surplus-notice.service';
 import { SurplusSourceAdapter, SurplusCaseDetail } from './surplus-source.types';
 import { classifyCase, collapseClaimants, isWorkable } from './surplus-classify.util';
 import { surplusUidOf } from './surplus.util';
@@ -48,19 +49,14 @@ interface IngestOpts {
 }
 
 /**
- * Duval publishes no filing dates on the docket and its Notice of Surplus Funds
- * is a scan with no text layer (6 characters across 3 pages), so the mailed
- * notice date cannot be read for free. Lee's RealTDM SURPLUS_LETTER is
- * generated and does carry it, which is a difference between the two sources
- * and not a general property of surplus notices.
+ * Fallback for when the notice cannot be read.
  *
- * Until OCR lands, the notice date is estimated as the SALE date and
- * `noticeConfirmed` stays false, which every surface already renders as an
- * estimate rather than a confident countdown. The estimate is deliberately
- * early: on the two Duval cases where the letter was read by hand the notice
- * followed the sale by 6 and 9 days, so a deadline computed from the sale date
- * lands a little BEFORE the real one. Erring the other way would tell the team
- * it had time it did not have.
+ * Duval publishes no filing dates on the docket, so with no notice extraction
+ * the date is estimated as the SALE date and `noticeConfirmed` stays false,
+ * which every surface renders as an estimate rather than a confident countdown.
+ * The estimate is deliberately early, so a computed deadline lands before the
+ * real one rather than after: Myrtis Griffin's notice is dated 7/1/2025 against
+ * a 6/11/2025 sale, so the estimate ran 20 days ahead of the truth.
  */
 function estimatedNoticeDate(detail: SurplusCaseDetail): string | null {
   return detail.saleDate || null;
@@ -74,6 +70,7 @@ export class SurplusIngestService {
     private prisma: PrismaService,
     private surplus: SurplusService,
     private duval: DuvalTaxDeedAdapter,
+    private notice: SurplusNoticeService,
   ) {}
 
   /** Every adapter wired up. Duval only for now; RealTDM is the next one. */
@@ -190,6 +187,10 @@ export class SurplusIngestService {
     const workable = isWorkable(verdict.claimStatus);
     if (!workable) out.retired = true;
 
+    // Read the notice only for cases worth working. A paid-out case does not
+    // need its owner's address, and every read is an API call.
+    const notice = workable ? await this.readNotice(adapter, verdict) : null;
+
     for (const claimant of claimants) {
       const dedupeUid = surplusUidOf({
         county: adapter.county,
@@ -243,8 +244,19 @@ export class SurplusIngestService {
 
           saleDate: detail.saleDate,
           salePrice: detail.highBid ?? null,
-          noticeDate: estimatedNoticeDate(detail),
-          noticeConfirmed: false,
+          // The notice date read off the document is the clerk's own record, so
+          // it is confirmed. Without it the clock falls back to the sale date,
+          // deliberately early, and stays flagged as an estimate.
+          noticeDate: notice?.noticeDate || estimatedNoticeDate(detail),
+          noticeConfirmed: !!notice?.noticeDate,
+          surplusAtNotice: notice?.surplusAtNotice ?? null,
+
+          noticeRecipient: notice?.recipient ?? null,
+          ownerMailingStreet: notice?.street ?? null,
+          ownerMailingCity: notice?.city ?? null,
+          ownerMailingState: notice?.state ?? null,
+          ownerMailingZip: notice?.zip ?? null,
+          ownerAddressSource: notice?.street ? 'notice_of_surplus_funds' : null,
 
           grossSurplus: detail.surplus ?? null,
 
@@ -309,6 +321,25 @@ export class SurplusIngestService {
         `Surplus ${detail.caseNumber} claim status ${existing.claimStatus} -> ${verdict.claimStatus}`,
       );
     }
+  }
+
+  /**
+   * Find the Notice of Surplus Funds on the docket and read it.
+   *
+   * There is at most one that matters; when a case carries several, the LAST is
+   * the operative one, since a re-noticed case supersedes its earlier letter.
+   */
+  private async readNotice(
+    adapter: SurplusSourceAdapter,
+    verdict: ReturnType<typeof classifyCase>,
+  ): Promise<NoticeExtract | null> {
+    if (!this.notice.available) return null;
+    const notices = verdict.ledger.filter((d) => d.kind === 'notice_surplus' && d.url);
+    const doc = notices[notices.length - 1];
+    if (!doc?.url) return null;
+    const base = (adapter as any).baseUrl || 'https://taxdeed.duvalclerk.com';
+    const url = doc.url.startsWith('http') ? doc.url : `${base}${doc.url}`;
+    return this.notice.readNotice(url);
   }
 
   private async finish(runId: string, r: SurplusIngestResult): Promise<void> {

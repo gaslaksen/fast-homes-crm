@@ -164,7 +164,8 @@ export type TraceSkipReason =
   | 'placeholder_address'
   | 'zip_state_mismatch'
   | 'entity'
-  | 'shared_address';
+  | 'shared_address'
+  | 'property_mail_returned';
 
 export interface TraceEligibility {
   ok: boolean;
@@ -189,7 +190,16 @@ function zipLooksFlorida(zip: string): boolean {
  */
 export function traceEligibility(
   c: TraceCandidate,
-  opts: { isEntity?: boolean; addressCaseCount?: number } = {},
+  opts: {
+    isEntity?: boolean;
+    addressCaseCount?: number;
+    /**
+     * Set only when this candidate is falling back to the PROPERTY address
+     * because no mailing address was recovered. Carries the clerk's own mail
+     * verdict for that property.
+     */
+    propertyFallbackMailVerdict?: string | null;
+  } = {},
 ): TraceEligibility {
   // An entity has no consumer identity to find. 37 of 204 targets on a sampled
   // Lee county pull were entities. They need Sunbiz for the registered agent,
@@ -255,6 +265,18 @@ export function traceEligibility(
       ok: false,
       reason: 'shared_address',
       detail: `This address appears on ${opts.addressCaseCount} different cases, so it is almost certainly a professional address rather than a home.`,
+    };
+  }
+
+  // The clerk already mailed this exact address and it came back. Tracing it
+  // returns whoever lives there now, which on a sold tax deed parcel is very
+  // often the purchaser. Six of six such submissions came back strangers.
+  if (opts.propertyFallbackMailVerdict === 'undeliverable') {
+    return {
+      ok: false,
+      reason: 'property_mail_returned',
+      detail:
+        'No mailing address recovered from the notice, and the clerk\'s own mail to the property was returned undelivered. Tracing it would return the current occupant. Read the Notice of Surplus Funds for the owner\'s address.',
     };
   }
 

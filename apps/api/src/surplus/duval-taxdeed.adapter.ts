@@ -179,7 +179,8 @@ export class DuvalTaxDeedAdapter implements SurplusSourceAdapter {
   readonly county = 'Duval';
 
   private readonly logger = new Logger(DuvalTaxDeedAdapter.name);
-  private readonly baseUrl: string;
+  /** Public so the ingest can absolutize a document's relative URL. */
+  readonly baseUrl: string;
 
   constructor(private config: ConfigService) {
     this.baseUrl = (

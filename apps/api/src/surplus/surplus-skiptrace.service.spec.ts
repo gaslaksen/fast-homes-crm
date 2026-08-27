@@ -36,7 +36,15 @@ const lead = (over: any = {}) => ({
   propertyCity: 'JACKSONVILLE',
   propertyState: 'FL',
   propertyZip: '32209',
-  surplusDetail: { id: over.detailId || 'd1', caseNumber: over.caseNumber ?? '2025-0023TD' },
+  surplusDetail: {
+    id: over.detailId || 'd1',
+    caseNumber: over.caseNumber ?? '2025-0023TD',
+    mailVerdict: over.mailVerdict ?? null,
+    ownerMailingStreet: over.mailStreet ?? null,
+    ownerMailingCity: over.mailCity ?? null,
+    ownerMailingState: over.mailState ?? null,
+    ownerMailingZip: over.mailZip ?? null,
+  },
 });
 
 const person = (first: string, last: string, phones: string[] = ['9045551234']) => ({
@@ -210,5 +218,62 @@ describe('SurplusSkiptraceService', () => {
 
     expect(r.contacted).toBe(0);
     expect(detailUpdates[0].data.callNotes).toMatch(/no matched person/i);
+  });
+});
+
+describe('choosing which address to submit', () => {
+  it('submits the OWNER mailing address from the notice, not the property', async () => {
+    // The case that proved this matters: a vacant Jacksonville lot whose owner
+    // was noticed in Hartford, Connecticut.
+    const { svc } = harness([
+      lead({
+        first: 'Myrtis', last: 'Griffin',
+        street: '0 HARDEE ST',
+        mailStreet: '72 SMITH DRIVE', mailCity: 'HARTFORD', mailState: 'CT', mailZip: '06118',
+      }),
+    ]);
+    respond([person('Myrtis', 'Griffin', ['8605551234'])]);
+
+    const r = await svc.traceLeads({ organizationId: 'org' });
+
+    expect(r.contacted).toBe(1);
+    const body: any = (mockedAxios.post as jest.Mock).mock.calls[0][1];
+    expect(body.requests[0].propertyAddress).toEqual({
+      street: '72 SMITH DRIVE', city: 'HARTFORD', state: 'CT', zip: '06118',
+    });
+  });
+
+  it('does not apply the placeholder rule to a real mailing address', async () => {
+    // "0 HARDEE ST" would be refused as a placeholder, but the mailing address
+    // is what gets submitted, so the case is still workable.
+    const { svc } = harness([
+      lead({ street: '0 HARDEE ST', mailStreet: '72 SMITH DRIVE', mailCity: 'HARTFORD', mailState: 'CT', mailZip: '06118' }),
+    ]);
+    respond([person('Myrtis', 'Griffin')]);
+
+    const r = await svc.traceLeads({ organizationId: 'org' });
+    expect(r.submitted).toBe(1);
+    expect(r.skipped.placeholder_address).toBeUndefined();
+  });
+
+  it('refuses the property fallback when the clerk\'s mail to it bounced', async () => {
+    // Direct evidence the owner was gone before we started looking. Six of six
+    // such submissions came back strangers on the first live run.
+    const { svc } = harness([
+      lead({ street: '2817 EAVERSON ST', mailVerdict: 'undeliverable' }),
+    ]);
+
+    const r = await svc.traceLeads({ organizationId: 'org' });
+
+    expect(mockedAxios.post).not.toHaveBeenCalled();
+    expect(r.skipped.property_mail_returned).toBe(1);
+  });
+
+  it('still allows the property fallback when the mail was delivered', async () => {
+    const { svc } = harness([lead({ street: '2817 EAVERSON ST', mailVerdict: 'delivered' })]);
+    respond([person('Myrtis', 'Griffin')]);
+
+    const r = await svc.traceLeads({ organizationId: 'org' });
+    expect(r.submitted).toBe(1);
   });
 });

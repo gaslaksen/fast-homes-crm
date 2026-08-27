@@ -72,6 +72,8 @@ interface Candidate {
   state: string | null;
   zip: string | null;
   addressKey: string;
+  /** 'notice' when this is the owner's own address, 'property' when it is not. */
+  addressSource: 'notice' | 'property';
 }
 
 interface TracedPerson {
@@ -145,21 +147,38 @@ export class SurplusSkiptraceService {
     const candidates: Candidate[] = leads
       .filter((l) => l.surplusDetail)
       .map((l) => {
+        const d = l.surplusDetail!;
         const claimant = `${l.sellerFirstName || ''} ${l.sellerLastName || ''}`.trim();
-        const c = {
-          street: l.propertyAddress,
-          city: l.propertyCity,
-          state: l.propertyState,
-          zip: l.propertyZip,
-        };
+
+        // The owner's OWN address, read off the Notice of Surplus Funds, is the
+        // target. The property address is a poor substitute and often an
+        // actively wrong one: case 2025-0023TD sold a vacant Jacksonville lot
+        // and noticed Myrtis Griffin at 72 Smith Drive, Hartford, CT. Tracing
+        // the property returned a stranger, as it did on all six of the first
+        // live submissions.
+        const hasMailing = !!d.ownerMailingStreet;
+        const c = hasMailing
+          ? {
+              street: d.ownerMailingStreet,
+              city: d.ownerMailingCity,
+              state: d.ownerMailingState,
+              zip: d.ownerMailingZip,
+            }
+          : {
+              street: l.propertyAddress,
+              city: l.propertyCity,
+              state: l.propertyState,
+              zip: l.propertyZip,
+            };
         return {
           leadId: l.id,
-          detailId: l.surplusDetail!.id,
+          detailId: d.id,
           claimant,
-          caseNumber: l.surplusDetail!.caseNumber,
+          caseNumber: d.caseNumber,
           isEntity: ENTITY.test(claimant),
           ...c,
           addressKey: addressKeyOf(c),
+          addressSource: (hasMailing ? 'notice' : 'property') as 'notice' | 'property',
         };
       });
 
@@ -169,6 +188,9 @@ export class SurplusSkiptraceService {
     // A professional address is one that recurs across DIFFERENT cases. Repeats
     // inside one case are a household and stay eligible.
     const caseCounts = addressCaseCounts(candidates);
+    const mailVerdicts = new Map(
+      leads.filter((l) => l.surplusDetail).map((l) => [l.surplusDetail!.id, l.surplusDetail!.mailVerdict]),
+    );
 
     // Group by address so one submission serves every claimant on it.
     const groups = new Map<string, Candidate[]>();
@@ -176,6 +198,11 @@ export class SurplusSkiptraceService {
       const elig = traceEligibility(c, {
         isEntity: c.isEntity,
         addressCaseCount: caseCounts.get(c.addressKey) || 0,
+        // Falling back to the property is only worth a credit when the clerk's
+        // own mail to it was not returned. An undeliverable verdict is direct
+        // evidence the owner was already gone before we started looking.
+        propertyFallbackMailVerdict:
+          c.addressSource === 'property' ? mailVerdicts.get(c.detailId) : undefined,
       });
       if (!elig.ok) {
         const reason = elig.reason || 'ineligible';

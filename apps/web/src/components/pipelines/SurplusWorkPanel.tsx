@@ -79,6 +79,12 @@ export interface SurplusPanelLead {
   lastPolledAt: string | null;
   grossSurplus: number;
   surplusAtNotice: number | null;
+  noticeRecipient: string | null;
+  ownerMailingStreet: string | null;
+  ownerMailingCity: string | null;
+  ownerMailingState: string | null;
+  ownerMailingZip: string | null;
+  ownerAddressSource: string | null;
   netToClaimant: number;
   estFee: number | null;
   saleDate: string | null;
@@ -474,6 +480,39 @@ function CaseTab({
         )}
       </Section>
 
+      {/* The two addresses are different things and the difference is the whole
+          game. The property is where the tax deed sold; the mailing address is
+          where the clerk actually wrote to the owner, and it is what gets
+          traced. On case 2025-0023TD those are Jacksonville and Hartford. */}
+      <Section title="Addresses">
+        <Row k="Property that sold" v={[lead.address, lead.city, lead.zip].filter(Boolean).join(', ')} />
+        {lead.ownerMailingStreet ? (
+          <Row
+            k="Owner, per the notice"
+            v={[
+              lead.ownerMailingStreet,
+              lead.ownerMailingCity,
+              [lead.ownerMailingState, lead.ownerMailingZip].filter(Boolean).join(' '),
+            ]
+              .filter(Boolean)
+              .join(', ')}
+            tone="var(--mint)"
+            note={
+              lead.noticeRecipient && lead.noticeRecipient !== lead.claimant
+                ? `Addressed to ${lead.noticeRecipient}. This is the address that gets skip traced.`
+                : 'This is the address that gets skip traced.'
+            }
+          />
+        ) : (
+          <Row
+            k="Owner, per the notice"
+            v="not recovered"
+            tone="var(--amber)"
+            note="The Notice of Surplus Funds has not been read for this case, so any trace falls back to the property address, which is usually not where the owner is."
+          />
+        )}
+      </Section>
+
       <Section title="Reaching them">
         {lead.phones.length === 0 && (
           <div style={{ fontSize: 12, color: 'var(--faint)' }}>
@@ -487,7 +526,9 @@ function CaseTab({
               </button>
             </div>
             <div style={{ marginTop: 4, fontSize: 11 }}>
-              Traces {lead.address}, the address the surplus notice was mailed to.
+              {lead.ownerMailingStreet
+                ? `Traces ${lead.ownerMailingStreet}, ${lead.ownerMailingCity || ''} ${lead.ownerMailingState || ''}, the address the surplus notice was mailed to.`
+                : `No owner address recovered, so this would trace the property at ${lead.address}, which is usually not where the owner is.`}
             </div>
           </div>
         )}

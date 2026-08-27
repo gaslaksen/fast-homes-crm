@@ -753,6 +753,21 @@ model SurplusDetail {
   /// re-fetching the county, which is the expensive and rate-limited half.
   claimLedger     Json?
 
+  // ── The owner's own address ───────────────────────────────────────────────
+  /// Where the clerk actually MAILED the Notice of Surplus Funds, read off the
+  /// notice itself. This is the skip-trace target and it is usually NOT the
+  /// property: Duval case 2025-0023TD sold a vacant lot in Jacksonville and
+  /// noticed Myrtis Griffin at 72 Smith Drive, Hartford, CT. Tracing the
+  /// property address there returns whoever lives on the parcel now, which is
+  /// the whole reason the first live run came back six strangers.
+  noticeRecipient    String?
+  ownerMailingStreet String?
+  ownerMailingCity   String?
+  ownerMailingState  String?
+  ownerMailingZip    String?
+  /// Which county document the mailing address came from, for audit.
+  ownerAddressSource String?
+
   // ── Provenance ────────────────────────────────────────────────────────────
   /// 'duval_taxdeed' | 'realtdm' | 'import' | 'manual'. Counties name things
   /// differently and a classifier carried across sources has been wrong every
