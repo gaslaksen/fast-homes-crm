@@ -187,9 +187,29 @@ export class SurplusIngestService {
     const workable = isWorkable(verdict.claimStatus);
     if (!workable) out.retired = true;
 
-    // Read the notice only for cases worth working. A paid-out case does not
-    // need its owner's address, and every read is an API call.
-    const notice = workable ? await this.readNotice(adapter, verdict) : null;
+    // Read the notice only when it will actually be used: the case is worth
+    // working AND at least one of its claimants still has no owner address.
+    // A paid-out case does not need one, and a case already carrying one must
+    // not be re-read, because every read is a billed API call.
+    const needsNotice =
+      workable &&
+      (await this.prisma.surplusDetail.count({
+        where: {
+          organizationId,
+          dedupeUid: {
+            in: claimants.map((c) =>
+              surplusUidOf({
+                county: adapter.county,
+                caseNumber: detail.caseNumber,
+                parcelId: detail.parcelId,
+                claimant: c.name,
+              }),
+            ),
+          },
+          ownerMailingStreet: { not: null },
+        },
+      })) === 0;
+    const notice = needsNotice ? await this.readNotice(adapter, verdict) : null;
 
     for (const claimant of claimants) {
       const dedupeUid = surplusUidOf({
@@ -201,11 +221,17 @@ export class SurplusIngestService {
 
       const existing = await this.prisma.surplusDetail.findFirst({
         where: { organizationId, dedupeUid },
-        select: { id: true, leadId: true, stage: true, claimStatus: true },
+        select: {
+          id: true,
+          leadId: true,
+          stage: true,
+          claimStatus: true,
+          ownerMailingStreet: true,
+        },
       });
 
       if (existing) {
-        await this.refresh(existing, detail, verdict, workable);
+        await this.refresh(existing, detail, verdict, workable, notice);
         out.updated += 1;
         continue;
       }
@@ -293,12 +319,45 @@ export class SurplusIngestService {
    * team's read of a lead beats the poll's.
    */
   private async refresh(
-    existing: { id: string; leadId: string; stage: string | null; claimStatus: string | null },
+    existing: {
+      id: string;
+      leadId: string;
+      stage: string | null;
+      claimStatus: string | null;
+      ownerMailingStreet: string | null;
+    },
     detail: SurplusCaseDetail,
     verdict: ReturnType<typeof classifyCase>,
     workable: boolean,
+    notice: NoticeExtract | null,
   ): Promise<void> {
     const changed = existing.claimStatus !== verdict.claimStatus;
+
+    // Backfill the owner's address on a lead created before notice extraction
+    // existed, or one whose earlier read failed. Only ever fills a gap: an
+    // address already on the row is left alone, including one somebody typed in
+    // by hand, and a re-poll never re-reads a notice it has already read.
+    const backfill =
+      !existing.ownerMailingStreet && notice?.street
+        ? {
+            noticeRecipient: notice.recipient,
+            ownerMailingStreet: notice.street,
+            ownerMailingCity: notice.city,
+            ownerMailingState: notice.state,
+            ownerMailingZip: notice.zip,
+            ownerAddressSource: 'notice_of_surplus_funds',
+            ...(notice.noticeDate
+              ? { noticeDate: new Date(`${notice.noticeDate}T00:00:00`), noticeConfirmed: true }
+              : {}),
+            ...(notice.surplusAtNotice ? { surplusAtNotice: notice.surplusAtNotice } : {}),
+          }
+        : {};
+
+    if (Object.keys(backfill).length) {
+      this.logger.log(
+        `Surplus ${detail.caseNumber} backfilled owner address from the notice: ${notice?.street}, ${notice?.city} ${notice?.state}`,
+      );
+    }
 
     await this.prisma.surplusDetail.update({
       where: { id: existing.id },
@@ -308,6 +367,7 @@ export class SurplusIngestService {
         claimLedger: verdict.ledger as any,
         grossSurplus: detail.surplus ?? undefined,
         lastPolledAt: new Date(),
+        ...backfill,
         // Retire, but never un-retire: a case the team has already marked Dead
         // stays Dead whatever the docket says today.
         ...(workable || existing.stage === SurplusStage.DEAD
