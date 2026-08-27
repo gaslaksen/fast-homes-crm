@@ -32,7 +32,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
 import { PrismaService } from '../prisma/prisma.service';
-import { LeadSource } from '@fast-homes/shared';
+import { DncRegistry, LeadSource } from '@fast-homes/shared';
 import { normalizePhoneDigits } from '../foreclosures/foreclosure-scoring.util';
 import {
   addressCaseCounts,
@@ -42,7 +42,19 @@ import {
   TraceVerdict,
 } from './surplus-skiptrace.util';
 
-const BATCHDATA_DEFAULT_BASE_URL = 'https://api.batchdata.com/api/v1';
+/**
+ * V3, not V1, and the difference is not cosmetic.
+ *
+ * V1 returns exactly ONE person per property: `persons[i]` corresponds to
+ * `requests[i]`, not to candidate people at one address. Every co-owner beyond
+ * the first was therefore unreachable through it, which is why Jessie Hall came
+ * back unmatched on 0 Hardee St. It was not evidence about her; the endpoint
+ * could not have returned her.
+ *
+ * V3 returns up to 3 persons per property, and each carries name aliases, an
+ * address history, and per-phone dnc/tcpa/reachable flags.
+ */
+const BATCHDATA_DEFAULT_BASE_URL = 'https://api.batchdata.com/api/v3';
 /** A courtesy pause between vendor calls. */
 const CALL_DELAY_MS = 250;
 
@@ -74,13 +86,38 @@ interface Candidate {
   addressKey: string;
   /** 'notice' when this is the owner's own address, 'property' when it is not. */
   addressSource: 'notice' | 'property';
+  /** The parcel that generated the surplus, always, whatever we submit. */
+  propertyStreet: string | null;
+  propertyCity: string | null;
+  propertyState: string | null;
+  propertyZip: string | null;
+}
+
+interface TracedPhone {
+  num: string;
+  type: string | null;
+  /** DncRegistry value, or null when there is no reason not to dial. */
+  dnc: string | null;
 }
 
 interface TracedPerson {
   first: string | null;
   last: string | null;
-  phones: { num: string; type: string | null }[];
+  /** Alternate spellings the vendor holds for the same person. */
+  akas: { first: string | null; last: string | null }[];
+  phones: TracedPhone[];
   emails: string[];
+  /** The vendor believes this person is deceased. */
+  deceased: boolean;
+  /**
+   * True when this person's address history includes the property that sold.
+   * This is the confirmation the surplus course teaches, available here without
+   * a human reading search results: a name in another state means nothing until
+   * something ties it back to the parcel that generated the surplus.
+   */
+  livedAtProperty: boolean;
+  /** The vendor's own view that this is an owner of record. */
+  propertyOwner: boolean;
 }
 
 const ENTITY = /\b(LLC|L\.L\.C|INC|CORP|CORPORATION|COMPANY|LP|LLP|LLLP|LTD|TRUST|ASSOCIATION|CHURCH|BANK|PARTNERS|HOLDINGS)\b/i;
@@ -179,6 +216,10 @@ export class SurplusSkiptraceService {
           ...c,
           addressKey: addressKeyOf(c),
           addressSource: (hasMailing ? 'notice' : 'property') as 'notice' | 'property',
+          propertyStreet: l.propertyAddress,
+          propertyCity: l.propertyCity,
+          propertyState: l.propertyState,
+          propertyZip: l.propertyZip,
         };
       });
 
@@ -241,16 +282,43 @@ export class SurplusSkiptraceService {
    * first: the co-owner lives in that array.
    */
   private async lookup(c: Candidate): Promise<TracedPerson[]> {
-    const propertyAddress: Record<string, string> = { street: String(c.street) };
-    if (c.city) propertyAddress.city = c.city;
-    if (c.state) propertyAddress.state = c.state;
-    if (c.zip) propertyAddress.zip = String(c.zip).slice(0, 5);
+    const propertyAddress: Record<string, string> = { street: String(c.propertyStreet || c.street) };
+    if (c.propertyCity) propertyAddress.city = c.propertyCity;
+    if (c.propertyState) propertyAddress.state = c.propertyState;
+    if (c.propertyZip) propertyAddress.zip = String(c.propertyZip).slice(0, 5);
+
+    // Send everything we know in one request. The vendor confirms a NAME
+    // against the property itself, which is the surplus course's method applied
+    // server-side, and the mailing address off the notice is where the owner
+    // actually is. Name plus property plus mailing address is a far better
+    // query than any of the three alone.
+    const req: Record<string, unknown> = { propertyAddress, requestId: c.detailId };
+    const parts = c.claimant.split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) {
+      req.name = { first: parts[0], last: parts[parts.length - 1] };
+    }
+    if (c.addressSource === 'notice' && c.street) {
+      const mailingAddress: Record<string, string> = { street: c.street };
+      if (c.city) mailingAddress.city = c.city;
+      if (c.state) mailingAddress.state = c.state;
+      if (c.zip) mailingAddress.zip = String(c.zip).slice(0, 5);
+      req.mailingAddress = mailingAddress;
+    }
 
     let resp;
     try {
       resp = await axios.post(
         `${this.batchBaseUrl}/property/skip-trace`,
-        { requests: [{ propertyAddress }] },
+        {
+          requests: [req],
+          options: {
+            // Return TCPA-restricted numbers rather than dropping them, and
+            // flag each one. V1 filtered them out silently, which meant a
+            // number existed and nobody knew. A flagged number can be weighed;
+            // a hidden one cannot.
+            includeTCPABlacklistedPhones: true,
+          },
+        },
         {
           headers: {
             Authorization: `Bearer ${this.batchKey}`,
@@ -272,29 +340,61 @@ export class SurplusSkiptraceService {
       throw err;
     }
 
-    const persons = resp.data?.results?.persons || [];
-    return persons
-      .filter((p: any) => p?.meta?.matched)
-      .map((p: any) => {
-        const seen = new Set<string>();
-        const phones = (p.phoneNumbers || [])
-          .map((ph: any) => ({ num: normalizePhoneDigits(ph.number), type: ph.type || null }))
-          .filter((ph: any) => {
-            if (!ph.num || seen.has(ph.num)) return false;
-            seen.add(ph.num);
-            return true;
-          })
-          .slice(0, 4);
-        const emails = Array.from(
-          new Set((p.emails || []).map((e: any) => e.email).filter(Boolean) as string[]),
-        ).slice(0, 2);
-        return {
-          first: p.name?.first || p.firstName || null,
-          last: p.name?.last || p.lastName || null,
-          phones,
-          emails,
-        };
-      });
+    const item = resp.data?.result?.data?.[0];
+    if (!item || item.meta?.matched === false || item.meta?.error) return [];
+
+    const propertyKey = addressKeyOf({
+      street: c.propertyStreet || c.street,
+      city: c.propertyCity,
+      zip: c.propertyZip,
+    });
+
+    return (item.persons || []).map((p: any) => {
+      const seen = new Set<string>();
+      const phones: TracedPhone[] = (p.phones || [])
+        .map((ph: any) => ({
+          num: normalizePhoneDigits(ph.number),
+          type: ph.type || null,
+          // One field, one question: is there a reason not to dial this? The
+          // strictest reason wins, since a litigator is the most expensive
+          // number in the list to get wrong.
+          dnc: p.litigator
+            ? DncRegistry.LITIGATOR
+            : ph.dnc
+              ? DncRegistry.FEDERAL
+              : ph.tcpa
+                ? DncRegistry.TCPA
+                : null,
+        }))
+        .filter((ph: TracedPhone) => {
+          if (!ph.num || seen.has(ph.num)) return false;
+          seen.add(ph.num);
+          return true;
+        })
+        .slice(0, 4);
+
+      const emails = Array.from(
+        new Set((p.emails || []).map((e: any) => e.email).filter(Boolean) as string[]),
+      ).slice(0, 2);
+
+      const livedAtProperty = (p.addresses || []).some(
+        (a: any) => addressKeyOf({ street: a.street, city: a.city, zip: a.zip }) === propertyKey,
+      );
+
+      return {
+        first: p.name?.first || null,
+        last: p.name?.last || null,
+        akas: (p.name?.akas || []).map((a: any) => ({
+          first: a.first || null,
+          last: a.last || null,
+        })),
+        phones,
+        emails,
+        deceased: !!p.deceased,
+        livedAtProperty,
+        propertyOwner: !!p.propertyOwner,
+      };
+    });
   }
 
   /**
@@ -324,7 +424,32 @@ export class SurplusSkiptraceService {
     for (const c of group) {
       let best: { person: TracedPerson; verdict: TraceVerdict; reason: string } | null = null;
       for (const p of persons) {
-        const check = verifyTracedName(c.claimant, p.first, p.last);
+        // Check every spelling the vendor holds, not just the primary. Counties
+        // and vendors disagree constantly on given names, and an alias is the
+        // vendor telling us outright that two spellings are one person.
+        const candidates = [{ first: p.first, last: p.last }, ...p.akas];
+        let check = candidates
+          .map((n) => verifyTracedName(c.claimant, n.first, n.last))
+          .reduce((a, b) => (rank[b.verdict] > rank[a.verdict] ? b : a));
+
+        // The course's confirmation, and the vendor can answer it directly: if
+        // this person's address history includes the parcel that sold, they are
+        // tied to the surplus. That outranks a surname-only guess.
+        if (p.livedAtProperty && check.verdict === 'relative') {
+          check = {
+            verdict: 'same_person',
+            reason:
+              'Surname matches and this person\'s address history includes the property that sold, which ties them to the surplus.',
+          };
+        }
+        if (p.livedAtProperty && check.verdict === 'stranger') {
+          check = {
+            verdict: 'unverified',
+            reason:
+              'The name does not match, but this person\'s address history includes the property that sold. Worth a look by hand before discarding.',
+          };
+        }
+
         if (!best || rank[check.verdict] > rank[best.verdict]) {
           best = { person: p, verdict: check.verdict, reason: check.reason };
         }
@@ -380,6 +505,14 @@ export class SurplusSkiptraceService {
           phone2Type: ph[1]?.type || null,
           phone3Type: ph[2]?.type || null,
           phone4Type: ph[3]?.type || null,
+          // Per-number reason not to dial, from the vendor. Stored rather than
+          // used to filter, so a restricted number is visible and weighable
+          // instead of silently absent.
+          phone1Dnc: ph[0]?.dnc || null,
+          phone2Dnc: ph[1]?.dnc || null,
+          phone3Dnc: ph[2]?.dnc || null,
+          phone4Dnc: ph[3]?.dnc || null,
+          dncScrubbedAt: new Date(),
           email2: best.person.emails[1] || null,
           contactMismatch: false,
           mismatchedName: null,
@@ -388,8 +521,12 @@ export class SurplusSkiptraceService {
             best.verdict === 'relative'
               ? `Skip trace returned ${name}, not the claimant. ${best.reason}`
               : best.verdict === 'unverified'
-                ? `Skip trace returned contacts with no name to verify against, so these are unconfirmed.`
-                : `Skip trace matched ${name}.`,
+                ? `Skip trace returned ${name || 'contacts'} ${where}. ${best.reason}`
+                : // Say HOW it matched, not just that it did. An exact name match
+                  // and a match confirmed by the property's address history are
+                  // different levels of confidence, and the person calling
+                  // should be able to see which one they have.
+                  `Skip trace matched ${name}. ${best.reason}`,
           ),
         },
       });

@@ -103,6 +103,7 @@ export const DNC_STATE: Record<string, { label: string } & ChipColor> = {
   federal: { label: 'Federal DNC', ...CHIP.red },
   state: { label: 'State DNC', ...CHIP.red },
   litigator: { label: 'Litigator', ...CHIP.red },
+  tcpa: { label: 'TCPA restricted', ...CHIP.red },
 };
 
 export const WORKUP_LABEL: Record<string, string> = {

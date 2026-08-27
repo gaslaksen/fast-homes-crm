@@ -160,6 +160,15 @@ export enum DncRegistry {
   FEDERAL = 'federal',
   STATE = 'state',
   LITIGATOR = 'litigator',
+  /**
+   * Carries a TCPA restriction. Not a registry like the others, but it belongs
+   * in the same field because the field answers one question: is there a reason
+   * not to dial this number? BatchData V3 returns TCPA-restricted numbers by
+   * default with a per-phone flag, where V1 silently dropped them. Returning
+   * them flagged beats hiding them: a number nobody knows about cannot be
+   * weighed, and an unflagged number is one somebody will dial.
+   */
+  TCPA = 'tcpa',
 }
 
 // ── Surplus Funds ───────────────────────────────────────────────────────────

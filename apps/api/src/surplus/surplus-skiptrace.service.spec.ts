@@ -47,15 +47,26 @@ const lead = (over: any = {}) => ({
   },
 });
 
-const person = (first: string, last: string, phones: string[] = ['9045551234']) => ({
-  meta: { matched: true },
-  name: { first, last },
-  phoneNumbers: phones.map((n) => ({ number: n, type: 'Mobile' })),
+const person = (
+  first: string,
+  last: string,
+  phones: string[] = ['9045551234'],
+  over: any = {},
+) => ({
+  propertyOwner: true,
+  name: { first, last, akas: over.akas || [] },
+  addresses: over.addresses || [],
+  phones: phones.map((n) => ({ number: n, type: 'Mobile', dnc: false, tcpa: false, ...over.phoneFlags })),
   emails: [],
+  litigator: !!over.litigator,
+  deceased: !!over.deceased,
 });
 
-function respond(persons: any[]) {
-  mockedAxios.post.mockResolvedValue({ data: { results: { persons } } } as any);
+/** The V3 envelope: result.data[] with a persons[] array per property. */
+function respond(persons: any[], meta: any = { matched: true, error: false }) {
+  mockedAxios.post.mockResolvedValue({
+    data: { result: { data: [{ persons, meta }] } },
+  } as any);
 }
 
 beforeEach(() => jest.clearAllMocks());
@@ -237,10 +248,14 @@ describe('choosing which address to submit', () => {
     const r = await svc.traceLeads({ organizationId: 'org' });
 
     expect(r.contacted).toBe(1);
-    const body: any = (mockedAxios.post as jest.Mock).mock.calls[0][1];
-    expect(body.requests[0].propertyAddress).toEqual({
+    // V3 carries both: the parcel that sold in propertyAddress, and where the
+    // owner actually is in mailingAddress. V1 could only take one, so the
+    // mailing address had to masquerade as the property.
+    const req: any = (mockedAxios.post as jest.Mock).mock.calls[0][1].requests[0];
+    expect(req.mailingAddress).toEqual({
       street: '72 SMITH DRIVE', city: 'HARTFORD', state: 'CT', zip: '06118',
     });
+    expect(req.propertyAddress.street).toBe('0 HARDEE ST');
   });
 
   it('does not apply the placeholder rule to a real mailing address', async () => {
@@ -279,5 +294,119 @@ describe('choosing which address to submit', () => {
 
     const r = await svc.traceLeads({ organizationId: 'org' });
     expect(r.submitted).toBe(1);
+  });
+});
+
+describe('BatchData V3', () => {
+  it('calls the v3 endpoint and asks for TCPA numbers to be returned', async () => {
+    const { svc } = harness([lead()]);
+    respond([person('Myrtis', 'Griffin')]);
+
+    await svc.traceLeads({ organizationId: 'org' });
+
+    const [url, body] = (mockedAxios.post as jest.Mock).mock.calls[0];
+    expect(url).toContain('/api/v3/property/skip-trace');
+    expect(body.options.includeTCPABlacklistedPhones).toBe(true);
+  });
+
+  it('sends the claimant name and both addresses in one request', async () => {
+    // Name plus property plus mailing address is a far better query than any
+    // one alone, and the vendor confirms the name against the property itself.
+    const { svc } = harness([
+      lead({
+        first: 'Myrtis', last: 'Griffin', street: '0 HARDEE ST',
+        mailStreet: '72 SMITH DRIVE', mailCity: 'HARTFORD', mailState: 'CT', mailZip: '06118',
+      }),
+    ]);
+    respond([person('Myrtis', 'Griffin')]);
+
+    await svc.traceLeads({ organizationId: 'org' });
+
+    const req = (mockedAxios.post as jest.Mock).mock.calls[0][1].requests[0];
+    expect(req.name).toEqual({ first: 'Myrtis', last: 'Griffin' });
+    expect(req.propertyAddress.street).toBe('0 HARDEE ST');
+    expect(req.mailingAddress).toEqual({
+      street: '72 SMITH DRIVE', city: 'HARTFORD', state: 'CT', zip: '06118',
+    });
+  });
+
+  it('reaches BOTH co-owners now that a property returns several persons', async () => {
+    // The thing V1 could not do. Its persons[] was one entry per REQUEST, so
+    // every co-owner past the first was unreachable and looked like a miss.
+    const { svc, leadUpdates } = harness([
+      lead({ id: 'a', detailId: 'da', first: 'Myrtis', last: 'Griffin' }),
+      lead({ id: 'b', detailId: 'db', first: 'Jessie', last: 'Hall' }),
+    ]);
+    respond([
+      person('Myrtis', 'Griffin', ['9045551111']),
+      person('Jessie', 'Hall', ['9045552222']),
+    ]);
+
+    const r = await svc.traceLeads({ organizationId: 'org' });
+
+    expect(r.contacted).toBe(2);
+    const byLead = Object.fromEntries(leadUpdates.map((u) => [u.where.id, u.data.sellerPhone]));
+    expect(byLead.a).toBe('+19045551111');
+    expect(byLead.b).toBe('+19045552222');
+  });
+
+  it('flags a restricted number rather than hiding it', async () => {
+    // V1 dropped TCPA numbers silently, so a number existed and nobody knew.
+    const { svc, detailUpdates } = harness([lead()]);
+    respond([person('Myrtis', 'Griffin', ['9045551234'], { phoneFlags: { tcpa: true } })]);
+
+    await svc.traceLeads({ organizationId: 'org' });
+    expect(detailUpdates[0].data.phone1Dnc).toBe('tcpa');
+  });
+
+  it('marks a litigator ahead of any other reason', async () => {
+    // The most expensive number in the list to get wrong.
+    const { svc, detailUpdates } = harness([lead()]);
+    respond([person('Myrtis', 'Griffin', ['9045551234'], { litigator: true, phoneFlags: { dnc: true } })]);
+
+    await svc.traceLeads({ organizationId: 'org' });
+    expect(detailUpdates[0].data.phone1Dnc).toBe('litigator');
+  });
+
+  it('matches on an alias the vendor holds for the same person', async () => {
+    const { svc } = harness([lead({ first: 'Myrtis', last: 'Griffin' })]);
+    respond([
+      person('M', 'Griffin', ['9045551234'], {
+        akas: [{ first: 'Myrtis', last: 'Griffin' }],
+      }),
+    ]);
+
+    const r = await svc.traceLeads({ organizationId: 'org' });
+    expect(r.contacted).toBe(1);
+    expect(r.mismatched).toBe(0);
+  });
+
+  it('promotes a relative to the claimant when they lived at the property', async () => {
+    // The course's confirmation, answered by the vendor: an address history
+    // containing the parcel that sold ties the person to the surplus.
+    const { svc, detailUpdates } = harness([
+      lead({
+        first: 'Myrtis', last: 'Griffin',
+        street: '2817 EAVERSON ST',
+        mailStreet: '72 SMITH DRIVE', mailCity: 'HARTFORD', mailState: 'CT', mailZip: '06118',
+      }),
+    ]);
+    respond([
+      person('Bertha', 'Griffin', ['9045551234'], {
+        addresses: [{ street: '2817 EAVERSON ST', city: 'JACKSONVILLE', zip: '32209' }],
+      }),
+    ]);
+
+    const r = await svc.traceLeads({ organizationId: 'org' });
+    expect(r.contacted).toBe(1);
+    expect(detailUpdates[0].data.callNotes).toMatch(/address history includes the property/i);
+  });
+
+  it('treats an unmatched property as no persons at all', async () => {
+    const { svc } = harness([lead()]);
+    respond([], { matched: false, error: false });
+
+    const r = await svc.traceLeads({ organizationId: 'org' });
+    expect(r.contacted).toBe(0);
   });
 });
