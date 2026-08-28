@@ -445,59 +445,6 @@ export default function ProbatePage() {
           </div>
         </div>
 
-        {/* Selection bar */}
-        {selected.size > 0 && (
-          <div className="bg-primary-50 dark:bg-primary-950 border border-primary-200 dark:border-primary-800 rounded-xl px-4 py-2.5 flex items-center gap-4 flex-wrap mb-4">
-            <span className="text-sm font-semibold text-primary-800 dark:text-primary-400">
-              {selected.size} contact{selected.size === 1 ? '' : 's'} selected
-            </span>
-            <span className="text-xs text-primary-700/70 dark:text-primary-500">
-              {selectedContacts.reduce((n, c) => n + c.propertyCount, 0)} properties · one enrollment each
-            </span>
-            <button
-              onClick={() => bulkStatus('DEAD', 'Marked dead')}
-              disabled={bulkBusy}
-              className="text-xs px-3 py-1 border border-gray-300 dark:border-gray-600 rounded-lg font-medium disabled:opacity-50"
-            >
-              Mark dead
-            </button>
-            <button
-              onClick={bulkDelete}
-              disabled={bulkBusy}
-              className="text-xs px-3 py-1 border border-red-500 text-red-600 dark:text-red-400 rounded-lg font-medium disabled:opacity-50"
-            >
-              Delete
-            </button>
-            {campaigns.length > 0 ? (
-              <div className="flex items-center gap-2">
-                <select
-                  value={bulkCampaign}
-                  onChange={(e) => setBulkCampaign(e.target.value)}
-                  className="text-xs border border-gray-200 dark:border-gray-700 rounded-md px-2 py-1 dark:bg-gray-800 dark:text-gray-200"
-                >
-                  <option value="">Enrol in campaign...</option>
-                  {campaigns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-                {bulkCampaign && (
-                  <button
-                    onClick={handleEnroll}
-                    disabled={enrolling}
-                    className="text-xs px-3 py-1 bg-primary-600 text-white rounded-lg font-medium disabled:opacity-50"
-                  >
-                    {enrolling ? 'Enrolling...' : 'Enrol'}
-                  </button>
-                )}
-              </div>
-            ) : (
-              <span className="text-xs text-primary-700/70 dark:text-primary-500">
-                No active campaigns yet - build one on Drip Campaigns first.
-              </span>
-            )}
-            <button onClick={() => setSelected(new Set())} className="text-xs text-primary-500 hover:underline ml-auto">
-              Deselect
-            </button>
-          </div>
-        )}
 
         {/* List */}
         {loading ? (
@@ -561,7 +508,55 @@ export default function ProbatePage() {
                   <span>
                     {total.toLocaleString()} heir{total === 1 ? '' : 's'} ·{' '}
                     {leadTotal.toLocaleString()} properties
+                    {selected.size > 0 && (
+                      <>
+                        {' '}· <b style={{ color: 'var(--mint)' }}>{selected.size} selected</b>
+                      </>
+                    )}
                   </span>
+                }
+                /* Selection actions live in the board toolbar, beside the count
+                   they act on, the same as every other pipeline. They used to
+                   be a full-width banner above the board, which pushed the rows
+                   down every time somebody ticked a box. */
+                toolbarRight={
+                  selected.size > 0 ? (
+                    <>
+                      <span style={{ fontSize: 12, color: 'var(--faint)' }}>
+                        {selectedContacts.reduce((n, c) => n + c.propertyCount, 0)} properties · one
+                        enrollment each
+                      </span>
+                      {campaigns.length > 0 && (
+                        <>
+                          <select
+                            value={bulkCampaign}
+                            onChange={(e) => setBulkCampaign(e.target.value)}
+                            className="text-xs border border-gray-200 dark:border-gray-700 rounded-md px-2 py-1 dark:bg-gray-800 dark:text-gray-200"
+                          >
+                            <option value="">Enrol in campaign...</option>
+                            {campaigns.map((c) => (
+                              <option key={c.id} value={c.id}>{c.name}</option>
+                            ))}
+                          </select>
+                          {bulkCampaign && (
+                            <button className="dc-btn sm" disabled={enrolling} onClick={handleEnroll}>
+                              {enrolling ? 'Enrolling...' : 'Enrol'}
+                            </button>
+                          )}
+                        </>
+                      )}
+                      <button
+                        className="dc-btn sm"
+                        disabled={bulkBusy}
+                        onClick={() => bulkStatus('DEAD', 'Marked dead')}
+                      >
+                        Mark dead
+                      </button>
+                      <button className="dc-btn sm dngr" disabled={bulkBusy} onClick={bulkDelete}>
+                        Delete
+                      </button>
+                    </>
+                  ) : null
                 }
               />
             </div>

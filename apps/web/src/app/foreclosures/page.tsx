@@ -1114,7 +1114,47 @@ export default function ForeclosuresPage() {
               />
             )}
             empty="No foreclosure leads found. Import the tracker sheet, upload an eCourts PDF, refresh the feed, or clear filters."
-            toolbarLeft={<span>{pagination.total.toLocaleString()} lead{pagination.total === 1 ? '' : 's'}</span>}
+            toolbarLeft={
+              <span>
+                {pagination.total.toLocaleString()} lead{pagination.total === 1 ? '' : 's'}
+                {selected.size > 0 && (
+                  <>
+                    {' '}· <b style={{ color: 'var(--mint)' }}>{selected.size} selected</b>
+                  </>
+                )}
+              </span>
+            }
+            /* Selection actions sit in the board toolbar, beside the count they
+               act on, the same as every other pipeline. They used to be a fixed
+               bar pinned to the bottom of the viewport, which floated over the
+               rows and put the controls nowhere near the checkboxes. */
+            toolbarRight={
+              <>
+                {selected.size > 0 && (
+                  <>
+                    <button className="dc-btn sm" disabled={busy} onClick={handleSkiptraceSelected}>
+                      Skip trace
+                    </button>
+                    <button
+                      className="dc-btn sm"
+                      disabled={busy}
+                      onClick={() => handleStatusSelected('DEAD', 'Marked dead')}
+                    >
+                      Mark dead
+                    </button>
+                    <button className="dc-btn sm dngr" disabled={busy} onClick={handleDeleteSelected}>
+                      Delete
+                    </button>
+                  </>
+                )}
+                <button
+                  style={{ color: 'var(--mint)', fontWeight: 600, fontSize: 13 }}
+                  onClick={() => downloadCsv(selected.size ? selectedLeads : leads)}
+                >
+                  Download {selected.size ? 'selected' : 'shown'} as CSV
+                </button>
+              </>
+            }
           />
         </div>
 
@@ -1160,21 +1200,6 @@ export default function ForeclosuresPage() {
           </div>
         )}
       </div>
-
-      {/* Selection bar */}
-      {selected.size > 0 && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 px-4 py-2.5 rounded-xl bg-white dark:bg-gray-900 border border-primary-500 shadow-lg text-sm">
-          <span className="text-gray-700 dark:text-gray-200"><b className="text-primary-600 dark:text-primary-400">{selected.size}</b> selected</span>
-          <button onClick={() => downloadCsv(selectedLeads)} className="btn btn-primary btn-sm">Download CSV</button>
-          <button onClick={handleSkiptraceSelected} disabled={busy} className="btn btn-secondary btn-sm disabled:opacity-50">Skip trace</button>
-          <button onClick={() => handleStatusSelected('DEAD', 'Marked dead')} disabled={busy} className="btn btn-secondary btn-sm disabled:opacity-50">Mark dead</button>
-          <button onClick={() => setSelected(new Set())} className="btn btn-secondary btn-sm">Clear</button>
-          <button onClick={handleDeleteSelected} disabled={busy}
-            className="btn btn-sm bg-red-600 hover:bg-red-700 text-white border border-red-600 disabled:opacity-50">
-            Delete
-          </button>
-        </div>
-      )}
 
       {/* Toast */}
       {toast && (
