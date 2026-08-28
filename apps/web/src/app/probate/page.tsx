@@ -4,10 +4,19 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import { probateAPI, campaignAPI } from '@/lib/api';
 import ProbateImportModal from '@/components/probate/ProbateImportModal';
-import ProbateContactRow, {
+import {
   ProbateContact,
   WORK_STATUS_LABELS,
 } from '@/components/probate/ProbateContactRow';
+import PipelineBoard, {
+  type PipelineView,
+  type PipelineColumn,
+  type PipelineStage,
+} from '@/components/pipelines/PipelineBoard';
+import PipelineWorkPanel from '@/components/pipelines/PipelineWorkPanel';
+import ProbateCard, { PROBATE_ACCENT } from '@/components/pipelines/ProbateCard';
+import ProbateDetail from '@/components/pipelines/ProbateDetail';
+import '@/components/pipelines/pipeline-board.css';
 
 interface Stats {
   leads: number;
@@ -26,6 +35,99 @@ const EMPTY_STATS: Stats = {
 };
 
 const PAGE_SIZE = 40;
+
+/**
+ * The table, in the order a probate lead is triaged: how long since the death,
+ * how much is inherited, who is the heir, can we reach them.
+ */
+const PROBATE_COLUMNS: PipelineColumn<ProbateContact>[] = [
+  {
+    key: 'status',
+    label: 'Status',
+    width: '140px',
+    sortValue: (c) => c.bestRank ?? 9999,
+    render: (c) => (
+      <span className="dc-tag" style={{ background: 'var(--surface3)', color: 'var(--text)' }}>
+        {WORK_STATUS_LABELS[c.workStatus || 'NOT_CONTACTED'] || 'Not contacted'}
+      </span>
+    ),
+  },
+  {
+    key: 'months',
+    label: 'Months since death',
+    align: 'right',
+    width: '130px',
+    sortValue: (c) => c.monthsSinceDeath ?? 9999,
+    render: (c) =>
+      c.monthsSinceDeath == null ? (
+        <span style={{ color: 'var(--faint)' }}>unknown</span>
+      ) : (
+        // Under three months is too soon to approach, not a hot lead.
+        <span style={{ color: c.monthsSinceDeath < 3 ? 'var(--amber)' : 'var(--dim)', fontWeight: 600 }}>
+          {c.monthsSinceDeath}
+        </span>
+      ),
+  },
+  {
+    key: 'value',
+    label: 'Inherited value',
+    align: 'right',
+    width: '125px',
+    sortValue: (c) => c.totalValue ?? 0,
+    render: (c) => <b>{money(c.totalValue)}</b>,
+  },
+  {
+    key: 'heir',
+    label: 'Heir',
+    sortValue: (c) => c.heirName || '',
+    render: (c) => (
+      <div>
+        <div style={{ fontWeight: 600 }}>{c.heirName}</div>
+        <div style={{ fontSize: 11.5, color: 'var(--faint)' }}>
+          {c.heirCity || 'city unknown'}
+          {c.absenteeHeir ? ' · absentee' : ''}
+        </div>
+      </div>
+    ),
+  },
+  {
+    key: 'estate',
+    label: 'Estate',
+    sortValue: (c) => c.deceasedNames[0] || '',
+    render: (c) => (
+      <div>
+        <div>{c.deceasedNames.slice(0, 2).join(', ') || 'unknown'}</div>
+        <div style={{ fontSize: 11.5, color: 'var(--faint)' }}>
+          {c.propertyCount} propert{c.propertyCount === 1 ? 'y' : 'ies'}
+        </div>
+      </div>
+    ),
+  },
+  {
+    key: 'contact',
+    label: 'Reach',
+    width: '120px',
+    sortValue: (c) => (c.doNotCall ? -1 : c.phone ? 1 : 0),
+    render: (c) =>
+      c.doNotCall ? (
+        <span style={{ color: 'var(--red)', fontSize: 12 }}>do not call</span>
+      ) : c.phone ? (
+        <span style={{ color: 'var(--mint)', fontSize: 12 }}>☏ on file</span>
+      ) : (
+        <span style={{ color: 'var(--faint)', fontSize: 12 }}>no number</span>
+      ),
+  },
+];
+
+const PROBATE_KANBAN: PipelineStage[] = Object.keys(WORK_STATUS_LABELS).map((k) => ({
+  key: k,
+  label: WORK_STATUS_LABELS[k],
+}));
+
+/** Local money format, matching the rest of the pipeline boards. */
+function money(n: number | null): string {
+  return n || n === 0 ? `$${Math.round(n).toLocaleString('en-US')}` : '-';
+}
 
 export default function ProbatePage() {
   const [contacts, setContacts] = useState<ProbateContact[]>([]);
@@ -47,7 +149,9 @@ export default function ProbatePage() {
   const [hideDead, setHideDead] = useState(true);
   const [hideDnc, setHideDnc] = useState(false);
 
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  /** Table by default: a probate list is scanned before any of it is worked. */
+  const [view, setView] = useState<PipelineView>('table');
+  const [openKey, setOpenKey] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [campaigns, setCampaigns] = useState<{ id: string; name: string }[]>([]);
   const [bulkCampaign, setBulkCampaign] = useState('');
@@ -112,11 +216,7 @@ export default function ProbatePage() {
   // Any filter change puts you back on page 1.
   useEffect(() => { setPage(1); }, [search, tier, county, city, workStatus, deathWindow, absentee, hideDead, hideDnc, sort]);
 
-  const toggleExpand = (key: string) => setExpanded((prev) => {
-    const next = new Set(prev);
-    next.has(key) ? next.delete(key) : next.add(key);
-    return next;
-  });
+  const openContact = openKey ? contacts.find((c) => c.contactKey === openKey) || null : null;
 
   const toggleSelect = (key: string) => setSelected((prev) => {
     const next = new Set(prev);
@@ -358,29 +458,79 @@ export default function ProbatePage() {
           </div>
         ) : (
           <>
-            <div className="flex items-center justify-between mb-2 px-1">
-              <button onClick={selectAllShown} className="text-xs text-gray-500 dark:text-gray-400 hover:underline">
-                Select all on this page
-              </button>
-              <span className="text-xs text-gray-400 dark:text-gray-500">
-                {total.toLocaleString()} contact{total === 1 ? '' : 's'} · {leadTotal.toLocaleString()} properties
-              </span>
+            {/* Wrapped in .dc-board so the shared board's colour tokens
+                resolve; they are scoped to that class on purpose. */}
+            <div className="dc-board">
+              <PipelineBoard
+                rows={contacts}
+                keyOf={(c) => c.contactKey}
+                columns={PROBATE_COLUMNS}
+                stages={PROBATE_KANBAN}
+                stageOf={(c) => c.workStatus || 'NOT_CONTACTED'}
+                onStageChange={(c, status) => setWorkStatusFor(c, status)}
+                view={view}
+                onViewChange={setView}
+                selected={Object.fromEntries([...selected].map((k) => [k, true]))}
+                onSelect={(k, on) =>
+                  setSelected((prev) => {
+                    const next = new Set(prev);
+                    if (on) next.add(k);
+                    else next.delete(k);
+                    return next;
+                  })
+                }
+                onSelectAll={(on) =>
+                  setSelected(on ? new Set(contacts.map((c) => c.contactKey)) : new Set())
+                }
+                onOpen={(c) => setOpenKey(c.contactKey)}
+                accentOf={(c) => PROBATE_ACCENT[c.workStatus || 'NOT_CONTACTED'] || 'var(--border2)'}
+                loading={loading}
+                renderCard={(c) => (
+                  <ProbateCard
+                    c={c}
+                    picked={selected.has(c.contactKey)}
+                    onPick={(on) =>
+                      setSelected((prev) => {
+                        const next = new Set(prev);
+                        if (on) next.add(c.contactKey);
+                        else next.delete(c.contactKey);
+                        return next;
+                      })
+                    }
+                    onOpen={() => setOpenKey(c.contactKey)}
+                  />
+                )}
+                toolbarLeft={
+                  <span>
+                    {total.toLocaleString()} heir{total === 1 ? '' : 's'} ·{' '}
+                    {leadTotal.toLocaleString()} properties
+                  </span>
+                }
+              />
             </div>
 
-            <div className="space-y-2">
-              {contacts.map((c) => (
-                <ProbateContactRow
-                  key={c.contactKey}
-                  contact={c}
-                  expanded={expanded.has(c.contactKey)}
-                  selected={selected.has(c.contactKey)}
-                  onToggleExpand={() => toggleExpand(c.contactKey)}
-                  onToggleSelect={() => toggleSelect(c.contactKey)}
-                  onSetWorkStatus={(s) => setWorkStatusFor(c, s)}
-                  onToggleDnc={() => toggleDncFor(c)}
-                />
-              ))}
-            </div>
+            {openContact && (
+              <PipelineWorkPanel
+                title={openContact.heirName}
+                subtitle={`${openContact.heirCity || 'city unknown'} · ${openContact.propertyCount} propert${openContact.propertyCount === 1 ? 'y' : 'ies'}`}
+                meta={openContact.deceasedNames.join(', ')}
+                detailLabel="Estate"
+                detail={<ProbateDetail c={openContact} />}
+                subjects={[
+                  {
+                    leadId: openContact.primaryLeadId,
+                    name: openContact.heirName,
+                    phones: openContact.phone
+                      ? [{ number: openContact.phone, type: openContact.phoneType }]
+                      : [],
+                    emails: openContact.email ? [openContact.email] : [],
+                  },
+                ]}
+                onClose={() => setOpenKey(null)}
+                onChanged={fetchContacts}
+                say={() => {}}
+              />
+            )}
 
             {pageCount > 1 && (
               <div className="flex items-center justify-center gap-3 mt-6">

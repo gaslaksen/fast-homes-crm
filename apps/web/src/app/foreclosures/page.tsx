@@ -1,6 +1,16 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
+import PipelineBoard, {
+  type PipelineView,
+  type PipelineColumn,
+  type PipelineStage,
+} from '@/components/pipelines/PipelineBoard';
+import PipelineWorkPanel from '@/components/pipelines/PipelineWorkPanel';
+import ForeclosureCard, { FCL_ACCENT } from '@/components/pipelines/ForeclosureCard';
+import ForeclosureDetail from '@/components/pipelines/ForeclosureDetail';
+import { CHIP, PRIORITY } from '@/components/pipelines/format';
+import '@/components/pipelines/pipeline-board.css';
 import Link from 'next/link';
 import { foreclosuresAPI } from '@/lib/api';
 import { formatPhoneDisplay } from '@/lib/format';
@@ -455,6 +465,106 @@ function saveFilters(f: SavedFilters) {
 }
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
+/**
+ * The table, in the order a foreclosure is triaged: how long until the sale,
+ * how much equity is behind it, whose is it, can we reach them. The deadline
+ * leads because after the sale there is nothing to buy.
+ */
+const FCL_COLUMNS: PipelineColumn<any>[] = [
+  {
+    key: 'priority',
+    label: 'Priority',
+    width: '110px',
+    sortValue: (l) => l.score ?? 0,
+    render: (l) => {
+      const p: any = PRIORITY[l.priority] || CHIP.slate;
+      return (
+        <span className="dc-tag" style={{ background: p.bg, color: p.fg }}>
+          {p.label || l.priority}
+        </span>
+      );
+    },
+  },
+  {
+    key: 'sale',
+    label: 'Days to sale',
+    align: 'right',
+    width: '115px',
+    // Soonest first. A past sale sorts to the bottom: there is nothing to buy.
+    sortValue: (l) => (l.daysToSale == null ? 9999 : l.daysToSale < 0 ? 9998 : l.daysToSale),
+    render: (l) =>
+      l.daysToSale == null ? (
+        <span style={{ color: 'var(--faint)' }}>no date</span>
+      ) : l.daysToSale < 0 ? (
+        <span style={{ color: 'var(--faint)' }}>{Math.abs(l.daysToSale)}d past</span>
+      ) : (
+        <span style={{ color: l.daysToSale <= 14 ? 'var(--red)' : 'var(--dim)', fontWeight: 600 }}>
+          {l.daysToSale}d
+        </span>
+      ),
+  },
+  {
+    key: 'equity',
+    label: 'Equity',
+    align: 'right',
+    width: '120px',
+    sortValue: (l) => (l.debtFigureReliable ? l.equitySpread ?? 0 : -1),
+    render: (l) =>
+      // Blank on purpose where the rules engine will not stand behind the debt
+      // figure. Printing a number here would invent one.
+      l.debtFigureReliable && l.equitySpread != null ? (
+        <b style={{ color: 'var(--mint)' }}>{money(l.equitySpread)}</b>
+      ) : (
+        <span style={{ color: 'var(--amber)', fontSize: 12 }}>not computed</span>
+      ),
+  },
+  {
+    key: 'property',
+    label: 'Property',
+    sortValue: (l) => l.address || '',
+    render: (l) => (
+      <div>
+        <div style={{ fontWeight: 600 }}>{l.address}</div>
+        <div style={{ fontSize: 11.5, color: 'var(--faint)' }}>
+          {[l.city, l.zip].filter(Boolean).join(' ')} · {l.county}
+          {l.caseNumber ? ` · ${l.caseNumber}` : ''}
+        </div>
+      </div>
+    ),
+  },
+  { key: 'owner', label: 'Owner', sortValue: (l) => l.ownerNames || '', render: (l) => l.ownerNames },
+  {
+    key: 'signals',
+    label: 'Signals',
+    width: '90px',
+    sortValue: (l) => (l.signals || []).filter((s: any) => s.severity === 'critical').length,
+    render: (l) => {
+      const crit = (l.signals || []).filter((s: any) => s.severity === 'critical').length;
+      return crit ? (
+        <span style={{ color: 'var(--red)', fontSize: 12, fontWeight: 600 }}>{crit} critical</span>
+      ) : (
+        <span style={{ color: 'var(--faint)', fontSize: 12 }}>{(l.signals || []).length}</span>
+      );
+    },
+  },
+  {
+    key: 'contact',
+    label: 'Reach',
+    width: '115px',
+    sortValue: (l) => (l.doNotCall ? -1 : l.phone1 ? 1 : 0),
+    render: (l) =>
+      l.doNotCall ? (
+        <span style={{ color: 'var(--red)', fontSize: 12 }}>do not call</span>
+      ) : l.phone1 ? (
+        <span style={{ color: 'var(--mint)', fontSize: 12 }}>☏ on file</span>
+      ) : (
+        <span style={{ color: 'var(--faint)', fontSize: 12 }}>no number</span>
+      ),
+  },
+];
+
+const FCL_KANBAN: PipelineStage[] = WORK_STATUSES.map((s) => ({ key: s.value, label: s.label }));
+
 export default function ForeclosuresPage() {
   const [leads, setLeads] = useState<FclLead[]>([]);
   const [cities, setCities] = useState<string[]>([]);
@@ -467,6 +577,9 @@ export default function ForeclosuresPage() {
   // detail page's prev/next walks this whole filtered set and not one page.
   const [queueParams, setQueueParams] = useState<Record<string, string> | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  /** Table by default: a long docket is scanned before any of it is worked. */
+  const [view, setView] = useState<PipelineView>('table');
+  const [openId, setOpenId] = useState<string | null>(null);
 
   // Filters (mirroring the offline tracker's filter bar). Chip groups are
   // multi-select: any combination within a group ORs together.
@@ -499,6 +612,8 @@ export default function ForeclosuresPage() {
     setToast({ msg, err });
     setTimeout(() => setToast(null), 4000);
   };
+
+  const openLead = openId ? leads.find((l) => l.id === openId) || null : null;
 
   const fetchLeads = useCallback(async () => {
     abortRef.current?.abort();
@@ -937,21 +1052,79 @@ export default function ForeclosuresPage() {
           )}
         </div>
 
-        {/* Grid */}
-        {!loading && leads.length === 0 ? (
-          <div className="text-center py-16 text-gray-500 dark:text-gray-400">
-            <p className="text-lg font-medium">No foreclosure leads found</p>
-            <p className="text-sm mt-1">Import the tracker sheet, upload an eCourts PDF, refresh the feed, or clear filters.</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 items-start">
-            {leads.map((l) => (
-              <LeadCard key={l.id} lead={l} onUpdate={updateLead} onSkiptrace={runSkiptraceOne}
-                onToggleAction={toggleSignalAction}
-                collapseDefault={collapseAll}
-                selected={selected.has(l.id)} onToggleSelect={() => toggleSelect(l.id)} />
-            ))}
-          </div>
+        {/* Wrapped in .dc-board so the shared board's colour tokens resolve. */}
+        <div className="dc-board">
+          <PipelineBoard
+            rows={leads}
+            keyOf={(l) => l.id}
+            columns={FCL_COLUMNS}
+            stages={FCL_KANBAN}
+            stageOf={(l) => l.workStatus || 'NOT_CONTACTED'}
+            onStageChange={(l, workStatus) => updateLead(l.id, { workStatus })}
+            view={view}
+            onViewChange={setView}
+            selected={Object.fromEntries([...selected].map((k) => [k, true]))}
+            onSelect={(k, on) =>
+              setSelected((prev) => {
+                const next = new Set(prev);
+                if (on) next.add(k);
+                else next.delete(k);
+                return next;
+              })
+            }
+            onSelectAll={(on) => setSelected(on ? new Set(leads.map((l) => l.id)) : new Set())}
+            onOpen={(l) => setOpenId(l.id)}
+            accentOf={(l) => FCL_ACCENT[l.priority] || 'var(--border2)'}
+            loading={loading}
+            renderCard={(l) => (
+              <ForeclosureCard
+                l={l}
+                picked={selected.has(l.id)}
+                onPick={(on) =>
+                  setSelected((prev) => {
+                    const next = new Set(prev);
+                    if (on) next.add(l.id);
+                    else next.delete(l.id);
+                    return next;
+                  })
+                }
+                onOpen={() => setOpenId(l.id)}
+              />
+            )}
+            empty="No foreclosure leads found. Import the tracker sheet, upload an eCourts PDF, refresh the feed, or clear filters."
+            toolbarLeft={<span>{pagination.total.toLocaleString()} lead{pagination.total === 1 ? '' : 's'}</span>}
+          />
+        </div>
+
+        {openLead && (
+          <PipelineWorkPanel
+            title={openLead.address}
+            subtitle={`${[openLead.city, openLead.zip].filter(Boolean).join(' ')}${
+              openLead.daysToSale != null
+                ? openLead.daysToSale < 0
+                  ? ` · sold ${Math.abs(openLead.daysToSale)} days ago`
+                  : ` · ${openLead.daysToSale} days to sale`
+                : ''
+            }`}
+            meta={`${openLead.county} County${openLead.caseNumber ? ` · ${openLead.caseNumber}` : ''}`}
+            detail={<ForeclosureDetail l={openLead} />}
+            subjects={[
+              {
+                leadId: openLead.id,
+                name: openLead.ownerNames || 'Owner',
+                phones: [
+                  { number: openLead.phone1, type: openLead.phone1Type },
+                  { number: openLead.phone2, type: openLead.phone2Type },
+                  { number: openLead.phone3, type: openLead.phone3Type },
+                  { number: openLead.phone4, type: openLead.phone4Type },
+                ].filter((p) => p.number) as any,
+                emails: [openLead.email, openLead.email2].filter(Boolean) as string[],
+              },
+            ]}
+            onClose={() => setOpenId(null)}
+            onChanged={fetchLeads}
+            say={() => {}}
+          />
         )}
 
         {/* Pagination */}
@@ -993,525 +1166,3 @@ export default function ForeclosuresPage() {
 }
 
 // ─── Lead card (modeled on the offline tracker card) ─────────────────────────
-function LeadCard({ lead: l, onUpdate, onSkiptrace, onToggleAction, collapseDefault, selected, onToggleSelect }: {
-  lead: FclLead;
-  onUpdate: (id: string, patch: any, localPatch?: any) => void;
-  onSkiptrace: (id: string) => Promise<void>;
-  onToggleAction: (signalId: string, action: string, completed: boolean) => void;
-  collapseDefault: boolean;
-  selected: boolean;
-  onToggleSelect: () => void;
-}) {
-  const db = daysBadge(l.daysToSale);
-  const priBar = l.priority === 'HIGH' ? 'bg-red-500' : l.priority === 'MEDIUM' ? 'bg-amber-500' : 'bg-blue-500';
-  const dialer = useDialer();
-  const [notes, setNotes] = useState(l.callNotes || '');
-  const [tracing, setTracing] = useState(false);
-  const [collapsed, setCollapsed] = useState(collapseDefault);
-  const [editing, setEditing] = useState(false);
-  const [showSignals, setShowSignals] = useState(false);
-  const notesTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Place the call through the in-app Twilio dialer (not the native handler).
-  const dial = (num: string) => {
-    dialer.startCall({ name: l.ownerNames || l.countyOwner || undefined, phone: num, leadId: l.id });
-  };
-
-  // Follow the global Collapse/Expand toggle when it changes.
-  useEffect(() => { setCollapsed(collapseDefault); }, [collapseDefault]);
-
-  const phones = [
-    { num: l.phone1, type: l.phone1Type },
-    { num: l.phone2, type: l.phone2Type },
-    { num: l.phone3, type: l.phone3Type },
-    { num: l.phone4, type: l.phone4Type },
-  ].filter((p) => p.num);
-  const emails = [l.email, l.email2].filter(Boolean) as string[];
-
-  const runTrace = async () => {
-    if (tracing) return;
-    setTracing(true);
-    try {
-      await onSkiptrace(l.id);
-    } catch {
-      /* toast handled upstream via refetch failure; keep the card usable */
-    } finally {
-      setTracing(false);
-    }
-  };
-
-  const saveNotes = (val: string) => {
-    setNotes(val);
-    if (notesTimer.current) clearTimeout(notesTimer.current);
-    notesTimer.current = setTimeout(() => {
-      onUpdate(l.id, { callNotes: val }, { callNotes: val });
-    }, 600);
-  };
-
-  const toggleDay = (day: string) => {
-    const next = { ...(l.touchDays || {}), [day]: !l.touchDays?.[day] };
-    const delta = next[day] ? 1 : -1;
-    onUpdate(l.id, { touchDays: next }, { touchDays: next, totalTouches: Math.max(0, l.totalTouches + delta) });
-  };
-
-  // Whole-card click selects (like the tracker); ignore interactive elements.
-  const onCardClick = (e: React.MouseEvent) => {
-    if ((e.target as HTMLElement).closest('a,button,select,textarea,input,label')) return;
-    onToggleSelect();
-  };
-
-  const parcelSub =
-    l.parcelType === 'exact' ? `PID ${l.parcelId}`
-    : l.parcelType === 'county' && l.parcelId ? `Parcel ${l.parcelId}`
-    : 'search';
-
-  // Signals: chip the ones worth seeing at a glance, count the rest.
-  const signals = l.signals || [];
-  const chipSignals = signals.filter((sg) => sg.severity !== 'info');
-  const infoSignalCount = signals.length - chipSignals.length;
-  // Equity is blank on purpose when the debt figure cannot be trusted; say so
-  // rather than letting it read as missing data.
-  const suppressedEquity = !l.debtFigureReliable && l.equityPct == null;
-  const equityBlankReason = suppressedEquity ? debtFigureNote(l.loanType).blank : undefined;
-
-  const linkBtn = 'flex-1 min-w-[80px] flex flex-col items-center justify-center gap-0.5 px-2 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/60 hover:border-primary-400 dark:hover:border-primary-500 transition-colors text-sm font-semibold text-gray-800 dark:text-gray-200';
-  const linkSub = 'text-[10px] font-normal text-gray-400 dark:text-gray-500';
-
-  return (
-    <div
-      onClick={onCardClick}
-      className={`h-full bg-white dark:bg-gray-900 rounded-xl border overflow-hidden flex flex-col transition-shadow hover:shadow-md cursor-pointer ${
-        l.doNotCall ? 'border-red-400 dark:border-red-500 ring-1 ring-red-400' : selected ? 'border-primary-500 ring-1 ring-primary-500' : 'border-gray-200 dark:border-gray-700'}`}
-    >
-      <div className={`h-1 flex-shrink-0 ${priBar}`} />
-      <div className="p-4 flex flex-col gap-3 flex-1">
-
-        {/* Header */}
-        <div className="flex justify-between items-start gap-2">
-          <div className="flex items-start gap-2.5 min-w-0">
-            <button
-              onClick={(e) => { e.stopPropagation(); onToggleSelect(); }}
-              className={`flex-shrink-0 w-[18px] h-[18px] mt-0.5 rounded border-[1.5px] flex items-center justify-center text-[11px] font-bold transition-colors ${
-                selected ? 'bg-primary-600 border-primary-600 text-white' : 'bg-gray-50 dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-transparent hover:border-primary-400'}`}
-              title="Select"
-            >✓</button>
-            <div className="min-w-0">
-              <div className="flex items-center min-w-0">
-                <Link href={`/leads/${l.id}`} onClick={(e) => e.stopPropagation()} className="font-bold text-gray-900 dark:text-gray-100 hover:text-primary-600 dark:hover:text-primary-400 leading-tight truncate">
-                  {l.address}
-                </Link>
-                <CopyBtn text={[l.address, l.city, l.zip].filter(Boolean).join(', ')} label="address" />
-              </div>
-              <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                {[l.city, l.zip].filter(Boolean).join(', ') || '-'}
-              </div>
-            </div>
-          </div>
-          <div className={`flex-shrink-0 w-11 h-11 rounded-lg border flex flex-col items-center justify-center font-bold ${scoreClass(l.score)}`}>
-            <span className="text-base leading-none">{l.score}</span>
-            <span className="text-[8px] uppercase tracking-wide opacity-70">score</span>
-          </div>
-        </div>
-
-        {/* Tags */}
-        <div className="flex gap-1.5 flex-wrap">
-          <Tag cls={priorityClass(l.priority)}>{l.priority}</Tag>
-          {l.noticeType && <Tag cls="bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400">{noticeLabel(l.noticeType)}</Tag>}
-          {l.equityPct != null && (
-            <Tag cls={l.equityPct >= 0 ? 'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300' : 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300'}>
-              {l.equityPct >= 0 ? '▲' : '▼'} {l.equityPct}% equity
-            </Tag>
-          )}
-          {l.ownerOccupied === 'N' && <Tag cls="bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300">Absentee owner</Tag>}
-          {l.ownerOccupied === 'Y' && <Tag cls="bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300">Owner-occupied</Tag>}
-          {/* Signals ride the existing tag row. critical/notable get their own
-              chip; info-level collapse into a count so the row cannot crowd. */}
-          {chipSignals.map((sig) => (
-            <SignalChip key={sig.id} signal={sig} onOpen={() => setShowSignals(true)} />
-          ))}
-          {infoSignalCount > 0 && (
-            <button
-              onClick={(e) => { e.stopPropagation(); setShowSignals(true); }}
-              title="More signals"
-              className="text-[11px] px-2 py-0.5 rounded font-semibold bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
-            >
-              +{infoSignalCount}
-            </button>
-          )}
-        </div>
-
-        {/* Owner */}
-        <div>
-          <SectionLabel>Owner</SectionLabel>
-          <div className="text-sm text-gray-800 dark:text-gray-200 mt-0.5 flex items-start">
-            <span className="min-w-0">{l.ownerNames || l.countyOwner || '-'}</span>
-            {(l.ownerNames || l.countyOwner) && <CopyBtn text={l.ownerNames || l.countyOwner || ''} label="name" />}
-          </div>
-        </div>
-
-        {/* Contact */}
-        <div className="rounded-lg bg-gray-50 dark:bg-gray-800/60 border border-gray-100 dark:border-gray-800 px-3 py-2 flex flex-col gap-1.5 justify-center">
-          {(phones.length || emails.length) ? (
-            <>
-              {phones.map((p, i) => (
-                <div key={i} className="flex items-center text-sm">
-                  <span className="w-5 text-gray-400 dark:text-gray-500">☎</span>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); dial(p.num!); }}
-                    disabled={l.doNotCall}
-                    title={l.doNotCall ? 'Do Not Call is on for this lead' : 'Call with the Dealcore dialer'}
-                    className="text-gray-800 dark:text-gray-200 hover:text-primary-600 dark:hover:text-primary-400 disabled:text-gray-400 disabled:cursor-not-allowed disabled:hover:text-gray-400"
-                  >
-                    {formatPhoneDisplay(p.num!)}
-                  </button>
-                  <CopyBtn text={p.num!} label="number" />
-                  {p.type && <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400">{p.type}</span>}
-                </div>
-              ))}
-              {emails.map((em, i) => (
-                <div key={i} className="flex items-center text-sm min-w-0">
-                  <span className="w-5 text-gray-400 dark:text-gray-500">✉</span>
-                  <a href={`mailto:${em}`} onClick={(e) => e.stopPropagation()} className="text-gray-800 dark:text-gray-200 hover:text-primary-600 dark:hover:text-primary-400 truncate">{em}</a>
-                  <CopyBtn text={em} label="email" />
-                </div>
-              ))}
-            </>
-          ) : (
-            <div className="text-sm text-gray-400 dark:text-gray-500 italic">No phone or email on file</div>
-          )}
-          <div className="flex justify-end gap-2 pt-0.5">
-            <button
-              onClick={(e) => { e.stopPropagation(); setEditing(true); }}
-              title="Edit owner name, phones, and emails"
-              className="text-[11px] px-2 py-0.5 rounded border border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 hover:border-primary-400 transition-colors"
-            >
-              ✎ Edit
-            </button>
-            <button
-              onClick={(e) => { e.stopPropagation(); runTrace(); }}
-              disabled={tracing}
-              title="Look up owner, parcel, and phones again (NC OneMap + BatchData)"
-              className="text-[11px] px-2 py-0.5 rounded border border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 hover:border-primary-400 transition-colors disabled:opacity-60"
-            >
-              {tracing ? 'Tracing...' : '↻ Skip trace'}
-            </button>
-          </div>
-        </div>
-
-        {/* Links */}
-        <div className="flex gap-2">
-          {l.zillowUrl && (
-            <a href={l.zillowUrl} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className={linkBtn}>
-              <span>🏠 Zillow</span><span className={linkSub}>listing</span>
-            </a>
-          )}
-          {l.realtorQuery && (
-            <button onClick={(e) => { e.stopPropagation(); openRealtor(l); }} className={linkBtn}>
-              <span>🔑 Realtor</span><span className={linkSub}>listing</span>
-            </button>
-          )}
-          <a href={parcelHref(l)} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className={linkBtn}>
-            <span>📍 Property</span><span className={linkSub}>{parcelSub}</span>
-          </a>
-        </div>
-
-        {/* Tracking */}
-        <div className="border-t border-gray-100 dark:border-gray-800 pt-3 flex flex-col gap-2.5">
-          <div className="flex items-center gap-3">
-            <div className="flex-1 min-w-0">
-              <SectionLabel className="mb-1">Status</SectionLabel>
-              <select
-                value={l.workStatus}
-                onChange={(e) => onUpdate(l.id, { workStatus: e.target.value })}
-                onClick={(e) => e.stopPropagation()}
-                className="input py-1.5 text-sm w-full"
-              >
-                {WORK_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-              </select>
-            </div>
-            <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400 cursor-pointer select-none mt-4">
-              <input
-                type="checkbox"
-                checked={l.doNotCall}
-                onChange={() => onUpdate(l.id, { doNotCall: !l.doNotCall })}
-                className="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-red-600 focus:ring-red-500"
-              />
-              Do Not Call
-            </label>
-          </div>
-
-          {!collapsed && (
-            <>
-              <div className="flex items-end gap-3 flex-wrap">
-                <div>
-                  <SectionLabel className="mb-1">Contacted this week</SectionLabel>
-                  <div className="flex gap-1.5">
-                    {DAYS.map((d, i) => (
-                      <button key={d} onClick={() => toggleDay(d)} className="flex flex-col items-center gap-0.5 group">
-                        <span className={`w-6 h-6 rounded border flex items-center justify-center text-[11px] font-bold transition-colors ${
-                          l.touchDays?.[d]
-                            ? 'bg-primary-600 border-primary-600 text-white'
-                            : 'bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-600 text-transparent group-hover:border-primary-400'}`}>✓</span>
-                        <span className="text-[9px] text-gray-400 dark:text-gray-500">{DAY_LABELS[i]}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="ml-auto text-xs text-gray-500 dark:text-gray-400 pb-1">
-                  Total touches: <b className="text-gray-800 dark:text-gray-200">{l.totalTouches}</b>
-                </div>
-              </div>
-
-              <textarea
-                value={notes}
-                onChange={(e) => saveNotes(e.target.value)}
-                onClick={(e) => e.stopPropagation()}
-                placeholder="Call notes, reminders..."
-                rows={2}
-                className="input text-sm resize-none h-[52px]"
-              />
-            </>
-          )}
-
-          {/* Collapse / expand the details below the status row */}
-          <button
-            onClick={(e) => { e.stopPropagation(); setCollapsed((v) => !v); }}
-            className="text-[11px] text-gray-400 dark:text-gray-500 hover:text-primary-600 dark:hover:text-primary-400 self-center mt-0.5"
-          >
-            {collapsed ? '▾ Show details' : '▴ Hide details'}
-          </button>
-        </div>
-
-        {/* Facts grid */}
-        {!collapsed && (
-          <div className="grid grid-cols-2 border-t border-gray-100 dark:border-gray-800 -mx-4 -mb-4 mt-auto divide-x divide-y divide-gray-100 dark:divide-gray-800">
-            <div className="px-4 py-2.5">
-              <SectionLabel>Sale date</SectionLabel>
-              <div className={`text-sm font-semibold mt-0.5 ${db.cls || 'text-gray-800 dark:text-gray-200'}`}>{fmtDateUS(l.saleDate)}</div>
-            </div>
-            <div className="px-4 py-2.5">
-              <SectionLabel>{l.daysToSale != null && l.daysToSale <= 30 ? 'Countdown' : 'Timing'}</SectionLabel>
-              <div className={`text-sm font-semibold mt-0.5 ${db.cls || 'text-gray-800 dark:text-gray-200'}`}>{db.text}</div>
-            </div>
-            <div className="px-4 py-2.5">
-              <SectionLabel>Assessed value</SectionLabel>
-              <div className="text-sm font-semibold mt-0.5 text-gray-800 dark:text-gray-200">{money(l.assessedValue)}</div>
-            </div>
-            <div className="px-4 py-2.5">
-              <SectionLabel>Loan amount</SectionLabel>
-              <div className="text-sm font-semibold mt-0.5 text-gray-800 dark:text-gray-200">
-                {money(l.loanAmount)}
-                {!l.debtFigureReliable && (
-                  <span
-                    title={debtFigureNote(l.loanType).figure}
-                    className="ml-1 text-amber-600 dark:text-amber-400 cursor-help"
-                  >⚠</span>
-                )}
-              </div>
-            </div>
-            <div className="px-4 py-2.5" title={equityBlankReason}>
-              <SectionLabel>Equity spread</SectionLabel>
-              <div className={`text-sm font-semibold mt-0.5 ${l.equitySpread == null ? 'text-gray-800 dark:text-gray-200' : l.equitySpread >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                {signedMoney(l.equitySpread)}
-                {suppressedEquity && <span className="ml-1 text-amber-600 dark:text-amber-400 cursor-help">⚠</span>}
-              </div>
-            </div>
-            <div className="px-4 py-2.5" title={equityBlankReason}>
-              <SectionLabel>Est. equity %</SectionLabel>
-              <div className="text-sm font-semibold mt-0.5 text-gray-800 dark:text-gray-200">
-                {l.equityPct == null ? '-' : `${l.equityPct}%`}
-                {suppressedEquity && <span className="ml-1 text-amber-600 dark:text-amber-400 cursor-help">⚠</span>}
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {showSignals && (
-        <SignalModal
-          lead={l}
-          onClose={() => setShowSignals(false)}
-          onToggleAction={onToggleAction}
-        />
-      )}
-
-      {editing && (
-        <ContactEditModal
-          lead={l}
-          onClose={() => setEditing(false)}
-          onSave={(patch, local) => { onUpdate(l.id, patch, local); setEditing(false); }}
-        />
-      )}
-    </div>
-  );
-}
-
-// ─── Signal detail modal ─────────────────────────────────────────────────────
-// Evidence is the field names the signal rests on; actions are suggestions the
-// user ticks off. Nothing here contacts anyone - ticking records what was done.
-function SignalModal({ lead, onClose, onToggleAction }: {
-  lead: FclLead;
-  onClose: () => void;
-  onToggleAction: (signalId: string, action: string, completed: boolean) => void;
-}) {
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-      onClick={(e) => { e.stopPropagation(); onClose(); }}
-    >
-      <div
-        className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 shadow-xl w-full max-w-lg p-5 flex flex-col gap-4 max-h-[90vh] overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between">
-          <h3 className="font-bold text-gray-900 dark:text-gray-100">Signals</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 text-lg leading-none">✕</button>
-        </div>
-        <div className="text-xs text-gray-500 dark:text-gray-400 -mt-2">{lead.address}</div>
-
-        {lead.signals.length === 0 && (
-          <div className="text-sm text-gray-400 dark:text-gray-500 italic">
-            No signals on this filing. Nothing unusual was found.
-          </div>
-        )}
-
-        {lead.signals.map((sig) => (
-          <div key={sig.id} className="rounded-lg border border-gray-200 dark:border-gray-700 p-3 flex flex-col gap-2">
-            <div className="flex items-start gap-2">
-              <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wide flex-shrink-0 mt-0.5 ${severityClass(sig.severity)}`}>
-                {sig.severity}
-              </span>
-              <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">{sig.headline}</span>
-            </div>
-
-            <div>
-              <SectionLabel>Based on</SectionLabel>
-              <div className="flex gap-1 flex-wrap mt-1">
-                {sig.evidence.map((f) => (
-                  <span key={f} className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400">
-                    {evidenceLabel(f)}
-                  </span>
-                ))}
-              </div>
-            </div>
-
-            {sig.recommendedActions.length > 0 && (
-              <div>
-                <SectionLabel>Suggested next steps</SectionLabel>
-                <div className="flex flex-col gap-1 mt-1">
-                  {sig.recommendedActions.map((a) => {
-                    const done = sig.completedActions.includes(a);
-                    return (
-                      <label key={a} className="flex items-start gap-2 text-sm cursor-pointer select-none">
-                        <input
-                          type="checkbox"
-                          checked={done}
-                          onChange={() => onToggleAction(sig.id, a, !done)}
-                          className="w-4 h-4 mt-0.5 rounded border-gray-300 dark:border-gray-600 text-primary-600 focus:ring-primary-500 flex-shrink-0"
-                        />
-                        <span className={done ? 'text-gray-400 dark:text-gray-500 line-through' : 'text-gray-700 dark:text-gray-300'}>
-                          {actionLabel(a)}
-                        </span>
-                      </label>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
-        ))}
-
-        <div className="text-[11px] text-gray-400 dark:text-gray-500 border-t border-gray-100 dark:border-gray-800 pt-3">
-          Suggestions only. Ticking a step records that you did it - nothing here sends a message.
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Contact edit modal ───────────────────────────────────────────────────────
-function ContactEditModal({ lead: l, onClose, onSave }: {
-  lead: FclLead;
-  onClose: () => void;
-  onSave: (patch: any, local: any) => void;
-}) {
-  const [owner, setOwner] = useState(l.ownerNames || '');
-  const [rows, setRows] = useState([
-    { num: l.phone1 || '', type: l.phone1Type || '' },
-    { num: l.phone2 || '', type: l.phone2Type || '' },
-    { num: l.phone3 || '', type: l.phone3Type || '' },
-    { num: l.phone4 || '', type: l.phone4Type || '' },
-  ]);
-  const [email1, setEmail1] = useState(l.email || '');
-  const [email2, setEmail2] = useState(l.email2 || '');
-
-  const setRow = (i: number, key: 'num' | 'type', val: string) =>
-    setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, [key]: val } : r)));
-
-  const digits = (v: string) => v.replace(/\D/g, '').slice(-10);
-
-  const save = () => {
-    const patch: any = {
-      ownerNames: owner.trim(),
-      email: email1.trim(),
-      email2: email2.trim(),
-    };
-    rows.forEach((r, i) => {
-      patch[`phone${i + 1}`] = r.num ? digits(r.num) : '';
-      patch[`phone${i + 1}Type`] = r.type || null;
-    });
-    // Local mirror so the card updates instantly (dto field names match).
-    const local: any = {
-      ownerNames: patch.ownerNames,
-      email: patch.email || null,
-      email2: patch.email2 || null,
-      phone1: patch.phone1 || null, phone1Type: patch.phone1Type,
-      phone2: patch.phone2 || null, phone2Type: patch.phone2Type,
-      phone3: patch.phone3 || null, phone3Type: patch.phone3Type,
-      phone4: patch.phone4 || null, phone4Type: patch.phone4Type,
-    };
-    onSave(patch, local);
-  };
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-      onClick={(e) => { e.stopPropagation(); onClose(); }}
-    >
-      <div
-        className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 shadow-xl w-full max-w-md p-5 flex flex-col gap-3 max-h-[90vh] overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between">
-          <h3 className="font-bold text-gray-900 dark:text-gray-100">Edit contact</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 text-lg leading-none">✕</button>
-        </div>
-        <div className="text-xs text-gray-500 dark:text-gray-400 -mt-1">{l.address}</div>
-
-        <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Owner name</label>
-        <input value={owner} onChange={(e) => setOwner(e.target.value)} className="input text-sm" placeholder="First Last" />
-
-        <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mt-1">Phones</label>
-        {rows.map((r, i) => (
-          <div key={i} className="flex gap-2">
-            <input value={r.num} onChange={(e) => setRow(i, 'num', e.target.value)} className="input text-sm flex-1" placeholder={`Phone ${i + 1}`} />
-            <select value={r.type} onChange={(e) => setRow(i, 'type', e.target.value)} className="input text-sm w-28">
-              <option value="">Type</option>
-              <option value="Mobile">Mobile</option>
-              <option value="Landline">Landline</option>
-            </select>
-          </div>
-        ))}
-
-        <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mt-1">Emails</label>
-        <input value={email1} onChange={(e) => setEmail1(e.target.value)} className="input text-sm" placeholder="Email 1" />
-        <input value={email2} onChange={(e) => setEmail2(e.target.value)} className="input text-sm" placeholder="Email 2" />
-
-        <div className="flex justify-end gap-2 mt-2">
-          <button onClick={onClose} className="btn btn-secondary btn-sm">Cancel</button>
-          <button onClick={save} className="btn btn-primary btn-sm">Save</button>
-        </div>
-      </div>
-    </div>
-  );
-}
