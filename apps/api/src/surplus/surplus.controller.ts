@@ -146,6 +146,10 @@ export class SurplusController {
       organizationId: body?.organizationId || organizationId || null,
       trigger: 'manual',
       limit,
+      // Re-read notices and correct the addresses they produced. Off by
+      // default: a notice read costs a vision call and its answer does not
+      // change between polls. Asked for when the EXTRACTOR changed.
+      reread: body?.reread === true,
     });
   }
 

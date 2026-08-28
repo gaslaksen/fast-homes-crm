@@ -47,6 +47,20 @@ interface IngestOpts {
   trigger?: SurplusPollTrigger;
   /** Cap the detail fetches. Used by the discovery pass and by manual runs. */
   limit?: number;
+  /**
+   * Re-read the Notice of Surplus Funds even for cases that already have an
+   * owner address, and rewrite the addresses it produced.
+   *
+   * Off by default, because a notice read costs a vision call and the answer
+   * does not change between polls. It exists for the case where the EXTRACTOR
+   * changed and the addresses already stored are wrong: reading only the first
+   * page of a notice gave every claimant on a case whichever recipient came
+   * first, so on a co-owned case one of them was holding the other's address.
+   *
+   * Only ever rewrites an address this service wrote itself. One somebody typed
+   * in by hand outranks anything a machine read off a scan.
+   */
+  reread?: boolean;
 }
 
 /**
@@ -61,6 +75,26 @@ interface IngestOpts {
  */
 function estimatedNoticeDate(detail: SurplusCaseDetail): string | null {
   return detail.saleDate || null;
+}
+
+/**
+ * The notice page addressed to this claimant.
+ *
+ * The fallback matters as much as the match. When a notice yields ONE page and
+ * the case has ONE claimant, that page is theirs even if the clerk spelled the
+ * name differently from the tax roll. When the case has TWO claimants and the
+ * notice yields one page, that page belongs to whoever it names and to nobody
+ * else: handing it to both is exactly the bug this replaced, and it ends with a
+ * skip trace of the co-owner that reads as a confirmed hit.
+ */
+function recipientFor<T extends { name?: string | null }>(
+  claimant: string,
+  recipients: T[] | undefined,
+  claimantCount: number,
+): T | null {
+  const matched = matchRecipient(claimant, recipients || []);
+  if (matched) return matched;
+  return recipients?.length === 1 && claimantCount === 1 ? recipients[0] : null;
 }
 
 @Injectable()
@@ -144,7 +178,7 @@ export class SurplusIngestService {
             result.skipped += 1;
             continue;
           }
-          const outcome = await this.ingestCase(adapter, detail, organizationId);
+          const outcome = await this.ingestCase(adapter, detail, organizationId, !!opts.reread);
           result.created += outcome.created;
           result.updated += outcome.updated;
           result.skipped += outcome.skipped;
@@ -180,6 +214,7 @@ export class SurplusIngestService {
     adapter: SurplusSourceAdapter,
     detail: SurplusCaseDetail,
     organizationId: string | null,
+    reread = false,
   ): Promise<{ created: number; updated: number; skipped: number; retired: boolean }> {
     const verdict = classifyCase(detail.documents, { owners: detail.owners });
     const claimants = collapseClaimants(detail.owners);
@@ -194,7 +229,11 @@ export class SurplusIngestService {
     // not be re-read, because every read is a billed API call.
     const needsNotice =
       workable &&
-      (await this.prisma.surplusDetail.count({
+      // A re-read is asked for explicitly and always reads. Otherwise the read
+      // is skipped once any claimant on the case has an address, since the
+      // notice does not change between polls and the call is not free.
+      (reread ||
+        (await this.prisma.surplusDetail.count({
         where: {
           organizationId,
           dedupeUid: {
@@ -209,7 +248,7 @@ export class SurplusIngestService {
           },
           ownerMailingStreet: { not: null },
         },
-      })) === 0;
+      })) === 0);
     const notice = needsNotice ? await this.readNotice(adapter, verdict) : null;
 
     for (const claimant of claimants) {
@@ -228,11 +267,21 @@ export class SurplusIngestService {
           stage: true,
           claimStatus: true,
           ownerMailingStreet: true,
+          ownerAddressSource: true,
         },
       });
 
       if (existing) {
-        await this.refresh(existing, detail, verdict, workable, notice, claimant.name);
+        await this.refresh(
+          existing,
+          detail,
+          verdict,
+          workable,
+          notice,
+          claimant.name,
+          claimants.length,
+          reread,
+        );
         out.updated += 1;
         continue;
       }
@@ -250,8 +299,7 @@ export class SurplusIngestService {
       // With several, an unmatched claimant gets nothing rather than somebody
       // else's address: none is visible, wrong is not.
       const mine =
-        matchRecipient(claimant.name, notice?.recipients || []) ||
-        (notice?.recipients?.length === 1 ? notice.recipients[0] : null);
+        recipientFor(claimant.name, notice?.recipients, claimants.length);
       const res = await this.surplus.createSurplusLead(
         {
           address: detail.propertyAddress || `${adapter.county} County surplus claim`,
@@ -336,42 +384,68 @@ export class SurplusIngestService {
       stage: string | null;
       claimStatus: string | null;
       ownerMailingStreet: string | null;
+      ownerAddressSource: string | null;
     },
     detail: SurplusCaseDetail,
     verdict: ReturnType<typeof classifyCase>,
     workable: boolean,
     notice: NoticeExtract | null,
     claimantName: string,
+    claimantCount: number,
+    reread = false,
   ): Promise<void> {
     const changed = existing.claimStatus !== verdict.claimStatus;
 
-    // Backfill the owner's address on a lead created before notice extraction
-    // existed, or one whose earlier read failed. Only ever fills a gap: an
-    // address already on the row is left alone, including one somebody typed in
-    // by hand, and a re-poll never re-reads a notice it has already read.
-    const mine =
-      matchRecipient(claimantName, notice?.recipients || []) ||
-      (notice?.recipients?.length === 1 ? notice.recipients[0] : null);
+    // The address this claimant's own notice page carries. Null when no page is
+    // addressed to them, which on a co-owned case is the honest answer.
+    const mine = recipientFor(claimantName, notice?.recipients, claimantCount);
 
-    const backfill =
-      !existing.ownerMailingStreet && mine?.street
-        ? {
-            noticeRecipient: mine.name,
-            ownerMailingStreet: mine.street,
-            ownerMailingCity: mine.city,
-            ownerMailingState: mine.state,
-            ownerMailingZip: mine.zip,
-            ownerAddressSource: 'notice_of_surplus_funds',
-            ...(notice.noticeDate
-              ? { noticeDate: new Date(`${notice.noticeDate}T00:00:00`), noticeConfirmed: true }
-              : {}),
-            ...(notice.surplusAtNotice ? { surplusAtNotice: notice.surplusAtNotice } : {}),
-          }
-        : {};
+    // A machine-written address may be corrected. One somebody typed in by hand
+    // may not: a person who went and found the owner outranks anything read off
+    // a scan, and silently overwriting that would be the worst kind of bug,
+    // because the row would still look filled in.
+    const ours = existing.ownerAddressSource === 'notice_of_surplus_funds';
+    const correcting = reread && ours && !!notice?.recipients?.length;
+
+    let backfill: Record<string, unknown> = {};
+    if (mine?.street && (!existing.ownerMailingStreet || correcting)) {
+      // Fills a gap on a lead created before notice extraction existed, or
+      // replaces an address the single-page extractor got from the wrong
+      // recipient.
+      backfill = {
+        noticeRecipient: mine.name,
+        ownerMailingStreet: mine.street,
+        ownerMailingCity: mine.city,
+        ownerMailingState: mine.state,
+        ownerMailingZip: mine.zip,
+        ownerAddressSource: 'notice_of_surplus_funds',
+        ...(notice!.noticeDate
+          ? { noticeDate: new Date(`${notice!.noticeDate}T00:00:00`), noticeConfirmed: true }
+          : {}),
+        ...(notice!.surplusAtNotice ? { surplusAtNotice: notice!.surplusAtNotice } : {}),
+      };
+    } else if (correcting && existing.ownerMailingStreet && !mine?.street) {
+      // The notice read fine and no page is addressed to this claimant, so
+      // whatever is on the row came off a co-owner's page. Clear it. A blank
+      // address is visible and prompts a name search; a wrong one is invisible
+      // and gets skip traced, which returns the co-owner and looks like a hit.
+      backfill = {
+        noticeRecipient: null,
+        ownerMailingStreet: null,
+        ownerMailingCity: null,
+        ownerMailingState: null,
+        ownerMailingZip: null,
+        ownerAddressSource: null,
+      };
+      this.logger.warn(
+        `Surplus ${detail.caseNumber}: no notice page addressed to ${claimantName}, cleared an address that belonged to a co-owner`,
+      );
+    }
 
     if (Object.keys(backfill).length) {
       this.logger.log(
-        `Surplus ${detail.caseNumber} backfilled owner address from the notice: ${notice?.street}, ${notice?.city} ${notice?.state}`,
+        `Surplus ${detail.caseNumber} owner address for ${claimantName} from the notice: ` +
+          `${backfill.ownerMailingStreet || 'cleared'}${backfill.ownerMailingCity ? `, ${backfill.ownerMailingCity} ${backfill.ownerMailingState || ''}` : ''}`,
       );
     }
 
