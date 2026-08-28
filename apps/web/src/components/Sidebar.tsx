@@ -112,6 +112,9 @@ function buildNavGroups(badges: { needsReply: number; newLeads: number }): NavGr
       items: [
         { label: 'Dashboard', href: '/dashboard', icon: ICON.dashboard },
         { label: 'Inbox', href: '/inbox', icon: ICON.inbox, badge: badges.needsReply },
+        // Deals is not a pipeline, it is the far end of all of them: the list
+        // is every Lead at a deal status, whatever pipeline it came in through.
+        { label: 'Deals', href: '/deals', icon: ICON.deals },
       ],
     },
     {
@@ -122,7 +125,6 @@ function buildNavGroups(badges: { needsReply: number; newLeads: number }): NavGr
         { label: 'Probate', href: '/probate', icon: ICON.probate },
         { label: 'Tax Sales', href: '/tax-sales', icon: ICON.taxSale },
         { label: 'Surplus Funds', href: '/surplus-funds', icon: ICON.surplus },
-        { label: 'Deals', href: '/deals', icon: ICON.deals },
       ],
     },
     {
