@@ -66,6 +66,27 @@ function htmlIsEmpty(html: string): boolean {
   return !html || !html.replace(/<(p|br|div|span)[^>]*>/gi, '').replace(/<\/[^>]+>/g, '').replace(/&nbsp;/gi, '').trim();
 }
 
+/**
+ * Match a requested recipient to the option that represents it.
+ *
+ * The number clicked elsewhere on the page and the number in this list are the
+ * same phone written two ways: the surplus panel renders ten digits
+ * ("9047662977") and this list carries E.164 ("+19047662977"). Comparing them
+ * as strings finds nothing, so the clicked number was sent as bare digits and
+ * the picker highlighted no row, which read as the recipient having reverted to
+ * the first number.
+ *
+ * Compared on digits with a leading US 1 dropped. On a match the OPTION's form
+ * wins, so what gets sent is the canonical number the rest of the system uses.
+ * With no match the request is kept: an ad-hoc number is still a real request.
+ */
+function resolveTo(requested: string, options: ToOption[]): string {
+  const digits = (v: string) => String(v || '').replace(/\D/g, '').replace(/^1(?=\d{10}$)/, '');
+  const want = digits(requested);
+  if (!want) return requested;
+  return options.find((o) => digits(o.number) === want)?.number || requested;
+}
+
 export default function MessageComposer({
   leadId,
   sellerPhone,
@@ -123,6 +144,17 @@ export default function MessageComposer({
   // one they last replied from, so an answer lands on the phone in their hand.
   const [toNumber, setToNumber] = useState<string>('');
   const [toOptions, setToOptions] = useState<ToOption[]>([]);
+  /**
+   * Whether the recipient was chosen deliberately, by clicking a number
+   * elsewhere on the page or by picking one here.
+   *
+   * The number list loads asynchronously and finishes by selecting the server's
+   * default. Clicking "Text" next to a number also switches to the conversation
+   * tab, which MOUNTS this composer, so that load lands AFTER the click has
+   * already set the recipient and overwrites it with the first number on the
+   * list. A deliberate choice outranks the default, whichever arrives second.
+   */
+  const chosenRef = useRef<string | null>(null);
   const [toPickerOpen, setToPickerOpen] = useState(false);
 
   // @mention state (comment mode)
@@ -162,12 +194,19 @@ export default function MessageComposer({
   // picker stays hidden and the server sends to the primary.
   useEffect(() => {
     let cancelled = false;
+    // A new lead means a new number list, so any earlier choice is void.
+    chosenRef.current = null;
     messagesAPI
       .toOptions(leadId)
       .then((res) => {
         if (cancelled) return;
-        setToOptions(res.data?.numbers || []);
-        setToNumber(res.data?.selected || '');
+        const numbers: ToOption[] = res.data?.numbers || [];
+        setToOptions(numbers);
+        setToNumber(
+          chosenRef.current
+            ? resolveTo(chosenRef.current, numbers)
+            : res.data?.selected || '',
+        );
       })
       .catch(() => {
         if (!cancelled) setToOptions([]);
@@ -292,7 +331,10 @@ export default function MessageComposer({
   useEffect(() => {
     if (!composeIntent) return;
     setChannel(composeIntent.channel);
-    if (composeIntent.channel === 'sms' && composeIntent.to) setToNumber(composeIntent.to);
+    if (composeIntent.channel === 'sms' && composeIntent.to) {
+      chosenRef.current = composeIntent.to;
+      setToNumber(resolveTo(composeIntent.to, toOptions));
+    }
   }, [composeIntent?.nonce]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const selectedTo = toOptions.find((o) => o.number === toNumber);
@@ -452,6 +494,7 @@ export default function MessageComposer({
                     key={o.number}
                     type="button"
                     onClick={() => {
+                      chosenRef.current = o.number;
                       setToNumber(o.number);
                       setToPickerOpen(false);
                     }}
