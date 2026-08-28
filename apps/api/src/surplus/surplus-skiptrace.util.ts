@@ -119,6 +119,20 @@ const SUFFIX = new Set(['jr', 'sr', 'ii', 'iii', 'iv', 'v']);
 const ESTATE_WORDS = new Set(['estate', 'deceased', 'decd', 'the', 'of']);
 
 /**
+ * Capacity markers a county appends to say HOW someone holds title, not who
+ * they are: trustee/custodian, "and others", "and wife", care-of.
+ *
+ * Stripped as whole phrases before tokenizing, because tokenizing them first
+ * turns "T/C" into the letters t and c and leaves "c" standing as a surname.
+ * Duval case 2026-0005TD carries two claimants ending in T/C, so both reduced
+ * to the surname "c" and matched each other: one of them was handed the other's
+ * notice page, which is the same wrong-address bug that gets the wrong person
+ * skip traced. "ET AL" does the same thing through the surname "al".
+ */
+const CAPACITY =
+  /\b(?:t\s*\/\s*c|c\s*\/\s*o|et\s+(?:al|ux|vir)|trustees?|tr|ttee|as\s+tenants?\s+in\s+common)\b/gi;
+
+/**
  * Split a county-style claimant string into given names and a surname.
  *
  * Counties write "DANNIE LESTER STEWART" and "EDGAR CLOWERS, JR." and
@@ -129,7 +143,12 @@ export function splitClaimantName(raw?: string | null): {
   given: string[];
   surname: string;
 } {
-  const parts = tokens(raw).filter((t) => !ESTATE_WORDS.has(t) && !SUFFIX.has(t));
+  const parts = tokens(String(raw || '').replace(CAPACITY, ' ')).filter(
+    (t) => !ESTATE_WORDS.has(t) && !SUFFIX.has(t),
+  );
+  // A trailing single letter is an initial, never a surname. Left in place it
+  // makes every "JOHN C" and "MARY C" on a docket look like the same family.
+  while (parts.length > 1 && parts[parts.length - 1].length === 1) parts.pop();
   if (!parts.length) return { given: [], surname: '' };
   if (parts.length === 1) return { given: [], surname: parts[0] };
   return { given: parts.slice(0, -1), surname: parts[parts.length - 1] };

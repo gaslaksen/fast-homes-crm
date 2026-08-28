@@ -7,6 +7,7 @@ import {
   addressCaseCounts,
   traceState,
 } from './surplus-skiptrace.util';
+import { matchRecipient } from './surplus-name-search.util';
 
 describe('splitClaimantName', () => {
   it('splits a plain name', () => {
@@ -287,5 +288,32 @@ describe('traceState', () => {
     // that may not have been submitted.
     expect(traceState({ traceOutcome: 'matched' }).state).toBe('never');
     expect(traceState({ tracedAt: new Date() }).state).toBe('never');
+  });
+});
+
+describe('capacity markers are not surnames', () => {
+  it('strips T/C so two trustees do not share the surname "c"', () => {
+    // Duval 2026-0005TD. Both reduced to "c" and matched each other, so one was
+    // handed the other's notice page.
+    expect(splitClaimantName('EDWARD WARRWEN TYSON T/C').surname).toBe('tyson');
+    expect(splitClaimantName('CHARLES TERRY TYSON T/C').surname).toBe('tyson');
+    expect(matchRecipient('CJAR;ES TERRY TUSPM T/C', [{ name: 'EDWARD WARRWEN TYSON T/C' }])).toBeNull();
+  });
+
+  it('strips ET AL, which collapses to the surname "al"', () => {
+    expect(splitClaimantName('CLARENCE L TYSON ET AL').surname).toBe('tyson');
+    expect(splitClaimantName('MARY SMITH ET UX').surname).toBe('smith');
+  });
+
+  it('drops a trailing initial rather than treating it as a surname', () => {
+    expect(splitClaimantName('RUTH M JOHNSON M').surname).toBe('johnson');
+    // A genuine one-token name is still a surname.
+    expect(splitClaimantName('HERCELL').surname).toBe('hercell');
+  });
+
+  it('still matches the claimants it should on that case', () => {
+    const R = [{ name: 'CHARLES TERRY TYSON' }, { name: 'CLARENCE L TYSON' }];
+    expect(matchRecipient('CHARLES TERRY TYSON', R)?.name).toBe('CHARLES TERRY TYSON');
+    expect(matchRecipient('CLARENCE L TYSON ET AL', R)?.name).toBe('CLARENCE L TYSON');
   });
 });
