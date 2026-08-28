@@ -53,8 +53,6 @@ import {
 } from './surplus.util';
 import {
   SURPLUS_FLOOR,
-  FL_COUNTIES,
-  ALL_FL_COUNTIES,
   DISCLOSURE_LABELS,
 } from './surplus-compliance';
 import { SurplusLeadInput, SurplusListFilters, SurplusPhoneInput } from './surplus.types';
@@ -486,10 +484,12 @@ export class SurplusService {
     if (filters.band === '25-50') detailWhere.grossSurplus = { gte: 25000, lt: 50000 };
     if (filters.band === '50+') detailWhere.grossSurplus = { gte: 50000 };
 
-    const county = filters.county || 'active';
-    if (county === 'active') detailWhere.county = { in: FL_COUNTIES.active };
-    else if (county === 'all') detailWhere.county = { in: ALL_FL_COUNTIES };
-    else detailWhere.county = county;
+    // Default is every county we hold data for, which is what "no filter"
+    // should mean. The old default filtered to a hardcoded "active" list, so a
+    // county we started ingesting was invisible until somebody edited a
+    // constant and redeployed.
+    const county = filters.county || 'all';
+    if (county !== 'all') detailWhere.county = county;
 
     if (filters.hideDnc) detailWhere.doNotCall = false;
 
@@ -592,7 +592,7 @@ export class SurplusService {
         leadCount: rows.length,
         page,
         pageSize,
-        counties: { active: FL_COUNTIES.active, candidate: FL_COUNTIES.candidate },
+        counties: await this.countiesInUse(filters.organizationId),
         surplusFloor: SURPLUS_FLOOR,
         disclosureLabels: DISCLOSURE_LABELS,
       };
@@ -608,13 +608,32 @@ export class SurplusService {
       total,
       page,
       pageSize,
-      counties: {
-        active: FL_COUNTIES.active,
-        candidate: FL_COUNTIES.candidate,
-      },
+      counties: await this.countiesInUse(filters.organizationId),
       surplusFloor: SURPLUS_FLOOR,
       disclosureLabels: DISCLOSURE_LABELS,
     };
+  }
+
+  /**
+   * The counties actually represented in the data, for the filter.
+   *
+   * Was a hardcoded list of four "active" and four "candidate" Florida
+   * counties, which offered Lee, Marion, Volusia and four more that hold no
+   * leads: a filter whose every option but one returns an empty board. The
+   * list of counties we INTEND to work is a roadmap, not a filter, and it does
+   * not belong in a dropdown that is there to narrow what is on screen.
+   */
+  private async countiesInUse(organizationId?: string | null): Promise<string[]> {
+    const rows = await this.prisma.surplusDetail.findMany({
+      where: {
+        ...(organizationId ? { organizationId } : {}),
+        county: { not: null },
+      },
+      distinct: ['county'],
+      select: { county: true },
+      orderBy: { county: 'asc' },
+    });
+    return rows.map((r) => r.county!).filter(Boolean);
   }
 
   private orderFor(sort?: string): any {

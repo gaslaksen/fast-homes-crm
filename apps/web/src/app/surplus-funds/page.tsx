@@ -307,10 +307,8 @@ export default function SurplusFundsPage() {
    * instead of N identical-looking cards.
    */
   const [rows, setRows] = useState<any[]>([]);
-  const [counties, setCounties] = useState<{ active: string[]; candidate: string[] }>({
-    active: [],
-    candidate: [],
-  });
+  /** Counties actually represented in the data. The API derives it from the rows. */
+  const [counties, setCounties] = useState<string[]>([]);
   const [floor, setFloor] = useState(15000);
   const [disclosureLabels, setDisclosureLabels] = useState<Record<string, string>>({});
   const [stats, setStats] = useState({
@@ -334,7 +332,7 @@ export default function SurplusFundsPage() {
   const [tierQ, setTierQ] = useState<string | null>(null);
   const [chipQ, setChipQ] = useState<string | null>(null);
   const [stageQ, setStageQ] = useState<string | null>(null);
-  const [county, setCounty] = useState('active');
+  const [county, setCounty] = useState('all');
   const [band, setBand] = useState('all');
   const [ctype, setCtype] = useState('all');
   const [ageQ, setAgeQ] = useState('all');
@@ -390,7 +388,7 @@ export default function SurplusFundsPage() {
       if (chipQ === 'lien') data = data.filter((r) => r.competingLien);
       setRows(data);
       setLeadCount(res.data.leadCount ?? data.length);
-      setCounties(res.data.counties || { active: [], candidate: [] });
+      setCounties(Array.isArray(res.data.counties) ? res.data.counties : []);
       setFloor(res.data.surplusFloor ?? 15000);
       setDisclosureLabels(res.data.disclosureLabels || {});
     } catch (err: any) {
@@ -619,11 +617,11 @@ export default function SurplusFundsPage() {
     say(`Exported ${list.length} lead${list.length === 1 ? '' : 's'}.`);
   };
 
+  // Only counties we hold leads for. Offering the ones we intend to work next
+  // put seven options on the menu that every returned an empty board.
   const countyOpts: [string, string][] = [
-    ['active', 'Active counties'],
-    ['all', 'All Florida counties'],
-    ...counties.active.map((c) => [c, c] as [string, string]),
-    ...counties.candidate.map((c) => [c, `${c} (candidate)`] as [string, string]),
+    ['all', counties.length > 1 ? 'All counties' : 'Every county'],
+    ...counties.map((c) => [c, c] as [string, string]),
   ];
 
   return (
