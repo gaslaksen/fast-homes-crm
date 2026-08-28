@@ -62,6 +62,7 @@ function harness(log: Partial<Log> = {}) {
     null as any,
     { resolve: async () => '', defaultFor: async () => '' } as any,
     { findLeadByPhone: async () => null } as any,
+    { record: async () => {} } as any,
   );
   (svc as any).client = () => twilioClient;
 

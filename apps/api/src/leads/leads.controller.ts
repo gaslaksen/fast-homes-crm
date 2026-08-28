@@ -340,6 +340,53 @@ export class LeadsController {
     return { numbers };
   }
 
+  /**
+   * The contacts on file for a lead, with the reasons not to use each: a DNC
+   * registry flag, or a note that somebody tried it and it does not reach them.
+   *
+   * On leads.* rather than per pipeline, because every pipeline hangs off Lead
+   * and four copies of this would drift the way listForLead already had.
+   */
+  @Get(':id/contacts')
+  async contacts(@Param('id') id: string) {
+    const [numbers, emails] = await Promise.all([
+      this.leadPhones.listForLead(id),
+      this.leadPhones.listEmailsForLead(id),
+    ]);
+    return { numbers, emails };
+  }
+
+  /**
+   * Replace the numbers and emails on file. The whole list is sent, primary
+   * first, because the slots are positional and "add to the first empty one"
+   * races with a skip trace writing the same slots.
+   */
+  @Put(':id/contacts')
+  async setContacts(
+    @Param('id') id: string,
+    @Body() body: { phones?: { number: string; type?: string | null }[]; emails?: string[] },
+  ) {
+    if (body.phones !== undefined) await this.leadPhones.setPhones(id, body.phones);
+    if (body.emails !== undefined) await this.leadPhones.setEmails(id, body.emails);
+    return this.contacts(id);
+  }
+
+  /**
+   * Mark a number or an address as one that does not reach this person, or
+   * clear the mark. The contact is kept either way: that it was tried and
+   * failed is worth more than the empty slot, and without it the next person
+   * to open the lead dials it again.
+   */
+  @Post(':id/contacts/flag')
+  async flagContact(
+    @Param('id') id: string,
+    @Body() body: { value: string; bad?: boolean },
+  ) {
+    if (!body?.value) throw new HttpException('value is required', HttpStatus.BAD_REQUEST);
+    await this.leadPhones.flagContact(id, body.value, body.bad !== false);
+    return this.contacts(id);
+  }
+
   @Post(':id/property-details/refresh')
   async refreshPropertyDetails(@Param('id') id: string) {
     try {

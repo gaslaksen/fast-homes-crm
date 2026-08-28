@@ -725,8 +725,14 @@ export class TaxSalesService {
       workup: (d.workup as Record<string, boolean>) || {},
       workupComplete: workupComplete(d.workup),
 
+      // The weekly planner (touchDays) says what somebody intended; touches and
+      // lastTouchedAt are the record of what actually went out, written by the
+      // channel that sent it. Kept apart so a ticked box cannot read as a call.
       touchDays,
+      plannedTouches: totalTouches,
       totalTouches,
+      touches: lead.touchCount || 0,
+      lastTouchedAt: lead.lastTouchedAt,
 
       zillowUrl: d.zillowUrl,
       realtorQuery: d.realtorQuery,

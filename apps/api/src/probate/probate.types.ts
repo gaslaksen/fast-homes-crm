@@ -114,6 +114,9 @@ export interface ProbateContactGroup {
   workStatus: string | null;
   doNotCall: boolean;
   enrolledCampaigns: string[];
+  /** Outbound calls, texts and emails across every property this heir owns. */
+  touches: number;
+  lastTouchedAt: Date | null;
   properties: ProbatePropertyRow[];
 }
 

@@ -1011,8 +1011,14 @@ export class ForeclosuresService {
       workStatus: d.workStatus || 'NOT_CONTACTED',
       doNotCall: !!d.doNotCall,
       callNotes: d.callNotes || '',
+      // The weekly planner (touchDays) says what somebody intended; touches and
+      // lastTouchedAt are the record of what actually went out, written by the
+      // channel that sent it. Kept apart so a ticked box cannot read as a call.
       touchDays,
+      plannedTouches: totalTouches,
       totalTouches,
+      touches: lead.touchCount || 0,
+      lastTouchedAt: lead.lastTouchedAt,
       phone1Type: d.phone1Type || null,
       phone2Type: d.phone2Type || null,
       phone3Type: d.phone3Type || null,

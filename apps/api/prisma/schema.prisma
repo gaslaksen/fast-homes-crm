@@ -257,6 +257,19 @@ model Lead {
   daysInStage       Int       @default(0)
   lastTouchedAt     DateTime  @default(now())
   touchCount        Int       @default(0)
+  /// Numbers and email addresses that have been tried and do not reach this
+  /// person: disconnected, wrong party, hard bounce. Shape:
+  /// `{ phones: string[], emails: string[] }`.
+  ///
+  /// Stored as VALUES, never as slot positions. A skip trace rewrites phone2
+  /// through phone4 in whatever order the vendor returned them, so a flag
+  /// pinned to "slot 3" would silently start describing a different number.
+  ///
+  /// Deliberately separate from the per-number DNC flags. "We are not allowed
+  /// to call this" and "this number does not work" are different facts with
+  /// different remedies, and collapsing them would either hide a compliance
+  /// problem or bury a good number under one.
+  badContacts       Json?
   aiRecommendation  String?
 
   // Unified inbox: denormalized last-message summary + thread state (team-level)

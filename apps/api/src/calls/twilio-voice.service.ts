@@ -6,6 +6,7 @@ import { CallsService } from './calls.service';
 import { formatPhoneNumber } from '@fast-homes/shared';
 import { PhoneNumbersService } from '../phone-numbers/phone-numbers.service';
 import { LeadPhonesService } from '../phone-numbers/lead-phones.service';
+import { TouchService } from '../leads/touch.service';
 
 const AccessToken = Twilio.jwt.AccessToken;
 const VoiceGrant = AccessToken.VoiceGrant;
@@ -34,6 +35,7 @@ export class TwilioVoiceService {
     private readonly callsService: CallsService,
     private readonly phoneNumbers: PhoneNumbersService,
     private readonly leadPhones: LeadPhonesService,
+    private readonly touch: TouchService,
   ) {}
 
   /**
@@ -155,6 +157,18 @@ export class TwilioVoiceService {
       } catch (err: any) {
         this.logger.error(`Failed to open CallLog for ${callSid}: ${err.message}`);
       }
+    }
+
+    // Dialling IS a touch, whether or not they pick up. Recorded here at the
+    // point the call is placed rather than on an answer webhook, because an
+    // unanswered call is still an attempt and is exactly what the "last
+    // touched" column exists to age.
+    if (leadId) {
+      await this.touch.record(leadId, 'CALL_PLACED', {
+        userId: userId || undefined,
+        description: `Outbound call to ${to}`,
+        metadata: { callSid, to, from: callerId },
+      });
     }
 
     const apiBase = this.callbackBase();

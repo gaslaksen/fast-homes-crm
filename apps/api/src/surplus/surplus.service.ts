@@ -847,8 +847,18 @@ export class SurplusService {
       trace: traceState(d, phones.length + emails.length),
       doNotCall: d.doNotCall,
       callNotes: d.callNotes || '',
+      // Two different things, deliberately both here.
+      //
+      // touchDays/plannedTouches is the WEEKLY PLANNER: boxes somebody ticks to
+      // pace their own callbacks. touches/lastTouchedAt is the RECORD: every
+      // call placed, text sent and email sent, written by the channel that sent
+      // it. The planner says what was intended, the record says what happened,
+      // and merging them would let a ticked box look like a placed call.
       touchDays,
+      plannedTouches: totalTouches,
       totalTouches,
+      touches: lead.touchCount || 0,
+      lastTouchedAt: lead.lastTouchedAt,
 
       createdAt: lead.createdAt,
       ...this.workRank(d, facts, phones),
@@ -986,6 +996,14 @@ export function groupByProperty(rows: any[]): any[] {
       anyMismatch: ranked.some((m) => m.contactMismatch),
       /** Claimants nothing has been submitted for. Distinct from "no numbers". */
       untracedCount: ranked.filter((m) => m.trace?.state === 'never').length,
+      // Summed and maxed across the claimants, since the property is worked as
+      // one thing even though each claimant is contacted separately.
+      touches: ranked.reduce((n: number, m: any) => n + (m.touches || 0), 0),
+      lastTouchedAt: ranked
+        .map((m: any) => m.lastTouchedAt)
+        .filter(Boolean)
+        .sort()
+        .pop() || null,
       // A property takes its most actionable claimant's queue, since that is
       // the work it represents: one callable owner makes the house callable
       // even when their co-owner is a dead end.

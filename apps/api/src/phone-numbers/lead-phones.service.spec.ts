@@ -55,9 +55,9 @@ describe('LeadPhonesService.listForLead', () => {
     const numbers = await service.listForLead('lead-1');
 
     expect(numbers).toEqual([
-      { number: '+17046082100', label: 'Primary', type: 'Landline', isPrimary: true, dnc: null },
-      { number: '+17049072850', label: 'Phone 2', type: 'Mobile', isPrimary: false, dnc: null },
-      { number: '+17043929100', label: 'Phone 3', type: 'Landline', isPrimary: false, dnc: null },
+      { number: '+17046082100', label: 'Primary', type: 'Landline', isPrimary: true, dnc: null, bad: false },
+      { number: '+17049072850', label: 'Phone 2', type: 'Mobile', isPrimary: false, dnc: null, bad: false },
+      { number: '+17043929100', label: 'Phone 3', type: 'Landline', isPrimary: false, dnc: null, bad: false },
     ]);
   });
 
@@ -214,5 +214,124 @@ describe('LeadPhonesService.setPrimary', () => {
     const { service, prisma } = buildService(foreclosureLead());
     await service.setPrimary('lead-1', '7046082100');
     expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Editing what we hold.
+ *
+ * These write real contact data across four pipelines whose detail tables have
+ * different slot counts, which is exactly where a shared helper drifts. The
+ * cases worth pinning are the ones that lose data quietly.
+ */
+function editHarness(lead: any) {
+  const updates: any[] = [];
+  const detailUpdate = jest.fn(async (a: any) => { updates.push(a); return {}; });
+  const leadUpdate = jest.fn(async (a: any) => { updates.push(a); return {}; });
+  const prisma = {
+    lead: { findUnique: jest.fn().mockResolvedValue(lead), update: leadUpdate },
+    message: { findFirst: jest.fn().mockResolvedValue(null) },
+    foreclosureDetail: { update: detailUpdate },
+    probateDetail: { update: detailUpdate },
+    surplusDetail: { update: detailUpdate },
+    taxSaleDetail: { update: detailUpdate },
+    $transaction: jest.fn(async (ops: any[]) => Promise.all(ops)),
+  } as unknown as PrismaService;
+  return { service: new LeadPhonesService(prisma), updates, leadUpdate, detailUpdate };
+}
+
+describe('LeadPhonesService.setPhones', () => {
+  it('writes the primary to the lead and the rest to the detail slots', async () => {
+    const { service, updates } = editHarness({
+      sellerPhone: '',
+      surplusDetail: { id: 'sd-1' },
+      badContacts: null,
+    });
+
+    await service.setPhones('l1', [
+      { number: '(904) 555-1234', type: 'Mobile' },
+      { number: '9045559999', type: 'Landline' },
+    ]);
+
+    const lead = updates.find((u) => u.data.sellerPhone !== undefined);
+    expect(lead.data.sellerPhone).toBe('+19045551234');
+    const detail = updates.find((u) => u.data.phone2 !== undefined);
+    expect(detail.data.phone2).toBe('9045559999');
+    expect(detail.data.phone2Type).toBe('Landline');
+    // Slots the user cleared must be nulled, not left holding an old number.
+    expect(detail.data.phone3).toBeNull();
+    expect(detail.data.phone4).toBeNull();
+  });
+
+  it('refuses more numbers than the pipeline can hold rather than dropping them', async () => {
+    // Probate holds two. Silently discarding the third somebody just typed is
+    // a loss nobody notices until they go looking for the number.
+    const { service } = editHarness({ sellerPhone: '', probateDetail: { id: 'pd-1' } });
+    await expect(
+      service.setPhones('l1', [
+        { number: '9045551111' },
+        { number: '9045552222' },
+        { number: '9045553333' },
+      ]),
+    ).rejects.toThrow(/at most 2/);
+  });
+
+  it('rejects a number that is not a number', async () => {
+    const { service } = editHarness({ sellerPhone: '', surplusDetail: { id: 'sd-1' } });
+    await expect(service.setPhones('l1', [{ number: '555-CALL' }])).rejects.toThrow(/not a valid/);
+  });
+
+  it('de-dupes rather than burning a slot on the same number twice', async () => {
+    const { service, updates } = editHarness({ sellerPhone: '', surplusDetail: { id: 'sd-1' } });
+    await service.setPhones('l1', [
+      { number: '9045551234' },
+      { number: '+19045551234' },
+      { number: '9045559999' },
+    ]);
+    const detail = updates.find((u) => u.data.phone2 !== undefined);
+    expect(detail.data.phone2).toBe('9045559999');
+  });
+});
+
+describe('LeadPhonesService.flagContact', () => {
+  it('keeps the number and records that it does not work', async () => {
+    // Deleting it loses the fact that it was tried, and the next person to open
+    // the lead dials it again.
+    const { service, leadUpdate } = editHarness({ badContacts: null });
+    const out = await service.flagContact('l1', '(904) 555-1234', true);
+    expect(out.phones).toEqual(['9045551234']);
+    expect(leadUpdate).toHaveBeenCalled();
+  });
+
+  it('clears a flag, matching however the number was written', async () => {
+    const { service } = editHarness({ badContacts: { phones: ['9045551234'], emails: [] } });
+    const out = await service.flagContact('l1', '+1 904-555-1234', false);
+    expect(out.phones).toEqual([]);
+  });
+
+  it('routes an address to the email list', async () => {
+    const { service } = editHarness({ badContacts: { phones: ['9045551234'], emails: [] } });
+    const out = await service.flagContact('l1', 'Owner@Example.com', true);
+    expect(out.emails).toEqual(['Owner@Example.com']);
+    expect(out.phones).toEqual(['9045551234']);
+  });
+
+  it('does not flag the same contact twice', async () => {
+    const { service } = editHarness({ badContacts: { phones: ['9045551234'], emails: [] } });
+    const out = await service.flagContact('l1', '9045551234', true);
+    expect(out.phones).toEqual(['9045551234']);
+  });
+});
+
+describe('listForLead marks a flagged number', () => {
+  it('reports bad on the number that was flagged and no other', async () => {
+    const { service } = editHarness({
+      sellerPhone: '9045551234',
+      surplusDetail: { phone2: '9045559999', phone1Type: 'Mobile' },
+      badContacts: { phones: ['9045551234'], emails: [] },
+    });
+    const list = await service.listForLead('l1');
+    expect(list.find((p) => p.number.endsWith('5551234'))?.bad).toBe(true);
+    expect(list.find((p) => p.number.endsWith('5559999'))?.bad).toBe(false);
   });
 });

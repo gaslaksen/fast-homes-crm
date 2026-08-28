@@ -331,6 +331,10 @@ export class ProbateService {
           workStatus: d.workStatus,
           doNotCall: d.doNotCall,
           enrolledCampaigns: (lead.campaignEnrollments || []).map((e: any) => e.campaign.name),
+          // Summed across the heir's properties below, since the heir is the
+          // person being contacted however many parcels they inherited.
+          touches: lead.touchCount || 0,
+          lastTouchedAt: lead.lastTouchedAt || null,
           properties: [property],
         });
         continue;
@@ -339,6 +343,13 @@ export class ProbateService {
       existing.properties.push(property);
       existing.propertyCount++;
       existing.totalValue += d.estValue || 0;
+      existing.touches += lead.touchCount || 0;
+      if (
+        lead.lastTouchedAt &&
+        (!existing.lastTouchedAt || lead.lastTouchedAt > existing.lastTouchedAt)
+      ) {
+        existing.lastTouchedAt = lead.lastTouchedAt;
+      }
       if (d.primaryContact) existing.primaryLeadId = lead.id;
       if (d.deceasedName && !existing.deceasedNames.includes(d.deceasedName)) {
         existing.deceasedNames.push(d.deceasedName);

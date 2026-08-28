@@ -1,5 +1,6 @@
 import { Injectable, Inject, forwardRef, Logger, Optional } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { TouchService } from './touch.service';
 import { ScoringService } from '../scoring/scoring.service';
 import { MessagesService } from '../messages/messages.service';
 import { DripService } from '../drip/drip.service';
@@ -57,6 +58,7 @@ export class LeadsService {
     private pipelineService: PipelineService,
     private profitCalc: ProfitCalculationService,
     private pushService: PushService,
+    private touch: TouchService,
   ) {}
 
   /**
@@ -1734,9 +1736,11 @@ export class LeadsService {
   }
 
   /**
-   * Centralized touch recording — called by all outbound channels (SMS, email, calls).
-   * Updates lastTouchedAt, increments touchCount, optionally advances pipeline stage,
-   * and logs an Activity record.
+   * Centralized touch recording, called by all outbound channels.
+   *
+   * Delegates to TouchService so the browser dialer can record the same way:
+   * CallsModule cannot import LeadsModule without closing a cycle, which is why
+   * calls were the one channel that never recorded a touch.
    */
   async recordTouch(
     leadId: string,
@@ -1747,31 +1751,7 @@ export class LeadsService {
       metadata?: Record<string, any>;
     },
   ): Promise<void> {
-    const lead = await this.prisma.lead.findUnique({
-      where: { id: leadId },
-      select: { status: true },
-    });
-    if (!lead) return;
-
-    await this.prisma.lead.update({
-      where: { id: leadId },
-      data: {
-        lastTouchedAt: new Date(),
-        touchCount: { increment: 1 },
-        ...(lead.status === 'NEW'
-          ? { status: 'ATTEMPTING_CONTACT', stageChangedAt: new Date(), daysInStage: 0 }
-          : {}),
-      },
-    });
-
-    await this.prisma.activity.create({
-      data: {
-        leadId,
-        userId: opts?.userId,
-        type,
-        description: opts?.description || type,
-        metadata: opts?.metadata ?? {},
-      },
-    });
+    return this.touch.record(leadId, type, opts);
   }
+
 }

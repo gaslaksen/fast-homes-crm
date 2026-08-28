@@ -26,6 +26,33 @@ export interface LeadPhone {
    * flag is one somebody will dial.
    */
   dnc: string | null;
+  /**
+   * Tried, and it does not reach this person: disconnected, wrong party, or
+   * the claimant said so. Distinct from `dnc`, which is a legal reason not to
+   * dial a number that may work perfectly well.
+   */
+  bad: boolean;
+}
+
+/**
+ * The shape stored in `Lead.badContacts`.
+ *
+ * Read through the helpers below rather than cast, because the column is JSON
+ * and every row written before this feature existed holds null.
+ */
+export interface BadContacts {
+  phones: string[];
+  emails: string[];
+}
+
+export function badPhonesOf(v: unknown): string[] {
+  const b = v as BadContacts | null;
+  return Array.isArray(b?.phones) ? b!.phones.filter((x) => typeof x === 'string') : [];
+}
+
+export function badEmailsOf(v: unknown): string[] {
+  const b = v as BadContacts | null;
+  return Array.isArray(b?.emails) ? b!.emails.filter((x) => typeof x === 'string') : [];
 }
 
 /** Where a match on an inbound number came from. */
@@ -45,6 +72,27 @@ export interface LeadPhoneMatch {
  * skip-trace time). sellerPhone is whatever the source handed us, so every
  * comparison goes through numberKey.
  */
+/**
+ * Where each pipeline keeps its extra phone slots.
+ *
+ * Every pipeline hangs its own detail table off Lead and they all store the
+ * same thing in almost the same shape, which is exactly the situation that
+ * grows four slightly different copies of one function. `promote` had already
+ * drifted: it handled foreclosure and probate and threw
+ * "not one of this lead's numbers" on any surplus or tax sale number, because
+ * those two tables were added after it.
+ *
+ * One table, consulted by every read and every write.
+ */
+const DETAIL_RELATIONS = [
+  { relation: 'foreclosureDetail', model: 'foreclosureDetail', slots: 4, emails: 0, dnc: false },
+  { relation: 'probateDetail', model: 'probateDetail', slots: 2, emails: 0, dnc: false },
+  { relation: 'surplusDetail', model: 'surplusDetail', slots: 4, emails: 2, dnc: true },
+  { relation: 'taxSaleDetail', model: 'taxSaleDetail', slots: 4, emails: 2, dnc: false },
+] as const;
+
+type DetailRelation = (typeof DETAIL_RELATIONS)[number];
+
 @Injectable()
 export class LeadPhonesService {
   private readonly logger = new Logger(LeadPhonesService.name);
@@ -87,6 +135,19 @@ export class LeadPhonesService {
             phone4: true, phone4Type: true, phone4Dnc: true,
           },
         },
+        // Tax sales carry four numbers too. Omitting them had the same effect
+        // it had on surplus: the composer only ever offered the primary,
+        // because it shows a picker when there is more than one number and
+        // there never was.
+        taxSaleDetail: {
+          select: {
+            phone1Type: true,
+            phone2: true, phone2Type: true,
+            phone3: true, phone3Type: true,
+            phone4: true, phone4Type: true,
+          },
+        },
+        badContacts: true,
       },
     });
     if (!lead) return [];
@@ -94,30 +155,34 @@ export class LeadPhonesService {
     const f = lead.foreclosureDetail;
     const p = lead.probateDetail;
     const s = lead.surplusDetail;
+    const t = lead.taxSaleDetail;
+    const badKeys = new Set(
+      badPhonesOf(lead.badContacts).map((n) => numberKey(toE164(n) || n)),
+    );
 
     const raw: { value: string | null; label: string; type: string | null; dnc: string | null }[] = [
       {
         value: lead.sellerPhone,
         label: 'Primary',
-        type: f?.phone1Type ?? p?.phone1Type ?? s?.phone1Type ?? null,
+        type: f?.phone1Type ?? p?.phone1Type ?? s?.phone1Type ?? t?.phone1Type ?? null,
         dnc: s?.phone1Dnc ?? null,
       },
       {
-        value: f?.phone2 ?? p?.phone2 ?? s?.phone2 ?? null,
+        value: f?.phone2 ?? p?.phone2 ?? s?.phone2 ?? t?.phone2 ?? null,
         label: 'Phone 2',
-        type: f?.phone2Type ?? p?.phone2Type ?? s?.phone2Type ?? null,
+        type: f?.phone2Type ?? p?.phone2Type ?? s?.phone2Type ?? t?.phone2Type ?? null,
         dnc: s?.phone2Dnc ?? null,
       },
       {
-        value: f?.phone3 ?? s?.phone3 ?? null,
+        value: f?.phone3 ?? s?.phone3 ?? t?.phone3 ?? null,
         label: 'Phone 3',
-        type: f?.phone3Type ?? s?.phone3Type ?? null,
+        type: f?.phone3Type ?? s?.phone3Type ?? t?.phone3Type ?? null,
         dnc: s?.phone3Dnc ?? null,
       },
       {
-        value: f?.phone4 ?? s?.phone4 ?? null,
+        value: f?.phone4 ?? s?.phone4 ?? t?.phone4 ?? null,
         label: 'Phone 4',
-        type: f?.phone4Type ?? s?.phone4Type ?? null,
+        type: f?.phone4Type ?? s?.phone4Type ?? t?.phone4Type ?? null,
         dnc: s?.phone4Dnc ?? null,
       },
     ];
@@ -136,6 +201,7 @@ export class LeadPhonesService {
         type: r.type,
         isPrimary: r.label === 'Primary',
         dnc: r.dnc,
+        bad: badKeys.has(key),
       });
     }
     return out;
@@ -333,4 +399,202 @@ export class LeadPhonesService {
     });
     return leads.map((l) => l.id);
   }
+  // ─── Editing what we hold ─────────────────────────────────────────────────
+
+  /**
+   * Which detail table this lead's extra numbers live in, and its row id.
+   *
+   * Returns null for a lead with no pipeline detail at all (a plain property
+   * lead), which is not an error: those carry only Lead.sellerPhone.
+   */
+  private async detailFor(
+    leadId: string,
+  ): Promise<{ spec: DetailRelation; id: string; row: any } | null> {
+    const lead = await this.prisma.lead.findUnique({
+      where: { id: leadId },
+      select: DETAIL_RELATIONS.reduce(
+        (acc, r) => ({ ...acc, [r.relation]: true }),
+        {} as Record<string, boolean>,
+      ),
+    });
+    if (!lead) throw new NotFoundException(`Lead ${leadId} not found`);
+    for (const spec of DETAIL_RELATIONS) {
+      const row = (lead as any)[spec.relation];
+      if (row) return { spec, id: row.id, row };
+    }
+    return null;
+  }
+
+  /**
+   * Replace the numbers on file, primary first.
+   *
+   * The whole list is written at once rather than one slot at a time, because
+   * the slots are positional: adding a number by writing "the first empty one"
+   * races with a skip trace and needs every caller to know how many slots this
+   * pipeline has.
+   *
+   * Anything past the pipeline's slot count is REFUSED rather than silently
+   * dropped. A probate lead holds two numbers, and quietly discarding the third
+   * a user just typed is the kind of loss nobody notices until they go looking
+   * for it.
+   */
+  async setPhones(
+    leadId: string,
+    phones: { number: string; type?: string | null }[],
+  ): Promise<LeadPhone[]> {
+    const clean: { number: string; type: string | null }[] = [];
+    const seen = new Set<string>();
+    for (const p of phones || []) {
+      const key = numberKey(p?.number || '');
+      if (!key || key.length !== 10) {
+        throw new BadRequestException(`"${p?.number}" is not a valid phone number`);
+      }
+      if (seen.has(key)) continue;
+      seen.add(key);
+      clean.push({ number: key, type: p.type || null });
+    }
+
+    const detail = await this.detailFor(leadId);
+    const capacity = detail ? detail.spec.slots : 1;
+    if (clean.length > capacity) {
+      throw new BadRequestException(
+        `This lead holds at most ${capacity} number${capacity === 1 ? '' : 's'}; ` +
+          `remove one before adding another.`,
+      );
+    }
+
+    const leadPatch: any = { sellerPhone: clean[0] ? `+1${clean[0].number}` : '' };
+    const writes: any[] = [this.prisma.lead.update({ where: { id: leadId }, data: leadPatch })];
+
+    if (detail) {
+      const detailPatch: any = { phone1Type: clean[0]?.type ?? null };
+      for (let i = 2; i <= detail.spec.slots; i += 1) {
+        detailPatch[`phone${i}`] = clean[i - 1]?.number ?? null;
+        detailPatch[`phone${i}Type`] = clean[i - 1]?.type ?? null;
+      }
+      writes.push(
+        (this.prisma as any)[detail.spec.model].update({
+          where: { id: detail.id },
+          data: detailPatch,
+        }),
+      );
+    }
+
+    await this.prisma.$transaction(writes);
+    return this.listForLead(leadId);
+  }
+
+  /** Every email on file, primary first, de-duped, with its bad flag. */
+  async listEmailsForLead(
+    leadId: string,
+  ): Promise<{ address: string; isPrimary: boolean; bad: boolean }[]> {
+    const lead = await this.prisma.lead.findUnique({
+      where: { id: leadId },
+      select: {
+        sellerEmail: true,
+        badContacts: true,
+        surplusDetail: { select: { email2: true } },
+        taxSaleDetail: { select: { email2: true } },
+      },
+    });
+    if (!lead) return [];
+    const bad = new Set(badEmailsOf(lead.badContacts).map((e) => e.toLowerCase()));
+    const raw = [lead.sellerEmail, lead.surplusDetail?.email2 ?? lead.taxSaleDetail?.email2];
+    const out: { address: string; isPrimary: boolean; bad: boolean }[] = [];
+    const seen = new Set<string>();
+    raw.forEach((v, i) => {
+      const address = String(v || '').trim();
+      if (!address || seen.has(address.toLowerCase())) return;
+      seen.add(address.toLowerCase());
+      out.push({ address, isPrimary: i === 0, bad: bad.has(address.toLowerCase()) });
+    });
+    return out;
+  }
+
+  /** Replace the emails on file, primary first. Same slot rules as phones. */
+  async setEmails(leadId: string, emails: string[]): Promise<void> {
+    const clean: string[] = [];
+    for (const raw of emails || []) {
+      const address = String(raw || '').trim();
+      if (!address) continue;
+      // Deliberately loose. Rejecting anything without a dot in the domain
+      // would turn a typo into a refusal to save the other three fields.
+      if (!/^[^\s@]+@[^\s@]+$/.test(address)) {
+        throw new BadRequestException(`"${address}" is not a valid email address`);
+      }
+      if (!clean.some((e) => e.toLowerCase() === address.toLowerCase())) clean.push(address);
+    }
+
+    const detail = await this.detailFor(leadId);
+    const capacity = detail?.spec.emails ? detail.spec.emails : 1;
+    if (clean.length > capacity) {
+      throw new BadRequestException(
+        `This lead holds at most ${capacity} email address${capacity === 1 ? '' : 'es'}.`,
+      );
+    }
+
+    const writes: any[] = [
+      this.prisma.lead.update({
+        where: { id: leadId },
+        data: { sellerEmail: clean[0] || null },
+      }),
+    ];
+    if (detail && detail.spec.emails > 1) {
+      writes.push(
+        (this.prisma as any)[detail.spec.model].update({
+          where: { id: detail.id },
+          data: { email2: clean[1] || null },
+        }),
+      );
+    }
+    await this.prisma.$transaction(writes);
+  }
+
+  /**
+   * Flag a number or an email as one that does not reach this person, or clear
+   * the flag.
+   *
+   * The contact is KEPT, not deleted. Knowing that a number was tried and does
+   * not work is worth more than the empty slot, and without the record the next
+   * person to open the lead dials it again.
+   */
+  async flagContact(
+    leadId: string,
+    value: string,
+    bad: boolean,
+  ): Promise<BadContacts> {
+    const lead = await this.prisma.lead.findUnique({
+      where: { id: leadId },
+      select: { badContacts: true },
+    });
+    if (!lead) throw new NotFoundException(`Lead ${leadId} not found`);
+
+    const isEmail = value.includes('@');
+    const phones = badPhonesOf(lead.badContacts);
+    const emails = badEmailsOf(lead.badContacts);
+
+    if (isEmail) {
+      const key = value.trim().toLowerCase();
+      const next = emails.filter((e) => e.toLowerCase() !== key);
+      if (bad) next.push(value.trim());
+      return this.writeBad(leadId, { phones, emails: next });
+    }
+
+    const key = numberKey(value);
+    if (!key || key.length !== 10) {
+      throw new BadRequestException(`"${value}" is not a valid phone number`);
+    }
+    const next = phones.filter((n) => numberKey(n) !== key);
+    if (bad) next.push(key);
+    return this.writeBad(leadId, { phones: next, emails });
+  }
+
+  private async writeBad(leadId: string, next: BadContacts): Promise<BadContacts> {
+    await this.prisma.lead.update({
+      where: { id: leadId },
+      data: { badContacts: next as any },
+    });
+    return next;
+  }
+
 }
