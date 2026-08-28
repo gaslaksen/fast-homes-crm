@@ -5,6 +5,7 @@ import {
   traceEligibility,
   addressKeyOf,
   addressCaseCounts,
+  traceState,
 } from './surplus-skiptrace.util';
 
 describe('splitClaimantName', () => {
@@ -255,5 +256,36 @@ describe('sameGivenName', () => {
   it('handles empties', () => {
     expect(sameGivenName('', 'robert')).toBe(false);
     expect(sameGivenName('robert', '')).toBe(false);
+  });
+});
+
+describe('traceState', () => {
+  it('calls a row nothing has been submitted for "never", not a failure', () => {
+    // The state 72 of 75 claimants are in. The nightly poll ingests and never
+    // traces, and reading that as a failed trace is what prompts a re-run that
+    // spends a credit to change nothing.
+    const t = traceState({});
+    expect(t.state).toBe('never');
+    expect(t.actionable).toBe(true);
+    expect(t.label).toMatch(/never/i);
+  });
+
+  it('does not offer a re-run once a submission has already answered', () => {
+    const t = traceState({ tracedAt: new Date(), traceOutcome: 'no_person', traceDetail: 'nobody' });
+    expect(t.actionable).toBe(false);
+    expect(t.tone).toBe('bad');
+  });
+
+  it('reads the legacy mismatch flag on rows traced before the outcome column', () => {
+    const t = traceState({ tracedAt: new Date(), contactMismatch: true, mismatchedName: 'Calvin Johnson' });
+    expect(t.state).toBe('mismatch');
+    expect(t.detail).toContain('Calvin Johnson');
+  });
+
+  it('needs BOTH a timestamp and an outcome before claiming a trace happened', () => {
+    // A half-written row must fall back to "never" rather than assert a trace
+    // that may not have been submitted.
+    expect(traceState({ traceOutcome: 'matched' }).state).toBe('never');
+    expect(traceState({ tracedAt: new Date() }).state).toBe('never');
   });
 });

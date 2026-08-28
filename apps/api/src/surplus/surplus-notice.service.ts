@@ -37,8 +37,24 @@ import axios from 'axios';
 /** 32 MB is the API request cap; stay well under it after base64 inflation. */
 const MAX_PDF_BYTES = 8 * 1024 * 1024;
 
+/** One addressee on the notice. The clerk prints one page per recipient. */
+export interface NoticeRecipient {
+  name: string | null;
+  street: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+}
+
 export interface NoticeExtract {
-  /** Name as addressed on the notice. */
+  /**
+   * EVERY addressee, one per page. A co-owned case gets one page per owner, and
+   * they do not necessarily share an address: reading only the first and
+   * applying it to the whole property gives one claimant the other's address,
+   * and then skip traces them at it.
+   */
+  recipients: NoticeRecipient[];
+  /** The first recipient, for callers that only need one. */
   recipient: string | null;
   street: string | null;
   city: string | null;
@@ -57,15 +73,17 @@ export interface NoticeExtract {
 
 const PROMPT = `You are reading a Florida county "NOTICE OF SURPLUS FUNDS FROM TAX DEED SALE".
 
-Extract ONLY what is printed on the page. Return a single JSON object, no prose, no code fence:
+The clerk prints ONE PAGE PER RECIPIENT. A co-owned property has several pages,
+each identical except for the addressee block near the top left. Read EVERY page
+and return every addressee, even when two share an address.
+
+Return a single JSON object, no prose, no code fence:
 
 {
-  "recipient": "the name in the addressee block, near the top left, above the street address",
-  "street": "addressee street line",
-  "city": "addressee city",
-  "state": "addressee two letter state",
-  "zip": "addressee 5 digit ZIP",
-  "noticeDate": "the DATED value in the header block, as YYYY-MM-DD",
+  "recipients": [
+    { "name": "addressee name", "street": "...", "city": "...", "state": "XX", "zip": "12345" }
+  ],
+  "noticeDate": "the DATED value in the header, as YYYY-MM-DD",
   "saleDate": "the DATE OF SALE value, as YYYY-MM-DD",
   "surplusAtNotice": the surplus dollar amount stated in the body as a number with no symbols or commas,
   "certificateNumber": "the CERTIFICATE No value",
@@ -74,15 +92,16 @@ Extract ONLY what is printed on the page. Return a single JSON object, no prose,
 }
 
 Rules:
+- One entry in "recipients" per PAGE that carries an addressee block, in page
+  order. Do not merge two recipients and do not skip a repeat.
 - The ADDRESSEE BLOCK is the owner being notified. Do NOT return the clerk's own
-  address, which appears in the letterhead beside the county seal and is in
-  Jacksonville on W Adams St. If the only address you can find is the clerk's,
-  return null for the address fields.
-- The addressee is frequently in a different city or state from the property.
-  That is expected and is the reason we are reading this. Do not "correct" it.
-- Use null for anything not printed on the page. Never guess or infer a value
-  from another field.
-- Return the addressee exactly as printed, including ESTATE or suffixes.`;
+  address, which sits in the letterhead beside the county seal and is on
+  W Adams St in Jacksonville. If a page shows only the clerk's address, omit it.
+- An addressee is frequently in a different city or state from the property, and
+  co-owners are frequently at different addresses from each other. That is
+  expected and is the reason we are reading this. Do not "correct" either.
+- Use null for anything not printed. Never guess or infer a value.
+- Return names exactly as printed, including ESTATE or suffixes.`;
 
 @Injectable()
 export class SurplusNoticeService {
@@ -203,12 +222,36 @@ export class SurplusNoticeService {
       return null;
     };
 
+    // Recipients, one per page, with the clerk's own letterhead rejected.
+    const rawRecipients: any[] = Array.isArray(o.recipients)
+      ? o.recipients
+      : // Tolerate the older single-recipient shape so a cached or partial
+        // reply still yields something rather than nothing.
+        [{ name: o.recipient, street: o.street, city: o.city, state: o.state, zip: o.zip }];
+
+    const recipients: NoticeRecipient[] = rawRecipients
+      .map((r) => ({
+        name: str(r?.name),
+        street: str(r?.street),
+        city: str(r?.city),
+        state: str(r?.state)?.toUpperCase().slice(0, 2) || null,
+        zip: str(r?.zip)?.replace(/[^0-9]/g, '').slice(0, 5) || null,
+      }))
+      // The clerk's own block is the one wrong answer the layout invites: it is
+      // a perfectly valid address, so a wrong read fails silently and would send
+      // every lead to the courthouse.
+      .filter((r) => !isClerkAddress(r.street, r.city))
+      .filter((r) => r.name || r.street);
+
+    const first = recipients[0];
+
     const out: NoticeExtract = {
-      recipient: str(o.recipient),
-      street: str(o.street),
-      city: str(o.city),
-      state: str(o.state)?.toUpperCase().slice(0, 2) || null,
-      zip: str(o.zip)?.replace(/[^0-9]/g, '').slice(0, 5) || null,
+      recipients,
+      recipient: first?.name ?? null,
+      street: first?.street ?? null,
+      city: first?.city ?? null,
+      state: first?.state ?? null,
+      zip: first?.zip ?? null,
       noticeDate: date(o.noticeDate),
       saleDate: date(o.saleDate),
       surplusAtNotice: num(o.surplusAtNotice),
@@ -216,18 +259,6 @@ export class SurplusNoticeService {
       taxDeedNumber: str(o.taxDeedNumber),
       realEstateNumber: str(o.realEstateNumber),
     };
-
-    // The clerk's own letterhead is the one wrong answer the layout invites,
-    // since it sits at the top of the page in a larger block than the addressee.
-    // Reject it here as well as in the prompt: a belt-and-braces check is cheap
-    // and the failure is silent, because the address looks perfectly valid.
-    if (isClerkAddress(out.street, out.city)) {
-      out.recipient = null;
-      out.street = null;
-      out.city = null;
-      out.state = null;
-      out.zip = null;
-    }
 
     return out;
   }

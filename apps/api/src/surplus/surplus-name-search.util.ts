@@ -40,6 +40,8 @@
  * identification.
  */
 
+import { splitClaimantName } from './surplus-skiptrace.util';
+
 export interface NameSearchLink {
   site: string;
   url: string;
@@ -181,4 +183,39 @@ export function relativeOutreachScript(claimant: string, relative?: string | nul
     `and ${claimant} has unclaimed funds available. Ask them to pass the message on or to share ` +
     `contact details. Do not name the amount to a third party.`
   );
+}
+
+
+/**
+ * Match a claimant to the notice page addressed to THEM.
+ *
+ * The clerk prints one page per recipient, and co-owners are frequently at
+ * different addresses. Applying the first page's address to every claimant on
+ * the case gives one of them the other's address and then skip traces them at
+ * it, which is how a co-owner ends up with somebody else's phone number.
+ *
+ * Surname must match; a given-name match then breaks ties between relatives who
+ * share one. When nothing matches, returns null rather than guessing: a wrong
+ * address is worse than none, because none is visible and wrong is not.
+ */
+export function matchRecipient<T extends { name?: string | null }>(
+  claimant: string,
+  recipients: T[],
+): T | null {
+  if (!recipients?.length) return null;
+  const want = splitClaimantName(claimant);
+  if (!want.surname) return null;
+
+  let best: { r: T; score: number } | null = null;
+  for (const r of recipients) {
+    const got = splitClaimantName(r.name);
+    if (!got.surname) continue;
+    const all = [...want.given, want.surname];
+    const surnameHit = got.surname === want.surname || all.includes(got.surname);
+    if (!surnameHit) continue;
+    const givenHit = got.given.some((g) => want.given.includes(g) || g === want.surname);
+    const score = givenHit ? 2 : 1;
+    if (!best || score > best.score) best = { r, score };
+  }
+  return best?.r ?? null;
 }

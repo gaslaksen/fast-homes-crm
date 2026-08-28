@@ -510,3 +510,56 @@ describe('trace notes', () => {
     expect(detailUpdates[0].data.callNotes).toMatch(/neighbour/);
   });
 });
+
+describe('recording that a trace happened', () => {
+  /**
+   * The panel now says outright whether a claimant has been traced, so the
+   * stamp has to survive every branch. Before this, the only record was a
+   * sentence in the notes, and a claimant nothing had run for looked identical
+   * to one whose trace came back empty.
+   */
+  it('stamps the outcome per claimant, not per address', async () => {
+    // Two co-owners, one submission, opposite outcomes: the trace returns only
+    // Calvin, so Ruth is left with nothing found.
+    const { svc, detailUpdates } = harness([
+      lead({ id: 'l1', detailId: 'd1', first: 'Calvin', last: 'Johnson' }),
+      lead({ id: 'l2', detailId: 'd2', first: 'Ruth', last: 'Johnson' }),
+    ]);
+    respond([person('Calvin', 'Johnson')]);
+
+    await svc.traceLeads({ organizationId: 'org' });
+
+    const byDetail = Object.fromEntries(
+      detailUpdates.map((u) => [u.where.id, u.data]),
+    );
+    expect(byDetail.d1.traceOutcome).toBe('matched');
+    expect(byDetail.d1.tracedAt).toBeInstanceOf(Date);
+    expect(byDetail.d2.traceOutcome).toBe('no_person');
+    expect(byDetail.d2.tracedAt).toBeInstanceOf(Date);
+  });
+
+  it('stamps a stranger as a mismatch rather than leaving it untraced', async () => {
+    const { svc, detailUpdates } = harness([lead({ detailId: 'd9' })]);
+    respond([person('Wanda', 'Pettiford')]);
+
+    await svc.traceLeads({ organizationId: 'org' });
+
+    const u = detailUpdates.find((x) => x.where.id === 'd9');
+    expect(u.data.traceOutcome).toBe('mismatch');
+    expect(u.data.contactMismatch).toBe(true);
+  });
+
+  it('stamps a refusal to submit, so it does not read as never tried', async () => {
+    // Returned clerk mail means no address we hold is live. We decline to spend
+    // the credit, and that decision is a fact about the claimant too.
+    const { svc, detailUpdates } = harness([
+      lead({ detailId: 'd7', mailVerdict: 'undeliverable', mailStreet: '72 SMITH DRIVE', mailCity: 'HARTFORD', mailState: 'CT', mailZip: '06118' }),
+    ]);
+
+    await svc.traceLeads({ organizationId: 'org' });
+
+    expect(mockedAxios.post).not.toHaveBeenCalled();
+    const u = detailUpdates.find((x) => x.where.id === 'd7');
+    expect(u.data.traceOutcome).toBe('skipped');
+  });
+});

@@ -56,7 +56,10 @@ describe('SurplusNoticeService.parse', () => {
   });
 
   it('keeps a five digit ZIP and drops a plus four', () => {
-    expect(svc().parse(JSON.stringify({ zip: '32254-1923' }))!.zip).toBe('32254');
+    const r = svc().parse(
+      JSON.stringify({ recipients: [{ name: 'ELLA CLOWERS ESTATE', street: '2866 W 11TH ST', zip: '32254-1923' }] }),
+    )!;
+    expect(r.zip).toBe('32254');
   });
 
   it('turns a string "null" into a real null rather than the word', () => {
@@ -128,5 +131,68 @@ describe('isClerkAddress', () => {
     expect(isClerkAddress('72 SMITH DRIVE', 'HARTFORD')).toBe(false);
     expect(isClerkAddress('2866 W 11TH ST', 'JACKSONVILLE')).toBe(false);
     expect(isClerkAddress('', '')).toBe(false);
+  });
+});
+
+describe('one page per recipient', () => {
+  /**
+   * Duval document 103369, verbatim. Case 2026-0006TD is co-owned and the
+   * clerk printed a page each for Richard Minton and Cecelia W Harris. Reading
+   * only the first and applying it to the whole property gives one claimant the
+   * other's address, and then skip traces them at it.
+   */
+  const BESSENT = JSON.stringify({
+    recipients: [
+      { name: 'RICHARD MINTON', street: '4027 BESSENT ROAD', city: 'JACKSONVILLE', state: 'FL', zip: '32218' },
+      { name: 'CECELIA W HARRIS', street: '4027 BESSENT ROAD', city: 'JACKSONVILLE', state: 'FL', zip: '32218' },
+    ],
+    noticeDate: '2026-06-25',
+    saleDate: '2026-06-10',
+    surplusAtNotice: 105670.33,
+  });
+
+  it('returns every addressee, not just the first', () => {
+    const r = svc().parse(BESSENT)!;
+    expect(r.recipients.map((x) => x.name)).toEqual(['RICHARD MINTON', 'CECELIA W HARRIS']);
+  });
+
+  it('keeps both when co-owners share one address', () => {
+    // They are still two claimants filing two claims.
+    const r = svc().parse(BESSENT)!;
+    expect(r.recipients).toHaveLength(2);
+  });
+
+  it('keeps co-owners at DIFFERENT addresses apart', () => {
+    const r = svc().parse(
+      JSON.stringify({
+        recipients: [
+          { name: 'HOWARD MARTIN', street: '1228 ADEE AVENUE', city: 'BRONX', state: 'NY', zip: '10469' },
+          { name: 'RAYMOND SOLOMON', street: '90 MAIN ST', city: 'ALBANY', state: 'NY', zip: '12207' },
+        ],
+      }),
+    )!;
+    expect(r.recipients[0].city).toBe('BRONX');
+    expect(r.recipients[1].city).toBe('ALBANY');
+  });
+
+  it('drops a page that only carries the clerk letterhead', () => {
+    const r = svc().parse(
+      JSON.stringify({
+        recipients: [
+          { name: 'JODY PHILLIPS', street: '501 W ADAMS ST', city: 'JACKSONVILLE', state: 'FL', zip: '32202' },
+          { name: 'RICHARD MINTON', street: '4027 BESSENT ROAD', city: 'JACKSONVILLE', state: 'FL', zip: '32218' },
+        ],
+      }),
+    )!;
+    expect(r.recipients).toHaveLength(1);
+    expect(r.recipients[0].name).toBe('RICHARD MINTON');
+  });
+
+  it('still reads an older single-recipient reply', () => {
+    const r = svc().parse(
+      JSON.stringify({ recipient: 'MYRTIS GRIFFIN', street: '72 SMITH DRIVE', city: 'HARTFORD', state: 'CT', zip: '06118' }),
+    )!;
+    expect(r.recipients).toHaveLength(1);
+    expect(r.street).toBe('72 SMITH DRIVE');
   });
 });

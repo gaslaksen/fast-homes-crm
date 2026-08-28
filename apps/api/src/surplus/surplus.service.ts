@@ -11,6 +11,7 @@ import {
 } from '@fast-homes/shared';
 import { CLAIM_STATUS_LABEL } from './surplus-classify.util';
 import { nameSearchPlan } from './surplus-name-search.util';
+import { traceState } from './surplus-skiptrace.util';
 import {
   normalizePhoneDigits,
   isoWeekKey,
@@ -797,6 +798,10 @@ export class SurplusService {
       dncScrubbedAt: d.dncScrubbedAt,
       contactMismatch: d.contactMismatch,
       mismatchedName: d.mismatchedName,
+      // Where the skip trace stands for THIS claimant. Co-claimants on one
+      // address get one submission and routinely end differently, so this is
+      // per person and never rolled up to the property.
+      trace: traceState(d),
       doNotCall: d.doNotCall,
       callNotes: d.callNotes || '',
       touchDays,
@@ -916,6 +921,8 @@ export function groupByProperty(rows: any[]): any[] {
       /** Rolled up so the card can show contact state without opening. */
       anyContactable: ranked.some((m) => m.cleanPhoneCount > 0),
       anyMismatch: ranked.some((m) => m.contactMismatch),
+      /** Claimants nothing has been submitted for. Distinct from "no numbers". */
+      untracedCount: ranked.filter((m) => m.trace?.state === 'never').length,
       allDeceased: ranked.every((m) => m.isDeceased),
       anyDeceased: ranked.some((m) => m.isDeceased),
       // The stage the property is furthest along on.

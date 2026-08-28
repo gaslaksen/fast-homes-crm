@@ -193,7 +193,12 @@ export class DuvalTaxDeedAdapter implements SurplusSourceAdapter {
     const jar: string[] = [];
     const http = axios.create({
       baseURL: this.baseUrl,
-      timeout: 30000,
+      // The docket list is a POST plus five paged grid calls against a county
+      // server, and 30s covered the whole sequence only on a good morning: the
+      // 2026-08-28 cron run died with "timeout of 30000ms exceeded" having
+      // scanned nothing, while a second replica two minutes later scanned all
+      // 443. A per-request minute is generous for one call and still bounded.
+      timeout: 60000,
       maxRedirects: 3,
       headers: {
         // Identify ourselves rather than impersonating a browser, and give the
@@ -218,6 +223,20 @@ export class DuvalTaxDeedAdapter implements SurplusSourceAdapter {
   async listSurplusCases(): Promise<SurplusCaseSummary[]> {
     const http = this.client();
 
+    // One retry on the whole sequence. A county web server that times out at
+    // 9:45 usually answers at 9:46, and a poll that gives up scans nothing:
+    // the run recorded scanned=0, created=0, which reads like an empty docket
+    // rather than a failed fetch.
+    try {
+      return await this.fetchList(http);
+    } catch (e: any) {
+      this.logger.warn(`Duval list failed (${e.message}), retrying once`);
+      await new Promise((r) => setTimeout(r, 5000));
+      return this.fetchList(this.client());
+    }
+  }
+
+  private async fetchList(http: AxiosInstance): Promise<SurplusCaseSummary[]> {
     // Step one: put "Surplus" into the session. The button name is the whole
     // payload; the search takes no other parameters.
     const form = new URLSearchParams({ buttonSubmitSurplus: 'Search for Surplus Funds' });

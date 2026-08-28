@@ -264,7 +264,10 @@ export class SurplusSkiptraceService {
         result.skipped[reason] = (result.skipped[reason] || 0) + 1;
         // Record WHY on the lead, so nobody re-runs the same trace expecting a
         // hit and so the board can show what to do instead.
-        await this.note(c.detailId, elig.detail || 'Not eligible for skip trace.');
+        await this.note(c.detailId, elig.detail || 'Not eligible for skip trace.', {
+          outcome: 'skipped',
+          detail: elig.detail || `Not eligible: ${reason}.`,
+        });
         continue;
       }
       groups.set(c.addressKey, [...(groups.get(c.addressKey) || []), c]);
@@ -503,7 +506,10 @@ export class SurplusSkiptraceService {
       if (best) taken.add(best.person);
 
       if (!best) {
-        await this.note(c.detailId, `Skip trace returned no matched person ${where}.`);
+        await this.note(c.detailId, `Skip trace returned no matched person ${where}.`, {
+          outcome: 'no_person',
+          detail: `The submission went through and came back with nobody matching ${c.claimant} ${where}. Re-running the same address returns the same nothing; the route now is a name search.`,
+        });
         continue;
       }
 
@@ -519,6 +525,9 @@ export class SurplusSkiptraceService {
             contactMismatch: true,
             mismatchedName: name || null,
             dncScrubbedAt: null,
+            tracedAt: new Date(),
+            traceOutcome: 'mismatch',
+            traceDetail: `Returned ${name || 'an unnamed person'} ${where}, who is not ${c.claimant}. ${best.reason}`,
             callNotes: this.appendNote(
               null,
               `Skip trace returned ${name || 'an unnamed person'} ${where}. ${best.reason} Contacts discarded. The claimant needs a name based route: Sunbiz for an entity, official records for a later deed, or an obituary if deceased.`,
@@ -530,7 +539,10 @@ export class SurplusSkiptraceService {
 
       const hasContact = best.person.phones.length > 0 || best.person.emails.length > 0;
       if (!hasContact) {
-        await this.note(c.detailId, `Skip trace matched ${name || 'a person'} but returned no phone or email.`);
+        await this.note(c.detailId, `Skip trace matched ${name || 'a person'} but returned no phone or email.`, {
+          outcome: 'no_contact',
+          detail: `Matched ${name || 'a person'}, but the vendor holds no phone or email for them. The identification is good; the contact route is not.`,
+        });
         continue;
       }
 
@@ -563,6 +575,9 @@ export class SurplusSkiptraceService {
           email2: best.person.emails[1] || null,
           contactMismatch: false,
           mismatchedName: null,
+          tracedAt: new Date(),
+          traceOutcome: best.verdict === 'relative' ? 'relative' : best.verdict === 'unverified' ? 'unverified' : 'matched',
+          traceDetail: `Returned ${name || 'contacts'} ${where}. ${best.reason}`,
           callNotes: this.appendNote(
             null,
             best.verdict === 'relative'
@@ -581,15 +596,31 @@ export class SurplusSkiptraceService {
     }
   }
 
-  /** Record a reason on the lead without clobbering an existing note. */
-  private async note(detailId: string, text: string): Promise<void> {
+  /**
+   * Record a reason on the lead without clobbering an existing note, and stamp
+   * the structured outcome alongside it.
+   *
+   * The note is for a person reading the lead; the outcome is for the UI, which
+   * cannot reliably infer state from prose and previously guessed by matching
+   * substrings.
+   */
+  private async note(
+    detailId: string,
+    text: string,
+    state?: { outcome: string; detail: string },
+  ): Promise<void> {
     const row = await this.prisma.surplusDetail.findUnique({
       where: { id: detailId },
       select: { callNotes: true },
     });
     await this.prisma.surplusDetail.update({
       where: { id: detailId },
-      data: { callNotes: this.appendNote(row?.callNotes, text) },
+      data: {
+        callNotes: this.appendNote(row?.callNotes, text),
+        // A refusal to submit is still an attempt in the sense that matters:
+        // somebody asked, and the answer is on the row.
+        ...(state ? { tracedAt: new Date(), traceOutcome: state.outcome, traceDetail: state.detail } : {}),
+      },
     });
   }
 

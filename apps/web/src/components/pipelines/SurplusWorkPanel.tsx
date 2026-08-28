@@ -105,10 +105,29 @@ export interface SurplusPanelLead {
   emails: string[];
   contactMismatch: boolean;
   mismatchedName: string | null;
+  /** Per-claimant skip trace state, computed server side. */
+  trace: {
+    state: string;
+    label: string;
+    tone: 'good' | 'warn' | 'bad' | 'idle';
+    detail: string;
+    at: string | null;
+    /** True only when nothing has been submitted yet. */
+    actionable: boolean;
+  } | null;
   doNotCall: boolean;
   isDeceased: boolean;
   totalTouches: number;
 }
+
+/** Colour per trace tone. Bad is red because a wrong-person result is a
+ *  discard, not a partial success. */
+const TRACE_TONE: Record<string, string> = {
+  good: 'var(--mint)',
+  warn: 'var(--amber)',
+  bad: 'var(--red)',
+  idle: 'var(--dim)',
+};
 
 interface Props {
   /** The subject property, with every claimant owed on it. */
@@ -369,7 +388,10 @@ export default function SurplusWorkPanel({
 
           {/* One property, several claims. Each claimant is contacted separately,
               so the conversation and notes tabs follow this selection. */}
-          {property.claimantCount > 1 && (
+          {/* Always shown, even for a single claimant. The NAME is what gets
+              searched and traced, and burying it made it unclear whose result
+              the panel below was showing. */}
+          {property.claimants.length > 0 && (
             <div style={{ display: 'flex', gap: 6, marginTop: 11, flexWrap: 'wrap' }}>
               {property.claimants.map((c: any) => (
                 <button
@@ -379,12 +401,13 @@ export default function SurplusWorkPanel({
                   onClick={() => setClaimantId(c.id)}
                 >
                   {c.claimant}
-                  <span className="sub">
+                  {/* The trace state, not just the phone count. A claimant with
+                      no numbers is either untried or exhausted, and those want
+                      opposite actions. */}
+                  <span className="sub" style={{ color: TRACE_TONE[c.trace?.tone || 'idle'] }}>
                     {c.cleanPhoneCount > 0
                       ? `${c.cleanPhoneCount} callable`
-                      : c.contactMismatch
-                        ? 'trace mismatched'
-                        : 'no number'}
+                      : c.trace?.label || 'Never skip traced'}
                   </span>
                 </button>
               ))}
@@ -593,49 +616,100 @@ function CaseTab({
           traced. On case 2025-0023TD those are Jacksonville and Hartford. */}
       <Section title="Addresses">
         <Row k="Property that sold" v={[property.address, property.city, property.zip].filter(Boolean).join(', ')} />
-        {property.ownerMailingStreet ? (
+        {/* Per CLAIMANT, not per property. The clerk prints one notice page per
+            recipient and co-owners are frequently at different addresses, so
+            lifting the first page's address onto everyone gives one claimant
+            the other's address and then traces them at it. */}
+        {lead.ownerMailingStreet ? (
           <Row
-            k="Owner, per the notice"
+            k={`Where the clerk wrote to ${lead.noticeRecipient || lead.claimant}`}
             v={[
-              property.ownerMailingStreet,
-              property.ownerMailingCity,
-              [property.ownerMailingState, property.ownerMailingZip].filter(Boolean).join(' '),
+              lead.ownerMailingStreet,
+              lead.ownerMailingCity,
+              [lead.ownerMailingState, lead.ownerMailingZip].filter(Boolean).join(', ').replace(', ', ' '),
             ]
               .filter(Boolean)
               .join(', ')}
             tone="var(--mint)"
             note={
-              property.noticeRecipient && property.noticeRecipient !== lead.claimant
-                ? `Addressed to ${property.noticeRecipient}. This is the address that gets skip traced.`
+              lead.noticeRecipient && lead.noticeRecipient !== lead.claimant
+                ? `The notice names ${lead.noticeRecipient}, matched to this claimant. This is the address that gets skip traced.`
                 : 'This is the address that gets skip traced.'
             }
           />
         ) : (
           <Row
-            k="Owner, per the notice"
+            k={`Where the clerk wrote to ${lead.claimant}`}
             v="not recovered"
             tone="var(--amber)"
-            note="The Notice of Surplus Funds has not been read for this case, so any trace falls back to the property address, which is usually not where the owner is."
+            note={
+              property.claimants.some((c: any) => c.ownerMailingStreet)
+                ? 'The notice was read for this case but no page was addressed to this claimant, so a trace here would fall back to the property address, which is usually not where they are.'
+                : 'The Notice of Surplus Funds has not been read for this case, so any trace falls back to the property address, which is usually not where the owner is.'
+            }
           />
         )}
       </Section>
 
-      <Section title="Reaching them">
+      <Section title={`Reaching ${lead.claimant}`}>
+        {/* The verdict, stated before the contacts rather than inferred from
+            their absence. "Nothing has been tried" and "everything has been
+            tried" both render as an empty contact list, and they want opposite
+            next actions: one costs a credit, the other a name search. */}
+        {lead.trace && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'baseline',
+              gap: 8,
+              flexWrap: 'wrap',
+              padding: '7px 10px',
+              marginBottom: 8,
+              borderRadius: 6,
+              background: 'var(--bg2)',
+              borderLeft: `3px solid ${TRACE_TONE[lead.trace.tone]}`,
+            }}
+          >
+            <strong style={{ fontSize: 12.5, color: TRACE_TONE[lead.trace.tone] }}>
+              {lead.trace.label}
+            </strong>
+            {lead.trace.at && (
+              <span style={{ fontSize: 11, color: 'var(--faint)' }}>{fmtDate(lead.trace.at)}</span>
+            )}
+            <div style={{ flexBasis: '100%', fontSize: 11.5, color: 'var(--dim)' }}>
+              {lead.trace.detail}
+            </div>
+          </div>
+        )}
         {lead.phones.length === 0 && (
           <div style={{ fontSize: 12, color: 'var(--faint)' }}>
-            No numbers yet.{' '}
-            {lead.contactMismatch
-              ? `A skip trace returned ${lead.mismatchedName || 'somebody else'}, so its contacts were discarded rather than attached. This claimant needs a name based route: Sunbiz for an entity, official records for a later deed, or an obituary if deceased.`
-              : 'Not skip traced yet.'}
-            <div style={{ marginTop: 6 }}>
-              <button type="button" className="dc-wp-btn" onClick={onTrace} disabled={tracing}>
-                {tracing ? 'Tracing...' : lead.contactMismatch ? 'Re-run skip trace' : 'Skip trace'}
+            <div style={{ marginTop: 2 }}>
+              {/* Offered only when a submission could still tell us something.
+                  Re-running an address that already answered spends a credit to
+                  hear the same answer. */}
+              <button
+                type="button"
+                className="dc-wp-btn"
+                onClick={onTrace}
+                disabled={tracing || lead.trace?.actionable === false}
+                title={
+                  lead.trace?.actionable === false
+                    ? 'Already submitted. The same address returns the same answer; use the name search below.'
+                    : undefined
+                }
+              >
+                {tracing ? 'Tracing...' : `Skip trace ${lead.claimant}`}
               </button>
+              {lead.trace?.actionable === false && (
+                <span style={{ marginLeft: 8, fontSize: 11 }}>
+                  Already submitted, so this is spent. The route now is the name search below.
+                </span>
+              )}
             </div>
             <div style={{ marginTop: 4, fontSize: 11 }}>
-              {property.ownerMailingStreet
-                ? `Traces ${property.ownerMailingStreet}, ${property.ownerMailingCity || ''} ${property.ownerMailingState || ''}, the address the surplus notice was mailed to.`
-                : `No owner address recovered, so this would trace the property at ${lead.address}, which is usually not where the owner is.`}
+              {lead.ownerMailingStreet
+                ? `Traces ${lead.ownerMailingStreet}, ${lead.ownerMailingCity || ''} ${lead.ownerMailingState || ''}, the address the surplus notice was mailed to ${lead.noticeRecipient || lead.claimant}.`
+                : `No owner address recovered for ${lead.claimant}, so this would trace the property at ${lead.address}, which is usually not where the owner is.`}
             </div>
           </div>
         )}
@@ -703,7 +777,17 @@ function CaseTab({
           the property that was sold, which is the inverse of what BatchData
           does and is why the two complement each other. */}
       {lead.nameSearch && (
-        <Section title="Find them by name">
+        <Section
+          title={`Find ${lead.claimant} by name`}
+          note={
+            property.claimants.length > 1
+              ? `One claimant at a time. Switch at the top to search ${property.claimants
+                  .filter((c: any) => c.id !== lead.id)
+                  .map((c: any) => c.claimant)
+                  .join(' or ')}.`
+              : undefined
+          }
+        >
           {lead.nameSearch.reason && (
             <div style={{ fontSize: 11.5, color: 'var(--amber)', marginBottom: 4 }}>
               {lead.nameSearch.reason}

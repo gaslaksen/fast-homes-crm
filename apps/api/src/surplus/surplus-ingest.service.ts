@@ -22,6 +22,7 @@ import {
 import { SurplusService } from './surplus.service';
 import { DuvalTaxDeedAdapter } from './duval-taxdeed.adapter';
 import { SurplusNoticeService, NoticeExtract } from './surplus-notice.service';
+import { matchRecipient } from './surplus-name-search.util';
 import { SurplusSourceAdapter, SurplusCaseDetail } from './surplus-source.types';
 import { classifyCase, collapseClaimants, isWorkable } from './surplus-classify.util';
 import { surplusUidOf } from './surplus.util';
@@ -231,7 +232,7 @@ export class SurplusIngestService {
       });
 
       if (existing) {
-        await this.refresh(existing, detail, verdict, workable, notice);
+        await this.refresh(existing, detail, verdict, workable, notice, claimant.name);
         out.updated += 1;
         continue;
       }
@@ -245,6 +246,12 @@ export class SurplusIngestService {
       }
 
       const deceased = claimant.deceased || verdict.probateOnFile;
+      // Only fall back to the sole recipient when the notice named exactly one.
+      // With several, an unmatched claimant gets nothing rather than somebody
+      // else's address: none is visible, wrong is not.
+      const mine =
+        matchRecipient(claimant.name, notice?.recipients || []) ||
+        (notice?.recipients?.length === 1 ? notice.recipients[0] : null);
       const res = await this.surplus.createSurplusLead(
         {
           address: detail.propertyAddress || `${adapter.county} County surplus claim`,
@@ -277,12 +284,16 @@ export class SurplusIngestService {
           noticeConfirmed: !!notice?.noticeDate,
           surplusAtNotice: notice?.surplusAtNotice ?? null,
 
-          noticeRecipient: notice?.recipient ?? null,
-          ownerMailingStreet: notice?.street ?? null,
-          ownerMailingCity: notice?.city ?? null,
-          ownerMailingState: notice?.state ?? null,
-          ownerMailingZip: notice?.zip ?? null,
-          ownerAddressSource: notice?.street ? 'notice_of_surplus_funds' : null,
+          // THIS claimant's own notice page, not the first one on the document.
+          // Co-owners are frequently at different addresses, and handing one of
+          // them the other's is how a co-owner gets skip traced at the wrong
+          // place.
+          noticeRecipient: mine?.name ?? null,
+          ownerMailingStreet: mine?.street ?? null,
+          ownerMailingCity: mine?.city ?? null,
+          ownerMailingState: mine?.state ?? null,
+          ownerMailingZip: mine?.zip ?? null,
+          ownerAddressSource: mine?.street ? 'notice_of_surplus_funds' : null,
 
           grossSurplus: detail.surplus ?? null,
 
@@ -330,6 +341,7 @@ export class SurplusIngestService {
     verdict: ReturnType<typeof classifyCase>,
     workable: boolean,
     notice: NoticeExtract | null,
+    claimantName: string,
   ): Promise<void> {
     const changed = existing.claimStatus !== verdict.claimStatus;
 
@@ -337,14 +349,18 @@ export class SurplusIngestService {
     // existed, or one whose earlier read failed. Only ever fills a gap: an
     // address already on the row is left alone, including one somebody typed in
     // by hand, and a re-poll never re-reads a notice it has already read.
+    const mine =
+      matchRecipient(claimantName, notice?.recipients || []) ||
+      (notice?.recipients?.length === 1 ? notice.recipients[0] : null);
+
     const backfill =
-      !existing.ownerMailingStreet && notice?.street
+      !existing.ownerMailingStreet && mine?.street
         ? {
-            noticeRecipient: notice.recipient,
-            ownerMailingStreet: notice.street,
-            ownerMailingCity: notice.city,
-            ownerMailingState: notice.state,
-            ownerMailingZip: notice.zip,
+            noticeRecipient: mine.name,
+            ownerMailingStreet: mine.street,
+            ownerMailingCity: mine.city,
+            ownerMailingState: mine.state,
+            ownerMailingZip: mine.zip,
             ownerAddressSource: 'notice_of_surplus_funds',
             ...(notice.noticeDate
               ? { noticeDate: new Date(`${notice.noticeDate}T00:00:00`), noticeConfirmed: true }

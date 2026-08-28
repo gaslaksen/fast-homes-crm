@@ -377,3 +377,73 @@ export function addressCaseCounts(
   }
   return new Map([...byAddress].map(([k, v]) => [k, v.size]));
 }
+
+/**
+ * How a claimant's skip trace stands, in one object the UI can render without
+ * interpreting anything.
+ *
+ * The distinction that matters most is the cheapest one to lose: NEVER TRIED is
+ * not a failure. The nightly county poll ingests and classifies but never
+ * traces, because every submission is billed, so most rows on the board have
+ * had nothing attempted on them at all. Shown as "no numbers" that reads as a
+ * broken trace, and the reasonable response to a broken trace is to run it
+ * again, which costs money and changes nothing.
+ *
+ * `actionable` says whether re-running the SAME trace could plausibly help. It
+ * is true only for a row nothing has been submitted for.
+ */
+export interface TraceState {
+  state: 'never' | 'matched' | 'relative' | 'unverified' | 'mismatch' | 'no_person' | 'no_contact' | 'skipped';
+  label: string;
+  /** 'good' | 'warn' | 'bad' | 'idle', for the panel to colour from. */
+  tone: 'good' | 'warn' | 'bad' | 'idle';
+  detail: string;
+  at: Date | null;
+  actionable: boolean;
+}
+
+const TRACE_LABEL: Record<string, { label: string; tone: TraceState['tone'] }> = {
+  matched: { label: 'Traced, matched', tone: 'good' },
+  relative: { label: 'Traced, relative only', tone: 'warn' },
+  unverified: { label: 'Traced, name unconfirmed', tone: 'warn' },
+  mismatch: { label: 'Traced, wrong person', tone: 'bad' },
+  no_person: { label: 'Traced, nobody found', tone: 'bad' },
+  no_contact: { label: 'Traced, no phone or email', tone: 'warn' },
+  skipped: { label: 'Not traced, refused', tone: 'idle' },
+};
+
+export function traceState(d: {
+  tracedAt?: Date | null;
+  traceOutcome?: string | null;
+  traceDetail?: string | null;
+  contactMismatch?: boolean | null;
+  mismatchedName?: string | null;
+}): TraceState {
+  // Rows traced before the outcome column existed carry only the mismatch flag.
+  // Reading it keeps their history rather than showing them as never tried.
+  const outcome = d.traceOutcome || (d.contactMismatch ? 'mismatch' : null);
+  if (!outcome || !d.tracedAt) {
+    return {
+      state: 'never',
+      label: 'Never skip traced',
+      tone: 'idle',
+      detail:
+        'Nothing has been submitted for this claimant. The nightly county poll ingests and classifies but does not trace, since every submission is billed.',
+      at: null,
+      actionable: true,
+    };
+  }
+  const meta = TRACE_LABEL[outcome] || { label: 'Traced', tone: 'idle' as const };
+  return {
+    state: outcome as TraceState['state'],
+    label: meta.label,
+    tone: meta.tone,
+    detail:
+      d.traceDetail ||
+      (d.mismatchedName ? `Returned ${d.mismatchedName}, who is not the claimant.` : 'Trace recorded.'),
+    at: d.tracedAt,
+    // Already submitted. The same address returns the same answer, so the next
+    // move is a name search, not another credit.
+    actionable: false,
+  };
+}

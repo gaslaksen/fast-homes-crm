@@ -813,6 +813,22 @@ model SurplusDetail {
   /// mismatch, so the rejection can be audited rather than just trusted.
   mismatchedName  String?
 
+  /// When a skip trace was last ATTEMPTED for this claimant, whatever came
+  /// back. NULL means never attempted, which is the state most rows are in:
+  /// the nightly county poll ingests and classifies but never traces, because
+  /// every submission is billed. "Never tried" and "tried and found nothing"
+  /// need different next actions and were previously indistinguishable, so the
+  /// panel was read as a failure when nothing had run at all.
+  tracedAt        DateTime?
+  /// Outcome of that attempt: 'matched' | 'relative' | 'unverified' |
+  /// 'mismatch' | 'no_person' | 'no_contact' | 'skipped'. Per CLAIMANT, not per
+  /// address: one submission serves every claimant at an address and they
+  /// routinely end differently, one matched and one a stranger.
+  traceOutcome    String?
+  /// The sentence behind the outcome, including the refusal reason when we
+  /// declined to submit at all.
+  traceDetail     String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

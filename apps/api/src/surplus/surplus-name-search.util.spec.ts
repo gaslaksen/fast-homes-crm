@@ -1,4 +1,5 @@
 import {
+  matchRecipient,
   nameSearchLinks,
   nameSearchPlan,
   relativeOutreachScript,
@@ -106,5 +107,37 @@ describe('relativeOutreachScript', () => {
 
   it('reads sensibly when the relative has no name', () => {
     expect(relativeOutreachScript('MYRTIS GRIFFIN')).toMatch(/^This contact is not the claimant/);
+  });
+});
+
+describe('matchRecipient', () => {
+  const bessent = [
+    { name: 'RICHARD MINTON', street: '4027 BESSENT ROAD' },
+    { name: 'CECELIA W HARRIS', street: '4027 BESSENT ROAD' },
+  ];
+
+  it('gives each co-owner the page addressed to THEM', () => {
+    // Duval 2026-0006TD. Handing Cecelia the page addressed to Richard is how a
+    // co-owner ends up skip traced at somebody else's address.
+    expect(matchRecipient('CECELIA W HARRIS', bessent)!.name).toBe('CECELIA W HARRIS');
+    expect(matchRecipient('RICHARD MINTON', bessent)!.name).toBe('RICHARD MINTON');
+  });
+
+  it('matches on surname when the given name is written differently', () => {
+    expect(matchRecipient('RUTH M JOHNSON', [{ name: 'RUTH JOHNSON' }])!.name).toBe('RUTH JOHNSON');
+  });
+
+  it('prefers the exact person over a relative sharing the surname', () => {
+    const both = [{ name: 'CALVIN J JOHNSON' }, { name: 'RUTH M JOHNSON' }];
+    expect(matchRecipient('RUTH M JOHNSON', both)!.name).toBe('RUTH M JOHNSON');
+  });
+
+  it('returns null rather than guessing when nobody matches', () => {
+    // A wrong address is worse than none: none is visible, wrong is not.
+    expect(matchRecipient('JESSIE HALL', bessent)).toBeNull();
+  });
+
+  it('handles an empty recipient list', () => {
+    expect(matchRecipient('RICHARD MINTON', [])).toBeNull();
   });
 });
