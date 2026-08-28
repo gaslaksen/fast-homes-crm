@@ -264,6 +264,49 @@ export default function ProbatePage() {
     [contacts, selected],
   );
 
+  const [bulkBusy, setBulkBusy] = useState(false);
+
+  /**
+   * Bulk actions on the checked heirs. Both act on the PERSON, so an heir with
+   * three properties is retired or removed in one go rather than left half on
+   * the board.
+   */
+  const bulkStatus = async (status: string, label: string) => {
+    const keys = Array.from(selected);
+    if (!keys.length) return;
+    setBulkBusy(true);
+    try {
+      const res = await probateAPI.bulkStatus(keys, status);
+      showToast(`${label} ${keys.length} contact${keys.length === 1 ? '' : 's'} (${res.data.updated} propert${res.data.updated === 1 ? 'y' : 'ies'}).`);
+      setSelected(new Set());
+      fetchContacts();
+    } catch (e: any) {
+      showToast(e?.response?.data?.message || `${label} failed`, true);
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const bulkDelete = async () => {
+    const keys = Array.from(selected);
+    if (!keys.length) return;
+    const props = selectedContacts.reduce((n, c) => n + c.propertyCount, 0);
+    if (!window.confirm(
+      `Delete ${keys.length} contact${keys.length === 1 ? '' : 's'} and all ${props} of their propert${props === 1 ? 'y' : 'ies'}? This cannot be undone.`,
+    )) return;
+    setBulkBusy(true);
+    try {
+      const res = await probateAPI.bulkDeleteContacts(keys);
+      showToast(`Deleted ${res.data.deleted} lead${res.data.deleted === 1 ? '' : 's'}.`);
+      setSelected(new Set());
+      fetchContacts();
+    } catch (e: any) {
+      showToast(e?.response?.data?.message || 'Delete failed', true);
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
   const handleEnroll = async () => {
     if (!bulkCampaign || selectedContacts.length === 0) return;
     const campaign = campaigns.find((c) => c.id === bulkCampaign);
@@ -411,6 +454,20 @@ export default function ProbatePage() {
             <span className="text-xs text-primary-700/70 dark:text-primary-500">
               {selectedContacts.reduce((n, c) => n + c.propertyCount, 0)} properties · one enrollment each
             </span>
+            <button
+              onClick={() => bulkStatus('DEAD', 'Marked dead')}
+              disabled={bulkBusy}
+              className="text-xs px-3 py-1 border border-gray-300 dark:border-gray-600 rounded-lg font-medium disabled:opacity-50"
+            >
+              Mark dead
+            </button>
+            <button
+              onClick={bulkDelete}
+              disabled={bulkBusy}
+              className="text-xs px-3 py-1 border border-red-500 text-red-600 dark:text-red-400 rounded-lg font-medium disabled:opacity-50"
+            >
+              Delete
+            </button>
             {campaigns.length > 0 ? (
               <div className="flex items-center gap-2">
                 <select

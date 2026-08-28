@@ -131,6 +131,8 @@ export const foreclosuresAPI = {
   get: (id: string) => api.get(`/foreclosures/${id}`),
   update: (id: string, data: any) => api.patch(`/foreclosures/${id}`, data),
   bulkDelete: (ids: string[]) => api.post('/foreclosures/bulk-delete', { ids }),
+  bulkStatus: (ids: string[], status: string) =>
+    api.post('/foreclosures/bulk-status', { ids, status }),
   bulkSkiptrace: (ids: string[]) => api.post('/foreclosures/bulk-skiptrace', { ids }),
   refresh: () => api.post('/foreclosures/refresh'),
   skiptrace: (id: string) => api.post(`/foreclosures/${id}/skiptrace`),
@@ -168,6 +170,8 @@ export const taxSalesAPI = {
   create: (data: any) => api.post('/tax-sales', data),
   update: (id: string, data: any) => api.patch(`/tax-sales/${id}`, data),
   bulkDelete: (ids: string[]) => api.post('/tax-sales/bulk-delete', { ids }),
+  bulkStatus: (ids: string[], status: string) =>
+    api.post('/tax-sales/bulk-status', { ids, status }),
   importParse: (file: File) => {
     const formData = new FormData();
     formData.append('file', file);
@@ -229,6 +233,12 @@ export const probateAPI = {
   updateContact: (contactKey: string, data: any) =>
     api.patch(`/probate/contacts/${encodeURIComponent(contactKey)}`, data),
   bulkDelete: (ids: string[]) => api.post('/probate/bulk-delete', { ids }),
+  // Keyed on the heir, not a lead: one heir routinely inherits several
+  // parcels, and marking their primary lead dead would leave the rest alive.
+  bulkStatus: (contactKeys: string[], status: string) =>
+    api.post('/probate/bulk-status', { contactKeys, status }),
+  bulkDeleteContacts: (contactKeys: string[]) =>
+    api.post('/probate/bulk-delete-contacts', { contactKeys }),
   importParse: (file: File) => {
     const formData = new FormData();
     formData.append('file', file);

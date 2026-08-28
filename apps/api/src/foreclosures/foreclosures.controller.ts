@@ -329,6 +329,23 @@ export class ForeclosuresController {
     return this.ingest.ingestPdf(file.buffer, file.originalname, { organizationId: orgId });
   }
 
+  /**
+   * Set the work status on the checked leads. Marking a batch Dead from the
+   * board goes through here.
+   */
+  @Post('bulk-status')
+  async bulkStatus(
+    @Body() body: { ids: string[]; status: string },
+    @Headers('authorization') authHeader?: string,
+  ) {
+    if (!Array.isArray(body?.ids) || body.ids.length === 0) {
+      throw new BadRequestException('No lead ids provided');
+    }
+    if (!body?.status) throw new BadRequestException('status is required');
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.foreclosures.bulkStatus(body.ids, body.status, organizationId);
+  }
+
   @Post('bulk-delete')
   async bulkDelete(
     @Body() body: { ids: string[] },

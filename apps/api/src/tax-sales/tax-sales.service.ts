@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   LeadSource,
@@ -389,6 +389,42 @@ export class TaxSalesService {
     });
 
     return this.get(id, organizationId);
+  }
+
+  /**
+   * Set the work status on every checked lead, which is how a lead is marked
+   * Dead from the board.
+   *
+   * Deliberately the same shape as the other pipelines: ids in, a count out,
+   * scoped to the organization and to this pipeline's own source so a stray id
+   * from another board cannot be restaged through it.
+   */
+  async bulkStatus(
+    ids: string[],
+    status: string,
+    organizationId?: string | null,
+  ): Promise<{ updated: number; status: string }> {
+    const target = String(status || '').toUpperCase();
+    if (!Object.values(TaxSaleWorkStatus).includes(target as TaxSaleWorkStatus)) {
+      throw new BadRequestException(`Unknown work status "${status}"`);
+    }
+    if (!ids?.length) return { updated: 0, status: target };
+
+    const leads = await this.prisma.lead.findMany({
+      where: {
+        id: { in: ids },
+        source: LeadSource.TAX_SALE,
+        ...(organizationId ? { organizationId } : {}),
+      },
+      select: { id: true },
+    });
+    if (!leads.length) return { updated: 0, status: target };
+
+    const res = await this.prisma.taxSaleDetail.updateMany({
+      where: { leadId: { in: leads.map((l) => l.id) } },
+      data: { workStatus: target },
+    });
+    return { updated: res.count, status: target };
   }
 
   async bulkDelete(ids: string[], organizationId?: string) {

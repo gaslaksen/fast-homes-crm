@@ -123,6 +123,36 @@ export class ProbateController {
     });
   }
 
+  /**
+   * Set the work status on the checked leads. Marking a batch Dead from the
+   * board goes through here.
+   */
+  @Post('bulk-status')
+  async bulkStatus(
+    @Body() body: { contactKeys: string[]; status: string },
+    @Headers('authorization') authHeader?: string,
+  ) {
+    if (!Array.isArray(body?.contactKeys) || body.contactKeys.length === 0) {
+      throw new BadRequestException('No contacts provided');
+    }
+    if (!body?.status) throw new BadRequestException('status is required');
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.probate.bulkStatus(body.contactKeys, body.status, organizationId);
+  }
+
+  /** Delete every lead belonging to the checked heirs. */
+  @Post('bulk-delete-contacts')
+  async bulkDeleteContacts(
+    @Body() body: { contactKeys: string[] },
+    @Headers('authorization') authHeader?: string,
+  ) {
+    if (!Array.isArray(body?.contactKeys) || body.contactKeys.length === 0) {
+      throw new BadRequestException('No contacts provided');
+    }
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.probate.bulkDeleteContacts(body.contactKeys, organizationId);
+  }
+
   @Post('bulk-delete')
   async bulkDelete(
     @Body() body: { ids: string[] },

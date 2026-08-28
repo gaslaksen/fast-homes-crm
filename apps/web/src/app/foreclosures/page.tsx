@@ -865,6 +865,28 @@ export default function ForeclosuresPage() {
     }
   };
 
+  /**
+   * Mark every checked lead Dead. Deliberately not a delete: a dead
+   * foreclosure is still a record of a notice we saw, and deleting it would
+   * let the next ingest re-create it as new.
+   */
+  const handleStatusSelected = async (status: string, label: string) => {
+    const ids = Array.from(selected);
+    if (!ids.length) return;
+    setBusy(true);
+    try {
+      const res = await foreclosuresAPI.bulkStatus(ids, status);
+      showToast(`${label} ${res.data.updated} lead${res.data.updated === 1 ? '' : 's'}.`);
+      setSelected(new Set());
+      fetchLeads();
+      fetchStats();
+    } catch (e: any) {
+      showToast(e.response?.data?.message || `${label} failed`, true);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const handleDeleteSelected = async () => {
     const ids = Array.from(selected);
     if (!ids.length) return;
@@ -1145,6 +1167,7 @@ export default function ForeclosuresPage() {
           <span className="text-gray-700 dark:text-gray-200"><b className="text-primary-600 dark:text-primary-400">{selected.size}</b> selected</span>
           <button onClick={() => downloadCsv(selectedLeads)} className="btn btn-primary btn-sm">Download CSV</button>
           <button onClick={handleSkiptraceSelected} disabled={busy} className="btn btn-secondary btn-sm disabled:opacity-50">Skip trace</button>
+          <button onClick={() => handleStatusSelected('DEAD', 'Marked dead')} disabled={busy} className="btn btn-secondary btn-sm disabled:opacity-50">Mark dead</button>
           <button onClick={() => setSelected(new Set())} className="btn btn-secondary btn-sm">Clear</button>
           <button onClick={handleDeleteSelected} disabled={busy}
             className="btn btn-sm bg-red-600 hover:bg-red-700 text-white border border-red-600 disabled:opacity-50">

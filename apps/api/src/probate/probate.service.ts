@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { LeadSource, ProbateWorkStatus } from '@fast-homes/shared';
 import { countyForCity, stateForCity, citiesInCounty } from '../foreclosures/foreclosure-scoring.util';
@@ -501,6 +501,61 @@ export class ProbateService {
         ...(body.doNotCall !== undefined ? { doNotCall: body.doNotCall } : {}),
       },
     });
+  }
+
+  /**
+   * Set the work status on every checked HEIR, which is how one is marked Dead
+   * from the board.
+   *
+   * Keyed on contactKey rather than lead id, because the probate board's unit
+   * is a person and not a property. One heir routinely inherits several
+   * parcels, so marking their primary lead dead would leave the rest alive and
+   * the heir would still show up on the board as workable. This mirrors the
+   * single-contact setter, which already updates every detail row sharing the
+   * key.
+   */
+  async bulkStatus(
+    contactKeys: string[],
+    status: string,
+    organizationId?: string | null,
+  ): Promise<{ updated: number; status: string }> {
+    const target = String(status || '').toUpperCase();
+    if (!Object.values(ProbateWorkStatus).includes(target as ProbateWorkStatus)) {
+      throw new BadRequestException(`Unknown work status "${status}"`);
+    }
+    if (!contactKeys?.length) return { updated: 0, status: target };
+
+    const res = await this.prisma.probateDetail.updateMany({
+      where: {
+        contactKey: { in: contactKeys },
+        ...(organizationId ? { organizationId } : {}),
+      },
+      data: { workStatus: target },
+    });
+    return { updated: res.count, status: target };
+  }
+
+  /**
+   * Delete every lead belonging to the checked heirs.
+   *
+   * Also keyed on contactKey, for the same reason: deleting one property of a
+   * three-property heir leaves a partial person on the board, which is worse
+   * than either outcome the user was choosing between.
+   */
+  async bulkDeleteContacts(contactKeys: string[], organizationId?: string | null) {
+    if (!contactKeys?.length) return { deleted: 0 };
+    const details = await this.prisma.probateDetail.findMany({
+      where: {
+        contactKey: { in: contactKeys },
+        ...(organizationId ? { organizationId } : {}),
+      },
+      select: { leadId: true },
+    });
+    if (!details.length) return { deleted: 0 };
+    const res = await this.prisma.lead.deleteMany({
+      where: { id: { in: details.map((d) => d.leadId) }, source: LeadSource.PROBATE },
+    });
+    return { deleted: res.count };
   }
 
   async bulkDelete(leadIds: string[], organizationId?: string) {

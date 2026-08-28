@@ -344,6 +344,46 @@ export default function TaxSalesPage() {
     }
   };
 
+  /**
+   * Bulk actions on the checked rows, the same pair every pipeline board
+   * carries: retire a lead, or remove it outright.
+   *
+   * Marking dead is the usual one. A dead tax sale is still a record of a
+   * judgment we saw, and deleting it lets the next import re-create it as new.
+   */
+  const bulkStatus = async (status: string, label: string) => {
+    if (!chosen.length) return;
+    setBusy(true);
+    try {
+      const res = await taxSalesAPI.bulkStatus(chosen, status);
+      say(`${label} ${res.data.updated} lead${res.data.updated === 1 ? '' : 's'}.`);
+      setPicked({});
+      fetchRows();
+      fetchStats();
+    } catch (err: any) {
+      say(err?.response?.data?.message || `${label} failed.`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const bulkDelete = async () => {
+    if (!chosen.length) return;
+    if (!window.confirm(`Delete ${chosen.length} lead${chosen.length === 1 ? '' : 's'}? This cannot be undone.`)) return;
+    setBusy(true);
+    try {
+      const res = await taxSalesAPI.bulkDelete(chosen);
+      say(`Deleted ${res.data.deleted} lead${res.data.deleted === 1 ? '' : 's'}.`);
+      setPicked({});
+      fetchRows();
+      fetchStats();
+    } catch (err: any) {
+      say(err?.response?.data?.message || 'Delete failed.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     e.target.value = '';
@@ -716,9 +756,21 @@ export default function TaxSalesPage() {
               </span>
             }
             toolbarRight={
-              <button style={{ color: 'var(--mint)', fontWeight: 600, fontSize: 13 }} onClick={csv}>
-                Download {chosen.length ? 'selected' : 'shown'} as CSV
-              </button>
+              <>
+                {chosen.length > 0 && (
+                  <>
+                    <button className="dc-btn sm" disabled={busy} onClick={() => bulkStatus('DEAD', 'Marked dead')}>
+                      Mark dead
+                    </button>
+                    <button className="dc-btn sm dngr" disabled={busy} onClick={bulkDelete}>
+                      Delete
+                    </button>
+                  </>
+                )}
+                <button style={{ color: 'var(--mint)', fontWeight: 600, fontSize: 13 }} onClick={csv}>
+                  Download {chosen.length ? 'selected' : 'shown'} as CSV
+                </button>
+              </>
             }
           />
 
