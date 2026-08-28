@@ -26,6 +26,8 @@ import {
   fmtDate,
   money,
   phoneDisplay,
+  agoLabel,
+  agoDays,
 } from '@/components/pipelines/format';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -189,6 +191,27 @@ const TAX_COLUMNS: PipelineColumn<any>[] = [
     ),
   },
   { key: 'owner', label: 'Owner', sortValue: (r) => r.owner || '', render: (r) => r.owner },
+  {
+    // The record of what actually went out: every call placed, text and email,
+    // written by the channel that sent it. Distinct from the weekly touch-day
+    // boxes, which are a plan rather than a log.
+    key: 'touches',
+    label: 'Touches',
+    align: 'right',
+    width: '110px',
+    // Most neglected first, so the column answers "who has nobody been calling".
+    sortValue: (r) => -agoDays(r.lastTouchedAt),
+    render: (r) => (
+      <div style={{ fontSize: 12 }}>
+        <div style={{ fontWeight: 600, color: r.touches ? 'var(--text)' : 'var(--faint)' }}>
+          {r.touches || 0}
+        </div>
+        <div style={{ fontSize: 11, color: r.lastTouchedAt ? 'var(--faint)' : 'var(--dim)' }}>
+          {agoLabel(r.lastTouchedAt)}
+        </div>
+      </div>
+    ),
+  },
   {
     key: 'contact',
     label: 'Reach',
@@ -463,6 +486,17 @@ export default function TaxSalesPage() {
     [rows, chips],
   );
   const openLead = openId ? shown.find((r) => r.id === openId) || null : null;
+  /**
+   * Step through the filtered list from inside the panel.
+   *
+   * Indexed off the SAME array the board renders, so the arrows follow whatever
+   * filter and sort is on screen rather than some separate order. Null at the
+   * ends instead of wrapping, which is what disables the button and makes the
+   * end of the list visible.
+   */
+  const openIndex = shown.findIndex((r) => r.id === openId);
+  const goTo = (i: number) => setOpenId(shown[i] ? (shown[i] as any).id : null);
+
 
 
   const chosen = Object.keys(picked).filter((k) => picked[k]);
@@ -779,6 +813,9 @@ export default function TaxSalesPage() {
 
         {openLead && (
           <PipelineWorkPanel
+            onPrev={openIndex > 0 ? () => goTo(openIndex - 1) : null}
+            onNext={openIndex >= 0 && openIndex < shown.length - 1 ? () => goTo(openIndex + 1) : null}
+            position={openIndex >= 0 ? { index: openIndex, total: shown.length } : null}
             title={openLead.address}
             subtitle={`${[openLead.city, openLead.zip].filter(Boolean).join(' ')} · ${money(openLead.redemptionAmount)} to redeem`}
             meta={`${openLead.county} County${openLead.fileNumber ? ` · file ${openLead.fileNumber}` : ''}`}

@@ -40,6 +40,9 @@ export interface ProbateContact {
   workStatus: string | null;
   doNotCall: boolean;
   enrolledCampaigns: string[];
+  /** Outbound calls, texts and emails across every property this heir owns. */
+  touches: number;
+  lastTouchedAt: string | null;
   properties: ProbateProperty[];
 }
 

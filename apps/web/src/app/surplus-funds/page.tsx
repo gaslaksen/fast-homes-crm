@@ -24,6 +24,8 @@ import {
   money,
   pct,
   phoneDisplay,
+  agoLabel,
+  agoDays,
 } from '@/components/pipelines/format';
 
 /**
@@ -304,6 +306,27 @@ const SURPLUS_COLUMNS: PipelineColumn<any>[] = [
       ),
   },
   {
+    // What we have actually done, not what somebody planned to do. Written by
+    // the channel that sent it: every call placed, text and email.
+    key: 'touches',
+    label: 'Touches',
+    align: 'right',
+    width: '110px',
+    // Sorts the most neglected first, so the column answers "who has nobody
+    // been calling" rather than "who is popular".
+    sortValue: (r) => -agoDays(r.lastTouchedAt),
+    render: (r) => (
+      <div style={{ fontSize: 12 }}>
+        <div style={{ fontWeight: 600, color: r.touches ? 'var(--text)' : 'var(--faint)' }}>
+          {r.touches || 0}
+        </div>
+        <div style={{ fontSize: 11, color: r.lastTouchedAt ? 'var(--faint)' : 'var(--dim)' }}>
+          {agoLabel(r.lastTouchedAt)}
+        </div>
+      </div>
+    ),
+  },
+  {
     key: 'contact',
     label: 'Reach',
     width: '150px',
@@ -491,6 +514,17 @@ export default function SurplusFundsPage() {
   // refresh after sending a message or enrolling a campaign flows straight into
   // the panel instead of leaving it showing a stale case.
   const openProperty = openId ? rows.find((r) => r.key === openId) || null : null;
+  /**
+   * Step through the filtered list from inside the panel.
+   *
+   * Indexed off the SAME array the board renders, so the arrows follow whatever
+   * filter and sort is on screen rather than some separate order. Null at the
+   * ends instead of wrapping, which is what disables the button and makes the
+   * end of the list visible.
+   */
+  const openIndex = rows.findIndex((r) => r.key === openId);
+  const goTo = (i: number) => setOpenId(rows[i] ? (rows[i] as any).key : null);
+
 
   // A lead that drops out of the current filter while its panel is open would
   // otherwise leave the panel mounted with nothing behind it.
@@ -953,6 +987,9 @@ export default function SurplusFundsPage() {
 
         {openProperty && (
           <SurplusWorkPanel
+            onPrev={openIndex > 0 ? () => goTo(openIndex - 1) : null}
+            onNext={openIndex >= 0 && openIndex < rows.length - 1 ? () => goTo(openIndex + 1) : null}
+            position={openIndex >= 0 ? { index: openIndex, total: rows.length } : null}
             property={openProperty}
             currentUser={currentUser}
             onClose={() => setOpenId(null)}

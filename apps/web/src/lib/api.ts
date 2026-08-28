@@ -119,6 +119,18 @@ export const leadsAPI = {
   dismissAlert: (id: string, ruleId: string, fingerprint: string) =>
     api.post(`/leads/${id}/alert-dismissals`, { ruleId, fingerprint }),
   cancelDrip: (id: string, reason?: string) => api.post(`/leads/${id}/drip/cancel`, { reason }),
+  /** Every number and address on file, with the reasons not to use each. */
+  contacts: (id: string) => api.get(`/leads/${id}/contacts`),
+  /**
+   * Replace the contacts. The whole list is sent, primary first: the slots
+   * behind this are positional and shared with the skip trace, so adding to
+   * "the first empty one" races with a trace writing the same slots.
+   */
+  setContacts: (id: string, body: { phones?: { number: string; type?: string | null }[]; emails?: string[] }) =>
+    api.put(`/leads/${id}/contacts`, body),
+  /** Mark a number or address as one that does not reach them, or clear it. */
+  flagContact: (id: string, value: string, bad: boolean) =>
+    api.post(`/leads/${id}/contacts/flag`, { value, bad }),
   communications: (id: string) => api.get(`/leads/${id}/communications`),
 };
 

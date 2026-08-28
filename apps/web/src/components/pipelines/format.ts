@@ -184,3 +184,30 @@ export function phoneDisplay(digits: string): string {
   if (d.length !== 10) return digits;
   return `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}`;
 }
+
+/**
+ * "today", "3d ago", "never" - how stale a lead's last outbound touch is.
+ *
+ * Reads as an age rather than a date because that is the question being asked
+ * of it: a date makes the reader do the subtraction, and the whole point of the
+ * column is spotting the ones nobody has touched in a fortnight.
+ */
+export function agoLabel(v?: string | Date | null): string {
+  if (!v) return 'never';
+  const then = new Date(v).getTime();
+  if (!Number.isFinite(then)) return 'never';
+  const days = Math.floor((Date.now() - then) / 86400000);
+  if (days <= 0) return 'today';
+  if (days === 1) return 'yesterday';
+  if (days < 30) return `${days}d ago`;
+  const months = Math.floor(days / 30);
+  return months < 12 ? `${months}mo ago` : `${Math.floor(days / 365)}y ago`;
+}
+
+/** Days since a timestamp, for sorting. Never-touched sorts oldest. */
+export function agoDays(v?: string | Date | null): number {
+  if (!v) return Number.MAX_SAFE_INTEGER;
+  const then = new Date(v).getTime();
+  if (!Number.isFinite(then)) return Number.MAX_SAFE_INTEGER;
+  return Math.floor((Date.now() - then) / 86400000);
+}

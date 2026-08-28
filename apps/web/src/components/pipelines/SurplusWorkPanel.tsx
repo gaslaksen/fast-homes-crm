@@ -8,6 +8,7 @@ import type { NoteItem, TimelineItem } from '@/components/communications/types';
 import { authAPI, campaignsAPI, leadsAPI, surplusAPI } from '@/lib/api';
 import { useDialer } from '@/components/dialer/DialerContext';
 import { DNC_STATE } from './format';
+import ContactEditor from './ContactEditor';
 import { fmtDate, money, phoneDisplay } from './format';
 
 /**
@@ -133,6 +134,16 @@ interface Props {
   /** The subject property, with every claimant owed on it. */
   property: any;
   currentUser: any;
+  /**
+   * Move to the previous or next property in the filtered list behind the
+   * panel, so a queue can be worked without closing and reopening. Null at
+   * either end rather than wrapping: looping silently back to the first record
+   * makes it impossible to tell you have reached the last one.
+   */
+  onPrev?: (() => void) | null;
+  onNext?: (() => void) | null;
+  /** "3 of 45", from the same filtered list. */
+  position?: { index: number; total: number } | null;
   onClose: () => void;
   /** Refresh the board row after something changes here. */
   onChanged: () => void;
@@ -142,6 +153,9 @@ interface Props {
 export default function SurplusWorkPanel({
   property,
   currentUser,
+  onPrev,
+  onNext,
+  position,
   onClose,
   onChanged,
   say,
@@ -242,14 +256,35 @@ export default function SurplusWorkPanel({
       .catch(() => {});
   }, []);
 
-  // Escape closes, which is what a slide-over is expected to do.
+  /**
+   * Escape closes; the arrows step through the filtered list.
+   *
+   * Both are ignored while focus is in a field, so typing a note or editing a
+   * phone number never navigates away mid-sentence and loses the edit.
+   */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      const el = e.target as HTMLElement | null;
+      const typing =
+        !!el &&
+        (el.tagName === 'INPUT' ||
+          el.tagName === 'TEXTAREA' ||
+          el.tagName === 'SELECT' ||
+          el.isContentEditable);
+      if (e.key === 'Escape') return onClose();
+      if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === 'ArrowLeft' && onPrev) {
+        e.preventDefault();
+        onPrev();
+      }
+      if (e.key === 'ArrowRight' && onNext) {
+        e.preventDefault();
+        onNext();
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [onClose, onPrev, onNext]);
 
   const enroll = async (campaignId: string) => {
     if (!campaignId || enrolling) return;
@@ -367,6 +402,38 @@ export default function SurplusWorkPanel({
                 )}
               </div>
             </div>
+            {/* Step through the filtered list without closing the panel.
+                Disabled rather than wrapping at either end, so it is obvious
+                when you have reached the last one. */}
+            {(onPrev !== undefined || onNext !== undefined) && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <button
+                  type="button"
+                  className="dc-wp-btn"
+                  onClick={() => onPrev?.()}
+                  disabled={!onPrev}
+                  aria-label="Previous"
+                  title="Previous (left arrow)"
+                >
+                  ‹
+                </button>
+                {position && (
+                  <span style={{ fontSize: 11.5, color: 'var(--faint)', whiteSpace: 'nowrap' }}>
+                    {position.index + 1} of {position.total}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  className="dc-wp-btn"
+                  onClick={() => onNext?.()}
+                  disabled={!onNext}
+                  aria-label="Next"
+                  title="Next (right arrow)"
+                >
+                  ›
+                </button>
+              </div>
+            )}
             <button type="button" className="dc-wp-btn" onClick={onClose} aria-label="Close">
               ✕
             </button>
@@ -441,6 +508,11 @@ export default function SurplusWorkPanel({
               onCall={call}
               onText={message}
               onEmail={mail}
+              onChanged={() => {
+                onChanged();
+                loadComms(true);
+              }}
+              say={say}
             />
           )}
 
@@ -545,6 +617,8 @@ function CaseTab({
   onCall,
   onText,
   onEmail,
+  onChanged,
+  say,
 }: {
   lead: SurplusPanelLead;
   property: any;
@@ -554,7 +628,11 @@ function CaseTab({
   onCall: (number: string) => void;
   onText: (number: string) => void;
   onEmail: (address: string) => void;
+  onChanged: () => void;
+  say: (msg: string) => void;
 }) {
+  /** The contact editor is opt-in, so the panel stays readable when reading. */
+  const [editing, setEditing] = useState(false);
   const grouped = LEDGER_GROUPS.map((g) => ({
     ...g,
     docs: ledger.filter((d) => d.kind === g.kind),
@@ -750,6 +828,19 @@ function CaseTab({
             </div>
           </div>
         ))}
+
+        {/* Research turns up numbers the vendor never had. This is where they
+            go, and where a number that turned out to be somebody else gets
+            marked rather than deleted. */}
+        <div style={{ marginTop: 4 }}>
+          <button type="button" className="dc-wp-btn" onClick={() => setEditing((v) => !v)}>
+            {editing ? 'Done editing' : 'Edit contacts'}
+          </button>
+        </div>
+        {editing && (
+          <ContactEditor leadId={lead.id} onChanged={onChanged} say={say} />
+        )}
+
         {property.mailVerdict && (
           <Row
             k="Clerk mail"

@@ -9,7 +9,7 @@ import PipelineBoard, {
 import PipelineWorkPanel from '@/components/pipelines/PipelineWorkPanel';
 import ForeclosureCard, { FCL_ACCENT } from '@/components/pipelines/ForeclosureCard';
 import ForeclosureDetail from '@/components/pipelines/ForeclosureDetail';
-import { CHIP, PRIORITY } from '@/components/pipelines/format';
+import { CHIP, PRIORITY , agoLabel, agoDays } from '@/components/pipelines/format';
 import '@/components/pipelines/pipeline-board.css';
 import Link from 'next/link';
 import { foreclosuresAPI } from '@/lib/api';
@@ -548,6 +548,27 @@ const FCL_COLUMNS: PipelineColumn<any>[] = [
     },
   },
   {
+    // The record of what actually went out: every call placed, text and email,
+    // written by the channel that sent it. Distinct from the weekly touch-day
+    // boxes, which are a plan rather than a log.
+    key: 'touches',
+    label: 'Touches',
+    align: 'right',
+    width: '110px',
+    // Most neglected first, so the column answers "who has nobody been calling".
+    sortValue: (r) => -agoDays(r.lastTouchedAt),
+    render: (r) => (
+      <div style={{ fontSize: 12 }}>
+        <div style={{ fontWeight: 600, color: r.touches ? 'var(--text)' : 'var(--faint)' }}>
+          {r.touches || 0}
+        </div>
+        <div style={{ fontSize: 11, color: r.lastTouchedAt ? 'var(--faint)' : 'var(--dim)' }}>
+          {agoLabel(r.lastTouchedAt)}
+        </div>
+      </div>
+    ),
+  },
+  {
     key: 'contact',
     label: 'Reach',
     width: '115px',
@@ -614,6 +635,17 @@ export default function ForeclosuresPage() {
   };
 
   const openLead = openId ? leads.find((l) => l.id === openId) || null : null;
+  /**
+   * Step through the filtered list from inside the panel.
+   *
+   * Indexed off the SAME array the board renders, so the arrows follow whatever
+   * filter and sort is on screen rather than some separate order. Null at the
+   * ends instead of wrapping, which is what disables the button and makes the
+   * end of the list visible.
+   */
+  const openIndex = leads.findIndex((l) => l.id === openId);
+  const goTo = (i: number) => setOpenId(leads[i] ? (leads[i] as any).id : null);
+
 
   const fetchLeads = useCallback(async () => {
     abortRef.current?.abort();
@@ -1160,6 +1192,9 @@ export default function ForeclosuresPage() {
 
         {openLead && (
           <PipelineWorkPanel
+            onPrev={openIndex > 0 ? () => goTo(openIndex - 1) : null}
+            onNext={openIndex >= 0 && openIndex < leads.length - 1 ? () => goTo(openIndex + 1) : null}
+            position={openIndex >= 0 ? { index: openIndex, total: leads.length } : null}
             title={openLead.address}
             subtitle={`${[openLead.city, openLead.zip].filter(Boolean).join(' ')}${
               openLead.daysToSale != null

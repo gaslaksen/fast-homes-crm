@@ -387,6 +387,23 @@ button.dc-wp-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 button.dc-wp-btn.on { background: var(--mint); color: var(--mintInk); border-color: var(--mint); }
 button.dc-wp-btn.on:hover:not(:disabled) { background: var(--mint2); border-color: var(--mint2); }
 
+/*
+ * Text fields inside the work panel.
+ *
+ * Element-qualified for the same reason every other selector in this block is:
+ * `.dc-board input` at (0,1,1) sets font-family and font-size and would beat a
+ * bare `.dc-input` at (0,1,0). The pair here is written as
+ * `input.dc-input, select.dc-input` rather than `.dc-input` so both keep their
+ * own element in the selector and neither loses to the reset.
+ */
+input.dc-input, select.dc-input {
+  background: var(--bg2); border: 1px solid var(--border2); border-radius: var(--r2);
+  padding: 7px 10px; color: var(--text); font-size: 12.5px; outline: none;
+  min-width: 0;
+}
+input.dc-input:focus, select.dc-input:focus { border-color: var(--mint); }
+input.dc-input::placeholder { color: var(--faint); }
+
 select.dc-wp-sel {
   background: var(--bg2); border: 1px solid var(--border2); border-radius: var(--r2);
   padding: 8px 11px; color: var(--text); font-size: 12.5px; font-weight: 600;

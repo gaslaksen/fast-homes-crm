@@ -6,6 +6,7 @@ import MessageComposer, { type EmailAction } from '@/components/communications/M
 import NotesPanel from '@/components/communications/NotesPanel';
 import type { NoteItem, TimelineItem } from '@/components/communications/types';
 import { authAPI, campaignsAPI, leadsAPI } from '@/lib/api';
+import ContactEditor from './ContactEditor';
 import { useDialer } from '@/components/dialer/DialerContext';
 import { DNC_STATE, phoneDisplay } from './format';
 
@@ -79,6 +80,17 @@ interface Props {
   /** Extra actions in the footer, beside campaign enrolment. */
   actions?: ReactNode;
 
+  /**
+   * Move to the previous or next record in the filtered list behind the panel,
+   * so a queue can be worked without closing and reopening. Null at either end
+   * rather than wrapping: silently looping back to the first record makes it
+   * impossible to tell you have reached the last one.
+   */
+  onPrev?: (() => void) | null;
+  onNext?: (() => void) | null;
+  /** "3 of 45", from the same filtered list. */
+  position?: { index: number; total: number } | null;
+
   onClose: () => void;
   onChanged: () => void;
   say: (msg: string) => void;
@@ -94,6 +106,9 @@ export default function PipelineWorkPanel({
   detail,
   subjects,
   actions,
+  onPrev,
+  onNext,
+  position,
   onClose,
   onChanged,
   say,
@@ -175,11 +190,35 @@ export default function PipelineWorkPanel({
       .catch(() => {});
   }, []);
 
+  /**
+   * Escape closes; the arrows step through the filtered list.
+   *
+   * Both are ignored while focus is in a field, so typing a note or editing a
+   * phone number never navigates away mid-sentence and loses the edit.
+   */
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      const typing =
+        !!el &&
+        (el.tagName === 'INPUT' ||
+          el.tagName === 'TEXTAREA' ||
+          el.tagName === 'SELECT' ||
+          el.isContentEditable);
+      if (e.key === 'Escape') return onClose();
+      if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === 'ArrowLeft' && onPrev) {
+        e.preventDefault();
+        onPrev();
+      }
+      if (e.key === 'ArrowRight' && onNext) {
+        e.preventDefault();
+        onNext();
+      }
+    };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [onClose, onPrev, onNext]);
 
   const call = (n: string) => dialer.startCall({ name: subject.name, phone: n, leadId: subject.leadId });
   const text = (n: string) => {
@@ -228,6 +267,38 @@ export default function PipelineWorkPanel({
                 <div style={{ fontSize: 12, color: 'var(--faint)', marginTop: 2 }}>{meta}</div>
               )}
             </div>
+            {/* Step through the filtered list without closing the panel.
+                Disabled rather than wrapping at either end, so it is obvious
+                when you have reached the last one. */}
+            {(onPrev !== undefined || onNext !== undefined) && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <button
+                  type="button"
+                  className="dc-wp-btn"
+                  onClick={() => onPrev?.()}
+                  disabled={!onPrev}
+                  aria-label="Previous"
+                  title="Previous (left arrow)"
+                >
+                  ‹
+                </button>
+                {position && (
+                  <span style={{ fontSize: 11.5, color: 'var(--faint)', whiteSpace: 'nowrap' }}>
+                    {position.index + 1} of {position.total}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  className="dc-wp-btn"
+                  onClick={() => onNext?.()}
+                  disabled={!onNext}
+                  aria-label="Next"
+                  title="Next (right arrow)"
+                >
+                  ›
+                </button>
+              </div>
+            )}
             <button type="button" className="dc-wp-btn" onClick={onClose} aria-label="Close">
               ✕
             </button>
@@ -286,7 +357,17 @@ export default function PipelineWorkPanel({
           {tab === 'detail' && (
             <div style={{ display: 'grid', gap: 16 }}>
               {detail}
-              <Contacts subject={subject} onCall={call} onText={text} onEmail={mail} />
+              <Contacts
+                subject={subject}
+                onCall={call}
+                onText={text}
+                onEmail={mail}
+                onChanged={() => {
+                  onChanged();
+                  loadComms(true);
+                }}
+                say={say}
+              />
             </div>
           )}
 
@@ -370,16 +451,38 @@ function Contacts({
   onCall,
   onText,
   onEmail,
+  onChanged,
+  say,
 }: {
   subject: PanelSubject;
   onCall: (n: string) => void;
   onText: (n: string) => void;
   onEmail: (a: string) => void;
+  onChanged: () => void;
+  say: (msg: string) => void;
 }) {
+  const [editing, setEditing] = useState(false);
   return (
     <div>
-      <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.3, marginBottom: 6 }}>
-        Reaching {subject.name}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'baseline',
+          gap: 8,
+          marginBottom: 6,
+        }}
+      >
+        <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.3 }}>
+          Reaching {subject.name}
+        </span>
+        <button
+          type="button"
+          className="dc-wp-btn"
+          style={{ marginLeft: 'auto' }}
+          onClick={() => setEditing((v) => !v)}
+        >
+          {editing ? 'Done' : 'Edit contacts'}
+        </button>
       </div>
       {subject.phones.length === 0 && subject.emails.length === 0 && (
         <div style={{ fontSize: 12, color: 'var(--faint)' }}>No phone or email on file.</div>
@@ -417,6 +520,7 @@ function Contacts({
           </div>
         </div>
       ))}
+      {editing && <ContactEditor leadId={subject.leadId} onChanged={onChanged} say={say} />}
     </div>
   );
 }
