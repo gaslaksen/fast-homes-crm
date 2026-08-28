@@ -12,6 +12,7 @@ import {
   SurplusClaimStatus,
   SurplusStage,
   SurplusTier,
+  SurplusQueue,
 } from '@fast-homes/shared';
 import { CLAIM_STATUS_LABEL, CLAIM_STATUS_RANK, isWorkable } from './surplus-classify.util';
 import {
@@ -217,6 +218,84 @@ export function tierOf(lead: SurplusFacts): SurplusTier {
   if (surplus >= 10000 && surplus < 25000 && !dead) return SurplusTier.B;
   if (surplus >= 25000 && dead) return SurplusTier.C;
   return SurplusTier.UNBANDED;
+}
+
+/**
+ * Which work queue a claimant belongs in.
+ *
+ * ── Why this replaced the tier ──────────────────────────────────────────────
+ *
+ * `tierOf` bands the DOLLARS, and the dollars are the one fact that never
+ * decides what happens next. Across the live Duval board Tier A held 31 of 75
+ * claimants and mixed nine callable leads in with denied claims and entities
+ * nobody can phone, which is why the labels went unused.
+ *
+ * These name an ACTION instead, and each is a different person's job: dialling,
+ * a Sunbiz lookup, a paid submission, or a people-search. Money survives as a
+ * sort and a band filter, which is what it is good for: ordering inside a
+ * queue, not choosing between them.
+ *
+ * ── The order is the logic ──────────────────────────────────────────────────
+ *
+ * Read top to bottom and stop at the first hit. Two orderings here are load
+ * bearing:
+ *
+ * CLOSED is tested first, so a denied or already-assigned claim never appears
+ * as callable however good its phone number is. That is the trap: those rows
+ * carry the best contact data on the board precisely because somebody already
+ * worked them.
+ *
+ * CALL is tested before ENTITY. An entity with a number on it got that number
+ * from a person, since the skip trace refuses entities outright, so it is the
+ * one thing on the row worth acting on.
+ */
+export interface QueueFacts {
+  claimStatus?: string | null;
+  cleanPhoneCount?: number | null;
+  doNotCall?: boolean | null;
+  isEntity?: boolean | null;
+  /** Null or 'never' means nothing has been submitted for this claimant. */
+  traceState?: string | null;
+  mailVerdict?: string | null;
+  ownerMailingStreet?: string | null;
+}
+
+export function queueOf(f: QueueFacts): SurplusQueue {
+  const status = (f.claimStatus || SurplusClaimStatus.UNKNOWN) as SurplusClaimStatus;
+
+  if (!isWorkable(status) || f.doNotCall) return SurplusQueue.CLOSED;
+  if ((f.cleanPhoneCount || 0) > 0) return SurplusQueue.CALL;
+  if (f.isEntity) return SurplusQueue.ENTITY;
+
+  // Nothing submitted yet. Worth a credit only if there is a live address to
+  // submit: the clerk's own mail coming back is that address being declared
+  // dead by the only party who tested it.
+  const untried = !f.traceState || f.traceState === 'never';
+  if (untried && f.mailVerdict !== 'undeliverable') return SurplusQueue.TRACE;
+
+  return SurplusQueue.NAME_SEARCH;
+}
+
+/** One line saying what to do, shown beside the queue on the card. */
+export function queueReason(f: QueueFacts): string {
+  switch (queueOf(f)) {
+    case SurplusQueue.CLOSED:
+      return f.doNotCall
+        ? 'Marked do not call'
+        : CLAIM_STATUS_LABEL[(f.claimStatus || SurplusClaimStatus.UNKNOWN) as SurplusClaimStatus];
+    case SurplusQueue.CALL:
+      return `${f.cleanPhoneCount} callable number${f.cleanPhoneCount === 1 ? '' : 's'}`;
+    case SurplusQueue.ENTITY:
+      return 'Entity claimant, the registered agent on Sunbiz is who can sign';
+    case SurplusQueue.TRACE:
+      return f.ownerMailingStreet
+        ? 'Never traced, and the notice address is live'
+        : 'Never traced, though only the property address is known';
+    default:
+      return f.mailVerdict === 'undeliverable'
+        ? "The clerk's mail came back, so no address we hold is live"
+        : 'The address route is spent, search by name';
+  }
 }
 
 /**

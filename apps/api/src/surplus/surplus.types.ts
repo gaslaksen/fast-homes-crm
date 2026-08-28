@@ -80,11 +80,16 @@ export interface SurplusLeadInput {
 export interface SurplusListFilters {
   organizationId?: string | null;
   search?: string;
-  /** Comma-separated SurplusTier values. */
+  /**
+   * Comma-separated SurplusTier values. The dollar band, kept as a filter and
+   * a sort; `queue` is what the board labels and groups by now.
+   */
   tier?: string;
+  /** Comma-separated SurplusQueue values: what to do with the claimant next. */
+  queue?: string;
   stage?: string;
   claimantType?: string;
-  /** 'active' (default), 'all', or one county name. */
+  /** 'all' (default) or one county name we hold leads for. */
   county?: string;
   /** '15-25' | '25-50' | '50+' */
   band?: string;

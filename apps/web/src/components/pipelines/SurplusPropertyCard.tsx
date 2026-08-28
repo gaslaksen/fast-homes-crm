@@ -71,6 +71,10 @@ export interface SurplusProperty {
   claimStatusLabel: string;
   workScore: number;
   workReason: string;
+  queue: string;
+  queueLabel: string;
+  queueReason: string;
+  queueCounts?: Record<string, number>;
   mailVerdict: string | null;
   noticeConfirmed: boolean;
   daysRemaining: number | null;
@@ -90,8 +94,18 @@ interface Props {
   onOpen: () => void;
 }
 
+/** Queue colours. Mint is reachable, slate is finished, the rest is research. */
+const QUEUE_CHIP: Record<string, { bg: string; fg: string }> = {
+  call: CHIP.mint,
+  trace: CHIP.blue,
+  name_search: CHIP.amber,
+  entity: CHIP.violet,
+  closed: CHIP.slate,
+};
+
 export default function SurplusPropertyCard({ p, picked, onPick, onOpen }: Props) {
   const chip = STATUS_CHIP[p.claimStatus] || CHIP.slate;
+  const qChip = QUEUE_CHIP[p.queue] || CHIP.slate;
   const accent = STATUS_ACCENT[p.claimStatus] || 'var(--border2)';
 
   // One line on reachability, in priority order: a live number is the only
@@ -131,6 +145,12 @@ export default function SurplusPropertyCard({ p, picked, onPick, onOpen }: Props
           onChange={(e) => onPick(e.target.checked)}
           aria-label={`Select ${p.address}`}
         />
+        {/* The queue leads, because it is what somebody does with this card.
+            The claim status stays beside it: it is why the queue is what it
+            is, and on a denied claim it is the thing to mention on the call. */}
+        <span className="dc-tag" style={{ background: qChip.bg, color: qChip.fg }}>
+          {p.queueLabel}
+        </span>
         <span className="dc-tag" style={{ background: chip.bg, color: chip.fg }}>
           {p.claimStatusLabel}
         </span>

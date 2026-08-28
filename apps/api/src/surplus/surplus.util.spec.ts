@@ -27,12 +27,15 @@ import {
   canQualify,
   complianceGate,
   SurplusFacts,
+  queueOf,
+  queueReason,
 } from './surplus.util';
 import {
   SurplusClaimantType,
   SurplusClaimStatus,
   SurplusStage,
   SurplusTier,
+  SurplusQueue,
 } from '@fast-homes/shared';
 
 /** Fixed "now" so nothing here depends on the day the suite runs. */
@@ -516,5 +519,72 @@ describe('daysSinceSale', () => {
   it('is null when there is no sale date rather than pretending it is today', () => {
     expect(daysSinceSale({ saleDate: null })).toBeNull();
     expect(daysSinceSale({})).toBeNull();
+  });
+});
+
+describe('queueOf', () => {
+  const base = { claimStatus: 'open', cleanPhoneCount: 0 };
+
+  it('puts a callable open claim in Call now', () => {
+    expect(queueOf({ ...base, cleanPhoneCount: 2 })).toBe(SurplusQueue.CALL);
+  });
+
+  it('closes a claim whose money is gone, however good its number is', () => {
+    // The trap. Resolved claims carry the best contact data on the board
+    // precisely because somebody already worked them, so testing contactability
+    // first would put the deadest rows at the top of the call list.
+    expect(queueOf({ claimStatus: 'distributed', cleanPhoneCount: 4 })).toBe(SurplusQueue.CLOSED);
+    expect(queueOf({ claimStatus: 'assigned', cleanPhoneCount: 4 })).toBe(SurplusQueue.CLOSED);
+  });
+
+  it('keeps a DENIED claim callable, because a denial can be refiled', () => {
+    // Deliberately not closed. A denial is usually a missing document, not a
+    // ruling on entitlement, and the money is still sitting there. This is the
+    // existing isWorkable() contract and the queue defers to it rather than
+    // inventing a second, quieter definition of dead.
+    expect(queueOf({ claimStatus: 'denied', cleanPhoneCount: 4 })).toBe(SurplusQueue.CALL);
+    expect(queueOf({ claimStatus: 'denied', cleanPhoneCount: 0, traceState: 'never' }))
+      .toBe(SurplusQueue.TRACE);
+  });
+
+  it('closes a do-not-call lead whatever the docket says', () => {
+    expect(queueOf({ ...base, cleanPhoneCount: 3, doNotCall: true })).toBe(SurplusQueue.CLOSED);
+  });
+
+  it('calls an entity that somebody found a number for', () => {
+    // The skip trace refuses entities, so a number on one was put there by a
+    // person. It is the only actionable thing on the row.
+    expect(queueOf({ ...base, isEntity: true, cleanPhoneCount: 1 })).toBe(SurplusQueue.CALL);
+    expect(queueOf({ ...base, isEntity: true })).toBe(SurplusQueue.ENTITY);
+  });
+
+  it('offers a trace only when nothing has been submitted', () => {
+    expect(queueOf({ ...base, traceState: 'never' })).toBe(SurplusQueue.TRACE);
+    expect(queueOf({ ...base, traceState: null })).toBe(SurplusQueue.TRACE);
+    expect(queueOf({ ...base, traceState: 'no_person' })).toBe(SurplusQueue.NAME_SEARCH);
+    expect(queueOf({ ...base, traceState: 'mismatch' })).toBe(SurplusQueue.NAME_SEARCH);
+  });
+
+  it('refuses to spend a credit against an address the clerk proved dead', () => {
+    // The clerk is the only party who has actually tested the address, and
+    // every submission against a returned one has come back a stranger.
+    expect(queueOf({ ...base, traceState: 'never', mailVerdict: 'undeliverable' }))
+      .toBe(SurplusQueue.NAME_SEARCH);
+    // Unclaimed is NOT undeliverable: delivery was attempted and notices left,
+    // so the address is live.
+    expect(queueOf({ ...base, traceState: 'never', mailVerdict: 'unclaimed' }))
+      .toBe(SurplusQueue.TRACE);
+  });
+
+  it('lands every claimant in exactly one queue', () => {
+    const combos = [
+      {}, { cleanPhoneCount: 1 }, { isEntity: true }, { doNotCall: true },
+      { claimStatus: 'denied' }, { traceState: 'never' }, { mailVerdict: 'undeliverable' },
+    ];
+    for (const c of combos) {
+      const q = queueOf({ claimStatus: 'open', ...c });
+      expect(Object.values(SurplusQueue)).toContain(q);
+      expect(queueReason({ claimStatus: 'open', ...c })).toBeTruthy();
+    }
   });
 });

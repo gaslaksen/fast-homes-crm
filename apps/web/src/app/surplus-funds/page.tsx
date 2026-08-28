@@ -176,7 +176,43 @@ const CLAIM_STATUS_CHIP: Record<string, { fg: string; bg: string }> = {
  * much, whose is it, where are they, can we reach them. Same question order as
  * the card, so switching views does not switch mental models.
  */
+const QUEUE_CHIP: Record<string, { bg: string; fg: string }> = {
+  call: CHIP.mint,
+  trace: CHIP.blue,
+  name_search: CHIP.amber,
+  entity: CHIP.violet,
+  closed: CHIP.slate,
+};
+
 const SURPLUS_COLUMNS: PipelineColumn<any>[] = [
+  {
+    // What to do with this one, first column and first read. Sorts on the
+    // work score so "Call now" rows arrive in call order rather than
+    // alphabetically by queue name.
+    key: 'queue',
+    label: 'Next step',
+    width: '150px',
+    sortValue: (r) => r.workScore,
+    render: (r) => {
+      const c = QUEUE_CHIP[r.queue] || CHIP.slate;
+      const others = Object.entries(r.queueCounts || {}).filter(([k]) => k !== r.queue);
+      return (
+        <div>
+          <span className="dc-tag" style={{ background: c.bg, color: c.fg }}>
+            {r.queueLabel}
+          </span>
+          {/* A property takes its best claimant's queue, so say when the others
+              are somewhere else rather than implying the whole house is
+              callable. */}
+          {others.length > 0 && (
+            <div style={{ fontSize: 11, color: 'var(--faint)', marginTop: 2 }}>
+              +{others.reduce((n, [, v]) => n + (v as number), 0)} elsewhere
+            </div>
+          )}
+        </div>
+      );
+    },
+  },
   {
     key: 'claimStatus',
     label: 'Status',
@@ -300,6 +336,30 @@ const SURPLUS_KANBAN: PipelineStage[] = SURPLUS_STAGES.map((st) => ({
 
 // ─── Page ───────────────────────────────────────────────────────────────────
 
+/**
+ * The work queues, in the order somebody works them: the reachable first, then
+ * the two kinds of research, then what is finished.
+ *
+ * "Closed" is offered as a filter but never leads, because its whole purpose is
+ * to be out of the way.
+ */
+const QUEUES: [string, string, string][] = [
+  ['call', 'Call now', '\u260E'],
+  ['trace', 'Skip trace', '\u2318'],
+  ['name_search', 'Name search', '\u{1F50E}'],
+  ['entity', 'Entity', '\u{1F3E2}'],
+  ['closed', 'Closed', '\u2713'],
+];
+
+const QUEUE_HELP: Record<string, string> = {
+  call: 'A callable number and a claim still open. Pick up the phone.',
+  trace: 'Nothing submitted yet and the notice address still looks live. Costs a credit.',
+  name_search:
+    'The address route is spent, either the clerk mail came back or a trace found nobody. Search by name and confirm against the property that sold.',
+  entity: 'An LLC, estate or trust. No consumer record exists; the registered agent on Sunbiz is who can sign.',
+  closed: 'Paid out, already assigned, or do-not-call. Nothing to do.',
+};
+
 export default function SurplusFundsPage() {
   /**
    * Subject properties, not leads. One sale can owe several claimants and each
@@ -315,6 +375,8 @@ export default function SurplusFundsPage() {
     openClaims: 0,
     newSevenDays: 0,
     tierA: 0,
+    /** Claimant counts per work queue, keyed by SurplusQueue. */
+    queues: {} as Record<string, number>,
     complianceBlocked: 0,
     netInPipeline: 0,
     belowFloor: 0,
@@ -329,7 +391,8 @@ export default function SurplusFundsPage() {
   // I ring first": it bands the dollars, and a big surplus whose owner already
   // signed with a competitor is worth less than a small one with a live number.
   const [sort, setSort] = useState('work');
-  const [tierQ, setTierQ] = useState<string | null>(null);
+  /** The work queue chip. Replaced the dollar tier as the board's primary cut. */
+  const [queueQ, setQueueQ] = useState<string | null>(null);
   const [chipQ, setChipQ] = useState<string | null>(null);
   const [stageQ, setStageQ] = useState<string | null>(null);
   const [county, setCounty] = useState('all');
@@ -365,7 +428,7 @@ export default function SurplusFundsPage() {
     try {
       const res = await surplusAPI.list({
         search: q || undefined,
-        tier: tierQ || undefined,
+        queue: queueQ || undefined,
         stage: stageQ || undefined,
         claimantType: ctype === 'all' ? undefined : ctype,
         county,
@@ -398,7 +461,7 @@ export default function SurplusFundsPage() {
     } finally {
       setLoading(false);
     }
-  }, [q, tierQ, stageQ, ctype, county, band, chipQ, ageQ, lienWin, hideDead, hideDnc, sort]);
+  }, [q, queueQ, stageQ, ctype, county, band, chipQ, ageQ, lienWin, hideDead, hideDnc, sort]);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -519,10 +582,10 @@ export default function SurplusFundsPage() {
 
   const reset = () => {
     setQ('');
-    setTierQ(null);
+    setQueueQ(null);
     setChipQ(null);
     setStageQ(null);
-    setCounty('active');
+    setCounty('all');
     setBand('all');
     setCtype('all');
     setAgeQ('all');
@@ -666,9 +729,12 @@ export default function SurplusFundsPage() {
               <div className="k">New, 7 days</div>
               <div className="v" style={{ color: 'var(--red)' }}>{stats.newSevenDays}</div>
             </button>
-            <button className={`dc-stat${tierQ === 'A' ? ' on' : ''}`} onClick={() => setTierQ(tierQ === 'A' ? null : 'A')}>
-              <div className="k">Tier A</div>
-              <div className="v" style={{ color: 'var(--amber)' }}>{stats.tierA}</div>
+            <button
+              className={`dc-stat${queueQ === 'call' ? ' on' : ''}`}
+              onClick={() => setQueueQ(queueQ === 'call' ? null : 'call')}
+            >
+              <div className="k">Callable now</div>
+              <div className="v" style={{ color: 'var(--mint)' }}>{stats.queues?.call ?? 0}</div>
             </button>
             {CONTRACTS_ENABLED && (
               <div className="dc-stat">
@@ -701,19 +767,29 @@ export default function SurplusFundsPage() {
               set={setSort}
               opts={[
                 ['work', 'Sort: Call first'],
-                ['notice', 'Sort: Newest notice'],
-                ['surplus', 'Sort: Surplus size'],
+                ['surplus', 'Sort: Biggest surplus'],
                 ['net', 'Sort: Net to claimant'],
-                ['tier', 'Sort: Tier'],
+                ['notice', 'Sort: Newest notice'],
               ]}
             />
           </div>
 
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
             <span className="dc-flabel">Quick filters</span>
-            {['A', 'B', 'C'].map((t) => (
-              <button key={t} className={`dc-tab${tierQ === t ? ' on' : ''}`} onClick={() => setTierQ(tierQ === t ? null : t)}>
-                {TIER[t].icon} {TIER[t].label}
+            {/* The work queue, not the dollar band. Each names what to do next
+                and who does it; the dollars are a sort, which is what they are
+                good for: ordering inside a queue, not choosing between them. */}
+            {QUEUES.map(([k, label, icon]) => (
+              <button
+                key={k}
+                className={`dc-tab${queueQ === k ? ' on' : ''}`}
+                onClick={() => setQueueQ(queueQ === k ? null : k)}
+                title={QUEUE_HELP[k]}
+              >
+                {icon} {label}
+                {stats.queues?.[k] != null && (
+                  <span style={{ marginLeft: 5, opacity: 0.6 }}>{stats.queues[k]}</span>
+                )}
               </button>
             ))}
             <span className="dc-sep" />

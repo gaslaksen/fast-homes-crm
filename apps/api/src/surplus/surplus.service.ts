@@ -8,6 +8,8 @@ import {
   SurplusFundLocation,
   SurplusTier,
   SurplusClaimStatus,
+  SURPLUS_QUEUE_LABEL,
+  SurplusQueue,
 } from '@fast-homes/shared';
 import { CLAIM_STATUS_LABEL } from './surplus-classify.util';
 import { nameSearchPlan } from './surplus-name-search.util';
@@ -29,6 +31,8 @@ import {
   claimantTypeFromText,
   stageFromText,
   tierOf,
+  queueOf,
+  queueReason,
   dripTrack,
   isDeceased,
   noticeAge,
@@ -79,6 +83,16 @@ export interface CreateSurplusResult {
   created: boolean;
   reason?: string;
 }
+
+/**
+ * A claimant name that belongs to an organization rather than a person.
+ *
+ * One definition, used by both the work queue and the name-search plan. They
+ * disagreeing would put a claimant in the "find the registered agent" queue
+ * while handing them a people-search link, or the reverse.
+ */
+const ENTITY_NAME =
+  /\b(LLC|L\.L\.C|INC|CORP|CORPORATION|COMPANY|LP|LLP|LLLP|LTD|TRUST|ASSOCIATION|CHURCH|BANK|PARTNERS|HOLDINGS)\b/i;
 
 @Injectable()
 export class SurplusService {
@@ -555,6 +569,11 @@ export class SurplusService {
       rows = rows.filter((r) => r.workScore > 0 || r.stage === SurplusStage.DEAD);
     }
 
+    // The queue is computed, so it filters here rather than in SQL. Cheap: the
+    // list already materializes every matching row before paginating.
+    const queues = asList(filters.queue);
+    if (queues.length) rows = rows.filter((r) => queues.includes(r.queue));
+
     if (filters.lienWindow === 'open') rows = rows.filter((r) => r.lienWindowOpen);
     if (filters.lienWindow === 'closed') rows = rows.filter((r) => !r.lienWindowOpen);
     if (filters.blockedOnly) rows = rows.filter((r) => !r.compliance.clear);
@@ -563,6 +582,7 @@ export class SurplusService {
       rows.sort((a, b) => (a.noticeAge ?? 9999) - (b.noticeAge ?? 9999));
     }
     if (filters.sort === 'net') rows.sort((a, b) => b.netToClaimant - a.netToClaimant);
+    if (filters.sort === 'surplus') rows.sort((a, b) => b.grossSurplus - a.grossSurplus);
     // The default the board opens on: who to call first.
     if (!filters.sort || filters.sort === 'work') {
       rows.sort((a, b) => b.workScore - a.workScore || b.netToClaimant - a.netToClaimant);
@@ -671,6 +691,12 @@ export class SurplusService {
       openClaims: feed.length,
       newSevenDays: feed.filter((r) => r.noticeAge !== null && r.noticeAge <= 7).length,
       tierA: feed.filter((r) => r.tier === SurplusTier.A).length,
+      // Counts per work queue, so the quick filters can show what they hold
+      // without the board guessing.
+      queues: Object.values(SurplusQueue).reduce((acc: Record<string, number>, q) => {
+        acc[q] = feed.filter((r) => r.queue === q).length;
+        return acc;
+      }, {}),
       complianceBlocked: all.filter((r) => !r.compliance.clear).length,
       netInPipeline: feed.reduce((acc, r) => acc + r.netToClaimant, 0),
       belowFloor: all.length - all.filter((r) => r.grossSurplus >= SURPLUS_FLOOR).length,
@@ -789,9 +815,7 @@ export class SurplusService {
         ownerState: d.ownerMailingState || lead.propertyState,
         propertyAddress: lead.propertyAddress,
         propertyCity: lead.propertyCity,
-        isEntity: /\b(LLC|L\.L\.C|INC|CORP|CORPORATION|COMPANY|LP|LLP|LLLP|LTD|TRUST|ASSOCIATION|CHURCH|BANK|PARTNERS|HOLDINGS)\b/i.test(
-          `${lead.sellerFirstName || ''} ${lead.sellerLastName || ''}`,
-        ),
+        isEntity: ENTITY_NAME.test(`${lead.sellerFirstName || ''} ${lead.sellerLastName || ''}`),
         mailVerdict: d.mailVerdict,
       }),
 
@@ -828,7 +852,27 @@ export class SurplusService {
 
       createdAt: lead.createdAt,
       ...this.workRank(d, facts, phones),
+      ...this.queueOf(d, lead, phones, traceState(d, phones.length + emails.length)),
     };
+  }
+
+  /**
+   * Which work queue this claimant is in, and why. Computed per request like
+   * workScore, so a rule change lands on the next page load rather than needing
+   * a backfill over every row.
+   */
+  private queueOf(d: any, lead: any, phones: { dnc?: string | null }[], trace: { state: string }) {
+    const f = {
+      claimStatus: d.claimStatus,
+      cleanPhoneCount: phones.filter((p) => !p.dnc).length,
+      doNotCall: d.doNotCall,
+      isEntity: ENTITY_NAME.test(`${lead.sellerFirstName || ''} ${lead.sellerLastName || ''}`),
+      traceState: trace.state,
+      mailVerdict: d.mailVerdict,
+      ownerMailingStreet: d.ownerMailingStreet,
+    };
+    const queue = queueOf(f);
+    return { queue, queueLabel: SURPLUS_QUEUE_LABEL[queue], queueReason: queueReason(f) };
   }
 
   /**
@@ -942,6 +986,17 @@ export function groupByProperty(rows: any[]): any[] {
       anyMismatch: ranked.some((m) => m.contactMismatch),
       /** Claimants nothing has been submitted for. Distinct from "no numbers". */
       untracedCount: ranked.filter((m) => m.trace?.state === 'never').length,
+      // A property takes its most actionable claimant's queue, since that is
+      // the work it represents: one callable owner makes the house callable
+      // even when their co-owner is a dead end.
+      queue: head.queue,
+      queueLabel: head.queueLabel,
+      queueReason: head.queueReason,
+      /** How many claimants sit in each queue, for the card. */
+      queueCounts: ranked.reduce((acc: Record<string, number>, m: any) => {
+        acc[m.queue] = (acc[m.queue] || 0) + 1;
+        return acc;
+      }, {}),
       allDeceased: ranked.every((m) => m.isDeceased),
       anyDeceased: ranked.some((m) => m.isDeceased),
       // The stage the property is furthest along on.

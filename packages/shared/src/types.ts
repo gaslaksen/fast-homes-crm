@@ -203,6 +203,40 @@ export enum SurplusClaimantType {
  * still shows the full $27,929.98, so a balance is not evidence the money is
  * still there.
  */
+/**
+ * What to DO with a surplus claimant next.
+ *
+ * This replaces the dollar-band tier as the board's primary label. Tier banded
+ * the money, which is the one fact that never decides what happens next: a $40k
+ * claim whose owner cannot be found is not workable today and a $12k one with a
+ * live mobile is. In practice nobody used the A/B/C labels, because "Tier A"
+ * held callable leads and dead ends side by side.
+ *
+ * Every claimant lands in exactly one of these, and each names a different
+ * action by a different person. Money is still there, as a sort and a band
+ * filter, which is what it is actually good for: ordering within a queue.
+ */
+export enum SurplusQueue {
+  /** Reachable now: a callable number and a claim still open. */
+  CALL = 'call',
+  /** No consumer record exists. The registered agent on Sunbiz can sign. */
+  ENTITY = 'entity',
+  /** Never submitted, and the address still looks live. Spend a credit. */
+  TRACE = 'trace',
+  /** The address route is spent. Name search, obituary, official records. */
+  NAME_SEARCH = 'name_search',
+  /** Denied, paid out, already assigned, or do-not-call. Nothing to do. */
+  CLOSED = 'closed',
+}
+
+export const SURPLUS_QUEUE_LABEL: Record<SurplusQueue, string> = {
+  [SurplusQueue.CALL]: 'Call now',
+  [SurplusQueue.ENTITY]: 'Entity, find the agent',
+  [SurplusQueue.TRACE]: 'Skip trace it',
+  [SurplusQueue.NAME_SEARCH]: 'Name search',
+  [SurplusQueue.CLOSED]: 'Closed',
+};
+
 export enum SurplusClaimStatus {
   /// Notice of surplus mailed, nothing filed against it. Chase these first.
   OPEN = 'open',
