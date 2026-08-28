@@ -801,7 +801,7 @@ export class SurplusService {
       // Where the skip trace stands for THIS claimant. Co-claimants on one
       // address get one submission and routinely end differently, so this is
       // per person and never rolled up to the property.
-      trace: traceState(d),
+      trace: traceState(d, phones.length + emails.length),
       doNotCall: d.doNotCall,
       callNotes: d.callNotes || '',
       touchDays,

@@ -317,3 +317,19 @@ describe('capacity markers are not surnames', () => {
     expect(matchRecipient('CLARENCE L TYSON ET AL', R)?.name).toBe('CLARENCE L TYSON');
   });
 });
+
+describe('traceState never contradicts the contacts on the row', () => {
+  it('refuses to report "nobody found" on a row holding numbers', () => {
+    // Calvin Johnson read "Traced, nobody found" while carrying four numbers.
+    // The outcome came from a migration guessing at note prose; the numbers are
+    // a fact.
+    const t = traceState({ tracedAt: new Date(), traceOutcome: 'no_person' }, 4);
+    expect(t.state).toBe('unverified');
+    expect(t.actionable).toBe(true);
+  });
+
+  it('leaves an outcome that agrees with the contacts alone', () => {
+    expect(traceState({ tracedAt: new Date(), traceOutcome: 'no_person' }, 0).state).toBe('no_person');
+    expect(traceState({ tracedAt: new Date(), traceOutcome: 'matched' }, 3).state).toBe('matched');
+  });
+});

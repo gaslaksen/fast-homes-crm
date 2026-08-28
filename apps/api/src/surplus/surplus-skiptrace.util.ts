@@ -431,13 +431,17 @@ const TRACE_LABEL: Record<string, { label: string; tone: TraceState['tone'] }> =
   skipped: { label: 'Not traced, refused', tone: 'idle' },
 };
 
-export function traceState(d: {
-  tracedAt?: Date | null;
-  traceOutcome?: string | null;
-  traceDetail?: string | null;
-  contactMismatch?: boolean | null;
-  mismatchedName?: string | null;
-}): TraceState {
+export function traceState(
+  d: {
+    tracedAt?: Date | null;
+    traceOutcome?: string | null;
+    traceDetail?: string | null;
+    contactMismatch?: boolean | null;
+    mismatchedName?: string | null;
+  },
+  /** Contacts actually on the row. The outcome must not contradict them. */
+  contactCount = 0,
+): TraceState {
   // Rows traced before the outcome column existed carry only the mismatch flag.
   // Reading it keeps their history rather than showing them as never tried.
   const outcome = d.traceOutcome || (d.contactMismatch ? 'mismatch' : null);
@@ -452,6 +456,23 @@ export function traceState(d: {
       actionable: true,
     };
   }
+  // A row holding numbers cannot also be reporting that nothing was found. The
+  // migration that backfilled outcomes had to guess from note prose, and it
+  // guessed wrong on rows whose notes carried more than one trace line: Calvin
+  // Johnson read "nobody found" while holding four numbers. Trust the contacts,
+  // which are a fact, over the outcome, which is a reconstruction.
+  if (contactCount > 0 && (outcome === 'no_person' || outcome === 'no_contact' || outcome === 'skipped')) {
+    return {
+      state: 'unverified',
+      label: 'Traced, contacts on file',
+      tone: 'warn',
+      detail:
+        'Contacts are attached from an earlier trace, but the recorded outcome does not match them, so how they were verified is not known. Re-trace to establish it.',
+      at: d.tracedAt,
+      actionable: true,
+    };
+  }
+
   const meta = TRACE_LABEL[outcome] || { label: 'Traced', tone: 'idle' as const };
   return {
     state: outcome as TraceState['state'],
