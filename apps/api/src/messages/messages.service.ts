@@ -7,6 +7,7 @@ import { CampaignEnrollmentService } from '../campaigns/campaign-enrollment.serv
 import { LeadsService } from '../leads/leads.service';
 import { SmsProvider, createSmsProvider } from './sms.provider';
 import { MailerService } from '../mailer/mailer.service';
+import { brandForLeadSource } from '../common/company.constants';
 import { PushService } from '../push/push.service';
 import { ComplianceService } from './compliance.service';
 import { PhoneNumbersService } from '../phone-numbers/phone-numbers.service';
@@ -745,10 +746,12 @@ You decide the right approach based on the conversation flow.${photoNudge}`.trim
     sellerFirstName: string;
     sellerEmail: string | null;
     propertyAddress: string;
+    source: string;
   }): Promise<void> {
     if (!lead.sellerEmail || !lead.organizationId) return;
 
-    const emailBody = `Hi ${lead.sellerFirstName},\n\nThis is Dax from Quick Cash Home Buyers. We just received your information about selling your property at ${lead.propertyAddress}.\n\nWe'd love to learn more about your situation. How much are you asking for the property? And what's your ideal timeline to sell?\n\nLooking forward to hearing from you!`;
+    const brand = brandForLeadSource(lead.source);
+    const emailBody = `Hi ${lead.sellerFirstName},\n\nThis is Dax from ${brand.companyName}. We just received your information about selling your property at ${lead.propertyAddress}.\n\nWe'd love to learn more about your situation. How much are you asking for the property? And what's your ideal timeline to sell?\n\nLooking forward to hearing from you!`;
 
     const unsubscribeUrl = this.mailerService.buildUnsubscribeUrl(lead.id);
 
@@ -759,6 +762,7 @@ You decide the right approach based on the conversation flow.${photoNudge}`.trim
       bodyText: emailBody,
       leadId: lead.id,
       listUnsubscribeUrl: unsubscribeUrl,
+      brand,
     });
 
     this.logger.log(`Initial email outreach sent for lead ${lead.id} to ${lead.sellerEmail}`);
@@ -1377,7 +1381,13 @@ You decide the right approach based on the conversation flow.${photoNudge}`.trim
   ) {
     const lead = await this.prisma.lead.findUnique({
       where: { id: leadId },
-      select: { id: true, organizationId: true, sellerEmail: true, propertyAddress: true },
+      select: {
+        id: true,
+        organizationId: true,
+        sellerEmail: true,
+        propertyAddress: true,
+        source: true,
+      },
     });
     if (!lead) throw new NotFoundException('Lead not found');
     if (!lead.organizationId) throw new BadRequestException('Lead has no organization');
@@ -1416,6 +1426,7 @@ You decide the right approach based on the conversation flow.${photoNudge}`.trim
         leadId: lead.id,
         inReplyToEmailId: params.inReplyToEmailId,
         sentByUserId: userId,
+        brand: brandForLeadSource(lead.source),
       });
     } catch (err: any) {
       // Surface the real Mailgun reason (e.g. auth/region/domain) to the UI

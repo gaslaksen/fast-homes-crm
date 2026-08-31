@@ -4,15 +4,22 @@ import { PrismaService } from '../prisma/prisma.service';
 import Mailgun from 'mailgun.js';
 import FormData from 'form-data';
 import * as crypto from 'crypto';
-import { COMPANY_NAME, COMPANY_PHONE, COMPANY_PHONE_E164, COMPANY_WEBSITE, COMPANY_WEBSITE_URL } from '../common/company.constants';
+import { Brand, DEFAULT_BRAND } from '../common/company.constants';
 
 /**
- * All outbound email flows through Mailgun on the verified sending subdomain
- * (MAILGUN_DOMAIN, e.g. crm.quickcashhomebuyers.com). Visible From addresses
- * use the root domain (deals@ / user@quickcashhomebuyers.com) so recipients see
- * a natural address; DKIM signs as the subdomain. Replies are routed back into
- * Dealcore via a per-lead Reply-To (reply+{leadId}@MAILGUN_DOMAIN) whose MX
- * points at Mailgun, which POSTs them to the inbound webhook.
+ * All outbound email flows through Mailgun on a verified sending subdomain
+ * (e.g. crm.quickcashhomebuyers.com). Visible From addresses use the matching
+ * root domain (deals@ / user@quickcashhomebuyers.com) so recipients see a
+ * natural address; DKIM signs as the subdomain. Replies are routed back into
+ * Dealcore via a Reply-To on that same subdomain, whose MX points at Mailgun,
+ * which POSTs them to the inbound webhook.
+ *
+ * There is more than one brand. Which one a lead gets is decided by
+ * brandForLeadSource() in company.constants, and the brand then picks the
+ * sending domain, the From identity and the signature together. Anything with
+ * no lead behind it (password resets, the daily brief, partner deal packages)
+ * stays on the default brand. Each brand needs its own verified domain and its
+ * own Mailgun inbound route; the webhook signing key is account-wide.
  */
 /**
  * Everything Mailgun told us about a failure, on one line.
@@ -95,8 +102,48 @@ export class MailerService {
     private prisma: PrismaService,
   ) {}
 
+  /** The default brand's sending domain, for mail that has no lead behind it. */
   private get domain(): string {
-    return this.config.get<string>('MAILGUN_DOMAIN') || 'crm.quickcashhomebuyers.com';
+    return this.brandConfig().domain;
+  }
+
+  /**
+   * How a brand actually sends: verified Mailgun domain plus deals identity.
+   *
+   * A brand whose domain is not configured yet falls back to the default brand
+   * entirely, rather than pushing its copy through another brand's domain or
+   * failing the send. DNS and Mailgun verification land before the env var
+   * does, so an unset var means "not live yet" and those leads keep getting
+   * default-brand email until it is. The returned `brand` is the one actually
+   * used, so the signature can never disagree with the From address.
+   */
+  private brandConfig(brand: Brand = DEFAULT_BRAND): {
+    brand: Brand;
+    domain: string;
+    dealsAddress: string;
+    dealsName: string;
+  } {
+    if (brand.key === 'digdeeper') {
+      const domain = (this.config.get<string>('MAILGUN_DIGDEEPER_DOMAIN') || '').trim();
+      if (!domain) {
+        this.logger.warn(
+          `MAILGUN_DIGDEEPER_DOMAIN not set, sending as ${DEFAULT_BRAND.companyName} instead of ${brand.companyName}`,
+        );
+        return this.brandConfig(DEFAULT_BRAND);
+      }
+      return {
+        brand,
+        domain,
+        dealsAddress: this.config.get<string>('EMAIL_DIGDEEPER_FROM') || 'deals@digdeeperllc.com',
+        dealsName: this.config.get<string>('EMAIL_DIGDEEPER_FROM_NAME') || brand.companyName,
+      };
+    }
+    return {
+      brand: DEFAULT_BRAND,
+      domain: this.config.get<string>('MAILGUN_DOMAIN') || 'crm.quickcashhomebuyers.com',
+      dealsAddress: this.config.get<string>('EMAIL_DEALS_FROM') || 'deals@quickcashhomebuyers.com',
+      dealsName: this.config.get<string>('EMAIL_DEALS_FROM_NAME') || DEFAULT_BRAND.companyName,
+    };
   }
 
   private get mg() {
@@ -114,9 +161,9 @@ export class MailerService {
    * In-Reply-To header first, then by sender email - so the address itself
    * carries no lead id and reads naturally (deals@crm..., ian@crm...).
    */
-  private inboundReplyTo(localPart: string): string {
+  private inboundReplyTo(localPart: string, domain: string = this.domain): string {
     const clean = (localPart || 'deals').trim().toLowerCase().replace(/[^a-z0-9._-]/g, '') || 'deals';
-    return `${clean}@${this.domain}`;
+    return `${clean}@${domain}`;
   }
 
   private buildFrom(displayName: string | undefined, address: string): string {
@@ -141,7 +188,10 @@ export class MailerService {
     leadId?: string | null;
     sentByUserId?: string | null;
     tags?: string[];
+    /** Sending brand's verified domain; defaults to the default brand's. */
+    domain?: string;
   }): Promise<{ mailgunId: string | null }> {
+    const domain = params.domain || this.domain;
     const message: Record<string, any> = {
       from: params.from,
       to: params.to,
@@ -153,7 +203,7 @@ export class MailerService {
     if (params.inReplyTo) message['h:In-Reply-To'] = params.inReplyTo;
     if (params.references) message['h:References'] = params.references;
     if (params.listUnsubscribeUrl) {
-      message['h:List-Unsubscribe'] = `<mailto:unsubscribe@${this.domain}>, <${params.listUnsubscribeUrl}>`;
+      message['h:List-Unsubscribe'] = `<mailto:unsubscribe@${domain}>, <${params.listUnsubscribeUrl}>`;
       message['h:List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click';
     }
     if (params.leadId) message['v:leadId'] = params.leadId;
@@ -161,7 +211,7 @@ export class MailerService {
 
     let mailgunId: string | null = null;
     try {
-      const res = await this.mg.messages.create(this.domain, message as any);
+      const res = await this.mg.messages.create(domain, message as any);
       // Mailgun returns id wrapped in angle brackets: <xxx@domain>
       mailgunId = (res?.id || '').replace(/^</, '').replace(/>$/, '') || null;
     } catch (err: any) {
@@ -200,6 +250,10 @@ export class MailerService {
   /**
    * Initial lead outreach + any automated org-level email, sent as deals@.
    * Body is wrapped with the branded signature + unsubscribe footer.
+   *
+   * `brand` decides the sending domain, the From identity and the signature
+   * together. Callers with a lead in hand should pass brandForLeadSource(),
+   * never a brand of their own choosing.
    */
   async sendAsDeals(params: {
     orgId: string;
@@ -209,29 +263,39 @@ export class MailerService {
     leadId?: string;
     listUnsubscribeUrl?: string;
     sentByUserId?: string | null;
+    brand?: Brand;
   }): Promise<{ mailgunId: string | null }> {
-    const address = this.config.get<string>('EMAIL_DEALS_FROM') || 'deals@quickcashhomebuyers.com';
-    const displayName = this.config.get<string>('EMAIL_DEALS_FROM_NAME') || 'Quick Cash Home Buyers';
-    const { bodyText, bodyHtml } = this.wrapEmailBody(params.bodyText, params.listUnsubscribeUrl);
+    const identity = this.brandConfig(params.brand);
+    const { bodyText, bodyHtml } = this.wrapEmailBody(
+      params.bodyText,
+      params.listUnsubscribeUrl,
+      identity.brand,
+    );
     return this.send({
-      from: this.buildFrom(displayName, address),
-      fromAddress: address,
+      from: this.buildFrom(identity.dealsName, identity.dealsAddress),
+      fromAddress: identity.dealsAddress,
       to: params.to,
       subject: params.subject,
       bodyText,
       bodyHtml,
-      replyTo: this.inboundReplyTo('deals'),
+      replyTo: this.inboundReplyTo('deals', identity.domain),
       listUnsubscribeUrl: params.listUnsubscribeUrl,
       orgId: params.orgId,
       leadId: params.leadId,
       sentByUserId: params.sentByUserId ?? null,
       tags: ['deals-outreach'],
+      domain: identity.domain,
     });
   }
 
   /**
    * A reply/message sent by a logged-in user, appearing from their own
    * root-domain address (e.g. Ian@quickcashhomebuyers.com).
+   *
+   * On a non-default brand the user has no mailbox to send from, so the From
+   * address becomes that brand's deals@ while the display name stays the
+   * user's. A seller on a Dig Deeper thread sees "Ian" from Dig Deeper, not
+   * the same person suddenly writing from another company.
    */
   async sendAsUser(params: {
     orgId: string;
@@ -243,7 +307,10 @@ export class MailerService {
     leadId?: string;
     inReplyToEmailId?: string;
     sentByUserId?: string | null;
+    brand?: Brand;
   }): Promise<{ mailgunId: string | null }> {
+    const identity = this.brandConfig(params.brand);
+    const ownBrand = identity.brand.key === DEFAULT_BRAND.key;
     const displayName = [params.user.firstName, params.user.lastName].filter(Boolean).join(' ') || undefined;
 
     // Thread onto the prior message if replying within a lead conversation.
@@ -260,22 +327,25 @@ export class MailerService {
       }
     }
 
-    const bodyHtml = params.bodyHtml ?? this.wrapEmailBody(params.bodyText).bodyHtml;
-    const userLocalPart = params.user.email.split('@')[0];
+    const bodyHtml =
+      params.bodyHtml ?? this.wrapEmailBody(params.bodyText, undefined, identity.brand).bodyHtml;
+    const fromAddress = ownBrand ? params.user.email : identity.dealsAddress;
+    const replyLocalPart = ownBrand ? params.user.email.split('@')[0] : 'deals';
     return this.send({
-      from: this.buildFrom(displayName, params.user.email),
-      fromAddress: params.user.email,
+      from: this.buildFrom(displayName, fromAddress),
+      fromAddress,
       to: params.to,
       subject: params.subject,
       bodyText: params.bodyText,
       bodyHtml,
-      replyTo: this.inboundReplyTo(userLocalPart),
+      replyTo: this.inboundReplyTo(replyLocalPart, identity.domain),
       inReplyTo,
       references,
       orgId: params.orgId,
       leadId: params.leadId,
       sentByUserId: params.sentByUserId ?? null,
       tags: ['user-reply'],
+      domain: identity.domain,
     });
   }
 
@@ -410,16 +480,22 @@ export class MailerService {
   }
 
   /**
-   * Wrap a plain-text body into a branded plain+HTML pair with a Quick Cash
-   * Home Buyers signature and an optional unsubscribe footer.
+   * Wrap a plain-text body into a branded plain+HTML pair with the sending
+   * brand's signature and an optional unsubscribe footer. Defaults to the
+   * default brand so existing callers are unaffected.
    */
-  wrapEmailBody(bodyText: string, unsubscribeUrl?: string): { bodyText: string; bodyHtml: string } {
-    const companyName = COMPANY_NAME;
-    const phone = COMPANY_PHONE;
-    const website = COMPANY_WEBSITE;
-    const websiteHref = COMPANY_WEBSITE_URL;
+  wrapEmailBody(
+    bodyText: string,
+    unsubscribeUrl?: string,
+    brand: Brand = DEFAULT_BRAND,
+  ): { bodyText: string; bodyHtml: string } {
+    const companyName = brand.companyName;
+    const phone = brand.phone;
+    const website = brand.website;
+    const websiteHref = brand.websiteUrl;
 
-    const textSignature = `\n\n-\n${companyName}\n${phone}\n${website}`;
+    // A brand with no public site omits the line rather than printing a blank.
+    const textSignature = `\n\n-\n${companyName}\n${phone}${website ? `\n${website}` : ''}`;
     const textUnsub = unsubscribeUrl ? `\n\nNot interested? Unsubscribe: ${unsubscribeUrl}` : '';
     const finalText = `${bodyText}${textSignature}${textUnsub}`;
 
@@ -445,8 +521,8 @@ export class MailerService {
 ${paragraphs}
 <div style="margin-top:24px;padding-top:16px;border-top:1px solid #e5e5e5;font-size:14px;color:#555;">
   <div style="font-weight:600;color:#222;">${companyName}</div>
-  <div><a href="tel:${COMPANY_PHONE_E164}" style="color:#555;text-decoration:none;">${phone}</a></div>
-  <div><a href="${websiteHref}" style="color:#555;text-decoration:none;">${website}</a></div>
+  <div><a href="tel:${brand.phoneE164}" style="color:#555;text-decoration:none;">${phone}</a></div>
+  ${website && websiteHref ? `<div><a href="${escape(websiteHref)}" style="color:#555;text-decoration:none;">${escape(website)}</a></div>` : ''}
 </div>
 ${unsubHtml}
 </div>

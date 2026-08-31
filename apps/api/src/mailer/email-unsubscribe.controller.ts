@@ -11,7 +11,7 @@ import {
 import { Response } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailerService } from './mailer.service';
-import { COMPANY_NAME, COMPANY_PHONE } from '../common/company.constants';
+import { Brand, DEFAULT_BRAND, brandForLeadSource } from '../common/company.constants';
 
 /**
  * Public (no auth) endpoints that honor the `List-Unsubscribe` /
@@ -48,21 +48,26 @@ export class EmailUnsubscribeController {
 
   private async processUnsubscribe(
     token: string,
-  ): Promise<{ ok: boolean; message: string }> {
+  ): Promise<{ ok: boolean; message: string; brand: Brand }> {
     const leadId = this.mailerService.verifyUnsubscribeToken(token || '');
     if (!leadId) {
       this.logger.warn(`Unsubscribe rejected: invalid token`);
-      return { ok: false, message: 'Invalid or expired unsubscribe link.' };
+      // No lead, so no brand to show: fall back to the default.
+      return { ok: false, message: 'Invalid or expired unsubscribe link.', brand: DEFAULT_BRAND };
     }
 
     const lead = await this.prisma.lead.findUnique({
       where: { id: leadId },
-      select: { id: true, sellerEmail: true },
+      select: { id: true, sellerEmail: true, source: true },
     });
     if (!lead) {
       this.logger.warn(`Unsubscribe rejected: lead ${leadId} not found`);
-      return { ok: false, message: 'Lead not found.' };
+      return { ok: false, message: 'Lead not found.', brand: DEFAULT_BRAND };
     }
+
+    // The page must name the same company the email did, or the seller lands
+    // on an unsubscribe confirmation from a business they never heard from.
+    const brand = brandForLeadSource(lead.source);
 
     await this.prisma.lead.update({
       where: { id: leadId },
@@ -81,10 +86,11 @@ export class EmailUnsubscribeController {
     return {
       ok: true,
       message: "You've been unsubscribed. We won't contact you again.",
+      brand,
     };
   }
 
-  private renderPage({ ok, message }: { ok: boolean; message: string }): string {
+  private renderPage({ ok, message, brand }: { ok: boolean; message: string; brand: Brand }): string {
     const title = ok ? 'Unsubscribed' : 'Something went wrong';
     const color = ok ? '#0a7d30' : '#b42318';
     return `<!DOCTYPE html>
@@ -99,7 +105,7 @@ export class EmailUnsubscribeController {
   <div style="font-size:20px;font-weight:600;color:${color};margin-bottom:12px;">${title}</div>
   <div style="font-size:15px;color:#444;line-height:1.5;">${message}</div>
   <div style="margin-top:24px;font-size:13px;color:#888;">
-    ${COMPANY_NAME} &middot; ${COMPANY_PHONE}
+    ${brand.companyName} &middot; ${brand.phone}
   </div>
 </div>
 </body>

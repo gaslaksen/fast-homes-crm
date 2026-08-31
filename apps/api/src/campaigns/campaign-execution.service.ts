@@ -17,6 +17,7 @@ import {
   isMailgunRateLimit,
   parseMailgunRetryAfter,
 } from '../mailer/mailer.service';
+import { brandForLeadSource } from '../common/company.constants';
 
 // Instance tag for distinguishing Railway replicas in logs.
 const INSTANCE_TAG = `${os.hostname()}/${process.pid}`;
@@ -451,14 +452,23 @@ export class CampaignExecutionService implements OnModuleInit {
       if (!orgId) {
         return { kind: 'SKIPPED', reason: `lead ${lead.id} has no organizationId` };
       }
+      const brand = brandForLeadSource(lead.source);
       const dealsFrom =
-        this.config.get<string>('EMAIL_DEALS_FROM') || 'deals@quickcashhomebuyers.com';
+        brand.key === 'digdeeper'
+          ? this.config.get<string>('EMAIL_DIGDEEPER_FROM') || 'deals@digdeeperllc.com'
+          : this.config.get<string>('EMAIL_DEALS_FROM') || 'deals@quickcashhomebuyers.com';
 
       // Daily then hourly ceilings, across ALL outbound email rather than just
       // this campaign or this sender, because Mailgun's limits are per domain
       // and every one of our senders shares one. Crossing them does not merely
       // reject the extra message: it locks the domain out, taking the daily
       // brief and every reply down with the campaign.
+      //
+      // Deliberately still counted across brands even though each brand now
+      // has its own domain and so its own limit. The ceiling is conservative
+      // rather than wrong, and a shared counter cannot let a second brand
+      // quietly lift the total we send. Split it per domain if Dig Deeper
+      // volume ever makes the shared ceiling the binding constraint.
       const throttle = await this.emailThrottle();
       if (throttle) return throttle;
 
@@ -471,6 +481,7 @@ export class CampaignExecutionService implements OnModuleInit {
           bodyText: renderedBody,
           leadId: lead.id,
           listUnsubscribeUrl: unsubUrl,
+          brand,
         });
         // MailerService persists the Email row but does not touch the lead;
         // record the EMAIL_SENT touch here to keep pipeline tracking accurate.
