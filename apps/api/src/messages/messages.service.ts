@@ -1362,6 +1362,33 @@ You decide the right approach based on the conversation flow.${photoNudge}`.trim
   }
 
   /**
+   * The address an email from this user to this lead would send from, and the
+   * brand it would send as. Nothing is sent.
+   *
+   * The composer cannot work this out on its own: the brand comes off the
+   * lead and the addresses come from server config. Returns null rather than
+   * throwing, because a missing "sending as" line is a smaller problem than a
+   * composer that will not open.
+   */
+  async getEmailSendIdentity(
+    leadId: string,
+    userId?: string,
+  ): Promise<{ fromAddress: string; brandName: string } | null> {
+    if (!userId) return null;
+    const [lead, user] = await Promise.all([
+      this.prisma.lead.findUnique({ where: { id: leadId }, select: { source: true } }),
+      this.prisma.user.findUnique({ where: { id: userId }, select: { email: true } }),
+    ]).catch(() => [null, null] as const);
+    if (!lead || !user?.email) return null;
+
+    const { fromAddress, brandName } = this.mailerService.userSendIdentity(
+      brandForLeadSource(lead.source),
+      user.email,
+    );
+    return { fromAddress, brandName };
+  }
+
+  /**
    * Send an email within a lead conversation, from the logged-in user's own
    * address. Handles replies (to the seller) and forwards (to an arbitrary
    * recipient via `to`). Accepts rich HTML from the composer; a plain-text

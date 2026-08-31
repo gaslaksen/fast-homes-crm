@@ -318,8 +318,13 @@ export default function CommunicationsTimeline({
                   </div>
                   {expanded ? (
                     <div className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
-                      <div className="text-[11px] text-gray-500 mb-1">
-                        {outbound ? `To: ${item.payload.toAddress}` : `From: ${item.payload.fromAddress}`}
+                      {/* Both sides, both directions. Which address WE sent
+                          from is not cosmetic: a surplus thread sends as Dig
+                          Deeper and everything else as Quick Cash, and showing
+                          only the recipient made that impossible to check. */}
+                      <div className="text-[11px] text-gray-500 mb-1 space-y-0.5">
+                        <div>From: {item.payload.fromAddress}</div>
+                        <div>To: {item.payload.toAddress}</div>
                       </div>
                       {item.payload.bodyText}
                     </div>

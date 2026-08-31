@@ -82,3 +82,39 @@ describe('wrapEmailBody', () => {
     expect(bodyHtml).not.toContain('href="undefined"');
   });
 });
+
+describe('userSendIdentity', () => {
+  const configured = {
+    MAILGUN_DOMAIN: 'crm.quickcashhomebuyers.com',
+    MAILGUN_DIGDEEPER_DOMAIN: 'crm.digdeeperllc.com',
+    EMAIL_DIGDEEPER_FROM: 'deals@digdeeperllc.com',
+  };
+
+  it('keeps the user on their own address for the default brand', () => {
+    const svc = makeService(configured);
+    const out = svc.userSendIdentity(QCHB_BRAND, 'ian@quickcashhomebuyers.com');
+
+    expect(out.fromAddress).toBe('ian@quickcashhomebuyers.com');
+    expect(out.replyTo).toBe('ian@crm.quickcashhomebuyers.com');
+    expect(out.brandName).toBe(QCHB_BRAND.companyName);
+  });
+
+  it("substitutes the brand's deals address where the user has no mailbox", () => {
+    const svc = makeService(configured);
+    const out = svc.userSendIdentity(DIG_DEEPER_BRAND, 'ian@quickcashhomebuyers.com');
+
+    expect(out.fromAddress).toBe('deals@digdeeperllc.com');
+    expect(out.replyTo).toBe('deals@crm.digdeeperllc.com');
+    expect(out.brandName).toBe('Dig Deeper LLC');
+  });
+
+  it('previews the fallback, not the brand, when the domain is not live', () => {
+    // The composer's "sending as" line reads this same method, so an
+    // unconfigured brand must preview the address that would really be used.
+    const svc = makeService({ ...configured, MAILGUN_DIGDEEPER_DOMAIN: '' });
+    const out = svc.userSendIdentity(DIG_DEEPER_BRAND, 'ian@quickcashhomebuyers.com');
+
+    expect(out.fromAddress).toBe('ian@quickcashhomebuyers.com');
+    expect(out.brandName).toBe(QCHB_BRAND.companyName);
+  });
+});

@@ -297,6 +297,30 @@ export class MailerService {
    * user's. A seller on a Dig Deeper thread sees "Ian" from Dig Deeper, not
    * the same person suddenly writing from another company.
    */
+  /**
+   * How a user-sent email will actually appear, without sending anything.
+   *
+   * sendAsUser and the composer's "sending as" line both read this, so a
+   * preview cannot drift from the send it is previewing. That mattered enough
+   * to share: the two disagreeing is exactly the bug the line exists to catch.
+   */
+  userSendIdentity(
+    brand: Brand | undefined,
+    userEmail: string,
+  ): { fromAddress: string; replyTo: string; brandName: string } {
+    const identity = this.brandConfig(brand);
+    const ownBrand = identity.brand.key === DEFAULT_BRAND.key;
+    // On another brand the user has no mailbox, so the brand's deals@ stands
+    // in and only the display name stays theirs.
+    const fromAddress = ownBrand ? userEmail : identity.dealsAddress;
+    const replyLocalPart = ownBrand ? userEmail.split('@')[0] : 'deals';
+    return {
+      fromAddress,
+      replyTo: this.inboundReplyTo(replyLocalPart, identity.domain),
+      brandName: identity.brand.companyName,
+    };
+  }
+
   async sendAsUser(params: {
     orgId: string;
     user: { firstName?: string | null; lastName?: string | null; email: string };
@@ -310,7 +334,7 @@ export class MailerService {
     brand?: Brand;
   }): Promise<{ mailgunId: string | null }> {
     const identity = this.brandConfig(params.brand);
-    const ownBrand = identity.brand.key === DEFAULT_BRAND.key;
+    const sender = this.userSendIdentity(params.brand, params.user.email);
     const displayName = [params.user.firstName, params.user.lastName].filter(Boolean).join(' ') || undefined;
 
     // Thread onto the prior message if replying within a lead conversation.
@@ -329,16 +353,14 @@ export class MailerService {
 
     const bodyHtml =
       params.bodyHtml ?? this.wrapEmailBody(params.bodyText, undefined, identity.brand).bodyHtml;
-    const fromAddress = ownBrand ? params.user.email : identity.dealsAddress;
-    const replyLocalPart = ownBrand ? params.user.email.split('@')[0] : 'deals';
     return this.send({
-      from: this.buildFrom(displayName, fromAddress),
-      fromAddress,
+      from: this.buildFrom(displayName, sender.fromAddress),
+      fromAddress: sender.fromAddress,
       to: params.to,
       subject: params.subject,
       bodyText: params.bodyText,
       bodyHtml,
-      replyTo: this.inboundReplyTo(replyLocalPart, identity.domain),
+      replyTo: sender.replyTo,
       inReplyTo,
       references,
       orgId: params.orgId,

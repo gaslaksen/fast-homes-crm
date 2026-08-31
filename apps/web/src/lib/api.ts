@@ -276,7 +276,8 @@ export const messagesAPI = {
     api.post(`/leads/${leadId}/messages/draft`, { context }),
   send: (leadId: string, message: string, userId?: string, from?: string, to?: string) =>
     api.post(`/leads/${leadId}/messages/send`, { message, userId, from, to }),
-  fromOptions: (leadId: string) => api.get(`/leads/${leadId}/messages/from-options`),
+  fromOptions: (leadId: string, userId?: string) =>
+    api.get(`/leads/${leadId}/messages/from-options`, { params: userId ? { userId } : {} }),
   // The seller's own numbers (skip trace attaches up to four) plus the one to preselect
   toOptions: (leadId: string) => api.get(`/leads/${leadId}/messages/to-options`),
   // Send an email (reply or forward) from the logged-in user, via Mailgun

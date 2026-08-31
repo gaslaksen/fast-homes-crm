@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Query } from '@nestjs/common';
 import { MessagesService } from './messages.service';
 import { PhoneNumbersService, numberKey } from '../phone-numbers/phone-numbers.service';
 import { LeadPhonesService } from '../phone-numbers/lead-phones.service';
@@ -36,16 +36,26 @@ export class MessagesController {
    * Numbers the composer may send this lead from, plus which one is preselected.
    * `lastUsed` marks the number already on this thread, `isDefault` the org
    * fallback, mirroring the badges in the picker.
+   *
+   * `email` is the address a message from `userId` would send from. It is not
+   * a choice like the numbers are, it is a statement: the brand comes off the
+   * lead, so a surplus thread sends as Dig Deeper whoever is typing. Null when
+   * no user was supplied or the lookup failed.
    */
   @Get('from-options')
-  async getFromOptions(@Param('leadId') leadId: string) {
-    const [numbers, sticky, selected] = await Promise.all([
+  async getFromOptions(
+    @Param('leadId') leadId: string,
+    @Query('userId') userId?: string,
+  ) {
+    const [numbers, sticky, selected, email] = await Promise.all([
       this.phoneNumbers.list({ channel: 'sms' }),
       this.phoneNumbers.stickyNumberFor(leadId),
       this.phoneNumbers.resolveForLead(leadId),
+      this.messagesService.getEmailSendIdentity(leadId, userId),
     ]);
     return {
       selected,
+      email,
       numbers: numbers.map((n) => ({
         number: n.number,
         label: n.label,

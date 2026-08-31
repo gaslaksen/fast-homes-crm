@@ -138,6 +138,7 @@ export default function MessageComposer({
   // already on this thread, so a reply keeps the same sender the seller knows.
   const [fromNumber, setFromNumber] = useState<string>('');
   const [fromOptions, setFromOptions] = useState<FromOption[]>([]);
+  const [emailIdentity, setEmailIdentity] = useState<{ fromAddress: string; brandName: string } | null>(null);
   const [fromPickerOpen, setFromPickerOpen] = useState(false);
 
   // Which of the seller's numbers this text goes to. The server preselects the
@@ -175,20 +176,24 @@ export default function MessageComposer({
   useEffect(() => {
     let cancelled = false;
     messagesAPI
-      .fromOptions(leadId)
+      .fromOptions(leadId, currentUser?.id)
       .then((res) => {
         if (cancelled) return;
         setFromOptions(res.data?.numbers || []);
         setFromNumber(res.data?.selected || '');
+        setEmailIdentity(res.data?.email || null);
       })
       .catch(() => {
         // Picker stays hidden; the server picks the number on its own.
-        if (!cancelled) setFromOptions([]);
+        if (!cancelled) {
+          setFromOptions([]);
+          setEmailIdentity(null);
+        }
       });
     return () => {
       cancelled = true;
     };
-  }, [leadId]);
+  }, [leadId, currentUser?.id]);
 
   // Load the seller's numbers. Same shape as the From list: on failure the
   // picker stays hidden and the server sends to the primary.
@@ -541,6 +546,17 @@ export default function MessageComposer({
         </div>
       ) : channel === 'email' ? (
         <div className="space-y-2">
+          {/* Not a picker: the brand follows the lead, so this states what the
+              recipient will see rather than offering a choice. */}
+          {emailIdentity && (
+            <div className="text-xs text-gray-500 dark:text-gray-400">
+              Sending as{' '}
+              <span className="font-medium text-gray-700 dark:text-gray-200">
+                {emailIdentity.fromAddress}
+              </span>{' '}
+              ({emailIdentity.brandName})
+            </div>
+          )}
           {emailMode === 'forward' ? (
             <input
               type="email"
