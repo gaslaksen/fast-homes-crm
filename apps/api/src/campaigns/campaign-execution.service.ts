@@ -432,11 +432,23 @@ export class CampaignExecutionService implements OnModuleInit {
       if (lead.doNotContact) {
         return { kind: 'SKIPPED', reason: `lead ${lead.id} marked doNotContact` };
       }
+      // The campaign's own number when it has one, e.g. a Florida surplus
+      // campaign on the Jacksonville line. Undefined falls through to the
+      // per-lead rules: the number already on this thread, else the org
+      // default. Passing it does not trust it; PhoneNumbersService matches it
+      // against the active SMS numbers and falls back if it no longer is one.
+      const fromNumber = enrollment.campaign?.fromNumber || undefined;
+
       return this.sendWithRetry(enrollment, currentStep, async () => {
         // sendMessage returns null when throttled (recent outbound to the
         // same lead within 5 min). Treat that as a retryable failure so the
         // step doesn't silently advance.
-        const result = await this.messagesService.sendMessage(lead.id, renderedBody);
+        const result = await this.messagesService.sendMessage(
+          lead.id,
+          renderedBody,
+          undefined,
+          fromNumber,
+        );
         if (result === null) {
           throw new Error('throttled — another outbound was sent <5 min ago');
         }

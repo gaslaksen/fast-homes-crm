@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { campaignAPI } from '@/lib/api';
+import { campaignAPI, settingsAPI } from '@/lib/api';
+import { formatPhoneDisplay } from '@/lib/format';
 
 interface Step {
   id?: string;
@@ -24,7 +25,16 @@ interface CampaignData {
   triggerDays: number;
   enrollmentMode: 'manual' | 'auto';
   isActive: boolean;
+  /** E.164 number TEXT steps send from. Empty string means the org default. */
+  fromNumber: string;
   steps: Step[];
+}
+
+interface SendingNumber {
+  number: string;
+  label: string;
+  smsEnabled: boolean;
+  active: boolean;
 }
 
 interface CampaignBuilderProps {
@@ -560,6 +570,7 @@ export default function CampaignBuilder({ initial, onSave }: CampaignBuilderProp
       description: '',
       triggerDays: 15,
       enrollmentMode: 'manual',
+      fromNumber: '',
       isActive: true,
       steps: [],
     },
@@ -568,6 +579,19 @@ export default function CampaignBuilder({ initial, onSave }: CampaignBuilderProp
   const [saving, setSaving] = useState(false);
   const [showAiModal, setShowAiModal] = useState(false);
   const [nameEditing, setNameEditing] = useState(!initial);
+  const [smsNumbers, setSmsNumbers] = useState<SendingNumber[]>([]);
+
+  // Only numbers that can actually text today. A campaign saved against a
+  // number that is later switched off still falls back to the default at send
+  // time, so this list is convenience rather than the safety check.
+  useEffect(() => {
+    settingsAPI
+      .listPhoneNumbers()
+      .then((res) =>
+        setSmsNumbers((res.data || []).filter((n: SendingNumber) => n.smsEnabled && n.active)),
+      )
+      .catch(() => setSmsNumbers([]));
+  }, []);
 
   const updateStep = useCallback((idx: number, updated: Step) => {
     setCampaign((c) => {
@@ -726,6 +750,28 @@ export default function CampaignBuilder({ initial, onSave }: CampaignBuilderProp
             {campaign.enrollmentMode === 'manual'
               ? 'Leads are enrolled manually from the lead detail page'
               : 'Leads are automatically enrolled when they first reply'}
+          </p>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            Send texts from
+          </label>
+          <select
+            value={campaign.fromNumber}
+            onChange={(e) => setCampaign((c) => ({ ...c, fromNumber: e.target.value }))}
+            className="w-full sm:w-80 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-sm dark:bg-gray-800 dark:text-gray-100"
+          >
+            <option value="">Default number</option>
+            {smsNumbers.map((n) => (
+              <option key={n.number} value={n.number}>
+                {n.label} ({formatPhoneDisplay(n.number)})
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            {campaign.fromNumber
+              ? 'Every text step in this campaign sends from this number, even if the lead was texted from another one before.'
+              : 'Texts send from the number already used on the lead\u2019s thread, or the default number if there is none.'}
           </p>
         </div>
       </div>

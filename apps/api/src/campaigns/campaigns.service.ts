@@ -1,5 +1,6 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { toE164 } from '../phone-numbers/phone-numbers.service';
 
 export interface CreateCampaignDto {
   name: string;
@@ -7,6 +8,11 @@ export interface CreateCampaignDto {
   triggerDays?: number;
   enrollmentMode?: string;
   isActive?: boolean;
+  /**
+   * E.164 number TEXT steps send from. Null or omitted keeps the existing
+   * per-lead resolution (sticky thread, else the org default).
+   */
+  fromNumber?: string | null;
   steps?: CreateStepDto[];
 }
 
@@ -28,8 +34,28 @@ export class CampaignsService {
 
   constructor(private prisma: PrismaService) {}
 
+  /**
+   * Store a campaign's sending number in one spelling, so the builder's
+   * dropdown matches what is saved however the value arrived.
+   *
+   * Absent means "leave it alone" on an edit; an explicitly empty value means
+   * "clear it" and go back to the default. Whether the number is actually one
+   * of ours is not settled here: PhoneNumbersService re-checks it against the
+   * active SMS list on every send, because a number can be deactivated long
+   * after a campaign was written.
+   */
+  private normalizeFromNumber(value: string | null | undefined): string | null | undefined {
+    if (value === undefined) return undefined;
+    if (value === null || value.trim() === '') return null;
+    const e164 = toE164(value);
+    if (!e164) throw new BadRequestException('Enter a valid US phone number to send from');
+    return e164;
+  }
+
   async createCampaign(dto: CreateCampaignDto, organizationId?: string) {
-    const { steps = [], ...campaignData } = dto;
+    const { steps = [], ...rest } = dto;
+    const fromNumber = this.normalizeFromNumber(rest.fromNumber);
+    const campaignData = { ...rest, fromNumber: fromNumber ?? null };
     return this.prisma.$transaction(async (tx) => {
       const campaign = await tx.campaign.create({
         data: {
@@ -56,7 +82,10 @@ export class CampaignsService {
   }
 
   async updateCampaign(id: string, dto: Partial<CreateCampaignDto>) {
-    const { steps, ...campaignData } = dto;
+    const { steps, ...rest } = dto;
+    const fromNumber = this.normalizeFromNumber(rest.fromNumber);
+    const campaignData =
+      fromNumber === undefined ? rest : { ...rest, fromNumber };
     return this.prisma.$transaction(async (tx) => {
       const campaign = await tx.campaign.update({
         where: { id },
