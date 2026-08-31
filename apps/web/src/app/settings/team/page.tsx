@@ -434,7 +434,7 @@ function TeamPageInner() {
             </form>
           )}
           {!showPassword && (
-            <p className="text-sm text-gray-500 dark:text-gray-400">Click "Change" to update your password.</p>
+            <p className="text-sm text-gray-500 dark:text-gray-400">Click &quot;Change&quot; to update your password.</p>
           )}
         </div>
 

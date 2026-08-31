@@ -261,7 +261,7 @@ export default function ActionQueueDashboard() {
             {!loading && nothingHere && (
               <div className="card p-8 text-center">
                 <div className="text-lg font-bold text-gray-800 dark:text-gray-200 mb-1">
-                  You're all caught up.
+                  You&apos;re all caught up.
                 </div>
                 <div className="text-sm text-gray-500 dark:text-gray-400 mb-4">
                   New actions will appear here as leads need attention.

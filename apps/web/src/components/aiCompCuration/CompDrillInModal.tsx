@@ -637,7 +637,7 @@ function HistoryTab({
       {detail.source === 'unavailable' && (
         <div className="text-[11px] text-yellow-700 dark:text-yellow-400 mb-2">
           Limited price history available — full MLS detail could not be
-          fetched. Showing what's stored locally.
+          fetched. Showing what&apos;s stored locally.
         </div>
       )}
       <ol className="relative border-l border-gray-200 dark:border-gray-700 pl-4 ml-1.5">
