@@ -135,7 +135,7 @@ export default function PartnersPage() {
         {reviewCount > 0 && (
           <div className="mb-4 rounded-lg border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-900/20 px-4 py-3 text-sm text-amber-900 dark:text-amber-200">
             <strong>{reviewCount} partner{reviewCount === 1 ? '' : 's'} need{reviewCount === 1 ? 's' : ''} a type review.</strong>{' '}
-            We migrated legacy &quot;Hedge Fund&quot; and &quot;Fix &amp; Flip&quot; types to &quot;Cash Buyer&quot; — please reclassify any that should be Lender, Title, or Agent.
+            We migrated legacy &quot;Hedge Fund&quot; and &quot;Fix &amp; Flip&quot; types to &quot;Cash Buyer&quot;. Please reclassify any that should be Lender, Title, or Agent.
           </div>
         )}
 
