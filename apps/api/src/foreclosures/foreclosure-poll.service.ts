@@ -4,14 +4,24 @@ import { ConfigService } from '@nestjs/config';
 import { ForeclosureIngestService } from './foreclosure-ingest.service';
 
 /**
- * Daily 6:30am (America/New_York) poll of the Mecklenburg Times public-notice
- * feed, deliberately ahead of the 7:00 Daily Brief. The paper typically
- * publishes notices weekly, but a daily pull catches off-cycle updates
- * promptly. Replaces the old external Claude scheduled task.
- * Ingestion is fully idempotent (dedupe by noticeId / dedupeUid), so an
- * overlapping run on a second Railway replica during a deploy is harmless - the
- * duplicate notices are simply skipped. A short in-process guard avoids a run
- * stacking on top of a slow one.
+ * Poll of the Mecklenburg Times public-notice feed.
+ *
+ * OFF by default as of 2026-09-01, at the team's request. The scraper and the
+ * Refresh feed button are untouched and still work on demand; only the 6:30am
+ * schedule is switched off, so nothing pulls the paper unless somebody asks it
+ * to. Set FORECLOSURE_RSS_POLL_ENABLED=true to bring the schedule back.
+ *
+ * The default is in code rather than left to an unset Railway variable because
+ * "off" should survive somebody recreating the environment. An env var that has
+ * to be present to keep a job disabled is a job that quietly restarts itself.
+ *
+ * Note for whoever turns it back on: 6:30 was chosen to sit ahead of the 7:00
+ * Daily Brief so overnight notices are ingested before the brief queries them,
+ * and the surplus poll at 5:45 sits ahead of both. Moving any one of the three
+ * without the others reorders that chain.
+ *
+ * Ingestion is idempotent (dedupe by noticeId / dedupeUid), so an overlapping
+ * run is harmless: duplicate notices are simply skipped.
  */
 @Injectable()
 export class ForeclosurePollService {
@@ -23,12 +33,15 @@ export class ForeclosurePollService {
     private config: ConfigService,
     private ingest: ForeclosureIngestService,
   ) {
-    // Default on; set FORECLOSURE_RSS_POLL_ENABLED=false to disable in an env.
-    this.enabled = (this.config.get<string>('FORECLOSURE_RSS_POLL_ENABLED') ?? 'true') !== 'false';
+    // Default OFF. Only an explicit "true" starts the schedule.
+    this.enabled = (this.config.get<string>('FORECLOSURE_RSS_POLL_ENABLED') ?? 'false') === 'true';
   }
 
-  // 6:30, deliberately ahead of the 7:00 Daily Brief so overnight notices are
-  // ingested before the brief queries them. See digest-cron.service.ts.
+  /** Whether the schedule is live, so the board can say so instead of warning. */
+  get scheduleEnabled(): boolean {
+    return this.enabled;
+  }
+
   @Cron('30 6 * * *', { timeZone: 'America/New_York' })
   async pollFeed() {
     if (!this.enabled || this.running) return;

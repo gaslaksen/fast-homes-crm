@@ -99,6 +99,8 @@ interface Stats {
   highEquity: number;
   lastPoll: PollRun | null;
   lastCronPoll: PollRun | null;
+  /** False when the daily Mecklenburg Times pull is switched off. */
+  rssPollEnabled: boolean;
 }
 
 interface FclSignal {
@@ -333,13 +335,27 @@ const CRON_STALE_HOURS = 36;
  * is not evidence the schedule is alive - the cron line is tracked separately
  * for that reason.
  */
-function FeedStatus({ lastPoll, lastCronPoll }: { lastPoll: PollRun | null; lastCronPoll: PollRun | null }) {
+function FeedStatus({
+  lastPoll,
+  lastCronPoll,
+  scheduleEnabled,
+}: {
+  lastPoll: PollRun | null;
+  lastCronPoll: PollRun | null;
+  /** False once the daily pull is switched off, which it is by default. */
+  scheduleEnabled: boolean;
+}) {
   const cronAgeHours = lastCronPoll
     ? (Date.now() - new Date(lastCronPoll.at).getTime()) / 3600000
     : Infinity;
 
   let warning: string | null = null;
-  if (!lastCronPoll) {
+  // With the schedule off, a stale or missing cron run is the expected state,
+  // not a fault. Warning about it forever would train everyone to ignore the
+  // one line that exists to catch a genuinely broken feed.
+  if (!scheduleEnabled) {
+    warning = null;
+  } else if (!lastCronPoll) {
     warning = 'The daily 6:30am pull has never run. Notices only arrive when someone clicks Refresh feed.';
   } else if (!lastCronPoll.ok) {
     warning = `The last daily pull failed${lastCronPoll.message ? `: ${lastCronPoll.message}` : '.'}`;
@@ -360,6 +376,11 @@ function FeedStatus({ lastPoll, lastCronPoll }: { lastPoll: PollRun | null; last
           </>
         ) : (
           'Feed has not been pulled yet.'
+        )}
+        {/* Say the schedule is off rather than leaving people to infer it from
+            a pull that keeps getting older. */}
+        {!scheduleEnabled && (
+          <span> &middot; the daily pull is switched off, use Refresh feed</span>
         )}
       </div>
       {warning && (
@@ -591,7 +612,7 @@ export default function ForeclosuresPage() {
   const [cities, setCities] = useState<string[]>([]);
   const [counties, setCounties] = useState<string[]>([]);
   const [collapseAll, setCollapseAll] = useState(false);
-  const [stats, setStats] = useState<Stats>({ total: 0, high: 0, soon: 0, highEquity: 0, lastPoll: null, lastCronPoll: null });
+  const [stats, setStats] = useState<Stats>({ total: 0, high: 0, soon: 0, highEquity: 0, lastPoll: null, lastCronPoll: null, rssPollEnabled: false });
   const [loading, setLoading] = useState(true);
   const [pagination, setPagination] = useState({ page: 1, pageSize: 60, total: 0, totalPages: 1 });
   // Filters the cards were last loaded with, replayed against /ids so the
@@ -992,7 +1013,11 @@ export default function ForeclosuresPage() {
           </div>
         </div>
 
-        <FeedStatus lastPoll={stats.lastPoll} lastCronPoll={stats.lastCronPoll} />
+        <FeedStatus
+          lastPoll={stats.lastPoll}
+          lastCronPoll={stats.lastCronPoll}
+          scheduleEnabled={stats.rssPollEnabled !== false}
+        />
 
         {/* Stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-5">
