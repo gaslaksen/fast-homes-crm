@@ -383,6 +383,46 @@ const QUEUE_HELP: Record<string, string> = {
   closed: 'Paid out, already assigned, or do-not-call. Nothing to do.',
 };
 
+/**
+ * Whether the daily county pull is actually running.
+ *
+ * Worth its own line because the failure mode is silent: the board keeps
+ * showing yesterday's cases and looks perfectly healthy. "The county has posted
+ * nothing new" and "the feed has been broken for a week" are indistinguishable
+ * without this, and the only way to tell them apart was to ask someone to read
+ * the logs.
+ *
+ * Only CRON runs count toward staleness. A manual pull does not prove the
+ * schedule works, and counting it would mask exactly the failure this is for.
+ */
+function FeedHealth({ runs }: { runs: any[] }) {
+  if (!runs.length) return null;
+  const lastCron = runs.find((r) => r.trigger === 'cron' && r.ok);
+  const ageHours = lastCron
+    ? (Date.now() - new Date(lastCron.startedAt).getTime()) / 3600000
+    : Infinity;
+
+  let warn: string | null = null;
+  if (!lastCron) {
+    warn = 'The daily 5:45am pull has never succeeded. Cases only arrive when somebody clicks Refresh feed.';
+  } else if (ageHours > 30) {
+    warn = `The daily pull last succeeded ${Math.round(ageHours)} hours ago. It should run every morning at 5:45.`;
+  }
+
+  return (
+    <div style={{ fontSize: 12, color: warn ? 'var(--amber)' : 'var(--faint)', marginTop: 6 }}>
+      {warn ? (
+        <>&#9888; {warn}</>
+      ) : (
+        <>
+          Feed last pulled {agoLabel(lastCron.startedAt)} (scheduled): {lastCron.scanned} scanned,{' '}
+          {lastCron.created} new, {lastCron.updated} updated, {lastCron.belowFloor} under the floor
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function SurplusFundsPage() {
   /**
    * Subject properties, not leads. One sale can owe several claimants and each
@@ -437,6 +477,9 @@ export default function SurplusFundsPage() {
   const [currentUser, setCurrentUser] = useState<any>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
+  const [polling, setPolling] = useState(false);
+  /** The last few county pulls, for the feed-health line under the title. */
+  const [runs, setRuns] = useState<any[]>([]);
   const [adding, setAdding] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -558,6 +601,47 @@ export default function SurplusFundsPage() {
       say('Copied');
     } catch {
       say('Copy blocked');
+    }
+  };
+
+  const fetchRuns = useCallback(() => {
+    surplusAPI
+      .pollRuns()
+      .then((r) => setRuns(r.data?.runs || []))
+      .catch(() => setRuns([]));
+  }, []);
+
+  useEffect(() => {
+    fetchRuns();
+  }, [fetchRuns]);
+
+  /**
+   * Pull the county docket now.
+   *
+   * This button used to call fetchRows() and fetchStats(), which re-read our
+   * own database and never contacted Duval at all. It looked like a no-op
+   * because it was one: no new cases, nothing in the log, and no way to tell
+   * whether the feed was broken or the county simply had nothing new.
+   */
+  const pollCounty = async () => {
+    setPolling(true);
+    say('Pulling the latest cases from the county...');
+    try {
+      const res = await surplusAPI.poll({ source: 'duval_taxdeed' });
+      const r = res.data;
+      say(
+        `County pull: ${r.created} new, ${r.updated} updated, ${r.belowFloor} under the floor` +
+          (r.dead ? `, ${r.dead} retired` : '') +
+          (r.errors ? `, ${r.errors} error${r.errors === 1 ? '' : 's'}` : '') +
+          '.',
+      );
+      fetchRows();
+      fetchStats();
+      fetchRuns();
+    } catch (err: any) {
+      say(err?.response?.data?.message || 'The county pull failed.');
+    } finally {
+      setPolling(false);
     }
   };
 
@@ -728,12 +812,12 @@ export default function SurplusFundsPage() {
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, flexWrap: 'wrap' }}>
             <div style={{ flex: 1, minWidth: 260 }}>
               <h1 className="dc-h1">Surplus Funds</h1>
-
+              <FeedHealth runs={runs} />
             </div>
             <div style={{ display: 'flex', gap: 9, flexWrap: 'wrap' }}>
               <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls" style={{ display: 'none' }} onChange={onFile} />
-              <button className="dc-btn" onClick={() => { fetchRows(); fetchStats(); }} disabled={loading}>
-                Refresh feed
+              <button className="dc-btn" onClick={pollCounty} disabled={polling || busy}>
+                {polling ? 'Pulling from the county...' : 'Refresh feed'}
               </button>
               <button className="dc-btn" onClick={() => fileRef.current?.click()} disabled={busy}>
                 {busy ? 'Importing...' : 'Import county list'}

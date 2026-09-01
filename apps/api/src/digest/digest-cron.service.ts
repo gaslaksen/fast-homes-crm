@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
+import { CronLockService } from '../common/cron-lock.service';
 import { MailerService } from '../mailer/mailer.service';
 import { DigestService } from './digest.service';
 import { DigestRenderService } from './digest-render.service';
@@ -33,6 +34,7 @@ export class DigestCronService implements OnModuleInit {
     private digest: DigestService,
     private render: DigestRenderService,
     private mailer: MailerService,
+    private lock: CronLockService,
   ) {}
 
   onModuleInit() {
@@ -51,6 +53,24 @@ export class DigestCronService implements OnModuleInit {
       return;
     }
     this.lastSentDayKey = dayKey;
+
+    // The day-key guard above is per PROCESS, and production runs more than one
+    // replica: the surplus poll proves it by writing two run rows every morning.
+    // Without a cross-replica lock each replica sends the brief, so every
+    // recipient gets it twice. Duplicate work is wasteful elsewhere; here it
+    // lands in somebody's inbox.
+    const sent = await this.lock.run(`daily-brief-${dayKey}`, () => this.deliver(dayKey, now));
+    if (sent === null) {
+      this.logger.log(`Daily Brief for ${dayKey} is being sent by another replica`);
+    }
+  }
+
+  /**
+   * The actual send, split out so the whole thing can run under one lock.
+   * `now` is passed in rather than re-read, so every org's brief in a single
+   * run is stamped with the same instant.
+   */
+  private async deliver(dayKey: string, now: Date) {
 
     this.logger.log(`Daily Brief run starting for ${dayKey}`);
 

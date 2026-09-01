@@ -217,7 +217,16 @@ export const surplusAPI = {
   // address and ignores names.
   skipTrace: (body: { leadIds?: string[]; limit?: number; includeTraced?: boolean }) =>
     api.post('/surplus/skip-trace', body),
-  poll: (body: { source?: string; limit?: number }) => api.post('/surplus/poll', body),
+  /**
+   * Pull the county docket now. This is what actually contacts Duval; the
+   * board's own refresh only re-reads our database.
+   *
+   * `reread` re-reads the Notice of Surplus Funds on cases that already have an
+   * owner address. Costs a vision call per case, so it is for correcting
+   * addresses after an extractor change, not for a routine pull.
+   */
+  poll: (body: { source?: string; limit?: number; reread?: boolean }) =>
+    api.post('/surplus/poll', body),
   pollRuns: () => api.get('/surplus/poll-runs'),
   importParse: (file: File) => {
     const formData = new FormData();
