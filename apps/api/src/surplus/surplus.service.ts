@@ -439,17 +439,61 @@ export class SurplusService {
     return { updated: res.count, stage: target };
   }
 
+  /**
+   * Remove leads outright, and record a tombstone so the county poll cannot
+   * bring them back.
+   *
+   * The tombstone is written FIRST and deliberately. Deleting the lead cascades
+   * SurplusDetail away, taking the dedupeUid the poll matches on with it, so
+   * after the delete there is nothing left to write one from. Without it the
+   * case reads as brand new the next morning and returns with every note,
+   * edited number and Dead marking gone, which is exactly what was happening.
+   *
+   * Marking a lead Dead is the normal way to retire one. This exists for a case
+   * that should never have been ingested at all.
+   */
   async bulkDelete(ids: string[], organizationId?: string) {
-    const leads = await this.prisma.lead.findMany({
+    const doomed = await this.prisma.lead.findMany({
       where: {
         id: { in: ids },
         source: LeadSource.SURPLUS,
         ...(organizationId ? { organizationId } : {}),
       },
-      select: { id: true },
+      select: {
+        id: true,
+        propertyAddress: true,
+        organizationId: true,
+        surplusDetail: {
+          select: { dedupeUid: true, county: true, caseNumber: true },
+        },
+        sellerFirstName: true,
+        sellerLastName: true,
+      },
     });
-    if (!leads.length) return { deleted: 0 };
-    const res = await this.prisma.lead.deleteMany({ where: { id: { in: leads.map((l) => l.id) } } });
+    if (!doomed.length) return { deleted: 0 };
+
+    const tombstones = doomed
+      .filter((l) => l.surplusDetail?.dedupeUid)
+      .map((l) => ({
+        organizationId: l.organizationId,
+        dedupeUid: l.surplusDetail!.dedupeUid,
+        county: l.surplusDetail!.county,
+        caseNumber: l.surplusDetail!.caseNumber,
+        claimant: `${l.sellerFirstName || ''} ${l.sellerLastName || ''}`.trim() || null,
+        propertyAddress: l.propertyAddress,
+        reason: 'deleted',
+      }));
+
+    if (tombstones.length) {
+      await this.prisma.surplusSuppression.createMany({ data: tombstones });
+    }
+
+    const res = await this.prisma.lead.deleteMany({
+      where: { id: { in: doomed.map((l) => l.id) } },
+    });
+    this.logger.log(
+      `Deleted ${res.count} surplus lead(s), ${tombstones.length} suppressed from re-ingestion`,
+    );
     return { deleted: res.count };
   }
 

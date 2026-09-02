@@ -1,6 +1,6 @@
 'use client';
 
-import { CHIP, money } from './format';
+import { CHIP, money , moneyShort } from './format';
 
 /**
  * One subject property on the board.
@@ -159,7 +159,11 @@ export default function SurplusPropertyCard({ p, picked, onPick, onOpen }: Props
             Estate
           </span>
         )}
-        <span className="dc-pcard-money">{money(p.grossSurplus)}</span>
+        {/* Rounded. The cents are noise on a card and cost the width that was
+            clipping the figure; the exact amount is on the panel. */}
+        <span className="dc-pcard-money" title={money(p.grossSurplus)}>
+          {moneyShort(p.grossSurplus)}
+        </span>
       </div>
 
       <div className="dc-pcard-addr">{p.address}</div>

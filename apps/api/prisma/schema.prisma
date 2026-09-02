@@ -2040,6 +2040,31 @@ model ForeclosurePollRun {
 /// boards report health the same way. `classified` counts cases whose claim
 /// status was resolved from the document list; `dead` counts those the classifier
 /// retired (distributed or already assigned) rather than surfacing as leads.
+/// A surplus case the team removed, kept so the next county poll cannot
+/// recreate it.
+///
+/// The tombstone has to outlive the lead because deleting the lead cascades
+/// SurplusDetail away, and with it the dedupeUid the poll matches on. Without
+/// this row the case is simply absent the next morning, which reads to the poll
+/// as a brand new case, and it comes back with every note, edited number and
+/// Dead marking gone.
+model SurplusSuppression {
+  id             String   @id @default(cuid())
+  organizationId String?
+  dedupeUid      String
+  county         String?
+  caseNumber     String?
+  claimant       String?
+  /// Human-readable, for working out later why something never appeared.
+  propertyAddress String?
+  reason         String   @default("deleted")
+  createdAt      DateTime @default(now())
+
+  @@index([organizationId, dedupeUid])
+  @@index([organizationId, caseNumber])
+  @@map("surplus_suppressions")
+}
+
 model SurplusPollRun {
   id             String    @id @default(cuid())
   organizationId String?

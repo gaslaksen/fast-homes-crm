@@ -24,6 +24,7 @@ function harness(existing: any[], recipients = RECIPIENTS) {
       create: jest.fn().mockResolvedValue({ id: 'run1' }),
       update: jest.fn().mockResolvedValue({}),
     },
+    surplusSuppression: { findFirst: jest.fn().mockResolvedValue(null) },
     surplusDetail: {
       count: jest.fn().mockResolvedValue(existing.length),
       findFirst: jest.fn(async ({ where }: any) =>
@@ -147,5 +148,65 @@ describe('re-reading notices to correct an address', () => {
     expect(notice.readNotice).not.toHaveBeenCalled();
     const byId = Object.fromEntries(updates.map((u) => [u.where.id, u.data]));
     expect(byId.d2.ownerMailingStreet).toBeUndefined();
+  });
+});
+
+/**
+ * What a poll must never undo.
+ *
+ * The county is authoritative about the CASE (what is filed, what is owed).
+ * It knows nothing about the work: the notes somebody typed, the number they
+ * found by hand, or their decision that this one is dead. A poll that resets
+ * any of those turns a morning of work into nothing, silently, overnight.
+ */
+describe('a refresh preserves the work', () => {
+  it('leaves a lead marked Dead marked Dead', async () => {
+    const { svc, updates } = harness([
+      row({ id: 'd1', dedupeUid: uid('RICHARD MINTON'), street: '4027 BESSENT RD', source: 'notice_of_surplus_funds' }),
+    ]);
+    // The row is Dead; the docket still says the claim is open.
+    (svc as any).prisma.surplusDetail.findFirst = jest.fn(async () => ({
+      id: 'd1',
+      leadId: 'lead-d1',
+      stage: 'Dead',
+      claimStatus: 'open',
+      ownerMailingStreet: '4027 BESSENT RD',
+      ownerAddressSource: 'notice_of_surplus_funds',
+    }));
+
+    await svc.ingestCounty('duval_taxdeed', {});
+
+    const patch = updates.find((u) => u.where.id === 'd1')?.data;
+    // Never un-retires: no stage key at all, so Dead survives untouched.
+    expect(patch.stage).toBeUndefined();
+  });
+
+  it('does not touch notes, phones, emails or the do-not-call flag', async () => {
+    const { svc, updates } = harness([
+      row({ id: 'd1', dedupeUid: uid('RICHARD MINTON'), street: '4027 BESSENT RD', source: 'notice_of_surplus_funds' }),
+    ]);
+
+    await svc.ingestCounty('duval_taxdeed', {});
+
+    const patch = updates.find((u) => u.where.id === 'd1')?.data || {};
+    for (const field of [
+      'callNotes', 'doNotCall', 'phone2', 'phone3', 'phone4',
+      'phone1Type', 'phone1Dnc', 'email2', 'touchDays', 'touchCount',
+      'contactMismatch', 'tracedAt', 'traceOutcome',
+    ]) {
+      expect(patch[field]).toBeUndefined();
+    }
+  });
+
+  it('will not recreate a case somebody deleted', async () => {
+    // No existing row, so this would normally be a create. The tombstone stops
+    // it: without this the case comes back every morning with the work gone.
+    const { svc, prisma } = harness([]);
+    prisma.surplusSuppression.findFirst = jest.fn().mockResolvedValue({ id: 'sup-1' });
+
+    const res = await svc.ingestCounty('duval_taxdeed', {});
+
+    expect(res.created).toBe(0);
+    expect(prisma.surplusSuppression.findFirst).toHaveBeenCalled();
   });
 });

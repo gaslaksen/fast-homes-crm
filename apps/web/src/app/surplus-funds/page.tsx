@@ -24,6 +24,7 @@ import {
   money,
   pct,
   phoneDisplay,
+  moneyShort,
   agoLabel,
   agoDays,
 } from '@/components/pipelines/format';
@@ -233,9 +234,10 @@ const SURPLUS_COLUMNS: PipelineColumn<any>[] = [
     key: 'surplus',
     label: 'Surplus',
     align: 'right',
-    width: '110px',
+    width: '92px',
+    nowrap: true,
     sortValue: (r) => r.grossSurplus,
-    render: (r) => <b>{money(r.grossSurplus)}</b>,
+    render: (r) => <b title={money(r.grossSurplus)}>{moneyShort(r.grossSurplus)}</b>,
   },
   {
     key: 'property',
@@ -266,10 +268,17 @@ const SURPLUS_COLUMNS: PipelineColumn<any>[] = [
   {
     key: 'owner',
     label: 'Owner address',
+    width: '150px',
+    nowrap: true,
     sortValue: (r) => r.ownerMailingState || '',
     render: (r) =>
       r.ownerMailingStreet ? (
-        <span style={{ color: 'var(--mint)', fontSize: 12 }}>
+        <span
+          style={{ color: 'var(--mint)', fontSize: 12 }}
+          title={[r.ownerMailingStreet, r.ownerMailingCity, r.ownerMailingState, r.ownerMailingZip]
+            .filter(Boolean)
+            .join(', ')}
+        >
           {[r.ownerMailingCity, r.ownerMailingState].filter(Boolean).join(', ')}
         </span>
       ) : (
@@ -311,19 +320,18 @@ const SURPLUS_COLUMNS: PipelineColumn<any>[] = [
     key: 'touches',
     label: 'Touches',
     align: 'right',
-    width: '110px',
+    width: '112px',
+    nowrap: true,
     // Sorts the most neglected first, so the column answers "who has nobody
     // been calling" rather than "who is popular".
     sortValue: (r) => -agoDays(r.lastTouchedAt),
+    // One line, not a stack. Two short values stacked set the row height for
+    // every other cell in the table and read as a wrap rather than a design.
     render: (r) => (
-      <div style={{ fontSize: 12 }}>
-        <div style={{ fontWeight: 600, color: r.touches ? 'var(--text)' : 'var(--faint)' }}>
-          {r.touches || 0}
-        </div>
-        <div style={{ fontSize: 11, color: r.lastTouchedAt ? 'var(--faint)' : 'var(--dim)' }}>
-          {agoLabel(r.lastTouchedAt)}
-        </div>
-      </div>
+      <span style={{ fontSize: 12, color: r.touches ? 'var(--text)' : 'var(--faint)' }}>
+        <b>{r.touches || 0}</b>
+        <span style={{ color: 'var(--faint)' }}> · {agoLabel(r.lastTouchedAt)}</span>
+      </span>
     ),
   },
   {
@@ -1051,11 +1059,8 @@ export default function SurplusFundsPage() {
               <>
                 {chosenKeys.length > 0 && (
                   <>
-                    <button className="dc-btn sm" disabled={busy} onClick={() => bulkStage('Dead')}>
+                    <button className="dc-btn sm dngr" disabled={busy} onClick={() => bulkStage('Dead')}>
                       Mark dead
-                    </button>
-                    <button className="dc-btn sm dngr" disabled={busy} onClick={bulkDelete}>
-                      Delete
                     </button>
                   </>
                 )}
