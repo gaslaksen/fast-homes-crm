@@ -10,6 +10,7 @@ import {
   SurplusClaimStatus,
   SURPLUS_QUEUE_LABEL,
   SurplusQueue,
+  SURPLUS_QUEUE_RANK,
 } from '@fast-homes/shared';
 import { CLAIM_STATUS_LABEL } from './surplus-classify.util';
 import { nameSearchPlan } from './surplus-name-search.util';
@@ -1095,9 +1096,25 @@ export function groupByProperty(rows: any[]): any[] {
       // A property takes its most actionable claimant's queue, since that is
       // the work it represents: one callable owner makes the house callable
       // even when their co-owner is a dead end.
-      queue: head.queue,
-      queueLabel: head.queueLabel,
-      queueReason: head.queueReason,
+      //
+      // Ranked by QUEUE, not by work score. Those are different orderings and
+      // the difference showed on 1624 W 35th St: a deceased claimant with no
+      // heirs on file outranked her co-owner whose son had just been found with
+      // four numbers, so the card read "Find the heirs, nobody can sign yet"
+      // about a house somebody could ring that morning.
+      ...(() => {
+        const best = ranked.reduce((a: any, b: any) =>
+          (SURPLUS_QUEUE_RANK[b.queue as SurplusQueue] ?? 0) >
+          (SURPLUS_QUEUE_RANK[a.queue as SurplusQueue] ?? 0)
+            ? b
+            : a,
+        );
+        return {
+          queue: best.queue,
+          queueLabel: best.queueLabel,
+          queueReason: best.queueReason,
+        };
+      })(),
       /** How many claimants sit in each queue, for the card. */
       queueCounts: ranked.reduce((acc: Record<string, number>, m: any) => {
         acc[m.queue] = (acc[m.queue] || 0) + 1;

@@ -112,3 +112,61 @@ describe('groupByProperty', () => {
     expect(g.claimants.map((c: any) => c.id).sort()).toEqual(['a', 'b', 'c']);
   });
 });
+
+describe('a property takes its most actionable claimant', () => {
+  const claimant = (over: any) => ({
+    id: over.id,
+    county: 'Duval',
+    caseNumber: '2025-0439TD',
+    parcelId: 'p1',
+    address: '1624 W 35TH ST',
+    city: 'JACKSONVILLE',
+    zip: '32209',
+    claimant: over.name,
+    grossSurplus: 45262,
+    netToClaimant: 45262,
+    workScore: over.workScore,
+    queue: over.queue,
+    queueLabel: over.queue,
+    queueReason: `${over.queue} reason`,
+    claimStatus: 'open',
+    stage: 'New',
+    tier: 'A',
+    phones: [],
+    emails: [],
+    cleanPhoneCount: 0,
+    touchDays: {},
+    isDeceased: true,
+    ...over,
+  });
+
+  it('ranks by queue, not by work score', () => {
+    // The live case. Leila outranks Alfred on work score and still needs heirs;
+    // Alfred's son has just been found with four numbers. Ranked by score the
+    // card reads "Find the heirs, nobody can sign yet" about a house somebody
+    // could ring that morning.
+    const [group] = groupByProperty([
+      claimant({ id: 'a', name: 'LEILA A SPENCER', queue: 'heirs', workScore: 404.5 }),
+      claimant({ id: 'b', name: 'ALFRED SPENCER', queue: 'call', workScore: 120 }),
+    ] as any);
+
+    expect(group.queue).toBe('call');
+    expect(group.queueReason).toBe('call reason');
+    // The heir work is still real and still counted, just not the headline.
+    expect(group.queueCounts).toEqual({ heirs: 1, call: 1 });
+  });
+
+  it('falls back to the only claimant when there is one', () => {
+    const [group] = groupByProperty([
+      claimant({ id: 'a', name: 'LEILA A SPENCER', queue: 'heirs', workScore: 404.5 }),
+    ] as any);
+    expect(group.queue).toBe('heirs');
+  });
+
+  it('prefers a trace over research, and research over closed', () => {
+    const q = (queue: string, id: string) => claimant({ id, name: id, queue, workScore: 1 });
+    expect(groupByProperty([q('name_search', 'a'), q('trace', 'b')] as any)[0].queue).toBe('trace');
+    expect(groupByProperty([q('closed', 'a'), q('entity', 'b')] as any)[0].queue).toBe('entity');
+    expect(groupByProperty([q('entity', 'a'), q('heirs', 'b')] as any)[0].queue).toBe('heirs');
+  });
+});
