@@ -235,6 +235,7 @@ export type TraceSkipReason =
   | 'no_house_number'
   | 'placeholder_address'
   | 'zip_state_mismatch'
+  | 'not_us_address'
   | 'entity'
   | 'shared_address'
   | 'mail_returned';
@@ -326,6 +327,18 @@ export function traceEligibility(
       ok: false,
       reason: 'zip_state_mismatch',
       detail: `ZIP ${zip} is not a Florida ZIP but the state says FL. Fix the address before tracing.`,
+    };
+  }
+
+  // BatchData is a US consumer database. An address with no two-letter state
+  // or five-digit ZIP is foreign or unparsed (Lee owners in Belgium, Australia
+  // and the UK on the first pull), and submitting it either misses or matches
+  // whoever the vendor guesses. Those claimants need a name search instead.
+  if (!/^[A-Z]{2}$/.test(state) || !/^\d{5}$/.test(zip)) {
+    return {
+      ok: false,
+      reason: 'not_us_address',
+      detail: `"${[c.street, c.city, c.state, c.zip].filter(Boolean).join(', ')}" is not a US address the vendor can match. Use the name search.`,
     };
   }
 

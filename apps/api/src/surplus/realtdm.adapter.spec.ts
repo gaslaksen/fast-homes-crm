@@ -427,6 +427,7 @@ describe('parseNotifications', () => {
         city: 'BAY SHORE',
         state: 'NY',
         zip: '11706',
+        attention: null,
         delivery: 'Certified Mail',
       },
       {
@@ -436,6 +437,7 @@ describe('parseNotifications', () => {
         city: 'CLINTON',
         state: 'CT',
         zip: '06413',
+        attention: null,
         delivery: 'Certified Mail',
       },
     ]);
@@ -453,7 +455,24 @@ describe('splitAddressLines', () => {
       city: 'MIAMI BEACH',
       state: 'FL',
       zip: '33140',
+      attention: null,
     });
+  });
+
+  it('lifts a care-of or trustee line off the street so the house number leads', () => {
+    // Lee 2024002557 was noticed "C/O GLENN BROWN / 4 BEE RIDGE CT". Folded
+    // into one street it failed the house-number check and was never traced.
+    expect(splitAddressLines(['C/O GLENN BROWN', '4 BEE RIDGE CT', 'SAINT PETERS, MO 63376'])).toEqual({
+      street: '4 BEE RIDGE CT',
+      city: 'SAINT PETERS',
+      state: 'MO',
+      zip: '63376',
+      attention: 'C/O GLENN BROWN',
+    });
+    expect(
+      splitAddressLines(['EDWARD H POTTER, TRUSTEE', '7935 HILLANDALE DRIVE', 'SAN DIEGO, CA 92120']).attention,
+    ).toBe('EDWARD H POTTER, TRUSTEE');
+    expect(splitAddressLines(['PO BOX 398', 'FT. MYERS, FL 33902']).street).toBe('PO BOX 398');
   });
 
   it('keeps a foreign or unparseable address whole rather than guessing parts', () => {
@@ -464,6 +483,7 @@ describe('splitAddressLines', () => {
       city: null,
       state: null,
       zip: null,
+      attention: null,
     });
   });
 });
@@ -577,6 +597,41 @@ describe('classifying live Lee dockets', () => {
     expect(lee.claimantUnknown).toBe(true);
     const elsewhere = classifyCase(docs(titles), { owners: ['JANE DOE'] });
     expect(elsewhere.claimStatus).toBe('open');
+  });
+
+  it('only mail returned AFTER the surplus letter condemns the address', () => {
+    // Lee 2024002557: the notice of application bounced in February, the
+    // surplus letter went out on March 19 to the clerk's corrected addresses
+    // (one of them care of a relative) and nothing has come back since.
+    // Counting the February returns gated 13 of the first 24 Lee leads out of
+    // a skip trace they were exactly the right candidates for.
+    const before = classifyCase(
+      [
+        { title: 'Returned Mail', filedAt: '2025-02-07' },
+        { title: 'Returned Mail', filedAt: '2025-02-07' },
+        { title: 'SURPLUS_LETTER', filedAt: '2025-03-19' },
+      ],
+      { owners: ['JOHN ALLEN BROWN'] },
+    );
+    expect(before.mailVerdict).toBe('unknown');
+
+    // Lee 2024002573: two returns on May 20 against a May 14 letter. Dead.
+    const after = classifyCase(
+      [
+        { title: 'Returned Mail', filedAt: '2025-02-03' },
+        { title: 'SURPLUS_LETTER', filedAt: '2025-05-14' },
+        { title: 'Returned Mail', filedAt: '2025-05-20' },
+      ],
+      { owners: ['DELORES ROUSE'] },
+    );
+    expect(after.mailVerdict).toBe('undeliverable');
+
+    // Duval dates nothing, so every return still counts there.
+    const undated = classifyCase(
+      [{ title: 'Notice of Surplus Funds' }, { title: 'Certified Mail Undelivered' }],
+      { owners: ['MYRTIS GRIFFIN'] },
+    );
+    expect(undated.mailVerdict).toBe('undeliverable');
   });
 
   it('a competitor claim leaves the owner residual contestable', () => {

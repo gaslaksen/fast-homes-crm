@@ -63,6 +63,8 @@ export interface SurplusCaseParty {
   city: string | null;
   state: string | null;
   zip: string | null;
+  /** An attention line above the street, eg "C/O GLENN BROWN". */
+  attention?: string | null;
   country?: string | null;
 }
 
@@ -78,6 +80,13 @@ export interface SurplusNoticeRecipient {
   city: string | null;
   state: string | null;
   zip: string | null;
+  /**
+   * An attention line the clerk printed above the street: "C/O GLENN BROWN",
+   * "ARAMIS ALVAREZ, TRUSTEE". Kept apart from the street so an address match
+   * still has a house number to work with, and kept at all because the person
+   * named is often the fastest route to the claimant.
+   */
+  attention?: string | null;
   /** "Certified Mail" and the like, as the county records it. */
   delivery?: string | null;
 }

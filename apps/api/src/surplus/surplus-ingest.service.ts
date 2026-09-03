@@ -140,6 +140,7 @@ function noticeFromSource(detail: SurplusCaseDetail): NoticeExtract | null {
     city: r.city,
     state: r.state,
     zip: r.zip,
+    attention: r.attention ?? null,
   }));
   const first = recipients[0];
   return {
@@ -455,10 +456,17 @@ export class SurplusIngestService {
     detail: SurplusCaseDetail,
     claimantCount: number,
   ): FoundAddress | null {
+    // The attention line ("C/O GLENN BROWN") travels with the recipient's name
+    // rather than the street, so the street still carries a house number and
+    // the relative the clerk found is still visible on the card.
+    const withAttention = (name: string | null, attention?: string | null) =>
+      attention ? `${name || ''}${name ? ', ' : ''}${attention}` : name;
+
     const fromNotice = recipientFor(claimant, notice?.recipients, claimantCount);
     if (fromNotice?.street) {
       return {
         ...fromNotice,
+        name: withAttention(fromNotice.name, fromNotice.attention),
         source: detail.noticeRecipients?.length ? ADDRESS_SOURCE.notifications : ADDRESS_SOURCE.notice,
       };
     }
@@ -466,7 +474,7 @@ export class SurplusIngestService {
     const fromParties = recipientFor(claimant, owners, claimantCount);
     if (fromParties?.street) {
       return {
-        name: fromParties.name,
+        name: withAttention(fromParties.name, fromParties.attention),
         street: fromParties.street,
         city: fromParties.city,
         state: fromParties.state,

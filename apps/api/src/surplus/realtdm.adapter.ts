@@ -155,20 +155,46 @@ export function formDate(d: Date): string {
   return `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}`;
 }
 
-/** "BAY SHORE, NY 11706" and the street lines above it into parts. */
+/** A line that can be a deliverable street: starts with a number, or is a box. */
+const STREET_LINE = /^\d|^p\.?\s*o\.?\s*box\b|^po\s*box\b/i;
+
+/**
+ * "BAY SHORE, NY 11706" and the street lines above it into parts.
+ *
+ * When the clerk prints an attention line above the street ("C/O GLENN BROWN",
+ * "EDWARD H POTTER, TRUSTEE") it is returned separately. Folded into the
+ * street it left "C/O GLENN BROWN, 4 BEE RIDGE CT", which no house-number
+ * check accepts and no address match resolves. A foreign address, whose last
+ * line is not CITY, ST 12345, stays whole with no state or zip: splitting it
+ * by US rules yields a state that does not exist and a zip that matches a
+ * stranger.
+ */
 export function splitAddressLines(addr: string[]): {
   street: string | null;
   city: string | null;
   state: string | null;
   zip: string | null;
+  attention: string | null;
 } {
+  const none = { street: null, city: null, state: null, zip: null, attention: null };
   const ls = (addr || []).map((l) => l.trim()).filter(Boolean);
-  if (!ls.length) return { street: null, city: null, state: null, zip: null };
+  if (!ls.length) return none;
   const last = ls[ls.length - 1];
   const m = /^(.*?),?\s+([A-Z]{2})\s+(\d{5})(?:-\d{4})?$/i.exec(last);
-  if (!m) return { street: ls.join(', '), city: null, state: null, zip: null };
-  const street = ls.slice(0, -1).join(', ') || null;
-  return { street, city: m[1].trim() || null, state: m[2].toUpperCase(), zip: m[3] };
+  if (!m) return { ...none, street: ls.join(', ') };
+
+  const above = ls.slice(0, -1);
+  const streetIdx = above.findIndex((l) => STREET_LINE.test(l));
+  // No numbered line at all: keep everything as the street rather than guess.
+  const street = streetIdx < 0 ? above.join(', ') : above.slice(streetIdx).join(', ');
+  const attention = streetIdx > 0 ? above.slice(0, streetIdx).join(', ') : null;
+  return {
+    street: street || null,
+    city: m[1].trim() || null,
+    state: m[2].toUpperCase(),
+    zip: m[3],
+    attention: attention || null,
+  };
 }
 
 // ─── The list ───────────────────────────────────────────────────────────────
