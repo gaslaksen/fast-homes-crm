@@ -842,6 +842,10 @@ model SurplusDetail {
   /// declined to submit at all.
   traceDetail     String?
 
+  /// Living people who inherited this claimant's interest. Populated from a
+  /// probate filing somebody read; never inferred.
+  heirs SurplusHeir[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -2040,6 +2044,92 @@ model ForeclosurePollRun {
 /// boards report health the same way. `classified` counts cases whose claim
 /// status was resolved from the document list; `dead` counts those the classifier
 /// retired (distributed or already assigned) rather than surfacing as leads.
+/// A living person who inherited a claimant's interest, read off a probate
+/// filing.
+///
+/// Hangs off SurplusDetail rather than becoming its own Lead, deliberately. The
+/// money belongs to the PROPERTY and the claim is filed against one case, so
+/// splitting the heirs into separate leads would put one surplus on two boards
+/// and let somebody work half of it. An heir is a contact on the claim, the way
+/// a co-owner is.
+///
+/// Every field here comes from a document a person read and confirmed. Nothing
+/// on this table is inferred, because a wrong heir is worse than no heir: it is
+/// a stranger being told they have money coming.
+model SurplusHeir {
+  id              String        @id @default(cuid())
+  surplusDetailId String
+  surplusDetail   SurplusDetail @relation(fields: [surplusDetailId], references: [id], onDelete: Cascade)
+  organizationId  String?
+
+  name         String
+  /// As printed: "Son", "Daughter", "Surviving Spouse". Kept verbatim because
+  /// it is what decides who can sign, and paraphrasing it loses that.
+  relationship String?
+  /// As printed: "50% Remainder Interest", "Life Estate". A life estate holder
+  /// cannot sell alone, so this is not decoration.
+  share        String?
+
+  // Where they actually live, off the filing. This is the skip-trace target and
+  // it is the whole point of reading the document: a 2025 petition carries a
+  // current address for a person the tax roll still lists at the dead owner's
+  // house.
+  street String?
+  city   String?
+  state  String?
+  zip    String?
+
+  /// An heir can themselves be dead. The Spencer petition lists the surviving
+  /// spouse as "ADULT, DECEASED DOD 03/25/2022", which means her share needs
+  /// its own estate opened and she must never be dialled.
+  deceased    Boolean   @default(false)
+  dateOfDeath DateTime?
+
+  // Contacts, found by skip trace or by hand. Their own columns rather than the
+  // parent's, because the parent's belong to the dead claimant.
+  phone1     String?
+  phone2     String?
+  phone3     String?
+  phone4     String?
+  phone1Type String?
+  phone2Type String?
+  phone3Type String?
+  phone4Type String?
+  phone1Dnc  String?
+  phone2Dnc  String?
+  phone3Dnc  String?
+  phone4Dnc  String?
+  email1     String?
+  email2     String?
+
+  // Trace state, same three columns and same meaning as SurplusDetail: "never
+  // tried" and "tried and found nothing" need different next actions.
+  tracedAt        DateTime?
+  traceOutcome    String?
+  traceDetail     String?
+  contactMismatch Boolean   @default(false)
+  mismatchedName  String?
+
+  doNotCall Boolean @default(false)
+  callNotes String?
+
+  // Provenance. Which filing said so, so a disputed heir can be checked against
+  // the document rather than argued about.
+  sourceCaseNumber String?
+  sourceDocument   String?
+  /// 'probate_petition' | 'manual'
+  sourceKind       String? @default("probate_petition")
+  addedByUserId    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([surplusDetailId])
+  @@index([organizationId, name])
+  @@index([phone1])
+  @@map("surplus_heirs")
+}
+
 /// A surplus case the team removed, kept so the next county poll cannot
 /// recreate it.
 ///

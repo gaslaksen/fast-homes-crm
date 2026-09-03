@@ -9,6 +9,7 @@ import { authAPI, campaignsAPI, leadsAPI, surplusAPI } from '@/lib/api';
 import { useDialer } from '@/components/dialer/DialerContext';
 import { DNC_STATE } from './format';
 import ContactEditor from './ContactEditor';
+import SurplusHeirs from './SurplusHeirs';
 import { fmtDate, money, phoneDisplay } from './format';
 
 /**
@@ -106,6 +107,9 @@ export interface SurplusPanelLead {
   emails: string[];
   contactMismatch: boolean;
   mismatchedName: string | null;
+  heirCount: number;
+  livingHeirCount: number;
+  callableHeirCount: number;
   /** Per-claimant skip trace state, computed server side. */
   trace: {
     state: string;
@@ -467,15 +471,31 @@ export default function SurplusWorkPanel({
                   className={`dc-wp-claimant${c.id === lead.id ? ' on' : ''}`}
                   onClick={() => setClaimantId(c.id)}
                 >
-                  {c.claimant}
-                  {/* The trace state, not just the phone count. A claimant with
-                      no numbers is either untried or exhausted, and those want
-                      opposite actions. */}
-                  <span className="sub" style={{ color: TRACE_TONE[c.trace?.tone || 'idle'] }}>
-                    {c.cleanPhoneCount > 0
-                      ? `${c.cleanPhoneCount} callable`
-                      : c.trace?.label || 'Never skip traced'}
+                  <span style={c.isDeceased ? { textDecoration: 'line-through' } : undefined}>
+                    {c.claimant}
                   </span>
+                  {/* For a dead claimant the trace state is beside the point:
+                      they cannot sign, so what matters is whether an heir has
+                      been found. Showing "never skip traced" here is what sent
+                      people off tracing a dead man. */}
+                  {c.isDeceased ? (
+                    <span
+                      className="sub"
+                      style={{ color: c.callableHeirCount > 0 ? 'var(--mint)' : 'var(--red)' }}
+                    >
+                      {c.callableHeirCount > 0
+                        ? `deceased · ${c.callableHeirCount} callable heir${c.callableHeirCount === 1 ? '' : 's'}`
+                        : c.livingHeirCount > 0
+                          ? `deceased · ${c.livingHeirCount} heir${c.livingHeirCount === 1 ? '' : 's'}, no number`
+                          : 'deceased · no heirs on file'}
+                    </span>
+                  ) : (
+                    <span className="sub" style={{ color: TRACE_TONE[c.trace?.tone || 'idle'] }}>
+                      {c.cleanPhoneCount > 0
+                        ? `${c.cleanPhoneCount} callable`
+                        : c.trace?.label || 'Never skip traced'}
+                    </span>
+                  )}
                 </button>
               ))}
             </div>
@@ -729,7 +749,41 @@ function CaseTab({
         )}
       </Section>
 
-      <Section title={`Reaching ${lead.claimant}`}>
+      {/* Heirs lead for a deceased claimant, because they are the only people
+          who can file. For a living one the section still appears once heirs
+          exist, since an estate can be opened mid-claim. */}
+      {(lead.isDeceased || (lead.heirCount || 0) > 0) && (
+        <Section
+          title="Who inherited"
+          note={
+            lead.isDeceased
+              ? 'Only a living heir can file this claim'
+              : undefined
+          }
+        >
+          <SurplusHeirs
+            leadId={lead.id}
+            claimant={lead.claimant}
+            claimantDeceased={!!lead.isDeceased}
+            propertyAddress={property.address}
+            county={property.county}
+            onCall={onCall}
+            onText={onText}
+            onEmail={onEmail}
+            onChanged={onChanged}
+            say={say}
+          />
+        </Section>
+      )}
+
+      <Section
+        title={`Reaching ${lead.claimant}`}
+        note={
+          lead.isDeceased
+            ? 'Deceased. These are the claimant\u2019s own contacts and cannot sign anything.'
+            : undefined
+        }
+      >
         {/* The verdict, stated before the contacts rather than inferred from
             their absence. "Nothing has been tried" and "everything has been
             tried" both render as an empty contact list, and they want opposite

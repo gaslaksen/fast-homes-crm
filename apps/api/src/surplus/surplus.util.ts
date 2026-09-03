@@ -258,12 +258,30 @@ export interface QueueFacts {
   traceState?: string | null;
   mailVerdict?: string | null;
   ownerMailingStreet?: string | null;
+  /** The claimant is dead: an estate, a decedent, or heirs required. */
+  isDeceased?: boolean | null;
+  /** Living heirs recorded from a probate filing. */
+  livingHeirCount?: number | null;
+  /** Living heirs who have a number that can be dialled. */
+  callableHeirCount?: number | null;
 }
 
 export function queueOf(f: QueueFacts): SurplusQueue {
   const status = (f.claimStatus || SurplusClaimStatus.UNKNOWN) as SurplusClaimStatus;
 
   if (!isWorkable(status) || f.doNotCall) return SurplusQueue.CLOSED;
+
+  // A dead claimant is tested before contactability, and that ordering is the
+  // point of this queue. Their own phone number is worthless: they cannot sign,
+  // and dialling it reaches a grieving relative who was never told why we have
+  // it. Only a living heir makes the claim workable.
+  if (f.isDeceased) {
+    if ((f.callableHeirCount || 0) > 0) return SurplusQueue.CALL;
+    if (!(f.livingHeirCount || 0)) return SurplusQueue.HEIRS;
+    // Heirs are on file but none is reachable yet, so this is ordinary contact
+    // work again: trace them, then search by name.
+  }
+
   if ((f.cleanPhoneCount || 0) > 0) return SurplusQueue.CALL;
   if (f.isEntity) return SurplusQueue.ENTITY;
 
@@ -284,9 +302,14 @@ export function queueReason(f: QueueFacts): string {
         ? 'Marked do not call'
         : CLAIM_STATUS_LABEL[(f.claimStatus || SurplusClaimStatus.UNKNOWN) as SurplusClaimStatus];
     case SurplusQueue.CALL:
+      if (f.isDeceased && (f.callableHeirCount || 0) > 0) {
+        return `${f.callableHeirCount} callable heir${f.callableHeirCount === 1 ? '' : 's'}`;
+      }
       return `${f.cleanPhoneCount} callable number${f.cleanPhoneCount === 1 ? '' : 's'}`;
     case SurplusQueue.ENTITY:
       return 'Entity claimant, the registered agent on Sunbiz is who can sign';
+    case SurplusQueue.HEIRS:
+      return 'Claimant is deceased and no heirs are on file, so nobody can sign yet';
     case SurplusQueue.TRACE:
       return f.ownerMailingStreet
         ? 'Never traced, and the notice address is live'

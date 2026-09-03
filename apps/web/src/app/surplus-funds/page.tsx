@@ -184,6 +184,8 @@ const QUEUE_CHIP: Record<string, { bg: string; fg: string }> = {
   trace: CHIP.blue,
   name_search: CHIP.amber,
   entity: CHIP.violet,
+  // Red because it is a hard block, not a contact problem: nobody can sign.
+  heirs: CHIP.red,
   closed: CHIP.slate,
 };
 
@@ -258,9 +260,27 @@ const SURPLUS_COLUMNS: PipelineColumn<any>[] = [
     sortValue: (r) => r.claimantNames[0] || '',
     render: (r) => (
       <div>
-        <div>{r.claimantNames.slice(0, 2).join(', ')}</div>
+        <div style={r.allDeceased ? { textDecoration: 'line-through', color: 'var(--dim)' } : undefined}>
+          {r.claimantNames.slice(0, 2).join(', ')}
+        </div>
         {r.claimantCount > 2 && (
           <div style={{ fontSize: 11.5, color: 'var(--faint)' }}>+{r.claimantCount - 2} more</div>
+        )}
+        {/* The whole point of the heirs work: say who can actually sign, so
+            nobody spends an afternoon on a dead claimant. */}
+        {r.anyDeceased && (
+          <div
+            style={{
+              fontSize: 11.5,
+              color: r.needsHeirs ? 'var(--red)' : 'var(--mint)',
+            }}
+          >
+            {r.needsHeirs
+              ? 'deceased, no heirs on file'
+              : `${r.livingHeirCount} heir${r.livingHeirCount === 1 ? '' : 's'}${
+                  r.callableHeirCount ? `, ${r.callableHeirCount} callable` : ', no number'
+                }`}
+          </div>
         )}
       </div>
     ),
@@ -376,6 +396,7 @@ const SURPLUS_KANBAN: PipelineStage[] = SURPLUS_STAGES.map((st) => ({
  */
 const QUEUES: [string, string, string][] = [
   ['call', 'Call now', '\u260E'],
+  ['heirs', 'Find the heirs', '\u2696'],
   ['trace', 'Skip trace', '\u2318'],
   ['name_search', 'Name search', '\u{1F50E}'],
   ['entity', 'Entity', '\u{1F3E2}'],
@@ -384,6 +405,8 @@ const QUEUES: [string, string, string][] = [
 
 const QUEUE_HELP: Record<string, string> = {
   call: 'A callable number and a claim still open. Pick up the phone.',
+  heirs:
+    'The claimant is deceased and no living heir is on file. Only a person with standing can file, so no amount of skip tracing helps: find the probate case and add the filing.',
   trace: 'Nothing submitted yet and the notice address still looks live. Costs a credit.',
   name_search:
     'The address route is spent, either the clerk mail came back or a trace found nobody. Search by name and confirm against the property that sold.',

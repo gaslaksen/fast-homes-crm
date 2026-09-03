@@ -221,6 +221,12 @@ export enum SurplusQueue {
   CALL = 'call',
   /** No consumer record exists. The registered agent on Sunbiz can sign. */
   ENTITY = 'entity',
+  /**
+   * The claimant is dead and nobody has found who inherited. Only a living
+   * person with standing can file, so this is not a contact problem at all: no
+   * amount of skip tracing a dead man produces somebody who can sign.
+   */
+  HEIRS = 'heirs',
   /** Never submitted, and the address still looks live. Spend a credit. */
   TRACE = 'trace',
   /** The address route is spent. Name search, obituary, official records. */
@@ -232,6 +238,7 @@ export enum SurplusQueue {
 export const SURPLUS_QUEUE_LABEL: Record<SurplusQueue, string> = {
   [SurplusQueue.CALL]: 'Call now',
   [SurplusQueue.ENTITY]: 'Entity, find the agent',
+  [SurplusQueue.HEIRS]: 'Find the heirs',
   [SurplusQueue.TRACE]: 'Skip trace it',
   [SurplusQueue.NAME_SEARCH]: 'Name search',
   [SurplusQueue.CLOSED]: 'Closed',

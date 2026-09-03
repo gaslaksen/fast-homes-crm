@@ -14,6 +14,7 @@ import {
 import { CLAIM_STATUS_LABEL } from './surplus-classify.util';
 import { nameSearchPlan } from './surplus-name-search.util';
 import { traceState } from './surplus-skiptrace.util';
+import { heirRow } from './surplus-heirs.util';
 import {
   normalizePhoneDigits,
   isoWeekKey,
@@ -312,7 +313,9 @@ export class SurplusService {
         source: LeadSource.SURPLUS,
         ...(organizationId ? { organizationId } : {}),
       },
-      include: { surplusDetail: true },
+      // Heirs travel with the detail: an Estate claimant's queue, card and
+      // panel all depend on whether a living heir is on file.
+      include: { surplusDetail: { include: { heirs: true } } },
     });
     if (!lead || !lead.surplusDetail) return null;
 
@@ -506,7 +509,9 @@ export class SurplusService {
         source: LeadSource.SURPLUS,
         ...(organizationId ? { organizationId } : {}),
       },
-      include: { surplusDetail: true },
+      // Heirs travel with the detail: an Estate claimant's queue, card and
+      // panel all depend on whether a living heir is on file.
+      include: { surplusDetail: { include: { heirs: true } } },
     });
     return lead && lead.surplusDetail ? this.toRow(lead) : null;
   }
@@ -585,7 +590,9 @@ export class SurplusService {
 
     const leads = await this.prisma.lead.findMany({
       where,
-      include: { surplusDetail: true },
+      // Heirs travel with the detail: an Estate claimant's queue, card and
+      // panel all depend on whether a living heir is on file.
+      include: { surplusDetail: { include: { heirs: true } } },
       orderBy: this.orderFor(filters.sort),
       take: 5000,
     });
@@ -724,7 +731,9 @@ export class SurplusService {
         source: LeadSource.SURPLUS,
         ...(organizationId ? { organizationId } : {}),
       },
-      include: { surplusDetail: true },
+      // Heirs travel with the detail: an Estate claimant's queue, card and
+      // panel all depend on whether a living heir is on file.
+      include: { surplusDetail: { include: { heirs: true } } },
     });
     const all = leads.filter((l) => l.surplusDetail).map((l) => this.toRow(l));
     const feed = all.filter(
@@ -760,6 +769,14 @@ export class SurplusService {
       { number: normalizePhoneDigits(d.phone4) || '', type: d.phone4Type, dnc: d.phone4Dnc },
     ].filter((p) => p.number);
     const emails = [lead.sellerEmail, d.email2].map((e) => cellText(e)).filter(Boolean);
+
+    // Heirs come off the detail row. Shaped by the same function the heirs
+    // endpoint uses, so the board and the panel cannot disagree about who is
+    // callable. The counts consider only the LIVING: a dead heir cannot sign
+    // either, and their share needs its own estate opened.
+    const heirRows = (d.heirs || []).map((h: any) => heirRow(h));
+    const livingHeirs = heirRows.filter((h: any) => !h.deceased);
+    const callableHeirs = livingHeirs.filter((h: any) => h.callable);
 
     const week = isoWeekKey();
     const staleWeek = d.touchWeek && d.touchWeek !== week;
@@ -889,6 +906,14 @@ export class SurplusService {
       // address get one submission and routinely end differently, so this is
       // per person and never rolled up to the property.
       trace: traceState(d, phones.length + emails.length),
+
+      // Who inherited, living first. The counts are what the queue and the card
+      // key on; heirs is what the panel renders.
+      heirs: heirRows,
+      heirCount: heirRows.length,
+      livingHeirCount: livingHeirs.length,
+      callableHeirCount: callableHeirs.length,
+      deceasedHeirCount: heirRows.length - livingHeirs.length,
       doNotCall: d.doNotCall,
       callNotes: d.callNotes || '',
       // Two different things, deliberately both here.
@@ -906,7 +931,14 @@ export class SurplusService {
 
       createdAt: lead.createdAt,
       ...this.workRank(d, facts, phones),
-      ...this.queueOf(d, lead, phones, traceState(d, phones.length + emails.length)),
+      ...this.queueOf(
+        d,
+        lead,
+        phones,
+        traceState(d, phones.length + emails.length),
+        livingHeirs.length,
+        callableHeirs.length,
+      ),
     };
   }
 
@@ -915,7 +947,14 @@ export class SurplusService {
    * workScore, so a rule change lands on the next page load rather than needing
    * a backfill over every row.
    */
-  private queueOf(d: any, lead: any, phones: { dnc?: string | null }[], trace: { state: string }) {
+  private queueOf(
+    d: any,
+    lead: any,
+    phones: { dnc?: string | null }[],
+    trace: { state: string },
+    livingHeirCount = 0,
+    callableHeirCount = 0,
+  ) {
     const f = {
       claimStatus: d.claimStatus,
       cleanPhoneCount: phones.filter((p) => !p.dnc).length,
@@ -924,6 +963,11 @@ export class SurplusService {
       traceState: trace.state,
       mailVerdict: d.mailVerdict,
       ownerMailingStreet: d.ownerMailingStreet,
+      // A dead claimant cannot sign, so the queue asks for heirs before it asks
+      // for a phone number.
+      isDeceased: !!d.deceased || !!d.heirsRequired,
+      livingHeirCount,
+      callableHeirCount,
     };
     const queue = queueOf(f);
     return { queue, queueLabel: SURPLUS_QUEUE_LABEL[queue], queueReason: queueReason(f) };
@@ -1061,6 +1105,18 @@ export function groupByProperty(rows: any[]): any[] {
       }, {}),
       allDeceased: ranked.every((m) => m.isDeceased),
       anyDeceased: ranked.some((m) => m.isDeceased),
+      // Heirs rolled up across the claimants, so a card can say "2 deceased, 2
+      // heirs" instead of leaving somebody to open the panel to find out there
+      // is nobody alive to ring.
+      heirCount: ranked.reduce((n: number, m: any) => n + (m.heirCount || 0), 0),
+      livingHeirCount: ranked.reduce((n: number, m: any) => n + (m.livingHeirCount || 0), 0),
+      callableHeirCount: ranked.reduce((n: number, m: any) => n + (m.callableHeirCount || 0), 0),
+      /**
+       * A dead claimant with nobody on file to inherit. The state that used to
+       * be invisible: the card showed "no number" and the queue said name
+       * search, when the actual next step is finding the probate case.
+       */
+      needsHeirs: ranked.some((m: any) => m.isDeceased && !(m.livingHeirCount || 0)),
       // The stage the property is furthest along on.
       stage: head.stage,
     };

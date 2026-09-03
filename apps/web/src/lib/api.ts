@@ -228,6 +228,28 @@ export const surplusAPI = {
   poll: (body: { source?: string; limit?: number; reread?: boolean }) =>
     api.post('/surplus/poll', body),
   pollRuns: () => api.get('/surplus/poll-runs'),
+
+  // ── Heirs of a deceased claimant ──
+  heirs: (id: string) => api.get(`/surplus/${id}/heirs`),
+  /**
+   * Read a probate filing and get the heirs back for confirmation. Does not
+   * save: whether this case belongs to this claimant is a human judgement.
+   */
+  readFiling: (id: string, file: File) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    return api.post(`/surplus/${id}/heirs/read-filing`, fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+  saveHeirs: (
+    id: string,
+    body: { heirs: any[]; caseNumber?: string | null; sourceDocument?: string | null },
+  ) => api.post(`/surplus/${id}/heirs`, body),
+  updateHeir: (heirId: string, body: any) => api.patch(`/surplus/heirs/${heirId}`, body),
+  deleteHeir: (heirId: string) => api.post(`/surplus/heirs/${heirId}/delete`),
+  skipTraceHeirs: (body: { heirIds?: string[]; limit?: number; includeTraced?: boolean }) =>
+    api.post('/surplus/heirs/skip-trace', body),
   importParse: (file: File) => {
     const formData = new FormData();
     formData.append('file', file);

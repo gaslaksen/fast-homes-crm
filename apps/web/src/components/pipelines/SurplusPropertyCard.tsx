@@ -83,6 +83,11 @@ export interface SurplusProperty {
   anyContactable: boolean;
   anyMismatch: boolean;
   anyDeceased: boolean;
+  /** A deceased claimant with nobody on file to inherit: nobody can sign. */
+  needsHeirs: boolean;
+  heirCount: number;
+  livingHeirCount: number;
+  callableHeirCount: number;
   stage: string;
   claimants: any[];
 }
@@ -154,9 +159,26 @@ export default function SurplusPropertyCard({ p, picked, onPick, onOpen }: Props
         <span className="dc-tag" style={{ background: chip.bg, color: chip.fg }}>
           {p.claimStatusLabel}
         </span>
+        {/* "Estate" alone told nobody anything actionable. What matters is
+            whether a living heir has been found, because until one has, the
+            claim cannot be filed by anyone. */}
         {p.anyDeceased && (
-          <span className="dc-tag" style={{ background: CHIP.violet.bg, color: CHIP.violet.fg }}>
-            Estate
+          <span
+            className="dc-tag"
+            style={
+              p.needsHeirs
+                ? { background: CHIP.red.bg, color: CHIP.red.fg }
+                : { background: CHIP.violet.bg, color: CHIP.violet.fg }
+            }
+            title={
+              p.needsHeirs
+                ? 'The claimant is deceased and no living heir is on file, so nobody can sign yet.'
+                : `${p.livingHeirCount} heir${p.livingHeirCount === 1 ? '' : 's'} on file`
+            }
+          >
+            {p.needsHeirs
+              ? 'Estate, no heirs'
+              : `Estate, ${p.livingHeirCount} heir${p.livingHeirCount === 1 ? '' : 's'}`}
           </span>
         )}
         {/* Rounded. The cents are noise on a card and cost the width that was

@@ -588,3 +588,44 @@ describe('queueOf', () => {
     }
   });
 });
+
+describe('queueOf with a deceased claimant', () => {
+  const dead = { claimStatus: 'open', isDeceased: true, cleanPhoneCount: 0 };
+
+  it('asks for heirs before anything else when the claimant is dead', () => {
+    // Not a contact problem. Only a living person with standing can file, so no
+    // amount of tracing a dead man produces somebody who can sign.
+    expect(queueOf({ ...dead, traceState: 'never' })).toBe(SurplusQueue.HEIRS);
+    expect(queueOf({ ...dead, mailVerdict: 'undeliverable' })).toBe(SurplusQueue.HEIRS);
+  });
+
+  it('ignores the dead claimant\'s own phone number', () => {
+    // The trap. Dialling it reaches a grieving relative who was never told why
+    // we have the number, and the person who answers still cannot sign.
+    expect(queueOf({ ...dead, cleanPhoneCount: 3 })).toBe(SurplusQueue.HEIRS);
+  });
+
+  it('becomes callable once a living heir has a number', () => {
+    expect(queueOf({ ...dead, livingHeirCount: 2, callableHeirCount: 1 })).toBe(SurplusQueue.CALL);
+    expect(queueReason({ ...dead, livingHeirCount: 2, callableHeirCount: 1 })).toMatch(/1 callable heir/);
+  });
+
+  it('falls back to ordinary contact work once heirs are on file but unreachable', () => {
+    // Heirs are known, so "find the heirs" is done. Now it is a trace, then a
+    // name search, exactly like a living claimant.
+    expect(queueOf({ ...dead, livingHeirCount: 2, callableHeirCount: 0, traceState: 'never' }))
+      .toBe(SurplusQueue.TRACE);
+    expect(queueOf({ ...dead, livingHeirCount: 2, callableHeirCount: 0, traceState: 'no_person' }))
+      .toBe(SurplusQueue.NAME_SEARCH);
+  });
+
+  it('still closes a claim whose money is gone', () => {
+    expect(queueOf({ ...dead, claimStatus: 'distributed', callableHeirCount: 2 })).toBe(SurplusQueue.CLOSED);
+    expect(queueOf({ ...dead, doNotCall: true })).toBe(SurplusQueue.CLOSED);
+  });
+
+  it('leaves a living claimant unaffected', () => {
+    expect(queueOf({ claimStatus: 'open', cleanPhoneCount: 2 })).toBe(SurplusQueue.CALL);
+    expect(queueOf({ claimStatus: 'open', cleanPhoneCount: 0, traceState: 'never' })).toBe(SurplusQueue.TRACE);
+  });
+});
