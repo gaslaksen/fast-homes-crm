@@ -563,3 +563,137 @@ describe('recording that a trace happened', () => {
     expect(u.data.traceOutcome).toBe('skipped');
   });
 });
+
+describe('tracing heirs', () => {
+  /**
+   * The bug this whole block exists for.
+   *
+   * An heir never owned the parcel; they inherited a remainder interest in it.
+   * Submitting the parcel returns whoever lives there NOW, and because every
+   * heir on a case shares that parcel, every one of them comes back as the same
+   * stranger. The first live run did exactly that: both Spencer heirs, at
+   * addresses eleven miles apart, came back as one Odell Landeros who lives at
+   * the house that sold.
+   */
+  function heirHarness(heirs: any[]) {
+    const updates: any[] = [];
+    const prisma: any = {
+      surplusHeir: {
+        findMany: jest.fn().mockResolvedValue(heirs),
+        findUnique: jest.fn().mockResolvedValue({ callNotes: null }),
+        update: jest.fn(async (a: any) => { updates.push(a); return {}; }),
+      },
+    };
+    const config = { get: (k: string) => (k === 'BATCHDATA_API_KEY' ? 'test-key' : undefined) };
+    const svc = new SurplusSkiptraceService(prisma, config as unknown as ConfigService);
+    return { svc, updates };
+  }
+
+  const heir = (over: any = {}) => ({
+    id: over.id || 'h1',
+    name: over.name ?? 'Alfred J. Spencer',
+    street: over.street ?? '7789 Andes Drive',
+    city: 'JACKSONVILLE',
+    state: 'FL',
+    zip: '32244',
+    deceased: !!over.deceased,
+    doNotCall: !!over.doNotCall,
+    surplusDetail: {
+      caseNumber: '2025-0439TD',
+      lead: {
+        propertyAddress: '1624 W 35TH ST',
+        propertyCity: 'JACKSONVILLE',
+        propertyState: 'FL',
+        propertyZip: '32209',
+      },
+    },
+    ...over,
+  });
+
+  it('submits the HEIR\'s address, not the property that sold', async () => {
+    const { svc } = heirHarness([heir()]);
+    respond([person('Alfred', 'Spencer')]);
+
+    await svc.traceHeirs({ organizationId: 'org' });
+
+    const body = mockedAxios.post.mock.calls[0][1] as any;
+    // The address the vendor keys on must be the heir's own.
+    expect(body.requests[0].propertyAddress.street).toBe('7789 Andes Drive');
+    expect(body.requests[0].propertyAddress.zip).toBe('32244');
+    // And not the parcel, which every heir on the case shares.
+    expect(JSON.stringify(body)).not.toContain('1624 W 35TH ST');
+  });
+
+  it('gives two heirs two different addresses', async () => {
+    // The symptom that exposed the bug: one submission per heir, but both
+    // carrying the same parcel, so both returned the same occupant.
+    const { svc } = heirHarness([
+      heir({ id: 'h1', name: 'Alfred J. Spencer', street: '7789 Andes Drive' }),
+      heir({ id: 'h2', name: 'Helen F. Sherman', street: '5407 Turkey Creek Road' }),
+    ]);
+    respond([person('Alfred', 'Spencer')]);
+
+    await svc.traceHeirs({ organizationId: 'org' });
+
+    const streets = mockedAxios.post.mock.calls.map(
+      (c: any) => (c[1] as any).requests[0].propertyAddress.street,
+    );
+    expect(streets).toEqual(['7789 Andes Drive', '5407 Turkey Creek Road']);
+  });
+
+  it('refuses a deceased heir rather than spending a credit', async () => {
+    // Their share needs its own estate opened. There is nobody at that address
+    // to find, and the filing already said so.
+    const { svc } = heirHarness([heir({ deceased: true })]);
+    const r = await svc.traceHeirs({ organizationId: 'org' });
+    expect(mockedAxios.post).not.toHaveBeenCalled();
+    expect(r.skipped.heir_deceased).toBe(1);
+  });
+
+  it('refuses a do-not-call heir', async () => {
+    const { svc } = heirHarness([heir({ doNotCall: true })]);
+    const r = await svc.traceHeirs({ organizationId: 'org' });
+    expect(mockedAxios.post).not.toHaveBeenCalled();
+    expect(r.skipped.do_not_call).toBe(1);
+  });
+
+  it('refuses an heir with no street number to submit', async () => {
+    const { svc, updates } = heirHarness([heir({ street: 'Andes Drive' })]);
+    const r = await svc.traceHeirs({ organizationId: 'org' });
+    expect(mockedAxios.post).not.toHaveBeenCalled();
+    expect(r.skipped.no_house_number).toBe(1);
+    expect(updates[0].data.traceOutcome).toBe('skipped');
+  });
+
+  it('attaches contacts when the name matches', async () => {
+    const { svc, updates } = heirHarness([heir()]);
+    respond([person('Alfred', 'Spencer', ['9045551234'])]);
+
+    const r = await svc.traceHeirs({ organizationId: 'org' });
+
+    expect(r.contacted).toBe(1);
+    expect(updates[0].data.phone1).toBe('9045551234');
+    expect(updates[0].data.traceOutcome).toBe('matched');
+  });
+
+  it('discards a stranger instead of attaching them to the heir', async () => {
+    const { svc, updates } = heirHarness([heir()]);
+    respond([person('Odell', 'Landeros', ['9045559999'])]);
+
+    const r = await svc.traceHeirs({ organizationId: 'org' });
+
+    expect(r.mismatched).toBe(1);
+    expect(updates[0].data.contactMismatch).toBe(true);
+    expect(updates[0].data.mismatchedName).toBe('Odell Landeros');
+    expect(updates[0].data.phone1).toBeUndefined();
+  });
+
+  it('treats an empty heirIds array as no heirs, not every heir', async () => {
+    // The same mistake on the claimant path once traced a whole board from a
+    // liveness probe.
+    const { svc } = heirHarness([]);
+    const r = await svc.traceHeirs({ organizationId: 'org', heirIds: [] });
+    expect(r.candidates).toBe(0);
+    expect(mockedAxios.post).not.toHaveBeenCalled();
+  });
+});

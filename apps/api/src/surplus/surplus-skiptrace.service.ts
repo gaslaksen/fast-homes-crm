@@ -86,6 +86,21 @@ interface Candidate {
   addressKey: string;
   /** 'notice' when this is the owner's own address, 'property' when it is not. */
   addressSource: 'notice' | 'property';
+  /**
+   * Which address the VENDOR keys the match on.
+   *
+   * 'property' for a claimant: they owned the parcel, so the parcel is the
+   * strongest thing tying a name to this surplus.
+   *
+   * 'self' for an heir, and the distinction is not cosmetic. An heir never
+   * owned the property; they inherited a remainder interest in it. Submitting
+   * the parcel returns whoever lives there NOW, and since every heir on a case
+   * shares that parcel, every one of them comes back as the same stranger. The
+   * first live run did exactly that: both Spencer heirs, at addresses eleven
+   * miles apart, came back as one Odell Landeros who lives at the house that
+   * sold.
+   */
+  matchOn?: 'property' | 'self';
   /** The parcel that generated the surplus, always, whatever we submit. */
   propertyStreet: string | null;
   propertyCity: string | null;
@@ -395,8 +410,10 @@ export class SurplusSkiptraceService {
           state: heir.state,
           zip: heir.zip,
           addressKey: addressKeyOf({ street: heir.street, city: heir.city, zip: heir.zip }),
-          // The heir's own address IS the good one here, so it is submitted as
-          // the mailing address exactly as a notice address would be.
+          // Match on the heir's OWN address. They never owned the parcel, and
+          // submitting it returns whoever lives there now, identically for
+          // every heir on the case.
+          matchOn: 'self',
           addressSource: 'notice',
           propertyStreet: property?.propertyAddress ?? null,
           propertyCity: property?.propertyCity ?? null,
@@ -540,10 +557,19 @@ export class SurplusSkiptraceService {
    * first: the co-owner lives in that array.
    */
   private async lookup(c: Candidate): Promise<TracedPerson[]> {
-    const propertyAddress: Record<string, string> = { street: String(c.propertyStreet || c.street) };
-    if (c.propertyCity) propertyAddress.city = c.propertyCity;
-    if (c.propertyState) propertyAddress.state = c.propertyState;
-    if (c.propertyZip) propertyAddress.zip = String(c.propertyZip).slice(0, 5);
+    // What the vendor matches on. For a claimant that is the parcel they owned;
+    // for an heir it has to be the heir's own address, because they never owned
+    // it and the parcel is shared by every heir on the case.
+    const self = c.matchOn === 'self';
+    const propertyAddress: Record<string, string> = {
+      street: String(self ? c.street : c.propertyStreet || c.street),
+    };
+    const pc = self ? c.city : c.propertyCity;
+    const ps = self ? c.state : c.propertyState;
+    const pz = self ? c.zip : c.propertyZip;
+    if (pc) propertyAddress.city = pc;
+    if (ps) propertyAddress.state = ps;
+    if (pz) propertyAddress.zip = String(pz).slice(0, 5);
 
     // Send everything we know in one request. The vendor confirms a NAME
     // against the property itself, which is the surplus course's method applied
@@ -555,7 +581,7 @@ export class SurplusSkiptraceService {
     if (parts.length >= 2) {
       req.name = { first: parts[0], last: parts[parts.length - 1] };
     }
-    if (c.addressSource === 'notice' && c.street) {
+    if (!self && c.addressSource === 'notice' && c.street) {
       const mailingAddress: Record<string, string> = { street: c.street };
       if (c.city) mailingAddress.city = c.city;
       if (c.state) mailingAddress.state = c.state;
