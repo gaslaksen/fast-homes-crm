@@ -58,6 +58,10 @@ interface LedgerDoc {
   kind: string;
   docId?: string | null;
   url?: string | null;
+  /** ISO date the county filed it, on sources that publish one. */
+  filedAt?: string | null;
+  /** The county's document type token, needed to mint a RealTDM link. */
+  docType?: string | null;
 }
 
 export interface SurplusPanelLead {
@@ -930,7 +934,7 @@ function CaseTab({
               {g.label} ({g.docs.length})
             </div>
             {g.docs.map((d, i) => (
-              <DocLink key={`${d.docId || d.title}-${i}`} doc={d} />
+              <DocLink key={`${d.docId || d.title}-${i}`} doc={d} source={property.sourceSystem} />
             ))}
           </div>
         ))}
@@ -941,7 +945,7 @@ function CaseTab({
             </summary>
             <div style={{ marginTop: 4 }}>
               {other.map((d, i) => (
-                <DocLink key={`${d.docId || d.title}-${i}`} doc={d} />
+                <DocLink key={`${d.docId || d.title}-${i}`} doc={d} source={property.sourceSystem} />
               ))}
             </div>
           </details>
@@ -951,25 +955,60 @@ function CaseTab({
   );
 }
 
-function DocLink({ doc }: { doc: LedgerDoc }) {
+/**
+ * One document on the docket.
+ *
+ * Duval links are durable relative paths and open directly. RealTDM hands out
+ * pre-signed S3 URLs that expire within the hour, so those ledgers store only
+ * the document id and the link is minted when clicked. The tab is opened
+ * before the request so the browser treats it as the click's own navigation
+ * rather than a popup.
+ */
+function DocLink({ doc, source }: { doc: LedgerDoc; source?: string | null }) {
   const label = doc.title;
-  if (!doc.url) {
+  const filed = doc.filedAt ? ` ${fmtDate(doc.filedAt)}` : '';
+
+  if (doc.url) {
     return (
-      <div style={{ fontSize: 12, color: 'var(--faint)' }}>
-        {label} <span style={{ fontSize: 10 }}>(not scanned)</span>
+      <div style={{ fontSize: 12 }}>
+        <a
+          href={`https://taxdeed.duvalclerk.com${doc.url}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="dc-wp-doc"
+        >
+          {label}
+        </a>
       </div>
     );
   }
+
+  if (doc.docId && source && source.startsWith('realtdm')) {
+    const open = async (e: React.MouseEvent) => {
+      e.preventDefault();
+      const tab = window.open('', '_blank');
+      try {
+        const res = await surplusAPI.documentLink(source, doc.docId!, doc.docType);
+        const url = res?.data?.url;
+        if (tab && url) tab.location.href = url;
+        else tab?.close();
+      } catch {
+        tab?.close();
+      }
+    };
+    return (
+      <div style={{ fontSize: 12 }}>
+        <a href="#" onClick={open} className="dc-wp-doc">
+          {label}
+        </a>
+        <span style={{ fontSize: 10, color: 'var(--faint)' }}>{filed}</span>
+      </div>
+    );
+  }
+
   return (
-    <div style={{ fontSize: 12 }}>
-      <a
-        href={`https://taxdeed.duvalclerk.com${doc.url}`}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="dc-wp-doc"
-      >
-        {label}
-      </a>
+    <div style={{ fontSize: 12, color: 'var(--faint)' }}>
+      {label} <span style={{ fontSize: 10 }}>(not scanned)</span>
     </div>
   );
 }

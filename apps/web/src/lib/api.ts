@@ -219,6 +219,9 @@ export const surplusAPI = {
     api.post('/surplus/skip-trace', body),
   poll: (body: { source?: string; limit?: number }) => api.post('/surplus/poll', body),
   pollRuns: () => api.get('/surplus/poll-runs'),
+  // A fresh link to a county document whose stored link expires (RealTDM).
+  documentLink: (source: string, docId: string, docType?: string | null) =>
+    api.get('/surplus/document-link', { params: { source, docId, docType: docType || undefined } }),
   importParse: (file: File) => {
     const formData = new FormData();
     formData.append('file', file);

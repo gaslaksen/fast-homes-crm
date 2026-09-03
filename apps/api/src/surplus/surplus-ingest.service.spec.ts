@@ -36,7 +36,10 @@ function harness(existing: any[], recipients = RECIPIENTS) {
   const adapter: any = {
     key: 'duval_taxdeed',
     county: 'Duval',
+    cadence: 'daily',
+    detailDelayMs: 0,
     baseUrl: 'https://taxdeed.duvalclerk.com',
+    isLive: () => true,
     listSurplusCases: jest.fn().mockResolvedValue([
       { sourceCaseId: '1', status: 'SOLD', surplus: 105670.33 },
     ]),

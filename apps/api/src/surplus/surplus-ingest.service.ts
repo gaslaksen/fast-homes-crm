@@ -4,10 +4,10 @@
  * Idempotent on `dedupeUid`, so a re-run creates nothing new and an overlapping
  * run on a second Railway replica during a deploy is harmless.
  *
- * A re-run is not a no-op though, and that is the point of polling daily: a
- * case that was OPEN yesterday and has a `Surplus - Submitted Claim` on it today
- * has to move, and one that reaches `Surplus Distribution` has to be retired
- * before somebody calls a family about money that is already gone.
+ * A re-run is not a no-op though, and that is the point of polling: a case that
+ * was OPEN last time and has a `Surplus - Submitted Claim` on it today has to
+ * move, and one that reaches `Surplus Distribution` has to be retired before
+ * somebody calls a family about money that is already gone.
  */
 
 import { Injectable, Logger } from '@nestjs/common';
@@ -21,6 +21,7 @@ import {
 } from '@fast-homes/shared';
 import { SurplusService } from './surplus.service';
 import { DuvalTaxDeedAdapter } from './duval-taxdeed.adapter';
+import { LeeRealTdmAdapter, OWNER_ROLES } from './realtdm.adapter';
 import { SurplusNoticeService, NoticeExtract } from './surplus-notice.service';
 import { matchRecipient } from './surplus-name-search.util';
 import { SurplusSourceAdapter, SurplusCaseDetail } from './surplus-source.types';
@@ -64,6 +65,21 @@ interface IngestOpts {
 }
 
 /**
+ * Where an owner address came from, as written to ownerAddressSource. Only
+ * these may ever be overwritten by a later poll; anything else was typed in by
+ * a person and outranks the machine.
+ */
+const ADDRESS_SOURCE = {
+  /** Read off the scanned Notice of Surplus Funds by vision. Duval. */
+  notice: 'notice_of_surplus_funds',
+  /** The county's own record of who the surplus letter was mailed to. RealTDM. */
+  notifications: 'surplus_letter_notifications',
+  /** The mailing address on the county's parties list. RealTDM fallback. */
+  parties: 'case_parties',
+} as const;
+const MACHINE_ADDRESS_SOURCES = new Set<string>(Object.values(ADDRESS_SOURCE));
+
+/**
  * Fallback for when the notice cannot be read.
  *
  * Duval publishes no filing dates on the docket, so with no notice extraction
@@ -97,6 +113,51 @@ function recipientFor<T extends { name?: string | null }>(
   return recipients?.length === 1 && claimantCount === 1 ? recipients[0] : null;
 }
 
+interface FoundAddress {
+  name: string | null;
+  street: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  source: string;
+}
+
+/**
+ * Whether a source hands us the notice for free. RealTDM publishes who the
+ * surplus letter was mailed to and when it was filed as structured data, so
+ * there is nothing to read with vision and nothing to bill.
+ */
+function noticeIsFree(detail: SurplusCaseDetail): boolean {
+  return !!(detail.noticeRecipients?.length || detail.noticeDate);
+}
+
+/** The notice as the county itself records it, in the shape the vision reader returns. */
+function noticeFromSource(detail: SurplusCaseDetail): NoticeExtract | null {
+  if (!noticeIsFree(detail)) return null;
+  const recipients = (detail.noticeRecipients || []).map((r) => ({
+    name: r.name,
+    street: r.street,
+    city: r.city,
+    state: r.state,
+    zip: r.zip,
+  }));
+  const first = recipients[0];
+  return {
+    recipients,
+    recipient: first?.name ?? null,
+    street: first?.street ?? null,
+    city: first?.city ?? null,
+    state: first?.state ?? null,
+    zip: first?.zip ?? null,
+    noticeDate: detail.noticeDate || null,
+    saleDate: detail.saleDate || null,
+    surplusAtNotice: detail.surplusAtNotice ?? null,
+    certificateNumber: detail.certificateNumber ?? null,
+    taxDeedNumber: detail.caseNumber || null,
+    realEstateNumber: null,
+  };
+}
+
 @Injectable()
 export class SurplusIngestService {
   private readonly logger = new Logger(SurplusIngestService.name);
@@ -106,11 +167,13 @@ export class SurplusIngestService {
     private surplus: SurplusService,
     private duval: DuvalTaxDeedAdapter,
     private notice: SurplusNoticeService,
+    private lee?: LeeRealTdmAdapter,
   ) {}
 
-  /** Every adapter wired up. Duval only for now; RealTDM is the next one. */
+  /** Every adapter wired up: Duval daily, Lee (RealTDM) weekly. */
   adapters(): SurplusSourceAdapter[] {
-    return [this.duval];
+    const all: (SurplusSourceAdapter | undefined)[] = [this.duval, this.lee];
+    return all.filter((a): a is SurplusSourceAdapter => !!a);
   }
 
   adapterFor(key: string): SurplusSourceAdapter | undefined {
@@ -160,10 +223,11 @@ export class SurplusIngestService {
       const summaries = await adapter.listSurplusCases();
       result.scanned = summaries.length;
 
-      // Only SOLD rows carry a live surplus: on the Duval docket 207 of 208
+      // Only rows that still hold money. On the Duval docket 207 of 208
       // ESCHEATED rows post $0.00, and escheated funds are a Chapter 717 matter
-      // needing a registered representative rather than a lead to call.
-      let candidates = summaries.filter((s) => DuvalTaxDeedAdapter.isLive(s));
+      // needing a registered representative rather than a lead to call. On
+      // RealTDM the equivalent is COMPLETED - SOLD BIDDER, which is paid out.
+      let candidates = summaries.filter((s) => adapter.isLive(s));
 
       const beforeFloor = candidates.length;
       candidates = candidates.filter((s) => (s.surplus || 0) >= SURPLUS_FLOOR);
@@ -190,7 +254,7 @@ export class SurplusIngestService {
             `Surplus ingest failed on ${adapter.key} case ${summary.sourceCaseId}: ${e.message}`,
           );
         }
-        await this.pause(DuvalTaxDeedAdapter.detailDelayMs);
+        await this.pause(adapter.detailDelayMs);
       }
     } catch (e: any) {
       result.errors += 1;
@@ -216,7 +280,10 @@ export class SurplusIngestService {
     organizationId: string | null,
     reread = false,
   ): Promise<{ created: number; updated: number; skipped: number; retired: boolean }> {
-    const verdict = classifyCase(detail.documents, { owners: detail.owners });
+    const verdict = classifyCase(detail.documents, {
+      owners: detail.owners,
+      receiptsImplyClaim: !!adapter.receiptsImplyClaim,
+    });
     const claimants = collapseClaimants(detail.owners);
     const out = { created: 0, updated: 0, skipped: 0, retired: false };
 
@@ -226,30 +293,32 @@ export class SurplusIngestService {
     // Read the notice only when it will actually be used: the case is worth
     // working AND at least one of its claimants still has no owner address.
     // A paid-out case does not need one, and a case already carrying one must
-    // not be re-read, because every read is a billed API call.
+    // not be re-read, because every read is a billed API call. A source that
+    // publishes the recipients as data costs nothing and is always taken.
     const needsNotice =
       workable &&
-      // A re-read is asked for explicitly and always reads. Otherwise the read
-      // is skipped once any claimant on the case has an address, since the
-      // notice does not change between polls and the call is not free.
-      (reread ||
+      (noticeIsFree(detail) ||
+        // A re-read is asked for explicitly and always reads. Otherwise the
+        // read is skipped once any claimant on the case has an address, since
+        // the notice does not change between polls and the call is not free.
+        reread ||
         (await this.prisma.surplusDetail.count({
-        where: {
-          organizationId,
-          dedupeUid: {
-            in: claimants.map((c) =>
-              surplusUidOf({
-                county: adapter.county,
-                caseNumber: detail.caseNumber,
-                parcelId: detail.parcelId,
-                claimant: c.name,
-              }),
-            ),
+          where: {
+            organizationId,
+            dedupeUid: {
+              in: claimants.map((c) =>
+                surplusUidOf({
+                  county: adapter.county,
+                  caseNumber: detail.caseNumber,
+                  parcelId: detail.parcelId,
+                  claimant: c.name,
+                }),
+              ),
+            },
+            ownerMailingStreet: { not: null },
           },
-          ownerMailingStreet: { not: null },
-        },
-      })) === 0);
-    const notice = needsNotice ? await this.readNotice(adapter, verdict) : null;
+        })) === 0);
+    const notice = needsNotice ? await this.readNotice(adapter, verdict, detail) : null;
 
     for (const claimant of claimants) {
       const dedupeUid = surplusUidOf({
@@ -295,11 +364,7 @@ export class SurplusIngestService {
       }
 
       const deceased = claimant.deceased || verdict.probateOnFile;
-      // Only fall back to the sole recipient when the notice named exactly one.
-      // With several, an unmatched claimant gets nothing rather than somebody
-      // else's address: none is visible, wrong is not.
-      const mine =
-        recipientFor(claimant.name, notice?.recipients, claimants.length);
+      const mine = this.addressFor(claimant.name, notice, detail, claimants.length);
       const res = await this.surplus.createSurplusLead(
         {
           address: detail.propertyAddress || `${adapter.county} County surplus claim`,
@@ -325,14 +390,15 @@ export class SurplusIngestService {
 
           saleDate: detail.saleDate,
           salePrice: detail.highBid ?? null,
-          // The notice date read off the document is the clerk's own record, so
-          // it is confirmed. Without it the clock falls back to the sale date,
-          // deliberately early, and stays flagged as an estimate.
+          // The notice date read off the document, or filed on the docket, is
+          // the clerk's own record, so it is confirmed. Without it the clock
+          // falls back to the sale date, deliberately early, and stays flagged
+          // as an estimate.
           noticeDate: notice?.noticeDate || estimatedNoticeDate(detail),
           noticeConfirmed: !!notice?.noticeDate,
           surplusAtNotice: notice?.surplusAtNotice ?? null,
 
-          // THIS claimant's own notice page, not the first one on the document.
+          // THIS claimant's own address, not the first one on the document.
           // Co-owners are frequently at different addresses, and handing one of
           // them the other's is how a co-owner gets skip traced at the wrong
           // place.
@@ -341,7 +407,7 @@ export class SurplusIngestService {
           ownerMailingCity: mine?.city ?? null,
           ownerMailingState: mine?.state ?? null,
           ownerMailingZip: mine?.zip ?? null,
-          ownerAddressSource: mine?.street ? 'notice_of_surplus_funds' : null,
+          ownerAddressSource: mine?.source ?? null,
 
           grossSurplus: detail.surplus ?? null,
 
@@ -367,12 +433,49 @@ export class SurplusIngestService {
   }
 
   /**
+   * The mailing address for one claimant, and where it came from.
+   *
+   * The notice (or the county's mailing record standing in for it) wins. When
+   * no page or record is addressed to this claimant, the county's parties list
+   * is tried, restricted to owner roles so a lienholder's office never becomes
+   * an owner's home. Null when neither names them: none is visible, wrong is
+   * not.
+   */
+  private addressFor(
+    claimant: string,
+    notice: NoticeExtract | null,
+    detail: SurplusCaseDetail,
+    claimantCount: number,
+  ): FoundAddress | null {
+    const fromNotice = recipientFor(claimant, notice?.recipients, claimantCount);
+    if (fromNotice?.street) {
+      return {
+        ...fromNotice,
+        source: detail.noticeRecipients?.length ? ADDRESS_SOURCE.notifications : ADDRESS_SOURCE.notice,
+      };
+    }
+    const owners = (detail.parties || []).filter((p) => OWNER_ROLES.test(p.role) && p.street);
+    const fromParties = recipientFor(claimant, owners, claimantCount);
+    if (fromParties?.street) {
+      return {
+        name: fromParties.name,
+        street: fromParties.street,
+        city: fromParties.city,
+        state: fromParties.state,
+        zip: fromParties.zip,
+        source: ADDRESS_SOURCE.parties,
+      };
+    }
+    return null;
+  }
+
+  /**
    * Bring an existing lead up to date with today's docket.
    *
-   * This is the reason the poll runs daily. The three transitions that matter:
-   * a claim appearing, a denial landing, and a distribution closing the case.
-   * The last one retires the lead, because the alternative is somebody calling
-   * a grieving family about money that was paid to a competitor in March.
+   * This is the reason the poll runs. The three transitions that matter: a
+   * claim appearing, a denial landing, and a distribution closing the case. The
+   * last one retires the lead, because the alternative is somebody calling a
+   * grieving family about money that was paid to a competitor in March.
    *
    * A stage somebody moved by hand is not overwritten except to retire it. The
    * team's read of a lead beats the poll's.
@@ -398,13 +501,13 @@ export class SurplusIngestService {
 
     // The address this claimant's own notice page carries. Null when no page is
     // addressed to them, which on a co-owned case is the honest answer.
-    const mine = recipientFor(claimantName, notice?.recipients, claimantCount);
+    const mine = this.addressFor(claimantName, notice, detail, claimantCount);
 
     // A machine-written address may be corrected. One somebody typed in by hand
     // may not: a person who went and found the owner outranks anything read off
     // a scan, and silently overwriting that would be the worst kind of bug,
     // because the row would still look filled in.
-    const ours = existing.ownerAddressSource === 'notice_of_surplus_funds';
+    const ours = MACHINE_ADDRESS_SOURCES.has(existing.ownerAddressSource || '');
     const correcting = reread && ours && !!notice?.recipients?.length;
 
     let backfill: Record<string, unknown> = {};
@@ -418,11 +521,11 @@ export class SurplusIngestService {
         ownerMailingCity: mine.city,
         ownerMailingState: mine.state,
         ownerMailingZip: mine.zip,
-        ownerAddressSource: 'notice_of_surplus_funds',
-        ...(notice!.noticeDate
-          ? { noticeDate: new Date(`${notice!.noticeDate}T00:00:00`), noticeConfirmed: true }
+        ownerAddressSource: mine.source,
+        ...(notice?.noticeDate
+          ? { noticeDate: new Date(`${notice.noticeDate}T00:00:00`), noticeConfirmed: true }
           : {}),
-        ...(notice!.surplusAtNotice ? { surplusAtNotice: notice!.surplusAtNotice } : {}),
+        ...(notice?.surplusAtNotice ? { surplusAtNotice: notice.surplusAtNotice } : {}),
       };
     } else if (correcting && existing.ownerMailingStreet && !mine?.street) {
       // The notice read fine and no page is addressed to this claimant, so
@@ -474,21 +577,35 @@ export class SurplusIngestService {
   }
 
   /**
-   * Find the Notice of Surplus Funds on the docket and read it.
+   * The Notice of Surplus Funds for this case.
    *
-   * There is at most one that matters; when a case carries several, the LAST is
-   * the operative one, since a re-noticed case supersedes its earlier letter.
+   * A source that records who the letter went to hands it over as data and
+   * nothing is fetched. Otherwise the notice document is found on the docket
+   * and read by vision. There is at most one that matters; when a case carries
+   * several, the LAST is the operative one, since a re-noticed case supersedes
+   * its earlier letter.
    */
   private async readNotice(
     adapter: SurplusSourceAdapter,
     verdict: ReturnType<typeof classifyCase>,
+    detail: SurplusCaseDetail,
   ): Promise<NoticeExtract | null> {
+    const fromSource = noticeFromSource(detail);
+    if (fromSource) return fromSource;
+
     if (!this.notice.available) return null;
-    const notices = verdict.ledger.filter((d) => d.kind === 'notice_surplus' && d.url);
+    const notices = verdict.ledger.filter((d) => d.kind === 'notice_surplus' && (d.url || d.docId));
     const doc = notices[notices.length - 1];
-    if (!doc?.url) return null;
-    const base = (adapter as any).baseUrl || 'https://taxdeed.duvalclerk.com';
-    const url = doc.url.startsWith('http') ? doc.url : `${base}${doc.url}`;
+    if (!doc) return null;
+
+    let url: string | null = null;
+    if (doc.url) {
+      const base = (adapter as any).baseUrl || 'https://taxdeed.duvalclerk.com';
+      url = doc.url.startsWith('http') ? doc.url : `${base}${doc.url}`;
+    } else if (adapter.resolveDocumentUrl) {
+      url = await adapter.resolveDocumentUrl(doc);
+    }
+    if (!url) return null;
     return this.notice.readNotice(url);
   }
 

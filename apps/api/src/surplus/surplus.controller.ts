@@ -129,6 +129,29 @@ export class SurplusController {
   }
 
   /**
+   * A fresh link to one county document.
+   *
+   * RealTDM hands out pre-signed S3 URLs that expire within the hour, so the
+   * ledger stores the document id and the link is minted when somebody clicks
+   * it. Duval links are durable and never come through here.
+   */
+  @Get('document-link')
+  async documentLink(
+    @Query('source') source?: string,
+    @Query('docId') docId?: string,
+    @Query('docType') docType?: string,
+  ) {
+    const adapter = source ? this.ingest.adapterFor(source) : undefined;
+    if (!adapter?.resolveDocumentUrl) {
+      throw new BadRequestException(`No document links for source "${source || ''}"`);
+    }
+    if (!docId) throw new BadRequestException('docId is required');
+    const url = await adapter.resolveDocumentUrl({ docId, docType: docType || null });
+    if (!url) throw new BadRequestException('The county did not return a link for that document');
+    return { url };
+  }
+
+  /**
    * Run a county ingest now. `limit` caps the detail fetches, which is what a
    * discovery pass on a new county wants: pull ten cases, look at what came
    * back, and only then let the cron loose on the whole docket.

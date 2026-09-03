@@ -5,6 +5,7 @@ import { SurplusImportService } from './surplus-import.service';
 import { SurplusIngestService } from './surplus-ingest.service';
 import { SurplusPollService } from './surplus-poll.service';
 import { DuvalTaxDeedAdapter } from './duval-taxdeed.adapter';
+import { LeeRealTdmAdapter } from './realtdm.adapter';
 import { SurplusSkiptraceService } from './surplus-skiptrace.service';
 import { SurplusNoticeService } from './surplus-notice.service';
 
@@ -16,6 +17,7 @@ import { SurplusNoticeService } from './surplus-notice.service';
     SurplusIngestService,
     SurplusPollService,
     DuvalTaxDeedAdapter,
+    LeeRealTdmAdapter,
     SurplusSkiptraceService,
     SurplusNoticeService,
   ],
