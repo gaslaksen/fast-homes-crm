@@ -80,6 +80,8 @@ export interface SurplusDoc {
    * no text layer. Left undefined rather than guessed.
    */
   claimant?: string | null;
+  /** ISO filing date, where the county publishes one. Dates the mail verdict. */
+  filedAt?: string | null;
 }
 
 export interface ClassifiedDoc extends SurplusDoc {
@@ -308,8 +310,19 @@ export function classifyCase(
   // attempted, notices left, address LIVE and worth a call) from VACANT or NO
   // SUCH NUMBER (address dead). That distinction is a USPS endorsement stamped
   // on a scan with no text layer, so it needs OCR and is not guessed here.
-  const dead = of('mail_undeliverable').length;
-  const live = of('mail_delivered').length;
+  //
+  // Only mail sent AFTER the operative notice counts, where the docket dates
+  // its filings. A tax deed case mails several times before the surplus letter
+  // (notice of application, sheriff letter, postcard) and on Lee those bounce
+  // in January while the surplus letter goes out in March to the clerk's
+  // updated addresses, often care of a relative. Counting the January returns
+  // condemned 13 of the first 24 Lee addresses the clerk had since corrected.
+  // Duval dates nothing, so there every return still counts, as before.
+  const operativeNotice = notices[notices.length - 1];
+  const since = operativeNotice?.filedAt || null;
+  const afterNotice = (d: SurplusDoc) => !since || !d.filedAt || d.filedAt >= since;
+  const dead = of('mail_undeliverable').filter(afterNotice).length;
+  const live = of('mail_delivered').filter(afterNotice).length;
   const mailVerdict: MailVerdict =
     dead && live ? 'mixed' : dead ? 'undeliverable' : live ? 'delivered' : 'unknown';
 

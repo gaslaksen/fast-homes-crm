@@ -44,6 +44,8 @@ export interface NoticeRecipient {
   city: string | null;
   state: string | null;
   zip: string | null;
+  /** An attention line above the street ("C/O GLENN BROWN"), where the source separates one. */
+  attention?: string | null;
 }
 
 export interface NoticeExtract {
