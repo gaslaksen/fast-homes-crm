@@ -59,6 +59,13 @@ export type SurplusDocKind =
   | 'probate'
   /** A Sunbiz pull, so the owner of record is an entity. */
   | 'entity'
+  /**
+   * A clerk's payment receipt for a filing fee. Not a claim, but on Lee every
+   * one of 68 receipts sat on a case with a claim and none on an unclaimed
+   * case, so a receipt with no claim document beside it is a claim we cannot
+   * see.
+   */
+  | 'receipt'
   | 'other';
 
 export interface SurplusDoc {
@@ -118,6 +125,15 @@ const RULES: Rule[] = [
     re: /\b(applicant|tax\s*collector)\s*disbursement\b/i,
     seenIn: 'Duval',
   },
+  // A "labels" sheet is the page of mailing labels the clerk prints beside a
+  // letter. Lee's SURPLUS_LETTER_LABELS is one page, 1 KB, and draws nothing,
+  // but it contains "SURPLUS_LETTER" and is filed seconds after the real
+  // letter, so without this trap it becomes the operative notice.
+  { kind: 'other', re: /_labels\b|labels\s*available/i, seenIn: 'Lee' },
+  // The clerk's fee receipt, filed beside a claim. Exactly "Receipt" on Lee;
+  // Duval's "RealAuction Payment Receipt" is the BIDDER's receipt, sits on
+  // every case, and must stay 'other'.
+  { kind: 'receipt', re: /^receipt$/i, seenIn: 'Lee' },
   // "RETURNED MAIL UNCLAIMED" contains "claim". Mail rules run before claim rules.
   {
     kind: 'mail_undeliverable',
@@ -134,6 +150,10 @@ const RULES: Rule[] = [
     seenIn: 'Duval',
   },
   { kind: 'sheriff_served', re: /return\s*of\s*service/i, seenIn: 'Duval' },
+  // Lee files the sheriff's return as "Sheriff's Service" with an ROS filename.
+  // Service is at the PROPERTY and says nothing about the owner's mailing
+  // address, which is why the mail verdict ignores this kind entirely.
+  { kind: 'sheriff_served', re: /sheriff'?s?\s*service|\bros\b/i, seenIn: 'Lee' },
 
   // ── The money moving. Checked before claims so a distributed case is never
   //    reported as merely contested. ──────────────────────────────────────────
@@ -213,7 +233,7 @@ export interface CaseClassification {
   mailVerdict: MailVerdict;
   ledger: ClassifiedDoc[];
   /** Counts behind the verdict, so a card can explain itself instead of asserting. */
-  counts: Record<'claims' | 'denials' | 'distributions' | 'govLiens' | 'notices', number>;
+  counts: Record<'claims' | 'denials' | 'distributions' | 'govLiens' | 'notices' | 'receipts', number>;
   /** A death certificate or probate filing is on the docket. */
   probateOnFile: boolean;
   /** A Sunbiz pull is on file, so the owner of record is an entity. */
@@ -237,7 +257,17 @@ export interface CaseClassification {
  */
 export function classifyCase(
   docs: SurplusDoc[],
-  opts: { owners?: string[] } = {},
+  opts: {
+    owners?: string[];
+    /**
+     * Whether a fee receipt with no claim document beside it means somebody
+     * has filed. TRUE on Lee, where 68 of 68 receipts sat on claimed cases.
+     * FALSE on Duval, where every docket carries a bare "Receipt" including
+     * wide-open ones. Set by the adapter, never assumed: it is exactly the
+     * kind of rule that inverts the answer when carried across counties.
+     */
+    receiptsImplyClaim?: boolean;
+  } = {},
 ): CaseClassification {
   const ledger = classifyDocuments(docs);
   const owners = opts.owners || [];
@@ -248,6 +278,7 @@ export function classifyCase(
   const distributions = of('distribution');
   const govLiens = of('gov_lien_claim');
   const notices = of('notice_surplus');
+  const receipts = of('receipt');
 
   const counts = {
     claims: claims.length,
@@ -255,6 +286,7 @@ export function classifyCase(
     distributions: distributions.length,
     govLiens: govLiens.length,
     notices: notices.length,
+    receipts: receipts.length,
   };
 
   const probateOnFile = of('probate').length > 0;
@@ -282,7 +314,11 @@ export function classifyCase(
     dead && live ? 'mixed' : dead ? 'undeliverable' : live ? 'delivered' : 'unknown';
 
   const claimantClasses = claims.map((c) => classifyClaimant(c.claimant, owners));
-  const claimantUnknown = claims.length > 0 && claims.every((c) => !c.claimant);
+  // On a county where receipts only ever accompany claims, a receipt with no
+  // claim document beside it is a claim the county has not indexed yet, filed
+  // by somebody it has not named.
+  const hiddenClaim = !!opts.receiptsImplyClaim && claims.length === 0 && receipts.length > 0;
+  const claimantUnknown = (claims.length > 0 && claims.every((c) => !c.claimant)) || hiddenClaim;
 
   let claimStatus: SurplusClaimStatus;
   let reason: string;
@@ -303,6 +339,11 @@ export function classifyCase(
     claimStatus = SurplusClaimStatus.PENDING;
     const open = claims.length - denials.length;
     reason = `${open} claim${open === 1 ? '' : 's'} on file with no denial and no distribution${claimantUnknown ? ', claimant not named in the county record' : ''}.`;
+  } else if (hiddenClaim) {
+    // Lee: 68 of 68 fee receipts sat on claimed cases and none on an unclaimed
+    // one. OPEN would rank this at the top of the board; contestable is honest.
+    claimStatus = SurplusClaimStatus.PENDING;
+    reason = `A filing-fee receipt is on the docket with no claim document beside it. On this county a receipt accompanies a claim, so somebody not yet named has filed.`;
   } else if (govLiens.length) {
     claimStatus = SurplusClaimStatus.GOV_LIEN;
     reason = `Only a governmental lien has filed, which takes a slice off the top. The owner residual is still unclaimed.`;

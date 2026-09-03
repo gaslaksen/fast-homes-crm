@@ -177,6 +177,9 @@ export function parseDocuments(html: string): SurplusCaseDocument[] {
 export class DuvalTaxDeedAdapter implements SurplusSourceAdapter {
   readonly key = 'duval_taxdeed';
   readonly county = 'Duval';
+  /** Daily: the county serves no robots.txt and the docket is a few hundred JSON rows. */
+  readonly cadence = 'daily' as const;
+  readonly detailDelayMs = DETAIL_DELAY_MS;
 
   private readonly logger = new Logger(DuvalTaxDeedAdapter.name);
   /** Public so the ingest can absolutize a document's relative URL. */
@@ -349,11 +352,7 @@ export class DuvalTaxDeedAdapter implements SurplusSourceAdapter {
   }
 
   /** Whether a list row is worth opening the detail page for. */
-  static isLive(summary: SurplusCaseSummary): boolean {
+  isLive(summary: SurplusCaseSummary): boolean {
     return LIVE_STATUS.test(summary.status || '');
-  }
-
-  static get detailDelayMs(): number {
-    return DETAIL_DELAY_MS;
   }
 }
