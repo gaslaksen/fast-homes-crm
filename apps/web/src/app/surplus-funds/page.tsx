@@ -469,7 +469,8 @@ export default function SurplusFundsPage() {
     openClaims: 0,
     newSevenDays: 0,
     tierA: 0,
-    /** Claimant counts per work queue, keyed by SurplusQueue. */
+    claimantCount: 0,
+    /** Property counts per work queue, keyed by SurplusQueue. */
     queues: {} as Record<string, number>,
     complianceBlocked: 0,
     netInPipeline: 0,
@@ -870,9 +871,16 @@ export default function SurplusFundsPage() {
           )}
 
           <div className="dc-stats">
+            {/* Properties, matching the row count under the board. It used to
+                count claimants, so the headline read 74 against 47 rows. */}
             <div className="dc-stat">
-              <div className="k">Open claims</div>
+              <div className="k">Open properties</div>
               <div className="v">{stats.openClaims}</div>
+              {stats.claimantCount > stats.openClaims && (
+                <div style={{ fontSize: 11, color: 'var(--faint)', marginTop: 2 }}>
+                  {stats.claimantCount} claimants
+                </div>
+              )}
             </div>
             <button className={`dc-stat${chipQ === 'new' ? ' on' : ''}`} onClick={() => setChipQ(chipQ === 'new' ? null : 'new')}>
               <div className="k">New, 7 days</div>

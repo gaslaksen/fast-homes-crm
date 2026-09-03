@@ -170,3 +170,56 @@ describe('a property takes its most actionable claimant', () => {
     expect(groupByProperty([q('entity', 'a'), q('heirs', 'b')] as any)[0].queue).toBe('heirs');
   });
 });
+
+describe('property-level totals', () => {
+  const c = (over: any) => ({
+    id: over.id,
+    county: 'Duval',
+    caseNumber: over.caseNumber || '2026-0006TD',
+    parcelId: over.parcelId || 'p1',
+    address: over.address || '4027 BESSENT RD',
+    city: 'JACKSONVILLE',
+    zip: '32218',
+    claimant: over.name,
+    grossSurplus: over.gross ?? 104221,
+    netToClaimant: over.gross ?? 104221,
+    workScore: 10,
+    queue: over.queue || 'call',
+    queueLabel: over.queue || 'call',
+    queueReason: 'r',
+    claimStatus: 'open',
+    stage: over.stage || 'New',
+    tier: 'A',
+    phones: [],
+    emails: [],
+    cleanPhoneCount: 0,
+    touchDays: {},
+    ...over,
+  });
+
+  it('counts one pot of money per sale, not one per co-owner', () => {
+    // The live bug. 4027 Bessent Rd owes Richard Minton and Cecelia Harris out
+    // of ONE $104,221 surplus. Summing netToClaimant across them counted it
+    // twice, and across fourteen co-owned properties inflated the board's
+    // pipeline figure by $594,723.
+    const groups = groupByProperty([
+      c({ id: 'a', name: 'RICHARD MINTON' }),
+      c({ id: 'b', name: 'CECELIA W HARRIS' }),
+    ] as any);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0].claimantCount).toBe(2);
+    expect(groups[0].netToClaimant).toBe(104221);
+    const total = groups.reduce((n: number, g: any) => n + g.netToClaimant, 0);
+    expect(total).toBe(104221);
+  });
+
+  it('keeps two separate sales separate', () => {
+    const groups = groupByProperty([
+      c({ id: 'a', name: 'A', caseNumber: '2026-0006TD', gross: 100 }),
+      c({ id: 'b', name: 'B', caseNumber: '2025-0439TD', parcelId: 'p2', address: '1624 W 35TH ST', gross: 45 }),
+    ] as any);
+    expect(groups).toHaveLength(2);
+    expect(groups.reduce((n: number, g: any) => n + g.netToClaimant, 0)).toBe(145);
+  });
+});

@@ -741,18 +741,37 @@ export class SurplusService {
       (r) => r.grossSurplus >= SURPLUS_FLOOR && r.claimantType !== SurplusClaimantType.LIENHOLDER,
     );
 
+    // Counted the way the board counts, on three axes that were all wrong.
+    //
+    // PROPERTIES, not claimants. A sale that owes two co-owners is one case
+    // with one pot of money, and counting it twice made the headline disagree
+    // with the row count directly under it: 74 against 47.
+    //
+    // LIVE ONLY. Dead is hidden on the board by default, so counting retired
+    // leads in the headline describes a board nobody is looking at.
+    //
+    // And the money is summed PER PROPERTY. netToClaimant is the whole surplus
+    // as it stands for that claimant, so adding it up across co-owners counted
+    // the same pot once per person: on the live board that inflated the
+    // pipeline by $594,723 across fourteen co-owned properties.
+    const live = feed.filter((r) => r.stage !== SurplusStage.DEAD);
+    const props = groupByProperty(live);
+
     return {
-      openClaims: feed.length,
-      newSevenDays: feed.filter((r) => r.noticeAge !== null && r.noticeAge <= 7).length,
-      tierA: feed.filter((r) => r.tier === SurplusTier.A).length,
+      openClaims: props.length,
+      claimantCount: live.length,
+      newSevenDays: props.filter((p: any) => p.noticeAge !== null && p.noticeAge <= 7).length,
+      tierA: props.filter((p: any) => p.tier === SurplusTier.A).length,
       // Counts per work queue, so the quick filters can show what they hold
-      // without the board guessing.
+      // without the board guessing. Property counts, because clicking a chip
+      // filters properties.
       queues: Object.values(SurplusQueue).reduce((acc: Record<string, number>, q) => {
-        acc[q] = feed.filter((r) => r.queue === q).length;
+        acc[q] = props.filter((p: any) => p.queue === q).length;
         return acc;
       }, {}),
+      /** One pot per sale. See the note above. */
+      netInPipeline: props.reduce((acc: number, p: any) => acc + (p.netToClaimant || 0), 0),
       complianceBlocked: all.filter((r) => !r.compliance.clear).length,
-      netInPipeline: feed.reduce((acc, r) => acc + r.netToClaimant, 0),
       belowFloor: all.length - all.filter((r) => r.grossSurplus >= SURPLUS_FLOOR).length,
       total: all.length,
     };
