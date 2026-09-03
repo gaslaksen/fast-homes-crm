@@ -86,6 +86,21 @@ interface Candidate {
   addressKey: string;
   /** 'notice' when this is the owner's own address, 'property' when it is not. */
   addressSource: 'notice' | 'property';
+  /**
+   * Which address the VENDOR keys the match on.
+   *
+   * 'property' for a claimant: they owned the parcel, so the parcel is the
+   * strongest thing tying a name to this surplus.
+   *
+   * 'self' for an heir, and the distinction is not cosmetic. An heir never
+   * owned the property; they inherited a remainder interest in it. Submitting
+   * the parcel returns whoever lives there NOW, and since every heir on a case
+   * shares that parcel, every one of them comes back as the same stranger. The
+   * first live run did exactly that: both Spencer heirs, at addresses eleven
+   * miles apart, came back as one Odell Landeros who lives at the house that
+   * sold.
+   */
+  matchOn?: 'property' | 'self';
   /** The parcel that generated the surplus, always, whatever we submit. */
   propertyStreet: string | null;
   propertyCity: string | null;
@@ -299,14 +314,262 @@ export class SurplusSkiptraceService {
   }
 
   /**
+   * Skip trace HEIRS rather than claimants.
+   *
+   * A separate entry point because the target is different in a way that
+   * matters: an heir's address comes off a probate filing that is usually a
+   * year or two old, which is far better input than a claimant's address off a
+   * notice the clerk's own mail came back from. The verification is the same
+   * though, and deliberately so, since the failure it prevents is identical:
+   * attaching a stranger's phone number to a real person.
+   *
+   * Refuses a DECEASED heir outright. Their share needs its own estate opened
+   * and there is nobody at that address to find; submitting one spends a credit
+   * to be told what the filing already said.
+   */
+  async traceHeirs(opts: {
+    organizationId?: string | null;
+    heirIds?: string[];
+    limit?: number;
+    includeTraced?: boolean;
+  }): Promise<SurplusTraceResult> {
+    const result: SurplusTraceResult = {
+      candidates: 0,
+      submitted: 0,
+      contacted: 0,
+      mismatched: 0,
+      skipped: {},
+      errors: 0,
+    };
+
+    if (!this.batchKey) {
+      result.message = 'BATCHDATA_API_KEY is not set, so no trace was attempted.';
+      return result;
+    }
+
+    const heirs = await this.prisma.surplusHeir.findMany({
+      where: {
+        ...(opts.organizationId ? { organizationId: opts.organizationId } : {}),
+        // An empty array means "these zero heirs", not "every heir". The same
+        // mistake on the claimant path once traced a whole board from a probe.
+        ...(opts.heirIds ? { id: { in: opts.heirIds } } : {}),
+        ...(opts.includeTraced ? {} : { phone1: null }),
+      },
+      include: {
+        surplusDetail: {
+          select: {
+            caseNumber: true,
+            lead: {
+              select: {
+                propertyAddress: true,
+                propertyCity: true,
+                propertyState: true,
+                propertyZip: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    result.candidates = heirs.length;
+    if (!heirs.length) return result;
+
+    let submitted = 0;
+    for (const heir of heirs) {
+      if (opts.limit && submitted >= opts.limit) break;
+
+      if (heir.deceased) {
+        result.skipped.heir_deceased = (result.skipped.heir_deceased || 0) + 1;
+        continue;
+      }
+      if (heir.doNotCall) {
+        result.skipped.do_not_call = (result.skipped.do_not_call || 0) + 1;
+        continue;
+      }
+      if (!heir.street || !/^\d/.test(heir.street.trim())) {
+        result.skipped.no_house_number = (result.skipped.no_house_number || 0) + 1;
+        await this.noteHeir(heir.id, 'No street address on file for this heir, so there is nothing to submit.', {
+          outcome: 'skipped',
+          detail: 'The filing gave no usable street address for this heir. Search by name instead.',
+        });
+        continue;
+      }
+
+      const property = heir.surplusDetail?.lead;
+      submitted += 1;
+      try {
+        const persons = await this.lookup({
+          leadId: '',
+          detailId: heir.id,
+          claimant: heir.name,
+          caseNumber: heir.surplusDetail?.caseNumber ?? null,
+          isEntity: false,
+          street: heir.street,
+          city: heir.city,
+          state: heir.state,
+          zip: heir.zip,
+          addressKey: addressKeyOf({ street: heir.street, city: heir.city, zip: heir.zip }),
+          // Match on the heir's OWN address. They never owned the parcel, and
+          // submitting it returns whoever lives there now, identically for
+          // every heir on the case.
+          matchOn: 'self',
+          addressSource: 'notice',
+          propertyStreet: property?.propertyAddress ?? null,
+          propertyCity: property?.propertyCity ?? null,
+          propertyState: property?.propertyState ?? null,
+          propertyZip: property?.propertyZip ?? null,
+        });
+        await this.applyToHeir(heir, persons, result);
+      } catch (e: any) {
+        result.errors += 1;
+        this.logger.warn(`Heir skip trace failed for ${heir.name}: ${e.message}`);
+        if (!result.message) result.message = e.message;
+        if (/credits/i.test(e.message) || /\b40[13]\b/.test(e.message)) break;
+      }
+      await this.pause(CALL_DELAY_MS);
+    }
+    result.submitted = submitted;
+    return result;
+  }
+
+  /**
+   * Attach what came back to one heir, or record why nothing was attached.
+   *
+   * Uses the same name verification as the claimant path. `livedAtProperty` is
+   * NOT promoted to a match here, and that is a deliberate difference in
+   * emphasis: an heir who grew up in the house legitimately has it in their
+   * address history, so it confirms the family rather than the person.
+   */
+  private async applyToHeir(
+    heir: { id: string; name: string; street: string | null; city: string | null },
+    persons: TracedPerson[],
+    result: SurplusTraceResult,
+  ): Promise<void> {
+    const where = `at ${[heir.street, heir.city].filter(Boolean).join(', ')}`;
+
+    let best: { person: TracedPerson; verdict: TraceVerdict; reason: string } | null = null;
+    for (const p of persons) {
+      const candidates = [{ first: p.first, last: p.last }, ...p.akas];
+      const check = candidates
+        .map((n) => verifyTracedName(heir.name, n.first, n.last))
+        .reduce((a, b) => (VERDICT_RANK[b.verdict] > VERDICT_RANK[a.verdict] ? b : a));
+      if (!best || VERDICT_RANK[check.verdict] > VERDICT_RANK[best.verdict]) {
+        best = { person: p, verdict: check.verdict, reason: check.reason };
+      }
+    }
+
+    if (!best) {
+      await this.noteHeir(heir.id, `Skip trace returned no matched person ${where}.`, {
+        outcome: 'no_person',
+        detail: `The submission went through and came back with nobody matching ${heir.name} ${where}. Re-running the same address returns the same nothing.`,
+      });
+      return;
+    }
+
+    const name = [best.person.first, best.person.last].filter(Boolean).join(' ');
+
+    if (best.verdict === 'stranger') {
+      result.mismatched += 1;
+      await this.prisma.surplusHeir.update({
+        where: { id: heir.id },
+        data: {
+          contactMismatch: true,
+          mismatchedName: name || null,
+          tracedAt: new Date(),
+          traceOutcome: 'mismatch',
+          traceDetail: `Returned ${name || 'an unnamed person'} ${where}, who is not ${heir.name}. ${best.reason}`,
+          callNotes: this.appendNote(
+            null,
+            `Skip trace returned ${name || 'an unnamed person'} ${where}. ${best.reason} Contacts discarded. Check the address on the filing, or search by name.`,
+          ),
+        },
+      });
+      return;
+    }
+
+    const ph = best.person.phones;
+    if (!ph.length && !best.person.emails.length) {
+      await this.noteHeir(heir.id, `Skip trace matched ${name || 'a person'} but returned no phone or email.`, {
+        outcome: 'no_contact',
+        detail: `Matched ${name || 'a person'}, but the vendor holds no phone or email for them.`,
+      });
+      return;
+    }
+
+    await this.prisma.surplusHeir.update({
+      where: { id: heir.id },
+      data: {
+        phone1: ph[0]?.num || null,
+        phone2: ph[1]?.num || null,
+        phone3: ph[2]?.num || null,
+        phone4: ph[3]?.num || null,
+        phone1Type: ph[0]?.type || null,
+        phone2Type: ph[1]?.type || null,
+        phone3Type: ph[2]?.type || null,
+        phone4Type: ph[3]?.type || null,
+        phone1Dnc: ph[0]?.dnc || null,
+        phone2Dnc: ph[1]?.dnc || null,
+        phone3Dnc: ph[2]?.dnc || null,
+        phone4Dnc: ph[3]?.dnc || null,
+        email1: best.person.emails[0] || null,
+        email2: best.person.emails[1] || null,
+        contactMismatch: false,
+        mismatchedName: null,
+        tracedAt: new Date(),
+        traceOutcome:
+          best.verdict === 'relative' ? 'relative' : best.verdict === 'unverified' ? 'unverified' : 'matched',
+        traceDetail: `Returned ${name || 'contacts'} ${where}. ${best.reason}`,
+        callNotes: this.appendNote(
+          null,
+          best.verdict === 'relative'
+            ? `Skip trace returned ${name}, not the heir. ${best.reason} Often the fastest route to them.`
+            : `Skip trace matched ${name} ${where}. ${best.reason}`,
+        ),
+      },
+    });
+    result.contacted += 1;
+  }
+
+  /** Record a reason on an heir, and stamp the structured outcome with it. */
+  private async noteHeir(
+    heirId: string,
+    text: string,
+    state: { outcome: string; detail: string },
+  ): Promise<void> {
+    const row = await this.prisma.surplusHeir.findUnique({
+      where: { id: heirId },
+      select: { callNotes: true },
+    });
+    await this.prisma.surplusHeir.update({
+      where: { id: heirId },
+      data: {
+        callNotes: this.appendNote(row?.callNotes, text),
+        tracedAt: new Date(),
+        traceOutcome: state.outcome,
+        traceDetail: state.detail,
+      },
+    });
+  }
+
+  /**
    * One BatchData call. Returns EVERY matched person at the address, not the
    * first: the co-owner lives in that array.
    */
   private async lookup(c: Candidate): Promise<TracedPerson[]> {
-    const propertyAddress: Record<string, string> = { street: String(c.propertyStreet || c.street) };
-    if (c.propertyCity) propertyAddress.city = c.propertyCity;
-    if (c.propertyState) propertyAddress.state = c.propertyState;
-    if (c.propertyZip) propertyAddress.zip = String(c.propertyZip).slice(0, 5);
+    // What the vendor matches on. For a claimant that is the parcel they owned;
+    // for an heir it has to be the heir's own address, because they never owned
+    // it and the parcel is shared by every heir on the case.
+    const self = c.matchOn === 'self';
+    const propertyAddress: Record<string, string> = {
+      street: String(self ? c.street : c.propertyStreet || c.street),
+    };
+    const pc = self ? c.city : c.propertyCity;
+    const ps = self ? c.state : c.propertyState;
+    const pz = self ? c.zip : c.propertyZip;
+    if (pc) propertyAddress.city = pc;
+    if (ps) propertyAddress.state = ps;
+    if (pz) propertyAddress.zip = String(pz).slice(0, 5);
 
     // Send everything we know in one request. The vendor confirms a NAME
     // against the property itself, which is the surplus course's method applied
@@ -318,7 +581,7 @@ export class SurplusSkiptraceService {
     if (parts.length >= 2) {
       req.name = { first: parts[0], last: parts[parts.length - 1] };
     }
-    if (c.addressSource === 'notice' && c.street) {
+    if (!self && c.addressSource === 'notice' && c.street) {
       const mailingAddress: Record<string, string> = { street: c.street };
       if (c.city) mailingAddress.city = c.city;
       if (c.state) mailingAddress.state = c.state;

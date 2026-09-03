@@ -335,3 +335,75 @@ describe('listForLead marks a flagged number', () => {
     expect(list.find((p) => p.number.endsWith('5559999'))?.bad).toBe(false);
   });
 });
+
+describe('LeadPhonesService with heirs of a deceased claimant', () => {
+  /**
+   * On an estate lead the heirs' numbers are the only dialable ones, because
+   * the claimant is dead. They have to appear here or the composer refuses to
+   * text an heir: it rejects any recipient not on the lead's own list.
+   */
+  const estateLead = (heirs: any[]) => ({
+    sellerPhone: '9045551111',
+    foreclosureDetail: null,
+    probateDetail: null,
+    taxSaleDetail: null,
+    badContacts: null,
+    surplusDetail: { phone1Type: 'Landline', heirs },
+  });
+
+  it('offers a living heir\'s number, labelled with their name', async () => {
+    const { service } = buildService(
+      estateLead([
+        { id: 'h1', name: 'Alfred J. Spencer', deceased: false, doNotCall: false, phone1: '9045552222', phone1Type: 'Mobile' },
+      ]),
+    );
+    const list = await service.listForLead('lead-1');
+    const heir = list.find((p) => p.number === '+19045552222');
+    expect(heir).toBeTruthy();
+    // Named, or the picker is a list of numbers with no way to tell whose.
+    expect(heir!.label).toBe('Heir: Alfred J. Spencer');
+    expect(heir!.type).toBe('Mobile');
+  });
+
+  it('never offers a DECEASED heir\'s number', async () => {
+    // The Spencer filing lists a surviving spouse who died in 2022. Offering
+    // her old line means telling whoever answers about money they are not owed.
+    const { service } = buildService(
+      estateLead([
+        { id: 'h1', name: 'Leila Spencer', deceased: true, doNotCall: false, phone1: '9045553333' },
+      ]),
+    );
+    const list = await service.listForLead('lead-1');
+    expect(list.map((p) => p.number)).not.toContain('+19045553333');
+  });
+
+  it('never offers a do-not-call heir\'s number', async () => {
+    const { service } = buildService(
+      estateLead([
+        { id: 'h1', name: 'Helen F. Sherman', deceased: false, doNotCall: true, phone1: '9045554444' },
+      ]),
+    );
+    const list = await service.listForLead('lead-1');
+    expect(list.map((p) => p.number)).not.toContain('+19045554444');
+  });
+
+  it('carries an heir number\'s DNC flag through', async () => {
+    const { service } = buildService(
+      estateLead([
+        { id: 'h1', name: 'A B', deceased: false, doNotCall: false, phone1: '9045555555', phone1Dnc: 'litigator' },
+      ]),
+    );
+    const list = await service.listForLead('lead-1');
+    expect(list.find((p) => p.number === '+19045555555')!.dnc).toBe('litigator');
+  });
+
+  it('keeps the claimant\'s own number primary and lists heirs after it', async () => {
+    const { service } = buildService(
+      estateLead([{ id: 'h1', name: 'A B', deceased: false, doNotCall: false, phone1: '9045556666' }]),
+    );
+    const list = await service.listForLead('lead-1');
+    expect(list[0].isPrimary).toBe(true);
+    expect(list[0].number).toBe('+19045551111');
+    expect(list.filter((p) => p.isPrimary)).toHaveLength(1);
+  });
+});

@@ -340,6 +340,14 @@ export class SurplusIngestService {
         },
       });
 
+      // A case the team deleted must stay deleted. The tombstone outlives the
+      // cascade that takes dedupeUid away with the lead, which is what let the
+      // next morning's poll recreate it with every note and edit gone.
+      if (!existing && (await this.isSuppressed(organizationId, dedupeUid))) {
+        out.skipped += 1;
+        continue;
+      }
+
       if (existing) {
         await this.refresh(
           existing,
@@ -480,6 +488,21 @@ export class SurplusIngestService {
    * A stage somebody moved by hand is not overwritten except to retire it. The
    * team's read of a lead beats the poll's.
    */
+  /** Has this case been deleted by hand? Checked only before a CREATE. */
+  private async isSuppressed(
+    organizationId: string | null,
+    dedupeUid: string,
+  ): Promise<boolean> {
+    const hit = await this.prisma.surplusSuppression.findFirst({
+      where: { organizationId, dedupeUid },
+      select: { id: true },
+    });
+    if (hit) {
+      this.logger.log(`Skipping suppressed surplus case ${dedupeUid}`);
+    }
+    return !!hit;
+  }
+
   private async refresh(
     existing: {
       id: string;

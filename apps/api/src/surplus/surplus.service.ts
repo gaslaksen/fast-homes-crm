@@ -10,10 +10,12 @@ import {
   SurplusClaimStatus,
   SURPLUS_QUEUE_LABEL,
   SurplusQueue,
+  SURPLUS_QUEUE_RANK,
 } from '@fast-homes/shared';
 import { CLAIM_STATUS_LABEL } from './surplus-classify.util';
 import { nameSearchPlan } from './surplus-name-search.util';
 import { traceState } from './surplus-skiptrace.util';
+import { heirRow } from './surplus-heirs.util';
 import {
   normalizePhoneDigits,
   isoWeekKey,
@@ -312,7 +314,9 @@ export class SurplusService {
         source: LeadSource.SURPLUS,
         ...(organizationId ? { organizationId } : {}),
       },
-      include: { surplusDetail: true },
+      // Heirs travel with the detail: an Estate claimant's queue, card and
+      // panel all depend on whether a living heir is on file.
+      include: { surplusDetail: { include: { heirs: true } } },
     });
     if (!lead || !lead.surplusDetail) return null;
 
@@ -439,17 +443,61 @@ export class SurplusService {
     return { updated: res.count, stage: target };
   }
 
+  /**
+   * Remove leads outright, and record a tombstone so the county poll cannot
+   * bring them back.
+   *
+   * The tombstone is written FIRST and deliberately. Deleting the lead cascades
+   * SurplusDetail away, taking the dedupeUid the poll matches on with it, so
+   * after the delete there is nothing left to write one from. Without it the
+   * case reads as brand new the next morning and returns with every note,
+   * edited number and Dead marking gone, which is exactly what was happening.
+   *
+   * Marking a lead Dead is the normal way to retire one. This exists for a case
+   * that should never have been ingested at all.
+   */
   async bulkDelete(ids: string[], organizationId?: string) {
-    const leads = await this.prisma.lead.findMany({
+    const doomed = await this.prisma.lead.findMany({
       where: {
         id: { in: ids },
         source: LeadSource.SURPLUS,
         ...(organizationId ? { organizationId } : {}),
       },
-      select: { id: true },
+      select: {
+        id: true,
+        propertyAddress: true,
+        organizationId: true,
+        surplusDetail: {
+          select: { dedupeUid: true, county: true, caseNumber: true },
+        },
+        sellerFirstName: true,
+        sellerLastName: true,
+      },
     });
-    if (!leads.length) return { deleted: 0 };
-    const res = await this.prisma.lead.deleteMany({ where: { id: { in: leads.map((l) => l.id) } } });
+    if (!doomed.length) return { deleted: 0 };
+
+    const tombstones = doomed
+      .filter((l) => l.surplusDetail?.dedupeUid)
+      .map((l) => ({
+        organizationId: l.organizationId,
+        dedupeUid: l.surplusDetail!.dedupeUid,
+        county: l.surplusDetail!.county,
+        caseNumber: l.surplusDetail!.caseNumber,
+        claimant: `${l.sellerFirstName || ''} ${l.sellerLastName || ''}`.trim() || null,
+        propertyAddress: l.propertyAddress,
+        reason: 'deleted',
+      }));
+
+    if (tombstones.length) {
+      await this.prisma.surplusSuppression.createMany({ data: tombstones });
+    }
+
+    const res = await this.prisma.lead.deleteMany({
+      where: { id: { in: doomed.map((l) => l.id) } },
+    });
+    this.logger.log(
+      `Deleted ${res.count} surplus lead(s), ${tombstones.length} suppressed from re-ingestion`,
+    );
     return { deleted: res.count };
   }
 
@@ -462,7 +510,9 @@ export class SurplusService {
         source: LeadSource.SURPLUS,
         ...(organizationId ? { organizationId } : {}),
       },
-      include: { surplusDetail: true },
+      // Heirs travel with the detail: an Estate claimant's queue, card and
+      // panel all depend on whether a living heir is on file.
+      include: { surplusDetail: { include: { heirs: true } } },
     });
     return lead && lead.surplusDetail ? this.toRow(lead) : null;
   }
@@ -541,7 +591,9 @@ export class SurplusService {
 
     const leads = await this.prisma.lead.findMany({
       where,
-      include: { surplusDetail: true },
+      // Heirs travel with the detail: an Estate claimant's queue, card and
+      // panel all depend on whether a living heir is on file.
+      include: { surplusDetail: { include: { heirs: true } } },
       orderBy: this.orderFor(filters.sort),
       take: 5000,
     });
@@ -680,25 +732,46 @@ export class SurplusService {
         source: LeadSource.SURPLUS,
         ...(organizationId ? { organizationId } : {}),
       },
-      include: { surplusDetail: true },
+      // Heirs travel with the detail: an Estate claimant's queue, card and
+      // panel all depend on whether a living heir is on file.
+      include: { surplusDetail: { include: { heirs: true } } },
     });
     const all = leads.filter((l) => l.surplusDetail).map((l) => this.toRow(l));
     const feed = all.filter(
       (r) => r.grossSurplus >= SURPLUS_FLOOR && r.claimantType !== SurplusClaimantType.LIENHOLDER,
     );
 
+    // Counted the way the board counts, on three axes that were all wrong.
+    //
+    // PROPERTIES, not claimants. A sale that owes two co-owners is one case
+    // with one pot of money, and counting it twice made the headline disagree
+    // with the row count directly under it: 74 against 47.
+    //
+    // LIVE ONLY. Dead is hidden on the board by default, so counting retired
+    // leads in the headline describes a board nobody is looking at.
+    //
+    // And the money is summed PER PROPERTY. netToClaimant is the whole surplus
+    // as it stands for that claimant, so adding it up across co-owners counted
+    // the same pot once per person: on the live board that inflated the
+    // pipeline by $594,723 across fourteen co-owned properties.
+    const live = feed.filter((r) => r.stage !== SurplusStage.DEAD);
+    const props = groupByProperty(live);
+
     return {
-      openClaims: feed.length,
-      newSevenDays: feed.filter((r) => r.noticeAge !== null && r.noticeAge <= 7).length,
-      tierA: feed.filter((r) => r.tier === SurplusTier.A).length,
+      openClaims: props.length,
+      claimantCount: live.length,
+      newSevenDays: props.filter((p: any) => p.noticeAge !== null && p.noticeAge <= 7).length,
+      tierA: props.filter((p: any) => p.tier === SurplusTier.A).length,
       // Counts per work queue, so the quick filters can show what they hold
-      // without the board guessing.
+      // without the board guessing. Property counts, because clicking a chip
+      // filters properties.
       queues: Object.values(SurplusQueue).reduce((acc: Record<string, number>, q) => {
-        acc[q] = feed.filter((r) => r.queue === q).length;
+        acc[q] = props.filter((p: any) => p.queue === q).length;
         return acc;
       }, {}),
+      /** One pot per sale. See the note above. */
+      netInPipeline: props.reduce((acc: number, p: any) => acc + (p.netToClaimant || 0), 0),
       complianceBlocked: all.filter((r) => !r.compliance.clear).length,
-      netInPipeline: feed.reduce((acc, r) => acc + r.netToClaimant, 0),
       belowFloor: all.length - all.filter((r) => r.grossSurplus >= SURPLUS_FLOOR).length,
       total: all.length,
     };
@@ -716,6 +789,14 @@ export class SurplusService {
       { number: normalizePhoneDigits(d.phone4) || '', type: d.phone4Type, dnc: d.phone4Dnc },
     ].filter((p) => p.number);
     const emails = [lead.sellerEmail, d.email2].map((e) => cellText(e)).filter(Boolean);
+
+    // Heirs come off the detail row. Shaped by the same function the heirs
+    // endpoint uses, so the board and the panel cannot disagree about who is
+    // callable. The counts consider only the LIVING: a dead heir cannot sign
+    // either, and their share needs its own estate opened.
+    const heirRows = (d.heirs || []).map((h: any) => heirRow(h));
+    const livingHeirs = heirRows.filter((h: any) => !h.deceased);
+    const callableHeirs = livingHeirs.filter((h: any) => h.callable);
 
     const week = isoWeekKey();
     const staleWeek = d.touchWeek && d.touchWeek !== week;
@@ -845,6 +926,14 @@ export class SurplusService {
       // address get one submission and routinely end differently, so this is
       // per person and never rolled up to the property.
       trace: traceState(d, phones.length + emails.length),
+
+      // Who inherited, living first. The counts are what the queue and the card
+      // key on; heirs is what the panel renders.
+      heirs: heirRows,
+      heirCount: heirRows.length,
+      livingHeirCount: livingHeirs.length,
+      callableHeirCount: callableHeirs.length,
+      deceasedHeirCount: heirRows.length - livingHeirs.length,
       doNotCall: d.doNotCall,
       callNotes: d.callNotes || '',
       // Two different things, deliberately both here.
@@ -862,7 +951,14 @@ export class SurplusService {
 
       createdAt: lead.createdAt,
       ...this.workRank(d, facts, phones),
-      ...this.queueOf(d, lead, phones, traceState(d, phones.length + emails.length)),
+      ...this.queueOf(
+        d,
+        lead,
+        phones,
+        traceState(d, phones.length + emails.length),
+        livingHeirs.length,
+        callableHeirs.length,
+      ),
     };
   }
 
@@ -871,7 +967,14 @@ export class SurplusService {
    * workScore, so a rule change lands on the next page load rather than needing
    * a backfill over every row.
    */
-  private queueOf(d: any, lead: any, phones: { dnc?: string | null }[], trace: { state: string }) {
+  private queueOf(
+    d: any,
+    lead: any,
+    phones: { dnc?: string | null }[],
+    trace: { state: string },
+    livingHeirCount = 0,
+    callableHeirCount = 0,
+  ) {
     const f = {
       claimStatus: d.claimStatus,
       cleanPhoneCount: phones.filter((p) => !p.dnc).length,
@@ -880,6 +983,11 @@ export class SurplusService {
       traceState: trace.state,
       mailVerdict: d.mailVerdict,
       ownerMailingStreet: d.ownerMailingStreet,
+      // A dead claimant cannot sign, so the queue asks for heirs before it asks
+      // for a phone number.
+      isDeceased: !!d.deceased || !!d.heirsRequired,
+      livingHeirCount,
+      callableHeirCount,
     };
     const queue = queueOf(f);
     return { queue, queueLabel: SURPLUS_QUEUE_LABEL[queue], queueReason: queueReason(f) };
@@ -1007,9 +1115,25 @@ export function groupByProperty(rows: any[]): any[] {
       // A property takes its most actionable claimant's queue, since that is
       // the work it represents: one callable owner makes the house callable
       // even when their co-owner is a dead end.
-      queue: head.queue,
-      queueLabel: head.queueLabel,
-      queueReason: head.queueReason,
+      //
+      // Ranked by QUEUE, not by work score. Those are different orderings and
+      // the difference showed on 1624 W 35th St: a deceased claimant with no
+      // heirs on file outranked her co-owner whose son had just been found with
+      // four numbers, so the card read "Find the heirs, nobody can sign yet"
+      // about a house somebody could ring that morning.
+      ...(() => {
+        const best = ranked.reduce((a: any, b: any) =>
+          (SURPLUS_QUEUE_RANK[b.queue as SurplusQueue] ?? 0) >
+          (SURPLUS_QUEUE_RANK[a.queue as SurplusQueue] ?? 0)
+            ? b
+            : a,
+        );
+        return {
+          queue: best.queue,
+          queueLabel: best.queueLabel,
+          queueReason: best.queueReason,
+        };
+      })(),
       /** How many claimants sit in each queue, for the card. */
       queueCounts: ranked.reduce((acc: Record<string, number>, m: any) => {
         acc[m.queue] = (acc[m.queue] || 0) + 1;
@@ -1017,6 +1141,18 @@ export function groupByProperty(rows: any[]): any[] {
       }, {}),
       allDeceased: ranked.every((m) => m.isDeceased),
       anyDeceased: ranked.some((m) => m.isDeceased),
+      // Heirs rolled up across the claimants, so a card can say "2 deceased, 2
+      // heirs" instead of leaving somebody to open the panel to find out there
+      // is nobody alive to ring.
+      heirCount: ranked.reduce((n: number, m: any) => n + (m.heirCount || 0), 0),
+      livingHeirCount: ranked.reduce((n: number, m: any) => n + (m.livingHeirCount || 0), 0),
+      callableHeirCount: ranked.reduce((n: number, m: any) => n + (m.callableHeirCount || 0), 0),
+      /**
+       * A dead claimant with nobody on file to inherit. The state that used to
+       * be invisible: the card showed "no number" and the queue said name
+       * search, when the actual next step is finding the probate case.
+       */
+      needsHeirs: ranked.some((m: any) => m.isDeceased && !(m.livingHeirCount || 0)),
       // The stage the property is furthest along on.
       stage: head.stage,
     };

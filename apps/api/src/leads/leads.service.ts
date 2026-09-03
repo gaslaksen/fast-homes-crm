@@ -1,4 +1,4 @@
-import { Injectable, Inject, forwardRef, Logger, Optional } from '@nestjs/common';
+import { Injectable, Inject, forwardRef, Logger, Optional , BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { TouchService } from './touch.service';
 import { ScoringService } from '../scoring/scoring.service';
@@ -1161,7 +1161,33 @@ export class LeadsService {
   /**
    * Bulk delete leads by IDs
    */
+  /**
+   * Delete plain property leads.
+   *
+   * REFUSES pipeline leads, and that refusal is the point. Every pipeline that
+   * re-ingests from a county keeps a suppression row so a deleted case stays
+   * deleted; this endpoint deletes by id with no such row, so a surplus lead
+   * removed through here is recreated by the next poll with its skip-trace
+   * results, notes and Dead marking gone. That happened: 27 surplus leads came
+   * back overnight on 2026-09-03.
+   *
+   * Pipeline leads are already hidden from this board by default, so refusing
+   * costs nothing and closes the last path that could lose that work.
+   */
   async bulkDelete(ids: string[]): Promise<{ deleted: number }> {
+    const pipeline = await this.prisma.lead.findMany({
+      where: { id: { in: ids }, source: { in: PIPELINE_SOURCES } },
+      select: { id: true, source: true },
+    });
+    if (pipeline.length) {
+      const sources = [...new Set(pipeline.map((l) => l.source))].join(', ');
+      throw new BadRequestException(
+        `${pipeline.length} of these are ${sources} leads. Delete them from that ` +
+          `pipeline's own board, which records the deletion so the next county ` +
+          `poll cannot recreate them. Marking them Dead there is usually better.`,
+      );
+    }
+
     const result = await this.prisma.lead.deleteMany({
       where: { id: { in: ids } },
     });

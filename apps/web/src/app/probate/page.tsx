@@ -111,18 +111,17 @@ const PROBATE_COLUMNS: PipelineColumn<ProbateContact>[] = [
     key: 'touches',
     label: 'Touches',
     align: 'right',
-    width: '110px',
+    width: '112px',
+    nowrap: true,
     // Most neglected first, so the column answers "who has nobody been calling".
     sortValue: (r) => -agoDays(r.lastTouchedAt),
+    // One line, not a stack. Two short values stacked set the row height for
+    // every other cell in the table and read as a wrap rather than a design.
     render: (r) => (
-      <div style={{ fontSize: 12 }}>
-        <div style={{ fontWeight: 600, color: r.touches ? 'var(--text)' : 'var(--faint)' }}>
-          {r.touches || 0}
-        </div>
-        <div style={{ fontSize: 11, color: r.lastTouchedAt ? 'var(--faint)' : 'var(--dim)' }}>
-          {agoLabel(r.lastTouchedAt)}
-        </div>
-      </div>
+      <span style={{ fontSize: 12, color: r.touches ? 'var(--text)' : 'var(--faint)' }}>
+        <b>{r.touches || 0}</b>
+        <span style={{ color: 'var(--faint)' }}> · {agoLabel(r.lastTouchedAt)}</span>
+      </span>
     ),
   },
   {
@@ -584,9 +583,6 @@ export default function ProbatePage() {
                         onClick={() => bulkStatus('DEAD', 'Marked dead')}
                       >
                         Mark dead
-                      </button>
-                      <button className="dc-btn sm dngr" disabled={bulkBusy} onClick={bulkDelete}>
-                        Delete
                       </button>
                     </>
                   ) : null

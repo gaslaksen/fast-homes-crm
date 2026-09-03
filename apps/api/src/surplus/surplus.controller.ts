@@ -5,11 +5,25 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import * as jwt from 'jsonwebtoken';
+import { SurplusHeirsService } from './surplus-heirs.service';
 import { SurplusService } from './surplus.service';
 import { SurplusImportService } from './surplus-import.service';
 import { SurplusIngestService } from './surplus-ingest.service';
 import { SurplusSkiptraceService } from './surplus-skiptrace.service';
 import { COMPLIANCE_RULES, DISCLOSURE_LABELS, FL_COUNTIES, SURPLUS_FLOOR } from './surplus-compliance';
+
+/**
+ * A probate filing upload. PDFs only and capped, because this goes straight to
+ * a vision model: a wrong file type wastes a call and a huge one fails halfway.
+ */
+const PDF_UPLOAD_OPTIONS = {
+  storage: memoryStorage(),
+  fileFilter: (_req: any, file: any, cb: any) => {
+    if (file.mimetype === 'application/pdf' || /\.pdf$/i.test(file.originalname)) cb(null, true);
+    else cb(new BadRequestException('Only PDF files are allowed'), false);
+  },
+  limits: { fileSize: 12 * 1024 * 1024 },
+};
 
 const IMPORT_UPLOAD_OPTIONS = {
   storage: memoryStorage(),
@@ -36,6 +50,7 @@ export class SurplusController {
     private importService: SurplusImportService,
     private ingest: SurplusIngestService,
     private skiptrace: SurplusSkiptraceService,
+      private heirs: SurplusHeirsService,
   ) {}
 
   private decodeToken(authHeader?: string): { userId?: string; organizationId?: string } {
@@ -199,6 +214,105 @@ export class SurplusController {
     return this.skiptrace.traceLeads({
       organizationId: body?.organizationId || organizationId || null,
       leadIds: Array.isArray(body?.leadIds) ? body.leadIds : undefined,
+      limit,
+      includeTraced: body?.includeTraced === true,
+    });
+  }
+
+  // ─── Heirs of a deceased claimant ─────────────────────────────────────────
+
+  /** Heirs on file for a claimant, living first. */
+  @Get(':id/heirs')
+  async listHeirs(@Param('id') id: string, @Headers('authorization') authHeader?: string) {
+    const { organizationId } = this.decodeToken(authHeader);
+    return { heirs: await this.heirs.list(id, organizationId) };
+  }
+
+  /**
+   * Read an uploaded probate filing and return the heirs for confirmation.
+   *
+   * Deliberately does NOT save. The one judgement a document cannot make for
+   * itself is whether this case belongs to this claimant, so a person confirms
+   * before anything is written: a wrong heir is a stranger being told they have
+   * money coming.
+   */
+  @Post(':id/heirs/read-filing')
+  @UseInterceptors(FileInterceptor('file', PDF_UPLOAD_OPTIONS))
+  async readFiling(
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File,
+    @Headers('authorization') authHeader?: string,
+  ) {
+    if (!file) throw new BadRequestException('No file uploaded');
+    const { organizationId } = this.decodeToken(authHeader);
+    try {
+      return await this.heirs.preview(id, file.buffer, file.originalname, organizationId);
+    } catch (e: any) {
+      // Surface the reason. This is somebody waiting on an upload they just
+      // made, not a background job that can fall back to something else.
+      throw new BadRequestException(e?.message || 'That filing could not be read.');
+    }
+  }
+
+  /** Save the confirmed heirs onto the claimant. */
+  @Post(':id/heirs')
+  async saveHeirs(
+    @Param('id') id: string,
+    @Body() body: { heirs: any[]; caseNumber?: string; sourceDocument?: string },
+    @Headers('authorization') authHeader?: string,
+  ) {
+    const { organizationId, userId } = this.decodeToken(authHeader);
+    if (!Array.isArray(body?.heirs) || !body.heirs.length) {
+      throw new BadRequestException('No heirs to save');
+    }
+    const saved = await this.heirs.save(
+      id,
+      body.heirs,
+      { caseNumber: body.caseNumber, sourceDocument: body.sourceDocument, userId },
+      organizationId,
+    );
+    return { ...saved, heirs: await this.heirs.list(id, organizationId) };
+  }
+
+  @Patch('heirs/:heirId')
+  async updateHeir(
+    @Param('heirId') heirId: string,
+    @Body() body: any,
+    @Headers('authorization') authHeader?: string,
+  ) {
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.heirs.update(heirId, body, organizationId);
+  }
+
+  @Post('heirs/:heirId/delete')
+  async deleteHeir(
+    @Param('heirId') heirId: string,
+    @Headers('authorization') authHeader?: string,
+  ) {
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.heirs.remove(heirId, organizationId);
+  }
+
+  /**
+   * Skip trace heirs at their own addresses from the filing.
+   *
+   * Separate from the claimant trace because the target is better: an address
+   * off a recent probate petition beats one off a notice the clerk's own mail
+   * came back from. A deceased heir is refused rather than submitted.
+   */
+  @Post('heirs/skip-trace')
+  async skipTraceHeirs(
+    @Body() body: { heirIds?: string[]; limit?: number; includeTraced?: boolean },
+    @Headers('authorization') authHeader?: string,
+  ) {
+    const { organizationId } = this.decodeToken(authHeader);
+    const limit = body?.limit == null ? undefined : Number(body.limit);
+    if (limit != null && (!Number.isFinite(limit) || limit < 1)) {
+      throw new BadRequestException('limit must be a positive number');
+    }
+    return this.skiptrace.traceHeirs({
+      organizationId,
+      heirIds: Array.isArray(body?.heirIds) ? body.heirIds : undefined,
       limit,
       includeTraced: body?.includeTraced === true,
     });

@@ -1,6 +1,6 @@
 'use client';
 
-import { CHIP, money } from './format';
+import { CHIP, money , moneyShort } from './format';
 import { WORK_STATUS_LABELS, type ProbateContact } from '@/components/probate/ProbateContactRow';
 
 /**
@@ -79,7 +79,7 @@ export default function ProbateCard({ c, picked, onPick, onOpen }: Props) {
             Absentee
           </span>
         )}
-        <span className="dc-pcard-money">{money(c.totalValue)}</span>
+        <span className="dc-pcard-money" title={money(c.totalValue)}>{moneyShort(c.totalValue)}</span>
       </div>
 
       <div className="dc-pcard-addr">{c.heirName}</div>

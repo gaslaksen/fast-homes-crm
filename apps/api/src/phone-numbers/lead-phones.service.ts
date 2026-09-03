@@ -133,6 +133,19 @@ export class LeadPhonesService {
             phone2: true, phone2Type: true, phone2Dnc: true,
             phone3: true, phone3Type: true, phone3Dnc: true,
             phone4: true, phone4Type: true, phone4Dnc: true,
+            // Heirs of a deceased claimant carry their own numbers, and on such
+            // a lead those are the only dialable ones, because the claimant is
+            // dead. Without them here the composer refuses to text an heir: it
+            // rejects any recipient that is not on the lead's own list.
+            heirs: {
+              select: {
+                id: true, name: true, deceased: true, doNotCall: true,
+                phone1: true, phone1Type: true, phone1Dnc: true,
+                phone2: true, phone2Type: true, phone2Dnc: true,
+                phone3: true, phone3Type: true, phone3Dnc: true,
+                phone4: true, phone4Type: true, phone4Dnc: true,
+              },
+            },
           },
         },
         // Tax sales carry four numbers too. Omitting them had the same effect
@@ -186,6 +199,26 @@ export class LeadPhonesService {
         dnc: s?.phone4Dnc ?? null,
       },
     ];
+
+    // A DECEASED heir's numbers are deliberately excluded. Their share needs
+    // its own estate opened, and offering the number means somebody dials a
+    // dead person's line and tells whoever answers about money they are not
+    // owed. A do-not-call heir is excluded for the same reason.
+    for (const h of s?.heirs || []) {
+      if (h.deceased || h.doNotCall) continue;
+      for (const i of [1, 2, 3, 4] as const) {
+        const num = (h as any)[`phone${i}`];
+        if (!num) continue;
+        raw.push({
+          value: num,
+          // Named, because on an estate lead the picker is otherwise a list of
+          // numbers with no way to tell which heir is which.
+          label: `Heir: ${h.name}`,
+          type: (h as any)[`phone${i}Type`] ?? null,
+          dnc: (h as any)[`phone${i}Dnc`] ?? null,
+        });
+      }
+    }
 
     const out: LeadPhone[] = [];
     const seen = new Set<string>();

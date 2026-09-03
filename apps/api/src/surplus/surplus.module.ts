@@ -8,6 +8,8 @@ import { DuvalTaxDeedAdapter } from './duval-taxdeed.adapter';
 import { LeeRealTdmAdapter } from './realtdm.adapter';
 import { SurplusSkiptraceService } from './surplus-skiptrace.service';
 import { SurplusNoticeService } from './surplus-notice.service';
+import { SurplusProbateService } from './surplus-probate.service';
+import { SurplusHeirsService } from './surplus-heirs.service';
 
 @Module({
   controllers: [SurplusController],
@@ -20,7 +22,15 @@ import { SurplusNoticeService } from './surplus-notice.service';
     LeeRealTdmAdapter,
     SurplusSkiptraceService,
     SurplusNoticeService,
+    SurplusProbateService,
+    SurplusHeirsService,
   ],
-  exports: [SurplusService, SurplusImportService, SurplusIngestService, SurplusSkiptraceService],
+  exports: [
+    SurplusService,
+    SurplusImportService,
+    SurplusIngestService,
+    SurplusSkiptraceService,
+    SurplusHeirsService,
+  ],
 })
 export class SurplusModule {}

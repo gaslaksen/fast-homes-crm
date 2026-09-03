@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { PrismaModule } from './prisma/prisma.module';
+import { CronLockModule } from './common/cron-lock.module';
 import { LeadsModule } from './leads/leads.module';
 import { MessagesModule } from './messages/messages.module';
 import { CompsModule } from './comps/comps.module';
@@ -43,6 +44,7 @@ import { DigestModule } from './digest/digest.module';
     }),
     ScheduleModule.forRoot(),
     PrismaModule,
+    CronLockModule,
     AuthModule,
     LeadsModule,
     MessagesModule,

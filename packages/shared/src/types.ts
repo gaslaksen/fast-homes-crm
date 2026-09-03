@@ -221,6 +221,12 @@ export enum SurplusQueue {
   CALL = 'call',
   /** No consumer record exists. The registered agent on Sunbiz can sign. */
   ENTITY = 'entity',
+  /**
+   * The claimant is dead and nobody has found who inherited. Only a living
+   * person with standing can file, so this is not a contact problem at all: no
+   * amount of skip tracing a dead man produces somebody who can sign.
+   */
+  HEIRS = 'heirs',
   /** Never submitted, and the address still looks live. Spend a credit. */
   TRACE = 'trace',
   /** The address route is spent. Name search, obituary, official records. */
@@ -229,9 +235,32 @@ export enum SurplusQueue {
   CLOSED = 'closed',
 }
 
+/**
+ * How actionable each queue is, most first.
+ *
+ * A PROPERTY takes the best queue among its claimants, not the queue of its
+ * highest-scoring one. Those are different orderings and the difference is
+ * visible: 1624 W 35th St has a deceased claimant whose heirs are still unknown
+ * and a second deceased claimant whose son has now been found and has four
+ * numbers on file. Ranked by work score the first one leads and the card reads
+ * "Find the heirs, nobody can sign yet", which is false about the house.
+ *
+ * Ordered by what the next action costs the person doing it: a phone call, then
+ * a one-click submission, then finding a court filing, then open-ended research.
+ */
+export const SURPLUS_QUEUE_RANK: Record<SurplusQueue, number> = {
+  [SurplusQueue.CALL]: 5,
+  [SurplusQueue.TRACE]: 4,
+  [SurplusQueue.HEIRS]: 3,
+  [SurplusQueue.NAME_SEARCH]: 2,
+  [SurplusQueue.ENTITY]: 1,
+  [SurplusQueue.CLOSED]: 0,
+};
+
 export const SURPLUS_QUEUE_LABEL: Record<SurplusQueue, string> = {
   [SurplusQueue.CALL]: 'Call now',
   [SurplusQueue.ENTITY]: 'Entity, find the agent',
+  [SurplusQueue.HEIRS]: 'Find the heirs',
   [SurplusQueue.TRACE]: 'Skip trace it',
   [SurplusQueue.NAME_SEARCH]: 'Name search',
   [SurplusQueue.CLOSED]: 'Closed',

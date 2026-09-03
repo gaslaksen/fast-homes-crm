@@ -954,6 +954,17 @@ export class ForeclosuresService {
       highEquity,
       lastPoll: shape(lastRun) || null,
       lastCronPoll: shape(lastCronRun) || null,
+      /**
+       * Whether the daily Mecklenburg Times pull is scheduled at all. Off since
+       * 2026-09-01 at the team's request.
+       *
+       * The board needs this, not just the run history: with the schedule off,
+       * "the last cron pull was days ago" is the expected state rather than a
+       * fault, and warning about it forever would train everyone to ignore the
+       * one line that is there to catch a genuinely broken feed.
+       */
+      rssPollEnabled:
+        (process.env.FORECLOSURE_RSS_POLL_ENABLED ?? 'false') === 'true',
     };
   }
 

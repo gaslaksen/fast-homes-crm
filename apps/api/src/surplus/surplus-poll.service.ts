@@ -3,6 +3,7 @@ import { Cron } from '@nestjs/schedule';
 import { ConfigService } from '@nestjs/config';
 import { SurplusIngestService } from './surplus-ingest.service';
 import { SurplusPollCadence } from './surplus-source.types';
+import { CronLockService } from '../common/cron-lock.service';
 
 /**
  * Scheduled polls of the county surplus dockets.
@@ -17,9 +18,14 @@ import { SurplusPollCadence } from './surplus-source.types';
  *           dockets do not move by the hour. Lee alone is a few hundred paced
  *           requests, so it wants the hour.
  *
- * Ingestion is idempotent on dedupeUid, so an overlapping run on a second
- * Railway replica during a deploy is harmless. The in-process guard is per
- * adapter: a slow weekly run must not stop the daily one from starting.
+ * Ingestion is idempotent on dedupeUid, so an overlapping run is harmless to
+ * the data. It was not harmless to the county: production runs more than one
+ * replica and both fired every morning, so two runs hit Duval within twenty
+ * milliseconds of each other and one of them timed out against the county's own
+ * slow page, every day, leaving a failed run on the record that looked like a
+ * broken feed. The advisory lock is cross-replica and held per cadence, so the
+ * weekly run never blocks the daily one. The in-process guard is per adapter
+ * and is the cheap check against a slow run stacking on the next one.
  */
 @Injectable()
 export class SurplusPollService {
@@ -30,6 +36,7 @@ export class SurplusPollService {
   constructor(
     private config: ConfigService,
     private ingest: SurplusIngestService,
+    private lock: CronLockService,
   ) {
     // Default on; set SURPLUS_POLL_ENABLED=false to disable in an env.
     this.enabled = (this.config.get<string>('SURPLUS_POLL_ENABLED') ?? 'true') !== 'false';
@@ -47,20 +54,30 @@ export class SurplusPollService {
 
   private async run(cadence: SurplusPollCadence) {
     if (!this.enabled) return;
-    for (const adapter of this.ingest.adapters()) {
-      if (adapter.cadence !== cadence || this.running.has(adapter.key)) continue;
-      this.running.add(adapter.key);
-      try {
-        const result = await this.ingest.ingestCounty(adapter.key, {
-          organizationId: this.defaultOrgId(),
-          trigger: 'cron',
-        });
-        this.logger.log(`Surplus poll ${adapter.key} done: ${JSON.stringify(result)}`);
-      } catch (e: any) {
-        this.logger.error(`Surplus poll ${adapter.key} failed: ${e.message}`);
-      } finally {
-        this.running.delete(adapter.key);
-      }
+    const adapters = this.ingest
+      .adapters()
+      .filter((a) => a.cadence === cadence && !this.running.has(a.key));
+    if (!adapters.length) return;
+
+    try {
+      await this.lock.run(`surplus-poll-${cadence}`, async () => {
+        for (const adapter of adapters) {
+          this.running.add(adapter.key);
+          try {
+            const result = await this.ingest.ingestCounty(adapter.key, {
+              organizationId: this.defaultOrgId(),
+              trigger: 'cron',
+            });
+            this.logger.log(`Surplus poll ${adapter.key} done: ${JSON.stringify(result)}`);
+          } catch (e: any) {
+            this.logger.error(`Surplus poll ${adapter.key} failed: ${e.message}`);
+          } finally {
+            this.running.delete(adapter.key);
+          }
+        }
+      });
+    } catch (e: any) {
+      this.logger.error(`Surplus ${cadence} poll failed: ${e.message}`);
     }
   }
 

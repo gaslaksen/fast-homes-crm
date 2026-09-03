@@ -112,3 +112,114 @@ describe('groupByProperty', () => {
     expect(g.claimants.map((c: any) => c.id).sort()).toEqual(['a', 'b', 'c']);
   });
 });
+
+describe('a property takes its most actionable claimant', () => {
+  const claimant = (over: any) => ({
+    id: over.id,
+    county: 'Duval',
+    caseNumber: '2025-0439TD',
+    parcelId: 'p1',
+    address: '1624 W 35TH ST',
+    city: 'JACKSONVILLE',
+    zip: '32209',
+    claimant: over.name,
+    grossSurplus: 45262,
+    netToClaimant: 45262,
+    workScore: over.workScore,
+    queue: over.queue,
+    queueLabel: over.queue,
+    queueReason: `${over.queue} reason`,
+    claimStatus: 'open',
+    stage: 'New',
+    tier: 'A',
+    phones: [],
+    emails: [],
+    cleanPhoneCount: 0,
+    touchDays: {},
+    isDeceased: true,
+    ...over,
+  });
+
+  it('ranks by queue, not by work score', () => {
+    // The live case. Leila outranks Alfred on work score and still needs heirs;
+    // Alfred's son has just been found with four numbers. Ranked by score the
+    // card reads "Find the heirs, nobody can sign yet" about a house somebody
+    // could ring that morning.
+    const [group] = groupByProperty([
+      claimant({ id: 'a', name: 'LEILA A SPENCER', queue: 'heirs', workScore: 404.5 }),
+      claimant({ id: 'b', name: 'ALFRED SPENCER', queue: 'call', workScore: 120 }),
+    ] as any);
+
+    expect(group.queue).toBe('call');
+    expect(group.queueReason).toBe('call reason');
+    // The heir work is still real and still counted, just not the headline.
+    expect(group.queueCounts).toEqual({ heirs: 1, call: 1 });
+  });
+
+  it('falls back to the only claimant when there is one', () => {
+    const [group] = groupByProperty([
+      claimant({ id: 'a', name: 'LEILA A SPENCER', queue: 'heirs', workScore: 404.5 }),
+    ] as any);
+    expect(group.queue).toBe('heirs');
+  });
+
+  it('prefers a trace over research, and research over closed', () => {
+    const q = (queue: string, id: string) => claimant({ id, name: id, queue, workScore: 1 });
+    expect(groupByProperty([q('name_search', 'a'), q('trace', 'b')] as any)[0].queue).toBe('trace');
+    expect(groupByProperty([q('closed', 'a'), q('entity', 'b')] as any)[0].queue).toBe('entity');
+    expect(groupByProperty([q('entity', 'a'), q('heirs', 'b')] as any)[0].queue).toBe('heirs');
+  });
+});
+
+describe('property-level totals', () => {
+  const c = (over: any) => ({
+    id: over.id,
+    county: 'Duval',
+    caseNumber: over.caseNumber || '2026-0006TD',
+    parcelId: over.parcelId || 'p1',
+    address: over.address || '4027 BESSENT RD',
+    city: 'JACKSONVILLE',
+    zip: '32218',
+    claimant: over.name,
+    grossSurplus: over.gross ?? 104221,
+    netToClaimant: over.gross ?? 104221,
+    workScore: 10,
+    queue: over.queue || 'call',
+    queueLabel: over.queue || 'call',
+    queueReason: 'r',
+    claimStatus: 'open',
+    stage: over.stage || 'New',
+    tier: 'A',
+    phones: [],
+    emails: [],
+    cleanPhoneCount: 0,
+    touchDays: {},
+    ...over,
+  });
+
+  it('counts one pot of money per sale, not one per co-owner', () => {
+    // The live bug. 4027 Bessent Rd owes Richard Minton and Cecelia Harris out
+    // of ONE $104,221 surplus. Summing netToClaimant across them counted it
+    // twice, and across fourteen co-owned properties inflated the board's
+    // pipeline figure by $594,723.
+    const groups = groupByProperty([
+      c({ id: 'a', name: 'RICHARD MINTON' }),
+      c({ id: 'b', name: 'CECELIA W HARRIS' }),
+    ] as any);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0].claimantCount).toBe(2);
+    expect(groups[0].netToClaimant).toBe(104221);
+    const total = groups.reduce((n: number, g: any) => n + g.netToClaimant, 0);
+    expect(total).toBe(104221);
+  });
+
+  it('keeps two separate sales separate', () => {
+    const groups = groupByProperty([
+      c({ id: 'a', name: 'A', caseNumber: '2026-0006TD', gross: 100 }),
+      c({ id: 'b', name: 'B', caseNumber: '2025-0439TD', parcelId: 'p2', address: '1624 W 35TH ST', gross: 45 }),
+    ] as any);
+    expect(groups).toHaveLength(2);
+    expect(groups.reduce((n: number, g: any) => n + g.netToClaimant, 0)).toBe(145);
+  });
+});

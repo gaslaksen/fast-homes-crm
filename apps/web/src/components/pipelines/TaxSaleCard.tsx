@@ -1,6 +1,6 @@
 'use client';
 
-import { CHIP, METHOD_LABEL, PRIORITY, TAX_STAGE_COLOR, TAX_STAGE_LABEL, money } from './format';
+import { CHIP, METHOD_LABEL, PRIORITY, TAX_STAGE_COLOR, TAX_STAGE_LABEL, money , moneyShort } from './format';
 
 /**
  * One tax sale on the board.
@@ -81,7 +81,7 @@ export default function TaxSaleCard({ r, picked, onPick, onOpen }: Props) {
             {prio.label}
           </span>
         )}
-        <span className="dc-pcard-money">{money(r.redemptionAmount)}</span>
+        <span className="dc-pcard-money" title={money(r.redemptionAmount)}>{moneyShort(r.redemptionAmount)}</span>
       </div>
 
       <div className="dc-pcard-addr">{r.address}</div>

@@ -432,19 +432,38 @@ select.dc-wp-sel:disabled { opacity: 0.45; cursor: not-allowed; }
   border-left: 3px solid var(--border2);
   border-radius: var(--r2); padding: 13px 15px; cursor: pointer;
   transition: 0.12s; display: flex; flex-direction: column; gap: 5px;
+  /* A flex item defaults to min-width:auto, so a long unbroken owner string
+     grows the card past its grid track instead of wrapping inside it. */
+  min-width: 0;
 }
+.dc-pcard > * { min-width: 0; }
 .dc-pcard:hover { border-color: var(--border2); background: var(--surface2); }
 .dc-pcard.pick { box-shadow: inset 0 0 0 1px var(--mint); }
 
-.dc-pcard-top { display: flex; align-items: center; gap: 7px; }
+/*
+ * The chip row. `flex-wrap` and a `min-width: 0` on the chips are both load
+ * bearing: without them a long chip like "Entity, find the agent" beside a
+ * status and a money figure pushes the row past the card and the amount is
+ * clipped mid-digit, which is what "$100,200" reading as "$100,20" was.
+ */
+.dc-pcard-top { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.dc-pcard-top > .dc-tag { min-width: 0; }
 .dc-pcard-top input[type='checkbox'] { width: 14px; height: 14px; accent-color: var(--mint); flex: 0 0 14px; }
-.dc-pcard-money { margin-left: auto; font-size: 18px; font-weight: 700; letter-spacing: -0.3px; }
+/* Never shrinks and never wraps: the amount is the one thing on the card that
+   must stay whole, so the chips give way to it rather than the reverse. */
+.dc-pcard-money {
+  margin-left: auto; font-size: 18px; font-weight: 700; letter-spacing: -0.3px;
+  white-space: nowrap; flex: 0 0 auto;
+}
 
-.dc-pcard-addr { font-size: 14.5px; font-weight: 700; line-height: 1.25; }
-.dc-pcard-sub { font-size: 11.5px; color: var(--faint); }
+/* Long owner strings and addresses wrap inside the card rather than running
+   past its edge. `overflow-wrap` catches the single unbroken token that
+   `word-break` alone would not. */
+.dc-pcard-addr { font-size: 14.5px; font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
+.dc-pcard-sub { font-size: 11.5px; color: var(--faint); overflow-wrap: anywhere; }
 /* The address the surplus notice was actually mailed to. */
-.dc-pcard-owner { font-size: 12px; color: var(--mint); margin-top: 1px; }
-.dc-pcard-names { font-size: 12.5px; color: var(--dim); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.dc-pcard-owner { font-size: 12px; color: var(--mint); margin-top: 1px; overflow-wrap: anywhere; }
+.dc-pcard-names { font-size: 12.5px; color: var(--dim); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; overflow-wrap: anywhere; }
 .dc-pcard-count {
   font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px;
   background: var(--surface3); color: var(--dim); border-radius: 4px; padding: 1px 5px;
@@ -501,7 +520,18 @@ button.dc-wp-claimant .sub { display: block; font-size: 10.5px; font-weight: 500
   border: 1px solid var(--border); border-radius: var(--r2);
   background: var(--surface); overflow-x: auto;
 }
-.dc-pb-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+/*
+ * `min-width` matters more than `width` here. With only width:100% the browser
+ * squeezes whichever columns have no declared width until their contents wrap,
+ * which is why "JACKSONVILLE, FL" broke across two lines and the property
+ * address split mid-line while several fixed columns sat with room to spare.
+ * Below this width the wrapper scrolls instead, which is the honest trade.
+ */
+.dc-pb-table { width: 100%; min-width: 1080px; border-collapse: collapse; font-size: 13px; }
+
+/* Cells that must never wrap: they are short by nature, and a wrap here costs
+   a whole extra row height across the table for no information. */
+.dc-pb-table td.nowrap, .dc-pb-table th.nowrap { white-space: nowrap; }
 .dc-pb-table thead th {
   text-align: left; padding: 9px 12px; font-size: 11px; font-weight: 700;
   text-transform: uppercase; letter-spacing: 0.5px; color: var(--faint);
@@ -515,6 +545,10 @@ button.dc-wp-claimant .sub { display: block; font-size: 10.5px; font-weight: 500
 .dc-pb-table tbody tr:hover { background: var(--surface2); }
 .dc-pb-table tbody tr.pick { background: var(--mintGhost); }
 .dc-pb-table td { padding: 10px 12px; vertical-align: middle; }
+/* Long values shorten with an ellipsis rather than wrapping the row. */
+.dc-pb-table td .ellipsis {
+  display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .dc-pb-table input[type='checkbox'] { width: 14px; height: 14px; accent-color: var(--mint); }
 
 /* Kanban */

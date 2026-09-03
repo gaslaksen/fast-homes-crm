@@ -27,6 +27,33 @@ export function money(n?: number | null): string {
   return n || n === 0 ? `$${Number(n).toLocaleString('en-US')}` : '-';
 }
 
+/**
+ * Money at a glance: $104K, $9.4K, $1.2M.
+ *
+ * For cards and dense table cells, where the exact figure is never the point.
+ * "$104,220.79" is fourteen characters that all have to fit somewhere, and the
+ * cents are noise: nobody decides which claim to work on the strength of
+ * seventy-nine cents, and the full figure is on the panel when it matters.
+ *
+ * Under a thousand is shown in full, since "$0.9K" is harder to read than
+ * "$940" and no shorter.
+ */
+export function moneyShort(n?: number | null): string {
+  if (n == null || (!n && n !== 0)) return '-';
+  const v = Number(n);
+  if (!Number.isFinite(v)) return '-';
+  const abs = Math.abs(v);
+  const sign = v < 0 ? '-' : '';
+  if (abs < 1000) return `${sign}$${Math.round(abs)}`;
+  if (abs < 1_000_000) {
+    // One decimal below $10K, none above: $9.4K reads, $104.2K just adds width.
+    const k = abs / 1000;
+    return `${sign}$${k < 10 ? k.toFixed(1) : Math.round(k)}K`;
+  }
+  const m = abs / 1_000_000;
+  return `${sign}$${m < 10 ? m.toFixed(1) : Math.round(m)}M`;
+}
+
 export function fmtDate(v?: string | Date | null): string {
   if (!v) return '-';
   const d = v instanceof Date ? v : new Date(v);

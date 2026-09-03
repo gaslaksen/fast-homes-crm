@@ -1,6 +1,6 @@
 'use client';
 
-import { CHIP, PRIORITY, money } from './format';
+import { CHIP, PRIORITY, money , moneyShort } from './format';
 
 /**
  * One foreclosure on the board.
@@ -72,7 +72,7 @@ export default function ForeclosureCard({ l, picked, onPick, onOpen }: Props) {
           </span>
         )}
         <span className="dc-pcard-money">
-          {l.debtFigureReliable && l.equitySpread != null ? money(l.equitySpread) : '-'}
+          {l.debtFigureReliable && l.equitySpread != null ? moneyShort(l.equitySpread) : '-'}
         </span>
       </div>
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { CHIP, money } from './format';
+import { CHIP, money , moneyShort } from './format';
 
 /**
  * One subject property on the board.
@@ -83,6 +83,11 @@ export interface SurplusProperty {
   anyContactable: boolean;
   anyMismatch: boolean;
   anyDeceased: boolean;
+  /** A deceased claimant with nobody on file to inherit: nobody can sign. */
+  needsHeirs: boolean;
+  heirCount: number;
+  livingHeirCount: number;
+  callableHeirCount: number;
   stage: string;
   claimants: any[];
 }
@@ -154,12 +159,33 @@ export default function SurplusPropertyCard({ p, picked, onPick, onOpen }: Props
         <span className="dc-tag" style={{ background: chip.bg, color: chip.fg }}>
           {p.claimStatusLabel}
         </span>
+        {/* "Estate" alone told nobody anything actionable. What matters is
+            whether a living heir has been found, because until one has, the
+            claim cannot be filed by anyone. */}
         {p.anyDeceased && (
-          <span className="dc-tag" style={{ background: CHIP.violet.bg, color: CHIP.violet.fg }}>
-            Estate
+          <span
+            className="dc-tag"
+            style={
+              p.needsHeirs
+                ? { background: CHIP.red.bg, color: CHIP.red.fg }
+                : { background: CHIP.violet.bg, color: CHIP.violet.fg }
+            }
+            title={
+              p.needsHeirs
+                ? 'The claimant is deceased and no living heir is on file, so nobody can sign yet.'
+                : `${p.livingHeirCount} heir${p.livingHeirCount === 1 ? '' : 's'} on file`
+            }
+          >
+            {p.needsHeirs
+              ? 'Estate, no heirs'
+              : `Estate, ${p.livingHeirCount} heir${p.livingHeirCount === 1 ? '' : 's'}`}
           </span>
         )}
-        <span className="dc-pcard-money">{money(p.grossSurplus)}</span>
+        {/* Rounded. The cents are noise on a card and cost the width that was
+            clipping the figure; the exact amount is on the panel. */}
+        <span className="dc-pcard-money" title={money(p.grossSurplus)}>
+          {moneyShort(p.grossSurplus)}
+        </span>
       </div>
 
       <div className="dc-pcard-addr">{p.address}</div>

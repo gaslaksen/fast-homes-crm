@@ -34,6 +34,11 @@ export interface PipelineColumn<T> {
   /** Right-align money and counts; everything else reads better left. */
   align?: 'left' | 'right';
   width?: string;
+  /**
+   * Keep this column on one line. For short values where a wrap costs a whole
+   * extra row height across the table and tells the reader nothing.
+   */
+  nowrap?: boolean;
   render: (row: T) => ReactNode;
   /**
    * Value to sort on. Omit to make the column unsortable, which is right for
@@ -200,7 +205,9 @@ export default function PipelineBoard<T>({
                   <th
                     key={c.key}
                     style={{ width: c.width, textAlign: c.align || 'left' }}
-                    className={c.sortValue ? 'sortable' : undefined}
+                    className={[c.sortValue ? 'sortable' : '', c.nowrap ? 'nowrap' : '']
+                      .filter(Boolean)
+                      .join(' ') || undefined}
                     onClick={c.sortValue ? () => toggleSort(c.key) : undefined}
                   >
                     {c.label}
@@ -228,7 +235,11 @@ export default function PipelineBoard<T>({
                       />
                     </td>
                     {columns.map((c) => (
-                      <td key={c.key} style={{ textAlign: c.align || 'left' }}>
+                      <td
+                        key={c.key}
+                        style={{ textAlign: c.align || 'left' }}
+                        className={c.nowrap ? 'nowrap' : undefined}
+                      >
                         {c.render(r)}
                       </td>
                     ))}
