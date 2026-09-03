@@ -24,7 +24,13 @@ function harness(existing: any[], recipients = RECIPIENTS) {
       create: jest.fn().mockResolvedValue({ id: 'run1' }),
       update: jest.fn().mockResolvedValue({}),
     },
-    surplusSuppression: { findFirst: jest.fn().mockResolvedValue(null) },
+    surplusSuppression: {
+      findFirst: jest.fn().mockResolvedValue(null),
+      // Cases the county already resolved, remembered so they are never
+      // fetched again. Empty unless a test seeds it.
+      findMany: jest.fn().mockResolvedValue([]),
+      create: jest.fn(async (a: any) => { updates.push(a); return {}; }),
+    },
     surplusDetail: {
       count: jest.fn().mockResolvedValue(existing.length),
       findFirst: jest.fn(async ({ where }: any) =>
@@ -311,6 +317,42 @@ describe('tiered refresh', () => {
     const patch = updates.find((u) => u.where?.id === 'd1')?.data;
     expect(patch.stage).toBe('Dead');
     expect(patch.claimStatus).toBe('distributed');
+  });
+
+  it('a case the county already resolved is remembered and never fetched again', async () => {
+    // No held rows for this case and the docket says the owner already
+    // claimed. The first pass fetches it once and writes a retired marker;
+    // the second pass sees the marker and skips it without a request. On the
+    // first Lee refresh 63 such cases cost 440 requests to re-learn.
+    const { svc, prisma, adapter } = lee();
+    prisma.surplusDetail.findFirst = jest.fn().mockResolvedValue(null);
+    prisma.surplusDetail.findMany = jest.fn().mockResolvedValue([]);
+    adapter.fetchCase.mockResolvedValue({
+      sourceCaseId: '82214',
+      caseNumber: '2025000391',
+      owners: ['BEVERLY F KONOPKA'],
+      surplus: 9000,
+      documents: [
+        { title: 'SURPLUS_LETTER', docId: '9825843' },
+        { title: 'Surplus Claim_Beverly Konopka', docId: '9999999', claimant: 'Beverly Konopka' },
+      ],
+    });
+
+    const first = await svc.ingestCounty('realtdm_lee', {});
+    expect(first.dead).toBe(1);
+    expect(first.created).toBe(0);
+    expect(prisma.surplusSuppression.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ caseNumber: '2025000391', reason: 'retired_by_county' }) }),
+    );
+
+    prisma.surplusSuppression.findMany = jest.fn().mockResolvedValue([{ caseNumber: '2025000391' }]);
+    adapter.fetchCase.mockClear();
+    adapter.probeDocket.mockClear();
+
+    const second = await svc.ingestCounty('realtdm_lee', {});
+    expect(adapter.fetchCase).not.toHaveBeenCalled();
+    expect(adapter.probeDocket).not.toHaveBeenCalled();
+    expect(second.unchanged).toBe(1);
   });
 
   it('full mode fetches every held case regardless of the probe', async () => {

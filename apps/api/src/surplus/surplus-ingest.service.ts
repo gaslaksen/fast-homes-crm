@@ -90,6 +90,14 @@ const ADDRESS_SOURCE = {
 const MACHINE_ADDRESS_SOURCES = new Set<string>(Object.values(ADDRESS_SOURCE));
 
 /**
+ * SurplusSuppression.reason for a case the county had already paid out or
+ * assigned when we first saw it. Nothing to work, nothing to create, and the
+ * tiered refresh skips it without a request. Distinct from 'deleted', which is
+ * a person's decision and is reported as such.
+ */
+const RETIRED_BY_COUNTY = 'retired_by_county';
+
+/**
  * Fallback for when the notice cannot be read.
  *
  * Duval publishes no filing dates on the docket, so with no notice extraction
@@ -271,6 +279,7 @@ export class SurplusIngestService {
       // seven-request detail fetch. The first Lee run was 2,600 requests; the
       // tiered refresh is a few hundred.
       const known = await this.knownCases(adapter, organizationId);
+      const retired = await this.retiredCases(adapter, organizationId);
       const tiered = !opts.full && !opts.reread && !!adapter.probeDocket;
 
       // Cases the county closed since we last looked. The list status says so:
@@ -288,6 +297,14 @@ export class SurplusIngestService {
       for (const summary of candidates) {
         try {
           const rows = known.get(summary.sourceCaseId) || [];
+
+          // Already paid out or assigned when we first saw it, and nothing
+          // held to update. Terminal, so not even a probe.
+          if (tiered && !rows.length && summary.caseNumber && retired.has(summary.caseNumber)) {
+            result.unchanged += 1;
+            continue;
+          }
+
           let lite = false;
           if (tiered && rows.length) {
             const newest = await adapter.probeDocket!(summary.sourceCaseId);
@@ -432,8 +449,22 @@ export class SurplusIngestService {
 
       // A case the county has already resolved is recorded but not raised as a
       // new lead. Creating it just to mark it Dead would put paid-out cases in
-      // front of the team on the day they are ingested.
+      // front of the team on the day they are ingested. It is remembered as
+      // retired, though: with no lead row to probe, the tiered refresh would
+      // otherwise re-fetch it in full every week. On the first Lee refresh
+      // that was 63 cases, 440 requests, to learn again that they were dead.
       if (!workable) {
+        await this.prisma.surplusSuppression.create({
+          data: {
+            organizationId,
+            dedupeUid,
+            county: adapter.county,
+            caseNumber: detail.caseNumber,
+            claimant: claimant.name,
+            propertyAddress: detail.propertyAddress || null,
+            reason: RETIRED_BY_COUNTY,
+          },
+        });
         out.skipped += 1;
         continue;
       }
@@ -724,6 +755,18 @@ export class SurplusIngestService {
       map.set(r.sourceCaseId, [...(map.get(r.sourceCaseId) || []), r as HeldRow]);
     }
     return map;
+  }
+
+  /** Case numbers this county had already resolved when first seen. Never fetched again. */
+  private async retiredCases(
+    adapter: SurplusSourceAdapter,
+    organizationId: string | null,
+  ): Promise<Set<string>> {
+    const rows = await this.prisma.surplusSuppression.findMany({
+      where: { organizationId, county: adapter.county, reason: RETIRED_BY_COUNTY },
+      select: { caseNumber: true },
+    });
+    return new Set(rows.map((r) => r.caseNumber).filter((c): c is string => !!c));
   }
 
   /** An unchanged case: carry today's posted balance over and note the visit. */
