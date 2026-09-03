@@ -119,6 +119,14 @@ export interface SurplusCaseDetail extends SurplusCaseSummary {
 /** How often a source is polled. Set per adapter, honoured by SurplusPollService. */
 export type SurplusPollCadence = 'daily' | 'weekly';
 
+export interface FetchCaseOptions {
+  /**
+   * The case is already held and only its docket may have moved. Skip the
+   * extras that never change (the surplus letter PDF) and fetch the rest.
+   */
+  lite?: boolean;
+}
+
 export interface SurplusSourceAdapter {
   /** Stable id written to SurplusDetail.sourceSystem, eg 'duval_taxdeed'. */
   readonly key: string;
@@ -141,8 +149,20 @@ export interface SurplusSourceAdapter {
   listSurplusCases(): Promise<SurplusCaseSummary[]>;
   /** Whether a list row still holds money and is worth a detail fetch. */
   isLive(summary: SurplusCaseSummary): boolean;
+  /**
+   * Whether the list row says the county has paid the case out. Lets the
+   * ingest retire a lead from the list alone, with no detail fetch. Absent on
+   * sources whose list status does not carry that meaning.
+   */
+  isPaidOut?(summary: SurplusCaseSummary): boolean;
   /** The full docket for one case. */
-  fetchCase(sourceCaseId: string): Promise<SurplusCaseDetail | null>;
+  fetchCase(sourceCaseId: string, opts?: FetchCaseOptions): Promise<SurplusCaseDetail | null>;
+  /**
+   * The id of the newest document on the docket, in ONE request. If it is
+   * already in the ledger we hold, nothing has changed and the seven-request
+   * detail fetch is skipped. This is what keeps a weekly refresh a trickle.
+   */
+  probeDocket?(sourceCaseId: string): Promise<string | null>;
   /**
    * A fresh link to one document, for sources whose stored links expire.
    * Absent on sources whose ledger URLs are durable.

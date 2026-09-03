@@ -225,7 +225,7 @@ export const surplusAPI = {
    * owner address. Costs a vision call per case, so it is for correcting
    * addresses after an extractor change, not for a routine pull.
    */
-  poll: (body: { source?: string; limit?: number; reread?: boolean }) =>
+  poll: (body: { source?: string; limit?: number; reread?: boolean; full?: boolean }) =>
     api.post('/surplus/poll', body),
   pollRuns: () => api.get('/surplus/poll-runs'),
   // A fresh link to a county document whose stored link expires (RealTDM).
