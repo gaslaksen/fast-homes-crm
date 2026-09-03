@@ -190,6 +190,10 @@ export class SurplusController {
       // default: a notice read costs a vision call and its answer does not
       // change between polls. Asked for when the EXTRACTOR changed.
       reread: body?.reread === true,
+      // Fetch every case in full rather than probing held ones for changes.
+      // Off by default: the tiered refresh is what keeps a weekly county pull
+      // a few hundred requests instead of a few thousand.
+      full: body?.full === true,
     });
   }
 

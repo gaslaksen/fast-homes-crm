@@ -51,6 +51,7 @@ import { ConfigService } from '@nestjs/config';
 import axios, { AxiosInstance } from 'axios';
 import pdfParse from 'pdf-parse';
 import {
+  FetchCaseOptions,
   SurplusSourceAdapter,
   SurplusCaseSummary,
   SurplusCaseDetail,
@@ -72,12 +73,18 @@ export const REALTDM_USER_AGENT =
   'Mozilla/5.0 (compatible; DealcoreSurplusBot/1.0; +https://mydealcore.com; contact deals@quickcashhomebuyers.com)';
 
 const PAGE_SIZE = 100;
-/** Pause between detail fetches. Weekly cadence, so there is no hurry. */
-const DETAIL_DELAY_MS = 750;
+/**
+ * Pause between cases. Weekly cadence and a tiered refresh, so there is no
+ * hurry: a held case is one probe request, and 300 of them at this pace is
+ * under ten minutes.
+ */
+const DETAIL_DELAY_MS = 1500;
 /** How far back the sale-date window reaches. Lee escheats after one to two years. */
 const DEFAULT_LOOKBACK_MONTHS = 18;
 /** Only these still hold money. COMPLETED - SOLD BIDDER has been paid out. */
 const LIVE_STATUS = /^ACTIVE\s*-\s*SOLD\s*BIDDER$/i;
+/** The clerk has disbursed and closed the case. Retire from the list alone. */
+const PAID_OUT_STATUS = /^COMPLETED\s*-\s*SOLD\s*BIDDER$/i;
 /** The list's column order, asserted on every run rather than assumed. */
 const LIST_COLUMNS = [
   'Case Number',
@@ -579,7 +586,24 @@ export class RealTdmAdapter implements SurplusSourceAdapter {
     return LIVE_STATUS.test(summary.status || '');
   }
 
-  async fetchCase(sourceCaseId: string): Promise<SurplusCaseDetail | null> {
+  /** COMPLETED - SOLD BIDDER: the clerk has disbursed and closed the case. */
+  isPaidOut(summary: SurplusCaseSummary): boolean {
+    return PAID_OUT_STATUS.test(summary.status || '');
+  }
+
+  /**
+   * The newest document id on the docket, from page one alone. Lee serves
+   * newest first, so one request says whether anything has been filed since
+   * we last looked.
+   */
+  async probeDocket(sourceCaseId: string): Promise<string | null> {
+    const page = parseDocumentsPage(
+      await this.post(this.client(), 'dspCaseDocuments', { caseID: String(sourceCaseId), pagenum: '1' }),
+    );
+    return page.docs[0]?.docId ?? null;
+  }
+
+  async fetchCase(sourceCaseId: string, opts: FetchCaseOptions = {}): Promise<SurplusCaseDetail | null> {
     const id = String(sourceCaseId);
     if (!this.listed.has(id)) await this.listSurplusCases();
     const row = this.listed.get(id);
@@ -615,7 +639,9 @@ export class RealTdmAdapter implements SurplusSourceAdapter {
     const letter = letters[letters.length - 1];
     let surplusAtNotice: number | null = null;
     let certificateNumber: string | null = null;
-    if (letter?.docId) {
+    // The letter never changes once filed, so a lite fetch of a held case
+    // skips the link request and the PDF download, the two heaviest calls.
+    if (letter?.docId && !opts.lite) {
       const read = await this.readLetter(http, letter);
       surplusAtNotice = read.surplusAtNotice;
       certificateNumber = read.certificateNumber;

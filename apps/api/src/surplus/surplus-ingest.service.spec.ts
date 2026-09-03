@@ -30,7 +30,11 @@ function harness(existing: any[], recipients = RECIPIENTS) {
       findFirst: jest.fn(async ({ where }: any) =>
         existing.find((e) => where.dedupeUid === e.dedupeUid) || null,
       ),
+      // The tiered refresh reads what is held by county case id. The Duval
+      // stub has no probe, so these rows only matter to the tiered tests.
+      findMany: jest.fn(async () => existing.filter((e) => e.sourceCaseId)),
       update: jest.fn(async (a: any) => { updates.push(a); return {}; }),
+      updateMany: jest.fn(async (a: any) => { updates.push(a); return { count: 1 }; }),
     },
   };
 
@@ -211,5 +215,110 @@ describe('a refresh preserves the work', () => {
 
     expect(res.created).toBe(0);
     expect(prisma.surplusSuppression.findFirst).toHaveBeenCalled();
+  });
+});
+
+/**
+ * The tiered refresh, on a source that can probe its docket (RealTDM).
+ *
+ * A weekly refresh of Lee at full price was 2,600 requests. Nearly every held
+ * case is unchanged week to week, and one request says so. These pin the
+ * three tiers: unchanged (probe only), changed (lite fetch), and paid out
+ * (retired from the list row, no fetch at all).
+ */
+describe('tiered refresh', () => {
+  const held = {
+    id: 'd1',
+    leadId: 'lead-d1',
+    stage: 'New',
+    claimStatus: 'open',
+    dedupeUid: 'LEE|2025000391|BEVERLY_F_KONOPKA',
+    sourceCaseId: '82214',
+    claimLedger: [
+      { title: 'SURPLUS_LETTER', kind: 'notice_surplus', docId: '9825843' },
+      { title: 'Recorded Tax Deed', kind: 'other', docId: '9808814' },
+    ],
+    ownerMailingStreet: '130 WOODIN STREET',
+    ownerAddressSource: 'surplus_letter_notifications',
+  };
+
+  function lee(status = 'ACTIVE - SOLD BIDDER', newest = '9825843') {
+    const { svc, prisma, updates } = harness([held]);
+    const adapter: any = {
+      key: 'realtdm_lee',
+      county: 'Lee',
+      cadence: 'weekly',
+      detailDelayMs: 0,
+      isLive: (s: any) => /^ACTIVE/.test(s.status),
+      isPaidOut: (s: any) => /^COMPLETED/.test(s.status),
+      probeDocket: jest.fn().mockResolvedValue(newest),
+      listSurplusCases: jest.fn().mockResolvedValue([
+        { sourceCaseId: '82214', caseNumber: '2025000391', status, surplus: 9000 },
+      ]),
+      fetchCase: jest.fn().mockResolvedValue({
+        sourceCaseId: '82214',
+        caseNumber: '2025000391',
+        owners: ['BEVERLY F KONOPKA'],
+        surplus: 9000,
+        documents: [
+          { title: 'SURPLUS_LETTER', docId: '9825843', filedAt: '2025-09-17' },
+          { title: 'Surplus Claim_Fast Funding LLC', docId: '9999999', filedAt: '2026-01-05', claimant: 'Fast Funding LLC' },
+        ],
+        noticeRecipients: [
+          { name: 'BEVERLY F KONOPKA', street: '130 WOODIN STREET', city: 'HAMDEN', state: 'CT', zip: '06489' },
+        ],
+        noticeDate: '2025-09-17',
+      }),
+    };
+    jest.spyOn(svc, 'adapterFor').mockReturnValue(adapter);
+    return { svc, prisma, updates, adapter };
+  }
+
+  it('an unchanged docket is one probe request and no fetch', async () => {
+    const { svc, updates, adapter } = lee();
+
+    const res = await svc.ingestCounty('realtdm_lee', {});
+
+    expect(adapter.probeDocket).toHaveBeenCalledWith('82214');
+    expect(adapter.fetchCase).not.toHaveBeenCalled();
+    expect(res.unchanged).toBe(1);
+    expect(res.classified).toBe(0);
+    // The posted balance still carries over from the list row.
+    const touch = updates.find((u) => u.data?.lastPolledAt && u.data?.grossSurplus === 9000);
+    expect(touch).toBeTruthy();
+  });
+
+  it('a new filing triggers a lite fetch and reclassifies the case', async () => {
+    const { svc, updates, adapter } = lee('ACTIVE - SOLD BIDDER', '9999999');
+
+    const res = await svc.ingestCounty('realtdm_lee', {});
+
+    expect(adapter.fetchCase).toHaveBeenCalledWith('82214', { lite: true });
+    expect(res.unchanged).toBe(0);
+    expect(res.updated).toBe(1);
+    const patch = updates.find((u) => u.where?.id === 'd1')?.data;
+    expect(patch.claimStatus).toBe('pending');
+  });
+
+  it('a case the list says is paid out is retired without a fetch', async () => {
+    const { svc, updates, adapter } = lee('COMPLETED - SOLD BIDDER');
+
+    const res = await svc.ingestCounty('realtdm_lee', {});
+
+    expect(adapter.probeDocket).not.toHaveBeenCalled();
+    expect(adapter.fetchCase).not.toHaveBeenCalled();
+    expect(res.retiredFromList).toBe(1);
+    const patch = updates.find((u) => u.where?.id === 'd1')?.data;
+    expect(patch.stage).toBe('Dead');
+    expect(patch.claimStatus).toBe('distributed');
+  });
+
+  it('full mode fetches every held case regardless of the probe', async () => {
+    const { svc, adapter } = lee();
+
+    await svc.ingestCounty('realtdm_lee', { full: true });
+
+    expect(adapter.probeDocket).not.toHaveBeenCalled();
+    expect(adapter.fetchCase).toHaveBeenCalledWith('82214', { lite: false });
   });
 });

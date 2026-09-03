@@ -24,7 +24,7 @@ import { DuvalTaxDeedAdapter } from './duval-taxdeed.adapter';
 import { LeeRealTdmAdapter, OWNER_ROLES } from './realtdm.adapter';
 import { SurplusNoticeService, NoticeExtract } from './surplus-notice.service';
 import { matchRecipient } from './surplus-name-search.util';
-import { SurplusSourceAdapter, SurplusCaseDetail } from './surplus-source.types';
+import { SurplusSourceAdapter, SurplusCaseDetail, SurplusCaseSummary } from './surplus-source.types';
 import { classifyCase, collapseClaimants, isWorkable } from './surplus-classify.util';
 import { surplusUidOf } from './surplus.util';
 import { SURPLUS_FLOOR } from './surplus-compliance';
@@ -40,6 +40,10 @@ export interface SurplusIngestResult {
   classified: number;
   dead: number;
   errors: number;
+  /** Held cases whose docket probe matched what we already have. No detail fetch. */
+  unchanged: number;
+  /** Held cases the list row alone said were paid out. Retired with no detail fetch. */
+  retiredFromList: number;
   message?: string;
 }
 
@@ -48,6 +52,12 @@ interface IngestOpts {
   trigger?: SurplusPollTrigger;
   /** Cap the detail fetches. Used by the discovery pass and by manual runs. */
   limit?: number;
+  /**
+   * Fetch every case in full instead of probing held ones for change. The
+   * default is the tiered refresh, which is what keeps a weekly county pull
+   * to a few hundred requests. `reread` implies this.
+   */
+  full?: boolean;
   /**
    * Re-read the Notice of Surplus Funds even for cases that already have an
    * owner address, and rewrite the addresses it produced.
@@ -120,6 +130,23 @@ interface FoundAddress {
   state: string | null;
   zip: string | null;
   source: string;
+}
+
+/** What the tiered refresh needs to know about a row we already hold. */
+interface HeldRow {
+  id: string;
+  sourceCaseId: string | null;
+  stage: string | null;
+  claimStatus: string | null;
+  claimLedger: unknown;
+}
+
+/** Every county document id in a persisted ledger. */
+function ledgerDocIds(ledger: unknown): string[] {
+  if (!Array.isArray(ledger)) return [];
+  return ledger
+    .map((d: any) => (d && d.docId != null ? String(d.docId) : null))
+    .filter((id): id is string => !!id);
 }
 
 /**
@@ -211,6 +238,8 @@ export class SurplusIngestService {
       classified: 0,
       dead: 0,
       errors: 0,
+      unchanged: 0,
+      retiredFromList: 0,
     };
 
     if (!adapter) {
@@ -236,9 +265,46 @@ export class SurplusIngestService {
 
       if (opts.limit) candidates = candidates.slice(0, opts.limit);
 
+      // What we already hold for this county, by the county's own case id.
+      // A weekly refresh mostly asks "did anything change?", and the list row
+      // plus one probe request answer that for almost every case without the
+      // seven-request detail fetch. The first Lee run was 2,600 requests; the
+      // tiered refresh is a few hundred.
+      const known = await this.knownCases(adapter, organizationId);
+      const tiered = !opts.full && !opts.reread && !!adapter.probeDocket;
+
+      // Cases the county closed since we last looked. The list status says so:
+      // on RealTDM a paid-out case flips to COMPLETED - SOLD BIDDER. Retiring
+      // from the list costs nothing and is the transition that matters most,
+      // because the alternative is calling a family about money that is gone.
+      if (adapter.isPaidOut) {
+        for (const s of summaries) {
+          const rows = known.get(s.sourceCaseId);
+          if (!rows?.length || !adapter.isPaidOut(s)) continue;
+          result.retiredFromList += await this.retireFromList(rows, s);
+        }
+      }
+
       for (const summary of candidates) {
         try {
-          const detail = await adapter.fetchCase(summary.sourceCaseId);
+          const rows = known.get(summary.sourceCaseId) || [];
+          let lite = false;
+          if (tiered && rows.length) {
+            const newest = await adapter.probeDocket!(summary.sourceCaseId);
+            const held = new Set(rows.flatMap((r) => ledgerDocIds(r.claimLedger)));
+            if (newest && held.has(newest)) {
+              // Nothing filed since last time. Carry the posted balance over
+              // and move on; the docket, the addresses and the letter are all
+              // exactly what we already hold.
+              await this.touch(rows, summary);
+              result.unchanged += 1;
+              await this.pause(adapter.detailDelayMs);
+              continue;
+            }
+            lite = true;
+          }
+
+          const detail = await adapter.fetchCase(summary.sourceCaseId, { lite });
           if (!detail) {
             result.skipped += 1;
             continue;
@@ -640,7 +706,75 @@ export class SurplusIngestService {
     return this.notice.readNotice(url);
   }
 
+  /**
+   * Every row this county has already produced, keyed by the county's own case
+   * id, with just enough to decide whether a case needs fetching again.
+   */
+  private async knownCases(
+    adapter: SurplusSourceAdapter,
+    organizationId: string | null,
+  ): Promise<Map<string, HeldRow[]>> {
+    const rows = await this.prisma.surplusDetail.findMany({
+      where: { organizationId, sourceSystem: adapter.key, sourceCaseId: { not: null } },
+      select: { id: true, sourceCaseId: true, stage: true, claimStatus: true, claimLedger: true },
+    });
+    const map = new Map<string, HeldRow[]>();
+    for (const r of rows) {
+      if (!r.sourceCaseId) continue;
+      map.set(r.sourceCaseId, [...(map.get(r.sourceCaseId) || []), r as HeldRow]);
+    }
+    return map;
+  }
+
+  /** An unchanged case: carry today's posted balance over and note the visit. */
+  private async touch(rows: HeldRow[], summary: SurplusCaseSummary): Promise<void> {
+    await this.prisma.surplusDetail.updateMany({
+      where: { id: { in: rows.map((r) => r.id) } },
+      data: {
+        lastPolledAt: new Date(),
+        ...(summary.surplus != null ? { grossSurplus: summary.surplus } : {}),
+      },
+    });
+  }
+
+  /**
+   * The list row says the clerk has paid this case out. Retire every claimant
+   * still open on it. Never un-retires, and never touches a stage somebody set
+   * by hand beyond moving it to Dead, which is the one direction the poll may
+   * push a lead.
+   */
+  private async retireFromList(rows: HeldRow[], summary: SurplusCaseSummary): Promise<number> {
+    let retired = 0;
+    for (const row of rows) {
+      if (row.stage === SurplusStage.DEAD && row.claimStatus === SurplusClaimStatus.DISTRIBUTED) continue;
+      await this.prisma.surplusDetail.update({
+        where: { id: row.id },
+        data: {
+          claimStatus: SurplusClaimStatus.DISTRIBUTED,
+          stage: SurplusStage.DEAD,
+          lastPolledAt: new Date(),
+          ...(summary.surplus != null ? { grossSurplus: summary.surplus } : {}),
+        },
+      });
+      retired += 1;
+    }
+    if (retired) {
+      this.logger.log(
+        `Surplus ${summary.caseNumber}: county lists it as "${summary.status}", retired ${retired} claimant${retired === 1 ? '' : 's'} from the list row`,
+      );
+    }
+    return retired;
+  }
+
   private async finish(runId: string, r: SurplusIngestResult): Promise<void> {
+    // The run table predates the tiered refresh and has no columns for these,
+    // so they ride in the message where the health strip already shows it.
+    const tiers = [
+      r.unchanged ? `${r.unchanged} unchanged since last poll` : null,
+      r.retiredFromList ? `${r.retiredFromList} retired from the list row` : null,
+    ].filter(Boolean);
+    if (tiers.length) r.message = [r.message, tiers.join(', ')].filter(Boolean).join('. ');
+
     await this.prisma.surplusPollRun.update({
       where: { id: runId },
       data: {
