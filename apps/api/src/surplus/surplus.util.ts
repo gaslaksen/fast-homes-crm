@@ -264,6 +264,8 @@ export interface QueueFacts {
   livingHeirCount?: number | null;
   /** Living heirs who have a number that can be dialled. */
   callableHeirCount?: number | null;
+  /** One of us has mailed a letter to the address on file. */
+  letterMailed?: boolean | null;
 }
 
 export function queueOf(f: QueueFacts): SurplusQueue {
@@ -283,6 +285,14 @@ export function queueOf(f: QueueFacts): SurplusQueue {
   }
 
   if ((f.cleanPhoneCount || 0) > 0) return SurplusQueue.CALL;
+
+  // A letter is out and nobody can be phoned, so the lead is waiting on the
+  // post, not on us. Tested AFTER the call check on purpose: a number that
+  // turns up later is a different channel and the letter does not make it
+  // less worth dialling. Tested BEFORE trace and name search because both of
+  // those exist to find an address, and this one has already been written to.
+  if (f.letterMailed) return SurplusQueue.MAILED;
+
   if (f.isEntity) return SurplusQueue.ENTITY;
 
   // Nothing submitted yet. Worth a credit only if there is a live address to
@@ -306,6 +316,8 @@ export function queueReason(f: QueueFacts): string {
         return `${f.callableHeirCount} callable heir${f.callableHeirCount === 1 ? '' : 's'}`;
       }
       return `${f.cleanPhoneCount} callable number${f.cleanPhoneCount === 1 ? '' : 's'}`;
+    case SurplusQueue.MAILED:
+      return 'Letter mailed, waiting on a reply';
     case SurplusQueue.ENTITY:
       return 'Entity claimant, the registered agent on Sunbiz is who can sign';
     case SurplusQueue.HEIRS:

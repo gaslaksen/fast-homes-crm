@@ -328,6 +328,7 @@ export class SurplusService {
       'county', 'caseNumber', 'parcelId', 'deceased', 'heirsRequired', 'competingLien',
       'surplusType', 'fundLocation', 'noticeConfirmed', 'arrangement', 'licensedRepId',
       'entitlementVerified', 'titleSearchComplete', 'doNotCall', 'callNotes',
+      'letterMailedTo',
     ];
     for (const k of passthrough) {
       if (patch[k] !== undefined) detailPatch[k] = patch[k];
@@ -337,10 +338,15 @@ export class SurplusService {
       if (patch[k] !== undefined) detailPatch[k] = patch[k] === null ? null : Number(patch[k]);
     }
 
-    for (const k of ['saleDate', 'noticeDate', 'certOfDisbursements']) {
+    for (const k of ['saleDate', 'noticeDate', 'certOfDisbursements', 'letterMailedAt']) {
       if (patch[k] !== undefined) {
         detailPatch[k] = patch[k] ? isoToDate(String(patch[k]).slice(0, 10)) : null;
       }
+    }
+    // Clearing the letter clears the envelope too, so a mistaken click leaves
+    // nothing behind that reads as if a letter went out.
+    if (patch.letterMailedAt === null && patch.letterMailedTo === undefined) {
+      detailPatch.letterMailedTo = null;
     }
 
     if (patch.claimantType !== undefined) {
@@ -430,6 +436,85 @@ export class SurplusService {
    * than forty, and so the stage is validated once against the enum instead of
    * trusting whatever the client sent.
    */
+  /**
+   * Record that a letter went out to each of these claimants. One call serves
+   * the panel (one id) and the board's bulk action (a rack of them).
+   *
+   * The envelope address defaults to where the clerk wrote to the owner, per
+   * CLAIMANT, because co-owners are routinely at different addresses and the
+   * whole point of the record is which address has been written to. A note is
+   * added to the lead as well, so the mailing shows in the timeline beside
+   * every call and text and the team's habit of logging it there keeps working.
+   */
+  async markLetterMailed(
+    ids: string[],
+    opts: { mailedAt?: string | null; address?: string | null; note?: string | null },
+    userId?: string | null,
+    organizationId?: string | null,
+  ) {
+    const where: any = { id: { in: ids }, source: LeadSource.SURPLUS };
+    if (organizationId) where.organizationId = organizationId;
+    const leads = await this.prisma.lead.findMany({
+      where,
+      select: {
+        id: true,
+        surplusDetail: {
+          select: {
+            id: true,
+            ownerMailingStreet: true,
+            ownerMailingCity: true,
+            ownerMailingState: true,
+            ownerMailingZip: true,
+          },
+        },
+      },
+    });
+    if (!leads.length) return { updated: 0 };
+
+    const mailedAt = opts.mailedAt
+      ? isoToDate(String(opts.mailedAt).slice(0, 10))
+      : new Date();
+    const dateLabel = mailedAt.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      timeZone: 'UTC',
+    });
+
+    let updated = 0;
+    for (const lead of leads) {
+      const d = lead.surplusDetail;
+      if (!d) continue;
+      const address =
+        (opts.address || '').trim() ||
+        [d.ownerMailingStreet, d.ownerMailingCity, [d.ownerMailingState, d.ownerMailingZip].filter(Boolean).join(' ')]
+          .filter(Boolean)
+          .join(', ') ||
+        null;
+
+      await this.prisma.surplusDetail.update({
+        where: { id: d.id },
+        data: { letterMailedAt: mailedAt, letterMailedTo: address },
+      });
+      updated += 1;
+
+      if (userId) {
+        const extra = (opts.note || '').trim();
+        await this.prisma.note.create({
+          data: {
+            leadId: lead.id,
+            userId,
+            content:
+              `Letter mailed ${dateLabel}` +
+              (address ? ` to ${address}` : ', address not recorded') +
+              (extra ? `. ${extra}` : ''),
+          },
+        });
+      }
+    }
+    return { updated, mailedAt };
+  }
+
   async bulkStage(ids: string[], stage: string, organizationId?: string | null) {
     const target = stageFromText(stage);
     const where: any = { id: { in: ids }, source: LeadSource.SURPLUS };
@@ -936,6 +1021,8 @@ export class SurplusService {
       deceasedHeirCount: heirRows.length - livingHeirs.length,
       doNotCall: d.doNotCall,
       callNotes: d.callNotes || '',
+      letterMailedAt: d.letterMailedAt,
+      letterMailedTo: d.letterMailedTo || null,
       // Two different things, deliberately both here.
       //
       // touchDays/plannedTouches is the WEEKLY PLANNER: boxes somebody ticks to
@@ -988,6 +1075,7 @@ export class SurplusService {
       isDeceased: !!d.deceased || !!d.heirsRequired,
       livingHeirCount,
       callableHeirCount,
+      letterMailed: !!d.letterMailedAt,
     };
     const queue = queueOf(f);
     return { queue, queueLabel: SURPLUS_QUEUE_LABEL[queue], queueReason: queueReason(f) };
@@ -1104,6 +1192,13 @@ export function groupByProperty(rows: any[]): any[] {
       anyMismatch: ranked.some((m) => m.contactMismatch),
       /** Claimants nothing has been submitted for. Distinct from "no numbers". */
       untracedCount: ranked.filter((m) => m.trace?.state === 'never').length,
+      /** How many claimants have had a letter, and the most recent date, for the card. */
+      letterMailedCount: ranked.filter((m: any) => m.letterMailedAt).length,
+      letterMailedAt: ranked
+        .map((m: any) => m.letterMailedAt)
+        .filter(Boolean)
+        .sort()
+        .pop() || null,
       // Summed and maxed across the claimants, since the property is worked as
       // one thing even though each claimant is contacted separately.
       touches: ranked.reduce((n: number, m: any) => n + (m.touches || 0), 0),
