@@ -798,6 +798,14 @@ model SurplusDetail {
   touchDays  Json?
   touchWeek  String?
   touchCount Int     @default(0)
+  /// When one of us mailed a letter to this claimant, and the address on the
+  /// envelope. One letter per claimant for now; the Notes tab keeps the
+  /// history. A mailed claimant with no callable number sits in the Letter
+  /// sent queue instead of trace or name search, so nobody chases an address
+  /// that has already been written to. A callable number still wins: a call
+  /// is a different channel and the letter does not make it less worth dialling.
+  letterMailedAt DateTime?
+  letterMailedTo String?
 
   // ── Contacts ──────────────────────────────────────────────────────────────
   phone2     String?

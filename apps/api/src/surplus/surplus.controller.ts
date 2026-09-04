@@ -366,6 +366,28 @@ export class SurplusController {
   }
 
   /**
+   * A letter went out. One id from the panel or a rack of them from the board;
+   * the date defaults to today and the address to where the clerk wrote to
+   * each claimant.
+   */
+  @Post('letter-mailed')
+  async letterMailed(
+    @Body() body: { ids: string[]; mailedAt?: string | null; address?: string | null; note?: string | null },
+    @Headers('authorization') authHeader?: string,
+  ) {
+    if (!Array.isArray(body?.ids) || body.ids.length === 0) {
+      throw new BadRequestException('No lead ids provided');
+    }
+    const { userId, organizationId } = this.decodeToken(authHeader);
+    return this.surplus.markLetterMailed(
+      body.ids,
+      { mailedAt: body.mailedAt, address: body.address, note: body.note },
+      userId,
+      organizationId,
+    );
+  }
+
+  /**
    * Bulk stage change, including marking dead. The board can select a rack of
    * properties and clear them in one call.
    */

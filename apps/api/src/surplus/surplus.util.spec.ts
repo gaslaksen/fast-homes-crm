@@ -576,10 +576,30 @@ describe('queueOf', () => {
       .toBe(SurplusQueue.TRACE);
   });
 
+  it('parks a mailed claimant nobody can phone in Letter sent', () => {
+    // Both the trace and the name search exist to find an address, and this
+    // one has already been written to.
+    expect(queueOf({ ...base, letterMailed: true, traceState: 'never' })).toBe(SurplusQueue.MAILED);
+    expect(queueOf({ ...base, letterMailed: true, traceState: 'no_person' })).toBe(SurplusQueue.MAILED);
+    expect(queueOf({ ...base, letterMailed: true, isEntity: true })).toBe(SurplusQueue.MAILED);
+  });
+
+  it('still calls a mailed claimant who has a number', () => {
+    // A call is a different channel. The letter does not make the number less
+    // worth dialling, and the team said so.
+    expect(queueOf({ ...base, letterMailed: true, cleanPhoneCount: 1 })).toBe(SurplusQueue.CALL);
+  });
+
+  it('closes a mailed claimant whose money is gone or who is do-not-call', () => {
+    expect(queueOf({ claimStatus: 'distributed', letterMailed: true })).toBe(SurplusQueue.CLOSED);
+    expect(queueOf({ ...base, letterMailed: true, doNotCall: true })).toBe(SurplusQueue.CLOSED);
+  });
+
   it('lands every claimant in exactly one queue', () => {
     const combos = [
       {}, { cleanPhoneCount: 1 }, { isEntity: true }, { doNotCall: true },
       { claimStatus: 'denied' }, { traceState: 'never' }, { mailVerdict: 'undeliverable' },
+      { letterMailed: true },
     ];
     for (const c of combos) {
       const q = queueOf({ claimStatus: 'open', ...c });

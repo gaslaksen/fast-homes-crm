@@ -127,6 +127,9 @@ export interface SurplusPanelLead {
   doNotCall: boolean;
   isDeceased: boolean;
   totalTouches: number;
+  /** One of us mailed a letter. Date and the address on the envelope. */
+  letterMailedAt: string | null;
+  letterMailedTo: string | null;
 }
 
 /** Colour per trace tone. Bad is red because a wrong-person result is a
@@ -751,6 +754,7 @@ function CaseTab({
             }
           />
         )}
+        <LetterMailed lead={lead} onChanged={onChanged} say={say} />
       </Section>
 
       {/* Heirs lead for a deceased claimant, because they are the only people
@@ -1063,6 +1067,168 @@ function DocLink({ doc, source }: { doc: LedgerDoc; source?: string | null }) {
   return (
     <div style={{ fontSize: 12, color: 'var(--faint)' }}>
       {label} <span style={{ fontSize: 10 }}>(not scanned)</span>
+    </div>
+  );
+}
+
+/**
+ * "We mailed them." For the claimants nobody can phone, a letter to the
+ * address on file is the outreach, and this is the record of it: the date and
+ * the envelope. Setting it parks the claimant in the Letter sent queue so the
+ * address is not traced or searched again, and adds a note to the lead so the
+ * mailing shows in the timeline beside every call and text.
+ *
+ * One letter per claimant for now. Marking again overwrites the date; the
+ * notes keep the history.
+ */
+function LetterMailed({
+  lead,
+  onChanged,
+  say,
+}: {
+  lead: SurplusPanelLead;
+  onChanged: () => void;
+  say: (msg: string) => void;
+}) {
+  const onFile = [
+    lead.ownerMailingStreet,
+    lead.ownerMailingCity,
+    [lead.ownerMailingState, lead.ownerMailingZip].filter(Boolean).join(' '),
+  ]
+    .filter(Boolean)
+    .join(', ');
+
+  const [open, setOpen] = useState(false);
+  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [address, setAddress] = useState(onFile);
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  // Switching claimant closes the form and re-seeds the envelope, because the
+  // address is per claimant and a stale one here is exactly the mistake the
+  // record exists to prevent.
+  useEffect(() => {
+    setOpen(false);
+    setAddress(onFile);
+    setNote('');
+    setDate(new Date().toISOString().slice(0, 10));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lead.id]);
+
+  const save = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await surplusAPI.letterMailed([lead.id], {
+        mailedAt: date || null,
+        address: address.trim() || null,
+        note: note.trim() || null,
+      });
+      say('Letter recorded');
+      setOpen(false);
+      onChanged();
+    } catch (e: any) {
+      say(e?.response?.data?.message || 'The letter could not be recorded');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const clear = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await surplusAPI.update(lead.id, { letterMailedAt: null });
+      say('Letter cleared');
+      onChanged();
+    } catch (e: any) {
+      say(e?.response?.data?.message || 'The letter could not be cleared');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const field: React.CSSProperties = {
+    width: '100%',
+    boxSizing: 'border-box',
+    fontSize: 12.5,
+    padding: '6px 8px',
+    border: '1px solid var(--border)',
+    borderRadius: 6,
+    background: 'var(--surface2)',
+    color: 'inherit',
+  };
+
+  if (lead.letterMailedAt) {
+    return (
+      <div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 13 }}>
+          <span style={{ color: 'var(--dim)' }}>Letter mailed</span>
+          <span style={{ color: 'var(--mint)', fontWeight: 600, textAlign: 'right' }}>
+            {fmtDate(lead.letterMailedAt)}
+            {lead.letterMailedTo ? ` to ${lead.letterMailedTo}` : ''}
+          </span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 3 }}>
+          <span style={{ fontSize: 11, color: 'var(--faint)', flex: 1 }}>
+            Parked in Letter sent until they reply. The mailing is also in the Notes tab.
+          </span>
+          <button type="button" className="dc-wp-btn" disabled={busy} onClick={clear} title="Undo a mistaken mark. The note stays.">
+            Clear
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!open) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+        <span style={{ fontSize: 11, color: 'var(--faint)' }}>
+          No letter has gone out to {lead.claimant}.
+        </span>
+        <button type="button" className="dc-wp-btn" onClick={() => setOpen(true)}>
+          {'✉'} Letter mailed
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: 'grid', gap: 6, padding: 8, border: '1px solid var(--border)', borderRadius: 8 }}>
+      <div style={{ fontSize: 12, fontWeight: 700 }}>Record a mailed letter</div>
+      <label style={{ fontSize: 11, color: 'var(--dim)' }}>
+        Date mailed
+        <input type="date" style={field} value={date} max={new Date().toISOString().slice(0, 10)} onChange={(e) => setDate(e.target.value)} />
+      </label>
+      <label style={{ fontSize: 11, color: 'var(--dim)' }}>
+        Mailed to
+        <input
+          type="text"
+          style={field}
+          value={address}
+          placeholder="Street, city, state zip"
+          onChange={(e) => setAddress(e.target.value)}
+        />
+      </label>
+      <label style={{ fontSize: 11, color: 'var(--dim)' }}>
+        Note, optional
+        <input
+          type="text"
+          style={field}
+          value={note}
+          placeholder="Anything worth remembering about this mailing"
+          onChange={(e) => setNote(e.target.value)}
+        />
+      </label>
+      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+        <button type="button" className="dc-wp-btn" disabled={busy} onClick={() => setOpen(false)}>
+          Cancel
+        </button>
+        <button type="button" className="dc-wp-btn on" disabled={busy || !date} onClick={save}>
+          {busy ? 'Saving...' : 'Save'}
+        </button>
+      </div>
     </div>
   );
 }

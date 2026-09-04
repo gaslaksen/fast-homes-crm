@@ -231,6 +231,12 @@ export enum SurplusQueue {
   TRACE = 'trace',
   /** The address route is spent. Name search, obituary, official records. */
   NAME_SEARCH = 'name_search',
+  /**
+   * A letter went out to the address on file and nobody can be phoned. Parked
+   * until they write or call back, so the address is not traced or searched
+   * again while the letter is in the post.
+   */
+  MAILED = 'mailed',
   /** Denied, paid out, already assigned, or do-not-call. Nothing to do. */
   CLOSED = 'closed',
 }
@@ -249,11 +255,14 @@ export enum SurplusQueue {
  * a one-click submission, then finding a court filing, then open-ended research.
  */
 export const SURPLUS_QUEUE_RANK: Record<SurplusQueue, number> = {
-  [SurplusQueue.CALL]: 5,
-  [SurplusQueue.TRACE]: 4,
-  [SurplusQueue.HEIRS]: 3,
-  [SurplusQueue.NAME_SEARCH]: 2,
-  [SurplusQueue.ENTITY]: 1,
+  [SurplusQueue.CALL]: 6,
+  [SurplusQueue.TRACE]: 5,
+  [SurplusQueue.HEIRS]: 4,
+  [SurplusQueue.NAME_SEARCH]: 3,
+  [SurplusQueue.ENTITY]: 2,
+  // Below every working queue: a mailed co-owner is parked, so if the other
+  // owner still needs a name search the property shows the search.
+  [SurplusQueue.MAILED]: 1,
   [SurplusQueue.CLOSED]: 0,
 };
 
@@ -263,6 +272,7 @@ export const SURPLUS_QUEUE_LABEL: Record<SurplusQueue, string> = {
   [SurplusQueue.HEIRS]: 'Find the heirs',
   [SurplusQueue.TRACE]: 'Skip trace it',
   [SurplusQueue.NAME_SEARCH]: 'Name search',
+  [SurplusQueue.MAILED]: 'Letter sent',
   [SurplusQueue.CLOSED]: 'Closed',
 };
 

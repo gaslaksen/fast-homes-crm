@@ -138,6 +138,9 @@ interface SurplusLead {
   mismatchedName: string | null;
   doNotCall: boolean;
   callNotes: string;
+  /** One of us mailed a letter. Date and the address on the envelope. */
+  letterMailedAt: string | null;
+  letterMailedTo: string | null;
   touchDays: Record<string, boolean>;
   totalTouches: number;
 
@@ -291,19 +294,30 @@ const SURPLUS_COLUMNS: PipelineColumn<any>[] = [
     width: '150px',
     nowrap: true,
     sortValue: (r) => r.ownerMailingState || '',
-    render: (r) =>
-      r.ownerMailingStreet ? (
-        <span
-          style={{ color: 'var(--mint)', fontSize: 12 }}
-          title={[r.ownerMailingStreet, r.ownerMailingCity, r.ownerMailingState, r.ownerMailingZip]
-            .filter(Boolean)
-            .join(', ')}
-        >
-          {[r.ownerMailingCity, r.ownerMailingState].filter(Boolean).join(', ')}
-        </span>
-      ) : (
-        <span style={{ color: 'var(--faint)', fontSize: 12 }}>not recovered</span>
-      ),
+    render: (r) => (
+      <div>
+        {r.ownerMailingStreet ? (
+          <span
+            style={{ color: 'var(--mint)', fontSize: 12 }}
+            title={[r.ownerMailingStreet, r.ownerMailingCity, r.ownerMailingState, r.ownerMailingZip]
+              .filter(Boolean)
+              .join(', ')}
+          >
+            {[r.ownerMailingCity, r.ownerMailingState].filter(Boolean).join(', ')}
+          </span>
+        ) : (
+          <span style={{ color: 'var(--faint)', fontSize: 12 }}>not recovered</span>
+        )}
+        {/* Which envelopes have gone out, so the row says so before anyone
+            opens the panel to write the same person twice. */}
+        {r.letterMailedCount > 0 && (
+          <div style={{ fontSize: 11.5, color: 'var(--faint)' }} title={`${r.letterMailedCount} of ${r.claimantCount} claimant${r.claimantCount === 1 ? '' : 's'} mailed`}>
+            {'✉'} Letter sent {fmtDate(r.letterMailedAt)}
+            {r.letterMailedCount < r.claimantCount ? ` (${r.letterMailedCount} of ${r.claimantCount})` : ''}
+          </div>
+        )}
+      </div>
+    ),
   },
   {
     key: 'age',
@@ -400,6 +414,7 @@ const QUEUES: [string, string, string][] = [
   ['trace', 'Skip trace', '\u2318'],
   ['name_search', 'Name search', '\u{1F50E}'],
   ['entity', 'Entity', '\u{1F3E2}'],
+  ['mailed', 'Letter sent', '\u2709'],
   ['closed', 'Closed', '\u2713'],
 ];
 
@@ -411,6 +426,8 @@ const QUEUE_HELP: Record<string, string> = {
   name_search:
     'The address route is spent, either the clerk mail came back or a trace found nobody. Search by name and confirm against the property that sold.',
   entity: 'An LLC, estate or trust. No consumer record exists; the registered agent on Sunbiz is who can sign.',
+  mailed:
+    'A letter went out to the address on file and nobody can be phoned. Parked until they reply, so the address is not traced or searched again. A claimant with a callable number stays in Call now even after a letter.',
   closed: 'Paid out, already assigned, or do-not-call. Nothing to do.',
 };
 
@@ -768,6 +785,37 @@ export default function SurplusFundsPage() {
   };
 
   /**
+   * A batch of envelopes went out today, one per claimant, each to the address
+   * the clerk wrote to that claimant. Confirmed first because the panel undoes
+   * one at a time and a mis-click here parks a whole rack of leads.
+   */
+  const bulkLetterMailed = async () => {
+    if (!chosen.length || busy) return;
+    const n = chosen.length;
+    if (
+      !window.confirm(
+        `Mark a letter as mailed today to ${n} claimant${n === 1 ? '' : 's'} across ${chosenKeys.length} propert${chosenKeys.length === 1 ? 'y' : 'ies'}?\n\n` +
+          'Each claimant is recorded at the address the clerk wrote to them, and a note is added to each lead. Open the panel to use a different date or address.',
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await surplusAPI.letterMailed(chosen);
+      const done = res.data?.updated ?? n;
+      say(`Recorded a letter to ${done} claimant${done === 1 ? '' : 's'}`);
+      setPicked({});
+      fetchRows();
+      fetchStats();
+    } catch (err: any) {
+      say(err?.response?.data?.message || 'Those letters could not be recorded.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /**
    * Permanent, and confirmed first. Ingestion is idempotent on dedupeUid, so a
    * deleted lead comes straight back on the next poll; marking it Dead is
    * usually what somebody actually wants.
@@ -808,6 +856,7 @@ export default function SurplusFundsPage() {
         'Net to claimant', 'Tier', 'Drip track', 'Stage', 'Arrangement', 'Total consideration',
         '% of gross', '% of net', 'Fee cap', 'Cap confidence', 'Compliance', 'Blocks',
         'Cert of disbursements', 'Assignment deadline', 'Phones', 'Emails', 'Touches', 'Notes',
+        'Letter mailed', 'Letter address',
       ],
       list.map((r) => [
         r.county, r.caseNumber, r.address, r.city, r.zip, r.parcelId, r.claimant,
@@ -825,6 +874,7 @@ export default function SurplusFundsPage() {
         fmtDate(r.certOfDisbursements), fmtDate(r.assignmentDeadline),
         r.phones.map((p: any) => phoneDisplay(p.number)).join(' | '), r.emails.join(' | '),
         r.totalTouches, r.callNotes,
+        fmtDate(r.letterMailedAt), r.letterMailedTo,
       ]),
     );
     say(`Exported ${list.length} lead${list.length === 1 ? '' : 's'}.`);
@@ -1090,6 +1140,14 @@ export default function SurplusFundsPage() {
               <>
                 {chosenKeys.length > 0 && (
                   <>
+                    <button
+                      className="dc-btn sm"
+                      disabled={busy}
+                      onClick={bulkLetterMailed}
+                      title="Record that a letter went out today to every selected claimant, at the address the clerk wrote to them"
+                    >
+                      {'✉'} Letter mailed
+                    </button>
                     <button className="dc-btn sm dngr" disabled={busy} onClick={() => bulkStage('Dead')}>
                       Mark dead
                     </button>
