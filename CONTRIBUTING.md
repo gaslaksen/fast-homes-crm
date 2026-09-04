@@ -117,16 +117,26 @@ production. Read it once end to end before your first change.
 
 **Feature integrations (set the ones you touch)**
 - `RENTCAST_API_KEY` comps/ARV
-- SMS: Twilio is the SMS provider. Set the `TWILIO_*` credentials, and set
-  `SMS_TEST_MODE="true"` plus `SMS_ALLOWED_NUMBERS` locally so you never text a
-  real lead by accident.
+- SMS: Twilio is the SMS provider. For local dev without a Twilio account, leave
+  `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN` empty and set
+  `ALLOW_SIMULATED_SMS="true"` so the app uses the SMS simulator (see the
+  warning below). With real credentials, also set `SMS_TEST_MODE="true"` plus
+  `SMS_ALLOWED_NUMBERS` so you never text a real lead by accident.
 - Email: `MAILGUN_*`
 - Comps/property data: `REAPI_API_KEY`, `ATTOM_API_KEY`, `BATCHDATA_API_KEY`
 - Voice AI: `VAPI_*`
 - Mobile push: `APNS_*`
 
-You do not need every integration to run locally. Missing keys degrade
+You do not need every integration to run locally. Most missing keys degrade
 gracefully (the app logs a warning and disables that feature).
+
+> **SMS is the exception: the API refuses to boot with no valid SMS provider.**
+> If `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` are non-empty (for example the
+> old placeholder values), the app builds a real Twilio client and crashes on
+> startup with `accountSid must start with AC`, so nothing listens on `:3001`
+> and every login fails with "invalid email or password". For local dev, keep
+> both empty and set `ALLOW_SIMULATED_SMS="true"`. The current `.env.example`
+> ships them empty, so a fresh copy boots straight into the simulator.
 
 ## Everyday workflow
 
