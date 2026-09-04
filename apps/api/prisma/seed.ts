@@ -421,7 +421,7 @@ ${BANNED_PHRASES}
 ${HONESTY_RULES}`,
       exampleMessages: [
         { role: 'user', content: 'Seller said "I need to think about it and talk to my wife first."' },
-        { role: 'assistant', content: '{"message":"Totally get it, that's a big decision. Take your time and if you and your wife want to chat about it together I'm around whenever"}' },
+        { role: 'assistant', content: `{"message":"Totally get it, that's a big decision. Take your time and if you and your wife want to chat about it together I'm around whenever"}` },
       ],
     },
     {
@@ -530,7 +530,7 @@ ${BANNED_PHRASES}
 ${HONESTY_RULES}`,
       exampleMessages: [
         { role: 'user', content: 'Seller wants $180k, timeline is 30 days. We need to know property condition.' },
-        { role: 'assistant', content: '{"message":"Ok great. How's the place holding up? Anything major going on with it or is it in pretty good shape?"}' },
+        { role: 'assistant', content: `{"message":"Ok great. How's the place holding up? Anything major going on with it or is it in pretty good shape?"}` },
       ],
     },
     {
