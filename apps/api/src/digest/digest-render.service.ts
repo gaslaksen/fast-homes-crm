@@ -243,6 +243,65 @@ export class DigestRenderService {
       <tr><td class="px" style="padding:0 36px 6px 36px;">${cards}${footer}</td></tr>`;
   }
 
+  /**
+   * Surplus claimants worth calling. Same card shape as the foreclosure watch
+   * so the eye reads the two pipelines the same way.
+   */
+  private renderSurplus(b: DigestBrief): string {
+    if (!b.surplus.length && !b.surplusIngestNote) return '';
+    const cards = b.surplus.map((s, i) => {
+      const p = PALETTE[s.urgency];
+      return `
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid ${p.border};border-radius:10px;background:${p.bg};${i ? 'margin-top:10px;' : ''}">
+          <tr><td style="padding:13px 15px;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+              <td style="font-size:14px;font-weight:700;color:${INK};"><a href="${this.esc(s.url)}" style="color:${INK};text-decoration:none;">${this.esc(s.claimant)}</a></td>
+              <td align="right" style="font-size:12px;font-weight:600;color:${MUTED};white-space:nowrap;">${this.esc(s.property)}</td>
+            </tr></table>
+            <div style="font-size:13px;color:${BODY};padding-top:4px;line-height:1.5;">${this.esc(s.facts)}</div>
+            <div style="font-size:12px;font-weight:600;color:${p.accent};padding-top:4px;">${this.esc(s.status)}</div>
+          </td></tr>
+        </table>`;
+    }).join('');
+
+    const footer = `<div style="padding-top:12px;font-size:13px;color:${MUTED};line-height:1.55;">
+        ${b.surplusIngestNote ? `<b style="color:${INK};">Overnight:</b> ${this.esc(b.surplusIngestNote)} ` : ''}
+        ${b.surplusCallableTotal} of ${b.surplusOpenTotal} open claimants have a live number.
+        <a href="${this.esc(b.appUrl)}/surplus-funds" style="color:${TEAL};font-weight:600;text-decoration:none;">Open the board &rarr;</a>
+      </div>`;
+
+    return `
+      ${this.divider()}
+      ${this.sectionLabel('Surplus funds', 'live number, nobody has called')}
+      <tr><td class="px" style="padding:0 36px 6px 36px;">${cards}${footer}</td></tr>`;
+  }
+
+  /**
+   * The automated county pulls, one line each. A failed or missing pull is
+   * red; there is no version of this section that goes quiet on failure.
+   */
+  private renderFeeds(b: DigestBrief): string {
+    if (!b.feeds.length) return '';
+    const rows = b.feeds.map((f) => {
+      const p = PALETTE[f.urgency];
+      return `
+        <tr>
+          <td valign="top" style="padding:8px 10px 8px 0;white-space:nowrap;">
+            <span style="display:inline-block;width:8px;height:8px;border-radius:4px;background:${p.accent};margin-right:8px;"></span><b style="color:${INK};font-size:13px;">${this.esc(f.label)}</b>
+            <div style="font-size:11px;color:${FAINT};padding-left:16px;">${this.esc(f.schedule)}</div>
+          </td>
+          <td valign="top" style="padding:8px 0;font-size:13px;color:${f.urgency === 'critical' ? p.accent : BODY};line-height:1.5;">${this.esc(f.detail)}</td>
+        </tr>`;
+    }).join('');
+
+    return `
+      ${this.divider()}
+      ${this.sectionLabel('County feeds', 'what the automated pulls did')}
+      <tr><td class="px" style="padding:0 36px 6px 36px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">${rows}</table>
+      </td></tr>`;
+  }
+
   private renderNewLeads(b: DigestBrief): string {
     if (!b.newOvernight.length) return '';
     const rows = b.newOvernight.map((n, i) => `
@@ -357,7 +416,9 @@ export class DigestRenderService {
   ${this.renderWaiting(b)}
   ${this.renderDeals(b)}
   ${this.renderForeclosures(b)}
+  ${this.renderSurplus(b)}
   ${this.renderNewLeads(b)}
+  ${this.renderFeeds(b)}
   ${this.renderNews(b)}
   ${this.renderYesterday(b)}
 
@@ -447,12 +508,31 @@ export class DigestRenderService {
       out.push('');
     }
 
+    if (b.surplus.length || b.surplusIngestNote) {
+      out.push('SURPLUS FUNDS');
+      for (const s of b.surplus) {
+        out.push(`  ${s.claimant} - ${s.property}`);
+        out.push(`     ${s.facts}`);
+        out.push(`     ${s.status}`);
+        out.push(`     ${s.url}`);
+      }
+      if (b.surplusIngestNote) out.push(`  Overnight: ${b.surplusIngestNote}`);
+      out.push(`  ${b.surplusCallableTotal} of ${b.surplusOpenTotal} open claimants have a live number.`);
+      out.push('');
+    }
+
     if (b.newOvernight.length) {
       out.push(`CAME IN OVERNIGHT (${b.newOvernightTotal})`);
       for (const n of b.newOvernight) {
         out.push(`  ${n.property} - ${n.meta}`);
         out.push(`     ${n.note}`);
       }
+      out.push('');
+    }
+
+    if (b.feeds.length) {
+      out.push('COUNTY FEEDS');
+      for (const f of b.feeds) out.push(`  ${f.label} (${f.schedule}): ${f.detail}`);
       out.push('');
     }
 

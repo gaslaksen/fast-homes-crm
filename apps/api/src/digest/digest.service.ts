@@ -3,6 +3,9 @@ import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { DigestNewsService } from './digest-news.service';
+import { SurplusService } from '../surplus/surplus.service';
+import { SurplusIngestService } from '../surplus/surplus-ingest.service';
+import { describeFeed } from './digest-feeds.util';
 import {
   BigThing,
   BoardTile,
@@ -10,8 +13,10 @@ import {
   DigestAction,
   DigestBrief,
   DigestUrgency,
+  FeedRow,
   ForeclosureRow,
   NewLeadRow,
+  SurplusRow,
   WaitingRow,
   YesterdayStat,
 } from './digest.types';
@@ -49,6 +54,8 @@ export class DigestService {
     private prisma: PrismaService,
     private config: ConfigService,
     private news: DigestNewsService,
+    private surplusService: SurplusService,
+    private surplusIngest: SurplusIngestService,
   ) {}
 
   private get appUrl(): string {
@@ -404,6 +411,68 @@ export class DigestService {
 
     const yesterday = await this.buildYesterday(orgId, since, now);
 
+    // ── Surplus funds ───────────────────────────────────────────────────────
+    // The board's own list and ranking, so the brief never names a claimant
+    // the board would rank differently. Best-effort: a surplus outage must not
+    // take the rest of the brief down.
+    const surplusBoard = await this.surplusService
+      .list({ organizationId: orgId, hideDead: true, pageSize: 200 })
+      .catch((e: any) => {
+        this.logger.warn(`Surplus board unavailable for the brief: ${e.message}`);
+        return null;
+      });
+    const surplusClaimants: any[] = (surplusBoard?.data || []).flatMap((p: any) => p.claimants || [p]);
+    const surplusOpenTotal = surplusBoard?.leadCount ?? 0;
+    const surplusCallable = surplusClaimants.filter(
+      (c) => c.workScore > 0 && c.cleanPhoneCount > 0 && !c.doNotCall,
+    );
+    // Live number, nothing logged against them yet. That is the whole list of
+    // who to call this morning, best first.
+    const surplusCalls = surplusCallable
+      .filter((c) => !(c.touches?.length) && !c.lastTouchedAt)
+      .sort((a, b) => b.workScore - a.workScore || (b.netToClaimant || 0) - (a.netToClaimant || 0));
+
+    const surplus: SurplusRow[] = surplusCalls.slice(0, 5).map((c) => ({
+      claimant: c.claimant,
+      property: this.place({ propertyAddress: c.address, propertyCity: c.city }),
+      facts: [
+        c.county ? `${c.county} County` : null,
+        c.caseNumber ? `case ${c.caseNumber}` : null,
+        `${this.money(c.grossSurplus)} surplus`,
+        c.claimStatusLabel,
+      ].filter(Boolean).join(' · '),
+      status: `Never contacted. ${c.workReason}`,
+      url: this.leadUrl(c.id),
+      urgency: c.claimStatus === 'denied' || (c.netToClaimant || 0) >= 25000 ? 'critical' : 'warn',
+    }));
+
+    // What the county pulls dropped on the board since the last brief.
+    const surplusLandedRows = await this.prisma.surplusDetail.groupBy({
+      by: ['county'],
+      where: { ...org, createdAt: { gte: since } },
+      _count: { _all: true },
+      _sum: { grossSurplus: true },
+    });
+    const landedCount = surplusLandedRows.reduce((s, g) => s + g._count._all, 0);
+    const landedTotal = surplusLandedRows.reduce((s, g) => s + (g._sum.grossSurplus || 0), 0);
+    const landedCounties = surplusLandedRows.map((g) => g.county || 'an unknown county');
+    const surplusLanded = landedCount
+      ? {
+          count: landedCount,
+          total: landedTotal,
+          counties: landedCounties,
+          top: surplusClaimants
+            .filter((c) => c.createdAt && new Date(c.createdAt) >= since)
+            .sort((a, b) => (b.grossSurplus || 0) - (a.grossSurplus || 0))
+            .slice(0, 2),
+        }
+      : null;
+    const surplusIngestNote = surplusLanded
+      ? `${surplusLanded.count} claimant${surplusLanded.count === 1 ? '' : 's'} landed from ${surplusLanded.counties.join(' and ')}, ${this.moneyCompact(surplusLanded.total)} of surplus between them.`
+      : null;
+
+    const feeds = await this.buildFeeds(orgId, now);
+
     // Feeds live outside our control, so this is best-effort: getItems swallows
     // its own failures and returns [] rather than taking the brief down.
     const strategies = [
@@ -584,12 +653,13 @@ export class DigestService {
     // ── Actions ─────────────────────────────────────────────────────────────
     const actions = this.buildActions({
       now, unread, twoHoursAgo, foreclosureRows, openContracts, in7,
-      pendingOffers, overdueTasks, staleLeads, photoByLead,
+      pendingOffers, overdueTasks, staleLeads, photoByLead, surplusCalls,
     });
 
     // ── Big thing ───────────────────────────────────────────────────────────
     const bigThing = this.buildBigThing({
       now, unread, foreclosureRows, openContracts, in7, photoByLead, recentKeys,
+      surplusCalls, surplusLanded,
     });
 
     const market = topCity[0]?.propertyCity ? `${topCity[0].propertyCity} metro` : null;
@@ -621,12 +691,20 @@ export class DigestService {
       foreclosureOpenTotal,
       newOvernight,
       newOvernightTotal: newLeads.length,
+      surplus,
+      surplusOpenTotal,
+      surplusCallableTotal: surplusCallable.length,
+      surplusIngestNote,
+      feeds,
       yesterday,
       news,
       appUrl: this.appUrl,
+      // A failed county feed is never an empty day; that is the one morning
+      // the email must go out.
       isEmpty:
         !bigThing && !actions.length && !waiting.length &&
-        !dealsInMotion.length && !foreclosures.length && !newOvernight.length,
+        !dealsInMotion.length && !foreclosures.length && !newOvernight.length &&
+        !surplus.length && !feeds.some((f) => f.urgency === 'critical'),
     };
 
     brief.subject = this.buildSubject(brief);
@@ -694,9 +772,32 @@ export class DigestService {
     overdueTasks: any[];
     staleLeads: number;
     photoByLead: Map<string, { at: Date; count: number; body: string }>;
+    /** Surplus claimants with a live number and no touch, best first. */
+    surplusCalls: any[];
   }): DigestAction[] {
     const out: DigestAction[] = [];
     const { now } = ctx;
+
+    // A surplus claimant with a live number is a call, not a research task,
+    // and the money is sitting with the clerk until somebody files. Scored
+    // beside a MEDIUM foreclosure so a real call never loses to a nudge.
+    for (const c of ctx.surplusCalls.slice(0, 4)) {
+      const net = c.netToClaimant || 0;
+      out.push({
+        title: `Call ${c.claimant} about ${this.moneyCompact(c.grossSurplus)} in surplus`,
+        detail: [
+          c.county ? `${c.county} County` : null,
+          c.claimStatusLabel,
+          `${c.cleanPhoneCount} clean number${c.cleanPhoneCount === 1 ? '' : 's'}`,
+          'never contacted',
+        ].filter(Boolean).join(' · '),
+        ctaLabel: 'Open surplus lead',
+        ctaUrl: this.leadUrl(c.id),
+        score: 90 + Math.min(80, net / 1000) + (c.claimStatus === 'denied' ? 30 : 0),
+        urgency: c.claimStatus === 'denied' || net >= 25000 ? 'critical' : 'warn',
+        category: 'surplus',
+      });
+    }
 
     for (const l of ctx.unread) {
       if (!l.lastMessageAt || l.lastMessageAt > ctx.twoHoursAgo) continue;
@@ -906,9 +1007,15 @@ export class DigestService {
   }
 
   /**
-   * The single most important thing on the board. Ranked rules, first non-empty
-   * wins: unanswered reply on the most valuable lead, then an imminent
-   * foreclosure sale, then a closing with a blocker.
+   * The single most important thing on the board.
+   *
+   * Events first, in a fixed order: a seller who sent photos, then an
+   * unanswered reply. Those are new, human and recoverable, and nothing
+   * standing on the board beats them. When there is no event, the standing
+   * conditions (a surplus batch that landed overnight, a surplus claimant with
+   * a live number, a HIGH foreclosure nobody has called, a closing with no
+   * title company) compete on a weight, and whatever led a recent brief sits
+   * out. When nothing qualifies the section is dropped rather than filled.
    */
   private buildBigThing(ctx: {
     now: Date;
@@ -919,6 +1026,8 @@ export class DigestService {
     photoByLead: Map<string, { at: Date; count: number; body: string }>;
     /** bigThingKeys from the last few sends, so the brief does not repeat itself. */
     recentKeys: Set<string>;
+    surplusCalls: any[];
+    surplusLanded: { count: number; total: number; counties: string[]; top: any[] } | null;
   }): BigThing | null {
     const { now } = ctx;
 
@@ -979,6 +1088,62 @@ export class DigestService {
       };
     }
 
+    // From here on nothing is an EVENT. These are standing conditions, so they
+    // compete on a weight rather than in a fixed order, and none of them leads
+    // two mornings running. A surplus claimant with a live number and real
+    // money outranks a foreclosure notice unless that notice is HIGH priority
+    // and scored well, and a MEDIUM or LOW notice never leads at all: "nobody
+    // has called" on a lead the team is not working was the headline that
+    // opened the email most mornings and got ignored.
+    const candidates: { weight: number; thing: BigThing }[] = [];
+
+    if (ctx.surplusLanded && ctx.surplusLanded.count >= 5) {
+      const s = ctx.surplusLanded;
+      const key = `surplus-batch:${now.toISOString().slice(0, 10)}`;
+      const top = s.top[0];
+      if (!ctx.recentKeys.has(key)) {
+        candidates.push({
+          weight: 550,
+          thing: {
+            key,
+            headline: `${s.count} surplus claimants landed overnight from ${s.counties.join(' and ')}, ${this.moneyCompact(s.total)} between them.`,
+            detail: top
+              ? `Largest: ${top.claimant}, ${this.money(top.grossSurplus)} on ${this.place({ propertyAddress: top.address, propertyCity: top.city })}. Every one carries the clerk's own mailing address for the owner.`
+              : "Every one carries the clerk's own mailing address for the owner.",
+            whyItMatters: 'They are unclaimed today. Every week that passes is a week a recovery firm can file first, and the ones with a live number are already ranked on the board.',
+            ctaLabel: 'Open the surplus board',
+            ctaUrl: `${this.appUrl}/surplus-funds`,
+            phone: null,
+          },
+        });
+      }
+    }
+
+    const bestSurplus = ctx.surplusCalls.find((c) => !ctx.recentKeys.has(`lead:${c.id}`));
+    if (bestSurplus) {
+      const net = bestSurplus.netToClaimant || 0;
+      const clean = (bestSurplus.phones || []).find((p: any) => !p.dnc) || (bestSurplus.phones || [])[0];
+      candidates.push({
+        weight: 500 + Math.min(100, net / 2000),
+        thing: {
+          key: `lead:${bestSurplus.id}`,
+          headline: `${bestSurplus.claimant} is owed ${this.money(bestSurplus.grossSurplus)} by ${bestSurplus.county || 'the'} County and has a live number nobody has called.`,
+          detail: [
+            bestSurplus.claimStatusLabel,
+            bestSurplus.caseNumber ? `case ${bestSurplus.caseNumber}` : null,
+            `${bestSurplus.cleanPhoneCount} clean number${bestSurplus.cleanPhoneCount === 1 ? '' : 's'}`,
+            bestSurplus.workReason,
+          ].filter(Boolean).join(' · '),
+          whyItMatters: `The money sits with the clerk until somebody files, and recovery firms work the same list. ${
+            net > 0 ? `Roughly ${this.money(net)} would reach the claimant after the fee cap. ` : ''
+          }A first call today is the whole game.`,
+          ctaLabel: 'Open surplus lead',
+          ctaUrl: this.leadUrl(bestSurplus.id),
+          phone: this.fmtPhone(clean?.number),
+        },
+      });
+    }
+
     // Only ever lead with a notice that can still be worked, and never with one
     // that led a recent brief. Both rules exist because a countdown on an
     // unwinnable property was opening the email several mornings running.
@@ -987,52 +1152,57 @@ export class DigestService {
         if (!f.saleDate) return false;
         const d = this.daysUntil(f.saleDate, now);
         if (d < FORECLOSURE_MIN_WORKABLE_DAYS || d > FORECLOSURE_MAX_WATCH_DAYS) return false;
-        if (f.workStatus !== 'NOT_CONTACTED') return false;
+        if (f.workStatus !== 'NOT_CONTACTED' || f.priority !== 'HIGH') return false;
         return f.lead ? !ctx.recentKeys.has(`lead:${f.lead.id}`) : true;
       })
       .sort((a, b) => {
-        const rank = (p?: string) => (p === 'HIGH' ? 2 : p === 'MEDIUM' ? 1 : 0);
-        const pd = rank(b.priority) - rank(a.priority);
-        if (pd !== 0) return pd;
         const sd = (b.leadScore ?? 0) - (a.leadScore ?? 0);
         if (sd !== 0) return sd;
         return a.saleDate.getTime() - b.saleDate.getTime();
       })[0];
     if (imminent) {
       const days = this.daysUntil(imminent.saleDate, now);
-      return {
-        key: imminent.lead ? `lead:${imminent.lead.id}` : `fc:${imminent.id}`,
-        headline: `${this.place({
-          propertyAddress: imminent.lead?.propertyAddress,
-          propertyCity: imminent.lead?.propertyCity,
-        })} has ${days} days left to work, and nobody has called.`,
-        detail: `${(imminent.noticeType || 'foreclosure').replace(/_/g, ' ')} · sale ${this.fmtShortDate(imminent.saleDate)} · priority ${imminent.priority || 'unset'} · score ${imminent.leadScore ?? 0}${
-          imminent.equitySpread != null ? ` · ${this.money(imminent.equitySpread)} equity spread` : ''
-        }`,
-        whyItMatters: `Reaching the owner, agreeing a number, and closing takes two to three weeks. ${days} days is enough to do that, and it will not be in a week. This is the last useful window, not the sale date.`,
-        ctaLabel: 'Open foreclosure',
-        ctaUrl: imminent.lead ? this.leadUrl(imminent.lead.id) : `${this.appUrl}/foreclosures`,
-        phone: this.fmtPhone(imminent.lead?.sellerPhone),
-      };
+      candidates.push({
+        weight: 400 + (imminent.leadScore ?? 0),
+        thing: {
+          key: imminent.lead ? `lead:${imminent.lead.id}` : `fc:${imminent.id}`,
+          headline: `${this.place({
+            propertyAddress: imminent.lead?.propertyAddress,
+            propertyCity: imminent.lead?.propertyCity,
+          })} has ${days} days left to work, and nobody has called.`,
+          detail: `${(imminent.noticeType || 'foreclosure').replace(/_/g, ' ')} · sale ${this.fmtShortDate(imminent.saleDate)} · priority ${imminent.priority || 'unset'} · score ${imminent.leadScore ?? 0}${
+            imminent.equitySpread != null ? ` · ${this.money(imminent.equitySpread)} equity spread` : ''
+          }`,
+          whyItMatters: `Reaching the owner, agreeing a number, and closing takes two to three weeks. ${days} days is enough to do that, and it will not be in a week. This is the last useful window, not the sale date.`,
+          ctaLabel: 'Open foreclosure',
+          ctaUrl: imminent.lead ? this.leadUrl(imminent.lead.id) : `${this.appUrl}/foreclosures`,
+          phone: this.fmtPhone(imminent.lead?.sellerPhone),
+        },
+      });
     }
 
     const blocked = ctx.openContracts.find(
-      (c) => c.expectedCloseDate && c.expectedCloseDate <= ctx.in7 && !c.titleCompany,
+      (c) => c.expectedCloseDate && c.expectedCloseDate <= ctx.in7 && !c.titleCompany &&
+        !ctx.recentKeys.has(`lead:${c.lead.id}`),
     );
     if (blocked) {
       const days = this.daysUntil(blocked.expectedCloseDate, now);
-      return {
-        key: `lead:${blocked.lead.id}`,
-        headline: `${this.place(blocked.lead)} closes in ${days} day${days === 1 ? '' : 's'} with no title company.`,
-        detail: `${this.money(blocked.assignmentFee)} assignment fee · ${(blocked.contractStatus || '').replace(/-/g, ' ')} · expected ${this.fmtShortDate(blocked.expectedCloseDate)}`,
-        whyItMatters: 'Title takes days to open a file. This is the one thing on the board that turns a signed deal into a missed close.',
-        ctaLabel: 'Open contract',
-        ctaUrl: this.leadUrl(blocked.lead.id, '/contract'),
-        phone: null,
-      };
+      candidates.push({
+        weight: 700,
+        thing: {
+          key: `lead:${blocked.lead.id}`,
+          headline: `${this.place(blocked.lead)} closes in ${days} day${days === 1 ? '' : 's'} with no title company.`,
+          detail: `${this.money(blocked.assignmentFee)} assignment fee · ${(blocked.contractStatus || '').replace(/-/g, ' ')} · expected ${this.fmtShortDate(blocked.expectedCloseDate)}`,
+          whyItMatters: 'Title takes days to open a file. This is the one thing on the board that turns a signed deal into a missed close.',
+          ctaLabel: 'Open contract',
+          ctaUrl: this.leadUrl(blocked.lead.id, '/contract'),
+          phone: null,
+        },
+      });
     }
 
-    return null;
+    candidates.sort((a, b) => b.weight - a.weight);
+    return candidates[0]?.thing ?? null;
   }
 
   /** Yesterday's activity counts. Cheap aggregate queries, no row hydration. */
@@ -1074,14 +1244,43 @@ export class DigestService {
   }
 
   /** Subject line, rebuilt daily from whatever is most urgent. */
+  /**
+   * What each automated county pull did, or failed to do, one line per source.
+   * Runs are shared across the org's replicas; the cron's own runs carry the
+   * org id and a manual run may not, so both are read.
+   */
+  private async buildFeeds(orgId: string | null, now: Date): Promise<FeedRow[]> {
+    const sources = this.surplusIngest
+      .adapters()
+      .map((a) => ({ key: a.key, county: a.county, cadence: a.cadence }));
+    if (!sources.length) return [];
+    const runs = await this.prisma.surplusPollRun.findMany({
+      where: {
+        source: { in: sources.map((s) => s.key) },
+        startedAt: { gte: new Date(now.getTime() - 10 * DAY) },
+        ...(orgId ? { OR: [{ organizationId: orgId }, { organizationId: null }] } : {}),
+      },
+      orderBy: { startedAt: 'desc' },
+    });
+    return sources.map((s) => describeFeed(s, runs, now));
+  }
+
   private buildSubject(b: DigestBrief): string {
     const parts: string[] = [];
+    // A broken feed is the one subject line that must not be buried.
+    const brokenFeeds = b.feeds.filter((f) => f.urgency === 'critical');
+    if (brokenFeeds.length) {
+      parts.push(`${brokenFeeds.map((f) => f.label.replace(' County', '')).join(' and ')} feed ${brokenFeeds.length === 1 ? 'needs' : 'need'} attention`);
+    }
     if (b.waitingTotal) {
       parts.push(`${b.waitingTotal} repl${b.waitingTotal === 1 ? 'y' : 'ies'} waiting`);
     }
     const workable = b.foreclosures.filter((f) => f.urgency === 'critical').length;
     if (workable) {
       parts.push(`${workable} foreclosure${workable > 1 ? 's' : ''} worth calling`);
+    }
+    if (b.surplus.length && parts.length < 2) {
+      parts.push(`${b.surplus.length} surplus claimant${b.surplus.length > 1 ? 's' : ''} to call`);
     }
     const urgentDeals = b.dealsInMotion.filter((d) => d.daysUrgency === 'critical').length;
     if (urgentDeals && parts.length < 2) {
