@@ -55,7 +55,7 @@ export interface DigestAction {
    * Action family. Used to cap how many slots one category can take, so a
    * heavy foreclosure ingest cannot crowd out every closing and offer.
    */
-  category: 'photos' | 'reply' | 'foreclosure' | 'closing' | 'signature' | 'offer' | 'task' | 'cleanup';
+  category: 'photos' | 'reply' | 'foreclosure' | 'surplus' | 'closing' | 'signature' | 'offer' | 'task' | 'cleanup';
 }
 
 export interface WaitingRow {
@@ -104,6 +104,27 @@ export interface YesterdayStat {
   text: string;
 }
 
+/** One surplus claimant worth calling today. */
+export interface SurplusRow {
+  claimant: string;
+  /** "2502 34th St SW, Lehigh Acres" */
+  property: string;
+  /** "Lee County · case 2025002173 · $32,054 surplus · Open, nothing filed" */
+  facts: string;
+  /** Contactability and clock, from the board's own work reason. */
+  status: string;
+  url: string;
+  urgency: DigestUrgency;
+}
+
+/** One automated county pull, one line. */
+export interface FeedRow {
+  label: string;
+  schedule: string;
+  detail: string;
+  urgency: DigestUrgency;
+}
+
 export interface DigestBrief {
   organizationId: string | null;
   generatedAt: Date;
@@ -133,6 +154,14 @@ export interface DigestBrief {
   foreclosureOpenTotal: number;
   newOvernight: NewLeadRow[];
   newOvernightTotal: number;
+  /** Surplus claimants with a live number nobody has called, best first. */
+  surplus: SurplusRow[];
+  surplusOpenTotal: number;
+  surplusCallableTotal: number;
+  /** "24 claimants landed from Lee overnight, $312K between them." */
+  surplusIngestNote: string | null;
+  /** What each automated county pull did, or failed to do. */
+  feeds: FeedRow[];
   yesterday: YesterdayStat[];
   news: NewsItem[];
 
