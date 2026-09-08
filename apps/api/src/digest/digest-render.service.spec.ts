@@ -95,6 +95,13 @@ describe('DigestRenderService, surplus and county feeds', () => {
     expect(text).toContain('Lee County (weekly, Monday 4:30am ET): Did not run this morning.');
   });
 
+  it('keeps the surplus totals on a day with nobody new to call', () => {
+    // The board still holds work; a section that vanishes reads as none.
+    const html = render.renderHtml(brief({ surplusOpenTotal: 238, surplusCallableTotal: 57 }));
+    expect(html).toContain('Surplus funds');
+    expect(html).toContain('57 of 238 open claimants have a live number');
+  });
+
   it('drops both sections when there is nothing to say', () => {
     const html = render.renderHtml(brief());
     expect(html).not.toContain('Surplus funds');

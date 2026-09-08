@@ -248,7 +248,9 @@ export class DigestRenderService {
    * so the eye reads the two pipelines the same way.
    */
   private renderSurplus(b: DigestBrief): string {
-    if (!b.surplus.length && !b.surplusIngestNote) return '';
+    // Present whenever the board holds open claimants, even on a day with
+    // nobody new to call: a section that vanishes reads as "no surplus work".
+    if (!b.surplus.length && !b.surplusIngestNote && !b.surplusOpenTotal) return '';
     const cards = b.surplus.map((s, i) => {
       const p = PALETTE[s.urgency];
       return `
@@ -508,7 +510,7 @@ export class DigestRenderService {
       out.push('');
     }
 
-    if (b.surplus.length || b.surplusIngestNote) {
+    if (b.surplus.length || b.surplusIngestNote || b.surplusOpenTotal) {
       out.push('SURPLUS FUNDS');
       for (const s of b.surplus) {
         out.push(`  ${s.claimant} - ${s.property}`);

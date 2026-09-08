@@ -427,9 +427,11 @@ export class DigestService {
       (c) => c.workScore > 0 && c.cleanPhoneCount > 0 && !c.doNotCall,
     );
     // Live number, nothing logged against them yet. That is the whole list of
-    // who to call this morning, best first.
+    // who to call this morning, best first. `touches` is the board's touch
+    // COUNT; lastTouchedAt is stamped at creation and says nothing about
+    // contact, which is how the first send of this section listed nobody.
     const surplusCalls = surplusCallable
-      .filter((c) => !(c.touches?.length) && !c.lastTouchedAt)
+      .filter((c) => !(Number(c.touches) > 0))
       .sort((a, b) => b.workScore - a.workScore || (b.netToClaimant || 0) - (a.netToClaimant || 0));
 
     const surplus: SurplusRow[] = surplusCalls.slice(0, 5).map((c) => ({
@@ -793,7 +795,9 @@ export class DigestService {
         ].filter(Boolean).join(' · '),
         ctaLabel: 'Open surplus lead',
         ctaUrl: this.leadUrl(c.id),
-        score: 90 + Math.min(80, net / 1000) + (c.claimStatus === 'denied' ? 30 : 0),
+        // A verified live number beats "2 phones on file" from a tax roll, so
+        // this sits level with a HIGH foreclosure and passes it on the money.
+        score: 130 + Math.min(80, net / 1000) + (c.claimStatus === 'denied' ? 30 : 0),
         urgency: c.claimStatus === 'denied' || net >= 25000 ? 'critical' : 'warn',
         category: 'surplus',
       });
@@ -1181,9 +1185,13 @@ export class DigestService {
       });
     }
 
+    // A close date in the next seven days, not one that passed in June. An
+    // overdue draft is a reset-or-kill task and already sits in Do This First;
+    // headlining it as "closes in 0 days" is how a 95-day-old contract led the
+    // brief.
     const blocked = ctx.openContracts.find(
-      (c) => c.expectedCloseDate && c.expectedCloseDate <= ctx.in7 && !c.titleCompany &&
-        !ctx.recentKeys.has(`lead:${c.lead.id}`),
+      (c) => c.expectedCloseDate && c.expectedCloseDate >= now && c.expectedCloseDate <= ctx.in7 &&
+        !c.titleCompany && !ctx.recentKeys.has(`lead:${c.lead.id}`),
     );
     if (blocked) {
       const days = this.daysUntil(blocked.expectedCloseDate, now);
