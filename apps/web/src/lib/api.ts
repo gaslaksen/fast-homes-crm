@@ -234,6 +234,16 @@ export const surplusAPI = {
   pollRuns: () => api.get('/surplus/poll-runs'),
   /** Connect rate by weekday and hour over the last 90 days of surplus calls. */
   callStats: () => api.get('/surplus/call-stats'),
+
+  // ── Scripts and letters, versioned ──
+  /** The scripts for one claimant, merge fields filled, plus on-screen facts. */
+  script: (id: string) => api.get(`/surplus/${id}/script`),
+  templates: () => api.get('/surplus/templates'),
+  templateVersions: (kind: string) => api.get(`/surplus/templates/${kind}/versions`),
+  saveTemplate: (kind: string, data: { body: string; name?: string; subject?: string; notes?: string }) =>
+    api.post(`/surplus/templates/${kind}`, data),
+  activateTemplate: (kind: string, version: number) =>
+    api.post(`/surplus/templates/${kind}/activate`, { version }),
   // A fresh link to a county document whose stored link expires (RealTDM).
   documentLink: (source: string, docId: string, docType?: string | null) =>
     api.get('/surplus/document-link', { params: { source, docId, docType: docType || undefined } }),

@@ -5,7 +5,8 @@ import CommunicationsTimeline from '@/components/communications/CommunicationsTi
 import MessageComposer, { type EmailAction } from '@/components/communications/MessageComposer';
 import NotesPanel from '@/components/communications/NotesPanel';
 import type { NoteItem, TimelineItem } from '@/components/communications/types';
-import { authAPI, campaignsAPI, leadsAPI, surplusAPI } from '@/lib/api';
+import { authAPI, campaignsAPI, leadsAPI, surplusAPI, tasksAPI } from '@/lib/api';
+import { dueLabel, isOverdue, quickDueDates } from '@/lib/dates';
 import { useDialer } from '@/components/dialer/DialerContext';
 import { DNC_STATE, SURPLUS_STAGES } from './format';
 import ContactEditor from './ContactEditor';
@@ -537,6 +538,7 @@ export default function SurplusWorkPanel({
               lead={lead}
               property={property}
               ledger={ledger}
+              currentUser={currentUser}
               onTrace={trace}
               tracing={tracing}
               onCall={call}
@@ -646,6 +648,7 @@ function CaseTab({
   lead,
   property,
   ledger,
+  currentUser,
   onTrace,
   tracing,
   onCall,
@@ -657,6 +660,7 @@ function CaseTab({
   lead: SurplusPanelLead;
   property: any;
   ledger: LedgerDoc[];
+  currentUser: any;
   onTrace: () => void;
   tracing: boolean;
   onCall: (number: string) => void;
@@ -679,6 +683,8 @@ function CaseTab({
   return (
     <div style={{ display: 'grid', gap: 16 }}>
       <StageControl lead={lead} onChanged={onChanged} say={say} />
+
+      <TasksSection lead={lead} currentUser={currentUser} onChanged={onChanged} say={say} />
 
       <Section title="The money">
         <Row k="Surplus posted today" v={money(property.grossSurplus)} />
@@ -1240,6 +1246,172 @@ function LetterMailed({
         </button>
       </div>
     </div>
+  );
+}
+
+/**
+ * What somebody has committed to doing next on this claimant, and when.
+ *
+ * The course's rule is that no call ends with "circle back later": every
+ * follow-up carries a date. The call summary and the stage changes create
+ * tasks on their own; this is where they are seen, ticked off, and where a
+ * person adds one by hand. Overdue is red because a slipped promise is the
+ * thing that loses a claimant's trust.
+ */
+function TasksSection({
+  lead,
+  currentUser,
+  onChanged,
+  say,
+}: {
+  lead: SurplusPanelLead;
+  currentUser: any;
+  onChanged: () => void;
+  say: (msg: string) => void;
+}) {
+  const [tasks, setTasks] = useState<any[] | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [title, setTitle] = useState('');
+  const [due, setDue] = useState('');
+  const [busy, setBusy] = useState(false);
+  const picks = quickDueDates();
+
+  const load = useCallback(() => {
+    leadsAPI
+      .getTasks(lead.id)
+      .then((r) => setTasks((r.data || []).filter((t: any) => !t.completed)))
+      .catch(() => setTasks([]));
+  }, [lead.id]);
+
+  useEffect(() => {
+    setTasks(null);
+    load();
+  }, [load]);
+
+  const complete = async (t: any) => {
+    setBusy(true);
+    try {
+      await tasksAPI.complete(t.id, currentUser?.id);
+      say(`Done: ${t.title}`);
+      load();
+      onChanged();
+    } catch {
+      say('That task could not be completed.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const add = async () => {
+    const text = title.trim();
+    if (!text || !due) return;
+    setBusy(true);
+    try {
+      await leadsAPI.createTask(lead.id, {
+        title: text,
+        dueDate: new Date(due).toISOString(),
+        userId: currentUser?.id,
+      });
+      setTitle('');
+      setDue('');
+      setAdding(false);
+      say('Follow-up added');
+      load();
+      onChanged();
+    } catch (err: any) {
+      say(err?.response?.data?.message || 'That follow-up could not be saved.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Section
+      title="Next action"
+      note={tasks && tasks.length ? `${tasks.length} open` : undefined}
+    >
+      {tasks === null ? (
+        <div style={{ fontSize: 12, color: 'var(--faint)' }}>Loading...</div>
+      ) : tasks.length === 0 ? (
+        <div style={{ fontSize: 12, color: 'var(--faint)' }}>
+          Nothing scheduled for {lead.claimant}. A call outcome or a stage change adds one, or add
+          one here.
+        </div>
+      ) : (
+        tasks.map((t) => {
+          const late = isOverdue(t.dueDate);
+          return (
+            <div key={t.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13 }}>
+              <input
+                type="checkbox"
+                disabled={busy}
+                onChange={() => complete(t)}
+                aria-label={`Complete ${t.title}`}
+                style={{ marginTop: 3, accentColor: 'var(--mint)' }}
+              />
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontWeight: 600, overflowWrap: 'anywhere' }}>{t.title}</div>
+                <div style={{ fontSize: 11, color: late ? 'var(--red)' : 'var(--faint)' }}>
+                  {dueLabel(t.dueDate)}
+                  {t.dueDate ? `, ${fmtDate(t.dueDate)}` : ''}
+                  {t.user?.firstName ? ` · ${t.user.firstName}` : ''}
+                </div>
+              </div>
+            </div>
+          );
+        })
+      )}
+
+      {adding ? (
+        <div style={{ display: 'grid', gap: 6, marginTop: 4 }}>
+          <input
+            className="dc-input"
+            placeholder="What needs doing"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            autoFocus
+          />
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {picks.map((p) => (
+              <button
+                key={p.label}
+                type="button"
+                className={`dc-wp-btn${due === p.value ? ' on' : ''}`}
+                onClick={() => setDue(p.value)}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+          <input
+            className="dc-input"
+            type="datetime-local"
+            value={due}
+            onChange={(e) => setDue(e.target.value)}
+            aria-label="Due"
+          />
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button
+              type="button"
+              className="dc-wp-btn on"
+              disabled={busy || !title.trim() || !due}
+              onClick={add}
+            >
+              Save
+            </button>
+            <button type="button" className="dc-wp-btn" onClick={() => setAdding(false)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div>
+          <button type="button" className="dc-wp-btn" onClick={() => setAdding(true)}>
+            Add a follow-up
+          </button>
+        </div>
+      )}
+    </Section>
   );
 }
 
