@@ -1,10 +1,10 @@
 #!/usr/bin/env sh
-# Render onepager/overview.html to ../overview.pdf with headless Chrome.
+# Render onepager/overview.html to ../public/overview.pdf with headless Chrome.
 # The PDF must be exactly one US Letter page and under 1 MB.
 set -eu
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-OUT="$HERE/../overview.pdf"
+OUT="$HERE/../public/overview.pdf"
 CHROME="${CHROME:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}"
 
 if [ ! -x "$CHROME" ]; then
