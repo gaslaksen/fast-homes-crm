@@ -57,15 +57,19 @@ export const QCHB_BRAND: Brand = {
 };
 
 /**
- * The Florida surplus-funds brand. No website yet, so the signature carries
- * name and phone only. The phone is the Jacksonville Twilio number, which is
- * in the phone_numbers table as a sending number too.
+ * The Florida surplus-funds brand. The name is rendered exactly as the Sunbiz
+ * filing has it (D.I.G. DEEPER LLC, document L26000438506) so a claimant who
+ * compares an email to the state record sees the same name. The phone is the
+ * Jacksonville Twilio number, which is in the phone_numbers table as a sending
+ * number too. The website is the static site in apps/digdeeper-site.
  */
 export const DIG_DEEPER_BRAND: Brand = {
   key: 'digdeeper',
-  companyName: 'Dig Deeper LLC',
+  companyName: 'D.I.G. Deeper LLC',
   phone: '(904) 595-9620',
   phoneE164: '+19045959620',
+  website: 'digdeeperllc.com',
+  websiteUrl: 'https://digdeeperllc.com',
 };
 
 /** Everything that is not explicitly another brand is Quick Cash. */

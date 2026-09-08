@@ -5,3 +5,7 @@ packages:
   # node_modules + lockfile). Excluded so its React Native dependency tree
   # never destabilizes the api/web workspace install. See apps/mobile/README.md.
   - '!apps/mobile'
+  # The Dig Deeper public site is plain HTML, CSS and a PDF with no package.json.
+  # Excluded so nothing ever treats it as a workspace package. It deploys as its
+  # own Vercel project rooted at apps/digdeeper-site. See its README.md.
+  - '!apps/digdeeper-site'

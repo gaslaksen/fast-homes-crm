@@ -5,7 +5,8 @@
   "workspaces": [
     "apps/*",
     "packages/*",
-    "!apps/mobile"
+    "!apps/mobile",
+    "!apps/digdeeper-site"
   ],
   "scripts": {
     "dev": "turbo run dev",

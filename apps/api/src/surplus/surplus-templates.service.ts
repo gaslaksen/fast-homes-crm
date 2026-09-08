@@ -42,7 +42,7 @@ export const MERGE_FIELDS: { key: string; meaning: string }[] = [
   { key: 'feeTerms', meaning: 'The fee wording for this case, from the compliance rule' },
   { key: 'callbackNumber', meaning: 'The Dig Deeper line' },
   { key: 'callerName', meaning: 'Your first name' },
-  { key: 'companyName', meaning: 'Dig Deeper LLC' },
+  { key: 'companyName', meaning: 'D.I.G. Deeper LLC, as filed on Sunbiz' },
   { key: 'website', meaning: 'The company website, once there is one' },
   { key: 'websiteUrl', meaning: 'The website as a full link, from DIGDEEPER_WEBSITE_URL' },
   { key: 'sunbizLink', meaning: "The company's Florida state filing on Sunbiz, from DIGDEEPER_SUNBIZ_URL" },
