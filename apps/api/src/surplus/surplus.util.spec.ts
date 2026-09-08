@@ -25,6 +25,7 @@ import {
   pctOfNet,
   governingPct,
   canQualify,
+  stageGateError,
   complianceGate,
   SurplusFacts,
   queueOf,
@@ -391,6 +392,31 @@ describe('canQualify', () => {
     expect(canQualify({ ...clean, titleSearchComplete: false })).toBe(false);
     expect(canQualify({ ...clean, noticeConfirmed: false })).toBe(false);
     expect(canQualify({ ...clean, entitlementVerified: false })).toBe(false);
+  });
+});
+
+describe('stageGateError', () => {
+  it('only guards Agreement Signed', () => {
+    const bare = { entitlementVerified: false, noticeConfirmed: false, titleSearchComplete: false };
+    expect(stageGateError(bare, SurplusStage.CONTACTED)).toBeNull();
+    expect(stageGateError(bare, SurplusStage.DEAD)).toBeNull();
+    expect(stageGateError(bare, SurplusStage.CLAIM_FILED)).toBeNull();
+  });
+
+  it('passes a qualified claimant', () => {
+    expect(stageGateError(clean, SurplusStage.AGREEMENT_SIGNED)).toBeNull();
+  });
+
+  it('names only what is missing', () => {
+    expect(stageGateError({ ...clean, noticeConfirmed: false }, SurplusStage.AGREEMENT_SIGNED)).toBe(
+      'Agreement Signed needs notice date confirmed.',
+    );
+    expect(
+      stageGateError(
+        { ...clean, noticeConfirmed: false, titleSearchComplete: false },
+        SurplusStage.AGREEMENT_SIGNED,
+      ),
+    ).toBe('Agreement Signed needs notice date confirmed, title search complete.');
   });
 });
 

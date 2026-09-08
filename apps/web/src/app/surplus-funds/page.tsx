@@ -12,10 +12,7 @@ import '@/components/pipelines/pipeline-board.css';
 import {
   CHIP,
   CLAIMANT_TYPE_LABEL,
-  DAYS,
   DNC_STATE,
-  DOC_LABEL,
-  DRIP_TRACK_COLOR,
   SURPLUS_STAGES,
   SURPLUS_STAGE_COLOR,
   TIER,
@@ -443,29 +440,77 @@ const QUEUE_HELP: Record<string, string> = {
  * Only CRON runs count toward staleness. A manual pull does not prove the
  * schedule works, and counting it would mask exactly the failure this is for.
  */
-function FeedHealth({ runs }: { runs: any[] }) {
-  if (!runs.length) return null;
-  const lastCron = runs.find((r) => r.trigger === 'cron' && r.ok);
-  const ageHours = lastCron
-    ? (Date.now() - new Date(lastCron.startedAt).getTime()) / 3600000
-    : Infinity;
+interface FeedSource {
+  key: string;
+  county: string;
+  /** 'daily' | 'weekly'. Decides how old a pull can be before it is late. */
+  cadence?: string;
+}
 
-  let warn: string | null = null;
-  if (!lastCron) {
-    warn = 'The daily 5:45am pull has never succeeded. Cases only arrive when somebody clicks Refresh feed.';
-  } else if (ageHours > 30) {
-    warn = `The daily pull last succeeded ${Math.round(ageHours)} hours ago. It should run every morning at 5:45.`;
-  }
+/** How long a feed can go without a successful cron pull before it is late. */
+function staleAfterHours(cadence?: string): number {
+  return cadence === 'weekly' ? 8 * 24 : 30;
+}
+
+function scheduleLabel(cadence?: string): string {
+  return cadence === 'weekly' ? 'every Monday at 4:30' : 'every morning at 5:45';
+}
+
+function FeedHealth({ runs, sources }: { runs: any[]; sources: FeedSource[] }) {
+  if (!runs.length && !sources.length) return null;
+  // One line per registered feed. A weekly feed judged by the daily rule was
+  // amber six days out of seven, which taught everyone to ignore the line.
+  const feeds: FeedSource[] = sources.length
+    ? sources
+    : [{ key: 'duval_taxdeed', county: 'Duval', cadence: 'daily' }];
 
   return (
-    <div style={{ fontSize: 12, color: warn ? 'var(--amber)' : 'var(--faint)', marginTop: 6 }}>
-      {warn ? (
-        <>&#9888; {warn}</>
-      ) : (
+    <div style={{ display: 'grid', gap: 2, marginTop: 6 }}>
+      {feeds.map((f) => {
+        const lastCron = runs.find((r) => r.trigger === 'cron' && r.ok && (!r.source || r.source === f.key));
+        const ageHours = lastCron
+          ? (Date.now() - new Date(lastCron.startedAt).getTime()) / 3600000
+          : Infinity;
+        let warn: string | null = null;
+        if (!lastCron) {
+          warn = `The ${f.county} pull (${scheduleLabel(f.cadence)}) has never succeeded. Cases only arrive when somebody clicks Refresh feed.`;
+        } else if (ageHours > staleAfterHours(f.cadence)) {
+          warn = `The ${f.county} pull last succeeded ${agoLabel(lastCron.startedAt)}. It should run ${scheduleLabel(f.cadence)}.`;
+        }
+        return (
+          <div key={f.key} style={{ fontSize: 12, color: warn ? 'var(--amber)' : 'var(--faint)' }}>
+            {warn ? (
+              <>&#9888; {warn}</>
+            ) : (
+              <>
+                {f.county} pulled {agoLabel(lastCron.startedAt)} (scheduled): {lastCron.scanned} scanned,{' '}
+                {lastCron.created} new, {lastCron.updated} updated, {lastCron.belowFloor} under the floor
+              </>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * When calls connect. Shown only once there are enough calls to say
+ * anything; a best window off four calls is noise dressed as advice.
+ */
+function CallWindows({ stats }: { stats: any }) {
+  if (!stats || stats.calls < 10) return null;
+  const rate = Math.round((stats.connectRate || 0) * 100);
+  return (
+    <div style={{ fontSize: 12, color: 'var(--faint)', marginTop: 2 }}>
+      Calls, last {stats.sinceDays} days: {stats.calls} placed, {rate}% reached a person
+      {stats.best ? (
         <>
-          Feed last pulled {agoLabel(lastCron.startedAt)} (scheduled): {lastCron.scanned} scanned,{' '}
-          {lastCron.created} new, {lastCron.updated} updated, {lastCron.belowFloor} under the floor
+          . Best window so far: <b style={{ color: 'var(--mint)' }}>{stats.best.label}</b> (
+          {stats.best.connected} of {stats.best.calls})
         </>
+      ) : (
+        '.'
       )}
     </div>
   );
@@ -481,7 +526,6 @@ export default function SurplusFundsPage() {
   /** Counties actually represented in the data. The API derives it from the rows. */
   const [counties, setCounties] = useState<string[]>([]);
   const [floor, setFloor] = useState(15000);
-  const [disclosureLabels, setDisclosureLabels] = useState<Record<string, string>>({});
   const [stats, setStats] = useState({
     openClaims: 0,
     newSevenDays: 0,
@@ -516,7 +560,6 @@ export default function SurplusFundsPage() {
   const [hideDnc, setHideDnc] = useState(true);
 
   const [picked, setPicked] = useState<Record<string, boolean>>({});
-  const [editing, setEditing] = useState<Record<string, boolean>>({});
   /** Table by default: seventy properties are scanned before they are worked. */
   const [view, setView] = useState<PipelineView>('table');
   /** The lead whose work panel is open, or null. */
@@ -529,6 +572,14 @@ export default function SurplusFundsPage() {
   const [polling, setPolling] = useState(false);
   /** The last few county pulls, for the feed-health line under the title. */
   const [runs, setRuns] = useState<any[]>([]);
+  /** The county feeds the API can pull, with their cadence. */
+  const [sources, setSources] = useState<FeedSource[]>([]);
+  /** Which feed Refresh feed pulls. Defaults to the first registered. */
+  const [source, setSource] = useState<string>('');
+  /** Connect rate by weekday and hour, off the call log. */
+  const [callStats, setCallStats] = useState<any>(null);
+  /** The dollar band chip. A sort more than a cut, but the course filters on it. */
+  const [tierQ, setTierQ] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -544,6 +595,7 @@ export default function SurplusFundsPage() {
       const res = await surplusAPI.list({
         search: q || undefined,
         queue: queueQ || undefined,
+        tier: tierQ || undefined,
         stage: stageQ || undefined,
         claimantType: ctype === 'all' ? undefined : ctype,
         county,
@@ -568,7 +620,6 @@ export default function SurplusFundsPage() {
       setLeadCount(res.data.leadCount ?? data.length);
       setCounties(Array.isArray(res.data.counties) ? res.data.counties : []);
       setFloor(res.data.surplusFloor ?? 15000);
-      setDisclosureLabels(res.data.disclosureLabels || {});
     } catch (err: any) {
       setError(err?.response?.data?.message || err.message || 'Could not load surplus leads.');
       setRows([]);
@@ -576,7 +627,7 @@ export default function SurplusFundsPage() {
     } finally {
       setLoading(false);
     }
-  }, [q, queueQ, stageQ, ctype, county, band, chipQ, ageQ, lienWin, hideDead, hideDnc, sort]);
+  }, [q, queueQ, tierQ, stageQ, ctype, county, band, chipQ, ageQ, lienWin, hideDead, hideDnc, sort]);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -644,20 +695,18 @@ export default function SurplusFundsPage() {
     [fetchRows, fetchStats, say],
   );
 
-  const copy = (v: string) => {
-    try {
-      navigator.clipboard.writeText(v);
-      say('Copied');
-    } catch {
-      say('Copy blocked');
-    }
-  };
-
   const fetchRuns = useCallback(() => {
     surplusAPI
       .pollRuns()
-      .then((r) => setRuns(r.data?.runs || []))
+      .then((r) => {
+        setRuns(r.data?.runs || []);
+        setSources(r.data?.sources || []);
+      })
       .catch(() => setRuns([]));
+    surplusAPI
+      .callStats()
+      .then((r) => setCallStats(r.data || null))
+      .catch(() => setCallStats(null));
   }, []);
 
   useEffect(() => {
@@ -674,12 +723,13 @@ export default function SurplusFundsPage() {
    */
   const pollCounty = async () => {
     setPolling(true);
-    say('Pulling the latest cases from the county...');
+    const feed = sources.find((s) => s.key === source) || sources[0];
+    say(`Pulling the latest cases from ${feed ? feed.county : 'the county'}...`);
     try {
-      const res = await surplusAPI.poll({ source: 'duval_taxdeed' });
+      const res = await surplusAPI.poll({ source: feed?.key || 'duval_taxdeed' });
       const r = res.data;
       say(
-        `County pull: ${r.created} new, ${r.updated} updated, ${r.belowFloor} under the floor` +
+        `${feed ? feed.county : 'County'} pull: ${r.created} new, ${r.updated} updated, ${r.belowFloor} under the floor` +
           (r.dead ? `, ${r.dead} retired` : '') +
           (r.errors ? `, ${r.errors} error${r.errors === 1 ? '' : 's'}` : '') +
           '.',
@@ -750,6 +800,7 @@ export default function SurplusFundsPage() {
   const reset = () => {
     setQ('');
     setQueueQ(null);
+    setTierQ(null);
     setChipQ(null);
     setStageQ(null);
     setCounty('all');
@@ -894,10 +945,27 @@ export default function SurplusFundsPage() {
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, flexWrap: 'wrap' }}>
             <div style={{ flex: 1, minWidth: 260 }}>
               <h1 className="dc-h1">Surplus Funds</h1>
-              <FeedHealth runs={runs} />
+              <FeedHealth runs={runs} sources={sources} />
+              <CallWindows stats={callStats} />
             </div>
             <div style={{ display: 'flex', gap: 9, flexWrap: 'wrap' }}>
               <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls" style={{ display: 'none' }} onChange={onFile} />
+              {sources.length > 1 && (
+                <select
+                  className="dc-in"
+                  value={source || sources[0].key}
+                  onChange={(e) => setSource(e.target.value)}
+                  disabled={polling}
+                  aria-label="County feed to pull"
+                  title="Which county feed Refresh feed pulls"
+                >
+                  {sources.map((s) => (
+                    <option key={s.key} value={s.key}>
+                      {s.county}
+                    </option>
+                  ))}
+                </select>
+              )}
               <button className="dc-btn" onClick={pollCounty} disabled={polling || busy}>
                 {polling ? 'Pulling from the county...' : 'Refresh feed'}
               </button>
@@ -1000,6 +1068,26 @@ export default function SurplusFundsPage() {
               </button>
             ))}
             <span className="dc-sep" />
+            {/* The dollar band. Computed on every row and kept as a sort, but
+                the course's first quick filter is tier and a caller working
+                the big ones first should not need the dropdowns. */}
+            {(['A', 'B', 'C'] as const).map((t) => (
+              <button
+                key={t}
+                className={`dc-tab${tierQ === t ? ' on' : ''}`}
+                onClick={() => setTierQ(tierQ === t ? null : t)}
+                title={
+                  t === 'A'
+                    ? '$25k and up, living owner, no competing lien'
+                    : t === 'B'
+                      ? '$10k to $25k, living owner'
+                      : '$25k and up, owner deceased'
+                }
+              >
+                {TIER[t].icon} {TIER[t].label}
+              </button>
+            ))}
+            <span className="dc-sep" />
             {(
               [
                 ['new', 'New, 7 days'],
@@ -1090,6 +1178,18 @@ export default function SurplusFundsPage() {
             onStageChange={(r, stage) => {
               // Dragging a property restages every claim on it, which is what
               // the column means: the house has been worked, not one owner.
+              // Confirmed first because a drop is easy to do by accident and
+              // it moves several people at once; the panel moves one.
+              const n = r.claimants.length;
+              if (
+                n > 1 &&
+                !window.confirm(
+                  `Move all ${n} claimants at ${r.address} to ${stage}?\n\nTo move one claimant, open the property and change the stage in the panel.`,
+                )
+              ) {
+                fetchRows();
+                return;
+              }
               surplusAPI
                 .bulkStage(r.claimants.map((c: any) => c.id), stage)
                 .then(() => {
@@ -1097,7 +1197,10 @@ export default function SurplusFundsPage() {
                   fetchRows();
                   fetchStats();
                 })
-                .catch(() => say('That stage change could not be saved.'));
+                .catch((err: any) => {
+                  say(err?.response?.data?.message || 'That stage change could not be saved.');
+                  fetchRows();
+                });
             }}
             view={view}
             onViewChange={setView}
@@ -1150,6 +1253,14 @@ export default function SurplusFundsPage() {
                     </button>
                     <button className="dc-btn sm dngr" disabled={busy} onClick={() => bulkStage('Dead')}>
                       Mark dead
+                    </button>
+                    <button
+                      className="dc-btn sm dngr"
+                      disabled={busy}
+                      onClick={bulkDelete}
+                      title="Remove leads that should never have been ingested. Writes a suppression so the county poll cannot bring them back. To retire a lead, mark it Dead instead."
+                    >
+                      Delete
                     </button>
                   </>
                 )}
@@ -1216,10 +1327,3 @@ function Sel({ v, set, opts }: { v: string; set: (v: string) => void; opts: [str
   );
 }
 
-function Lbl({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
-  return (
-    <div className="dc-lbl" style={style}>
-      {children}
-    </div>
-  );
-}

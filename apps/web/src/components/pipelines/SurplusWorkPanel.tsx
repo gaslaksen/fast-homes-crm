@@ -7,7 +7,7 @@ import NotesPanel from '@/components/communications/NotesPanel';
 import type { NoteItem, TimelineItem } from '@/components/communications/types';
 import { authAPI, campaignsAPI, leadsAPI, surplusAPI } from '@/lib/api';
 import { useDialer } from '@/components/dialer/DialerContext';
-import { DNC_STATE } from './format';
+import { DNC_STATE, SURPLUS_STAGES } from './format';
 import ContactEditor from './ContactEditor';
 import SurplusHeirs from './SurplusHeirs';
 import { fmtDate, money, phoneDisplay } from './format';
@@ -23,9 +23,10 @@ import { fmtDate, money, phoneDisplay } from './format';
  * job rather than a second messaging implementation: CommunicationsTimeline,
  * MessageComposer and NotesPanel are the same components the lead page uses.
  *
- * The panel deliberately does NOT duplicate the card's editing controls. The
- * card stays the place to change stage and tick documents; this is the place to
- * read the case and talk to the person.
+ * The panel does not duplicate the card's editing controls, with one
+ * exception: the stage moves from here, per claimant, because the card no
+ * longer carries a stage select and a kanban drag restages a whole property.
+ * Everything else here is for reading the case and talking to the person.
  */
 
 const CONV_POLL_MS = 8_000;
@@ -75,6 +76,8 @@ export interface SurplusPanelLead {
   county: string | null;
   caseNumber: string | null;
   parcelId: string | null;
+  /** The county's public court-records search, when the API knows it. */
+  courtRecordsUrl: string | null;
   stage: string;
   tier: string;
   claimStatus: string;
@@ -339,7 +342,11 @@ export default function SurplusWorkPanel({
    * the same call path as the lead page and the floating dialer, and the call
    * is attributed to this lead rather than appearing as an anonymous dial.
    */
-  const call = (number: string) => dialer.startCall({ name: lead.claimant, phone: number, leadId: lead.id });
+  // leadSource tells the dialer's summary screen to offer the surplus
+  // outcomes (spoke to claimant, message passed, already signed elsewhere)
+  // instead of the wholesaling dispositions.
+  const call = (number: string) =>
+    dialer.startCall({ name: lead.claimant, phone: number, leadId: lead.id, leadSource: 'SURPLUS' });
 
   /** Open the conversation on SMS with this number already selected. */
   const message = (number: string) => {
@@ -671,6 +678,8 @@ function CaseTab({
 
   return (
     <div style={{ display: 'grid', gap: 16 }}>
+      <StageControl lead={lead} onChanged={onChanged} say={say} />
+
       <Section title="The money">
         <Row k="Surplus posted today" v={money(property.grossSurplus)} />
         {property.surplusAtNotice != null && property.surplusAtNotice !== property.grossSurplus && (
@@ -775,6 +784,7 @@ function CaseTab({
             claimantDeceased={!!lead.isDeceased}
             propertyAddress={property.address}
             county={property.county}
+            courtRecordsUrl={lead.courtRecordsUrl}
             onCall={onCall}
             onText={onText}
             onEmail={onEmail}
@@ -1230,6 +1240,78 @@ function LetterMailed({
         </button>
       </div>
     </div>
+  );
+}
+
+/**
+ * Where this claimant's claim stands, and the one place to move it.
+ *
+ * Per claimant, not per property: each person files their own claim and
+ * signs their own agreement, so one co-owner can be at Agreement Signed while
+ * the other is still unreached. The API refuses Agreement Signed until the
+ * qualification gate is met and says which item is missing, and that message
+ * is shown as is rather than paraphrased.
+ */
+function StageControl({
+  lead,
+  onChanged,
+  say,
+}: {
+  lead: SurplusPanelLead;
+  onChanged: () => void;
+  say: (msg: string) => void;
+}) {
+  const [saving, setSaving] = useState(false);
+  const stages = SURPLUS_STAGES.concat('Dead');
+
+  const move = async (stage: string) => {
+    if (!stage || stage === lead.stage || saving) return;
+    const warning =
+      stage === 'Dead'
+        ? `Mark ${lead.claimant} as Dead? The lead stays on file and the county poll will not bring it back as new.`
+        : `Move ${lead.claimant} to ${stage}?`;
+    if (!window.confirm(warning)) return;
+    setSaving(true);
+    try {
+      await surplusAPI.update(lead.id, { stage });
+      say(`${lead.claimant} moved to ${stage}`);
+      onChanged();
+    } catch (err: any) {
+      say(err?.response?.data?.message || 'That stage change could not be saved.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Section title="Where the claim stands" note="This claimant only">
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <select
+          className="dc-wp-sel"
+          value={lead.stage}
+          disabled={saving}
+          onChange={(e) => {
+            const next = e.target.value;
+            // Reset so a refused move leaves the select on the real stage.
+            e.target.value = lead.stage;
+            move(next);
+          }}
+          aria-label="Stage"
+        >
+          {stages.map((s) => (
+            <option key={s} value={s}>
+              {s}
+            </option>
+          ))}
+        </select>
+        {lead.stage !== 'Agreement Signed' && !lead.stage.match(/Notarized|Filed|Paid|Dead/) && (
+          <span style={{ fontSize: 11, color: 'var(--faint)' }}>
+            Agreement Signed needs entitlement verified, the notice date confirmed and the title search
+            complete.
+          </span>
+        )}
+      </div>
+    </Section>
   );
 }
 

@@ -28,7 +28,15 @@ import { DNC_STATE, phoneDisplay, fmtDate } from './format';
  * is the one who lost 1624 W 35th St is an identification, not a lookup.
  */
 
-const CORE_URL = 'https://core.duvalclerk.com/CoreCms.aspx?mode=PublicAccess';
+/**
+ * Where to send somebody for a county whose records URL the API does not
+ * know. A web search for the clerk beats a guessed URL: clerks' public-access
+ * systems differ per county and a wrong link reads as broken.
+ */
+function courtRecordsSearch(county: string | null): string {
+  const q = `${county || 'Florida'} County Clerk of Court records search probate`;
+  return `https://www.google.com/search?q=${encodeURIComponent(q)}`;
+}
 
 export interface Heir {
   id: string;
@@ -69,6 +77,7 @@ export default function SurplusHeirs({
   claimantDeceased,
   propertyAddress,
   county,
+  courtRecordsUrl,
   onCall,
   onText,
   onEmail,
@@ -81,6 +90,8 @@ export default function SurplusHeirs({
   claimantDeceased: boolean;
   propertyAddress: string;
   county: string | null;
+  /** The county's public-access court records, from the API, or null. */
+  courtRecordsUrl?: string | null;
   onCall: (n: string) => void;
   onText: (n: string) => void;
   onEmail: (a: string) => void;
@@ -193,7 +204,7 @@ export default function SurplusHeirs({
 
   const living = (heirs || []).filter((h) => !h.deceased);
   const dead = (heirs || []).filter((h) => h.deceased);
-  const coreSearch = `${CORE_URL}`;
+  const coreSearch = courtRecordsUrl || courtRecordsSearch(county);
 
   return (
     <div style={{ display: 'grid', gap: 10 }}>
@@ -226,7 +237,11 @@ export default function SurplusHeirs({
           rel="noopener noreferrer"
           className="dc-wp-btn"
           style={{ textDecoration: 'none' }}
-          title="Duval CORE public access. Search the probate division by the claimant's name."
+          title={
+            courtRecordsUrl
+              ? `${county || 'County'} clerk public access. Search the probate division by the claimant's name.`
+              : `No records link on file for ${county || 'this county'} yet. Opens a search for the clerk's public-access site.`
+          }
         >
           Open {county || 'county'} court records
         </a>

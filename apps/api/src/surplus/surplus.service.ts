@@ -11,6 +11,7 @@ import {
   SURPLUS_QUEUE_LABEL,
   SurplusQueue,
   SURPLUS_QUEUE_RANK,
+  surplusCallConnected,
 } from '@fast-homes/shared';
 import { CLAIM_STATUS_LABEL } from './surplus-classify.util';
 import { nameSearchPlan } from './surplus-name-search.util';
@@ -54,12 +55,14 @@ import {
   pctOfNet,
   governingPct,
   canQualify,
+  stageGateError,
   complianceGate,
   SurplusLien,
 } from './surplus.util';
 import {
   SURPLUS_FLOOR,
   DISCLOSURE_LABELS,
+  courtRecordsUrl,
 } from './surplus-compliance';
 import { SurplusLeadInput, SurplusListFilters, SurplusPhoneInput } from './surplus.types';
 
@@ -365,11 +368,8 @@ export class SurplusService {
       const after = { ...d, ...detailPatch };
       // The gate is checked against the values being written, so ticking the
       // last checkbox and advancing the stage in one request is allowed.
-      if (next === SurplusStage.AGREEMENT_SIGNED && !canQualify(after)) {
-        throw new BadRequestException(
-          'An agreement needs entitlement verified, notice date confirmed, and title search complete.',
-        );
-      }
+      const refused = stageGateError(after, next);
+      if (refused) throw new BadRequestException(refused);
       detailPatch.stage = next;
       if (next === SurplusStage.DEAD) leadPatch.status = 'DEAD';
     }
@@ -519,13 +519,131 @@ export class SurplusService {
     const target = stageFromText(stage);
     const where: any = { id: { in: ids }, source: LeadSource.SURPLUS };
     if (organizationId) where.organizationId = organizationId;
-    const leads = await this.prisma.lead.findMany({ where, select: { id: true } });
+    const leads = await this.prisma.lead.findMany({
+      where,
+      select: {
+        id: true,
+        sellerFirstName: true,
+        sellerLastName: true,
+        surplusDetail: {
+          select: { entitlementVerified: true, noticeConfirmed: true, titleSearchComplete: true },
+        },
+      },
+    });
     if (!leads.length) return { updated: 0, stage: target };
+
+    // The same gate as update(). Refused as a whole rather than moving the
+    // claimants that pass: a kanban drag restages one property, and half a
+    // property at Agreement Signed reads as if the agreement covered everyone.
+    const refused = leads
+      .map((l) => ({
+        name: `${l.sellerFirstName || ''} ${l.sellerLastName || ''}`.trim() || 'a claimant',
+        why: l.surplusDetail ? stageGateError(l.surplusDetail, target) : null,
+      }))
+      .filter((r) => r.why);
+    if (refused.length) {
+      const first = refused[0];
+      const more = refused.length > 1 ? ` (and ${refused.length - 1} more)` : '';
+      throw new BadRequestException(`${first.name}${more}: ${first.why}`);
+    }
+
+    const leadIds = leads.map((l) => l.id);
     const res = await this.prisma.surplusDetail.updateMany({
-      where: { leadId: { in: leads.map((l) => l.id) } },
+      where: { leadId: { in: leadIds } },
       data: { stage: target },
     });
+    // Dead is the one stage the Lead row mirrors, so the lead list and the
+    // digest stop offering the claimant. update() does the same for one card.
+    if (target === SurplusStage.DEAD) {
+      await this.prisma.lead.updateMany({ where: { id: { in: leadIds } }, data: { status: 'DEAD' } });
+    }
     return { updated: res.count, stage: target };
+  }
+
+  /**
+   * When surplus calls actually connect, by weekday and hour, over the last
+   * ninety days. Read straight off the call log: every browser call on a
+   * surplus lead is an attempt, and an outcome where a person picked up is a
+   * connection. The course asks for this so the team's real best calling
+   * windows surface from evidence rather than folklore.
+   *
+   * Hours are America/New_York, because that is where the claimants are.
+   */
+  async callStats(organizationId?: string | null) {
+    const since = new Date(Date.now() - 90 * 86_400_000);
+    const calls = await this.prisma.callLog.findMany({
+      where: {
+        type: 'twilio_browser',
+        createdAt: { gte: since },
+        lead: {
+          source: LeadSource.SURPLUS,
+          ...(organizationId ? { organizationId } : {}),
+        },
+      },
+      select: { createdAt: true, outcome: true, disposition: true },
+    });
+
+    const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const fmt = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York',
+      weekday: 'short',
+      hour: 'numeric',
+      hour12: false,
+    });
+    const byWeekday = DAYS.map((day) => ({ day, calls: 0, connected: 0 }));
+    const byHour = Array.from({ length: 24 }, (_, hour) => ({ hour, calls: 0, connected: 0 }));
+    /** Weekday by two-hour block, for naming a best window. */
+    const blocks = new Map<string, { day: string; fromHour: number; calls: number; connected: number }>();
+
+    let connectedTotal = 0;
+    for (const c of calls) {
+      const parts = fmt.formatToParts(c.createdAt);
+      const day = parts.find((p) => p.type === 'weekday')?.value || 'Sun';
+      const hour = Number(parts.find((p) => p.type === 'hour')?.value || 0) % 24;
+      // Calls logged before the outcome enum existed carry only the
+      // wholesaling disposition; the three that imply a conversation count.
+      const connected =
+        surplusCallConnected(c.outcome) ||
+        (!c.outcome && ['Follow Up', 'Requested Appointment', 'Not Interested'].includes(c.disposition || ''));
+      const di = Math.max(0, DAYS.indexOf(day));
+      byWeekday[di].calls += 1;
+      byHour[hour].calls += 1;
+      const fromHour = hour - (hour % 2);
+      const key = `${day}:${fromHour}`;
+      const b = blocks.get(key) || { day, fromHour, calls: 0, connected: 0 };
+      b.calls += 1;
+      if (connected) {
+        connectedTotal += 1;
+        byWeekday[di].connected += 1;
+        byHour[hour].connected += 1;
+        b.connected += 1;
+      }
+      blocks.set(key, b);
+    }
+
+    // A best window needs enough calls behind it to mean anything.
+    const MIN_BLOCK = 5;
+    const best = Array.from(blocks.values())
+      .filter((b) => b.calls >= MIN_BLOCK && b.connected > 0)
+      .sort((a, b) => b.connected / b.calls - a.connected / a.calls || b.calls - a.calls)[0] || null;
+    const clock = (h: number) => `${((h + 11) % 12) + 1}${h < 12 ? 'am' : 'pm'}`;
+
+    return {
+      sinceDays: 90,
+      calls: calls.length,
+      connected: connectedTotal,
+      connectRate: calls.length ? connectedTotal / calls.length : 0,
+      byWeekday,
+      byHour,
+      best: best
+        ? {
+            label: `${best.day} ${clock(best.fromHour)} to ${clock(best.fromHour + 2)}`,
+            calls: best.calls,
+            connected: best.connected,
+            rate: best.connected / best.calls,
+          }
+        : null,
+    };
   }
 
   /**
@@ -921,6 +1039,8 @@ export class SurplusService {
       county: d.county,
       caseNumber: d.caseNumber,
       parcelId: d.parcelId,
+      /** Where to find this county's probate filings by hand, when known. */
+      courtRecordsUrl: courtRecordsUrl(d.county),
 
       deceased: d.deceased,
       heirsRequired: d.heirsRequired,

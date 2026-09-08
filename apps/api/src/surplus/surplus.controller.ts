@@ -139,8 +139,22 @@ export class SurplusController {
     const { organizationId } = this.decodeToken(authHeader);
     return {
       runs: await this.ingest.recentRuns(organizationId),
-      sources: this.ingest.adapters().map((a) => ({ key: a.key, county: a.county })),
+      // Cadence travels with the source so the board can judge staleness per
+      // feed: a weekly pull is not late after thirty hours.
+      sources: this.ingest
+        .adapters()
+        .map((a) => ({ key: a.key, county: a.county, cadence: a.cadence })),
     };
+  }
+
+  /**
+   * Connect rate by weekday and hour for surplus calls, so the team's best
+   * calling windows come from the call log rather than a hunch.
+   */
+  @Get('call-stats')
+  async callStats(@Headers('authorization') authHeader?: string) {
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.surplus.callStats(organizationId);
   }
 
   /**
