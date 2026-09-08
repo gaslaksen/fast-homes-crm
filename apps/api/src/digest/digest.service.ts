@@ -17,6 +17,7 @@ import {
   ForeclosureRow,
   NewLeadRow,
   SurplusRow,
+  SurplusTaskRow,
   WaitingRow,
   YesterdayStat,
 } from './digest.types';
@@ -473,6 +474,35 @@ export class DigestService {
       ? `${surplusLanded.count} claimant${surplusLanded.count === 1 ? '' : 's'} landed from ${surplusLanded.counties.join(' and ')}, ${this.moneyCompact(surplusLanded.total)} of surplus between them.`
       : null;
 
+    // Follow-ups on surplus claimants that have slipped. The call summary
+    // screen and the stage changes create these; a task nobody sees is the
+    // "circle back later" the course warns about, so the brief names them.
+    const surplusOverdueTasks = await this.prisma.task
+      .findMany({
+        where: {
+          completed: false,
+          dueDate: { lt: now },
+          lead: { source: 'SURPLUS', ...org },
+        },
+        orderBy: { dueDate: 'asc' },
+        take: 50,
+        include: {
+          lead: { select: { id: true, sellerFirstName: true, sellerLastName: true } },
+          user: { select: { firstName: true } },
+        },
+      })
+      .catch(() => [] as any[]);
+    const surplusOverdue: SurplusTaskRow[] = surplusOverdueTasks.slice(0, 5).map((t: any) => {
+      const days = Math.max(1, Math.floor((now.getTime() - new Date(t.dueDate).getTime()) / 86_400_000));
+      return {
+        title: t.title,
+        claimant: `${t.lead?.sellerFirstName || ''} ${t.lead?.sellerLastName || ''}`.trim() || 'a claimant',
+        due: `due ${days} day${days === 1 ? '' : 's'} ago`,
+        owner: t.user?.firstName || null,
+        url: this.leadUrl(t.lead?.id || t.leadId),
+      };
+    });
+
     const feeds = await this.buildFeeds(orgId, now);
 
     // Feeds live outside our control, so this is best-effort: getItems swallows
@@ -697,6 +727,8 @@ export class DigestService {
       surplusOpenTotal,
       surplusCallableTotal: surplusCallable.length,
       surplusIngestNote,
+      surplusOverdue,
+      surplusOverdueTotal: surplusOverdueTasks.length,
       feeds,
       yesterday,
       news,

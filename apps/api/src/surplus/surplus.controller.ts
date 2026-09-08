@@ -10,6 +10,7 @@ import { SurplusService } from './surplus.service';
 import { SurplusImportService } from './surplus-import.service';
 import { SurplusIngestService } from './surplus-ingest.service';
 import { SurplusSkiptraceService } from './surplus-skiptrace.service';
+import { SurplusTemplatesService } from './surplus-templates.service';
 import { COMPLIANCE_RULES, DISCLOSURE_LABELS, FL_COUNTIES, SURPLUS_FLOOR } from './surplus-compliance';
 
 /**
@@ -50,7 +51,8 @@ export class SurplusController {
     private importService: SurplusImportService,
     private ingest: SurplusIngestService,
     private skiptrace: SurplusSkiptraceService,
-      private heirs: SurplusHeirsService,
+    private heirs: SurplusHeirsService,
+    private templates: SurplusTemplatesService,
   ) {}
 
   private decodeToken(authHeader?: string): { userId?: string; organizationId?: string } {
@@ -155,6 +157,58 @@ export class SurplusController {
   async callStats(@Headers('authorization') authHeader?: string) {
     const { organizationId } = this.decodeToken(authHeader);
     return this.surplus.callStats(organizationId);
+  }
+
+  // ── Scripts and letters, versioned ────────────────────────────────────────
+
+  /** Every template kind with its active version, or the built-in default. */
+  @Get('templates')
+  async listTemplates(@Headers('authorization') authHeader?: string) {
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.templates.list(organizationId);
+  }
+
+  @Get('templates/:kind/versions')
+  async templateVersions(
+    @Param('kind') kind: string,
+    @Headers('authorization') authHeader?: string,
+  ) {
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.templates.versions(organizationId, kind);
+  }
+
+  /** Save an edit as the next version and make it the active one. */
+  @Post('templates/:kind')
+  async saveTemplate(
+    @Param('kind') kind: string,
+    @Body() body: { body: string; name?: string; subject?: string; notes?: string },
+    @Headers('authorization') authHeader?: string,
+  ) {
+    const { organizationId, userId } = this.decodeToken(authHeader);
+    return this.templates.save(organizationId, kind, body, userId);
+  }
+
+  /** Make an earlier version the active one again. */
+  @Post('templates/:kind/activate')
+  async activateTemplate(
+    @Param('kind') kind: string,
+    @Body() body: { version: number },
+    @Headers('authorization') authHeader?: string,
+  ) {
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.templates.activate(organizationId, kind, Number(body?.version));
+  }
+
+  /**
+   * The scripts for one claimant, merge fields filled, plus the facts the
+   * caller needs on screen. What the dialer shows during a surplus call.
+   */
+  @Get(':id/script')
+  async script(@Param('id') id: string, @Headers('authorization') authHeader?: string) {
+    const { organizationId, userId } = this.decodeToken(authHeader);
+    const out = await this.templates.scriptFor(id, organizationId, userId);
+    if (!out) throw new BadRequestException('Surplus lead not found');
+    return out;
   }
 
   /**
@@ -414,8 +468,8 @@ export class SurplusController {
       throw new BadRequestException('No lead ids provided');
     }
     if (!body?.stage) throw new BadRequestException('stage is required');
-    const { organizationId } = this.decodeToken(authHeader);
-    return this.surplus.bulkStage(body.ids, body.stage, organizationId);
+    const { organizationId, userId } = this.decodeToken(authHeader);
+    return this.surplus.bulkStage(body.ids, body.stage, organizationId, userId);
   }
 
   @Get(':id')
@@ -432,8 +486,8 @@ export class SurplusController {
     @Body() body: any,
     @Headers('authorization') authHeader?: string,
   ) {
-    const { organizationId } = this.decodeToken(authHeader);
-    const updated = await this.surplus.update(id, body, organizationId);
+    const { organizationId, userId } = this.decodeToken(authHeader);
+    const updated = await this.surplus.update(id, body, organizationId, userId);
     if (!updated) throw new BadRequestException('Surplus lead not found');
     return updated;
   }

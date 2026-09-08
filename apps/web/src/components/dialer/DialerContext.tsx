@@ -10,7 +10,7 @@ import {
   ReactNode,
 } from 'react';
 import { Device, Call } from '@twilio/voice-sdk';
-import { callsAPI, type CallDispositionInput } from '@/lib/api';
+import { callsAPI, surplusAPI, type CallDispositionInput } from '@/lib/api';
 
 export type DialerView = 'dialpad' | 'connecting' | 'oncall' | 'summary' | 'incoming';
 
@@ -38,6 +38,37 @@ export interface CallerId {
 /** Where a warm transfer has got to. 'idle' means no transfer in progress. */
 export type TransferState = 'idle' | 'consulting';
 
+/** One rendered script, with the version to stamp on the call. */
+export interface RenderedScript {
+  kind: string;
+  label: string;
+  version: number;
+  versionLabel: string;
+  body: string;
+}
+
+/** What GET /surplus/:id/script returns: the words and the facts beside them. */
+export interface SurplusScript {
+  facts: {
+    claimant: string;
+    claimantFirstName: string;
+    daysSearching: number;
+    propertyAddress: string;
+    county: string | null;
+    caseNumber: string | null;
+    surplusAmount: number | null;
+    claimStatus: string;
+    claimStatusLabel: string;
+    deceased: boolean;
+    doNotCall: boolean;
+    feeTerms: string;
+    feeCap: number | null;
+    callbackNumber: string;
+    callerName: string;
+  };
+  scripts: { phone: RenderedScript; voicemail: RenderedScript; relative: RenderedScript };
+}
+
 interface DialerState {
   open: boolean;
   view: DialerView;
@@ -46,6 +77,8 @@ interface DialerState {
   ready: boolean;
   error: string | null;
   contact: CallContact | null;
+  /** The surplus script pane's data, present during a surplus call. */
+  script: SurplusScript | null;
   muted: boolean;
   onHold: boolean;
   durationSec: number;
@@ -103,6 +136,7 @@ export function DialerProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [contact, setContact] = useState<CallContact | null>(null);
+  const [script, setScript] = useState<SurplusScript | null>(null);
   const [muted, setMuted] = useState(false);
   const [onHold, setOnHold] = useState(false);
   const [durationSec, setDurationSec] = useState(0);
@@ -328,6 +362,16 @@ export function DialerProvider({ children }: { children: ReactNode }) {
       setOpen(true);
       setView('connecting');
 
+      // The script pane's data. Fetched alongside the connect rather than
+      // after it, so the words are on screen before the claimant answers.
+      setScript(null);
+      if (c.leadId && c.leadSource === 'SURPLUS') {
+        surplusAPI
+          .script(c.leadId)
+          .then((r) => setScript(r.data || null))
+          .catch(() => setScript(null));
+      }
+
       const device = await getDevice();
       if (!device) {
         setView('dialpad');
@@ -482,6 +526,7 @@ export function DialerProvider({ children }: { children: ReactNode }) {
       setContact(null);
       setDurationSec(0);
       setLastCallSid(null);
+      setScript(null);
       return true;
     },
     [lastCallSid],
@@ -492,6 +537,7 @@ export function DialerProvider({ children }: { children: ReactNode }) {
     setContact(null);
     setDurationSec(0);
     setLastCallSid(null);
+    setScript(null);
     setError(null);
     setOnHold(false);
     setTransferState('idle');
@@ -519,6 +565,7 @@ export function DialerProvider({ children }: { children: ReactNode }) {
         ready,
         error,
         contact,
+        script,
         muted,
         onHold,
         durationSec,

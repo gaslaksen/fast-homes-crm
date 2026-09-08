@@ -66,6 +66,41 @@ import {
 } from './surplus-compliance';
 import { SurplusLeadInput, SurplusListFilters, SurplusPhoneInput } from './surplus.types';
 
+/**
+ * What every surplus read pulls alongside the lead. Heirs, because an Estate
+ * claimant's queue depends on whether a living heir is on file. Open tasks,
+ * because the board and the panel show the next action and whether it is
+ * overdue, and a follow-up nobody can see is a follow-up nobody does.
+ */
+const LEAD_INCLUDE = {
+  surplusDetail: { include: { heirs: true } },
+  tasks: {
+    where: { completed: false },
+    orderBy: { dueDate: 'asc' as const },
+    take: 3,
+    select: { id: true, title: true, dueDate: true, userId: true },
+  },
+};
+
+/** Days after a stage change before its follow-up task comes due. */
+const STAGE_TASK_DAYS: Partial<Record<SurplusStage, { title: (name: string) => string; days: number }>> = {
+  [SurplusStage.AGREEMENT_SIGNED]: {
+    title: (n) => `Book the notary and get ${n}'s assignment signed`,
+    days: 7,
+  },
+  [SurplusStage.ASSIGNMENT_NOTARIZED]: {
+    title: (n) => `File ${n}'s claim with the clerk`,
+    days: 7,
+  },
+  [SurplusStage.CLAIM_FILED]: {
+    title: (n) => `Check with the clerk on ${n}'s claim`,
+    days: 21,
+  },
+};
+
+/** Days after a letter goes out before checking for a reply. */
+const LETTER_FOLLOW_UP_DAYS = 14;
+
 const EMPTY_DISCLOSURES = {
   financial: false,
   noAttorneyNeeded: false,
@@ -310,7 +345,7 @@ export class SurplusService {
    * qualification gate is satisfied, because that is the one stage change that
    * commits us to a claim we may not be entitled to file.
    */
-  async update(id: string, patch: any, organizationId?: string) {
+  async update(id: string, patch: any, organizationId?: string, userId?: string | null) {
     const lead = await this.prisma.lead.findFirst({
       where: {
         id,
@@ -319,7 +354,7 @@ export class SurplusService {
       },
       // Heirs travel with the detail: an Estate claimant's queue, card and
       // panel all depend on whether a living heir is on file.
-      include: { surplusDetail: { include: { heirs: true } } },
+      include: LEAD_INCLUDE,
     });
     if (!lead || !lead.surplusDetail) return null;
 
@@ -426,7 +461,48 @@ export class SurplusService {
       data: { ...leadPatch, surplusDetail: { update: detailPatch } },
     });
 
+    if (detailPatch.stage && detailPatch.stage !== d.stage) {
+      await this.scheduleStageTask(id, detailPatch.stage, userId);
+    }
+
     return this.get(id, organizationId);
+  }
+
+  /**
+   * The follow-up a stage change creates, so a deadline is a dated task and
+   * not a memory. Idempotent on title: moving a claimant back and forward
+   * does not stack reminders. The task has no owner when the change came from
+   * ingestion; a person's change is theirs to chase.
+   */
+  private async scheduleStageTask(leadId: string, stage: string, userId?: string | null) {
+    const rule = STAGE_TASK_DAYS[stage as SurplusStage];
+    if (!rule) return;
+    const lead = await this.prisma.lead.findUnique({
+      where: { id: leadId },
+      select: { sellerFirstName: true, sellerLastName: true },
+    });
+    const name = `${lead?.sellerFirstName || ''} ${lead?.sellerLastName || ''}`.trim() || 'the claimant';
+    await this.createTaskOnce(leadId, rule.title(name), rule.days, userId);
+  }
+
+  private async createTaskOnce(leadId: string, title: string, days: number, userId?: string | null) {
+    const open = await this.prisma.task.findFirst({ where: { leadId, title, completed: false } });
+    if (open) return;
+    const dueDate = new Date();
+    dueDate.setDate(dueDate.getDate() + days);
+    dueDate.setHours(9, 0, 0, 0);
+    await this.prisma.task.create({
+      data: { leadId, title, dueDate, userId: userId || undefined },
+    });
+    await this.prisma.activity.create({
+      data: {
+        leadId,
+        userId: userId || undefined,
+        type: 'TASK_CREATED',
+        description: `Task created: ${title}`,
+        metadata: { title, dueDate: dueDate.toISOString(), auto: true },
+      },
+    });
   }
 
   /**
@@ -458,6 +534,8 @@ export class SurplusService {
       where,
       select: {
         id: true,
+        sellerFirstName: true,
+        sellerLastName: true,
         surplusDetail: {
           select: {
             id: true,
@@ -498,6 +576,16 @@ export class SurplusService {
       });
       updated += 1;
 
+      // A letter in the post is a promise to check for a reply. Two weeks is
+      // the course's cadence, and past it the claimant is due another one.
+      const name = `${lead.sellerFirstName || ''} ${lead.sellerLastName || ''}`.trim() || 'the claimant';
+      await this.createTaskOnce(
+        lead.id,
+        `Check for a reply to the letter to ${name}`,
+        LETTER_FOLLOW_UP_DAYS,
+        userId,
+      );
+
       if (userId) {
         const extra = (opts.note || '').trim();
         await this.prisma.note.create({
@@ -515,7 +603,12 @@ export class SurplusService {
     return { updated, mailedAt };
   }
 
-  async bulkStage(ids: string[], stage: string, organizationId?: string | null) {
+  async bulkStage(
+    ids: string[],
+    stage: string,
+    organizationId?: string | null,
+    userId?: string | null,
+  ) {
     const target = stageFromText(stage);
     const where: any = { id: { in: ids }, source: LeadSource.SURPLUS };
     if (organizationId) where.organizationId = organizationId;
@@ -557,6 +650,7 @@ export class SurplusService {
     if (target === SurplusStage.DEAD) {
       await this.prisma.lead.updateMany({ where: { id: { in: leadIds } }, data: { status: 'DEAD' } });
     }
+    for (const id of leadIds) await this.scheduleStageTask(id, target, userId);
     return { updated: res.count, stage: target };
   }
 
@@ -715,7 +809,7 @@ export class SurplusService {
       },
       // Heirs travel with the detail: an Estate claimant's queue, card and
       // panel all depend on whether a living heir is on file.
-      include: { surplusDetail: { include: { heirs: true } } },
+      include: LEAD_INCLUDE,
     });
     return lead && lead.surplusDetail ? this.toRow(lead) : null;
   }
@@ -796,7 +890,7 @@ export class SurplusService {
       where,
       // Heirs travel with the detail: an Estate claimant's queue, card and
       // panel all depend on whether a living heir is on file.
-      include: { surplusDetail: { include: { heirs: true } } },
+      include: LEAD_INCLUDE,
       orderBy: this.orderFor(filters.sort),
       take: 5000,
     });
@@ -937,7 +1031,7 @@ export class SurplusService {
       },
       // Heirs travel with the detail: an Estate claimant's queue, card and
       // panel all depend on whether a living heir is on file.
-      include: { surplusDetail: { include: { heirs: true } } },
+      include: LEAD_INCLUDE,
     });
     const all = leads.filter((l) => l.surplusDetail).map((l) => this.toRow(l));
     const feed = all.filter(
@@ -1156,6 +1250,16 @@ export class SurplusService {
       touches: lead.touchCount || 0,
       lastTouchedAt: lead.lastTouchedAt,
 
+      // The next thing somebody has committed to doing on this claimant, and
+      // whether it has slipped. Open tasks only, soonest first.
+      nextTask: lead.tasks?.[0]
+        ? { id: lead.tasks[0].id, title: lead.tasks[0].title, dueDate: lead.tasks[0].dueDate }
+        : null,
+      openTaskCount: lead.tasks?.length || 0,
+      overdueTaskCount: (lead.tasks || []).filter(
+        (t: any) => t.dueDate && new Date(t.dueDate).getTime() < Date.now(),
+      ).length,
+
       createdAt: lead.createdAt,
       ...this.workRank(d, facts, phones),
       ...this.queueOf(
@@ -1327,6 +1431,14 @@ export function groupByProperty(rows: any[]): any[] {
         .filter(Boolean)
         .sort()
         .pop() || null,
+      // The soonest open task across the claimants, so the board can sort on
+      // what is due next and flag what has slipped.
+      nextTask: ranked
+        .map((m: any) => m.nextTask)
+        .filter((t: any) => t && t.dueDate)
+        .sort((a: any, b: any) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())[0] || null,
+      openTaskCount: ranked.reduce((n: number, m: any) => n + (m.openTaskCount || 0), 0),
+      overdueTaskCount: ranked.reduce((n: number, m: any) => n + (m.overdueTaskCount || 0), 0),
       // A property takes its most actionable claimant's queue, since that is
       // the work it represents: one callable owner makes the house callable
       // even when their co-owner is a dead end.
