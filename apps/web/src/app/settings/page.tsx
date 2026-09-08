@@ -113,6 +113,21 @@ export default function SettingsPage() {
           <span className="text-primary-600 font-medium text-sm">Edit scripts &rarr;</span>
         </Link>
 
+        {/* Surplus counties */}
+        <Link
+          href="/settings/surplus/counties"
+          className="card max-w-2xl mb-6 flex items-center justify-between hover:shadow-md transition-shadow"
+        >
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Surplus Counties</h3>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+              What each clerk requires to file a claim: the form, how it is submitted, whether an attorney is
+              needed, and who to ask. Rechecked every 180 days.
+            </p>
+          </div>
+          <span className="text-primary-600 font-medium text-sm">Edit counties &rarr;</span>
+        </Link>
+
         {/* Lead Management Link */}
         <Link
           href="/settings/leads"

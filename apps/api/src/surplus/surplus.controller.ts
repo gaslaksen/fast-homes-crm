@@ -12,6 +12,7 @@ import { SurplusIngestService } from './surplus-ingest.service';
 import { SurplusSkiptraceService } from './surplus-skiptrace.service';
 import { SurplusTemplatesService } from './surplus-templates.service';
 import { SurplusCredibilityService, CredibilityChannel } from './surplus-credibility.service';
+import { SurplusCountiesService, ACCEPTED_METHOD_LABEL } from './surplus-counties.service';
 import { COMPLIANCE_RULES, DISCLOSURE_LABELS, FL_COUNTIES, SURPLUS_FLOOR } from './surplus-compliance';
 
 /**
@@ -55,6 +56,7 @@ export class SurplusController {
     private heirs: SurplusHeirsService,
     private templates: SurplusTemplatesService,
     private credibility: SurplusCredibilityService,
+    private counties: SurplusCountiesService,
   ) {}
 
   private decodeToken(authHeader?: string): { userId?: string; organizationId?: string } {
@@ -205,6 +207,49 @@ export class SurplusController {
   ) {
     const { organizationId } = this.decodeToken(authHeader);
     return this.templates.activate(organizationId, kind, Number(body?.version));
+  }
+
+  // ── Counties ──────────────────────────────────────────────────────────────
+
+  /**
+   * What each county requires to file. Seeded from the code list on first
+   * read; the feed key says which counties have an automated pull.
+   */
+  @Get('counties')
+  async listCounties(@Headers('authorization') authHeader?: string) {
+    const { organizationId } = this.decodeToken(authHeader);
+    const feeds = this.ingest.adapters();
+    const counties = await this.counties.list(organizationId);
+    return {
+      counties: counties.map((c) => ({
+        ...c,
+        feedKey: feeds.find((a) => a.county.toLowerCase() === c.name.toLowerCase())?.key || null,
+      })),
+      methodLabels: ACCEPTED_METHOD_LABEL,
+    };
+  }
+
+  @Post('counties')
+  async createCounty(@Body() body: { name: string }, @Headers('authorization') authHeader?: string) {
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.counties.create(organizationId, body?.name);
+  }
+
+  @Patch('counties/:countyId')
+  async updateCounty(
+    @Param('countyId') countyId: string,
+    @Body() body: any,
+    @Headers('authorization') authHeader?: string,
+  ) {
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.counties.update(countyId, body || {}, organizationId);
+  }
+
+  /** The answers were just checked with the clerk. Resets the 180-day clock. */
+  @Post('counties/:countyId/verified')
+  async verifyCounty(@Param('countyId') countyId: string, @Headers('authorization') authHeader?: string) {
+    const { organizationId, userId } = this.decodeToken(authHeader);
+    return this.counties.markVerified(countyId, organizationId, userId);
   }
 
   /** Whether the credibility packet can be sent, and what is missing if not. */

@@ -132,6 +132,10 @@ export default function SurplusTemplatesPage() {
           <Link href="/settings" className="text-sm text-primary-600 hover:underline">
             &larr; Settings
           </Link>
+          <span className="text-sm text-gray-400 mx-2">·</span>
+          <Link href="/settings/surplus/counties" className="text-sm text-primary-600 hover:underline">
+            Surplus Counties
+          </Link>
           <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 mt-2">Surplus Scripts and Letters</h2>
           <p className="text-sm text-gray-600 dark:text-gray-400 mt-1 max-w-2xl">
             What the dialer shows during a Dig Deeper call, and the letters the team sends. Saving makes a new

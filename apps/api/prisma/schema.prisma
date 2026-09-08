@@ -2249,6 +2249,53 @@ model SurplusTemplate {
   @@map("surplus_templates")
 }
 
+/// What each county requires to file a surplus claim, kept once per county
+/// because every case filed there reuses the same answer: which form, how it
+/// may be submitted, whether an attorney is needed, who at the clerk's office
+/// answers questions. Carries a last-verified date so an answer gets rechecked
+/// rather than assumed permanent, the same 180-day rule the compliance table
+/// uses. The claim form itself becomes a stored file when document storage
+/// lands; until then it is a link to the county's own copy.
+model SurplusCounty {
+  id             String  @id @default(cuid())
+  organizationId String?
+  name           String
+  state          String  @default("FL")
+  /// Worked today, as against a candidate for expansion.
+  active         Boolean @default(true)
+
+  courtRecordsUrl String?
+  surplusListUrl  String?
+  claimFormUrl    String?
+  /// 'full' | 'partial' | null when not yet asked.
+  assignmentPreference String?
+  /// Comma list: usps, fedex, ups, in_person, efile.
+  acceptedMethods   String?
+  /// Null means not yet asked, as distinct from no.
+  signatureRequired Boolean?
+  attorneyRequired  Boolean?
+
+  clerkContactName  String?
+  clerkContactPhone String?
+  clerkContactEmail String?
+  /// Where a claim package is mailed.
+  clerkAddress      String?
+  notes             String? @db.Text
+
+  /// The course's dry run: every document in the set filled out once before
+  /// the first real case in a new county.
+  practiceRunAt DateTime?
+
+  lastVerifiedAt   DateTime?
+  verifiedByUserId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organizationId, name])
+  @@map("surplus_counties")
+}
+
 model SurplusSuppression {
   id             String   @id @default(cuid())
   organizationId String?

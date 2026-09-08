@@ -12,6 +12,7 @@ import { SurplusProbateService } from './surplus-probate.service';
 import { SurplusHeirsService } from './surplus-heirs.service';
 import { SurplusTemplatesService } from './surplus-templates.service';
 import { SurplusCredibilityService } from './surplus-credibility.service';
+import { SurplusCountiesService } from './surplus-counties.service';
 import { MessagesModule } from '../messages/messages.module';
 
 @Module({
@@ -24,6 +25,7 @@ import { MessagesModule } from '../messages/messages.module';
     SurplusService,
     SurplusTemplatesService,
     SurplusCredibilityService,
+    SurplusCountiesService,
     SurplusImportService,
     SurplusIngestService,
     SurplusPollService,
