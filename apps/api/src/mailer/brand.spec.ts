@@ -73,7 +73,7 @@ describe('wrapEmailBody', () => {
     const svc = makeService({});
     const { bodyText, bodyHtml } = svc.wrapEmailBody('Hi there', undefined, DIG_DEEPER_BRAND);
 
-    expect(bodyText).toContain('Dig Deeper LLC');
+    expect(bodyText).toContain('D.I.G. Deeper LLC');
     expect(bodyText).toContain('(904) 595-9620');
     expect(bodyText).not.toContain(QCHB_BRAND.companyName);
     expect(bodyHtml).toContain('tel:+19045959620');
@@ -105,7 +105,7 @@ describe('userSendIdentity', () => {
 
     expect(out.fromAddress).toBe('deals@digdeeperllc.com');
     expect(out.replyTo).toBe('deals@crm.digdeeperllc.com');
-    expect(out.brandName).toBe('Dig Deeper LLC');
+    expect(out.brandName).toBe('D.I.G. Deeper LLC');
   });
 
   it('previews the fallback, not the brand, when the domain is not live', () => {
