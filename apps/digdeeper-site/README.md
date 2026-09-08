@@ -11,17 +11,17 @@ project with `apps/digdeeper-site` as the Root Directory. The Dealcore web app
 
 ## Files
 
-- `index.html` the one-page site
-- `styles.css` the stylesheet, mobile first
-- `overview.pdf` the one-pager, rendered from `onepager/overview.html`
-- `vercel.json` clean URLs plus headers for the PDF
-- `.vercelignore` keeps `onepager/` and this README out of the deploy
+- `public/` everything that is served, and nothing else
+  - `index.html` the one-page site
+  - `styles.css` the stylesheet, mobile first
+  - `overview.pdf` the one-pager, rendered from `onepager/overview.html`
+- `vercel.json` static build settings, clean URLs, the www redirect, headers
 - `onepager/overview.html` source for the PDF
-- `onepager/build.sh` renders the PDF with headless Chrome
+- `onepager/build.sh` renders the PDF with headless Chrome into `public/`
 
 ## Editing copy
 
-Edit `index.html` directly. The fee section must never state a typed
+Edit `public/index.html` directly. The fee section must never state a typed
 percentage. Say contingency only, no advance fee, no recovery no fee, capped by
 Florida law. FS 45.033 caps compensation on clerk-held surplus at 12 percent and
 the CRM's compliance table (`apps/api/src/surplus/surplus-compliance.ts`) is
@@ -38,32 +38,34 @@ changes on Sunbiz, change it here and in the one-pager too.
 apps/digdeeper-site/onepager/build.sh
 ```
 
-Requires Google Chrome. Writes `overview.pdf` next to `index.html` and prints
+Requires Google Chrome. Writes `public/overview.pdf` and prints
 the page count and file size. The PDF must be one page and under 1 MB.
 
 ## Deploying
 
 The Vercel project is `digdeeper-site` under the `gaslaksens-projects` team,
-created 2026-09-08 from the CLI. It is not connected to GitHub yet, so a push
-to `master` does not deploy it. Deploy from a machine that has run
-`vercel login`:
+connected to this GitHub repo with Root Directory `apps/digdeeper-site`. A
+push to `master` that touches this folder deploys it; commits elsewhere in the
+repo are skipped by the Ignored Build Step.
+
+`vercel.json` pins the folder as static on purpose. The repo root has a
+`turbo.json`, and Vercel's Turborepo detection otherwise runs `pnpm install`
+and `turbo run build` from the repo root, matches zero packages (this folder
+is not a workspace package), and then fails looking for a `public` output
+directory. That is what broke the first git deploy on 2026-09-08. The no-op
+`installCommand` and `buildCommand` beat that detection; an empty string did
+not. `outputDirectory: "public"` means only that subfolder is served, so the
+README, the PDF source and `vercel.json` itself never become public URLs. Do
+not remove those keys.
+
+Manual deploy from a machine that has run `vercel login`, from this folder or
+from the repo root (the project's Root Directory applies either way):
 
 ```bash
-cd apps/digdeeper-site && vercel --prod
+vercel --prod
 ```
 
-The `.vercel/` folder the CLI writes here is gitignored.
-
-To switch to deploy-on-push later, set these in the Vercel dashboard first, or
-a git-triggered build will run from the repo root and find no site:
-
-- Root Directory: `apps/digdeeper-site`
-- Framework Preset: Other
-- Build Command: none
-- Output Directory: leave blank (the root directory is served as is)
-- Ignored Build Step: "Only build if there are changes in the Root Directory"
-
-Then run `vercel git connect` from this folder.
+The `.vercel/` folders the CLI writes are gitignored.
 
 ## DNS
 
