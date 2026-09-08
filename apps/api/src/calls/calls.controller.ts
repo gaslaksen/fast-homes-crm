@@ -15,7 +15,7 @@ import {
 import { Request, Response } from 'express';
 import * as jwt from 'jsonwebtoken';
 import { CallsService } from './calls.service';
-import { TwilioVoiceService } from './twilio-voice.service';
+import { TwilioVoiceService, CallDispositionInput } from './twilio-voice.service';
 import { InitiateCallDto } from './dto/initiate-call.dto';
 import { isTwilioRequestValid } from '../webhooks/twilio-signature.util';
 import { RINGBACK_WAV } from './ringback.util';
@@ -168,16 +168,13 @@ export class CallsController {
   /** Post-call disposition from the agent. */
   @Post('twilio/disposition')
   async twilioDisposition(
-    @Body() body: { callSid: string; disposition: string; notes?: string },
+    @Body() body: { callSid: string } & CallDispositionInput,
     @Headers('authorization') authHeader?: string,
   ) {
     const { userId } = this.decodeToken(authHeader);
     if (!userId) return { success: false, error: 'Not authenticated' };
-    await this.twilioVoiceService.setDisposition(
-      body.callSid,
-      body.disposition,
-      body.notes,
-    );
+    const { callSid, ...input } = body;
+    await this.twilioVoiceService.setDisposition(callSid, input, userId);
     return { success: true };
   }
 

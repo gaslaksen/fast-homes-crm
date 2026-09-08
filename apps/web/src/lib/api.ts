@@ -232,6 +232,8 @@ export const surplusAPI = {
   poll: (body: { source?: string; limit?: number; reread?: boolean; full?: boolean }) =>
     api.post('/surplus/poll', body),
   pollRuns: () => api.get('/surplus/poll-runs'),
+  /** Connect rate by weekday and hour over the last 90 days of surplus calls. */
+  callStats: () => api.get('/surplus/call-stats'),
   // A fresh link to a county document whose stored link expires (RealTDM).
   documentLink: (source: string, docId: string, docType?: string | null) =>
     api.get('/surplus/document-link', { params: { source, docId, docType: docType || undefined } }),
@@ -548,14 +550,28 @@ export const campaignsAPI = {
     api.get(`/leads/${leadId}/campaigns`),
 };
 
+/** What the dialer's summary screen records after a call. */
+export interface CallDispositionInput {
+  disposition: string;
+  notes?: string;
+  /** SurplusCallOutcome, on a surplus lead. */
+  outcome?: string | null;
+  /** SurplusObjection, when one came up. */
+  objection?: string | null;
+  scriptVersion?: string | null;
+  voicemailVersion?: string | null;
+  /** ISO datetime. The API turns it into a follow-up task on the lead. */
+  followUpAt?: string | null;
+}
+
 // Calls API
 export const callsAPI = {
   initiateAiCall: (leadId: string) =>
     api.post('/calls/ai-initiate', { leadId }),
   // Twilio browser dialer
   twilioToken: () => api.post('/calls/twilio/token'),
-  twilioDisposition: (callSid: string, disposition: string, notes?: string) =>
-    api.post('/calls/twilio/disposition', { callSid, disposition, notes }),
+  twilioDisposition: (callSid: string, input: CallDispositionInput) =>
+    api.post('/calls/twilio/disposition', { callSid, ...input }),
   twilioRecents: (limit = 25) =>
     api.get('/calls/twilio/recents', { params: { limit } }),
   twilioNumbers: () => api.get('/calls/twilio/numbers'),

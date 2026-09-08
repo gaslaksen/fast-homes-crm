@@ -1514,6 +1514,23 @@ model CallLog {
   transferState    String?           // null | warm_consulting | transferred
   transferTo       String?           // number the call was/is being transferred to
   disposition      String?           // post-call outcome (Voicemail, Follow Up, etc.)
+  /// SurplusCallOutcome, for calls on a surplus lead. `disposition` stays the
+  /// free label the wholesaling dialer writes; this is the enum the recovery
+  /// process keys on (was the claimant reached, was a message passed, has the
+  /// person already signed elsewhere).
+  outcome          String?
+  /// SurplusObjection raised on the call, if any. Logged per the course so
+  /// script wording can be tested against which objection it fails on.
+  objection        String?
+  /// Which version of the phone and voicemail scripts was on screen. Null
+  /// until the script pane exists; recorded now so the column is there when
+  /// wording starts changing.
+  scriptVersion    String?
+  voicemailVersion String?
+  /// The follow-up date the caller committed to on the summary screen. The
+  /// Task carries the reminder; this is kept on the call so the record of the
+  /// call says what was promised.
+  followUpAt       DateTime?
   status           String   @default("queued")
   type             String   @default("ai_outbound")  // ai_outbound|twilio_browser|twilio_inbound
   transcript   String?  @db.Text

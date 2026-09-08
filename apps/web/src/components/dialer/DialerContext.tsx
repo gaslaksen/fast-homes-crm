@@ -10,7 +10,7 @@ import {
   ReactNode,
 } from 'react';
 import { Device, Call } from '@twilio/voice-sdk';
-import { callsAPI } from '@/lib/api';
+import { callsAPI, type CallDispositionInput } from '@/lib/api';
 
 export type DialerView = 'dialpad' | 'connecting' | 'oncall' | 'summary' | 'incoming';
 
@@ -21,6 +21,13 @@ export interface CallContact {
   name?: string;
   phone: string;
   leadId?: string;
+  /**
+   * LeadSource of the lead, when the caller knows it. The summary screen
+   * shows the surplus outcome list for 'SURPLUS' and the wholesaling one
+   * otherwise; a call started from the surplus panel says so here rather than
+   * making the dialer fetch the lead to find out.
+   */
+  leadSource?: string;
 }
 
 export interface CallerId {
@@ -70,7 +77,14 @@ interface DialerState {
   startWarmTransfer: (to: string) => Promise<void>;
   completeWarmTransfer: () => Promise<void>;
   cancelWarmTransfer: () => Promise<void>;
-  saveDisposition: (disposition: string, notes?: string) => Promise<void>;
+  /**
+   * Record what happened and return to the dialpad. Resolves false and stays
+   * on the summary when the record could not be saved and the input carried a
+   * surplus outcome or a follow-up date, because losing those silently is
+   * losing the task the course's process depends on. A plain wholesaling
+   * disposition is still fire-and-forget.
+   */
+  saveDisposition: (input: CallDispositionInput) => Promise<boolean>;
   reset: () => void;
 }
 
@@ -449,18 +463,26 @@ export function DialerProvider({ children }: { children: ReactNode }) {
   }, [callControl]);
 
   const saveDisposition = useCallback(
-    async (disposition: string, notes?: string) => {
+    async (input: CallDispositionInput) => {
       if (lastCallSid) {
         try {
-          await callsAPI.twilioDisposition(lastCallSid, disposition, notes);
-        } catch {
-          /* non-blocking */
+          await callsAPI.twilioDisposition(lastCallSid, input);
+        } catch (e: any) {
+          if (input.outcome || input.followUpAt) {
+            setError(
+              e?.response?.data?.message || 'The call outcome could not be saved. Try again.',
+            );
+            return false;
+          }
+          /* a bare wholesaling disposition stays non-blocking */
         }
       }
+      setError(null);
       setView('dialpad');
       setContact(null);
       setDurationSec(0);
       setLastCallSid(null);
+      return true;
     },
     [lastCallSid],
   );

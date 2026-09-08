@@ -1,9 +1,61 @@
-import { Injectable, Logger, forwardRef, Inject } from '@nestjs/common';
+import { Injectable, Logger, forwardRef, Inject, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Twilio from 'twilio';
 import { PrismaService } from '../prisma/prisma.service';
 import { CallsService } from './calls.service';
-import { formatPhoneNumber } from '@fast-homes/shared';
+import {
+  formatPhoneNumber,
+  LeadSource,
+  SurplusCallOutcome,
+  SurplusObjection,
+  SurplusStage,
+  SURPLUS_CALL_OUTCOME_LABEL,
+  SURPLUS_OBJECTION_LABEL,
+  surplusFollowUpRule,
+} from '@fast-homes/shared';
+
+/** What the summary screen sends after a call. Only `disposition` is universal. */
+export interface CallDispositionInput {
+  disposition: string;
+  notes?: string;
+  /** SurplusCallOutcome, on a surplus lead. */
+  outcome?: string | null;
+  /** SurplusObjection, when one was raised. */
+  objection?: string | null;
+  scriptVersion?: string | null;
+  voicemailVersion?: string | null;
+  /** ISO datetime the caller committed to. Becomes a Task. */
+  followUpAt?: string | null;
+}
+
+function surplusOutcomeOf(raw?: string | null): SurplusCallOutcome | null {
+  if (!raw) return null;
+  return (Object.values(SurplusCallOutcome) as string[]).includes(raw)
+    ? (raw as SurplusCallOutcome)
+    : null;
+}
+
+function surplusObjectionOf(raw?: string | null): SurplusObjection | null {
+  if (!raw) return null;
+  return (Object.values(SurplusObjection) as string[]).includes(raw) ? (raw as SurplusObjection) : null;
+}
+
+/** The task title reads as the thing to do, not the outcome it came from. */
+function followUpTitle(outcome: SurplusCallOutcome | null, name: string): string {
+  switch (outcome) {
+    case SurplusCallOutcome.WANTS_PACKET:
+      return `Send the credibility packet and follow up with ${name}`;
+    case SurplusCallOutcome.SPOKE_RELATIVE:
+      return `Follow up with ${name} after the message was passed along`;
+    case SurplusCallOutcome.CALLBACK_SCHEDULED:
+      return `Callback with ${name}`;
+    case SurplusCallOutcome.NO_ANSWER_VOICEMAIL:
+    case SurplusCallOutcome.NO_ANSWER:
+      return `Call ${name} again`;
+    default:
+      return `Follow up with ${name}`;
+  }
+}
 import { PhoneNumbersService } from '../phone-numbers/phone-numbers.service';
 import { LeadPhonesService } from '../phone-numbers/lead-phones.service';
 import { TouchService } from '../leads/touch.service';
@@ -855,20 +907,136 @@ export class TwilioVoiceService {
   /**
    * Post-call disposition from the agent (Voicemail, Follow Up, Not Interested, ...).
    * Keyed by the browser leg's CallSid, which is what the client knows.
+   *
+   * On a surplus lead the client also sends the recovery-process outcome, the
+   * objection heard, and a follow-up date. The date becomes a Task, which is
+   * what the course's rule ("no follow-up without a date") turns into here:
+   * the summary screen refuses to close without one, and this is where it
+   * lands so the reminder cron and the lead page both see it.
    */
   async setDisposition(
     callSid: string,
-    disposition: string,
-    notes?: string,
+    input: CallDispositionInput,
+    userId?: string,
   ): Promise<void> {
     if (!callSid) return;
+    const notes = (input.notes || '').trim();
+    const outcome = surplusOutcomeOf(input.outcome);
+    const objection = surplusObjectionOf(input.objection);
+    const followUpAt = input.followUpAt ? new Date(input.followUpAt) : null;
+    if (followUpAt && Number.isNaN(followUpAt.getTime())) {
+      throw new BadRequestException('The follow-up date could not be read.');
+    }
+    if (input.outcome && !outcome) {
+      throw new BadRequestException('That call outcome is not one the surplus pipeline knows.');
+    }
+    if (outcome && surplusFollowUpRule(outcome) === 'required' && !followUpAt) {
+      throw new BadRequestException(
+        `${SURPLUS_CALL_OUTCOME_LABEL[outcome]} needs a follow-up date before the call can be closed.`,
+      );
+    }
+
+    const log = await this.prisma.callLog.findUnique({
+      where: { twilioCallSid: callSid },
+      select: {
+        id: true,
+        leadId: true,
+        toNumber: true,
+        lead: {
+          select: {
+            id: true,
+            source: true,
+            sellerFirstName: true,
+            sellerLastName: true,
+            surplusDetail: { select: { id: true, stage: true, doNotCall: true } },
+          },
+        },
+      },
+    });
+
     await this.prisma.callLog.updateMany({
       where: { twilioCallSid: callSid },
       data: {
-        disposition,
+        disposition: input.disposition,
         ...(notes ? { summary: notes } : {}),
+        ...(outcome ? { outcome } : {}),
+        ...(objection ? { objection } : {}),
+        ...(input.scriptVersion ? { scriptVersion: input.scriptVersion } : {}),
+        ...(input.voicemailVersion ? { voicemailVersion: input.voicemailVersion } : {}),
+        ...(followUpAt ? { followUpAt } : {}),
       },
     });
+
+    const lead = log?.lead;
+    if (!log?.leadId || !lead) return;
+    const name = `${lead.sellerFirstName || ''} ${lead.sellerLastName || ''}`.trim() || 'the claimant';
+
+    // The outcome goes on the timeline as its own event, beside the CALL_PLACED
+    // the dial wrote, so reading the thread says what happened and not only
+    // that a number was rung.
+    if (outcome) {
+      const bits = [SURPLUS_CALL_OUTCOME_LABEL[outcome]];
+      if (objection) bits.push(`objection: ${SURPLUS_OBJECTION_LABEL[objection]}`);
+      await this.prisma.activity.create({
+        data: {
+          leadId: log.leadId,
+          userId: userId || undefined,
+          type: 'CALL_OUTCOME',
+          description: `Call outcome: ${bits.join(', ')}${notes ? `. ${notes}` : ''}`,
+          metadata: {
+            callSid,
+            to: log.toNumber,
+            outcome,
+            objection,
+            followUpAt: followUpAt ? followUpAt.toISOString() : null,
+          },
+        },
+      });
+    }
+
+    if (followUpAt) {
+      const title = followUpTitle(outcome, name);
+      await this.prisma.task.create({
+        data: {
+          leadId: log.leadId,
+          userId: userId || undefined,
+          title,
+          description: notes || undefined,
+          dueDate: followUpAt,
+        },
+      });
+      await this.prisma.activity.create({
+        data: {
+          leadId: log.leadId,
+          userId: userId || undefined,
+          type: 'TASK_CREATED',
+          description: `Task created: ${title}`,
+          metadata: { title, dueDate: followUpAt.toISOString(), callSid },
+        },
+      });
+    }
+
+    // Two outcomes change the file itself. "Do not call" is a legal
+    // instruction and takes effect on the record, not in somebody's notes.
+    // Reaching the claimant is what Contacted means, so a New file moves.
+    const detail = lead.source === LeadSource.SURPLUS ? lead.surplusDetail : null;
+    if (detail && outcome === SurplusCallOutcome.DO_NOT_CALL && !detail.doNotCall) {
+      await this.prisma.lead.update({
+        where: { id: lead.id },
+        data: { doNotContact: true, surplusDetail: { update: { doNotCall: true } } },
+      });
+    } else if (
+      detail &&
+      detail.stage === SurplusStage.NEW &&
+      (outcome === SurplusCallOutcome.SPOKE_CLAIMANT ||
+        outcome === SurplusCallOutcome.WANTS_PACKET ||
+        outcome === SurplusCallOutcome.CALLBACK_SCHEDULED)
+    ) {
+      await this.prisma.surplusDetail.update({
+        where: { id: detail.id },
+        data: { stage: SurplusStage.CONTACTED },
+      });
+    }
   }
 
   /** Recent calls for the dialer "Recents" tab. */

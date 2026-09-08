@@ -172,6 +172,23 @@ export const FL_COUNTIES = {
 export const ALL_FL_COUNTIES = FL_COUNTIES.active.concat(FL_COUNTIES.candidate);
 
 /**
+ * Where to look up a county's court records by hand, for finding the probate
+ * case behind a deceased claimant. Only counties whose public-access URL has
+ * been checked are listed; the panel falls back to a search for the rest
+ * rather than guessing at a clerk's URL scheme. Becomes a column on the county
+ * table when counties get one.
+ */
+export const FL_COUNTY_LINKS: Record<string, { courtRecords: string }> = {
+  Duval: { courtRecords: 'https://core.duvalclerk.com/CoreCms.aspx?mode=PublicAccess' },
+};
+
+export function courtRecordsUrl(county?: string | null): string | null {
+  if (!county) return null;
+  const key = Object.keys(FL_COUNTY_LINKS).find((k) => k.toLowerCase() === county.trim().toLowerCase());
+  return key ? FL_COUNTY_LINKS[key].courtRecords : null;
+}
+
+/**
  * Below this a surplus never reaches the feed at all. It is a floor on
  * ingestion, not a filter on a view.
  *

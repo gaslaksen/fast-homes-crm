@@ -432,6 +432,27 @@ export function canQualify(lead: SurplusFacts): boolean {
   return !!(lead.entitlementVerified && lead.noticeConfirmed && lead.titleSearchComplete);
 }
 
+/**
+ * Why a stage change is refused, or null when it is allowed.
+ *
+ * One function for the single-card edit and the bulk restage, because the
+ * bulk path used to write the stage straight through and the gate only held
+ * on the card. A gate that one of two buttons skips is not a gate. Names the
+ * missing items rather than the whole list, so the message says what to do.
+ */
+export function stageGateError(
+  facts: Pick<SurplusFacts, 'entitlementVerified' | 'noticeConfirmed' | 'titleSearchComplete'>,
+  next: SurplusStage,
+): string | null {
+  if (next !== SurplusStage.AGREEMENT_SIGNED) return null;
+  const missing: string[] = [];
+  if (!facts.entitlementVerified) missing.push('entitlement verified');
+  if (!facts.noticeConfirmed) missing.push('notice date confirmed');
+  if (!facts.titleSearchComplete) missing.push('title search complete');
+  if (!missing.length) return null;
+  return `Agreement Signed needs ${missing.join(', ')}.`;
+}
+
 // ─── The gate ───────────────────────────────────────────────────────────────
 
 export interface ComplianceVerdict {

@@ -3,6 +3,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useDialer, DialerTab } from './DialerContext';
 import { leadsAPI, callsAPI, authAPI } from '@/lib/api';
+import {
+  SurplusCallOutcome,
+  SurplusObjection,
+  SURPLUS_CALL_OUTCOME_LABEL,
+  SURPLUS_OBJECTION_LABEL,
+  surplusFollowUpRule,
+  surplusCallConnected,
+} from '@/lib/surplus-calls';
 
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '0', '#'];
 const KEY_SUB: Record<string, string> = {
@@ -749,8 +757,22 @@ function IncomingView() {
 
 function SummaryView() {
   const d = useDialer();
-  const [selected, setSelected] = useState<string | null>(null);
   const c = d.contact;
+  // A call started from the surplus panel says its source. One started from
+  // Recents or a pasted number does not, so ask the lead once. Until the
+  // answer arrives the wholesaling list shows, which is the safe default.
+  const [source, setSource] = useState<string | null>(c?.leadSource || null);
+  useEffect(() => {
+    if (c?.leadSource || !c?.leadId) return;
+    let cancelled = false;
+    leadsAPI
+      .get(c.leadId)
+      .then((r) => !cancelled && setSource(r.data?.source || null))
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [c?.leadId, c?.leadSource]);
 
   return (
     <div className="px-5 py-5">
@@ -760,6 +782,16 @@ function SummaryView() {
         </p>
         <p className="text-xs text-red-500 mt-0.5">Call Ended · {fmtDuration(d.durationSec)}</p>
       </div>
+      {source === 'SURPLUS' ? <SurplusSummary /> : <WholesaleSummary />}
+    </div>
+  );
+}
+
+function WholesaleSummary() {
+  const d = useDialer();
+  const [selected, setSelected] = useState<string | null>(null);
+  return (
+    <>
       <p className="text-xs font-medium text-gray-500 mb-2">Disposition</p>
       <div className="grid grid-cols-2 gap-2">
         {DISPOSITIONS.map((disp) => (
@@ -777,12 +809,167 @@ function SummaryView() {
         ))}
       </div>
       <button
-        onClick={() => d.saveDisposition(selected || 'Completed')}
+        onClick={() => d.saveDisposition({ disposition: selected || 'Completed' })}
         className="mt-4 w-full h-11 rounded-full border border-primary-500 text-primary-600 dark:text-primary-400 font-medium hover:bg-primary-50 dark:hover:bg-primary-900/20"
       >
         Done
       </button>
-    </div>
+    </>
+  );
+}
+
+/** Outcomes in the order the course's call goes: reached, not reached, finished. */
+const SURPLUS_OUTCOMES: SurplusCallOutcome[] = [
+  SurplusCallOutcome.SPOKE_CLAIMANT,
+  SurplusCallOutcome.CALLBACK_SCHEDULED,
+  SurplusCallOutcome.WANTS_PACKET,
+  SurplusCallOutcome.SPOKE_RELATIVE,
+  SurplusCallOutcome.NO_ANSWER_VOICEMAIL,
+  SurplusCallOutcome.NO_ANSWER,
+  SurplusCallOutcome.WRONG_NUMBER,
+  SurplusCallOutcome.DISCONNECTED,
+  SurplusCallOutcome.NOT_INTERESTED,
+  SurplusCallOutcome.ALREADY_SIGNED,
+  SurplusCallOutcome.DO_NOT_CALL,
+];
+
+function toLocalInput(dt: Date): string {
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+}
+
+/** The same quick picks as the follow-up modal, so the two agree. */
+function quickDates(): { label: string; value: string }[] {
+  const at = (days: number, hour: number) => {
+    const t = new Date();
+    t.setDate(t.getDate() + days);
+    t.setHours(hour, 0, 0, 0);
+    return toLocalInput(t);
+  };
+  const inHour = new Date(Date.now() + 3600_000);
+  return [
+    { label: 'In 1 hour', value: toLocalInput(inHour) },
+    { label: 'Tomorrow 9am', value: at(1, 9) },
+    { label: 'In 3 days', value: at(3, 9) },
+    { label: 'Next week', value: at(7, 9) },
+  ];
+}
+
+/**
+ * The surplus summary. Three things the wholesaling screen lacks, all from
+ * the course: an outcome in recovery vocabulary, the objection heard, and a
+ * follow-up that must carry a date before the call can be closed.
+ */
+function SurplusSummary() {
+  const d = useDialer();
+  const [outcome, setOutcome] = useState<SurplusCallOutcome | null>(null);
+  const [objection, setObjection] = useState<string>('');
+  const [notes, setNotes] = useState('');
+  const [followUp, setFollowUp] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const rule = surplusFollowUpRule(outcome);
+  const connected = surplusCallConnected(outcome);
+  const canSave = !!outcome && (rule !== 'required' || !!followUp) && !saving;
+  const picks = useMemo(quickDates, [outcome]);
+
+  const save = async () => {
+    if (!outcome || !canSave) return;
+    setSaving(true);
+    const ok = await d.saveDisposition({
+      disposition: SURPLUS_CALL_OUTCOME_LABEL[outcome],
+      outcome,
+      objection: connected && objection ? objection : null,
+      notes: notes.trim() || undefined,
+      followUpAt: followUp ? new Date(followUp).toISOString() : null,
+    });
+    if (!ok) setSaving(false);
+  };
+
+  return (
+    <>
+      <p className="text-xs font-medium text-gray-500 mb-2">What happened</p>
+      <div className="grid grid-cols-2 gap-1.5">
+        {SURPLUS_OUTCOMES.map((o) => (
+          <button
+            key={o}
+            onClick={() => setOutcome(o)}
+            className={`px-2.5 py-1.5 text-[11px] leading-tight rounded-lg border text-left ${
+              outcome === o
+                ? 'border-primary-500 text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-900/20'
+                : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:border-gray-300'
+            }`}
+          >
+            {SURPLUS_CALL_OUTCOME_LABEL[o]}
+          </button>
+        ))}
+      </div>
+
+      {connected && (
+        <div className="mt-3">
+          <label className="text-xs font-medium text-gray-500">Objection raised</label>
+          <select
+            value={objection}
+            onChange={(e) => setObjection(e.target.value)}
+            className="mt-1 w-full h-9 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-xs text-gray-800 dark:text-gray-200 px-2"
+          >
+            <option value="">None</option>
+            {Object.values(SurplusObjection).map((o) => (
+              <option key={o} value={o}>
+                {SURPLUS_OBJECTION_LABEL[o]}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {outcome && rule !== 'none' && (
+        <div className="mt-3">
+          <label className="text-xs font-medium text-gray-500">
+            Follow up {rule === 'required' ? <span className="text-red-500">(needs a date)</span> : '(optional)'}
+          </label>
+          <div className="mt-1 flex flex-wrap gap-1.5">
+            {picks.map((p) => (
+              <button
+                key={p.label}
+                onClick={() => setFollowUp(p.value)}
+                className={`px-2 py-1 text-[11px] rounded-md border ${
+                  followUp === p.value
+                    ? 'border-primary-500 text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-900/20'
+                    : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300'
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+          <input
+            type="datetime-local"
+            value={followUp}
+            onChange={(e) => setFollowUp(e.target.value)}
+            className="mt-1.5 w-full h-9 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-xs text-gray-800 dark:text-gray-200 px-2"
+          />
+        </div>
+      )}
+
+      <textarea
+        value={notes}
+        onChange={(e) => setNotes(e.target.value)}
+        placeholder="What was said"
+        rows={2}
+        className="mt-3 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-xs text-gray-800 dark:text-gray-200 px-2.5 py-2 resize-none"
+      />
+
+      {d.error && <p className="mt-2 text-xs text-red-600">{d.error}</p>}
+
+      <button
+        onClick={save}
+        disabled={!canSave}
+        className="mt-3 w-full h-11 rounded-full border border-primary-500 text-primary-600 dark:text-primary-400 font-medium hover:bg-primary-50 dark:hover:bg-primary-900/20 disabled:opacity-40 disabled:cursor-not-allowed"
+      >
+        {saving ? 'Saving...' : rule === 'required' && !followUp ? 'Pick a follow-up date' : 'Done'}
+      </button>
+    </>
   );
 }
 

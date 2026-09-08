@@ -319,6 +319,108 @@ export enum SurplusTier {
   UNBANDED = 'U',
 }
 
+/**
+ * What happened on a surplus call, in the vocabulary the recovery process
+ * uses. The wholesaling dialer dispositions (Requested Appointment, Incorrect
+ * Number) describe a seller conversation; none of them says whether the
+ * claimant was reached, whether a message was left with a relative, or
+ * whether the person has already signed with somebody else, and those are the
+ * three facts that decide what happens to the file next.
+ */
+export enum SurplusCallOutcome {
+  /** Rang out and the curiosity voicemail was left. */
+  NO_ANSWER_VOICEMAIL = 'no_answer_voicemail',
+  /** Rang out, no voicemail box or none left. */
+  NO_ANSWER = 'no_answer',
+  SPOKE_CLAIMANT = 'spoke_claimant',
+  /** A relative, neighbour or friend answered and agreed to pass a message. */
+  SPOKE_RELATIVE = 'spoke_relative',
+  WRONG_NUMBER = 'wrong_number',
+  DISCONNECTED = 'disconnected',
+  NOT_INTERESTED = 'not_interested',
+  /** Asked for the credibility packet before deciding. */
+  WANTS_PACKET = 'wants_packet',
+  CALLBACK_SCHEDULED = 'callback_scheduled',
+  /** Already retained somebody else. The money is not ours to chase. */
+  ALREADY_SIGNED = 'already_signed',
+  DO_NOT_CALL = 'do_not_call',
+}
+
+export const SURPLUS_CALL_OUTCOME_LABEL: Record<SurplusCallOutcome, string> = {
+  [SurplusCallOutcome.NO_ANSWER_VOICEMAIL]: 'No answer, voicemail left',
+  [SurplusCallOutcome.NO_ANSWER]: 'No answer',
+  [SurplusCallOutcome.SPOKE_CLAIMANT]: 'Spoke to claimant',
+  [SurplusCallOutcome.SPOKE_RELATIVE]: 'Spoke to relative, message passed',
+  [SurplusCallOutcome.WRONG_NUMBER]: 'Wrong number',
+  [SurplusCallOutcome.DISCONNECTED]: 'Disconnected',
+  [SurplusCallOutcome.NOT_INTERESTED]: 'Not interested',
+  [SurplusCallOutcome.WANTS_PACKET]: 'Wants the credibility packet',
+  [SurplusCallOutcome.CALLBACK_SCHEDULED]: 'Callback scheduled',
+  [SurplusCallOutcome.ALREADY_SIGNED]: 'Already signed elsewhere',
+  [SurplusCallOutcome.DO_NOT_CALL]: 'Asked not to be called',
+};
+
+/** The Big Four from the course, plus the deferral and a catch-all. */
+export enum SurplusObjection {
+  WHO_ARE_YOU = 'who_are_you',
+  ARE_YOU_REAL = 'are_you_real',
+  COST = 'cost',
+  TRUST = 'trust',
+  TELL_ME_MORE = 'tell_me_more',
+  OTHER = 'other',
+}
+
+export const SURPLUS_OBJECTION_LABEL: Record<SurplusObjection, string> = {
+  [SurplusObjection.WHO_ARE_YOU]: 'Who are you?',
+  [SurplusObjection.ARE_YOU_REAL]: 'Are you for real?',
+  [SurplusObjection.COST]: 'What does it cost?',
+  [SurplusObjection.TRUST]: 'Can I trust you?',
+  [SurplusObjection.TELL_ME_MORE]: 'Tell me more first',
+  [SurplusObjection.OTHER]: 'Something else',
+};
+
+/**
+ * Whether an outcome needs a dated follow-up before the call can be closed.
+ *
+ * 'required' is the course's rule made mechanical: a call that ends with an
+ * intention to follow up gets a date, never a "circle back later". 'optional'
+ * covers an unanswered call, where the next attempt is usually the weekly
+ * cadence rather than a specific promise. 'none' is a file that is finished
+ * on this number.
+ */
+export function surplusFollowUpRule(
+  outcome: SurplusCallOutcome | string | null | undefined,
+): 'required' | 'optional' | 'none' {
+  switch (outcome) {
+    case SurplusCallOutcome.CALLBACK_SCHEDULED:
+    case SurplusCallOutcome.WANTS_PACKET:
+    case SurplusCallOutcome.SPOKE_RELATIVE:
+      return 'required';
+    case SurplusCallOutcome.NO_ANSWER_VOICEMAIL:
+    case SurplusCallOutcome.NO_ANSWER:
+    case SurplusCallOutcome.SPOKE_CLAIMANT:
+      return 'optional';
+    default:
+      return 'none';
+  }
+}
+
+/** A person picked up. What the connect-rate report counts as a connection. */
+export function surplusCallConnected(outcome: SurplusCallOutcome | string | null | undefined): boolean {
+  switch (outcome) {
+    case SurplusCallOutcome.SPOKE_CLAIMANT:
+    case SurplusCallOutcome.SPOKE_RELATIVE:
+    case SurplusCallOutcome.NOT_INTERESTED:
+    case SurplusCallOutcome.WANTS_PACKET:
+    case SurplusCallOutcome.CALLBACK_SCHEDULED:
+    case SurplusCallOutcome.ALREADY_SIGNED:
+    case SurplusCallOutcome.DO_NOT_CALL:
+      return true;
+    default:
+      return false;
+  }
+}
+
 // Score Bands (Council Model)
 export enum ScoreBand {
   DEAD_COLD = 'DEAD_COLD', // 0-3
