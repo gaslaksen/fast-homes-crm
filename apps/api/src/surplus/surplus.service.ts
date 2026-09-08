@@ -72,8 +72,18 @@ import { SurplusLeadInput, SurplusListFilters, SurplusPhoneInput } from './surpl
  * because the board and the panel show the next action and whether it is
  * overdue, and a follow-up nobody can see is a follow-up nobody does.
  */
+/** The default letter cadence, per the course: biweekly unless the file says weekly. */
+const DEFAULT_LETTER_CADENCE_DAYS = 14;
+/** Unanswered standard letters before the panel suggests Priority or FedEx. */
+const LETTER_ESCALATE_AFTER = 3;
+
 const LEAD_INCLUDE = {
-  surplusDetail: { include: { heirs: true } },
+  surplusDetail: {
+    include: {
+      heirs: true,
+      letters: { orderBy: { mailedAt: 'desc' as const }, take: 10 },
+    },
+  },
   tasks: {
     where: { completed: false },
     orderBy: { dueDate: 'asc' as const },
@@ -389,16 +399,34 @@ export class SurplusService {
     for (const k of ['salePrice', 'grossSurplus', 'totalConsideration']) {
       if (patch[k] !== undefined) detailPatch[k] = patch[k] === null ? null : Number(patch[k]);
     }
+    if (patch.letterCadenceDays !== undefined) {
+      const n = patch.letterCadenceDays === null ? null : Number(patch.letterCadenceDays);
+      if (n !== null && n !== 7 && n !== 14) {
+        throw new BadRequestException('Letter cadence is weekly (7) or biweekly (14).');
+      }
+      detailPatch.letterCadenceDays = n;
+    }
 
     for (const k of ['saleDate', 'noticeDate', 'certOfDisbursements', 'letterMailedAt']) {
       if (patch[k] !== undefined) {
         detailPatch[k] = patch[k] ? isoToDate(String(patch[k]).slice(0, 10)) : null;
       }
     }
-    // Clearing the letter clears the envelope too, so a mistaken click leaves
-    // nothing behind that reads as if a letter went out.
-    if (patch.letterMailedAt === null && patch.letterMailedTo === undefined) {
-      detailPatch.letterMailedTo = null;
+    // Clearing the letter is now removing the latest one from the history
+    // and re-caching from what is left, so a mistaken click leaves nothing
+    // behind that reads as if a letter went out.
+    if (patch.letterMailedAt === null) {
+      const latest = await this.prisma.surplusLetter.findFirst({
+        where: { surplusDetailId: d.id },
+        orderBy: { mailedAt: 'desc' },
+      });
+      if (latest) await this.prisma.surplusLetter.delete({ where: { id: latest.id } });
+      const prev = await this.prisma.surplusLetter.findFirst({
+        where: { surplusDetailId: d.id },
+        orderBy: { mailedAt: 'desc' },
+      });
+      detailPatch.letterMailedAt = prev?.mailedAt || null;
+      detailPatch.letterMailedTo = prev?.address || null;
     }
 
     if (patch.claimantType !== undefined) {
@@ -538,7 +566,20 @@ export class SurplusService {
    */
   async markLetterMailed(
     ids: string[],
-    opts: { mailedAt?: string | null; address?: string | null; note?: string | null },
+    opts: {
+      mailedAt?: string | null;
+      address?: string | null;
+      note?: string | null;
+      /** 'standard' | 'priority' | 'fedex' */
+      mailType?: string | null;
+      trackingNumber?: string | null;
+      /** SurplusTemplateKind, when the letter came off a template. */
+      templateKind?: string | null;
+      templateVersion?: number | null;
+      recipientName?: string | null;
+      /** The envelope went to this heir rather than the claimant. One id only. */
+      heirId?: string | null;
+    },
     userId?: string | null,
     organizationId?: string | null,
   ) {
@@ -548,6 +589,7 @@ export class SurplusService {
       where,
       select: {
         id: true,
+        organizationId: true,
         sellerFirstName: true,
         sellerLastName: true,
         surplusDetail: {
@@ -557,11 +599,16 @@ export class SurplusService {
             ownerMailingCity: true,
             ownerMailingState: true,
             ownerMailingZip: true,
+            heirs: { select: { id: true, name: true, street: true, city: true, state: true, zip: true } },
           },
         },
       },
     });
     if (!leads.length) return { updated: 0 };
+
+    const mailType = ['standard', 'priority', 'fedex'].includes(String(opts.mailType || ''))
+      ? String(opts.mailType)
+      : 'standard';
 
     const mailedAt = opts.mailedAt
       ? isoToDate(String(opts.mailedAt).slice(0, 10))
@@ -577,13 +624,37 @@ export class SurplusService {
     for (const lead of leads) {
       const d = lead.surplusDetail;
       if (!d) continue;
-      const address =
-        (opts.address || '').trim() ||
-        [d.ownerMailingStreet, d.ownerMailingCity, [d.ownerMailingState, d.ownerMailingZip].filter(Boolean).join(' ')]
-          .filter(Boolean)
-          .join(', ') ||
-        null;
+      const claimantName = `${lead.sellerFirstName || ''} ${lead.sellerLastName || ''}`.trim();
+      // An heir's envelope goes to the heir's own address off the filing, not
+      // the dead claimant's, and is recorded against the heir.
+      const heir = opts.heirId ? d.heirs.find((h) => h.id === opts.heirId) || null : null;
+      const defaultAddress = heir
+        ? [heir.street, heir.city, [heir.state, heir.zip].filter(Boolean).join(' ')].filter(Boolean).join(', ')
+        : [d.ownerMailingStreet, d.ownerMailingCity, [d.ownerMailingState, d.ownerMailingZip].filter(Boolean).join(' ')]
+            .filter(Boolean)
+            .join(', ');
+      const address = (opts.address || '').trim() || defaultAddress || null;
+      const recipientName = (opts.recipientName || '').trim() || heir?.name || claimantName || null;
 
+      await this.prisma.surplusLetter.create({
+        data: {
+          surplusDetailId: d.id,
+          heirId: heir?.id || null,
+          organizationId: lead.organizationId,
+          mailedAt,
+          recipientName,
+          address,
+          templateKind: opts.templateKind || null,
+          templateVersion: opts.templateVersion ?? null,
+          mailType,
+          trackingNumber: (opts.trackingNumber || '').trim() || null,
+          note: (opts.note || '').trim() || null,
+          sentByUserId: userId || null,
+        },
+      });
+      // The cache the queue reads: the latest envelope, whoever it went to.
+      // A letter to an heir still parks the claim in Letter sent, since it
+      // is the same claim waiting on the same reply.
       await this.prisma.surplusDetail.update({
         where: { id: d.id },
         data: { letterMailedAt: mailedAt, letterMailedTo: address },
@@ -608,13 +679,34 @@ export class SurplusService {
             userId,
             content:
               `Letter mailed ${dateLabel}` +
-              (address ? ` to ${address}` : ', address not recorded') +
+              (recipientName && recipientName !== claimantName ? ` to ${recipientName}` : '') +
+              (address ? ` at ${address}` : ', address not recorded') +
+              (mailType !== 'standard' ? ` by ${mailType === 'fedex' ? 'FedEx' : 'Priority Mail'}` : '') +
+              (opts.trackingNumber ? `, tracking ${String(opts.trackingNumber).trim()}` : '') +
               (extra ? `. ${extra}` : ''),
           },
         });
       }
     }
     return { updated, mailedAt };
+  }
+
+  /** Take one envelope out of the history and re-cache the latest. */
+  async removeLetter(letterId: string, organizationId?: string | null) {
+    const letter = await this.prisma.surplusLetter.findFirst({
+      where: { id: letterId, ...(organizationId ? { organizationId } : {}) },
+    });
+    if (!letter) throw new BadRequestException('Letter not found');
+    await this.prisma.surplusLetter.delete({ where: { id: letter.id } });
+    const latest = await this.prisma.surplusLetter.findFirst({
+      where: { surplusDetailId: letter.surplusDetailId },
+      orderBy: { mailedAt: 'desc' },
+    });
+    await this.prisma.surplusDetail.update({
+      where: { id: letter.surplusDetailId },
+      data: { letterMailedAt: latest?.mailedAt || null, letterMailedTo: latest?.address || null },
+    });
+    return { removed: 1 };
   }
 
   async bulkStage(
@@ -945,6 +1037,7 @@ export class SurplusService {
     // files with a channel nobody has tried yet.
     if (filters.contact) rows = rows.filter((r) => r.contactStatus === filters.contact);
     if (filters.missingChannel) rows = rows.filter((r) => r.channelsMissing.length > 0);
+    if (filters.letterDue) rows = rows.filter((r) => r.letterDue);
 
     if (filters.sort === 'untapped') {
       rows.sort(
@@ -1098,6 +1191,7 @@ export class SurplusService {
       // The two working lists, as property counts to match the chips.
       notTapped: props.filter((p: any) => p.contactStatus === 'not_tapped' && p.workScore > 0).length,
       missingChannel: props.filter((p: any) => p.channelsMissing?.length > 0 && p.workScore > 0).length,
+      letterDue: props.filter((p: any) => p.letterDue).length,
       complianceBlocked: all.filter((r) => !r.compliance.clear).length,
       belowFloor: all.length - all.filter((r) => r.grossSurplus >= SURPLUS_FLOOR).length,
       total: all.length,
@@ -1267,6 +1361,7 @@ export class SurplusService {
       callNotes: d.callNotes || '',
       letterMailedAt: d.letterMailedAt,
       letterMailedTo: d.letterMailedTo || null,
+      ...this.letterState(d),
       // Two different things, deliberately both here.
       //
       // touchDays/plannedTouches is the WEEKLY PLANNER: boxes somebody ticks to
@@ -1326,6 +1421,44 @@ export class SurplusService {
         livingHeirs.length,
         callableHeirs.length,
       ),
+    };
+  }
+
+  /**
+   * The letter history and where the cadence stands.
+   *
+   * Due means: nobody has replied, there is an address to write to, and
+   * either no letter has gone out or the last one is older than the file's
+   * cadence. Escalate means the course's rule: after three unanswered
+   * standard letters, the next one goes Priority or FedEx so it is actually
+   * opened.
+   */
+  private letterState(d: any) {
+    const letters = ((d.letters || []) as any[]).map((l) => ({
+      id: l.id,
+      mailedAt: l.mailedAt,
+      recipientName: l.recipientName || null,
+      address: l.address || null,
+      mailType: l.mailType || 'standard',
+      trackingNumber: l.trackingNumber || null,
+      templateKind: l.templateKind || null,
+      templateVersion: l.templateVersion ?? null,
+      heirId: l.heirId || null,
+      note: l.note || null,
+    }));
+    const cadence = d.letterCadenceDays || DEFAULT_LETTER_CADENCE_DAYS;
+    const last = letters[0]?.mailedAt ? new Date(letters[0].mailedAt) : null;
+    const dueAt = last ? new Date(last.getTime() + cadence * 86_400_000) : null;
+    const hasAddress = !!(d.ownerMailingStreet || d.letterMailedTo);
+    const replied = !!d.tappedAt;
+    const standardUnanswered = replied ? 0 : letters.filter((l) => l.mailType === 'standard').length;
+    return {
+      letters,
+      letterCount: letters.length,
+      letterCadenceDays: cadence,
+      letterDueAt: dueAt,
+      letterDue: !replied && hasAddress && !d.doNotCall && (!last || dueAt!.getTime() <= Date.now()),
+      escalateMail: standardUnanswered >= LETTER_ESCALATE_AFTER,
     };
   }
 
@@ -1474,6 +1607,9 @@ export function groupByProperty(rows: any[]): any[] {
       untracedCount: ranked.filter((m) => m.trace?.state === 'never').length,
       /** How many claimants have had a letter, and the most recent date, for the card. */
       letterMailedCount: ranked.filter((m: any) => m.letterMailedAt).length,
+      letterCount: ranked.reduce((n: number, m: any) => n + (m.letterCount || 0), 0),
+      letterDue: ranked.some((m: any) => m.letterDue && m.workScore > 0),
+      escalateMail: ranked.some((m: any) => m.escalateMail),
       letterMailedAt: ranked
         .map((m: any) => m.letterMailedAt)
         .filter(Boolean)

@@ -142,6 +142,26 @@ export interface SurplusPanelLead {
   channelsMissing: string[];
   credibilitySentAt: string | null;
   credibilityChannels: string[];
+  /** Every envelope on this claim, newest first. */
+  letters: {
+    id: string;
+    mailedAt: string;
+    recipientName: string | null;
+    address: string | null;
+    mailType: string;
+    trackingNumber: string | null;
+    templateKind: string | null;
+    heirId: string | null;
+  }[];
+  letterCount: number;
+  /** 7 or 14. */
+  letterCadenceDays: number;
+  letterDueAt: string | null;
+  letterDue: boolean;
+  /** Three standard letters unanswered: send the next by Priority or FedEx. */
+  escalateMail: boolean;
+  /** Heirs on file, for addressing a letter. Same shape the heirs panel uses. */
+  heirs: { id: string; name: string; address: string | null; deceased: boolean }[];
 }
 
 const CONTACT_LABEL: Record<string, string> = {
@@ -794,7 +814,7 @@ function CaseTab({
             }
           />
         )}
-        <LetterMailed lead={lead} onChanged={onChanged} say={say} />
+        <LetterHistory lead={lead} onChanged={onChanged} say={say} />
       </Section>
 
       {/* Heirs lead for a deceased claimant, because they are the only people
@@ -1123,7 +1143,28 @@ function DocLink({ doc, source }: { doc: LedgerDoc; source?: string | null }) {
  * One letter per claimant for now. Marking again overwrites the date; the
  * notes keep the history.
  */
-function LetterMailed({
+const MAIL_TYPE_LABEL: Record<string, string> = {
+  standard: 'Standard',
+  priority: 'Priority Mail',
+  fedex: 'FedEx',
+};
+
+const LETTER_KINDS: [string, string][] = [
+  ['letter_claimant', 'To the claimant'],
+  ['letter_family', 'To a family member'],
+  ['letter_associate', 'To a neighbour or associate'],
+];
+
+/**
+ * Every envelope that went out on this claim, and where the cadence stands.
+ *
+ * The course's rule is weekly or biweekly letters until somebody replies,
+ * with the third unanswered standard letter upgraded to Priority or FedEx
+ * so it is actually opened. Both are counted here off the history rather
+ * than remembered. "Write a letter" opens the print view built from the
+ * template; "Record a letter" is for one that went out some other way.
+ */
+function LetterHistory({
   lead,
   onChanged,
   say,
@@ -1139,11 +1180,17 @@ function LetterMailed({
   ]
     .filter(Boolean)
     .join(', ');
+  const livingHeirs = (lead.heirs || []).filter((h) => !h.deceased);
 
   const [open, setOpen] = useState(false);
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [recipient, setRecipient] = useState<string>('claimant');
   const [address, setAddress] = useState(onFile);
+  const [mailType, setMailType] = useState('standard');
+  const [tracking, setTracking] = useState('');
   const [note, setNote] = useState('');
+  const [writeKind, setWriteKind] = useState('letter_claimant');
+  const [writeTo, setWriteTo] = useState<string>('claimant');
   const [busy, setBusy] = useState(false);
 
   // Switching claimant closes the form and re-seeds the envelope, because the
@@ -1151,20 +1198,40 @@ function LetterMailed({
   // record exists to prevent.
   useEffect(() => {
     setOpen(false);
+    setRecipient('claimant');
     setAddress(onFile);
+    setMailType(lead.escalateMail ? 'priority' : 'standard');
+    setTracking('');
     setNote('');
     setDate(new Date().toISOString().slice(0, 10));
+    setWriteTo('claimant');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lead.id]);
+
+  // The recipient picks the envelope address: an heir's is their own, off the
+  // filing, and must never default to the dead claimant's.
+  useEffect(() => {
+    if (recipient === 'claimant') setAddress(onFile);
+    else {
+      const h = livingHeirs.find((x) => x.id === recipient);
+      setAddress(h?.address || '');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recipient]);
 
   const save = async () => {
     if (busy) return;
     setBusy(true);
     try {
+      const heir = recipient === 'claimant' ? null : livingHeirs.find((x) => x.id === recipient) || null;
       await surplusAPI.letterMailed([lead.id], {
         mailedAt: date || null,
         address: address.trim() || null,
         note: note.trim() || null,
+        mailType,
+        trackingNumber: tracking.trim() || null,
+        heirId: heir?.id || null,
+        recipientName: heir?.name || null,
       });
       say('Letter recorded');
       setOpen(false);
@@ -1176,18 +1243,40 @@ function LetterMailed({
     }
   };
 
-  const clear = async () => {
+  const remove = async (letterId: string) => {
     if (busy) return;
+    if (!window.confirm('Remove this letter from the history? The note in the Notes tab stays.')) return;
     setBusy(true);
     try {
-      await surplusAPI.update(lead.id, { letterMailedAt: null });
-      say('Letter cleared');
+      await surplusAPI.deleteLetter(letterId);
+      say('Letter removed');
       onChanged();
     } catch (e: any) {
-      say(e?.response?.data?.message || 'The letter could not be cleared');
+      say(e?.response?.data?.message || 'The letter could not be removed');
     } finally {
       setBusy(false);
     }
+  };
+
+  const setCadence = async (days: number) => {
+    if (busy || days === lead.letterCadenceDays) return;
+    setBusy(true);
+    try {
+      await surplusAPI.update(lead.id, { letterCadenceDays: days });
+      say(days === 7 ? 'Letters weekly' : 'Letters every two weeks');
+      onChanged();
+    } catch (e: any) {
+      say(e?.response?.data?.message || 'The cadence could not be saved');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const write = () => {
+    const heir = writeTo === 'claimant' ? null : writeTo;
+    const q = new URLSearchParams({ lead: lead.id, kind: writeKind });
+    if (heir) q.set('heir', heir);
+    window.open(`/surplus-funds/letter?${q.toString()}`, '_blank', 'noopener');
   };
 
   const field: React.CSSProperties = {
@@ -1200,77 +1289,177 @@ function LetterMailed({
     background: 'var(--surface2)',
     color: 'inherit',
   };
+  const lbl: React.CSSProperties = { fontSize: 11, color: 'var(--dim)' };
 
-  if (lead.letterMailedAt) {
-    return (
-      <div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 13 }}>
-          <span style={{ color: 'var(--dim)' }}>Letter mailed</span>
-          <span style={{ color: 'var(--mint)', fontWeight: 600, textAlign: 'right' }}>
-            {fmtDate(lead.letterMailedAt)}
-            {lead.letterMailedTo ? ` to ${lead.letterMailedTo}` : ''}
-          </span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 3 }}>
-          <span style={{ fontSize: 11, color: 'var(--faint)', flex: 1 }}>
-            Parked in Letter sent until they reply. The mailing is also in the Notes tab.
-          </span>
-          <button type="button" className="dc-wp-btn" disabled={busy} onClick={clear} title="Undo a mistaken mark. The note stays.">
-            Clear
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  if (!open) {
-    return (
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-        <span style={{ fontSize: 11, color: 'var(--faint)' }}>
-          No letter has gone out to {lead.claimant}.
-        </span>
-        <button type="button" className="dc-wp-btn" onClick={() => setOpen(true)}>
-          {'✉'} Letter mailed
-        </button>
-      </div>
-    );
-  }
+  const letters = lead.letters || [];
+  const replied = !!lead.tappedAt;
+  const dueLine = replied
+    ? `${lead.claimant} has replied, so the letter cadence is off.`
+    : !onFile && !letters.length
+      ? 'No address to write to yet.'
+      : lead.letterDue
+        ? letters.length
+          ? `Letter due. The last one went out ${fmtDate(letters[0].mailedAt)} and the cadence is ${lead.letterCadenceDays} days.`
+          : 'No letter has gone out yet. Everyone gets a letter.'
+        : lead.letterDueAt
+          ? `Next letter due ${fmtDate(lead.letterDueAt)}.`
+          : '';
 
   return (
-    <div style={{ display: 'grid', gap: 6, padding: 8, border: '1px solid var(--border)', borderRadius: 8 }}>
-      <div style={{ fontSize: 12, fontWeight: 700 }}>Record a mailed letter</div>
-      <label style={{ fontSize: 11, color: 'var(--dim)' }}>
-        Date mailed
-        <input type="date" style={field} value={date} max={new Date().toISOString().slice(0, 10)} onChange={(e) => setDate(e.target.value)} />
-      </label>
-      <label style={{ fontSize: 11, color: 'var(--dim)' }}>
-        Mailed to
-        <input
-          type="text"
-          style={field}
-          value={address}
-          placeholder="Street, city, state zip"
-          onChange={(e) => setAddress(e.target.value)}
-        />
-      </label>
-      <label style={{ fontSize: 11, color: 'var(--dim)' }}>
-        Note, optional
-        <input
-          type="text"
-          style={field}
-          value={note}
-          placeholder="Anything worth remembering about this mailing"
-          onChange={(e) => setNote(e.target.value)}
-        />
-      </label>
-      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-        <button type="button" className="dc-wp-btn" disabled={busy} onClick={() => setOpen(false)}>
-          Cancel
-        </button>
-        <button type="button" className="dc-wp-btn on" disabled={busy || !date} onClick={save}>
-          {busy ? 'Saving...' : 'Save'}
-        </button>
+    <div style={{ display: 'grid', gap: 8 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'baseline', fontSize: 13 }}>
+        <span style={{ color: 'var(--dim)' }}>
+          Letters
+          {letters.length ? <span style={{ color: 'var(--faint)' }}> · {letters.length} sent</span> : null}
+        </span>
+        <span style={{ display: 'inline-flex', gap: 4, fontSize: 11 }} title="How often a letter goes out while nobody has replied">
+          {([7, 14] as const).map((d) => (
+            <button
+              key={d}
+              type="button"
+              className={`dc-wp-btn${lead.letterCadenceDays === d ? ' on' : ''}`}
+              disabled={busy}
+              onClick={() => setCadence(d)}
+              style={{ padding: '3px 8px', fontSize: 11 }}
+            >
+              {d === 7 ? 'Weekly' : 'Biweekly'}
+            </button>
+          ))}
+        </span>
       </div>
+
+      {dueLine && (
+        <div style={{ fontSize: 11.5, color: lead.letterDue && !replied ? 'var(--amber)' : 'var(--faint)' }}>
+          {dueLine}
+        </div>
+      )}
+      {lead.escalateMail && !replied && (
+        <div
+          style={{
+            fontSize: 11.5,
+            padding: '6px 9px',
+            borderRadius: 6,
+            background: 'var(--bg2)',
+            borderLeft: '3px solid var(--amber)',
+            color: 'var(--dim)',
+          }}
+        >
+          Three standard letters have gone unanswered. Send the next one by Priority Mail or FedEx so it
+          gets opened.
+        </div>
+      )}
+
+      {letters.length > 0 && (
+        <div style={{ display: 'grid', gap: 3 }}>
+          {letters.map((l) => (
+            <div key={l.id} style={{ display: 'flex', gap: 8, alignItems: 'baseline', fontSize: 12 }}>
+              <span style={{ color: 'var(--mint)', fontWeight: 600, whiteSpace: 'nowrap' }}>{fmtDate(l.mailedAt)}</span>
+              <span style={{ color: 'var(--dim)', minWidth: 0, overflowWrap: 'anywhere', flex: 1 }}>
+                {l.recipientName && l.recipientName !== lead.claimant ? `${l.recipientName}, ` : ''}
+                {l.address || 'address not recorded'}
+                {l.mailType !== 'standard' ? ` · ${MAIL_TYPE_LABEL[l.mailType] || l.mailType}` : ''}
+                {l.trackingNumber ? ` · ${l.trackingNumber}` : ''}
+                {l.templateKind ? ` · ${LETTER_KINDS.find(([k]) => k === l.templateKind)?.[1] || l.templateKind}` : ''}
+              </span>
+              <button
+                type="button"
+                className="dc-wp-btn"
+                disabled={busy}
+                onClick={() => remove(l.id)}
+                title="Remove a mistaken entry"
+                style={{ padding: '2px 7px', fontSize: 11 }}
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Write one from the template. Opens the print view in its own tab so
+          the letter can be printed and then recorded from there. */}
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+        <select className="dc-wp-sel" value={writeKind} onChange={(e) => setWriteKind(e.target.value)} aria-label="Letter kind">
+          {LETTER_KINDS.map(([k, l]) => (
+            <option key={k} value={k}>
+              {l}
+            </option>
+          ))}
+        </select>
+        {livingHeirs.length > 0 && (
+          <select className="dc-wp-sel" value={writeTo} onChange={(e) => setWriteTo(e.target.value)} aria-label="Addressed to">
+            <option value="claimant">{lead.claimant}</option>
+            {livingHeirs.map((h) => (
+              <option key={h.id} value={h.id}>
+                {h.name}
+              </option>
+            ))}
+          </select>
+        )}
+        <button type="button" className="dc-wp-btn on" onClick={write}>
+          {'✉'} Write a letter
+        </button>
+        {!open && (
+          <button type="button" className="dc-wp-btn" onClick={() => setOpen(true)}>
+            Record a letter
+          </button>
+        )}
+      </div>
+
+      {open && (
+        <div style={{ display: 'grid', gap: 6, padding: 8, border: '1px solid var(--border)', borderRadius: 8 }}>
+          <div style={{ fontSize: 12, fontWeight: 700 }}>Record a mailed letter</div>
+          <label style={lbl}>
+            Date mailed
+            <input type="date" style={field} value={date} max={new Date().toISOString().slice(0, 10)} onChange={(e) => setDate(e.target.value)} />
+          </label>
+          {livingHeirs.length > 0 && (
+            <label style={lbl}>
+              Addressed to
+              <select style={field} value={recipient} onChange={(e) => setRecipient(e.target.value)}>
+                <option value="claimant">{lead.claimant}</option>
+                {livingHeirs.map((h) => (
+                  <option key={h.id} value={h.id}>
+                    {h.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          <label style={lbl}>
+            Mailed to
+            <input type="text" style={field} value={address} placeholder="Street, city, state zip" onChange={(e) => setAddress(e.target.value)} />
+          </label>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+            <label style={lbl}>
+              Mail type
+              <select style={field} value={mailType} onChange={(e) => setMailType(e.target.value)}>
+                {Object.entries(MAIL_TYPE_LABEL).map(([k, l]) => (
+                  <option key={k} value={k}>
+                    {l}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label style={lbl}>
+              Tracking number
+              <input type="text" style={field} value={tracking} placeholder="Optional" onChange={(e) => setTracking(e.target.value)} />
+            </label>
+          </div>
+          <label style={lbl}>
+            Note, optional
+            <input type="text" style={field} value={note} placeholder="Anything worth remembering about this mailing" onChange={(e) => setNote(e.target.value)} />
+          </label>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <button type="button" className="dc-wp-btn" disabled={busy} onClick={() => setOpen(false)}>
+              Cancel
+            </button>
+            <button type="button" className="dc-wp-btn on" disabled={busy || !date} onClick={save}>
+              {busy ? 'Saving...' : 'Save'}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
