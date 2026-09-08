@@ -11,6 +11,7 @@ import {
   surplusFollowUpRule,
   surplusCallConnected,
 } from '@/lib/surplus-calls';
+import { quickDueDates } from '@/lib/dates';
 
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '0', '#'];
 const KEY_SUB: Record<string, string> = {
@@ -60,18 +61,116 @@ export default function Dialer() {
     );
   }
 
+  // The script pane opens beside the call controls on a surplus call and
+  // stays through the summary, so the words and the outcome are one screen.
+  const withScript = !!d.script && ['connecting', 'oncall', 'summary'].includes(d.view);
+
   return (
-    <div className="fixed bottom-5 right-5 z-[60] w-[360px] max-w-[calc(100vw-2rem)] rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-2xl overflow-hidden">
+    <div
+      className={`fixed bottom-5 right-5 z-[60] max-w-[calc(100vw-2rem)] rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-2xl overflow-hidden ${
+        withScript ? 'w-[780px]' : 'w-[360px]'
+      }`}
+    >
       <Header />
       {d.error && d.view === 'dialpad' && (
         <div className="px-4 py-2 text-xs text-red-600 bg-red-50 dark:bg-red-900/20">{d.error}</div>
       )}
 
-      {d.view === 'dialpad' && <DialpadView typed={typed} setTyped={setTyped} />}
-      {d.view === 'incoming' && <IncomingView />}
-      {d.view === 'connecting' && <CallingView phase="connecting" />}
-      {d.view === 'oncall' && <CallingView phase="oncall" />}
-      {d.view === 'summary' && <SummaryView />}
+      <div className={withScript ? 'flex items-stretch' : ''}>
+        <div className={withScript ? 'w-[360px] shrink-0' : ''}>
+          {d.view === 'dialpad' && <DialpadView typed={typed} setTyped={setTyped} />}
+          {d.view === 'incoming' && <IncomingView />}
+          {d.view === 'connecting' && <CallingView phase="connecting" />}
+          {d.view === 'oncall' && <CallingView phase="oncall" />}
+          {d.view === 'summary' && <SummaryView />}
+        </div>
+        {withScript && <ScriptPane />}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The course's script, on screen during the call, with the facts the caller
+ * needs beside it. Merge fields are already filled by the API, so what is on
+ * screen is what to say, and the version shown is what the call log records.
+ */
+function ScriptPane() {
+  const d = useDialer();
+  const s = d.script;
+  const [tab, setTab] = useState<'phone' | 'voicemail' | 'relative'>('phone');
+  if (!s) return null;
+  const f = s.facts;
+  const current = s.scripts[tab];
+  const money = (n: number | null) => (n == null ? 'unknown' : `$${Math.round(n).toLocaleString('en-US')}`);
+
+  return (
+    <div className="flex-1 min-w-0 border-l border-gray-100 dark:border-gray-800 flex flex-col">
+      <div className="px-4 pt-3 pb-2 border-b border-gray-100 dark:border-gray-800">
+        <div className="flex items-baseline justify-between gap-2">
+          <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">{f.claimant}</p>
+          <p className="text-xs text-gray-500 whitespace-nowrap">{money(f.surplusAmount)} surplus</p>
+        </div>
+        <p className="text-[11px] text-gray-500 truncate">
+          {f.propertyAddress}
+          {f.county ? ` · ${f.county} County` : ''}
+          {f.caseNumber ? ` · case ${f.caseNumber}` : ''}
+        </p>
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300">
+            {f.claimStatusLabel}
+          </span>
+          <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300">
+            {f.daysSearching} day{f.daysSearching === 1 ? '' : 's'} searching
+          </span>
+          {f.deceased && (
+            <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300">
+              Claimant deceased, speak to the heir
+            </span>
+          )}
+          {f.doNotCall && (
+            <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300">
+              Do not call
+            </span>
+          )}
+        </div>
+        <p className="mt-1.5 text-[11px] text-amber-700 dark:text-amber-400 leading-snug">{f.feeTerms}</p>
+      </div>
+
+      <div className="flex gap-1 px-3 pt-2">
+        {(['phone', 'voicemail', 'relative'] as const).map((k) => (
+          <button
+            key={k}
+            onClick={() => setTab(k)}
+            className={`px-2.5 py-1 text-[11px] rounded-md ${
+              tab === k
+                ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300 font-semibold'
+                : 'text-gray-500 hover:bg-gray-50 dark:hover:bg-gray-800'
+            }`}
+          >
+            {s.scripts[k].label}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 max-h-[440px]">
+        {current.body.trim() ? (
+          <pre className="whitespace-pre-wrap font-sans text-[12.5px] leading-relaxed text-gray-800 dark:text-gray-200">
+            {current.body}
+          </pre>
+        ) : (
+          <p className="text-xs text-gray-500">No {current.label.toLowerCase()} has been written yet.</p>
+        )}
+      </div>
+
+      <div className="px-4 py-2 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between text-[10.5px] text-gray-400">
+        <span>
+          Phone script {s.scripts.phone.versionLabel} · Voicemail {s.scripts.voicemail.versionLabel}
+        </span>
+        <a href="/settings/surplus" className="text-primary-600 dark:text-primary-400 hover:underline">
+          Edit scripts
+        </a>
+      </div>
     </div>
   );
 }
@@ -833,27 +932,6 @@ const SURPLUS_OUTCOMES: SurplusCallOutcome[] = [
   SurplusCallOutcome.DO_NOT_CALL,
 ];
 
-function toLocalInput(dt: Date): string {
-  const pad = (n: number) => n.toString().padStart(2, '0');
-  return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
-}
-
-/** The same quick picks as the follow-up modal, so the two agree. */
-function quickDates(): { label: string; value: string }[] {
-  const at = (days: number, hour: number) => {
-    const t = new Date();
-    t.setDate(t.getDate() + days);
-    t.setHours(hour, 0, 0, 0);
-    return toLocalInput(t);
-  };
-  const inHour = new Date(Date.now() + 3600_000);
-  return [
-    { label: 'In 1 hour', value: toLocalInput(inHour) },
-    { label: 'Tomorrow 9am', value: at(1, 9) },
-    { label: 'In 3 days', value: at(3, 9) },
-    { label: 'Next week', value: at(7, 9) },
-  ];
-}
 
 /**
  * The surplus summary. Three things the wholesaling screen lacks, all from
@@ -871,17 +949,23 @@ function SurplusSummary() {
   const rule = surplusFollowUpRule(outcome);
   const connected = surplusCallConnected(outcome);
   const canSave = !!outcome && (rule !== 'required' || !!followUp) && !saving;
-  const picks = useMemo(quickDates, [outcome]);
+  const picks = useMemo(quickDueDates, [outcome]);
 
   const save = async () => {
     if (!outcome || !canSave) return;
     setSaving(true);
+    // The versions on screen during the call, so wording changes can be
+    // measured against outcomes. The voicemail version only means something
+    // when one was left.
     const ok = await d.saveDisposition({
       disposition: SURPLUS_CALL_OUTCOME_LABEL[outcome],
       outcome,
       objection: connected && objection ? objection : null,
       notes: notes.trim() || undefined,
       followUpAt: followUp ? new Date(followUp).toISOString() : null,
+      scriptVersion: d.script?.scripts.phone.versionLabel || null,
+      voicemailVersion:
+        outcome === SurplusCallOutcome.NO_ANSWER_VOICEMAIL ? d.script?.scripts.voicemail.versionLabel || null : null,
     });
     if (!ok) setSaving(false);
   };

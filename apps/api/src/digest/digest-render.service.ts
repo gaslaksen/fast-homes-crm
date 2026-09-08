@@ -250,7 +250,7 @@ export class DigestRenderService {
   private renderSurplus(b: DigestBrief): string {
     // Present whenever the board holds open claimants, even on a day with
     // nobody new to call: a section that vanishes reads as "no surplus work".
-    if (!b.surplus.length && !b.surplusIngestNote && !b.surplusOpenTotal) return '';
+    if (!b.surplus.length && !b.surplusIngestNote && !b.surplusOpenTotal && !b.surplusOverdue?.length) return '';
     const cards = b.surplus.map((s, i) => {
       const p = PALETTE[s.urgency];
       return `
@@ -266,7 +266,21 @@ export class DigestRenderService {
         </table>`;
     }).join('');
 
-    const footer = `<div style="padding-top:12px;font-size:13px;color:${MUTED};line-height:1.55;">
+    // Slipped follow-ups, in red, because a promise to call back that went
+    // unkept is the thing that loses a claimant's trust.
+    const overdue = b.surplusOverdue?.length
+      ? `<div style="padding-top:12px;font-size:13px;color:${BODY};line-height:1.6;">
+          <b style="color:#b91c1c;">${b.surplusOverdueTotal} overdue follow-up${b.surplusOverdueTotal === 1 ? '' : 's'}</b>
+          ${b.surplusOverdue
+            .map(
+              (t) =>
+                `<div><a href="${this.esc(t.url)}" style="color:${INK};font-weight:600;text-decoration:none;">${this.esc(t.title)}</a> <span style="color:${MUTED};">${this.esc(t.due)}${t.owner ? `, ${this.esc(t.owner)}` : ''}</span></div>`,
+            )
+            .join('')}
+        </div>`
+      : '';
+
+    const footer = `${overdue}<div style="padding-top:12px;font-size:13px;color:${MUTED};line-height:1.55;">
         ${b.surplusIngestNote ? `<b style="color:${INK};">Overnight:</b> ${this.esc(b.surplusIngestNote)} ` : ''}
         ${b.surplusCallableTotal} of ${b.surplusOpenTotal} open claimants have a live number.
         <a href="${this.esc(b.appUrl)}/surplus-funds" style="color:${TEAL};font-weight:600;text-decoration:none;">Open the board &rarr;</a>
@@ -517,6 +531,13 @@ export class DigestRenderService {
         out.push(`     ${s.facts}`);
         out.push(`     ${s.status}`);
         out.push(`     ${s.url}`);
+      }
+      if (b.surplusOverdue?.length) {
+        out.push(`  ${b.surplusOverdueTotal} overdue follow-up${b.surplusOverdueTotal === 1 ? '' : 's'}:`);
+        for (const t of b.surplusOverdue) {
+          out.push(`     ${t.title}, ${t.due}${t.owner ? `, ${t.owner}` : ''}`);
+          out.push(`     ${t.url}`);
+        }
       }
       if (b.surplusIngestNote) out.push(`  Overnight: ${b.surplusIngestNote}`);
       out.push(`  ${b.surplusCallableTotal} of ${b.surplusOpenTotal} open claimants have a live number.`);

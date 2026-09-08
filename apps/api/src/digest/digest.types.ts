@@ -117,6 +117,16 @@ export interface SurplusRow {
   urgency: DigestUrgency;
 }
 
+/** One overdue follow-up on a surplus claimant. */
+export interface SurplusTaskRow {
+  title: string;
+  claimant: string;
+  /** "due 3 days ago" */
+  due: string;
+  owner: string | null;
+  url: string;
+}
+
 /** One automated county pull, one line. */
 export interface FeedRow {
   label: string;
@@ -160,6 +170,9 @@ export interface DigestBrief {
   surplusCallableTotal: number;
   /** "24 claimants landed from Lee overnight, $312K between them." */
   surplusIngestNote: string | null;
+  /** Follow-ups on surplus claimants that are past due, oldest first. */
+  surplusOverdue: SurplusTaskRow[];
+  surplusOverdueTotal: number;
   /** What each automated county pull did, or failed to do. */
   feeds: FeedRow[];
   yesterday: YesterdayStat[];
