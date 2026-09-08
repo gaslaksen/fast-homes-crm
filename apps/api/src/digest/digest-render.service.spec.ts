@@ -36,6 +36,8 @@ function brief(over: Partial<DigestBrief> = {}): DigestBrief {
     surplusIngestNote: null,
     surplusOverdue: [],
     surplusOverdueTotal: 0,
+    surplusNotTapped: 0,
+    surplusMissingChannel: 0,
     feeds: [],
     yesterday: [],
     news: [],

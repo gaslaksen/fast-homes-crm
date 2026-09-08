@@ -11,6 +11,7 @@ import { SurplusImportService } from './surplus-import.service';
 import { SurplusIngestService } from './surplus-ingest.service';
 import { SurplusSkiptraceService } from './surplus-skiptrace.service';
 import { SurplusTemplatesService } from './surplus-templates.service';
+import { SurplusCredibilityService, CredibilityChannel } from './surplus-credibility.service';
 import { COMPLIANCE_RULES, DISCLOSURE_LABELS, FL_COUNTIES, SURPLUS_FLOOR } from './surplus-compliance';
 
 /**
@@ -53,6 +54,7 @@ export class SurplusController {
     private skiptrace: SurplusSkiptraceService,
     private heirs: SurplusHeirsService,
     private templates: SurplusTemplatesService,
+    private credibility: SurplusCredibilityService,
   ) {}
 
   private decodeToken(authHeader?: string): { userId?: string; organizationId?: string } {
@@ -83,6 +85,8 @@ export class SurplusController {
     @Query('blockedOnly') blockedOnly?: string,
     @Query('hideDead') hideDead?: string,
     @Query('hideDnc') hideDnc?: string,
+    @Query('contact') contact?: string,
+    @Query('missingChannel') missingChannel?: string,
     @Query('sort') sort?: string,
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
@@ -106,6 +110,8 @@ export class SurplusController {
       blockedOnly: blockedOnly === 'true',
       hideDead: hideDead === 'true',
       hideDnc: hideDnc === 'true',
+      contact,
+      missingChannel: missingChannel === 'true',
       sort,
       page: num(page),
       pageSize: num(pageSize),
@@ -197,6 +203,26 @@ export class SurplusController {
   ) {
     const { organizationId } = this.decodeToken(authHeader);
     return this.templates.activate(organizationId, kind, Number(body?.version));
+  }
+
+  /** Whether the credibility packet can be sent, and what is missing if not. */
+  @Get('credibility/status')
+  credibilityStatus() {
+    return this.templates.credibilityReadiness();
+  }
+
+  /**
+   * Send the credibility packet (website, Sunbiz filing, one-pager, callback
+   * number) to one claimant by text, email, or both, as Dig Deeper.
+   */
+  @Post(':id/credibility')
+  async sendCredibility(
+    @Param('id') id: string,
+    @Body() body: { channels: CredibilityChannel[]; phone?: string | null; email?: string | null },
+    @Headers('authorization') authHeader?: string,
+  ) {
+    const { organizationId, userId } = this.decodeToken(authHeader);
+    return this.credibility.send(id, body || { channels: [] }, organizationId, userId);
   }
 
   /**

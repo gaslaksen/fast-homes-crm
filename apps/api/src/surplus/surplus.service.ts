@@ -80,7 +80,21 @@ const LEAD_INCLUDE = {
     take: 3,
     select: { id: true, title: true, dueDate: true, userId: true },
   },
+  // Whether each channel has been TRIED, counted off the records the
+  // channels themselves write. The course's rule is that a file is not worked
+  // until it has been called, texted, emailed and lettered, and a checkbox
+  // somebody ticks would drift from what actually went out.
+  _count: {
+    select: {
+      callLogs: { where: { type: { in: ['twilio_browser', 'ai_outbound'] } } },
+      messages: { where: { direction: 'OUTBOUND' } },
+      emails: { where: { direction: 'outbound' } },
+    },
+  },
 };
+
+const CHANNELS = ['called', 'texted', 'emailed', 'lettered'] as const;
+const CONTACT_RANK: Record<string, number> = { not_tapped: 0, tapped: 1, recap_scheduled: 2 };
 
 /** Days after a stage change before its follow-up task comes due. */
 const STAGE_TASK_DAYS: Partial<Record<SurplusStage, { title: (name: string) => string; days: number }>> = {
@@ -927,6 +941,19 @@ export class SurplusService {
     if (filters.lienWindow === 'closed') rows = rows.filter((r) => !r.lienWindowOpen);
     if (filters.blockedOnly) rows = rows.filter((r) => !r.compliance.clear);
 
+    // The course's two working lists: people we have never heard from, and
+    // files with a channel nobody has tried yet.
+    if (filters.contact) rows = rows.filter((r) => r.contactStatus === filters.contact);
+    if (filters.missingChannel) rows = rows.filter((r) => r.channelsMissing.length > 0);
+
+    if (filters.sort === 'untapped') {
+      rows.sort(
+        (a, b) =>
+          (CONTACT_RANK[a.contactStatus] || 0) - (CONTACT_RANK[b.contactStatus] || 0) ||
+          b.workScore - a.workScore,
+      );
+    }
+
     if (filters.sort === 'notice') {
       rows.sort((a, b) => (a.noticeAge ?? 9999) - (b.noticeAge ?? 9999));
     }
@@ -1068,6 +1095,9 @@ export class SurplusService {
       }, {}),
       /** One pot per sale. See the note above. */
       netInPipeline: props.reduce((acc: number, p: any) => acc + (p.netToClaimant || 0), 0),
+      // The two working lists, as property counts to match the chips.
+      notTapped: props.filter((p: any) => p.contactStatus === 'not_tapped' && p.workScore > 0).length,
+      missingChannel: props.filter((p: any) => p.channelsMissing?.length > 0 && p.workScore > 0).length,
       complianceBlocked: all.filter((r) => !r.compliance.clear).length,
       belowFloor: all.length - all.filter((r) => r.grossSurplus >= SURPLUS_FLOOR).length,
       total: all.length,
@@ -1250,6 +1280,32 @@ export class SurplusService {
       touches: lead.touchCount || 0,
       lastTouchedAt: lead.lastTouchedAt,
 
+      // Tapped / Not Tapped, and which of the four channels have been tried.
+      // Recap scheduled is tapped with a dated follow-up on the books.
+      tappedAt: d.tappedAt,
+      contactStatus: !d.tappedAt
+        ? 'not_tapped'
+        : (lead.tasks || []).some((t: any) => t.dueDate)
+          ? 'recap_scheduled'
+          : 'tapped',
+      channels: {
+        called: (lead._count?.callLogs || 0) > 0,
+        texted: (lead._count?.messages || 0) > 0,
+        emailed: (lead._count?.emails || 0) > 0,
+        lettered: !!d.letterMailedAt,
+      },
+      channelsMissing: CHANNELS.filter((c) => {
+        const tried = {
+          called: (lead._count?.callLogs || 0) > 0,
+          texted: (lead._count?.messages || 0) > 0,
+          emailed: (lead._count?.emails || 0) > 0,
+          lettered: !!d.letterMailedAt,
+        };
+        return !tried[c];
+      }),
+      credibilitySentAt: d.credibilitySentAt,
+      credibilityChannels: d.credibilityChannels ? String(d.credibilityChannels).split(',') : [],
+
       // The next thing somebody has committed to doing on this claimant, and
       // whether it has slipped. Open tasks only, soonest first.
       nextTask: lead.tasks?.[0]
@@ -1431,6 +1487,18 @@ export function groupByProperty(rows: any[]): any[] {
         .filter(Boolean)
         .sort()
         .pop() || null,
+      // Contact state rolled up: the property is tapped if anyone on it has
+      // replied, and a channel counts as tried if it was tried on anyone.
+      contactStatus: ranked
+        .map((m: any) => m.contactStatus || 'not_tapped')
+        .sort((a: string, b: string) => (CONTACT_RANK[b] || 0) - (CONTACT_RANK[a] || 0))[0],
+      tappedAt: ranked.map((m: any) => m.tappedAt).filter(Boolean).sort().pop() || null,
+      channels: CHANNELS.reduce((acc: Record<string, boolean>, c) => {
+        acc[c] = ranked.some((m: any) => m.channels?.[c]);
+        return acc;
+      }, {}),
+      channelsMissing: CHANNELS.filter((c) => !ranked.some((m: any) => m.channels?.[c])),
+      credibilitySentAt: ranked.map((m: any) => m.credibilitySentAt).filter(Boolean).sort().pop() || null,
       // The soonest open task across the claimants, so the board can sort on
       // what is due next and flag what has slipped.
       nextTask: ranked

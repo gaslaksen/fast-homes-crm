@@ -773,6 +773,18 @@ You decide the right approach based on the conversation flow.${photoNudge}`.trim
    * the reply+{leadId}@ Reply-To address; falls back to matching sellerEmail.
    * Stores an inbound Email, surfaces it in the thread, and pauses automation.
    */
+  /**
+   * A surplus claimant has replied through this channel, so the file is
+   * Tapped. First reply only: the date is when contact was first made, and a
+   * later reply does not move it.
+   */
+  private async markSurplusTapped(leadId: string, source?: string | null) {
+    if (source !== 'SURPLUS') return;
+    await this.prisma.surplusDetail
+      .updateMany({ where: { leadId, tappedAt: null }, data: { tappedAt: new Date() } })
+      .catch((err: any) => this.logger.warn(`Could not mark ${leadId} tapped: ${err.message}`));
+  }
+
   async handleInboundEmail(data: {
     leadId?: string | null;
     from: string;
@@ -850,6 +862,7 @@ You decide the right approach based on the conversation flow.${photoNudge}`.trim
 
     const summaryText = (data.bodyText || data.subject || '').trim().substring(0, 500);
     await this.syncThreadSummary(lead.id, summaryText, 'INBOUND');
+    await this.markSurplusTapped(lead.id, lead.source);
 
     // Push notify the assigned user (or the whole org) about the inbound reply
     this.pushService.notifyNewMessage(lead, summaryText).catch((err) =>
@@ -986,6 +999,7 @@ You decide the right approach based on the conversation flow.${photoNudge}`.trim
       },
     });
     await this.syncThreadSummary(lead.id, body, 'INBOUND');
+    await this.markSurplusTapped(lead.id, lead.source);
 
     // Push notify the assigned user (or the whole org) about the inbound reply
     this.pushService.notifyNewMessage(lead, body).catch((err) =>

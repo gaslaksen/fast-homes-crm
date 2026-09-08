@@ -244,6 +244,15 @@ export const surplusAPI = {
     api.post(`/surplus/templates/${kind}`, data),
   activateTemplate: (kind: string, version: number) =>
     api.post(`/surplus/templates/${kind}/activate`, { version }),
+
+  // ── Credibility packet ──
+  /** Whether the packet's links are configured, and which are missing. */
+  credibilityStatus: () => api.get('/surplus/credibility/status'),
+  /** Send the packet by text, email, or both, as Dig Deeper. */
+  sendCredibility: (
+    id: string,
+    body: { channels: ('sms' | 'email')[]; phone?: string | null; email?: string | null },
+  ) => api.post(`/surplus/${id}/credibility`, body),
   // A fresh link to a county document whose stored link expires (RealTDM).
   documentLink: (source: string, docId: string, docType?: string | null) =>
     api.get('/surplus/document-link', { params: { source, docId, docType: docType || undefined } }),

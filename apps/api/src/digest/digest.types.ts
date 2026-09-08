@@ -173,6 +173,10 @@ export interface DigestBrief {
   /** Follow-ups on surplus claimants that are past due, oldest first. */
   surplusOverdue: SurplusTaskRow[];
   surplusOverdueTotal: number;
+  /** Live claimants nobody has heard back from yet. */
+  surplusNotTapped: number;
+  /** Live claimants with at least one of call, text, email, letter untried. */
+  surplusMissingChannel: number;
   /** What each automated county pull did, or failed to do. */
   feeds: FeedRow[];
   yesterday: YesterdayStat[];

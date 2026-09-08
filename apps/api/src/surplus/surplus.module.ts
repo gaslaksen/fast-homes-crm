@@ -11,12 +11,19 @@ import { SurplusNoticeService } from './surplus-notice.service';
 import { SurplusProbateService } from './surplus-probate.service';
 import { SurplusHeirsService } from './surplus-heirs.service';
 import { SurplusTemplatesService } from './surplus-templates.service';
+import { SurplusCredibilityService } from './surplus-credibility.service';
+import { MessagesModule } from '../messages/messages.module';
 
 @Module({
+  // MessagesModule for the credibility packet, which goes out over the same
+  // SMS and email paths as a hand-typed message so it lands on the timeline
+  // and sends as Dig Deeper.
+  imports: [MessagesModule],
   controllers: [SurplusController],
   providers: [
     SurplusService,
     SurplusTemplatesService,
+    SurplusCredibilityService,
     SurplusImportService,
     SurplusIngestService,
     SurplusPollService,

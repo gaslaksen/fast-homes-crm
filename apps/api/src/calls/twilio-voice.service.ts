@@ -12,6 +12,7 @@ import {
   SURPLUS_CALL_OUTCOME_LABEL,
   SURPLUS_OBJECTION_LABEL,
   surplusFollowUpRule,
+  surplusCallConnected,
 } from '@fast-homes/shared';
 
 /** What the summary screen sends after a call. Only `disposition` is universal. */
@@ -683,6 +684,14 @@ export class TwilioVoiceService {
       }
     }
 
+    // A surplus claimant ringing us back is contact made, whatever happens
+    // next on the call. The voicemail's whole job is to produce this.
+    if (lead?.id && (lead as any).source === LeadSource.SURPLUS) {
+      await this.prisma.surplusDetail
+        .updateMany({ where: { leadId: lead.id, tappedAt: null }, data: { tappedAt: new Date() } })
+        .catch(() => undefined);
+    }
+
     const identities = await this.getRingIdentities();
     if (identities.length === 0) {
       response.say('No agents are available to take your call. Please try again later.');
@@ -744,7 +753,7 @@ export class TwilioVoiceService {
     if (!match) return null;
     return this.prisma.lead.findUnique({
       where: { id: match.leadId },
-      select: { id: true, sellerFirstName: true, sellerLastName: true },
+      select: { id: true, sellerFirstName: true, sellerLastName: true, source: true },
     });
   }
 
@@ -1020,6 +1029,16 @@ export class TwilioVoiceService {
     // instruction and takes effect on the record, not in somebody's notes.
     // Reaching the claimant is what Contacted means, so a New file moves.
     const detail = lead.source === LeadSource.SURPLUS ? lead.surplusDetail : null;
+
+    // The claimant themselves picked up: the file is Tapped. A relative
+    // passing a message is progress but not contact with the person who can
+    // sign, so it does not count here.
+    if (detail && outcome && surplusCallConnected(outcome) && outcome !== SurplusCallOutcome.SPOKE_RELATIVE) {
+      await this.prisma.surplusDetail.updateMany({
+        where: { id: detail.id, tappedAt: null },
+        data: { tappedAt: new Date() },
+      });
+    }
     if (detail && outcome === SurplusCallOutcome.DO_NOT_CALL && !detail.doNotCall) {
       await this.prisma.lead.update({
         where: { id: lead.id },

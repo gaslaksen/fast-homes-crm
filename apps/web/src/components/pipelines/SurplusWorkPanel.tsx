@@ -134,7 +134,32 @@ export interface SurplusPanelLead {
   /** One of us mailed a letter. Date and the address on the envelope. */
   letterMailedAt: string | null;
   letterMailedTo: string | null;
+  /** 'not_tapped' | 'tapped' | 'recap_scheduled', from the channels that heard from them. */
+  contactStatus: string;
+  tappedAt: string | null;
+  /** Which of the four channels have been tried, off the records themselves. */
+  channels: { called: boolean; texted: boolean; emailed: boolean; lettered: boolean };
+  channelsMissing: string[];
+  credibilitySentAt: string | null;
+  credibilityChannels: string[];
 }
+
+const CONTACT_LABEL: Record<string, string> = {
+  not_tapped: 'Not tapped',
+  tapped: 'Tapped',
+  recap_scheduled: 'Recap scheduled',
+};
+const CONTACT_TONE: Record<string, string> = {
+  not_tapped: 'var(--amber)',
+  tapped: 'var(--mint)',
+  recap_scheduled: 'var(--mint)',
+};
+const CHANNEL_GLYPH: [keyof SurplusPanelLead['channels'], string, string][] = [
+  ['called', '☎', 'Called'],
+  ['texted', '\u{1F4AC}', 'Texted'],
+  ['emailed', '@', 'Emailed'],
+  ['lettered', '✉', 'Lettered'],
+];
 
 /** Colour per trace tone. Bad is red because a wrong-person result is a
  *  discard, not a partial success. */
@@ -808,6 +833,7 @@ function CaseTab({
             : undefined
         }
       >
+        <CredibilityBlock lead={lead} say={say} onChanged={onChanged} />
         {/* The verdict, stated before the contacts rather than inferred from
             their absence. "Nothing has been tried" and "everything has been
             tried" both render as an empty contact list, and they want opposite
@@ -1483,7 +1509,148 @@ function StageControl({
           </span>
         )}
       </div>
+      <ContactLine lead={lead} />
     </Section>
+  );
+}
+
+/**
+ * Tapped or not, and which channels have been tried. Both derived: tapped is
+ * stamped by the channel that heard from the claimant, and a channel counts
+ * as tried when its own record exists, so nothing here can be ticked by hand
+ * and drift from what actually went out.
+ */
+function ContactLine({ lead }: { lead: SurplusPanelLead }) {
+  const status = lead.contactStatus || 'not_tapped';
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', fontSize: 12, marginTop: 4 }}>
+      <span style={{ fontWeight: 700, color: CONTACT_TONE[status] }}>
+        {CONTACT_LABEL[status]}
+        {lead.tappedAt ? ` ${fmtDate(lead.tappedAt)}` : ''}
+      </span>
+      <span style={{ display: 'inline-flex', gap: 6 }} title="Called, texted, emailed, lettered">
+        {CHANNEL_GLYPH.map(([k, glyph, label]) => {
+          const on = !!lead.channels?.[k];
+          return (
+            <span
+              key={k}
+              title={on ? `${label}` : `Not yet ${label.toLowerCase()}`}
+              style={{
+                fontSize: 11,
+                padding: '1px 6px',
+                borderRadius: 4,
+                background: on ? 'var(--mintGhost)' : 'var(--surface3)',
+                color: on ? 'var(--mint)' : 'var(--faint)',
+                textDecoration: on ? 'none' : 'line-through',
+              }}
+            >
+              {glyph} {label}
+            </span>
+          );
+        })}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * The Instant Credibility packet from the panel: website, Sunbiz filing,
+ * one-pager and callback number, by text or email, as Dig Deeper. Shows when
+ * it last went out so a follow-up call does not send the same links twice,
+ * and stays disabled with the reason until the links are configured.
+ */
+function CredibilityBlock({
+  lead,
+  say,
+  onChanged,
+}: {
+  lead: SurplusPanelLead;
+  say: (msg: string) => void;
+  onChanged: () => void;
+}) {
+  const [status, setStatus] = useState<{ ready: boolean; missing: string[] } | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  useEffect(() => {
+    surplusAPI
+      .credibilityStatus()
+      .then((r) => setStatus(r.data || null))
+      .catch(() => setStatus({ ready: false, missing: ['status unavailable'] }));
+  }, []);
+
+  const phone = lead.phones.find((p) => !p.dnc)?.number || null;
+  const email = lead.emails[0] || null;
+
+  const send = async (channel: 'sms' | 'email') => {
+    setBusy(channel);
+    try {
+      const r = await surplusAPI.sendCredibility(lead.id, {
+        channels: [channel],
+        phone: channel === 'sms' ? phone : undefined,
+        email: channel === 'email' ? email : undefined,
+      });
+      say(
+        `Credibility packet sent by ${channel === 'sms' ? 'text' : 'email'}.` +
+          (r.data?.errors?.length ? ` ${r.data.errors.join(' ')}` : ''),
+      );
+      onChanged();
+    } catch (err: any) {
+      say(err?.response?.data?.message || 'The packet could not be sent.');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const ready = !!status?.ready;
+  const why = status ? `Not set up: ${status.missing.join(', ')}` : 'Checking...';
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        flexWrap: 'wrap',
+        padding: '7px 10px',
+        marginBottom: 8,
+        borderRadius: 6,
+        background: 'var(--bg2)',
+        fontSize: 12,
+      }}
+    >
+      <span style={{ fontWeight: 700 }}>Credibility packet</span>
+      {lead.credibilitySentAt ? (
+        <span style={{ color: 'var(--mint)' }}>
+          sent {fmtDate(lead.credibilitySentAt)}
+          {lead.credibilityChannels?.length
+            ? ` by ${lead.credibilityChannels.map((c) => (c === 'sms' ? 'text' : 'email')).join(' and ')}`
+            : ''}
+        </span>
+      ) : (
+        <span style={{ color: 'var(--faint)' }}>not sent yet</span>
+      )}
+      <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 6 }}>
+        <button
+          type="button"
+          className="dc-wp-btn"
+          disabled={!ready || !phone || !!busy || lead.doNotCall}
+          onClick={() => send('sms')}
+          title={!ready ? why : !phone ? 'No callable number' : 'Text the website, Sunbiz filing, one-pager and callback number'}
+        >
+          {busy === 'sms' ? 'Sending...' : 'Text packet'}
+        </button>
+        <button
+          type="button"
+          className="dc-wp-btn"
+          disabled={!ready || !email || !!busy || lead.doNotCall}
+          onClick={() => send('email')}
+          title={!ready ? why : !email ? 'No email on file' : 'Email the packet'}
+        >
+          {busy === 'email' ? 'Sending...' : 'Email packet'}
+        </button>
+      </span>
+      {status && !ready && (
+        <div style={{ flexBasis: '100%', fontSize: 11, color: 'var(--faint)' }}>{why}</div>
+      )}
+    </div>
   );
 }
 

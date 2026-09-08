@@ -110,6 +110,10 @@ export interface SurplusListFilters {
   blockedOnly?: boolean;
   hideDead?: boolean;
   hideDnc?: boolean;
+  /** 'not_tapped' | 'tapped' | 'recap_scheduled': whether the claimant has ever responded. */
+  contact?: string;
+  /** Only claimants with at least one of call, text, email, letter not yet attempted. */
+  missingChannel?: boolean;
   /** 'notice' | 'surplus' | 'net' | 'tier' */
   sort?: string;
   page?: number;

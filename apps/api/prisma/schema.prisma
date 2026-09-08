@@ -807,6 +807,17 @@ model SurplusDetail {
   letterMailedAt DateTime?
   letterMailedTo String?
 
+  /// When the claimant first responded through any channel: answered a call
+  /// and it was them, texted back, or emailed back. The course's Tapped / Not
+  /// Tapped line. Set by the channel that heard from them, never ticked by
+  /// hand, so "tapped" always means a real reply exists on the timeline.
+  tappedAt DateTime?
+  /// When the credibility packet (website, state filing, one-pager, callback
+  /// number) last went out, and by which channels ("sms,email"). Kept on the
+  /// row so a follow-up call does not send the same links twice.
+  credibilitySentAt    DateTime?
+  credibilityChannels  String?
+
   // ── Contacts ──────────────────────────────────────────────────────────────
   phone2     String?
   phone3     String?

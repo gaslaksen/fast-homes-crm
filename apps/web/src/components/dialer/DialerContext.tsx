@@ -67,6 +67,7 @@ export interface SurplusScript {
     callerName: string;
   };
   scripts: { phone: RenderedScript; voicemail: RenderedScript; relative: RenderedScript };
+  credibility: { ready: boolean; missing: string[]; sentAt: string | null; channels: string[] };
 }
 
 interface DialerState {
@@ -79,6 +80,8 @@ interface DialerState {
   contact: CallContact | null;
   /** The surplus script pane's data, present during a surplus call. */
   script: SurplusScript | null;
+  /** Re-read the script pane's data, after the packet goes out. */
+  refreshScript: () => void;
   muted: boolean;
   onHold: boolean;
   durationSec: number;
@@ -532,6 +535,15 @@ export function DialerProvider({ children }: { children: ReactNode }) {
     [lastCallSid],
   );
 
+  const refreshScript = useCallback(() => {
+    const id = contact?.leadId;
+    if (!id || contact?.leadSource !== 'SURPLUS') return;
+    surplusAPI
+      .script(id)
+      .then((r) => setScript(r.data || null))
+      .catch(() => undefined);
+  }, [contact?.leadId, contact?.leadSource]);
+
   const reset = useCallback(() => {
     setView('dialpad');
     setContact(null);
@@ -566,6 +578,7 @@ export function DialerProvider({ children }: { children: ReactNode }) {
         error,
         contact,
         script,
+        refreshScript,
         muted,
         onHold,
         durationSec,

@@ -424,6 +424,11 @@ export class DigestService {
       });
     const surplusClaimants: any[] = (surplusBoard?.data || []).flatMap((p: any) => p.claimants || [p]);
     const surplusOpenTotal = surplusBoard?.leadCount ?? 0;
+    // The course's two working lists, as counts: people we have never heard
+    // from, and files with a channel nobody has tried.
+    const surplusLive = surplusClaimants.filter((c) => c.workScore > 0);
+    const surplusNotTapped = surplusLive.filter((c) => c.contactStatus === 'not_tapped').length;
+    const surplusMissingChannel = surplusLive.filter((c) => (c.channelsMissing || []).length > 0).length;
     const surplusCallable = surplusClaimants.filter(
       (c) => c.workScore > 0 && c.cleanPhoneCount > 0 && !c.doNotCall,
     );
@@ -729,6 +734,8 @@ export class DigestService {
       surplusIngestNote,
       surplusOverdue,
       surplusOverdueTotal: surplusOverdueTasks.length,
+      surplusNotTapped,
+      surplusMissingChannel,
       feeds,
       yesterday,
       news,
