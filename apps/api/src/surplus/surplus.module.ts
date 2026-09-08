@@ -10,11 +10,13 @@ import { SurplusSkiptraceService } from './surplus-skiptrace.service';
 import { SurplusNoticeService } from './surplus-notice.service';
 import { SurplusProbateService } from './surplus-probate.service';
 import { SurplusHeirsService } from './surplus-heirs.service';
+import { SurplusTemplatesService } from './surplus-templates.service';
 
 @Module({
   controllers: [SurplusController],
   providers: [
     SurplusService,
+    SurplusTemplatesService,
     SurplusImportService,
     SurplusIngestService,
     SurplusPollService,

@@ -2163,6 +2163,38 @@ model SurplusHeir {
 /// this row the case is simply absent the next morning, which reads to the poll
 /// as a brand new case, and it comes back with every note, edited number and
 /// Dead marking gone.
+/// A versioned piece of surplus outreach wording: the phone script, the
+/// voicemail, the letters, the credibility texts. Versions are immutable and
+/// numbered per kind, so a call log that says "phone script v3" points at
+/// exactly the words that were on screen. Saving an edit creates the next
+/// version and makes it the active one; older versions stay for the record
+/// and can be re-activated.
+model SurplusTemplate {
+  id             String  @id @default(cuid())
+  organizationId String?
+  /// SurplusTemplateKind.
+  kind           String
+  version        Int
+  name           String?
+  /// For email kinds. Ignored elsewhere.
+  subject        String?
+  body           String  @db.Text
+  active         Boolean @default(true)
+  /// When somebody last read it through and agreed it still says the right
+  /// thing. Distinct from updatedAt: a template can be reviewed and left alone.
+  lastReviewedAt DateTime?
+  /// Why this version was made, for the history list.
+  notes          String?
+  createdByUserId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organizationId, kind, version])
+  @@index([organizationId, kind, active])
+  @@map("surplus_templates")
+}
+
 model SurplusSuppression {
   id             String   @id @default(cuid())
   organizationId String?

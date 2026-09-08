@@ -8,6 +8,7 @@ import SurplusWorkPanel from '@/components/pipelines/SurplusWorkPanel';
 import SurplusPropertyCard, { STATUS_ACCENT } from '@/components/pipelines/SurplusPropertyCard';
 import type { PipelineColumn, PipelineStage } from '@/components/pipelines/PipelineBoard';
 import { authAPI, surplusAPI } from '@/lib/api';
+import { dueLabel, isOverdue } from '@/lib/dates';
 import '@/components/pipelines/pipeline-board.css';
 import {
   CHIP,
@@ -364,6 +365,40 @@ const SURPLUS_COLUMNS: PipelineColumn<any>[] = [
         <span style={{ color: 'var(--faint)' }}> · {agoLabel(r.lastTouchedAt)}</span>
       </span>
     ),
+  },
+  {
+    // What somebody has promised to do next, and whether it has slipped. The
+    // course's whole discipline is that every follow-up has a date; this is
+    // where the board shows whether the dates are being kept.
+    key: 'nextTask',
+    label: 'Next action',
+    width: '170px',
+    // Soonest first on the first click: the board sorts descending, so the
+    // nearest date gets the largest value and rows with nothing due go last.
+    sortValue: (r) => (r.nextTask?.dueDate ? -new Date(r.nextTask.dueDate).getTime() : -Infinity),
+    render: (r) =>
+      r.nextTask ? (
+        <div style={{ fontSize: 12, minWidth: 0 }}>
+          <div
+            style={{
+              fontWeight: 600,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              maxWidth: 160,
+            }}
+            title={r.nextTask.title}
+          >
+            {r.nextTask.title}
+          </div>
+          <div style={{ fontSize: 11, color: isOverdue(r.nextTask.dueDate) ? 'var(--red)' : 'var(--faint)' }}>
+            {dueLabel(r.nextTask.dueDate)}
+            {r.openTaskCount > 1 ? ` · +${r.openTaskCount - 1} more` : ''}
+          </div>
+        </div>
+      ) : (
+        <span style={{ fontSize: 12, color: 'var(--faint)' }}>none</span>
+      ),
   },
   {
     key: 'contact',

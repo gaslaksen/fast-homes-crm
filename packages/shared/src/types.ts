@@ -360,6 +360,35 @@ export const SURPLUS_CALL_OUTCOME_LABEL: Record<SurplusCallOutcome, string> = {
   [SurplusCallOutcome.DO_NOT_CALL]: 'Asked not to be called',
 };
 
+/**
+ * The pieces of surplus outreach wording that are kept as versioned
+ * templates. One kind, one active version at a time.
+ */
+export enum SurplusTemplateKind {
+  PHONE_SCRIPT = 'phone_script',
+  VOICEMAIL = 'voicemail',
+  /** What to say when a relative or neighbour answers instead. */
+  RELATIVE_SCRIPT = 'relative_script',
+  LETTER_CLAIMANT = 'letter_claimant',
+  LETTER_FAMILY = 'letter_family',
+  LETTER_ASSOCIATE = 'letter_associate',
+  CREDIBILITY_SMS = 'credibility_sms',
+  CREDIBILITY_EMAIL = 'credibility_email',
+  NOTARY_INSTRUCTIONS = 'notary_instructions',
+}
+
+export const SURPLUS_TEMPLATE_KIND_LABEL: Record<SurplusTemplateKind, string> = {
+  [SurplusTemplateKind.PHONE_SCRIPT]: 'Phone script',
+  [SurplusTemplateKind.VOICEMAIL]: 'Voicemail',
+  [SurplusTemplateKind.RELATIVE_SCRIPT]: 'Relative or neighbour answered',
+  [SurplusTemplateKind.LETTER_CLAIMANT]: 'Letter to the claimant',
+  [SurplusTemplateKind.LETTER_FAMILY]: 'Letter to a family member',
+  [SurplusTemplateKind.LETTER_ASSOCIATE]: 'Letter to a neighbour or associate',
+  [SurplusTemplateKind.CREDIBILITY_SMS]: 'Credibility packet text',
+  [SurplusTemplateKind.CREDIBILITY_EMAIL]: 'Credibility packet email',
+  [SurplusTemplateKind.NOTARY_INSTRUCTIONS]: 'Notary instructions',
+};
+
 /** The Big Four from the course, plus the deferral and a catch-all. */
 export enum SurplusObjection {
   WHO_ARE_YOU = 'who_are_you',
