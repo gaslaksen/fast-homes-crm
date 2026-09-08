@@ -21,16 +21,27 @@ project with `apps/digdeeper-site` as the Root Directory. The Dealcore web app
 
 ## Editing copy
 
-Edit `public/index.html` directly. The fee section must never state a typed
-percentage. Say contingency only, no advance fee, no recovery no fee, capped by
-Florida law. FS 45.033 caps compensation on clerk-held surplus at 12 percent and
-the CRM's compliance table (`apps/api/src/surplus/surplus-compliance.ts`) is
-the source of truth for that figure, so the site and PDF describe the cap
-without quoting it.
+Edit `public/index.html` directly, and keep `onepager/overview.html` saying
+the same things.
 
-The entity facts in the Verify section come from the Sunbiz record for
-document number L26000438506. If the registered agent or principal address
-changes on Sunbiz, change it here and in the one-pager too.
+Positioning (decided 2026-09-08): the site presents D.I.G. Deeper as an
+unclaimed funds recovery firm, based in Florida and working nationwide. It
+must not name the kind of funds we recover or the mechanics of where they sit
+(no foreclosure, tax deed, surplus, county clerk or statute references). A
+claimant who is told exactly where the money is can go collect it alone. The
+model for tone is an asset recovery firm's public page, not a legal notice.
+
+Fee wording never states a percentage. Say contingency only, no upfront cost,
+no recovery no fee, set in writing before work begins, compliant with state
+law where a cap applies. The CRM's compliance table
+(`apps/api/src/surplus/surplus-compliance.ts`) is the source of truth for the
+Florida cap and for the disclosures the signed agreement must carry. Those
+disclosures live in the agreement, not on this page.
+
+The Company details section carries the legal name, registered agent and a
+low key link to the Florida Sunbiz record for document L26000438506. If the
+registered agent or principal address changes on Sunbiz, change it here and in
+the one-pager too.
 
 ## Rebuilding the PDF
 
