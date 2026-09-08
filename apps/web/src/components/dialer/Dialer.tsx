@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useDialer, DialerTab } from './DialerContext';
-import { leadsAPI, callsAPI, authAPI } from '@/lib/api';
+import { leadsAPI, callsAPI, authAPI, surplusAPI } from '@/lib/api';
 import {
   SurplusCallOutcome,
   SurplusObjection,
@@ -91,6 +91,73 @@ export default function Dialer() {
 }
 
 /**
+ * One tap to send the credibility packet while the claimant is still on the
+ * line, so they can look the company up on their own screen. Disabled with
+ * the reason until the links are configured, and shows when it last went out
+ * so the next call does not send it again.
+ */
+function CredibilityButtons() {
+  const d = useDialer();
+  const [busy, setBusy] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const s = d.script;
+  const leadId = d.contact?.leadId;
+  if (!s || !leadId) return null;
+  const c = s.credibility;
+
+  const send = async (channel: 'sms' | 'email') => {
+    setBusy(channel);
+    setNote(null);
+    try {
+      const r = await surplusAPI.sendCredibility(leadId, {
+        channels: [channel],
+        phone: channel === 'sms' ? d.contact?.phone : undefined,
+      });
+      setNote(`Packet sent by ${channel === 'sms' ? 'text' : 'email'}.${r.data?.errors?.length ? ` ${r.data.errors.join(' ')}` : ''}`);
+      d.refreshScript();
+    } catch (err: any) {
+      setNote(err?.response?.data?.message || 'The packet could not be sent.');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const sentLabel = c.sentAt
+    ? `Packet sent ${new Date(c.sentAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}${
+        c.channels.length ? ` by ${c.channels.map((x) => (x === 'sms' ? 'text' : 'email')).join(' and ')}` : ''
+      }`
+    : null;
+
+  return (
+    <div className="mt-2">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <button
+          onClick={() => send('sms')}
+          disabled={!c.ready || !!busy}
+          title={c.ready ? 'Text the website, Sunbiz filing, one-pager and callback number' : `Not set up: ${c.missing.join(', ')}`}
+          className="px-2 py-1 text-[11px] font-medium rounded-md border border-primary-300 dark:border-primary-700 text-primary-700 dark:text-primary-300 hover:bg-primary-50 dark:hover:bg-primary-900/20 disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          {busy === 'sms' ? 'Sending...' : 'Text credibility packet'}
+        </button>
+        <button
+          onClick={() => send('email')}
+          disabled={!c.ready || !!busy}
+          title={c.ready ? 'Email the packet to the address on file' : `Not set up: ${c.missing.join(', ')}`}
+          className="px-2 py-1 text-[11px] font-medium rounded-md border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          {busy === 'email' ? 'Sending...' : 'Email packet'}
+        </button>
+        {sentLabel && <span className="text-[10.5px] text-green-700 dark:text-green-400">{sentLabel}</span>}
+      </div>
+      {!c.ready && (
+        <p className="mt-1 text-[10.5px] text-gray-400">Packet links not configured: {c.missing.join(', ')}</p>
+      )}
+      {note && <p className="mt-1 text-[10.5px] text-gray-600 dark:text-gray-300">{note}</p>}
+    </div>
+  );
+}
+
+/**
  * The course's script, on screen during the call, with the facts the caller
  * needs beside it. Merge fields are already filled by the API, so what is on
  * screen is what to say, and the version shown is what the call log records.
@@ -135,6 +202,7 @@ function ScriptPane() {
           )}
         </div>
         <p className="mt-1.5 text-[11px] text-amber-700 dark:text-amber-400 leading-snug">{f.feeTerms}</p>
+        <CredibilityButtons />
       </div>
 
       <div className="flex gap-1 px-3 pt-2">

@@ -283,6 +283,7 @@ export class DigestRenderService {
     const footer = `${overdue}<div style="padding-top:12px;font-size:13px;color:${MUTED};line-height:1.55;">
         ${b.surplusIngestNote ? `<b style="color:${INK};">Overnight:</b> ${this.esc(b.surplusIngestNote)} ` : ''}
         ${b.surplusCallableTotal} of ${b.surplusOpenTotal} open claimants have a live number.
+        ${b.surplusNotTapped ? `${b.surplusNotTapped} not yet reached` : ''}${b.surplusNotTapped && b.surplusMissingChannel ? ', ' : ''}${b.surplusMissingChannel ? `${b.surplusMissingChannel} missing a channel` : ''}${b.surplusNotTapped || b.surplusMissingChannel ? '. ' : ''}
         <a href="${this.esc(b.appUrl)}/surplus-funds" style="color:${TEAL};font-weight:600;text-decoration:none;">Open the board &rarr;</a>
       </div>`;
 
@@ -541,6 +542,16 @@ export class DigestRenderService {
       }
       if (b.surplusIngestNote) out.push(`  Overnight: ${b.surplusIngestNote}`);
       out.push(`  ${b.surplusCallableTotal} of ${b.surplusOpenTotal} open claimants have a live number.`);
+      if (b.surplusNotTapped || b.surplusMissingChannel) {
+        out.push(
+          `  ${[
+            b.surplusNotTapped ? `${b.surplusNotTapped} not yet reached` : null,
+            b.surplusMissingChannel ? `${b.surplusMissingChannel} missing a channel` : null,
+          ]
+            .filter(Boolean)
+            .join(', ')}.`,
+        );
+      }
       out.push('');
     }
 

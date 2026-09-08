@@ -367,6 +367,43 @@ const SURPLUS_COLUMNS: PipelineColumn<any>[] = [
     ),
   },
   {
+    // Tapped or not, and the four channels. Tapped is stamped by the channel
+    // that heard back; a channel counts as tried when its own record exists.
+    // Nothing here is ticked by hand, so it cannot drift from what went out.
+    key: 'contactStatus',
+    label: 'Contact',
+    width: '150px',
+    sortValue: (r) => (r.contactStatus === 'not_tapped' ? 0 : r.contactStatus === 'tapped' ? 1 : 2),
+    render: (r) => {
+      const status = r.contactStatus || 'not_tapped';
+      const label = status === 'not_tapped' ? 'Not tapped' : status === 'tapped' ? 'Tapped' : 'Recap set';
+      const tone = status === 'not_tapped' ? 'var(--amber)' : 'var(--mint)';
+      const glyphs: [string, string][] = [
+        ['called', '☎'],
+        ['texted', '\u{1F4AC}'],
+        ['emailed', '@'],
+        ['lettered', '✉'],
+      ];
+      return (
+        <div style={{ fontSize: 12 }}>
+          <div style={{ fontWeight: 600, color: tone }}>{label}</div>
+          <div style={{ display: 'flex', gap: 5, fontSize: 11 }} title="Called, texted, emailed, lettered">
+            {glyphs.map(([k, g]) => (
+              <span key={k} style={{ color: r.channels?.[k] ? 'var(--mint)' : 'var(--faint)', opacity: r.channels?.[k] ? 1 : 0.5 }}>
+                {g}
+              </span>
+            ))}
+            {r.channelsMissing?.length ? (
+              <span style={{ color: 'var(--faint)' }}>{r.channelsMissing.length} to go</span>
+            ) : (
+              <span style={{ color: 'var(--mint)' }}>all four</span>
+            )}
+          </div>
+        </div>
+      );
+    },
+  },
+  {
     // What somebody has promised to do next, and whether it has slipped. The
     // course's whole discipline is that every follow-up has a date; this is
     // where the board shows whether the dates are being kept.
@@ -572,6 +609,9 @@ export default function SurplusFundsPage() {
     netInPipeline: 0,
     belowFloor: 0,
     total: 0,
+    /** Properties nobody has heard back from, and with an untried channel. */
+    notTapped: null as number | null,
+    missingChannel: null as number | null,
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -641,6 +681,8 @@ export default function SurplusFundsPage() {
         lienWindow: lienWin === 'all' ? undefined : lienWin,
         hideDead: hideDead || undefined,
         hideDnc: hideDnc || undefined,
+        contact: chipQ === 'not_tapped' ? 'not_tapped' : undefined,
+        missingChannel: chipQ === 'missing' || undefined,
         sort,
         pageSize: 200,
       });
@@ -1077,6 +1119,7 @@ export default function SurplusFundsPage() {
               set={setSort}
               opts={[
                 ['work', 'Sort: Call first'],
+                ['untapped', 'Sort: Not tapped first'],
                 ['surplus', 'Sort: Biggest surplus'],
                 ['net', 'Sort: Net to claimant'],
                 ['notice', 'Sort: Newest notice'],
@@ -1125,6 +1168,8 @@ export default function SurplusFundsPage() {
             <span className="dc-sep" />
             {(
               [
+                ['not_tapped', 'Not tapped'],
+                ['missing', 'Missing a channel'],
                 ['new', 'New, 7 days'],
                 ['estate', 'Estate or probate'],
                 ['lien', 'Competing lien filed'],
@@ -1137,10 +1182,20 @@ export default function SurplusFundsPage() {
                 title={
                   k === 'lien'
                     ? 'Informational. Does not block outreach, but the payout may land under the posted surplus.'
-                    : undefined
+                    : k === 'not_tapped'
+                      ? 'Nobody has heard back from anyone on this property yet. The working list.'
+                      : k === 'missing'
+                        ? 'At least one of call, text, email, letter has not been tried on this property.'
+                        : undefined
                 }
               >
                 {l}
+                {k === 'not_tapped' && stats.notTapped != null && (
+                  <span style={{ marginLeft: 5, opacity: 0.6 }}>{stats.notTapped}</span>
+                )}
+                {k === 'missing' && stats.missingChannel != null && (
+                  <span style={{ marginLeft: 5, opacity: 0.6 }}>{stats.missingChannel}</span>
+                )}
               </button>
             ))}
             <span className="dc-sep" />

@@ -19,6 +19,7 @@
  */
 
 import { Injectable, BadRequestException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   LeadSource,
@@ -43,8 +44,16 @@ export const MERGE_FIELDS: { key: string; meaning: string }[] = [
   { key: 'callerName', meaning: 'Your first name' },
   { key: 'companyName', meaning: 'Dig Deeper LLC' },
   { key: 'website', meaning: 'The company website, once there is one' },
+  { key: 'websiteUrl', meaning: 'The website as a full link, from DIGDEEPER_WEBSITE_URL' },
+  { key: 'sunbizLink', meaning: "The company's Florida state filing on Sunbiz, from DIGDEEPER_SUNBIZ_URL" },
+  { key: 'onePagerLink', meaning: 'The one-page company overview PDF, from DIGDEEPER_ONEPAGER_URL' },
   { key: 'window', meaning: 'The decision window asked for at the close' },
 ];
+
+/** What is left in a rendered body that the app could not fill. */
+export function unfilledFields(body: string): string[] {
+  return Array.from(new Set(Array.from(body.matchAll(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g)).map((m) => m[1])));
+}
 
 /**
  * Built-in version 0 of each kind: what the pane shows until somebody saves
@@ -93,17 +102,19 @@ Do not name the amount to a third party.`,
   [SurplusTemplateKind.LETTER_FAMILY]: { name: '', body: '' },
   [SurplusTemplateKind.LETTER_ASSOCIATE]: { name: '', body: '' },
   [SurplusTemplateKind.CREDIBILITY_SMS]: {
-    name: 'Draft',
-    body: `{{claimantFirstName}}, this is {{callerName}} with {{companyName}}. As promised: our website {{website}}. You can call me back any time on {{callbackNumber}}.`,
+    name: 'Course packet',
+    body: `{{claimantFirstName}}, this is {{callerName}} with {{companyName}}. As promised, so you can check us yourself: our website {{websiteUrl}} and our Florida state filing {{sunbizLink}}. Our one-page overview: {{onePagerLink}}. Call me back any time on {{callbackNumber}}.`,
   },
   [SurplusTemplateKind.CREDIBILITY_EMAIL]: {
-    name: 'Draft',
+    name: 'Course packet',
     subject: 'Who we are, from {{callerName}} at {{companyName}}',
     body: `Hi {{claimantFirstName}},
 
 Thank you for taking my call. As promised, here is where you can check us out for yourself.
 
-Website: {{website}}
+Website: {{websiteUrl}}
+Our Florida state filing (Sunbiz): {{sunbizLink}}
+One-page overview of who we are and how the fee works: {{onePagerLink}}
 Phone: {{callbackNumber}}, ask for {{callerName}}
 
 {{feeTerms}} There is no upfront cost and nothing to pay if nothing is recovered.
@@ -156,7 +167,68 @@ export interface ScriptFacts {
 
 @Injectable()
 export class SurplusTemplatesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private config: ConfigService,
+  ) {}
+
+  /**
+   * The links the credibility packet carries. Read from config rather than
+   * the brand constants because they arrive one at a time as the website,
+   * the Sunbiz record and the one-pager get made, and each is the on switch
+   * for its own line.
+   */
+  credibilityLinks(): { websiteUrl: string | null; sunbizLink: string | null; onePagerLink: string | null } {
+    const get = (k: string) => (this.config.get<string>(k) || '').trim() || null;
+    return {
+      websiteUrl: get('DIGDEEPER_WEBSITE_URL'),
+      sunbizLink: get('DIGDEEPER_SUNBIZ_URL'),
+      onePagerLink: get('DIGDEEPER_ONEPAGER_URL'),
+    };
+  }
+
+  /** Whether the packet can go out at all, and what is missing if not. */
+  credibilityReadiness(): { ready: boolean; missing: string[]; items: string[] } {
+    const links = this.credibilityLinks();
+    const missing: string[] = [];
+    if (!links.websiteUrl) missing.push('DIGDEEPER_WEBSITE_URL');
+    if (!links.sunbizLink) missing.push('DIGDEEPER_SUNBIZ_URL');
+    if (!links.onePagerLink) missing.push('DIGDEEPER_ONEPAGER_URL');
+    return {
+      ready: missing.length === 0,
+      missing,
+      items: ['website', 'Sunbiz filing', 'one-pager', 'callback number'],
+    };
+  }
+
+  /**
+   * The credibility text and email for one claimant, rendered, with anything
+   * the app could not fill named so the send can refuse rather than ship a
+   * blank.
+   */
+  async credibilityFor(leadId: string, organizationId?: string | null, userId?: string | null) {
+    const built = await this.fieldsFor(leadId, organizationId, userId);
+    if (!built) throw new BadRequestException('Surplus lead not found');
+    const readiness = this.credibilityReadiness();
+    const active = await this.list(organizationId);
+    const render = (kind: SurplusTemplateKind) => {
+      const t = active.kinds.find((k) => k.kind === kind)!;
+      const body = renderTemplate(t.body, built.fields);
+      const subject = t.subject ? renderTemplate(t.subject, built.fields) : '';
+      return {
+        version: t.version,
+        versionLabel: t.version ? `v${t.version}` : 'built-in',
+        body,
+        subject,
+        unfilled: unfilledFields(body).concat(unfilledFields(subject)),
+      };
+    };
+    return {
+      ...readiness,
+      sms: render(SurplusTemplateKind.CREDIBILITY_SMS),
+      email: render(SurplusTemplateKind.CREDIBILITY_EMAIL),
+    };
+  }
 
   /** The active version of every kind, with the built-in default standing in. */
   async list(organizationId?: string | null) {
@@ -270,6 +342,44 @@ export class SurplusTemplatesService {
    * caller needs on screen beside them.
    */
   async scriptFor(leadId: string, organizationId?: string | null, userId?: string | null) {
+    const built = await this.fieldsFor(leadId, organizationId, userId);
+    if (!built) return null;
+    const { facts, fields, detail } = built;
+
+    const active = await this.list(organizationId);
+    const pick = (kind: SurplusTemplateKind) => {
+      const t = active.kinds.find((k) => k.kind === kind)!;
+      return {
+        kind,
+        label: t.label,
+        version: t.version,
+        versionLabel: t.version ? `v${t.version}` : 'built-in',
+        body: renderTemplate(t.body, fields),
+      };
+    };
+
+    const readiness = this.credibilityReadiness();
+    return {
+      facts,
+      scripts: {
+        phone: pick(SurplusTemplateKind.PHONE_SCRIPT),
+        voicemail: pick(SurplusTemplateKind.VOICEMAIL),
+        relative: pick(SurplusTemplateKind.RELATIVE_SCRIPT),
+      },
+      /** The panel's existing relative wording, for parity with the name-search card. */
+      relativeNote: relativeOutreachScript(facts.claimant),
+      /** Whether the packet can be sent from the pane, and whether it already was. */
+      credibility: {
+        ready: readiness.ready,
+        missing: readiness.missing,
+        sentAt: detail.credibilitySentAt,
+        channels: detail.credibilityChannels ? String(detail.credibilityChannels).split(',') : [],
+      },
+    };
+  }
+
+  /** The facts and merge fields for one claimant. Shared by every renderer. */
+  private async fieldsFor(leadId: string, organizationId?: string | null, userId?: string | null) {
     const lead = await this.prisma.lead.findFirst({
       where: {
         id: leadId,
@@ -323,35 +433,18 @@ export class SurplusTemplatesService {
       website: DIG_DEEPER_BRAND.website || 'our website (coming soon)',
       window: '24 to 48 hours',
     };
+    const links = this.credibilityLinks();
     const fields: Record<string, string | number | boolean | null> = {
       ...facts,
+      ...links,
       surplusAmount:
         facts.surplusAmount != null
           ? `$${Math.round(facts.surplusAmount).toLocaleString('en-US')}`
           : null,
     };
+    // The bare website merge field reads as a link too once one exists.
+    if (!DIG_DEEPER_BRAND.website && links.websiteUrl) fields.website = links.websiteUrl;
 
-    const active = await this.list(organizationId);
-    const pick = (kind: SurplusTemplateKind) => {
-      const t = active.kinds.find((k) => k.kind === kind)!;
-      return {
-        kind,
-        label: t.label,
-        version: t.version,
-        versionLabel: t.version ? `v${t.version}` : 'built-in',
-        body: renderTemplate(t.body, fields),
-      };
-    };
-
-    return {
-      facts,
-      scripts: {
-        phone: pick(SurplusTemplateKind.PHONE_SCRIPT),
-        voicemail: pick(SurplusTemplateKind.VOICEMAIL),
-        relative: pick(SurplusTemplateKind.RELATIVE_SCRIPT),
-      },
-      /** The panel's existing relative wording, for parity with the name-search card. */
-      relativeNote: relativeOutreachScript(claimant),
-    };
+    return { facts, fields, detail: d };
   }
 }
