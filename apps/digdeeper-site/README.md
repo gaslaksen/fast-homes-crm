@@ -43,25 +43,46 @@ the page count and file size. The PDF must be one page and under 1 MB.
 
 ## Deploying
 
-The Vercel project deploys from GitHub on every push to `master` that touches
-this folder. Project settings:
-
-- Root Directory: `apps/digdeeper-site`
-- Framework Preset: Other
-- Build Command: none (leave blank, or override with an empty command)
-- Output Directory: leave blank (the root directory is served as is)
-- Ignored Build Step: "Only build if there are changes in the Root Directory"
-
-Manual deploy from a machine that has run `vercel login`:
+The Vercel project is `digdeeper-site` under the `gaslaksens-projects` team,
+created 2026-09-08 from the CLI. It is not connected to GitHub yet, so a push
+to `master` does not deploy it. Deploy from a machine that has run
+`vercel login`:
 
 ```bash
 cd apps/digdeeper-site && vercel --prod
 ```
 
+The `.vercel/` folder the CLI writes here is gitignored.
+
+To switch to deploy-on-push later, set these in the Vercel dashboard first, or
+a git-triggered build will run from the repo root and find no site:
+
+- Root Directory: `apps/digdeeper-site`
+- Framework Preset: Other
+- Build Command: none
+- Output Directory: leave blank (the root directory is served as is)
+- Ignored Build Step: "Only build if there are changes in the Root Directory"
+
+Then run `vercel git connect` from this folder.
+
 ## DNS
 
-Nameservers for `digdeeperllc.com` are at GoDaddy. Email for the brand runs on
-`crm.digdeeperllc.com` through Mailgun, so the records on that subdomain (MX,
-TXT for SPF, DKIM, and the tracking CNAME) must not be changed. Only the apex
-`A` record and the `www` `CNAME` point at Vercel. Vercel shows the exact
-values when the domain is added to the project.
+Nameservers for `digdeeperllc.com` stay at GoDaddy (`ns69.domaincontrol.com`,
+`ns70.domaincontrol.com`). Do not move them to Vercel: email for the brand runs
+on `crm.digdeeperllc.com` through Mailgun, and the records on that subdomain
+(MX, TXT for SPF, DKIM, and the tracking CNAME) live in the GoDaddy zone.
+
+Records Vercel asked for when the domains were added (2026-09-08):
+
+| Host | Type | Value |
+|---|---|---|
+| `@` | A | `76.76.21.21` |
+| `www` | A | `76.76.21.21` |
+
+The apex previously held two parking A records; both are replaced by the one
+above. `www` previously held a CNAME to the apex; replace it with the A record
+(or a CNAME to `cname.vercel-dns.com`, either works). `www` redirects to the
+apex permanently, from `vercel.json`.
+
+Check with `vercel domains inspect digdeeperllc.com` once the records
+propagate; Vercel issues the certificate on its own.
