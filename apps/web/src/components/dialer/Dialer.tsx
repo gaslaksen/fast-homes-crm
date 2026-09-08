@@ -10,7 +10,7 @@ import {
   SURPLUS_OBJECTION_LABEL,
   surplusFollowUpRule,
   surplusCallConnected,
-} from '@fast-homes/shared';
+} from '@/lib/surplus-calls';
 
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '0', '#'];
 const KEY_SUB: Record<string, string> = {
