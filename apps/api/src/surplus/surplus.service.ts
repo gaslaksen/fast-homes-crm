@@ -69,10 +69,13 @@ import {
 import { SurplusLeadInput, SurplusListFilters, SurplusPhoneInput } from './surplus.types';
 import { SurplusCountiesService, CountyRow } from './surplus-counties.service';
 import { SurplusDocumentsService } from './surplus-documents.service';
+import { SurplusTemplatesService } from './surplus-templates.service';
 
 /** What toRow needs beyond the lead: per-request lookups fetched once. */
 interface RowContext {
   counties?: Map<string, CountyRow>;
+  /** Active template version per kind, for the stale flag on documents. */
+  templateVersions?: Record<string, number>;
 }
 
 /**
@@ -176,6 +179,7 @@ export class SurplusService {
     private prisma: PrismaService,
     private counties: SurplusCountiesService,
     private documents: SurplusDocumentsService,
+    private templates: SurplusTemplatesService,
   ) {}
 
   // ─── Writing ──────────────────────────────────────────────────────────────
@@ -958,7 +962,7 @@ export class SurplusService {
       include: LEAD_INCLUDE,
     });
     if (!lead || !lead.surplusDetail) return null;
-    return this.toRow(lead, { counties: await this.counties.mapFor(organizationId) });
+    return this.toRow(lead, await this.rowContext(organizationId));
   }
 
   async list(filters: SurplusListFilters) {
@@ -1042,7 +1046,7 @@ export class SurplusService {
       take: 5000,
     });
 
-    const ctx: RowContext = { counties: await this.counties.mapFor(filters.organizationId) };
+    const ctx = await this.rowContext(filters.organizationId);
     let rows = leads.filter((l) => l.surplusDetail).map((l) => this.toRow(l, ctx));
 
     // These read the compliance gate, a derived clock, or the per-number DNC
@@ -1195,7 +1199,7 @@ export class SurplusService {
       // panel all depend on whether a living heir is on file.
       include: LEAD_INCLUDE,
     });
-    const ctx: RowContext = { counties: await this.counties.mapFor(organizationId) };
+    const ctx = await this.rowContext(organizationId);
     const all = leads.filter((l) => l.surplusDetail).map((l) => this.toRow(l, ctx));
     const feed = all.filter(
       (r) => r.grossSurplus >= SURPLUS_FLOOR && r.claimantType !== SurplusClaimantType.LIENHOLDER,
@@ -1242,6 +1246,15 @@ export class SurplusService {
   }
 
   // ─── Shaping ──────────────────────────────────────────────────────────────
+
+  /** The per-request lookups every row reads, fetched once. */
+  private async rowContext(organizationId?: string | null): Promise<RowContext> {
+    const [counties, templateVersions] = await Promise.all([
+      this.counties.mapFor(organizationId),
+      this.templates.activeVersions(organizationId),
+    ]);
+    return { counties, templateVersions };
+  }
 
   private toRow(lead: any, ctx: RowContext = {}) {
     const d = lead.surplusDetail;
@@ -1377,10 +1390,14 @@ export class SurplusService {
       // missing. Computed against the claim (an estate needs the death
       // certificate; an entity its papers) so "complete" means filable.
       ...(() => {
-        const checklist = this.documents.checklist(d.documents || [], {
-          deceased: isDeceased(facts),
-          isEntity: ENTITY_NAME.test(`${lead.sellerFirstName || ''} ${lead.sellerLastName || ''}`),
-        });
+        const checklist = this.documents.checklist(
+          d.documents || [],
+          {
+            deceased: isDeceased(facts),
+            isEntity: ENTITY_NAME.test(`${lead.sellerFirstName || ''} ${lead.sellerLastName || ''}`),
+          },
+          ctx.templateVersions || {},
+        );
         const docs: Record<string, string> = {};
         for (const doc of d.documents || []) docs[doc.kind] = doc.status;
         return {

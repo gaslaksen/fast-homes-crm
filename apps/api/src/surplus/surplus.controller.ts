@@ -330,6 +330,23 @@ export class SurplusController {
     return this.documents.setStatus(id, kind, body, organizationId, userId);
   }
 
+  /**
+   * One of our standard documents for a claim, rendered from its template
+   * for the print page. Records nothing until marked drafted from there.
+   */
+  @Get(':id/document-draft')
+  async documentDraft(
+    @Param('id') id: string,
+    @Query('kind') kind?: string,
+    @Headers('authorization') authHeader?: string,
+  ) {
+    if (!kind) throw new BadRequestException('kind is required');
+    const { organizationId, userId } = this.decodeToken(authHeader);
+    const out = await this.templates.documentFor(id, kind, organizationId, userId);
+    if (!out) throw new BadRequestException('Surplus lead not found');
+    return out;
+  }
+
   /** A five-minute link to the file itself. */
   @Get('documents/:docId/url')
   async documentUrl(@Param('docId') docId: string, @Headers('authorization') authHeader?: string) {

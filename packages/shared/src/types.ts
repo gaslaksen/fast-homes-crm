@@ -375,6 +375,17 @@ export enum SurplusTemplateKind {
   CREDIBILITY_SMS = 'credibility_sms',
   CREDIBILITY_EMAIL = 'credibility_email',
   NOTARY_INSTRUCTIONS = 'notary_instructions',
+  /**
+   * Our standard documents. Versioned like the scripts so a case's fee
+   * agreement records the wording it was built from and shows stale once
+   * the template is revised. The legal ones ship empty: the text comes
+   * from counsel and is pasted in, never drafted here.
+   */
+  DOC_FEE_AGREEMENT = 'doc_fee_agreement',
+  DOC_LIMITED_POA = 'doc_limited_poa',
+  DOC_ASSIGNMENT_OF_RIGHTS = 'doc_assignment_of_rights',
+  DOC_LETTER_OF_DIRECTION = 'doc_letter_of_direction',
+  DOC_CLAIMS_CHECKLIST = 'doc_claims_checklist',
 }
 
 export const SURPLUS_TEMPLATE_KIND_LABEL: Record<SurplusTemplateKind, string> = {
@@ -386,8 +397,21 @@ export const SURPLUS_TEMPLATE_KIND_LABEL: Record<SurplusTemplateKind, string> = 
   [SurplusTemplateKind.LETTER_ASSOCIATE]: 'Letter to a neighbour or associate',
   [SurplusTemplateKind.CREDIBILITY_SMS]: 'Credibility packet text',
   [SurplusTemplateKind.CREDIBILITY_EMAIL]: 'Credibility packet email',
-  [SurplusTemplateKind.NOTARY_INSTRUCTIONS]: 'Notary instructions',
+  [SurplusTemplateKind.NOTARY_INSTRUCTIONS]: 'Mobile notary agreement and instructions',
+  [SurplusTemplateKind.DOC_FEE_AGREEMENT]: 'Contingency fee agreement',
+  [SurplusTemplateKind.DOC_LIMITED_POA]: 'Limited power of attorney',
+  [SurplusTemplateKind.DOC_ASSIGNMENT_OF_RIGHTS]: 'Assignment of rights',
+  [SurplusTemplateKind.DOC_LETTER_OF_DIRECTION]: 'Letter of direction',
+  [SurplusTemplateKind.DOC_CLAIMS_CHECKLIST]: 'Claims checklist',
 };
+
+/** Template kinds whose text is a legal instrument: counsel writes it, the app only fills names in. */
+export const SURPLUS_LEGAL_TEMPLATE_KINDS: SurplusTemplateKind[] = [
+  SurplusTemplateKind.DOC_FEE_AGREEMENT,
+  SurplusTemplateKind.DOC_LIMITED_POA,
+  SurplusTemplateKind.DOC_ASSIGNMENT_OF_RIGHTS,
+  SurplusTemplateKind.DOC_LETTER_OF_DIRECTION,
+];
 
 /**
  * Every document a surplus claim can carry, in three sets: ours (the
@@ -472,6 +496,16 @@ export const SURPLUS_DOCUMENT_STATUS_LABEL: Record<SurplusDocumentStatus, string
   [SurplusDocumentStatus.SIGNED]: 'Signed',
   [SurplusDocumentStatus.NOTARIZED]: 'Notarized',
   [SurplusDocumentStatus.FILED]: 'Filed',
+};
+
+/** Which template, if any, a document kind is generated from. */
+export const SURPLUS_DOCUMENT_TEMPLATE: Partial<Record<SurplusDocumentKind, SurplusTemplateKind>> = {
+  [SurplusDocumentKind.FEE_AGREEMENT]: SurplusTemplateKind.DOC_FEE_AGREEMENT,
+  [SurplusDocumentKind.LIMITED_POA]: SurplusTemplateKind.DOC_LIMITED_POA,
+  [SurplusDocumentKind.ASSIGNMENT_OF_RIGHTS]: SurplusTemplateKind.DOC_ASSIGNMENT_OF_RIGHTS,
+  [SurplusDocumentKind.LETTER_OF_DIRECTION]: SurplusTemplateKind.DOC_LETTER_OF_DIRECTION,
+  [SurplusDocumentKind.NOTARY_AGREEMENT]: SurplusTemplateKind.NOTARY_INSTRUCTIONS,
+  [SurplusDocumentKind.CLAIMS_CHECKLIST]: SurplusTemplateKind.DOC_CLAIMS_CHECKLIST,
 };
 
 /** The status order, so "at least signed" is one comparison. */
