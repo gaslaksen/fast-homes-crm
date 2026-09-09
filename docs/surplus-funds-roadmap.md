@@ -280,7 +280,10 @@ digest surfaces due rechecks.
 1. Fee terms for Florida: the 12 percent cap versus the course's split, and a
    written opinion on tax deed surplus.
 2. Retention instrument: assignment, limited POA, or both, and full versus
-   partial per county.
+   partial per county. Decided 2026-09-09: the limited POA plus an
+   irrevocable direction to pay, no assignment. The claimant stays claimant
+   of record. The stage is Package Notarized and the assignment is retired
+   from the document set. Full versus partial per county is still open.
 3. Stage list: adopt the three-axis model with back-half stages, or the
    course's 12 literally.
 4. File storage vendor (S3 or R2) and who holds the keys.

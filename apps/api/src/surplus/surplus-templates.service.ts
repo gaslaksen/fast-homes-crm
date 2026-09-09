@@ -31,6 +31,7 @@ import {
   SURPLUS_DOCUMENT_LABEL,
   SURPLUS_DOCUMENT_TEMPLATE,
   SURPLUS_LEGAL_TEMPLATE_KINDS,
+  SURPLUS_RETIRED_TEMPLATE_KINDS,
   surplusDocumentAtLeast,
 } from '@fast-homes/shared';
 import { DIG_DEEPER_BRAND } from '../common/company.constants';
@@ -231,9 +232,10 @@ Phone: {{callbackNumber}}, ask for {{callerName}}
   // county versions (Duval, Lee) live in COUNTY_DEFAULTS and win for a
   // claim in that county.
   [SurplusTemplateKind.NOTARY_INSTRUCTIONS]: { name: NOTARY_PACKAGE_NAME, body: NOTARY_COVER.general },
-  // The fee agreement and the assignment ship empty: counsel writes them.
-  // The POA and the direction to pay carry the team's working draft, with
-  // its own caveat that Florida counsel has not reviewed it.
+  // The fee agreement ships empty: counsel writes it. The POA and the
+  // direction to pay carry the team's working draft, with its own caveat
+  // that Florida counsel has not reviewed it. The assignment is retired
+  // (the claimant stays claimant of record) and is hidden from the list.
   [SurplusTemplateKind.DOC_FEE_AGREEMENT]: { name: '', body: '' },
   [SurplusTemplateKind.DOC_LIMITED_POA]: { name: NOTARY_PACKAGE_NAME, body: LIMITED_POA },
   [SurplusTemplateKind.DOC_ASSIGNMENT_OF_RIGHTS]: { name: '', body: '' },
@@ -255,11 +257,10 @@ BEFORE THE AGREEMENT
 [ ] Disclosures the rule requires are in the agreement
 
 OUR DOCUMENTS, IN SIGNING ORDER
-[ ] Contingency fee agreement, signed first and put away
-[ ] Limited power of attorney, signed
-[ ] Assignment of rights, signed and notarized (fund source disclosed here, not before)
-[ ] Letter of direction
-[ ] Mobile notary agreement signed by the notary BEFORE the appointment is booked
+[ ] Contingency fee agreement (Client Recovery Services Agreement), signed at retention and put away
+[ ] Notary package cover signed by the notary BEFORE the appointment is booked
+[ ] General limited power of attorney, signed and notarized at the appointment
+[ ] Irrevocable direction to pay surplus funds, signed and notarized (fund source disclosed here, not before)
 
 THE COUNTY'S DOCUMENT
 [ ] County claim form, completed and packaged as {{county}} County requires
@@ -365,7 +366,9 @@ export function resolveKind(kind: SurplusTemplateKind, rows: TemplateRowLike[], 
   };
 }
 
+/** Every kind, for reading rows already stored, and the live ones, for the list. */
 const KINDS = Object.values(SurplusTemplateKind) as SurplusTemplateKind[];
+const LIVE_KINDS = KINDS.filter((k) => !SURPLUS_RETIRED_TEMPLATE_KINDS.includes(k));
 
 function kindOf(raw: string): SurplusTemplateKind {
   if ((KINDS as string[]).includes(raw)) return raw as SurplusTemplateKind;
@@ -490,7 +493,7 @@ export class SurplusTemplatesService {
     });
     return {
       county,
-      kinds: KINDS.map((kind) => {
+      kinds: LIVE_KINDS.map((kind) => {
         const r = resolveKind(kind, rows, county);
         return {
           kind,
@@ -720,18 +723,18 @@ export class SurplusTemplatesService {
   }
 
   /**
-   * The mobile notary packet: the instruction sheet as a cover, then each
-   * document the notary needs for THIS appointment, in signing order, each
-   * rendered from its template with the claim's names filled in.
+   * The mobile notary packet: the cover with the notary's instructions,
+   * then each document the notary needs for THIS appointment, in signing
+   * order, each rendered from its template with the claim's names filled in.
    *
-   * What goes in follows the course's rule. Until the retention documents
-   * (fee agreement and POA) are confirmed signed, the packet carries those
-   * two and withholds the assignment, because the assignment names the fund
-   * source and the claimant must be retained before seeing it. Once
-   * retention is confirmed, the packet carries the assignment, the letter
-   * of direction and the county form, and lists the retention pair as
-   * already signed. A team that signs everything at one appointment, with
-   * the notary keeping the order, can ask for the whole set.
+   * What goes in follows the team's package. Until the fee agreement (the
+   * Client Recovery Services Agreement) is confirmed signed, the packet
+   * carries that alone and withholds the rest, because the direction to pay
+   * and the county form both name the fund source and the claimant must be
+   * retained before seeing it. Once retention is confirmed, the packet
+   * carries the POA, the direction to pay and the county form. A team that
+   * signs everything at one appointment, with the notary keeping the order,
+   * can ask for the whole set.
    */
   async notaryPacket(
     leadId: string,
@@ -745,17 +748,14 @@ export class SurplusTemplatesService {
     const docs = new Map<string, any>(((d as any).documents || []).map((x: any) => [x.kind, x]));
     const at = (kind: SurplusDocumentKind, min: SurplusDocumentStatus) =>
       surplusDocumentAtLeast(docs.get(kind)?.status, min);
-    const retentionConfirmed =
-      at(SurplusDocumentKind.FEE_AGREEMENT, SurplusDocumentStatus.SIGNED) &&
-      at(SurplusDocumentKind.LIMITED_POA, SurplusDocumentStatus.SIGNED);
+    const retentionConfirmed = at(SurplusDocumentKind.FEE_AGREEMENT, SurplusDocumentStatus.SIGNED);
 
     // The signing order, and why each is in or out of this packet.
     const order: { kind: SurplusDocumentKind; step: number; note: string }[] = [
-      { kind: SurplusDocumentKind.FEE_AGREEMENT, step: 1, note: 'Signed first and put away before anything else is shown.' },
-      { kind: SurplusDocumentKind.LIMITED_POA, step: 2, note: 'Signed once the fee agreement is put away.' },
-      { kind: SurplusDocumentKind.ASSIGNMENT_OF_RIGHTS, step: 3, note: 'Names the fund source. Notarize the signature.' },
-      { kind: SurplusDocumentKind.LETTER_OF_DIRECTION, step: 4, note: 'Signed after the assignment.' },
-      { kind: SurplusDocumentKind.COUNTY_CLAIM_FORM, step: 5, note: 'The county form, completed. Notarize where it calls for it.' },
+      { kind: SurplusDocumentKind.FEE_AGREEMENT, step: 1, note: 'Signed at retention and put away before anything else is shown.' },
+      { kind: SurplusDocumentKind.LIMITED_POA, step: 2, note: 'Document 1 of the package. Notarize the signature.' },
+      { kind: SurplusDocumentKind.LETTER_OF_DIRECTION, step: 3, note: 'Document 2. Names the fund source. Notarize the signature.' },
+      { kind: SurplusDocumentKind.COUNTY_CLAIM_FORM, step: 4, note: "Document 3. The county's own form, completed. Notarize where it calls for it; Lee needs two witnesses." },
     ];
     const active = await this.list(organizationId, built.facts.county);
     const items = [] as any[];
@@ -763,7 +763,7 @@ export class SurplusTemplatesService {
       const row = docs.get(o.kind) || null;
       const status = row?.status || SurplusDocumentStatus.OUTSTANDING;
       const alreadySigned = surplusDocumentAtLeast(status, SurplusDocumentStatus.SIGNED);
-      const isRetention = o.step <= 2;
+      const isRetention = o.step === 1;
       let included: boolean;
       let reason: string;
       if (opts.includeAll) {
@@ -775,7 +775,7 @@ export class SurplusTemplatesService {
           ? alreadySigned
             ? 'Already signed, not included.'
             : 'Included: retention comes first.'
-          : 'Withheld until the fee agreement and the POA are confirmed signed.';
+          : 'Withheld until the fee agreement is confirmed signed.';
       } else {
         included = !isRetention && !alreadySigned;
         reason = alreadySigned ? 'Already signed, not included.' : 'Included: retention is confirmed.';

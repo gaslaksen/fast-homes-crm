@@ -478,7 +478,7 @@ export const TRACKED_SUBMISSION_METHODS = ['usps', 'fedex', 'ups'];
 /** The three forward stages the gate guards, in order. Later ones inherit earlier requirements. */
 const GATED_STAGES: SurplusStage[] = [
   SurplusStage.AGREEMENT_SIGNED,
-  SurplusStage.ASSIGNMENT_NOTARIZED,
+  SurplusStage.PACKAGE_NOTARIZED,
   SurplusStage.CLAIM_FILED,
   SurplusStage.AWAITING_DISBURSEMENT,
   SurplusStage.CHECK_RECEIVED,
@@ -487,11 +487,12 @@ const GATED_STAGES: SurplusStage[] = [
 
 /**
  * What a stage needs before a claim can enter it. This is the course's
- * signing order made mechanical: the claimant is retained (fee agreement,
- * then the POA) before the fund source is disclosed and the assignment
- * signed, and nothing is filed until every required document is in hand.
+ * signing order made mechanical: the claimant is retained (the fee
+ * agreement) before the fund source is disclosed in the direction to pay,
+ * the notary package is signed and notarized as a set, and nothing is filed
+ * until every required document is in hand.
  *
- * Cumulative: Claim Filed needs everything Assignment Notarized needs, which
+ * Cumulative: Claim Filed needs everything Package Notarized needs, which
  * needs everything Agreement Signed needs, so a jump from New straight to
  * Claim Filed is checked against the whole list.
  */
@@ -518,14 +519,18 @@ export function stageRequirementsMissing(
     missing.push(`${label(SurplusDocumentKind.FEE_AGREEMENT)} marked signed`);
   }
 
-  // Assignment Notarized: retention documents signed before the fund source
-  // is disclosed, then the assignment itself notarized.
+  // Package Notarized: the notary package signed as a set. The POA at least
+  // signed, the direction to pay notarized (it names the fund source, so it
+  // comes after retention), and the county's own form signed at the table.
   if (idx >= 1) {
     if (!at(SurplusDocumentKind.LIMITED_POA, SurplusDocumentStatus.SIGNED)) {
       missing.push(`${label(SurplusDocumentKind.LIMITED_POA)} marked signed`);
     }
-    if (!at(SurplusDocumentKind.ASSIGNMENT_OF_RIGHTS, SurplusDocumentStatus.NOTARIZED)) {
-      missing.push(`${label(SurplusDocumentKind.ASSIGNMENT_OF_RIGHTS)} marked notarized`);
+    if (!at(SurplusDocumentKind.LETTER_OF_DIRECTION, SurplusDocumentStatus.NOTARIZED)) {
+      missing.push(`${label(SurplusDocumentKind.LETTER_OF_DIRECTION)} marked notarized`);
+    }
+    if (!at(SurplusDocumentKind.COUNTY_CLAIM_FORM, SurplusDocumentStatus.SIGNED)) {
+      missing.push(`${label(SurplusDocumentKind.COUNTY_CLAIM_FORM)} marked signed`);
     }
   }
 
@@ -824,7 +829,7 @@ export function stageFromText(raw?: string | null): SurplusStage {
   if (s.includes('awaiting') || s.includes('disburse')) return SurplusStage.AWAITING_DISBURSEMENT;
   if (s.includes('check')) return SurplusStage.CHECK_RECEIVED;
   if (s.includes('filed')) return SurplusStage.CLAIM_FILED;
-  if (s.includes('notariz')) return SurplusStage.ASSIGNMENT_NOTARIZED;
+  if (s.includes('notariz') || s.includes('package')) return SurplusStage.PACKAGE_NOTARIZED;
   if (s.includes('signed') || s.includes('agreement')) return SurplusStage.AGREEMENT_SIGNED;
   if (s.includes('dead')) return SurplusStage.DEAD;
   if (s.includes('contact')) return SurplusStage.CONTACTED;

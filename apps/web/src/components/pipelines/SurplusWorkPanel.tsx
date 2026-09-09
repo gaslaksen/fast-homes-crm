@@ -1517,7 +1517,7 @@ const NOTARY_SOURCES: [string, string][] = [
  * booked until the notary has signed the sheet, because that is what locks
  * in the document list, the payment and the signing order. Confirming
  * "signed in order" moves the document set with it, which is what the
- * Assignment Notarized gate waits for.
+ * Package Notarized gate waits for.
  */
 function NotarySection({
   lead,
@@ -1779,8 +1779,8 @@ function NotarySection({
         </button>
         <span style={{ fontSize: 11, color: 'var(--faint)' }}>
           {n.retentionConfirmed
-            ? 'Retention confirmed: the assignment goes in.'
-            : 'Retention not yet signed: the assignment is withheld.'}
+            ? 'Fee agreement signed: the POA, the direction to pay and the county form go in.'
+            : 'Fee agreement not yet signed: the package is withheld, only the agreement goes in.'}
         </span>
       </div>
     </Section>
@@ -3772,8 +3772,8 @@ function StageControl({
 
 /** The next gated stage after the current one, or null past Claim Filed. */
 function nextGatedStage(stage: string): string | null {
-  const order = ['New', 'Contacted', 'Agreement Signed', 'Assignment Notarized', 'Claim Filed', 'Awaiting Disbursement'];
-  const gated = ['Agreement Signed', 'Assignment Notarized', 'Claim Filed', 'Awaiting Disbursement'];
+  const order = ['New', 'Contacted', 'Agreement Signed', 'Package Notarized', 'Claim Filed', 'Awaiting Disbursement'];
+  const gated = ['Agreement Signed', 'Package Notarized', 'Claim Filed', 'Awaiting Disbursement'];
   const idx = order.indexOf(stage);
   if (idx < 0) return null;
   return gated.find((g) => order.indexOf(g) > idx) || null;

@@ -46,7 +46,7 @@ const COUNTY_STAGES = [SurplusStage.CLAIM_FILED, SurplusStage.AWAITING_DISBURSEM
 /** Stages where the claimant has signed and is owed a monthly word. */
 const SIGNED_STAGES = [
   SurplusStage.AGREEMENT_SIGNED,
-  SurplusStage.ASSIGNMENT_NOTARIZED,
+  SurplusStage.PACKAGE_NOTARIZED,
   SurplusStage.CLAIM_FILED,
   SurplusStage.AWAITING_DISBURSEMENT,
   SurplusStage.CHECK_RECEIVED,

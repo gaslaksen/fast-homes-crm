@@ -23,6 +23,7 @@ import {
   SURPLUS_DOCUMENT_TEMPLATE,
   surplusDocumentCollected,
   surplusDocumentsRequired,
+  SURPLUS_RETIRED_DOCUMENT_KINDS,
 } from '@fast-homes/shared';
 
 const KINDS = Object.values(SurplusDocumentKind) as string[];
@@ -32,11 +33,11 @@ const STATUSES = Object.values(SurplusDocumentStatus) as string[];
 export const DOCUMENT_MIME_TYPES = ['application/pdf', 'image/jpeg', 'image/png', 'image/heic', 'image/webp'];
 export const DOCUMENT_MAX_BYTES = 20 * 1024 * 1024;
 
-/** The course's order at the notary table. Read by the signing-order gate. */
+/** The order at the notary table: retention first, then the package. Read by the signing-order gate. */
 export const SIGNING_ORDER: SurplusDocumentKind[] = [
   SurplusDocumentKind.FEE_AGREEMENT,
   SurplusDocumentKind.LIMITED_POA,
-  SurplusDocumentKind.ASSIGNMENT_OF_RIGHTS,
+  SurplusDocumentKind.LETTER_OF_DIRECTION,
   SurplusDocumentKind.COUNTY_CLAIM_FORM,
 ];
 
@@ -139,7 +140,15 @@ export class SurplusDocumentsService {
   ): Omit<DocumentChecklist, 'storageConfigured'> {
     const required = surplusDocumentsRequired(facts);
     const byKind = new Map<string, any>(rows.map((r) => [r.kind, r]));
-    const documents: DocumentRow[] = (Object.values(SurplusDocumentKind) as SurplusDocumentKind[]).map((kind) => {
+    // A retired kind stays on the list only while a claim still carries
+    // something on it (a file, or a status past outstanding), so old rows
+    // read and new claims never see it.
+    const kinds = (Object.values(SurplusDocumentKind) as SurplusDocumentKind[]).filter((kind) => {
+      if (!SURPLUS_RETIRED_DOCUMENT_KINDS.includes(kind)) return true;
+      const r = byKind.get(kind);
+      return !!r && (!!r.fileKey || (r.status && r.status !== SurplusDocumentStatus.OUTSTANDING));
+    });
+    const documents: DocumentRow[] = kinds.map((kind) => {
       const r = byKind.get(kind) || null;
       const status = r?.status || SurplusDocumentStatus.OUTSTANDING;
       const templateKind = SURPLUS_DOCUMENT_TEMPLATE[kind] || null;

@@ -15,14 +15,24 @@ describe('SurplusDocumentsService.checklist', () => {
     expect(c.required).toEqual([
       SurplusDocumentKind.FEE_AGREEMENT,
       SurplusDocumentKind.LIMITED_POA,
-      SurplusDocumentKind.ASSIGNMENT_OF_RIGHTS,
       SurplusDocumentKind.LETTER_OF_DIRECTION,
       SurplusDocumentKind.COUNTY_CLAIM_FORM,
       SurplusDocumentKind.PHOTO_ID,
     ]);
     expect(c.complete).toBe(false);
     expect(c.missing).toEqual(c.required);
-    expect(c.documents).toHaveLength(Object.values(SurplusDocumentKind).length);
+    // The retired assignment is off the list for a claim that never had one.
+    expect(c.documents).toHaveLength(Object.values(SurplusDocumentKind).length - 1);
+    expect(c.documents.find((d) => d.kind === SurplusDocumentKind.ASSIGNMENT_OF_RIGHTS)).toBeUndefined();
+  });
+
+  it('keeps a retired kind visible only while a claim still carries something on it', () => {
+    const withOld = svc.checklist([{ kind: 'assignment_of_rights', status: 'notarized' }], { deceased: false, isEntity: false });
+    const old = withOld.documents.find((d) => d.kind === SurplusDocumentKind.ASSIGNMENT_OF_RIGHTS)!;
+    expect(old).toBeDefined();
+    expect(old.required).toBe(false);
+    const blank = svc.checklist([{ kind: 'assignment_of_rights', status: 'outstanding' }], { deceased: false, isEntity: false });
+    expect(blank.documents.find((d) => d.kind === SurplusDocumentKind.ASSIGNMENT_OF_RIGHTS)).toBeUndefined();
   });
 
   it('adds the estate papers for a deceased claimant and entity papers for a company', () => {
@@ -38,13 +48,12 @@ describe('SurplusDocumentsService.checklist', () => {
     const rows = [
       { kind: 'fee_agreement', status: 'signed' },
       { kind: 'limited_poa', status: 'notarized' },
-      { kind: 'assignment_of_rights', status: 'sent' },
       { kind: 'letter_of_direction', status: 'drafted' },
       { kind: 'county_claim_form', status: 'filed' },
       { kind: 'photo_id', status: 'received', fileKey: 'k', fileName: 'id.jpg' },
     ];
     const c = svc.checklist(rows, { deceased: false, isEntity: false });
-    expect(c.missing).toEqual([SurplusDocumentKind.ASSIGNMENT_OF_RIGHTS, SurplusDocumentKind.LETTER_OF_DIRECTION]);
+    expect(c.missing).toEqual([SurplusDocumentKind.LETTER_OF_DIRECTION]);
     expect(c.complete).toBe(false);
     const id = c.documents.find((d) => d.kind === SurplusDocumentKind.PHOTO_ID)!;
     expect(id.hasFile).toBe(true);
@@ -71,16 +80,15 @@ describe('SurplusDocumentsService.checklist', () => {
     expect(id.hasTemplate).toBe(false);
     expect(id.templateStale).toBe(false);
     // Never built from a template: nothing to be stale against, even if the template moved.
-    const assignment = c.documents.find((d) => d.kind === SurplusDocumentKind.ASSIGNMENT_OF_RIGHTS)!;
-    expect(assignment.hasTemplate).toBe(true);
-    expect(assignment.templateStale).toBe(false);
+    const direction = c.documents.find((d) => d.kind === SurplusDocumentKind.LETTER_OF_DIRECTION)!;
+    expect(direction.hasTemplate).toBe(true);
+    expect(direction.templateStale).toBe(false);
   });
 
   it('is complete once every required kind is in hand, whatever the optional ones say', () => {
     const rows = [
       'fee_agreement',
       'limited_poa',
-      'assignment_of_rights',
       'letter_of_direction',
       'county_claim_form',
       'photo_id',
