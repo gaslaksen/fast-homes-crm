@@ -115,7 +115,7 @@ export default function ReferencesPage() {
           <p className="text-sm text-gray-500">Loading...</p>
         ) : rows.length === 0 ? (
           <p className="text-sm text-gray-500">
-            No references yet. They are recorded from a paid claim's work panel, in the After the payout section.
+            No references yet. They are recorded from a paid claim&apos;s work panel, in the After the payout section.
           </p>
         ) : (
           <div className="grid gap-3">
@@ -135,7 +135,7 @@ export default function ReferencesPage() {
                       {r.consented ? `Consented ${fmt(r.consentedAt)}` : 'Not consented'}
                     </span>
                   </div>
-                  {r.quote && <div className="text-sm text-gray-800 dark:text-gray-200 mt-1">"{r.quote}"</div>}
+                  {r.quote && <div className="text-sm text-gray-800 dark:text-gray-200 mt-1">&ldquo;{r.quote}&rdquo;</div>}
                   {r.story && <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">{r.story}</div>}
                   <div className="text-xs text-gray-500 mt-1">
                     {r.amountRecovered != null ? `${usd(r.amountRecovered)} recovered` : ''}

@@ -744,7 +744,7 @@ function SurveySection({
         <div style={{ fontSize: 12.5 }}>
           <span style={{ color: 'var(--mint)', fontWeight: 600 }}>Agreed to be named</span>
           <span style={{ color: 'var(--faint)' }}> {ref.consentedAt ? fmtDate(ref.consentedAt) : ''}</span>
-          {ref.quote && <div style={{ color: 'var(--dim)', marginTop: 2 }}>"{ref.quote}"</div>}
+          {ref.quote && <div style={{ color: 'var(--dim)', marginTop: 2 }}>&ldquo;{ref.quote}&rdquo;</div>}
           {ref.story && <div style={{ fontSize: 11.5, color: 'var(--faint)', marginTop: 2 }}>{ref.story}</div>}
         </div>
       ) : (
@@ -972,7 +972,7 @@ function DisbursementSection({
           onChange={(e) => save({ expensesFromClaimantShare: e.target.checked }, e.target.checked ? 'Expenses come out of the claimant’s share' : 'Expenses borne by the company')}
         />
         <span>
-          Expenses come out of the claimant's share
+          Expenses come out of the claimant&apos;s share
           <span style={{ display: 'block', fontSize: 11, color: 'var(--faint)' }}>
             They then count as consideration toward the Florida cap. Off, the company bears them.
           </span>
@@ -1016,7 +1016,7 @@ function DisbursementSection({
       {/* 5. The claimant's check. */}
       {m.reportSignedAt && !m.frozen && (
         <div style={{ display: 'grid', gap: 6, padding: 8, border: '1px solid var(--border)', borderRadius: 8 }}>
-          <div style={{ fontSize: 12, fontWeight: 700 }}>Send {lead.claimant}'s check, {usd(m.claimantShare)}</div>
+          <div style={{ fontSize: 12, fontWeight: 700 }}>Send {lead.claimant}&apos;s check, {usd(m.claimantShare)}</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
             <label style={lbl}>
               Sent

@@ -348,7 +348,7 @@ export default function SurplusCountiesPage() {
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="md:col-span-2">
-                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">County claim form (link to the clerk's copy)</label>
+                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">County claim form (link to the clerk&apos;s copy)</label>
                     <input className="input w-full" value={form.claimFormUrl || ''} onChange={(e) => set({ claimFormUrl: e.target.value })} placeholder="https://" />
                     <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
                       <input ref={formFileRef} type="file" accept=".pdf" className="hidden" onChange={onFormFile} />
