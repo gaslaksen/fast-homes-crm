@@ -259,12 +259,16 @@ export const surplusAPI = {
   // ── Scripts and letters, versioned ──
   /** The scripts for one claimant, merge fields filled, plus on-screen facts. */
   script: (id: string) => api.get(`/surplus/${id}/script`),
-  templates: () => api.get('/surplus/templates'),
-  templateVersions: (kind: string) => api.get(`/surplus/templates/${kind}/versions`),
-  saveTemplate: (kind: string, data: { body: string; name?: string; subject?: string; notes?: string }) =>
-    api.post(`/surplus/templates/${kind}`, data),
-  activateTemplate: (kind: string, version: number) =>
-    api.post(`/surplus/templates/${kind}/activate`, { version }),
+  /** The active text of every kind, for one county (its own text wins) or in general. */
+  templates: (county?: string | null) => api.get('/surplus/templates', { params: { county: county || undefined } }),
+  templateVersions: (kind: string, county?: string | null) =>
+    api.get(`/surplus/templates/${kind}/versions`, { params: { county: county || undefined } }),
+  saveTemplate: (
+    kind: string,
+    data: { body: string; name?: string; subject?: string; notes?: string; county?: string | null },
+  ) => api.post(`/surplus/templates/${kind}`, data),
+  activateTemplate: (kind: string, version: number, county?: string | null) =>
+    api.post(`/surplus/templates/${kind}/activate`, { version, county: county || null }),
 
   // ── Counties: what each clerk requires to file ──
   counties: () => api.get('/surplus/counties'),

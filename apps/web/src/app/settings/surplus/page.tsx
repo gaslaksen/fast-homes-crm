@@ -22,6 +22,10 @@ interface TemplateKind {
   subject: string | null;
   body: string;
   builtIn: boolean;
+  /** Where the text came from: this county's saved version, its built-in, the general saved version, or the general built-in. */
+  scope: 'county' | 'county_builtin' | 'all' | 'builtin';
+  countySpecific: boolean;
+  generalVersionShadowed: boolean;
   hasText: boolean;
   lastReviewedAt: string | null;
   updatedAt: string | null;
@@ -53,6 +57,9 @@ export default function SurplusTemplatesPage() {
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  /** Empty means the general text, used wherever a county has none of its own. */
+  const [county, setCounty] = useState('');
+  const [counties, setCounties] = useState<string[]>([]);
 
   const say = (t: string) => {
     setToast(t);
@@ -61,7 +68,7 @@ export default function SurplusTemplatesPage() {
 
   const load = useCallback(async () => {
     try {
-      const r = await surplusAPI.templates();
+      const r = await surplusAPI.templates(county || null);
       setKinds(r.data?.kinds || []);
       setMergeFields(r.data?.mergeFields || []);
     } catch {
@@ -69,6 +76,13 @@ export default function SurplusTemplatesPage() {
     } finally {
       setLoading(false);
     }
+  }, [county]);
+
+  useEffect(() => {
+    surplusAPI
+      .counties()
+      .then((r) => setCounties(((r.data?.counties || []) as { name: string; active: boolean }[]).filter((c) => c.active).map((c) => c.name)))
+      .catch(() => setCounties([]));
   }, []);
 
   useEffect(() => {
@@ -86,12 +100,12 @@ export default function SurplusTemplatesPage() {
     setNotes('');
     setDirty(false);
     surplusAPI
-      .templateVersions(current.kind)
+      .templateVersions(current.kind, county || null)
       .then((r) => setVersions(r.data?.versions || []))
       .catch(() => setVersions([]));
-    // Only when the kind or its active version changes, not on every keystroke.
+    // Only when the kind, the county or the active version changes, not on every keystroke.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current?.kind, current?.version]);
+  }, [current?.kind, current?.version, current?.scope, county]);
 
   const save = async () => {
     if (!current || !body.trim() || saving) return;
@@ -102,8 +116,13 @@ export default function SurplusTemplatesPage() {
         name: name || undefined,
         subject: EMAIL_KINDS.has(current.kind) ? subject || undefined : undefined,
         notes: notes || undefined,
+        county: county || null,
       });
-      say(`Saved ${current.label} as v${r.data?.version}. It is now what the dialer shows.`);
+      say(
+        county
+          ? `Saved ${current.label} as ${county} v${r.data?.version}. ${county} claims use it from now on; other counties are unchanged.`
+          : `Saved ${current.label} as v${r.data?.version}. It is now what the dialer shows.`,
+      );
       await load();
     } catch (err: any) {
       say(err?.response?.data?.message || 'That could not be saved.');
@@ -115,9 +134,9 @@ export default function SurplusTemplatesPage() {
   const activate = async (version: number) => {
     if (!current) return;
     const what = version === 0 ? 'the built-in text' : `v${version}`;
-    if (!window.confirm(`Make ${what} the active ${current.label.toLowerCase()}?`)) return;
+    if (!window.confirm(`Make ${what} the active ${current.label.toLowerCase()}${county ? ` for ${county}` : ''}?`)) return;
     try {
-      await surplusAPI.activateTemplate(current.kind, version);
+      await surplusAPI.activateTemplate(current.kind, version, county || null);
       say(`${current.label} is now ${what}.`);
       await load();
     } catch (err: any) {
@@ -142,6 +161,36 @@ export default function SurplusTemplatesPage() {
             version; every call records the version that was on screen, so wording can be tested against
             connect and close rates.
           </p>
+          {/* A county's own text wins over the general text for claims in
+              that county. The notary package is the case that needs it: the
+              clerk's form, and what the notary must confirm, differ. */}
+          <div className="mt-3 flex items-center gap-2 text-sm">
+            <label htmlFor="template-county" className="text-gray-600 dark:text-gray-400">
+              Text for
+            </label>
+            <select
+              id="template-county"
+              className="input w-auto"
+              value={county}
+              onChange={(e) => {
+                if (dirty && !window.confirm('Discard the unsaved edit?')) return;
+                setCounty(e.target.value);
+                setDirty(false);
+              }}
+            >
+              <option value="">All counties</option>
+              {counties.map((c) => (
+                <option key={c} value={c}>
+                  {c} County
+                </option>
+              ))}
+            </select>
+            {county && (
+              <span className="text-xs text-gray-500">
+                A kind with no {county} text of its own uses the all-counties text.
+              </span>
+            )}
+          </div>
         </div>
 
         {toast && (
@@ -171,8 +220,20 @@ export default function SurplusTemplatesPage() {
                 >
                   <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{k.label}</div>
                   <div className="text-[11px] text-gray-500 mt-0.5">
-                    {k.hasText ? (k.builtIn ? 'Built-in text' : `v${k.version}`) : 'Not written yet'}
-                    {k.versionCount ? ` · ${k.versionCount} saved` : ''}
+                    {!k.hasText
+                      ? 'Not written yet'
+                      : k.scope === 'county'
+                        ? `${county} v${k.version}`
+                        : k.scope === 'county_builtin'
+                          ? `Built-in ${county} text`
+                          : k.builtIn
+                            ? county
+                              ? 'Built-in text, all counties'
+                              : 'Built-in text'
+                            : county
+                              ? `All-counties v${k.version}`
+                              : `v${k.version}`}
+                    {k.versionCount ? ` · ${k.versionCount} saved${county ? ` for ${county}` : ''}` : ''}
                   </div>
                 </button>
               ))}
@@ -184,9 +245,22 @@ export default function SurplusTemplatesPage() {
                 <div className="flex items-baseline justify-between gap-3 mb-3">
                   <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{current.label}</h3>
                   <span className="text-xs text-gray-500">
-                    Active: {current.builtIn ? 'built-in text' : `v${current.version}`}
+                    Active{county ? ` for ${county}` : ''}:{' '}
+                    {current.scope === 'county'
+                      ? `${county} v${current.version}`
+                      : current.scope === 'county_builtin'
+                        ? `built-in ${county} text`
+                        : current.builtIn
+                          ? 'built-in text'
+                          : `${county ? 'all-counties ' : ''}v${current.version}`}
                   </span>
                 </div>
+                {county && current.generalVersionShadowed && (
+                  <div className="mb-3 rounded-lg bg-gray-50 dark:bg-gray-800/60 px-3 py-2 text-xs text-gray-600 dark:text-gray-400">
+                    An all-counties version of this kind is saved, but {county} claims use the {county} text shown here.
+                    Activate the built-in below to fall back to the all-counties text.
+                  </div>
+                )}
 
                 <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
                   Version name
@@ -252,7 +326,7 @@ export default function SurplusTemplatesPage() {
                     disabled={saving || !body.trim() || !dirty}
                     className="btn-primary disabled:opacity-50"
                   >
-                    {saving ? 'Saving...' : `Save as v${(versions[0]?.version || 0) + 1}`}
+                    {saving ? 'Saving...' : `Save as ${county ? `${county} ` : ''}v${(versions[0]?.version || 0) + 1}`}
                   </button>
                   {dirty && <span className="text-xs text-gray-500">Unsaved edit</span>}
                 </div>

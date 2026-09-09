@@ -537,11 +537,11 @@ export const SURPLUS_TEMPLATE_KIND_LABEL: Record<SurplusTemplateKind, string> = 
   [SurplusTemplateKind.LETTER_ASSOCIATE]: 'Letter to a neighbour or associate',
   [SurplusTemplateKind.CREDIBILITY_SMS]: 'Credibility packet text',
   [SurplusTemplateKind.CREDIBILITY_EMAIL]: 'Credibility packet email',
-  [SurplusTemplateKind.NOTARY_INSTRUCTIONS]: 'Mobile notary agreement and instructions',
+  [SurplusTemplateKind.NOTARY_INSTRUCTIONS]: 'Notary package cover and instructions',
   [SurplusTemplateKind.DOC_FEE_AGREEMENT]: 'Contingency fee agreement',
   [SurplusTemplateKind.DOC_LIMITED_POA]: 'Limited power of attorney',
   [SurplusTemplateKind.DOC_ASSIGNMENT_OF_RIGHTS]: 'Assignment of rights',
-  [SurplusTemplateKind.DOC_LETTER_OF_DIRECTION]: 'Letter of direction',
+  [SurplusTemplateKind.DOC_LETTER_OF_DIRECTION]: 'Direction to pay surplus funds',
   [SurplusTemplateKind.DOC_CLAIMS_CHECKLIST]: 'Claims checklist',
 };
 

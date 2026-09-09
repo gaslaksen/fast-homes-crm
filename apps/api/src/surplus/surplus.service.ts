@@ -89,8 +89,8 @@ import { SurplusTemplatesService } from './surplus-templates.service';
 /** What toRow needs beyond the lead: per-request lookups fetched once. */
 interface RowContext {
   counties?: Map<string, CountyRow>;
-  /** Active template version per kind, for the stale flag on documents. */
-  templateVersions?: Record<string, number>;
+  /** Active template version per kind, per lower-cased county ('' for the general set), for the stale flag on documents. */
+  templateVersions?: Record<string, Record<string, number>>;
 }
 
 /**
@@ -1995,10 +1995,11 @@ export class SurplusService {
 
   /** The per-request lookups every row reads, fetched once. */
   private async rowContext(organizationId?: string | null): Promise<RowContext> {
-    const [counties, templateVersions] = await Promise.all([
-      this.counties.mapFor(organizationId),
-      this.templates.activeVersions(organizationId),
-    ]);
+    const counties = await this.counties.mapFor(organizationId);
+    const templateVersions = await this.templates.activeVersionsByCounty(
+      organizationId,
+      Array.from(counties.values()).map((c) => c.name),
+    );
     return { counties, templateVersions };
   }
 
@@ -2145,7 +2146,8 @@ export class SurplusService {
             deceased: isDeceased(facts),
             isEntity: ENTITY_NAME.test(`${lead.sellerFirstName || ''} ${lead.sellerLastName || ''}`),
           },
-          ctx.templateVersions || {},
+          // The county's own template versions, since a county package can differ.
+          (ctx.templateVersions && (ctx.templateVersions[String(d.county || '').toLowerCase()] || ctx.templateVersions[''])) || {},
         );
         const docs: Record<string, string> = {};
         for (const doc of d.documents || []) docs[doc.kind] = doc.status;

@@ -203,25 +203,26 @@ export class SurplusController {
 
   /** Every template kind with its active version, or the built-in default. */
   @Get('templates')
-  async listTemplates(@Headers('authorization') authHeader?: string) {
+  async listTemplates(@Query('county') county?: string, @Headers('authorization') authHeader?: string) {
     const { organizationId } = this.decodeToken(authHeader);
-    return this.templates.list(organizationId);
+    return this.templates.list(organizationId, county);
   }
 
   @Get('templates/:kind/versions')
   async templateVersions(
     @Param('kind') kind: string,
+    @Query('county') county?: string,
     @Headers('authorization') authHeader?: string,
   ) {
     const { organizationId } = this.decodeToken(authHeader);
-    return this.templates.versions(organizationId, kind);
+    return this.templates.versions(organizationId, kind, county);
   }
 
-  /** Save an edit as the next version and make it the active one. */
+  /** Save an edit as the next version and make it the active one, for one county or for all. */
   @Post('templates/:kind')
   async saveTemplate(
     @Param('kind') kind: string,
-    @Body() body: { body: string; name?: string; subject?: string; notes?: string },
+    @Body() body: { body: string; name?: string; subject?: string; notes?: string; county?: string | null },
     @Headers('authorization') authHeader?: string,
   ) {
     const { organizationId, userId } = this.decodeToken(authHeader);
@@ -232,11 +233,11 @@ export class SurplusController {
   @Post('templates/:kind/activate')
   async activateTemplate(
     @Param('kind') kind: string,
-    @Body() body: { version: number },
+    @Body() body: { version: number; county?: string | null },
     @Headers('authorization') authHeader?: string,
   ) {
     const { organizationId } = this.decodeToken(authHeader);
-    return this.templates.activate(organizationId, kind, Number(body?.version));
+    return this.templates.activate(organizationId, kind, Number(body?.version), body?.county);
   }
 
   // ── Counties ──────────────────────────────────────────────────────────────
