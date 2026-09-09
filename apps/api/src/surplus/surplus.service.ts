@@ -12,6 +12,9 @@ import {
   SurplusQueue,
   SURPLUS_QUEUE_RANK,
   surplusCallConnected,
+  SurplusDocumentKind,
+  SurplusDocumentStatus,
+  surplusDocumentAtLeast,
 } from '@fast-homes/shared';
 import { CLAIM_STATUS_LABEL } from './surplus-classify.util';
 import { nameSearchPlan } from './surplus-name-search.util';
@@ -409,6 +412,7 @@ export class SurplusService {
       'surplusType', 'fundLocation', 'noticeConfirmed', 'arrangement', 'licensedRepId',
       'entitlementVerified', 'titleSearchComplete', 'doNotCall', 'callNotes',
       'letterMailedTo',
+      'notaryName', 'notaryPhone', 'notaryEmail', 'notarySource', 'notaryNotes', 'notaryAppointmentPlace',
     ];
     for (const k of passthrough) {
       if (patch[k] !== undefined) detailPatch[k] = patch[k];
@@ -429,6 +433,28 @@ export class SurplusService {
       if (patch[k] !== undefined) {
         detailPatch[k] = patch[k] ? isoToDate(String(patch[k]).slice(0, 10)) : null;
       }
+    }
+
+    // The notary's dates keep their time of day: an appointment is at 2pm,
+    // not on a day. The agreement date is the gate on the appointment, per
+    // the course: the notary signs the instruction sheet before anything is
+    // booked, so the document list and the signing order are locked first.
+    for (const k of ['notaryAgreementSignedAt', 'notaryAppointmentAt', 'notarySignedInOrderAt']) {
+      if (patch[k] === undefined) continue;
+      if (patch[k] === null) {
+        detailPatch[k] = null;
+        continue;
+      }
+      const at = new Date(patch[k]);
+      if (Number.isNaN(at.getTime())) throw new BadRequestException(`${k} is not a date.`);
+      detailPatch[k] = at;
+    }
+    const agreementSignedAt =
+      detailPatch.notaryAgreementSignedAt !== undefined ? detailPatch.notaryAgreementSignedAt : d.notaryAgreementSignedAt;
+    if (detailPatch.notaryAppointmentAt && !agreementSignedAt) {
+      throw new BadRequestException(
+        'Book the claimant appointment after the notary has signed the agreement. That locks in the document list and the signing order.',
+      );
     }
     // Clearing the letter is now removing the latest one from the history
     // and re-caching from what is left, so a mistaken click leaves nothing
@@ -525,7 +551,80 @@ export class SurplusService {
       await this.scheduleStageTask(id, detailPatch.stage, userId);
     }
 
+    // The notary's own documents follow the notary's dates, so the document
+    // set and the notary section cannot disagree about what has been signed.
+    const claimant = `${lead.sellerFirstName || ''} ${lead.sellerLastName || ''}`.trim() || 'the claimant';
+    if (detailPatch.notaryAgreementSignedAt) {
+      await this.documents
+        .setStatus(id, SurplusDocumentKind.NOTARY_AGREEMENT, { status: SurplusDocumentStatus.SIGNED }, organizationId, userId)
+        .catch(() => undefined);
+    }
+    if (detailPatch.notaryAppointmentAt) {
+      const when = new Date(detailPatch.notaryAppointmentAt);
+      const label = when.toLocaleString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        timeZone: 'America/New_York',
+      });
+      await this.createTaskAt(id, `Notary appointment with ${claimant}, ${label}`, when, userId);
+    }
+    if (detailPatch.notarySignedInOrderAt) {
+      await this.recordSignedInOrder(id, organizationId, userId);
+    }
+
     return this.get(id, organizationId);
+  }
+
+  /**
+   * The notary reported everything signed in the printed order. That is the
+   * fact the signing gate waits for, so the documents move together: the
+   * retention pair to signed, the assignment to notarized, the rest to
+   * signed. Only ever upgrades; a document already further along stays.
+   */
+  private async recordSignedInOrder(leadId: string, organizationId?: string | null, userId?: string | null) {
+    const moves: [SurplusDocumentKind, SurplusDocumentStatus][] = [
+      [SurplusDocumentKind.FEE_AGREEMENT, SurplusDocumentStatus.SIGNED],
+      [SurplusDocumentKind.LIMITED_POA, SurplusDocumentStatus.SIGNED],
+      [SurplusDocumentKind.ASSIGNMENT_OF_RIGHTS, SurplusDocumentStatus.NOTARIZED],
+      [SurplusDocumentKind.LETTER_OF_DIRECTION, SurplusDocumentStatus.SIGNED],
+      [SurplusDocumentKind.COUNTY_CLAIM_FORM, SurplusDocumentStatus.SIGNED],
+    ];
+    const detail = await this.prisma.surplusDetail.findUnique({
+      where: { leadId },
+      select: { documents: { select: { kind: true, status: true } } },
+    });
+    const current = new Map((detail?.documents || []).map((x) => [x.kind, x.status]));
+    for (const [kind, status] of moves) {
+      if (surplusDocumentAtLeast(current.get(kind), status)) continue;
+      await this.documents.setStatus(leadId, kind, { status }, organizationId, userId).catch(() => undefined);
+    }
+    await this.prisma.activity.create({
+      data: {
+        leadId,
+        userId: userId || undefined,
+        type: 'NOTARY_SIGNED_IN_ORDER',
+        description: 'Notary confirmed every document was signed in the printed order',
+        metadata: { moved: moves.map(([k]) => k) },
+      },
+    });
+  }
+
+  /** A task due at an exact time, for an appointment. Idempotent on title. */
+  private async createTaskAt(leadId: string, title: string, dueDate: Date, userId?: string | null) {
+    const open = await this.prisma.task.findFirst({ where: { leadId, title, completed: false } });
+    if (open) return;
+    await this.prisma.task.create({ data: { leadId, title, dueDate, userId: userId || undefined } });
+    await this.prisma.activity.create({
+      data: {
+        leadId,
+        userId: userId || undefined,
+        type: 'TASK_CREATED',
+        description: `Task created: ${title}`,
+        metadata: { title, dueDate: dueDate.toISOString(), auto: true },
+      },
+    });
   }
 
   /**
@@ -1487,6 +1586,29 @@ export class SurplusService {
 
       // Tapped / Not Tapped, and which of the four channels have been tried.
       // Recap scheduled is tapped with a dated follow-up on the books.
+      // The notary, and where the appointment stands. The packet reads the
+      // document set; this is the person and the dates.
+      notary: {
+        name: d.notaryName || null,
+        phone: d.notaryPhone || null,
+        email: d.notaryEmail || null,
+        source: d.notarySource || null,
+        notes: d.notaryNotes || null,
+        agreementSignedAt: d.notaryAgreementSignedAt,
+        appointmentAt: d.notaryAppointmentAt,
+        appointmentPlace: d.notaryAppointmentPlace || null,
+        signedInOrderAt: d.notarySignedInOrderAt,
+        /** Retention documents (fee agreement, POA) both signed: the assignment may go in the packet. */
+        retentionConfirmed:
+          surplusDocumentAtLeast(
+            (d.documents || []).find((x: any) => x.kind === SurplusDocumentKind.FEE_AGREEMENT)?.status,
+            SurplusDocumentStatus.SIGNED,
+          ) &&
+          surplusDocumentAtLeast(
+            (d.documents || []).find((x: any) => x.kind === SurplusDocumentKind.LIMITED_POA)?.status,
+            SurplusDocumentStatus.SIGNED,
+          ),
+      },
       tappedAt: d.tappedAt,
       contactStatus: !d.tappedAt
         ? 'not_tapped'

@@ -347,6 +347,24 @@ export class SurplusController {
     return out;
   }
 
+  /**
+   * The mobile notary packet for the print page: the instruction sheet as a
+   * cover, then the documents for this appointment in signing order. The
+   * assignment is withheld until retention is confirmed unless the whole
+   * set is asked for.
+   */
+  @Get(':id/notary-packet')
+  async notaryPacket(
+    @Param('id') id: string,
+    @Query('includeAll') includeAll?: string,
+    @Headers('authorization') authHeader?: string,
+  ) {
+    const { organizationId, userId } = this.decodeToken(authHeader);
+    const out = await this.templates.notaryPacket(id, { includeAll: includeAll === 'true' }, organizationId, userId);
+    if (!out) throw new BadRequestException('Surplus lead not found');
+    return out;
+  }
+
   /** A five-minute link to the file itself. */
   @Get('documents/:docId/url')
   async documentUrl(@Param('docId') docId: string, @Headers('authorization') authHeader?: string) {

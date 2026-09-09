@@ -169,6 +169,19 @@ export interface SurplusPanelLead {
   docsComplete: boolean;
   /** What each gated stage still needs, keyed by stage name. Empty means ready. */
   stageBlocks: Record<string, string[]>;
+  /** The mobile notary and where the appointment stands. */
+  notary: {
+    name: string | null;
+    phone: string | null;
+    email: string | null;
+    source: string | null;
+    notes: string | null;
+    agreementSignedAt: string | null;
+    appointmentAt: string | null;
+    appointmentPlace: string | null;
+    signedInOrderAt: string | null;
+    retentionConfirmed: boolean;
+  };
   /** The qualification gate and the compliance gate. */
   entitlementVerified: boolean;
   titleSearchComplete: boolean;
@@ -465,6 +478,290 @@ function DocumentsSection({
           })}
         </div>
       ))}
+    </Section>
+  );
+}
+
+const NOTARY_SOURCES: [string, string][] = [
+  ['123notary', '123notary.com'],
+  ['notaryrotary', 'notaryrotary.com'],
+  ['other', 'Other'],
+];
+
+/**
+ * The mobile notary: who, the signed instruction sheet, the appointment, and
+ * the confirmation that everything was signed in the printed order.
+ *
+ * The order of the controls is the course's rule. The appointment cannot be
+ * booked until the notary has signed the sheet, because that is what locks
+ * in the document list, the payment and the signing order. Confirming
+ * "signed in order" moves the document set with it, which is what the
+ * Assignment Notarized gate waits for.
+ */
+function NotarySection({
+  lead,
+  onChanged,
+  say,
+}: {
+  lead: SurplusPanelLead;
+  onChanged: () => void;
+  say: (msg: string) => void;
+}) {
+  const n = lead.notary || ({} as SurplusPanelLead['notary']);
+  const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(n.name || '');
+  const [phone, setPhone] = useState(n.phone || '');
+  const [email, setEmail] = useState(n.email || '');
+  const [source, setSource] = useState(n.source || '');
+  const [place, setPlace] = useState(n.appointmentPlace || '');
+  const [notes, setNotes] = useState(n.notes || '');
+  const [appointment, setAppointment] = useState('');
+
+  useEffect(() => {
+    setEditing(false);
+    setName(n.name || '');
+    setPhone(n.phone || '');
+    setEmail(n.email || '');
+    setSource(n.source || '');
+    setPlace(n.appointmentPlace || '');
+    setNotes(n.notes || '');
+    setAppointment('');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lead.id]);
+
+  const save = async (patch: any, done: string) => {
+    setBusy(true);
+    try {
+      await surplusAPI.update(lead.id, patch);
+      say(done);
+      onChanged();
+      return true;
+    } catch (err: any) {
+      say(err?.response?.data?.message || 'That could not be saved.');
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const field: React.CSSProperties = {
+    width: '100%',
+    boxSizing: 'border-box',
+    fontSize: 12.5,
+    padding: '6px 8px',
+    border: '1px solid var(--border)',
+    borderRadius: 6,
+    background: 'var(--surface2)',
+    color: 'inherit',
+  };
+  const lbl: React.CSSProperties = { fontSize: 11, color: 'var(--dim)' };
+  const countyReady = lead.countyInfo?.practiceRunAt;
+
+  const openPacket = (all: boolean) =>
+    window.open(
+      `/surplus-funds/notary-packet?lead=${encodeURIComponent(lead.id)}${all ? '&all=true' : ''}`,
+      '_blank',
+      'noopener',
+    );
+
+  return (
+    <Section
+      title="The notary"
+      note={
+        n.signedInOrderAt
+          ? `Signed in order ${fmtDate(n.signedInOrderAt)}`
+          : n.appointmentAt
+            ? `Appointment ${fmtDate(n.appointmentAt)}`
+            : n.agreementSignedAt
+              ? 'Agreement signed, not yet booked'
+              : undefined
+      }
+    >
+      {!countyReady && (
+        <div style={{ fontSize: 11.5, color: 'var(--amber)' }}>
+          {lead.county || 'This county'} has not had its practice run. Fill out the whole document set once before
+          the first real appointment there.
+        </div>
+      )}
+
+      {/* Who. */}
+      {!editing ? (
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, fontSize: 13, flexWrap: 'wrap' }}>
+          <span style={{ color: 'var(--dim)' }}>Notary</span>
+          <span style={{ fontWeight: 600, flex: 1 }}>
+            {n.name || <span style={{ color: 'var(--faint)', fontWeight: 400 }}>not yet chosen</span>}
+            {n.phone ? ` · ${n.phone}` : ''}
+            {n.source ? (
+              <span style={{ fontSize: 11, color: 'var(--faint)', fontWeight: 400 }}>
+                {' '}
+                via {NOTARY_SOURCES.find(([k]) => k === n.source)?.[1] || n.source}
+              </span>
+            ) : null}
+          </span>
+          <button type="button" className="dc-wp-btn" style={{ padding: '3px 8px', fontSize: 11 }} onClick={() => setEditing(true)}>
+            {n.name ? 'Edit' : 'Add notary'}
+          </button>
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gap: 6, padding: 8, border: '1px solid var(--border)', borderRadius: 8 }}>
+          <label style={lbl}>
+            Name
+            <input style={field} value={name} onChange={(e) => setName(e.target.value)} />
+          </label>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+            <label style={lbl}>
+              Phone
+              <input style={field} value={phone} onChange={(e) => setPhone(e.target.value)} />
+            </label>
+            <label style={lbl}>
+              Email
+              <input style={field} value={email} onChange={(e) => setEmail(e.target.value)} />
+            </label>
+          </div>
+          <label style={lbl}>
+            Found on
+            <select style={field} value={source} onChange={(e) => setSource(e.target.value)}>
+              <option value="">Not recorded</option>
+              {NOTARY_SOURCES.map(([k, l]) => (
+                <option key={k} value={k}>
+                  {l}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label style={lbl}>
+            Where the signing happens
+            <input style={field} value={place} placeholder="The claimant's address, or wherever they asked" onChange={(e) => setPlace(e.target.value)} />
+          </label>
+          <label style={lbl}>
+            Notes
+            <input style={field} value={notes} placeholder="Fee agreed, travel, anything to remember" onChange={(e) => setNotes(e.target.value)} />
+          </label>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <button type="button" className="dc-wp-btn" disabled={busy} onClick={() => setEditing(false)}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="dc-wp-btn on"
+              disabled={busy}
+              onClick={async () => {
+                const ok = await save(
+                  {
+                    notaryName: name.trim() || null,
+                    notaryPhone: phone.trim() || null,
+                    notaryEmail: email.trim() || null,
+                    notarySource: source || null,
+                    notaryAppointmentPlace: place.trim() || null,
+                    notaryNotes: notes.trim() || null,
+                  },
+                  'Notary saved',
+                );
+                if (ok) setEditing(false);
+              }}
+            >
+              Save
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* The gate, in order. */}
+      <Row
+        k="1. Instruction sheet signed by the notary"
+        v={n.agreementSignedAt ? fmtDate(n.agreementSignedAt) : 'not yet'}
+        tone={n.agreementSignedAt ? 'var(--mint)' : 'var(--amber)'}
+        note="Locks in the document list, the payment and the signing order before anything is booked."
+      />
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        {!n.agreementSignedAt ? (
+          <button
+            type="button"
+            className="dc-wp-btn on"
+            disabled={busy || !n.name}
+            title={n.name ? 'Record that the notary signed the instruction sheet today' : 'Add the notary first'}
+            onClick={() => save({ notaryAgreementSignedAt: new Date().toISOString() }, 'Notary agreement recorded as signed')}
+          >
+            Notary signed the sheet
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="dc-wp-btn"
+            disabled={busy}
+            onClick={() => save({ notaryAgreementSignedAt: null }, 'Notary agreement cleared')}
+            title="Undo a mistaken mark"
+          >
+            Clear
+          </button>
+        )}
+      </div>
+
+      <Row
+        k="2. Appointment with the claimant"
+        v={n.appointmentAt ? new Date(n.appointmentAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'not booked'}
+        tone={n.appointmentAt ? 'var(--mint)' : undefined}
+        note={n.agreementSignedAt ? undefined : 'Available once the notary has signed the sheet.'}
+      />
+      {n.agreementSignedAt && !n.signedInOrderAt && (
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+          <input
+            type="datetime-local"
+            style={{ ...field, width: 'auto' }}
+            value={appointment}
+            onChange={(e) => setAppointment(e.target.value)}
+            aria-label="Appointment"
+          />
+          <button
+            type="button"
+            className="dc-wp-btn on"
+            disabled={busy || !appointment}
+            onClick={() =>
+              save({ notaryAppointmentAt: new Date(appointment).toISOString() }, 'Appointment booked and a reminder set')
+            }
+          >
+            {n.appointmentAt ? 'Rebook' : 'Book'}
+          </button>
+        </div>
+      )}
+
+      <Row
+        k="3. Signed in the printed order"
+        v={n.signedInOrderAt ? fmtDate(n.signedInOrderAt) : 'not yet'}
+        tone={n.signedInOrderAt ? 'var(--mint)' : undefined}
+        note="The notary reports every document signed in order and the fee agreement put away before the assignment. Confirming moves the document set."
+      />
+      {n.appointmentAt && !n.signedInOrderAt && (
+        <div>
+          <button
+            type="button"
+            className="dc-wp-btn on"
+            disabled={busy}
+            onClick={() => {
+              if (!window.confirm('Confirm the notary signed every document in the printed order? This marks the fee agreement and POA signed and the assignment notarized.')) return;
+              save({ notarySignedInOrderAt: new Date().toISOString() }, 'Signed in order confirmed, documents updated');
+            }}
+          >
+            Confirm signed in order
+          </button>
+        </div>
+      )}
+
+      {/* The packet. */}
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginTop: 4 }}>
+        <button type="button" className="dc-wp-btn" onClick={() => openPacket(false)}>
+          Print the packet
+        </button>
+        <button type="button" className="dc-wp-btn" onClick={() => openPacket(true)} title="Every document in signing order, for a single appointment where the notary keeps the order">
+          Whole set
+        </button>
+        <span style={{ fontSize: 11, color: 'var(--faint)' }}>
+          {n.retentionConfirmed
+            ? 'Retention confirmed: the assignment goes in.'
+            : 'Retention not yet signed: the assignment is withheld.'}
+        </span>
+      </div>
     </Section>
   );
 }
@@ -1209,6 +1506,8 @@ function CaseTab({
       <CountySection lead={lead} />
 
       <DocumentsSection lead={lead} onChanged={onChanged} say={say} />
+
+      <NotarySection lead={lead} onChanged={onChanged} say={say} />
 
       {/* Heirs lead for a deceased claimant, because they are the only people
           who can file. For a living one the section still appears once heirs

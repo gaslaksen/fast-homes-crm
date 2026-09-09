@@ -299,6 +299,9 @@ export const surplusAPI = {
   ) => api.patch(`/surplus/${id}/documents/${kind}`, data),
   /** One of our standard documents rendered from its template, for the print page. */
   documentDraft: (id: string, kind: string) => api.get(`/surplus/${id}/document-draft`, { params: { kind } }),
+  /** The mobile notary packet: cover sheet plus the documents for this appointment. */
+  notaryPacket: (id: string, includeAll = false) =>
+    api.get(`/surplus/${id}/notary-packet`, { params: { includeAll: includeAll ? 'true' : undefined } }),
   documentUrl: (docId: string) => api.get(`/surplus/documents/${docId}/url`),
   removeDocument: (docId: string) => api.post(`/surplus/documents/${docId}/delete`),
 
