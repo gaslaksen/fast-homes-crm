@@ -174,6 +174,14 @@ describe('stageFromText', () => {
     expect(stageFromText('PAID')).toBe(SurplusStage.PAID);
     expect(stageFromText('')).toBe(SurplusStage.NEW);
   });
+
+  it('knows the two back-half stages, and does not confuse them with Claim Filed', () => {
+    expect(stageFromText('Awaiting Disbursement')).toBe(SurplusStage.AWAITING_DISBURSEMENT);
+    expect(stageFromText('filed, awaiting disbursement')).toBe(SurplusStage.AWAITING_DISBURSEMENT);
+    expect(stageFromText('Check Received')).toBe(SurplusStage.CHECK_RECEIVED);
+    expect(stageFromText('check received 9/1')).toBe(SurplusStage.CHECK_RECEIVED);
+    expect(stageFromText('Claim Filed')).toBe(SurplusStage.CLAIM_FILED);
+  });
 });
 
 describe('tierOf', () => {

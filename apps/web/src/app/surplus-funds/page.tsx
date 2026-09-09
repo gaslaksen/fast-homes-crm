@@ -9,6 +9,7 @@ import SurplusPropertyCard, { STATUS_ACCENT } from '@/components/pipelines/Surpl
 import type { PipelineColumn, PipelineStage } from '@/components/pipelines/PipelineBoard';
 import { authAPI, surplusAPI } from '@/lib/api';
 import { dueLabel, isOverdue } from '@/lib/dates';
+import { SURPLUS_DEAD_REASONS } from '@/lib/surplus-dead';
 import '@/components/pipelines/pipeline-board.css';
 import {
   CHIP,
@@ -664,6 +665,10 @@ export default function SurplusFundsPage() {
   const [callStats, setCallStats] = useState<any>(null);
   /** The dollar band chip. A sort more than a cut, but the course filters on it. */
   const [tierQ, setTierQ] = useState<string | null>(null);
+  /** The bulk Mark dead form: a reason is required. */
+  const [deadOpen, setDeadOpen] = useState(false);
+  const [deadReason, setDeadReason] = useState('');
+  const [deadNote, setDeadNote] = useState('');
   const [adding, setAdding] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -850,6 +855,14 @@ export default function SurplusFundsPage() {
           // count buried in a list reads as a rounding detail rather than work.
           (mismatches
             ? ` ${mismatches} skip trace${mismatches === 1 ? '' : 's'} came back as a different person, so those contacts were discarded.`
+            : '') +
+          // Previously worked and retired, named rather than silently skipped,
+          // so nobody re-researches a case the team already closed.
+          (r.previouslyDead?.length
+            ? ` ${r.previouslyDead.length} ${r.previouslyDead.length === 1 ? 'was' : 'were'} previously worked and marked dead: ${r.previouslyDead
+                .slice(0, 3)
+                .map((p: any) => `${p.claimant}${p.reason ? ` (${p.reason})` : ''}`)
+                .join(', ')}${r.previouslyDead.length > 3 ? ` and ${r.previouslyDead.length - 3} more` : ''}.`
             : ''),
       );
       fetchRows();
@@ -906,12 +919,15 @@ export default function SurplusFundsPage() {
    * worked, not by deleting it, so the classifier's verdict and the trace
    * history survive for the next poll to compare against.
    */
-  const bulkStage = async (stage: string) => {
+  const bulkStage = async (stage: string, dead?: { deadReason: string; deadNote?: string | null }) => {
     if (!chosen.length || busy) return;
     setBusy(true);
     try {
-      const res = await surplusAPI.bulkStage(chosen, stage);
+      const res = await surplusAPI.bulkStage(chosen, stage, dead);
       say(`Moved ${res.data?.updated ?? chosen.length} claimant${chosen.length === 1 ? '' : 's'} to ${stage}`);
+      setDeadOpen(false);
+      setDeadReason('');
+      setDeadNote('');
       setPicked({});
       fetchRows();
       fetchStats();
@@ -1357,9 +1373,46 @@ export default function SurplusFundsPage() {
                     >
                       {'✉'} Letter mailed
                     </button>
-                    <button className="dc-btn sm dngr" disabled={busy} onClick={() => bulkStage('Dead')}>
-                      Mark dead
-                    </button>
+                    {/* Dead needs a reason, so the button opens a small form
+                        rather than acting at once. */}
+                    {deadOpen ? (
+                      <>
+                        <select
+                          className="dc-in"
+                          value={deadReason}
+                          onChange={(e) => setDeadReason(e.target.value)}
+                          aria-label="Dead reason"
+                        >
+                          <option value="">Why dead?</option>
+                          {SURPLUS_DEAD_REASONS.map(([k, l]) => (
+                            <option key={k} value={k}>
+                              {l}
+                            </option>
+                          ))}
+                        </select>
+                        <input
+                          className="dc-in"
+                          value={deadNote}
+                          placeholder="Note, optional"
+                          onChange={(e) => setDeadNote(e.target.value)}
+                          style={{ width: 160 }}
+                        />
+                        <button
+                          className="dc-btn sm dngr"
+                          disabled={busy || !deadReason}
+                          onClick={() => bulkStage('Dead', { deadReason, deadNote: deadNote.trim() || null })}
+                        >
+                          Confirm dead
+                        </button>
+                        <button className="dc-btn sm" disabled={busy} onClick={() => setDeadOpen(false)}>
+                          Cancel
+                        </button>
+                      </>
+                    ) : (
+                      <button className="dc-btn sm dngr" disabled={busy} onClick={() => setDeadOpen(true)}>
+                        Mark dead
+                      </button>
+                    )}
                     <button
                       className="dc-btn sm dngr"
                       disabled={busy}

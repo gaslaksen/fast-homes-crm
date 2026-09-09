@@ -304,9 +304,36 @@ export enum SurplusStage {
   AGREEMENT_SIGNED = 'Agreement Signed',
   ASSIGNMENT_NOTARIZED = 'Assignment Notarized',
   CLAIM_FILED = 'Claim Filed',
+  /** Filed and acknowledged by the county, waiting on its processing. */
+  AWAITING_DISBURSEMENT = 'Awaiting Disbursement',
+  /** The county's check is in hand; the thirty-day clearing and the claimant's share follow. */
+  CHECK_RECEIVED = 'Check Received',
   PAID = 'Paid',
   DEAD = 'Dead',
 }
+
+/**
+ * Why a claim was retired. Recorded, never deleted, so a county pull that
+ * lists the case again is matched against a reason rather than a blank,
+ * and the team can see what kills claims in a county.
+ */
+export enum SurplusDeadReason {
+  BELOW_FLOOR = 'below_floor',
+  DECEASED_NO_HEIRS = 'deceased_no_heirs',
+  COMPETING_CLAIM = 'competing_claim',
+  UNRESPONSIVE = 'unresponsive',
+  ALREADY_ASSIGNED = 'already_assigned',
+  OTHER = 'other',
+}
+
+export const SURPLUS_DEAD_REASON_LABEL: Record<SurplusDeadReason, string> = {
+  [SurplusDeadReason.BELOW_FLOOR]: 'Surplus below the floor',
+  [SurplusDeadReason.DECEASED_NO_HEIRS]: 'Deceased, no heirs located',
+  [SurplusDeadReason.COMPETING_CLAIM]: 'Competing claim already filed',
+  [SurplusDeadReason.UNRESPONSIVE]: 'Unresponsive after the set attempts',
+  [SurplusDeadReason.ALREADY_ASSIGNED]: 'Already signed with somebody else',
+  [SurplusDeadReason.OTHER]: 'Other',
+};
 
 // Banding from the surplus spec. It leaves two gaps on purpose: a living owner
 // at $25k+ who already has a competing lien filed, and a deceased owner under

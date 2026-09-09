@@ -4,6 +4,7 @@ import { SurplusService } from './surplus.service';
 import { SurplusLeadInput, SurplusPhoneInput } from './surplus.types';
 import { SurplusLien, nameMatchesClaimant } from './surplus.util';
 import { SURPLUS_FLOOR } from './surplus-compliance';
+import { SurplusStage, SurplusDeadReason, SURPLUS_DEAD_REASON_LABEL } from '@fast-homes/shared';
 import { cellText, parseNum, normalizePhoneDigits, phoneTypeOf, parseListDate } from '../probate/probate.util';
 
 function normH(h: any): string {
@@ -141,6 +142,12 @@ const SEGMENT_HEADERS = ['segment', 'band', 'tier'];
 export interface SurplusImportResult {
   created: number;
   duplicates: number;
+  /**
+   * Duplicates that are already Dead on the board: previously worked and
+   * retired. Named rather than folded into the duplicate count, so nobody
+   * re-researches a case the team already closed.
+   */
+  previouslyDead: { row: number; claimant: string; caseNumber: string | null; reason: string | null; deadAt: Date | null }[];
   /** Rows dropped for sitting under the surplus floor, counted rather than errored. */
   belowFloor: number;
   /**
@@ -208,6 +215,7 @@ export class SurplusImportService {
     const result: SurplusImportResult = {
       created: 0,
       duplicates: 0,
+      previouslyDead: [],
       belowFloor: 0,
       contactMismatches: [],
       countyInferred: 0,
@@ -246,7 +254,19 @@ export class SurplusImportService {
           organizationId: opts.organizationId,
         });
         if (!res.created) {
-          if (res.reason === 'duplicate') result.duplicates++;
+          if (res.reason === 'duplicate') {
+            result.duplicates++;
+            const ex = (res as any).existing;
+            if (ex?.stage === SurplusStage.DEAD) {
+              result.previouslyDead.push({
+                row: rowNo,
+                claimant: input.claimant || '',
+                caseNumber: input.caseNumber || null,
+                reason: ex.deadReason ? SURPLUS_DEAD_REASON_LABEL[ex.deadReason as SurplusDeadReason] || ex.deadReason : null,
+                deadAt: ex.deadAt || null,
+              });
+            }
+          }
           else if (res.reason === 'below the surplus floor') result.belowFloor++;
           else result.errors.push({ row: rowNo, reason: res.reason || 'not created' });
           continue;

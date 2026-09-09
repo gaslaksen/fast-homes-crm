@@ -817,6 +817,13 @@ model SurplusDetail {
   /// its next letter once the last one is older than this.
   letterCadenceDays Int?
 
+  // ── Why it died ───────────────────────────────────────────────────────────
+  /// SurplusDeadReason. Required to enter Dead, so a retired claim always
+  /// says why and a re-listed case is matched against a reason.
+  deadReason String?
+  deadNote   String?
+  deadAt     DateTime?
+
   // ── The attorney ──────────────────────────────────────────────────────────
   // Most counties do not require one. Where one is engaged, every contact
   // with the county or the court goes through them, and the case says so

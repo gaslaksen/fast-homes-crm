@@ -12,6 +12,8 @@ import {
   SurplusQueue,
   SURPLUS_QUEUE_RANK,
   surplusCallConnected,
+  SurplusDeadReason,
+  SURPLUS_DEAD_REASON_LABEL,
   SurplusDocumentKind,
   SurplusDocumentStatus,
   surplusDocumentAtLeast,
@@ -143,7 +145,23 @@ const STAGE_TASK_DAYS: Partial<
     title: (n, a) => (a ? `Ask ${a} where ${n}'s claim stands with the clerk` : `Check with the clerk on ${n}'s claim`),
     days: 21,
   },
+  [SurplusStage.AWAITING_DISBURSEMENT]: {
+    title: (n, a) =>
+      a ? `Ask ${a} when the county will pay ${n}'s claim` : `Check with the clerk on ${n}'s disbursement`,
+    days: 30,
+  },
+  [SurplusStage.CHECK_RECEIVED]: {
+    title: (n) => `Tell ${n} the check arrived and start the disbursement report`,
+    days: 1,
+  },
 };
+
+/** The reason string, when it is one of ours. */
+function deadReasonOf(raw: unknown): SurplusDeadReason | null {
+  return (Object.values(SurplusDeadReason) as string[]).includes(String(raw || ''))
+    ? (raw as SurplusDeadReason)
+    : null;
+}
 
 /** Days after a letter goes out before checking for a reply. */
 const LETTER_FOLLOW_UP_DAYS = 14;
@@ -169,6 +187,8 @@ export interface CreateSurplusResult {
   leadId: string | null;
   created: boolean;
   reason?: string;
+  /** On a duplicate: what the existing file is, so an import can say "previously worked". */
+  existing?: { stage: string | null; deadReason: string | null; deadAt: Date | null };
 }
 
 /**
@@ -241,10 +261,18 @@ export class SurplusService {
     });
     const existing = await this.prisma.surplusDetail.findFirst({
       where: { organizationId, dedupeUid },
-      select: { leadId: true },
+      select: { leadId: true, stage: true, deadReason: true, deadAt: true },
     });
     if (existing) {
-      return { leadId: existing.leadId, created: false, reason: 'duplicate' };
+      // Say what the existing file is, so an import can tell "already on
+      // the board" from "previously worked and retired" instead of both
+      // reading as a silent skip.
+      return {
+        leadId: existing.leadId,
+        created: false,
+        reason: 'duplicate',
+        existing: { stage: existing.stage, deadReason: existing.deadReason, deadAt: existing.deadAt },
+      };
     }
 
     const { firstName, lastName } = splitOwnerName(claimant);
@@ -501,7 +529,25 @@ export class SurplusService {
       const refused = stageGateError(after, next, await this.gateContext(lead, after));
       if (refused) throw new BadRequestException(refused);
       detailPatch.stage = next;
-      if (next === SurplusStage.DEAD) leadPatch.status = 'DEAD';
+      if (next === SurplusStage.DEAD) {
+        // Dead needs a reason. Recorded rather than deleted, so a re-listed
+        // case is matched against why it was retired.
+        const reason = patch.deadReason !== undefined ? patch.deadReason : d.deadReason;
+        if (!deadReasonOf(reason)) {
+          throw new BadRequestException('Marking a claim Dead needs a reason: below the floor, deceased with no heirs, competing claim, unresponsive, already assigned, or other.');
+        }
+        detailPatch.deadReason = reason;
+        detailPatch.deadNote = patch.deadNote !== undefined ? (patch.deadNote || '').trim() || null : d.deadNote;
+        detailPatch.deadAt = d.stage === SurplusStage.DEAD && d.deadAt ? d.deadAt : new Date();
+        leadPatch.status = 'DEAD';
+      } else if (d.stage === SurplusStage.DEAD) {
+        // Revived. The reason is cleared so the row does not read as dead
+        // and alive at once; the timeline still has the history.
+        detailPatch.deadReason = null;
+        detailPatch.deadNote = null;
+        detailPatch.deadAt = null;
+        leadPatch.status = 'NEW';
+      }
     }
 
     if (patch.phones !== undefined) {
@@ -936,8 +982,12 @@ export class SurplusService {
     stage: string,
     organizationId?: string | null,
     userId?: string | null,
+    dead?: { reason?: string | null; note?: string | null },
   ) {
     const target = stageFromText(stage);
+    if (target === SurplusStage.DEAD && !deadReasonOf(dead?.reason)) {
+      throw new BadRequestException('Marking claims Dead needs a reason.');
+    }
     const where: any = { id: { in: ids }, source: LeadSource.SURPLUS };
     if (organizationId) where.organizationId = organizationId;
     const leads = await this.prisma.lead.findMany({ where, include: LEAD_INCLUDE });
@@ -972,6 +1022,16 @@ export class SurplusService {
     // digest stop offering the claimant. update() does the same for one card.
     if (target === SurplusStage.DEAD) {
       await this.prisma.lead.updateMany({ where: { id: { in: leadIds } }, data: { status: 'DEAD' } });
+      await this.prisma.surplusDetail.updateMany({
+        where: { leadId: { in: leadIds } },
+        data: { deadReason: dead!.reason, deadNote: (dead?.note || '').trim() || null, deadAt: new Date() },
+      });
+    } else {
+      // Anything moved out of Dead is revived: the reason goes with it.
+      await this.prisma.surplusDetail.updateMany({
+        where: { leadId: { in: leadIds }, deadReason: { not: null } },
+        data: { deadReason: null, deadNote: null, deadAt: null },
+      });
     }
     for (const id of leadIds) await this.scheduleStageTask(id, target, userId);
     return { updated: res.count, stage: target };
@@ -1676,6 +1736,13 @@ export class SurplusService {
 
       // Tapped / Not Tapped, and which of the four channels have been tried.
       // Recap scheduled is tapped with a dated follow-up on the books.
+      // Why it died, when it did. Kept so the board's Dead column reads as
+      // a list of reasons and a re-listed case says what happened last time.
+      deadReason: d.deadReason || null,
+      deadReasonLabel: d.deadReason ? SURPLUS_DEAD_REASON_LABEL[d.deadReason as SurplusDeadReason] || d.deadReason : null,
+      deadNote: d.deadNote || null,
+      deadAt: d.deadAt || null,
+
       // The notary, and where the appointment stands. The packet reads the
       // document set; this is the person and the dates.
       notary: {
