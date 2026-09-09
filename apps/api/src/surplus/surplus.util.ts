@@ -455,13 +455,22 @@ export interface StageGateContext {
   attorneyRequired?: boolean;
   /** One is engaged on the case. */
   attorneyEngaged?: boolean;
+  /** How the package went out, and the carrier's tracking number when one applies. */
+  submissionMethod?: string | null;
+  submissionTrackingNumber?: string | null;
+  /** The county confirmed it has the package. */
+  countyAcknowledgedAt?: Date | string | null;
 }
+
+/** Submission methods that hand back a tracking number. The rest hand back a receipt or a confirmation. */
+export const TRACKED_SUBMISSION_METHODS = ['usps', 'fedex', 'ups'];
 
 /** The three forward stages the gate guards, in order. Later ones inherit earlier requirements. */
 const GATED_STAGES: SurplusStage[] = [
   SurplusStage.AGREEMENT_SIGNED,
   SurplusStage.ASSIGNMENT_NOTARIZED,
   SurplusStage.CLAIM_FILED,
+  SurplusStage.AWAITING_DISBURSEMENT,
 ];
 
 /**
@@ -518,6 +527,18 @@ export function stageRequirementsMissing(
     if (ctx.attorneyRequired && !ctx.attorneyEngaged) {
       missing.push('an attorney engaged, this county requires one to file');
     }
+    // And a record of how it went: "we mailed it" with no tracking number
+    // is the expensive mistake the course names.
+    if (!ctx.submissionMethod) {
+      missing.push('how the package was submitted');
+    } else if (TRACKED_SUBMISSION_METHODS.includes(ctx.submissionMethod) && !ctx.submissionTrackingNumber) {
+      missing.push(`the ${ctx.submissionMethod.toUpperCase()} tracking number`);
+    }
+  }
+
+  // Awaiting Disbursement: the county has said it has the package.
+  if (idx >= 3 && !ctx.countyAcknowledgedAt) {
+    missing.push('the county acknowledging receipt');
   }
 
   return Array.from(new Set(missing));

@@ -460,25 +460,53 @@ describe('stageGateError', () => {
       stageGateError(clean, SurplusStage.CLAIM_FILED, {
         docs: signedUp,
         docsMissing: ['county_claim_form', 'photo_id'],
+        submissionMethod: 'in_person',
       }),
     ).toBe('Claim Filed needs county claim form in hand, photo id in hand.');
-    expect(stageGateError(clean, SurplusStage.CLAIM_FILED, { docs: signedUp, docsMissing: [] })).toBeNull();
+    expect(stageGateError(clean, SurplusStage.CLAIM_FILED, { docs: signedUp, docsMissing: [], submissionMethod: 'in_person' })).toBeNull();
+  });
+
+  it('needs a submission method, and a tracking number when a carrier took it', () => {
+    const base = { docs: signedUp, docsMissing: [] as string[] };
+    expect(stageGateError(clean, SurplusStage.CLAIM_FILED, base)).toBe(
+      'Claim Filed needs how the package was submitted.',
+    );
+    expect(stageGateError(clean, SurplusStage.CLAIM_FILED, { ...base, submissionMethod: 'fedex' })).toBe(
+      'Claim Filed needs the FEDEX tracking number.',
+    );
+    expect(
+      stageGateError(clean, SurplusStage.CLAIM_FILED, { ...base, submissionMethod: 'fedex', submissionTrackingNumber: '7749' }),
+    ).toBeNull();
+    // In person and e-file hand back a receipt, not a tracking number.
+    expect(stageGateError(clean, SurplusStage.CLAIM_FILED, { ...base, submissionMethod: 'in_person' })).toBeNull();
+    expect(stageGateError(clean, SurplusStage.CLAIM_FILED, { ...base, submissionMethod: 'efile' })).toBeNull();
+  });
+
+  it('holds Awaiting Disbursement until the county acknowledges receipt', () => {
+    const filed = { docs: signedUp, docsMissing: [] as string[], submissionMethod: 'usps', submissionTrackingNumber: '9400' };
+    expect(stageGateError(clean, SurplusStage.AWAITING_DISBURSEMENT, filed)).toBe(
+      'Awaiting Disbursement needs the county acknowledging receipt.',
+    );
+    expect(
+      stageGateError(clean, SurplusStage.AWAITING_DISBURSEMENT, { ...filed, countyAcknowledgedAt: '2026-09-01' }),
+    ).toBeNull();
   });
 
   it('needs an attorney engaged to file only where one is required', () => {
     expect(
-      stageGateError(clean, SurplusStage.CLAIM_FILED, { docs: signedUp, docsMissing: [], attorneyRequired: true }),
+      stageGateError(clean, SurplusStage.CLAIM_FILED, { docs: signedUp, docsMissing: [], submissionMethod: 'in_person', attorneyRequired: true }),
     ).toBe('Claim Filed needs an attorney engaged, this county requires one to file.');
     expect(
       stageGateError(clean, SurplusStage.CLAIM_FILED, {
         docs: signedUp,
         docsMissing: [],
+        submissionMethod: 'in_person',
         attorneyRequired: true,
         attorneyEngaged: true,
       }),
     ).toBeNull();
     expect(
-      stageGateError(clean, SurplusStage.CLAIM_FILED, { docs: signedUp, docsMissing: [], attorneyRequired: false }),
+      stageGateError(clean, SurplusStage.CLAIM_FILED, { docs: signedUp, docsMissing: [], submissionMethod: 'in_person', attorneyRequired: false }),
     ).toBeNull();
     // Only Claim Filed cares: an attorney is for the filing, not the retention.
     expect(
