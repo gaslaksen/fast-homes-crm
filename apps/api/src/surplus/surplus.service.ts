@@ -16,6 +16,10 @@ import {
   SURPLUS_DEAD_REASON_LABEL,
   SURPLUS_EXPENSE_KINDS,
   surplusDisbursement,
+  SurplusTraceChannel,
+  SURPLUS_TRACE_CHANNEL_LABEL,
+  SURPLUS_TIER1_CHANNELS,
+  SurplusPersonRole,
   SurplusDocumentKind,
   SurplusDocumentStatus,
   surplusDocumentAtLeast,
@@ -63,6 +67,8 @@ import {
   governingPct,
   canQualify,
   stageGateError,
+  deadGateError,
+  deadGateMissing,
   stageBlocks,
   StageGateContext,
   complianceGate,
@@ -106,6 +112,7 @@ const LEAD_INCLUDE = {
       documents: true,
       expenses: { orderBy: { incurredAt: 'asc' as const } },
       reference: true,
+      traceAttempts: { orderBy: { ranAt: 'desc' as const }, take: 50 },
     },
   },
   tasks: {
@@ -179,6 +186,10 @@ export const CLEARING_DAYS = 30;
 export const SURVEY_FOLLOW_UP_DAYS = 10;
 /** And the county is asked about a filed claim at least this often after the first check. */
 export const COUNTY_FOLLOW_UP_DAYS = 30;
+/** An unreached claimant with no number gets the free searches run again this often. */
+export const TIER1_RECHECK_DAYS = 60;
+/** And another letter this long after the last one, when nothing has come back. */
+export const REMAIL_DAYS = 90;
 
 const EMPTY_DISCLOSURES = {
   financial: false,
@@ -598,6 +609,10 @@ export class SurplusService {
         if (!deadReasonOf(reason)) {
           throw new BadRequestException('Marking a claim Dead needs a reason: below the floor, deceased with no heirs, competing claim, unresponsive, already assigned, or other.');
         }
+        // "Unresponsive" is a claim about the effort, so the effort is checked.
+        const note = patch.deadNote !== undefined ? patch.deadNote : d.deadNote;
+        const refusedDead = deadGateError(reason, this.deadEffort(lead, d), { on: !!patch.deadOverride, note });
+        if (refusedDead) throw new BadRequestException(refusedDead);
         detailPatch.deadReason = reason;
         detailPatch.deadNote = patch.deadNote !== undefined ? (patch.deadNote || '').trim() || null : d.deadNote;
         detailPatch.deadAt = d.stage === SurplusStage.DEAD && d.deadAt ? d.deadAt : new Date();
@@ -1003,6 +1018,76 @@ export class SurplusService {
   }
 
   /**
+   * A search somebody ran by hand: a Google, a Facebook look, a Sunbiz or
+   * official-records check, a letter, a professional tracer engaged. The
+   * paid database logs itself; this is for the free routes, which are the
+   * ones the escalation rule needs proof of.
+   */
+  async addTraceAttempt(
+    leadId: string,
+    input: {
+      channel: string;
+      source?: string | null;
+      result: string;
+      summary?: string | null;
+      cost?: number | null;
+      heirId?: string | null;
+      ranAt?: string | null;
+    },
+    organizationId?: string | null,
+    userId?: string | null,
+  ) {
+    const d = await this.detailOf(leadId, organizationId);
+    const channel = String(input.channel || '');
+    if (!(Object.values(SurplusTraceChannel) as string[]).includes(channel)) {
+      throw new BadRequestException('Pick a channel: free search, social, government records, paid database, professional tracer, or mail.');
+    }
+    const result = String(input.result || '');
+    if (!['found', 'nothing', 'mismatch', 'skipped'].includes(result)) {
+      throw new BadRequestException('The result is found, nothing, mismatch, or skipped.');
+    }
+    if (input.heirId) {
+      const heir = await this.prisma.surplusHeir.findFirst({ where: { id: input.heirId, surplusDetailId: d.id } });
+      if (!heir) throw new BadRequestException('That heir is not on this claim.');
+    }
+    const ranAt = input.ranAt ? new Date(input.ranAt) : new Date();
+    if (Number.isNaN(ranAt.getTime())) throw new BadRequestException('The date could not be read.');
+    const row = await this.prisma.surplusTraceAttempt.create({
+      data: {
+        surplusDetailId: d.id,
+        heirId: input.heirId || null,
+        organizationId: d.organizationId,
+        channel,
+        source: (input.source || '').trim() || null,
+        result,
+        summary: (input.summary || '').trim() || null,
+        cost: input.cost != null && Number.isFinite(Number(input.cost)) ? Number(input.cost) : null,
+        ranAt,
+        byUserId: userId || null,
+      },
+    });
+    await this.prisma.activity.create({
+      data: {
+        leadId,
+        userId: userId || undefined,
+        type: 'TRACE_ATTEMPT',
+        description: `${SURPLUS_TRACE_CHANNEL_LABEL[channel as SurplusTraceChannel]}${row.source ? ` (${row.source})` : ''}: ${result}${row.summary ? `. ${row.summary}` : ''}`,
+        metadata: { channel, source: row.source, result, heirId: row.heirId },
+      },
+    });
+    return row;
+  }
+
+  async removeTraceAttempt(attemptId: string, organizationId?: string | null) {
+    const row = await this.prisma.surplusTraceAttempt.findFirst({
+      where: { id: attemptId, ...(organizationId ? { organizationId } : {}) },
+    });
+    if (!row) throw new BadRequestException('Attempt not found');
+    await this.prisma.surplusTraceAttempt.delete({ where: { id: row.id } });
+    return { removed: 1 };
+  }
+
+  /**
    * The reference library: paid claimants, whether they agreed to be
    * named, and their story. Searchable by county so the nearest one is
    * the one that gets sent. Recoveries is the milestone counter.
@@ -1396,7 +1481,7 @@ export class SurplusService {
     stage: string,
     organizationId?: string | null,
     userId?: string | null,
-    dead?: { reason?: string | null; note?: string | null },
+    dead?: { reason?: string | null; note?: string | null; override?: boolean | null },
   ) {
     const target = stageFromText(stage);
     if (target === SurplusStage.DEAD && !deadReasonOf(dead?.reason)) {
@@ -1415,7 +1500,10 @@ export class SurplusService {
         leads.map(async (l) => ({
           name: `${l.sellerFirstName || ''} ${l.sellerLastName || ''}`.trim() || 'a claimant',
           why: l.surplusDetail
-            ? stageGateError(l.surplusDetail, target, await this.gateContext(l, l.surplusDetail))
+            ? stageGateError(l.surplusDetail, target, await this.gateContext(l, l.surplusDetail)) ||
+              (target === SurplusStage.DEAD
+                ? deadGateError(dead?.reason, this.deadEffort(l, l.surplusDetail), { on: !!dead?.override, note: dead?.note })
+                : null)
             : null,
         })),
       )
@@ -1931,8 +2019,11 @@ export class SurplusService {
     // callable. The counts consider only the LIVING: a dead heir cannot sign
     // either, and their share needs its own estate opened.
     const heirRows = (d.heirs || []).map((h: any) => heirRow(h));
-    const livingHeirs = heirRows.filter((h: any) => !h.deceased);
+    // Signer counts read heirs only. A neighbor with a phone number is a
+    // route to the claimant, not somebody who can file.
+    const livingHeirs = heirRows.filter((h: any) => !h.deceased && h.isHeir);
     const callableHeirs = livingHeirs.filter((h: any) => h.callable);
+    const associates = heirRows.filter((h: any) => !h.deceased && !h.isHeir);
 
     const week = isoWeekKey();
     const staleWeek = d.touchWeek && d.touchWeek !== week;
@@ -2144,10 +2235,14 @@ export class SurplusService {
       // Who inherited, living first. The counts are what the queue and the card
       // key on; heirs is what the panel renders.
       heirs: heirRows,
-      heirCount: heirRows.length,
+      heirCount: heirRows.filter((h: any) => h.isHeir).length,
       livingHeirCount: livingHeirs.length,
       callableHeirCount: callableHeirs.length,
-      deceasedHeirCount: heirRows.length - livingHeirs.length,
+      deceasedHeirCount: heirRows.filter((h: any) => h.isHeir && h.deceased).length,
+      /** Relatives, neighbors, friends: people who may know where the claimant is. */
+      associateCount: associates.length,
+      callableAssociateCount: associates.filter((h: any) => h.callable).length,
+      associatesUntried: associates.filter((h: any) => h.contactStatus === 'not_contacted').length,
       doNotCall: d.doNotCall,
       callNotes: d.callNotes || '',
       letterMailedAt: d.letterMailedAt,
@@ -2187,6 +2282,54 @@ export class SurplusService {
           lastAt,
           daysSince,
           overdue: applies && (daysSince === null || daysSince > CLAIMANT_UPDATE_DAYS),
+        };
+      })(),
+
+      // Every search run for this person, by channel, and what the
+      // escalation rule makes of it: were the free routes tried before the
+      // paid one, and is a professional tracer worth it here.
+      tracing: (() => {
+        const attempts = ((d.traceAttempts || []) as any[]).map((a) => ({
+          id: a.id,
+          heirId: a.heirId || null,
+          channel: a.channel,
+          channelLabel: SURPLUS_TRACE_CHANNEL_LABEL[a.channel as SurplusTraceChannel] || a.channel,
+          source: a.source || null,
+          result: a.result,
+          summary: a.summary || null,
+          cost: a.cost ?? null,
+          ranAt: a.ranAt,
+        }));
+        const own = attempts.filter((a) => !a.heirId);
+        const channelsTried = Array.from(new Set(own.map((a) => a.channel)));
+        const tier1Done = SURPLUS_TIER1_CHANNELS.some((c) => channelsTried.includes(c));
+        const paidRuns = own.filter((a) => a.channel === SurplusTraceChannel.PAID_DB && a.result !== 'skipped');
+        const tier = tierOf(facts);
+        const lastTier1At =
+          own
+            .filter((a) => SURPLUS_TIER1_CHANNELS.includes(a.channel as SurplusTraceChannel) && a.result !== 'skipped')
+            .map((a) => new Date(a.ranAt).getTime())
+            .sort((x, y) => y - x)[0] || null;
+        const tier1AgeDays = lastTier1At ? Math.floor((Date.now() - lastTier1At) / 86_400_000) : null;
+        return {
+          attempts,
+          channelsTried,
+          tier1Done,
+          paidRuns: paidRuns.length,
+          /** A credit was spent before any free route was logged. */
+          tierSkipped: paidRuns.length > 0 && !tier1Done,
+          /** The course reserves a professional tracer for the big claims. */
+          proTracerEligible: tier === SurplusTier.A || tier === SurplusTier.B,
+          lastTier1At: lastTier1At ? new Date(lastTier1At) : null,
+          tier1AgeDays,
+          /**
+           * The recheck: nobody has heard from them, there is no number to
+           * ring, and the free searches are old enough that the web may have
+           * moved on. The cadence cron turns this into a task.
+           */
+          tier1RecheckDue:
+            !d.tappedAt && !d.doNotCall && phones.filter((p) => !p.dnc).length === 0 && tier1AgeDays !== null && tier1AgeDays >= TIER1_RECHECK_DAYS,
+          totalCost: attempts.reduce((s, a) => s + (a.cost || 0), 0),
         };
       })(),
 
@@ -2266,6 +2409,8 @@ export class SurplusService {
 
       // Why it died, when it did. Kept so the board's Dead column reads as
       // a list of reasons and a re-listed case says what happened last time.
+      /** What "unresponsive" still needs before it is a reason. Empty when it is. */
+      deadGateMissing: deadGateMissing(SurplusDeadReason.UNRESPONSIVE, this.deadEffort(lead, d)),
       deadReason: d.deadReason || null,
       deadReasonLabel: d.deadReason ? SURPLUS_DEAD_REASON_LABEL[d.deadReason as SurplusDeadReason] || d.deadReason : null,
       deadNote: d.deadNote || null,
@@ -2350,6 +2495,20 @@ export class SurplusService {
    * standard letters, the next one goes Priority or FedEx so it is actually
    * opened.
    */
+  /**
+   * What has been tried on this claimant, for the effort gate before Dead.
+   * Attempts against an heir or an associate do not count: the claimant is
+   * the one being called unresponsive.
+   */
+  private deadEffort(lead: any, d: any) {
+    const own = ((d.traceAttempts || []) as any[]).filter((a) => !a.heirId && a.result !== 'skipped');
+    return {
+      channelsTried: Array.from(new Set(own.map((a) => String(a.channel)))),
+      letterCount: ((d.letters || []) as any[]).length,
+      callCount: lead._count?.callLogs || 0,
+    };
+  }
+
   private letterState(d: any) {
     const letters = ((d.letters || []) as any[]).map((l) => ({
       id: l.id,

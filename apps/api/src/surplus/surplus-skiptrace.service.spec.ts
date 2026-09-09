@@ -12,19 +12,23 @@ const mockedAxios = axios as jest.Mocked<typeof axios>;
 function harness(leads: any[]) {
   const leadUpdates: any[] = [];
   const detailUpdates: any[] = [];
+  const attempts: any[] = [];
   const prisma: any = {
     lead: {
       findMany: jest.fn().mockResolvedValue(leads),
       update: jest.fn(async (a: any) => { leadUpdates.push(a); return {}; }),
     },
     surplusDetail: {
-      findUnique: jest.fn().mockResolvedValue({ callNotes: null }),
+      findUnique: jest.fn().mockResolvedValue({ callNotes: null, organizationId: 'org' }),
       update: jest.fn(async (a: any) => { detailUpdates.push(a); return {}; }),
+    },
+    surplusTraceAttempt: {
+      create: jest.fn(async (a: any) => { attempts.push(a.data); return a.data; }),
     },
   };
   const config = { get: (k: string) => (k === 'BATCHDATA_API_KEY' ? 'test-key' : undefined) };
   const svc = new SurplusSkiptraceService(prisma, config as unknown as ConfigService);
-  return { svc, prisma, leadUpdates, detailUpdates };
+  return { svc, prisma, leadUpdates, detailUpdates, attempts };
 }
 
 const lead = (over: any = {}) => ({
@@ -521,7 +525,7 @@ describe('recording that a trace happened', () => {
   it('stamps the outcome per claimant, not per address', async () => {
     // Two co-owners, one submission, opposite outcomes: the trace returns only
     // Calvin, so Ruth is left with nothing found.
-    const { svc, detailUpdates } = harness([
+    const { svc, detailUpdates, attempts } = harness([
       lead({ id: 'l1', detailId: 'd1', first: 'Calvin', last: 'Johnson' }),
       lead({ id: 'l2', detailId: 'd2', first: 'Ruth', last: 'Johnson' }),
     ]);
@@ -536,6 +540,10 @@ describe('recording that a trace happened', () => {
     expect(byDetail.d1.tracedAt).toBeInstanceOf(Date);
     expect(byDetail.d2.traceOutcome).toBe('no_person');
     expect(byDetail.d2.tracedAt).toBeInstanceOf(Date);
+    // Both runs land in the search log as paid-database attempts, one per claimant.
+    const byAttempt = Object.fromEntries(attempts.map((a) => [a.surplusDetailId, a]));
+    expect(byAttempt.d1).toMatchObject({ heirId: null, channel: 'paid_db', source: 'batchdata', result: 'found' });
+    expect(byAttempt.d2).toMatchObject({ heirId: null, channel: 'paid_db', result: 'nothing' });
   });
 
   it('stamps a stranger as a mismatch rather than leaving it untraced', async () => {
@@ -577,20 +585,28 @@ describe('tracing heirs', () => {
    */
   function heirHarness(heirs: any[]) {
     const updates: any[] = [];
+    const attempts: any[] = [];
     const prisma: any = {
       surplusHeir: {
         findMany: jest.fn().mockResolvedValue(heirs),
-        findUnique: jest.fn().mockResolvedValue({ callNotes: null }),
+        findUnique: jest.fn().mockResolvedValue({ callNotes: null, surplusDetailId: 'd1' }),
         update: jest.fn(async (a: any) => { updates.push(a); return {}; }),
+      },
+      surplusDetail: {
+        findUnique: jest.fn().mockResolvedValue({ organizationId: 'org' }),
+      },
+      surplusTraceAttempt: {
+        create: jest.fn(async (a: any) => { attempts.push(a.data); return a.data; }),
       },
     };
     const config = { get: (k: string) => (k === 'BATCHDATA_API_KEY' ? 'test-key' : undefined) };
     const svc = new SurplusSkiptraceService(prisma, config as unknown as ConfigService);
-    return { svc, updates };
+    return { svc, updates, attempts };
   }
 
   const heir = (over: any = {}) => ({
     id: over.id || 'h1',
+    surplusDetailId: 'd1',
     name: over.name ?? 'Alfred J. Spencer',
     street: over.street ?? '7789 Andes Drive',
     city: 'JACKSONVILLE',
@@ -666,7 +682,7 @@ describe('tracing heirs', () => {
   });
 
   it('attaches contacts when the name matches', async () => {
-    const { svc, updates } = heirHarness([heir()]);
+    const { svc, updates, attempts } = heirHarness([heir()]);
     respond([person('Alfred', 'Spencer', ['9045551234'])]);
 
     const r = await svc.traceHeirs({ organizationId: 'org' });
@@ -674,6 +690,9 @@ describe('tracing heirs', () => {
     expect(r.contacted).toBe(1);
     expect(updates[0].data.phone1).toBe('9045551234');
     expect(updates[0].data.traceOutcome).toBe('matched');
+    // The paid database logs itself in the search log, against the heir.
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0]).toMatchObject({ surplusDetailId: 'd1', heirId: 'h1', channel: 'paid_db', source: 'batchdata', result: 'found' });
   });
 
   it('discards a stranger instead of attaching them to the heir', async () => {

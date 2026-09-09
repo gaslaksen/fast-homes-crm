@@ -682,6 +682,7 @@ export default function SurplusFundsPage() {
   const [deadOpen, setDeadOpen] = useState(false);
   const [deadReason, setDeadReason] = useState('');
   const [deadNote, setDeadNote] = useState('');
+  const [deadOverride, setDeadOverride] = useState(false);
   const [adding, setAdding] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -933,7 +934,7 @@ export default function SurplusFundsPage() {
    * worked, not by deleting it, so the classifier's verdict and the trace
    * history survive for the next poll to compare against.
    */
-  const bulkStage = async (stage: string, dead?: { deadReason: string; deadNote?: string | null }) => {
+  const bulkStage = async (stage: string, dead?: { deadReason: string; deadNote?: string | null; deadOverride?: boolean }) => {
     if (!chosen.length || busy) return;
     setBusy(true);
     try {
@@ -1425,14 +1426,32 @@ export default function SurplusFundsPage() {
                         <input
                           className="dc-in"
                           value={deadNote}
-                          placeholder="Note, optional"
+                          placeholder={deadOverride ? 'Why, required' : 'Note, optional'}
                           onChange={(e) => setDeadNote(e.target.value)}
                           style={{ width: 160 }}
                         />
+                        {/* "Unresponsive" is checked against the search log, the
+                            letters and the call count on every selected claimant.
+                            The override needs a note. */}
+                        {deadReason === 'unresponsive' && (
+                          <label
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11.5, color: 'var(--dim)', cursor: 'pointer' }}
+                            title="Skip the effort gate: the free searches, a social search, a letter and three calls"
+                          >
+                            <input type="checkbox" checked={deadOverride} onChange={(e) => setDeadOverride(e.target.checked)} />
+                            Override the effort gate
+                          </label>
+                        )}
                         <button
                           className="dc-btn sm dngr"
-                          disabled={busy || !deadReason}
-                          onClick={() => bulkStage('Dead', { deadReason, deadNote: deadNote.trim() || null })}
+                          disabled={busy || !deadReason || (deadOverride && !deadNote.trim())}
+                          onClick={() =>
+                            bulkStage('Dead', {
+                              deadReason,
+                              deadNote: deadNote.trim() || null,
+                              ...(deadOverride && deadReason === 'unresponsive' ? { deadOverride: true } : {}),
+                            })
+                          }
                         >
                           Confirm dead
                         </button>

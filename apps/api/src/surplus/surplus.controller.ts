@@ -360,6 +360,34 @@ export class SurplusController {
     return out;
   }
 
+  // ── Trace attempts ────────────────────────────────────────────────────────
+
+  /** Log a search run by hand, so the free routes are on the record. */
+  @Post(':id/trace-attempts')
+  async addTraceAttempt(
+    @Param('id') id: string,
+    @Body()
+    body: {
+      channel: string;
+      source?: string | null;
+      result: string;
+      summary?: string | null;
+      cost?: number | null;
+      heirId?: string | null;
+      ranAt?: string | null;
+    },
+    @Headers('authorization') authHeader?: string,
+  ) {
+    const { organizationId, userId } = this.decodeToken(authHeader);
+    return this.surplus.addTraceAttempt(id, body || ({} as any), organizationId, userId);
+  }
+
+  @Post('trace-attempts/:attemptId/delete')
+  async removeTraceAttempt(@Param('attemptId') attemptId: string, @Headers('authorization') authHeader?: string) {
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.surplus.removeTraceAttempt(attemptId, organizationId);
+  }
+
   // ── References ────────────────────────────────────────────────────────────
 
   /** The reference library, with the recoveries counter. Optional county filter. */
@@ -617,6 +645,13 @@ export class SurplusController {
     return { ...saved, heirs: await this.heirs.list(id, organizationId) };
   }
 
+  /** One person added by hand: a missed heir, or somebody who may know where the claimant is. */
+  @Post(':id/heirs/add')
+  async addHeir(@Param('id') id: string, @Body() body: any, @Headers('authorization') authHeader?: string) {
+    const { organizationId, userId } = this.decodeToken(authHeader);
+    return this.heirs.add(id, body || {}, organizationId, userId);
+  }
+
   @Patch('heirs/:heirId')
   async updateHeir(
     @Param('heirId') heirId: string,
@@ -765,7 +800,7 @@ export class SurplusController {
    */
   @Post('bulk-stage')
   async bulkStage(
-    @Body() body: { ids: string[]; stage: string; deadReason?: string | null; deadNote?: string | null },
+    @Body() body: { ids: string[]; stage: string; deadReason?: string | null; deadNote?: string | null; deadOverride?: boolean | null },
     @Headers('authorization') authHeader?: string,
   ) {
     if (!Array.isArray(body?.ids) || body.ids.length === 0) {
@@ -776,6 +811,7 @@ export class SurplusController {
     return this.surplus.bulkStage(body.ids, body.stage, organizationId, userId, {
       reason: body.deadReason,
       note: body.deadNote,
+      override: !!body.deadOverride,
     });
   }
 

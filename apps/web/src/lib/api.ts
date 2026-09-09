@@ -211,8 +211,11 @@ export const surplusAPI = {
   create: (data: any) => api.post('/surplus', data),
   update: (id: string, data: any) => api.patch(`/surplus/${id}`, data),
   bulkDelete: (ids: string[]) => api.post('/surplus/bulk-delete', { ids }),
-  bulkStage: (ids: string[], stage: string, dead?: { deadReason?: string | null; deadNote?: string | null }) =>
-    api.post('/surplus/bulk-stage', { ids, stage, ...(dead || {}) }),
+  bulkStage: (
+    ids: string[],
+    stage: string,
+    dead?: { deadReason?: string | null; deadNote?: string | null; deadOverride?: boolean },
+  ) => api.post('/surplus/bulk-stage', { ids, stage, ...(dead || {}) }),
   letterMailed: (
     ids: string[],
     data: {
@@ -300,6 +303,20 @@ export const surplusAPI = {
   ) => api.patch(`/surplus/${id}/documents/${kind}`, data),
   /** One of our standard documents rendered from its template, for the print page. */
   documentDraft: (id: string, kind: string) => api.get(`/surplus/${id}/document-draft`, { params: { kind } }),
+  // ── Trace attempts: the search log ──
+  addTraceAttempt: (
+    id: string,
+    data: {
+      channel: string;
+      source?: string | null;
+      result: string;
+      summary?: string | null;
+      cost?: number | null;
+      heirId?: string | null;
+    },
+  ) => api.post(`/surplus/${id}/trace-attempts`, data),
+  removeTraceAttempt: (attemptId: string) => api.post(`/surplus/trace-attempts/${attemptId}/delete`),
+
   // ── References ──
   references: (county?: string | null) => api.get('/surplus/references', { params: { county: county || undefined } }),
   saveReference: (
@@ -349,6 +366,22 @@ export const surplusAPI = {
     id: string,
     body: { heirs: any[]; caseNumber?: string | null; sourceDocument?: string | null },
   ) => api.post(`/surplus/${id}/heirs`, body),
+  /** One person added by hand: a missed heir, or somebody who may know where the claimant is. */
+  addHeir: (
+    id: string,
+    body: {
+      name: string;
+      role?: string | null;
+      relationship?: string | null;
+      street?: string | null;
+      city?: string | null;
+      state?: string | null;
+      zip?: string | null;
+      phones?: string[];
+      emails?: string[];
+      callNotes?: string | null;
+    },
+  ) => api.post(`/surplus/${id}/heirs/add`, body),
   updateHeir: (heirId: string, body: any) => api.patch(`/surplus/heirs/${heirId}`, body),
   deleteHeir: (heirId: string) => api.post(`/surplus/heirs/${heirId}/delete`),
   skipTraceHeirs: (body: { heirIds?: string[]; limit?: number; includeTraced?: boolean }) =>

@@ -312,6 +312,36 @@ export enum SurplusStage {
   DEAD = 'Dead',
 }
 
+/**
+ * The channels a person can be searched through, cheapest first. The tier
+ * is the course's escalation rule: free routes before a paid database,
+ * and a professional tracer only for the big claims once both have failed.
+ */
+export enum SurplusTraceChannel {
+  FREE_SEARCH = 'free_search',
+  SOCIAL = 'social',
+  GOV_RECORDS = 'gov_records',
+  PAID_DB = 'paid_db',
+  PRO_TRACER = 'pro_tracer',
+  MAIL = 'mail',
+}
+
+export const SURPLUS_TRACE_CHANNEL_LABEL: Record<SurplusTraceChannel, string> = {
+  [SurplusTraceChannel.FREE_SEARCH]: 'Free search',
+  [SurplusTraceChannel.SOCIAL]: 'Social',
+  [SurplusTraceChannel.GOV_RECORDS]: 'Government records',
+  [SurplusTraceChannel.PAID_DB]: 'Paid database',
+  [SurplusTraceChannel.PRO_TRACER]: 'Professional tracer',
+  [SurplusTraceChannel.MAIL]: 'Mail',
+};
+
+/** Tier 1 is free and always first. */
+export const SURPLUS_TIER1_CHANNELS: SurplusTraceChannel[] = [
+  SurplusTraceChannel.FREE_SEARCH,
+  SurplusTraceChannel.SOCIAL,
+  SurplusTraceChannel.GOV_RECORDS,
+];
+
 /** What money gets spent on a surplus claim, itemized on the disbursement report. */
 export const SURPLUS_EXPENSE_KINDS: [string, string][] = [
   ['title_search', 'Title search'],
@@ -380,6 +410,42 @@ export const SURPLUS_DEAD_REASON_LABEL: Record<SurplusDeadReason, string> = {
   [SurplusDeadReason.UNRESPONSIVE]: 'Unresponsive after the set attempts',
   [SurplusDeadReason.ALREADY_ASSIGNED]: 'Already signed with somebody else',
   [SurplusDeadReason.OTHER]: 'Other',
+};
+
+/**
+ * Who a person on a claim is to the claimant. Only a heir can file, so the
+ * signer counts read this. Everybody else is a route to the person: the
+ * course's relative and neighbor outreach, logged as its own contact.
+ */
+export enum SurplusPersonRole {
+  HEIR = 'heir',
+  RELATIVE = 'relative',
+  NEIGHBOR = 'neighbor',
+  FRIEND = 'friend',
+  ASSOCIATE = 'associate',
+}
+
+export const SURPLUS_PERSON_ROLE_LABEL: Record<SurplusPersonRole, string> = {
+  [SurplusPersonRole.HEIR]: 'Heir',
+  [SurplusPersonRole.RELATIVE]: 'Relative',
+  [SurplusPersonRole.NEIGHBOR]: 'Neighbor',
+  [SurplusPersonRole.FRIEND]: 'Friend',
+  [SurplusPersonRole.ASSOCIATE]: 'Associate',
+};
+
+/** Where the outreach to one person stands. */
+export enum SurplusContactStatus {
+  NOT_CONTACTED = 'not_contacted',
+  CONTACTED = 'contacted',
+  MESSAGE_PASSED = 'message_passed',
+  DEAD_END = 'dead_end',
+}
+
+export const SURPLUS_CONTACT_STATUS_LABEL: Record<SurplusContactStatus, string> = {
+  [SurplusContactStatus.NOT_CONTACTED]: 'Not contacted',
+  [SurplusContactStatus.CONTACTED]: 'Contacted',
+  [SurplusContactStatus.MESSAGE_PASSED]: 'Passed a message on',
+  [SurplusContactStatus.DEAD_END]: 'Dead end',
 };
 
 // Banding from the surplus spec. It leaves two gaps on purpose: a living owner

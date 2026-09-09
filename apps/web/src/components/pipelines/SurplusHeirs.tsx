@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { surplusAPI } from '@/lib/api';
 import { DNC_STATE, phoneDisplay, fmtDate } from './format';
+import { SURPLUS_PERSON_ROLES, SURPLUS_CONTACT_STATUSES, personRoleLabel } from '@/lib/surplus-people';
 
 /**
  * Who inherited a deceased claimant's interest, and who is safe to ring.
@@ -41,6 +42,13 @@ function courtRecordsSearch(county: string | null): string {
 export interface Heir {
   id: string;
   name: string;
+  /** Heir by default. Anybody else is a route to the claimant, not a signer. */
+  role: string;
+  roleLabel: string;
+  isHeir: boolean;
+  contactStatus: string;
+  contactStatusLabel: string;
+  lastContactedAt: string | null;
   relationship: string | null;
   share: string | null;
   address: string | null;
@@ -202,9 +210,25 @@ export default function SurplusHeirs({
     }
   };
 
-  const living = (heirs || []).filter((h) => !h.deceased);
-  const dead = (heirs || []).filter((h) => h.deceased);
+  const living = (heirs || []).filter((h) => !h.deceased && h.isHeir);
+  const dead = (heirs || []).filter((h) => h.deceased && h.isHeir);
+  // People who are not heirs: a relative, a neighbor, a friend. They cannot
+  // sign anything, but one of them usually knows where the claimant is.
+  const associates = (heirs || []).filter((h) => !h.deceased && !h.isHeir);
   const coreSearch = courtRecordsUrl || courtRecordsSearch(county);
+
+  const setStatus = async (h: Heir, contactStatus: string) => {
+    setBusy(true);
+    try {
+      await surplusAPI.updateHeir(h.id, { contactStatus });
+      load();
+      onChanged();
+    } catch (err: any) {
+      say(err?.response?.data?.message || 'That could not be saved.');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <div style={{ display: 'grid', gap: 10 }}>
@@ -326,10 +350,35 @@ export default function SurplusHeirs({
               onTrace={() => trace(h.id, h.name)}
               onDnc={() => setDnc(h)}
               onRemove={() => remove(h)}
+              onStatus={(v) => setStatus(h, v)}
             />
           ))}
         </div>
       )}
+
+      {!!associates.length && (
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--dim)', letterSpacing: 0.4, marginBottom: 4 }}>
+            PEOPLE WHO MAY KNOW WHERE {claimantDeceased ? 'THE HEIRS ARE' : `${claimant.toUpperCase()} IS`}
+          </div>
+          {associates.map((h) => (
+            <HeirRow
+              key={h.id}
+              h={h}
+              busy={busy}
+              onCall={onCall}
+              onText={onText}
+              onEmail={onEmail}
+              onTrace={() => trace(h.id, h.name)}
+              onDnc={() => setDnc(h)}
+              onRemove={() => remove(h)}
+              onStatus={(v) => setStatus(h, v)}
+            />
+          ))}
+        </div>
+      )}
+
+      <AddPerson leadId={leadId} claimant={claimant} busy={busy} say={say} onAdded={() => { load(); onChanged(); }} />
 
       {/* Shown, not hidden. Knowing an heir is dead is why nobody wastes an
           afternoon on them, and their share still needs its own estate. */}
@@ -376,6 +425,7 @@ function HeirRow({
   onTrace,
   onDnc,
   onRemove,
+  onStatus,
 }: {
   h: Heir;
   busy: boolean;
@@ -385,11 +435,19 @@ function HeirRow({
   onTrace: () => void;
   onDnc: () => void;
   onRemove: () => void;
+  onStatus: (status: string) => void;
 }) {
+  const statusTone =
+    h.contactStatus === 'message_passed' ? 'var(--mint)' : h.contactStatus === 'dead_end' ? 'var(--red)' : h.contactStatus === 'contacted' ? 'var(--amber)' : 'var(--faint)';
   return (
     <div style={{ padding: '7px 0', borderTop: '1px solid var(--border)' }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 7, flexWrap: 'wrap' }}>
         <b style={{ fontSize: 13 }}>{h.name}</b>
+        {!h.isHeir && (
+          <span className="dc-tag" style={{ background: 'var(--bg2)', color: 'var(--dim)' }}>
+            {h.roleLabel}
+          </span>
+        )}
         {h.relationship && <span style={{ fontSize: 11.5, color: 'var(--dim)' }}>{h.relationship}</span>}
         {h.share && (
           <span className="dc-tag" style={{ background: 'var(--bg2)', color: 'var(--dim)' }}>
@@ -445,6 +503,32 @@ function HeirRow({
         </div>
       ))}
 
+      {/* Where the outreach to this person stands. "Passed a message on" is
+          the win with a neighbor or a relative: the claimant now knows to call. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 5, fontSize: 11.5 }}>
+        <select
+          value={h.contactStatus}
+          disabled={busy}
+          onChange={(e) => onStatus(e.target.value)}
+          aria-label={`Contact status for ${h.name}`}
+          style={{
+            fontSize: 11.5,
+            padding: '2px 6px',
+            border: '1px solid var(--border)',
+            borderRadius: 6,
+            background: 'var(--surface2)',
+            color: statusTone,
+          }}
+        >
+          {SURPLUS_CONTACT_STATUSES.map(([k, l]) => (
+            <option key={k} value={k}>
+              {l}
+            </option>
+          ))}
+        </select>
+        {h.lastContactedAt && <span style={{ color: 'var(--faint)' }}>last {fmtDate(h.lastContactedAt)}</span>}
+      </div>
+
       <div style={{ display: 'flex', gap: 6, marginTop: 5, flexWrap: 'wrap' }}>
         {/* Offered only while a submission could still tell us something. The
             heir's address comes off a recent filing, which is far better input
@@ -469,6 +553,141 @@ function HeirRow({
         </button>
         <button type="button" className="dc-wp-btn" disabled={busy} onClick={onRemove}>
           Remove
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * One person added by hand. A missed heir, or the relative, neighbor or
+ * friend the course says to ring when the claimant cannot be reached
+ * directly. Every field but the name is optional: a neighbor's first name
+ * and a phone number is a real lead.
+ */
+function AddPerson({
+  leadId,
+  claimant,
+  busy,
+  say,
+  onAdded,
+}: {
+  leadId: string;
+  claimant: string;
+  busy: boolean;
+  say: (msg: string) => void;
+  onAdded: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState('');
+  const [role, setRole] = useState('relative');
+  const [relationship, setRelationship] = useState('');
+  const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
+  const [street, setStreet] = useState('');
+  const [city, setCity] = useState('');
+  const [state, setState] = useState('');
+  const [zip, setZip] = useState('');
+  const [note, setNote] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const field: React.CSSProperties = {
+    width: '100%',
+    boxSizing: 'border-box',
+    fontSize: 12.5,
+    padding: '6px 8px',
+    border: '1px solid var(--border)',
+    borderRadius: 6,
+    background: 'var(--surface2)',
+    color: 'inherit',
+  };
+
+  const save = async () => {
+    if (!name.trim()) {
+      say('A person needs a name.');
+      return;
+    }
+    setSaving(true);
+    try {
+      await surplusAPI.addHeir(leadId, {
+        name: name.trim(),
+        role,
+        relationship: relationship.trim() || null,
+        phones: phone.trim() ? [phone.trim()] : [],
+        emails: email.trim() ? [email.trim()] : [],
+        street: street.trim() || null,
+        city: city.trim() || null,
+        state: state.trim() || null,
+        zip: zip.trim() || null,
+        callNotes: note.trim() || null,
+      });
+      say(`${name.trim()} added as ${personRoleLabel(role).toLowerCase()}.`);
+      setOpen(false);
+      setName('');
+      setRelationship('');
+      setPhone('');
+      setEmail('');
+      setStreet('');
+      setCity('');
+      setState('');
+      setZip('');
+      setNote('');
+      onAdded();
+    } catch (err: any) {
+      say(err?.response?.data?.message || 'That person could not be added.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!open) {
+    return (
+      <div>
+        <button type="button" className="dc-wp-btn" disabled={busy} onClick={() => setOpen(true)}>
+          Add a person
+        </button>
+        <span style={{ fontSize: 11, color: 'var(--faint)', marginLeft: 8 }}>
+          An heir the filing missed, or a relative or neighbor who may know where {claimant} is.
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: 'grid', gap: 6, padding: 10, border: '1px solid var(--border)', borderRadius: 8 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 6 }}>
+        <input style={field} value={name} placeholder="Name" onChange={(e) => setName(e.target.value)} autoFocus />
+        <select style={field} value={role} onChange={(e) => setRole(e.target.value)} aria-label="Role">
+          {SURPLUS_PERSON_ROLES.map(([k, l]) => (
+            <option key={k} value={k}>
+              {l}
+            </option>
+          ))}
+        </select>
+      </div>
+      <input
+        style={field}
+        value={relationship}
+        placeholder={role === 'heir' ? 'Relationship as printed: Son, Surviving Spouse' : 'How they know the claimant: lived next door, works with them'}
+        onChange={(e) => setRelationship(e.target.value)}
+      />
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+        <input style={field} value={phone} placeholder="Phone" onChange={(e) => setPhone(e.target.value)} />
+        <input style={field} value={email} placeholder="Email" onChange={(e) => setEmail(e.target.value)} />
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 60px 80px', gap: 6 }}>
+        <input style={field} value={street} placeholder="Street" onChange={(e) => setStreet(e.target.value)} />
+        <input style={field} value={city} placeholder="City" onChange={(e) => setCity(e.target.value)} />
+        <input style={field} value={state} placeholder="ST" maxLength={2} onChange={(e) => setState(e.target.value)} />
+        <input style={field} value={zip} placeholder="Zip" onChange={(e) => setZip(e.target.value)} />
+      </div>
+      <input style={field} value={note} placeholder="Note, optional" onChange={(e) => setNote(e.target.value)} />
+      <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+        <button type="button" className="dc-wp-btn" disabled={saving} onClick={() => setOpen(false)}>
+          Cancel
+        </button>
+        <button type="button" className="dc-wp-btn on" disabled={saving || !name.trim()} onClick={save}>
+          Add
         </button>
       </div>
     </div>

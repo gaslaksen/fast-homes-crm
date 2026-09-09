@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SurplusProbateService, ExtractedHeir, ProbateExtract } from './surplus-probate.service';
 import { normalizePhoneDigits } from '../foreclosures/foreclosure-scoring.util';
 import { heirRow } from './surplus-heirs.util';
+import { SurplusPersonRole, SurplusContactStatus } from '@fast-homes/shared';
 
 /**
  * Heirs of a deceased surplus claimant.
@@ -104,6 +105,8 @@ export class SurplusHeirsService {
         sourceCaseNumber: meta.caseNumber || null,
         sourceDocument: meta.sourceDocument || null,
         sourceKind: 'probate_petition',
+        // A filing names heirs. Associates are only ever added by hand.
+        role: SurplusPersonRole.HEIR,
         addedByUserId: meta.userId || null,
       };
 
@@ -143,6 +146,59 @@ export class SurplusHeirsService {
     return rows.map((h) => this.toRow(h));
   }
 
+  /**
+   * One person added by hand: an heir the filing missed, or somebody who is
+   * not an heir at all but may know where the claimant is. The course's
+   * relative and neighbor outreach lands here, so each of those calls has a
+   * row to sit on and a contact status to move.
+   */
+  async add(
+    leadId: string,
+    input: {
+      name: string;
+      role?: string | null;
+      relationship?: string | null;
+      street?: string | null;
+      city?: string | null;
+      state?: string | null;
+      zip?: string | null;
+      phones?: (string | { number: string; type?: string | null })[];
+      emails?: string[];
+      callNotes?: string | null;
+    },
+    organizationId?: string | null,
+    userId?: string | null,
+  ) {
+    const detail = await this.detailForLead(leadId, organizationId);
+    const name = String(input.name || '').trim();
+    if (!name) throw new BadRequestException('A person needs a name.');
+    const role = String(input.role || SurplusPersonRole.HEIR);
+    if (!(Object.values(SurplusPersonRole) as string[]).includes(role)) {
+      throw new BadRequestException('Pick a role: heir, relative, neighbor, friend, or associate.');
+    }
+    const created = await this.prisma.surplusHeir.create({
+      data: {
+        surplusDetailId: detail.id,
+        organizationId: detail.organizationId,
+        name,
+        role,
+        relationship: String(input.relationship || '').trim() || null,
+        street: String(input.street || '').trim() || null,
+        city: String(input.city || '').trim() || null,
+        state: String(input.state || '').toUpperCase().slice(0, 2) || null,
+        zip: String(input.zip || '').trim() || null,
+        callNotes: String(input.callNotes || '').trim() || null,
+        sourceKind: 'manual',
+        addedByUserId: userId || null,
+      },
+    });
+    // Contacts go through update() so the phone slots are written the one way.
+    if (input.phones?.length || input.emails?.length) {
+      return this.update(created.id, { phones: input.phones || [], emails: input.emails || [] }, organizationId);
+    }
+    return this.toRow(created);
+  }
+
   async update(heirId: string, patch: any, organizationId?: string | null) {
     const heir = await this.find(heirId, organizationId);
     const data: any = {};
@@ -155,6 +211,23 @@ export class SurplusHeirsService {
     }
     if (patch.deceased !== undefined) data.deceased = !!patch.deceased;
     if (patch.doNotCall !== undefined) data.doNotCall = !!patch.doNotCall;
+    if (patch.role !== undefined) {
+      const role = String(patch.role || '');
+      if (!(Object.values(SurplusPersonRole) as string[]).includes(role)) {
+        throw new BadRequestException('Pick a role: heir, relative, neighbor, friend, or associate.');
+      }
+      data.role = role;
+    }
+    if (patch.contactStatus !== undefined) {
+      const status = String(patch.contactStatus || '');
+      if (!(Object.values(SurplusContactStatus) as string[]).includes(status)) {
+        throw new BadRequestException('The contact status is not contacted, contacted, message passed, or dead end.');
+      }
+      data.contactStatus = status;
+      // Anything past "not contacted" is a contact, and the date of the latest
+      // one is what the recheck cadence reads.
+      if (status !== SurplusContactStatus.NOT_CONTACTED) data.lastContactedAt = new Date();
+    }
     if (patch.dateOfDeath !== undefined) {
       data.dateOfDeath = patch.dateOfDeath ? new Date(`${patch.dateOfDeath}T00:00:00`) : null;
     }

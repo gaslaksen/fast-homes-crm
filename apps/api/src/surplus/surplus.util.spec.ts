@@ -27,6 +27,9 @@ import {
   canQualify,
   stageGateError,
   stageBlocks,
+  deadGateError,
+  deadGateMissing,
+  DEAD_MIN_CALLS,
   complianceGate,
   SurplusFacts,
   queueOf,
@@ -401,6 +404,47 @@ describe('canQualify', () => {
     expect(canQualify({ ...clean, titleSearchComplete: false })).toBe(false);
     expect(canQualify({ ...clean, noticeConfirmed: false })).toBe(false);
     expect(canQualify({ ...clean, entitlementVerified: false })).toBe(false);
+  });
+});
+
+describe('the effort gate before Dead', () => {
+  const done = { channelsTried: ['free_search', 'social'], letterCount: 1, callCount: 3 };
+
+  it('only reads "unresponsive"; every other reason is a fact about the claim', () => {
+    const nothing = { channelsTried: [], letterCount: 0, callCount: 0 };
+    expect(deadGateError('below_floor', nothing)).toBeNull();
+    expect(deadGateError('competing_claim', nothing)).toBeNull();
+    expect(deadGateError('deceased_no_heirs', nothing)).toBeNull();
+    expect(deadGateError('other', nothing)).toBeNull();
+  });
+
+  it('passes once the free routes, the mail and the calls are all on the record', () => {
+    expect(deadGateError('unresponsive', done)).toBeNull();
+    // A records check stands in for the free search, and a logged mail
+    // attempt stands in for a letter row.
+    expect(deadGateError('unresponsive', { channelsTried: ['gov_records', 'social', 'mail'], letterCount: 0, callCount: 3 })).toBeNull();
+  });
+
+  it('names what is still missing, and counts the calls left', () => {
+    expect(deadGateMissing('unresponsive', { channelsTried: [], letterCount: 0, callCount: 0 })).toEqual([
+      'a free search or a records check logged',
+      'a social search logged',
+      'a letter mailed',
+      `${DEAD_MIN_CALLS} calls`,
+    ]);
+    expect(deadGateMissing('unresponsive', { ...done, callCount: 2 })).toEqual(['1 more call']);
+    expect(deadGateError('unresponsive', { ...done, channelsTried: ['free_search'] })).toBe(
+      'Unresponsive needs a social search logged. Override with a note if the file is really done.',
+    );
+  });
+
+  it('lets an override through only with a note', () => {
+    const thin = { channelsTried: [], letterCount: 0, callCount: 1 };
+    expect(deadGateError('unresponsive', thin, { on: true })).toBe('Overriding the effort gate needs a note saying why.');
+    expect(deadGateError('unresponsive', thin, { on: true, note: '  ' })).not.toBeNull();
+    expect(deadGateError('unresponsive', thin, { on: true, note: 'Number confirmed disconnected by the carrier, mail returned twice.' })).toBeNull();
+    // An override on a reason that never needed one changes nothing.
+    expect(deadGateError('below_floor', thin, { on: true })).toBeNull();
   });
 });
 
