@@ -174,6 +174,19 @@ export interface SurplusPanelLead {
   deadReason: string | null;
   deadNote: string | null;
   deadAt: string | null;
+  /** The filing: how the package went to the county and what the county said. */
+  submission: {
+    method: string | null;
+    trackingNumber: string | null;
+    signatureRequired: boolean | null;
+    submittedAt: string | null;
+    countyAcknowledgedAt: string | null;
+    clerkContactName: string | null;
+    clerkStatusNote: string | null;
+    additionalDocsRequested: string | null;
+    expectedDisbursementAt: string | null;
+    daysUnacknowledged: number | null;
+  };
   /** The attorney, where the county requires one, and the rule that follows. */
   attorney: {
     required: boolean | null;
@@ -498,6 +511,194 @@ function DocumentsSection({
           })}
         </div>
       ))}
+    </Section>
+  );
+}
+
+const SUBMISSION_METHODS: [string, string][] = [
+  ['usps', 'USPS'],
+  ['fedex', 'FedEx'],
+  ['ups', 'UPS'],
+  ['in_person', 'In person'],
+  ['efile', 'E-file'],
+];
+
+/**
+ * The filing: how the package went to the county and what the county has
+ * said since. The tracking number is what makes "we mailed it" a fact, and
+ * the acknowledgement date is what moves the claim to Awaiting Disbursement
+ * and closes the "check with the clerk" task. The county's accepted methods
+ * narrow the choice so a package does not go by a carrier the clerk refuses.
+ */
+function FilingSection({
+  lead,
+  onChanged,
+  say,
+}: {
+  lead: SurplusPanelLead;
+  onChanged: () => void;
+  say: (msg: string) => void;
+}) {
+  const s = lead.submission || ({} as SurplusPanelLead['submission']);
+  const [busy, setBusy] = useState(false);
+  const [method, setMethod] = useState(s.method || '');
+  const [tracking, setTracking] = useState(s.trackingNumber || '');
+  const [signature, setSignature] = useState<boolean | null>(s.signatureRequired ?? null);
+  const [submittedAt, setSubmittedAt] = useState(s.submittedAt ? s.submittedAt.slice(0, 10) : '');
+  const [acknowledgedAt, setAcknowledgedAt] = useState(s.countyAcknowledgedAt ? s.countyAcknowledgedAt.slice(0, 10) : '');
+  const [clerk, setClerk] = useState(s.clerkContactName || '');
+  const [note, setNote] = useState(s.clerkStatusNote || '');
+  const [extraDocs, setExtraDocs] = useState(s.additionalDocsRequested || '');
+  const [expected, setExpected] = useState(s.expectedDisbursementAt ? s.expectedDisbursementAt.slice(0, 10) : '');
+  const [dirty, setDirty] = useState(false);
+
+  useEffect(() => {
+    setMethod(s.method || '');
+    setTracking(s.trackingNumber || '');
+    setSignature(s.signatureRequired ?? null);
+    setSubmittedAt(s.submittedAt ? s.submittedAt.slice(0, 10) : '');
+    setAcknowledgedAt(s.countyAcknowledgedAt ? s.countyAcknowledgedAt.slice(0, 10) : '');
+    setClerk(s.clerkContactName || '');
+    setNote(s.clerkStatusNote || '');
+    setExtraDocs(s.additionalDocsRequested || '');
+    setExpected(s.expectedDisbursementAt ? s.expectedDisbursementAt.slice(0, 10) : '');
+    setDirty(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lead.id, s.method, s.trackingNumber, s.submittedAt, s.countyAcknowledgedAt, s.clerkStatusNote]);
+
+  const allowed = lead.countyInfo?.acceptedMethods?.length ? lead.countyInfo.acceptedMethods : null;
+  const methods = allowed ? SUBMISSION_METHODS.filter(([k]) => allowed.includes(k)) : SUBMISSION_METHODS;
+  const tracked = ['usps', 'fedex', 'ups'].includes(method);
+  const filedStage = ['Claim Filed', 'Awaiting Disbursement', 'Check Received', 'Paid'].includes(lead.stage);
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      await surplusAPI.update(lead.id, {
+        submissionMethod: method || null,
+        submissionTrackingNumber: tracking.trim() || null,
+        submissionSignatureRequired: signature,
+        submittedAt: submittedAt ? new Date(submittedAt).toISOString() : null,
+        countyAcknowledgedAt: acknowledgedAt ? new Date(acknowledgedAt).toISOString() : null,
+        clerkContactName: clerk.trim() || null,
+        clerkStatusNote: note.trim() || null,
+        additionalDocsRequested: extraDocs.trim() || null,
+        expectedDisbursementAt: expected ? new Date(expected).toISOString() : null,
+      });
+      say('Filing saved');
+      setDirty(false);
+      onChanged();
+    } catch (err: any) {
+      say(err?.response?.data?.message || 'That could not be saved.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const field: React.CSSProperties = {
+    width: '100%',
+    boxSizing: 'border-box',
+    fontSize: 12.5,
+    padding: '6px 8px',
+    border: '1px solid var(--border)',
+    borderRadius: 6,
+    background: 'var(--surface2)',
+    color: 'inherit',
+  };
+  const lbl: React.CSSProperties = { fontSize: 11, color: 'var(--dim)' };
+  const mark = <T,>(set: (v: T) => void) => (v: T) => {
+    set(v);
+    setDirty(true);
+  };
+
+  const summary = !s.submittedAt
+    ? filedStage
+      ? 'Filed, date not recorded'
+      : undefined
+    : s.countyAcknowledgedAt
+      ? `Acknowledged ${fmtDate(s.countyAcknowledgedAt)}`
+      : `Submitted ${fmtDate(s.submittedAt)}, awaiting acknowledgement`;
+
+  return (
+    <Section title="The filing" note={summary}>
+      {s.daysUnacknowledged != null && s.daysUnacknowledged >= 21 && (
+        <div style={{ fontSize: 11.5, color: 'var(--amber)' }}>
+          {s.daysUnacknowledged} days since filing with no acknowledgement from the county.
+          {lead.countyContactVia === 'attorney' ? ` Ask ${lead.attorney?.name || 'the attorney'}.` : ' Call the clerk.'}
+        </div>
+      )}
+      {s.additionalDocsRequested && (
+        <div style={{ fontSize: 11.5, color: 'var(--amber)' }}>County asked for: {s.additionalDocsRequested}</div>
+      )}
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+        <label style={lbl}>
+          Submitted by
+          <select style={field} value={method} onChange={(e) => mark(setMethod)(e.target.value)}>
+            <option value="">Not yet</option>
+            {methods.map(([k, l]) => (
+              <option key={k} value={k}>
+                {l}
+              </option>
+            ))}
+          </select>
+          {allowed && <span style={{ fontSize: 10.5, color: 'var(--faint)' }}>Only what {lead.county} accepts</span>}
+        </label>
+        <label style={lbl}>
+          {tracked ? 'Tracking number, required' : 'Tracking or confirmation number'}
+          <input style={field} value={tracking} onChange={(e) => mark(setTracking)(e.target.value)} />
+        </label>
+        <label style={lbl}>
+          Date submitted
+          <input type="date" style={field} value={submittedAt} onChange={(e) => mark(setSubmittedAt)(e.target.value)} />
+        </label>
+        <label style={lbl}>
+          County acknowledged receipt
+          <input type="date" style={field} value={acknowledgedAt} onChange={(e) => mark(setAcknowledgedAt)(e.target.value)} />
+        </label>
+        <label style={lbl}>
+          Clerk contact
+          <input style={field} value={clerk} placeholder={lead.countyInfo?.clerkContactName || 'Name'} onChange={(e) => mark(setClerk)(e.target.value)} />
+        </label>
+        <label style={lbl}>
+          Expected disbursement
+          <input type="date" style={field} value={expected} onChange={(e) => mark(setExpected)(e.target.value)} />
+        </label>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+        <span style={{ color: 'var(--dim)' }}>Signature on delivery</span>
+        {([
+          [null, 'Not set'],
+          [true, 'Yes'],
+          [false, 'No'],
+        ] as [boolean | null, string][]).map(([v, l]) => (
+          <button
+            key={String(v)}
+            type="button"
+            className={`dc-wp-btn${signature === v ? ' on' : ''}`}
+            style={{ padding: '3px 8px', fontSize: 11 }}
+            onClick={() => mark(setSignature)(v)}
+          >
+            {l}
+          </button>
+        ))}
+      </div>
+      <label style={lbl}>
+        Clerk status note
+        <input style={field} value={note} placeholder="What the clerk said last time" onChange={(e) => mark(setNote)(e.target.value)} />
+      </label>
+      <label style={lbl}>
+        Additional documents requested
+        <input style={field} value={extraDocs} placeholder="Anything the county asked for after filing" onChange={(e) => mark(setExtraDocs)(e.target.value)} />
+      </label>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <button type="button" className="dc-wp-btn on" disabled={busy || !dirty} onClick={save}>
+          {busy ? 'Saving...' : 'Save filing'}
+        </button>
+        {acknowledgedAt && !s.countyAcknowledgedAt && lead.stage === 'Claim Filed' && (
+          <span style={{ fontSize: 11, color: 'var(--faint)' }}>Saving the acknowledgement moves the claim to Awaiting Disbursement.</span>
+        )}
+      </div>
     </Section>
   );
 }
@@ -1782,6 +1983,8 @@ function CaseTab({
 
       <AttorneySection lead={lead} onChanged={onChanged} say={say} />
 
+      <FilingSection lead={lead} onChanged={onChanged} say={say} />
+
       {/* Heirs lead for a deceased claimant, because they are the only people
           who can file. For a living one the section still appears once heirs
           exist, since an estate can be opened mid-claim. */}
@@ -2722,8 +2925,8 @@ function StageControl({
 
 /** The next gated stage after the current one, or null past Claim Filed. */
 function nextGatedStage(stage: string): string | null {
-  const order = ['New', 'Contacted', 'Agreement Signed', 'Assignment Notarized', 'Claim Filed'];
-  const gated = ['Agreement Signed', 'Assignment Notarized', 'Claim Filed'];
+  const order = ['New', 'Contacted', 'Agreement Signed', 'Assignment Notarized', 'Claim Filed', 'Awaiting Disbursement'];
+  const gated = ['Agreement Signed', 'Assignment Notarized', 'Claim Filed', 'Awaiting Disbursement'];
   const idx = order.indexOf(stage);
   if (idx < 0) return null;
   return gated.find((g) => order.indexOf(g) > idx) || null;

@@ -450,7 +450,16 @@ export class SurplusService {
       'notaryName', 'notaryPhone', 'notaryEmail', 'notarySource', 'notaryNotes', 'notaryAppointmentPlace',
       'attorneyRequired', 'attorneyName', 'attorneyFirm', 'attorneyPhone', 'attorneyEmail', 'attorneySource',
       'attorneyNotes',
+      'submissionTrackingNumber', 'submissionSignatureRequired', 'clerkContactName', 'clerkStatusNote',
+      'additionalDocsRequested',
     ];
+    if (patch.submissionMethod !== undefined) {
+      const m = patch.submissionMethod === null ? null : String(patch.submissionMethod).toLowerCase();
+      if (m && !['usps', 'fedex', 'ups', 'in_person', 'efile'].includes(m)) {
+        throw new BadRequestException('Submission method is USPS, FedEx, UPS, in person, or e-file.');
+      }
+      detailPatch.submissionMethod = m;
+    }
     for (const k of passthrough) {
       if (patch[k] !== undefined) detailPatch[k] = patch[k];
     }
@@ -476,7 +485,15 @@ export class SurplusService {
     // not on a day. The agreement date is the gate on the appointment, per
     // the course: the notary signs the instruction sheet before anything is
     // booked, so the document list and the signing order are locked first.
-    for (const k of ['notaryAgreementSignedAt', 'notaryAppointmentAt', 'notarySignedInOrderAt', 'attorneyEngagedAt']) {
+    for (const k of [
+      'notaryAgreementSignedAt',
+      'notaryAppointmentAt',
+      'notarySignedInOrderAt',
+      'attorneyEngagedAt',
+      'submittedAt',
+      'countyAcknowledgedAt',
+      'expectedDisbursementAt',
+    ]) {
       if (patch[k] === undefined) continue;
       if (patch[k] === null) {
         detailPatch[k] = null;
@@ -529,6 +546,11 @@ export class SurplusService {
       const refused = stageGateError(after, next, await this.gateContext(lead, after));
       if (refused) throw new BadRequestException(refused);
       detailPatch.stage = next;
+      // Entering Claim Filed is the filing: stamp the date unless one was
+      // given, so the county follow-up clock has a start.
+      if (next === SurplusStage.CLAIM_FILED && !d.submittedAt && detailPatch.submittedAt === undefined) {
+        detailPatch.submittedAt = new Date();
+      }
       if (next === SurplusStage.DEAD) {
         // Dead needs a reason. Recorded rather than deleted, so a re-listed
         // case is matched against why it was retired.
@@ -629,6 +651,33 @@ export class SurplusService {
       await this.recordSignedInOrder(id, organizationId, userId);
     }
 
+    // The county acknowledging receipt is what Awaiting Disbursement means,
+    // so a claim at Claim Filed moves on its own when the date is recorded,
+    // and the "check with the clerk" task that was waiting for it closes.
+    if (detailPatch.countyAcknowledgedAt && !d.countyAcknowledgedAt) {
+      const stageNow = detailPatch.stage || d.stage;
+      await this.completeOpenTasks(id, [
+        `Check with the clerk on ${claimant}'s claim`,
+        `Ask ${d.attorneyName || 'the attorney'} where ${claimant}'s claim stands with the clerk`,
+      ]);
+      await this.prisma.activity.create({
+        data: {
+          leadId: id,
+          userId: userId || undefined,
+          type: 'COUNTY_ACKNOWLEDGED',
+          description: `${d.county || 'The county'} acknowledged receipt of ${claimant}'s claim`,
+          metadata: { acknowledgedAt: new Date(detailPatch.countyAcknowledgedAt).toISOString() },
+        },
+      });
+      if (stageNow === SurplusStage.CLAIM_FILED) {
+        await this.prisma.surplusDetail.update({
+          where: { id: d.id },
+          data: { stage: SurplusStage.AWAITING_DISBURSEMENT },
+        });
+        await this.scheduleStageTask(id, SurplusStage.AWAITING_DISBURSEMENT, userId);
+      }
+    }
+
     // Engaging an attorney is a rule change on the case, not a note: from
     // here every county contact goes through them. Logged on the timeline
     // so the thread says when it changed, and the open county tasks are
@@ -698,6 +747,14 @@ export class SurplusService {
     });
   }
 
+  /** Close open tasks by title, when the thing they waited for has happened. */
+  private async completeOpenTasks(leadId: string, titles: string[]) {
+    await this.prisma.task.updateMany({
+      where: { leadId, completed: false, title: { in: titles } },
+      data: { completed: true, completedAt: new Date() },
+    });
+  }
+
   /** A task due at an exact time, for an appointment. Idempotent on title. */
   private async createTaskAt(leadId: string, title: string, dueDate: Date, userId?: string | null) {
     const open = await this.prisma.task.findFirst({ where: { leadId, title, completed: false } });
@@ -756,6 +813,9 @@ export class SurplusService {
       complianceBlocks: complianceGate(facts).blocks,
       docsMissing: checklist.missing,
       ...this.attorneyGate(d, lead),
+      submissionMethod: d.submissionMethod,
+      submissionTrackingNumber: d.submissionTrackingNumber,
+      countyAcknowledgedAt: d.countyAcknowledgedAt,
     };
   }
 
@@ -1645,6 +1705,9 @@ export class SurplusService {
             complianceBlocks: gate.blocks,
             docsMissing: checklist.missing,
             ...this.attorneyGate(d, { _countyRow: county }),
+            submissionMethod: d.submissionMethod,
+            submissionTrackingNumber: d.submissionTrackingNumber,
+            countyAcknowledgedAt: d.countyAcknowledgedAt,
           }),
           // The attorney, and the rule that follows from one being engaged.
           attorney: {
@@ -1736,6 +1799,24 @@ export class SurplusService {
 
       // Tapped / Not Tapped, and which of the four channels have been tried.
       // Recap scheduled is tapped with a dated follow-up on the books.
+      // The filing: how the package went and what the county said.
+      submission: {
+        method: d.submissionMethod || null,
+        trackingNumber: d.submissionTrackingNumber || null,
+        signatureRequired: d.submissionSignatureRequired ?? null,
+        submittedAt: d.submittedAt || null,
+        countyAcknowledgedAt: d.countyAcknowledgedAt || null,
+        clerkContactName: d.clerkContactName || null,
+        clerkStatusNote: d.clerkStatusNote || null,
+        additionalDocsRequested: d.additionalDocsRequested || null,
+        expectedDisbursementAt: d.expectedDisbursementAt || null,
+        /** Days since the filing with no acknowledgement, for the flag. */
+        daysUnacknowledged:
+          d.submittedAt && !d.countyAcknowledgedAt
+            ? Math.floor((Date.now() - new Date(d.submittedAt).getTime()) / 86_400_000)
+            : null,
+      },
+
       // Why it died, when it did. Kept so the board's Dead column reads as
       // a list of reasons and a re-listed case says what happened last time.
       deadReason: d.deadReason || null,

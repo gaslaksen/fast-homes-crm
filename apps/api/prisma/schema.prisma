@@ -817,6 +817,23 @@ model SurplusDetail {
   /// its next letter once the last one is older than this.
   letterCadenceDays Int?
 
+  // ── The filing ────────────────────────────────────────────────────────────
+  // How the claim package went to the county and what the county said. A
+  // tracking number is required to enter Claim Filed for anything sent by a
+  // carrier, because "we mailed it" without one is the expensive mistake.
+  /// 'usps' | 'fedex' | 'ups' | 'in_person' | 'efile'
+  submissionMethod            String?
+  submissionTrackingNumber    String?
+  submissionSignatureRequired Boolean?
+  submittedAt                 DateTime?
+  /// When the county confirmed it has the package. Moves the claim to Awaiting Disbursement.
+  countyAcknowledgedAt        DateTime?
+  clerkContactName            String?
+  clerkStatusNote             String?
+  /// What the county asked for after filing, if anything.
+  additionalDocsRequested     String?
+  expectedDisbursementAt      DateTime?
+
   // ── Why it died ───────────────────────────────────────────────────────────
   /// SurplusDeadReason. Required to enter Dead, so a retired claim always
   /// says why and a re-listed case is matched against a reason.
