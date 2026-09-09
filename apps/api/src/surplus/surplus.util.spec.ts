@@ -449,7 +449,7 @@ describe('the effort gate before Dead', () => {
 });
 
 describe('stageGateError', () => {
-  const signedUp = { fee_agreement: 'signed', limited_poa: 'signed', assignment_of_rights: 'notarized' };
+  const signedUp = { fee_agreement: 'signed', limited_poa: 'notarized', letter_of_direction: 'notarized', county_claim_form: 'notarized' };
 
   it('leaves the early and terminal stages alone', () => {
     const bare = { entitlementVerified: false, noticeConfirmed: false, titleSearchComplete: false };
@@ -486,18 +486,22 @@ describe('stageGateError', () => {
     ).toBe('Agreement Signed needs compliance: Missing disclosure: financial.');
   });
 
-  it('holds the fund source until the retention documents are signed', () => {
+  it('waits for the notary package as a set: the POA signed, the direction notarized, the county form signed', () => {
     expect(
-      stageGateError(clean, SurplusStage.ASSIGNMENT_NOTARIZED, { docs: { fee_agreement: 'signed' } }),
+      stageGateError(clean, SurplusStage.PACKAGE_NOTARIZED, { docs: { fee_agreement: 'signed' } }),
     ).toBe(
-      'Assignment Notarized needs limited power of attorney marked signed, assignment of rights marked notarized.',
+      'Package Notarized needs limited power of attorney marked signed, direction to pay surplus funds marked notarized, county claim form marked signed.',
     );
     expect(
-      stageGateError(clean, SurplusStage.ASSIGNMENT_NOTARIZED, {
-        docs: { fee_agreement: 'signed', limited_poa: 'signed', assignment_of_rights: 'signed' },
+      stageGateError(clean, SurplusStage.PACKAGE_NOTARIZED, {
+        docs: { fee_agreement: 'signed', limited_poa: 'signed', letter_of_direction: 'signed', county_claim_form: 'signed' },
       }),
-    ).toBe('Assignment Notarized needs assignment of rights marked notarized.');
-    expect(stageGateError(clean, SurplusStage.ASSIGNMENT_NOTARIZED, { docs: signedUp })).toBeNull();
+    ).toBe('Package Notarized needs direction to pay surplus funds marked notarized.');
+    expect(stageGateError(clean, SurplusStage.PACKAGE_NOTARIZED, { docs: signedUp })).toBeNull();
+    // The retired assignment is not asked for, whatever its row says.
+    expect(
+      stageGateError(clean, SurplusStage.PACKAGE_NOTARIZED, { docs: { ...signedUp, assignment_of_rights: 'outstanding' } }),
+    ).toBeNull();
   });
 
   it('files nothing until every required document is in hand', () => {
@@ -590,7 +594,7 @@ describe('stageGateError', () => {
     ).toBeNull();
     // Only Claim Filed cares: an attorney is for the filing, not the retention.
     expect(
-      stageGateError(clean, SurplusStage.ASSIGNMENT_NOTARIZED, { docs: signedUp, attorneyRequired: true }),
+      stageGateError(clean, SurplusStage.PACKAGE_NOTARIZED, { docs: signedUp, attorneyRequired: true }),
     ).toBeNull();
   });
 
@@ -603,7 +607,7 @@ describe('stageGateError', () => {
     expect(msg).toContain('entitlement verified');
     expect(msg).toContain('contingency fee agreement marked signed');
     expect(msg).toContain('limited power of attorney marked signed');
-    expect(msg).toContain('assignment of rights marked notarized');
+    expect(msg).toContain('direction to pay surplus funds marked notarized');
     // The fee agreement is named once, as "marked signed", not again as "in hand".
     expect(msg!.match(/contingency fee agreement/g)!.length).toBe(1);
   });
@@ -611,9 +615,10 @@ describe('stageGateError', () => {
   it('reports every gated stage at once for the panel', () => {
     const blocks = stageBlocks(clean, { docs: { fee_agreement: 'signed' }, docsMissing: ['photo_id'] });
     expect(blocks[SurplusStage.AGREEMENT_SIGNED]).toEqual([]);
-    expect(blocks[SurplusStage.ASSIGNMENT_NOTARIZED]).toEqual([
+    expect(blocks[SurplusStage.PACKAGE_NOTARIZED]).toEqual([
       'limited power of attorney marked signed',
-      'assignment of rights marked notarized',
+      'direction to pay surplus funds marked notarized',
+      'county claim form marked signed',
     ]);
     expect(blocks[SurplusStage.CLAIM_FILED]).toContain('photo id in hand');
   });

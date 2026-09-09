@@ -302,7 +302,8 @@ export enum SurplusStage {
   NEW = 'New',
   CONTACTED = 'Contacted',
   AGREEMENT_SIGNED = 'Agreement Signed',
-  ASSIGNMENT_NOTARIZED = 'Assignment Notarized',
+  /** The notary package (limited POA, direction to pay, county form) signed and notarized. */
+  PACKAGE_NOTARIZED = 'Package Notarized',
   CLAIM_FILED = 'Claim Filed',
   /** Filed and acknowledged by the county, waiting on its processing. */
   AWAITING_DISBURSEMENT = 'Awaiting Disbursement',
@@ -540,10 +541,19 @@ export const SURPLUS_TEMPLATE_KIND_LABEL: Record<SurplusTemplateKind, string> = 
   [SurplusTemplateKind.NOTARY_INSTRUCTIONS]: 'Notary package cover and instructions',
   [SurplusTemplateKind.DOC_FEE_AGREEMENT]: 'Contingency fee agreement',
   [SurplusTemplateKind.DOC_LIMITED_POA]: 'Limited power of attorney',
-  [SurplusTemplateKind.DOC_ASSIGNMENT_OF_RIGHTS]: 'Assignment of rights',
+  [SurplusTemplateKind.DOC_ASSIGNMENT_OF_RIGHTS]: 'Assignment of rights (retired)',
   [SurplusTemplateKind.DOC_LETTER_OF_DIRECTION]: 'Direction to pay surplus funds',
   [SurplusTemplateKind.DOC_CLAIMS_CHECKLIST]: 'Claims checklist',
 };
+
+/**
+ * Kinds the process no longer uses. Kept in the enums so rows already
+ * stored still read; hidden from the settings list, the checklist and the
+ * packet. The assignment went when the team's package settled on the
+ * limited POA and the direction to pay: the claimant stays claimant of
+ * record.
+ */
+export const SURPLUS_RETIRED_TEMPLATE_KINDS: SurplusTemplateKind[] = [SurplusTemplateKind.DOC_ASSIGNMENT_OF_RIGHTS];
 
 /** Template kinds whose text is a legal instrument: counsel writes it, the app only fills names in. */
 export const SURPLUS_LEGAL_TEMPLATE_KINDS: SurplusTemplateKind[] = [
@@ -598,8 +608,8 @@ export const SURPLUS_DOCUMENT_SET: Record<SurplusDocumentKind, SurplusDocumentSe
 export const SURPLUS_DOCUMENT_LABEL: Record<SurplusDocumentKind, string> = {
   [SurplusDocumentKind.FEE_AGREEMENT]: 'Contingency fee agreement',
   [SurplusDocumentKind.LIMITED_POA]: 'Limited power of attorney',
-  [SurplusDocumentKind.ASSIGNMENT_OF_RIGHTS]: 'Assignment of rights',
-  [SurplusDocumentKind.LETTER_OF_DIRECTION]: 'Letter of direction',
+  [SurplusDocumentKind.ASSIGNMENT_OF_RIGHTS]: 'Assignment of rights (retired)',
+  [SurplusDocumentKind.LETTER_OF_DIRECTION]: 'Direction to pay surplus funds',
   [SurplusDocumentKind.NOTARY_AGREEMENT]: 'Mobile notary agreement',
   [SurplusDocumentKind.CLAIMS_CHECKLIST]: 'Claims checklist',
   [SurplusDocumentKind.COUNTY_CLAIM_FORM]: 'County claim form',
@@ -682,11 +692,13 @@ export function surplusDocumentCollected(status: string | null | undefined): boo
  * course's standard set. Estate and entity documents only when the claim is
  * one; the notary agreement and checklist are ours to keep, not to file.
  */
+/** Document kinds the process no longer uses. See SURPLUS_RETIRED_TEMPLATE_KINDS. */
+export const SURPLUS_RETIRED_DOCUMENT_KINDS: SurplusDocumentKind[] = [SurplusDocumentKind.ASSIGNMENT_OF_RIGHTS];
+
 export function surplusDocumentsRequired(facts: { deceased: boolean; isEntity: boolean }): SurplusDocumentKind[] {
   const required = [
     SurplusDocumentKind.FEE_AGREEMENT,
     SurplusDocumentKind.LIMITED_POA,
-    SurplusDocumentKind.ASSIGNMENT_OF_RIGHTS,
     SurplusDocumentKind.LETTER_OF_DIRECTION,
     SurplusDocumentKind.COUNTY_CLAIM_FORM,
     SurplusDocumentKind.PHOTO_ID,

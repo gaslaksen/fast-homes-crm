@@ -147,10 +147,10 @@ const STAGE_TASK_DAYS: Partial<
   Record<SurplusStage, { title: (name: string, attorney: string | null) => string; days: number }>
 > = {
   [SurplusStage.AGREEMENT_SIGNED]: {
-    title: (n) => `Book the notary and get ${n}'s assignment signed`,
+    title: (n) => `Book the notary and get ${n}'s package signed`,
     days: 7,
   },
-  [SurplusStage.ASSIGNMENT_NOTARIZED]: {
+  [SurplusStage.PACKAGE_NOTARIZED]: {
     title: (n, a) => (a ? `Have ${a} file ${n}'s claim with the clerk` : `File ${n}'s claim with the clerk`),
     days: 7,
   },
@@ -366,7 +366,7 @@ export class SurplusService {
             certOfDisbursements: isoToDate(cellText(input.certOfDisbursements)),
             grossSurplus: gross,
             liens: liens as any,
-            arrangement: input.arrangement || 'assignment',
+            arrangement: input.arrangement || 'limited_poa',
             totalConsideration: input.totalConsideration ?? 0,
             licensedRepId: input.licensedRepId || null,
             stage,
@@ -866,16 +866,16 @@ export class SurplusService {
   /**
    * The notary reported everything signed in the printed order. That is the
    * fact the signing gate waits for, so the documents move together: the
-   * retention pair to signed, the assignment to notarized, the rest to
-   * signed. Only ever upgrades; a document already further along stays.
+   * fee agreement to signed, and the package (POA, direction to pay, county
+   * form) to notarized, since each carries a notary block. Only ever
+   * upgrades; a document already further along stays.
    */
   private async recordSignedInOrder(leadId: string, organizationId?: string | null, userId?: string | null) {
     const moves: [SurplusDocumentKind, SurplusDocumentStatus][] = [
       [SurplusDocumentKind.FEE_AGREEMENT, SurplusDocumentStatus.SIGNED],
-      [SurplusDocumentKind.LIMITED_POA, SurplusDocumentStatus.SIGNED],
-      [SurplusDocumentKind.ASSIGNMENT_OF_RIGHTS, SurplusDocumentStatus.NOTARIZED],
-      [SurplusDocumentKind.LETTER_OF_DIRECTION, SurplusDocumentStatus.SIGNED],
-      [SurplusDocumentKind.COUNTY_CLAIM_FORM, SurplusDocumentStatus.SIGNED],
+      [SurplusDocumentKind.LIMITED_POA, SurplusDocumentStatus.NOTARIZED],
+      [SurplusDocumentKind.LETTER_OF_DIRECTION, SurplusDocumentStatus.NOTARIZED],
+      [SurplusDocumentKind.COUNTY_CLAIM_FORM, SurplusDocumentStatus.NOTARIZED],
     ];
     const detail = await this.prisma.surplusDetail.findUnique({
       where: { leadId },
@@ -2271,7 +2271,7 @@ export class SurplusService {
       claimantUpdate: (() => {
         const signedStages = [
           SurplusStage.AGREEMENT_SIGNED,
-          SurplusStage.ASSIGNMENT_NOTARIZED,
+          SurplusStage.PACKAGE_NOTARIZED,
           SurplusStage.CLAIM_FILED,
           SurplusStage.AWAITING_DISBURSEMENT,
           SurplusStage.CHECK_RECEIVED,
@@ -2430,16 +2430,11 @@ export class SurplusService {
         appointmentAt: d.notaryAppointmentAt,
         appointmentPlace: d.notaryAppointmentPlace || null,
         signedInOrderAt: d.notarySignedInOrderAt,
-        /** Retention documents (fee agreement, POA) both signed: the assignment may go in the packet. */
-        retentionConfirmed:
-          surplusDocumentAtLeast(
-            (d.documents || []).find((x: any) => x.kind === SurplusDocumentKind.FEE_AGREEMENT)?.status,
-            SurplusDocumentStatus.SIGNED,
-          ) &&
-          surplusDocumentAtLeast(
-            (d.documents || []).find((x: any) => x.kind === SurplusDocumentKind.LIMITED_POA)?.status,
-            SurplusDocumentStatus.SIGNED,
-          ),
+        /** The fee agreement is signed: the claimant is retained, and the direction to pay may go in the packet. */
+        retentionConfirmed: surplusDocumentAtLeast(
+          (d.documents || []).find((x: any) => x.kind === SurplusDocumentKind.FEE_AGREEMENT)?.status,
+          SurplusDocumentStatus.SIGNED,
+        ),
       },
       tappedAt: d.tappedAt,
       contactStatus: !d.tappedAt

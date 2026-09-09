@@ -717,7 +717,9 @@ model SurplusDetail {
   liens        Json?
 
   // ── The arrangement ───────────────────────────────────────────────────────
-  arrangement        String? @default("assignment") // assignment | limited_poa
+  /// limited_poa | assignment. The team's package retains with a limited POA
+  /// and a direction to pay; the assignment is no longer used.
+  arrangement        String? @default("limited_poa") // limited_poa | assignment
   /// Measured against TOTAL consideration, not a line item labelled "fee",
   /// because FS 45.033(3)(d) reaches anything paid or payable, earned or
   /// expected to be earned.

@@ -574,7 +574,7 @@ export class SurplusImportService {
       grossSurplus: parseNum(g('grossSurplus')),
       liens,
 
-      arrangement: /poa|attorney/i.test(g('arrangement')) ? 'limited_poa' : 'assignment',
+      arrangement: /assign/i.test(g('arrangement')) ? 'assignment' : 'limited_poa',
       totalConsideration: parseNum(g('totalConsideration')),
       licensedRepId: g('licensedRepId') || null,
 
