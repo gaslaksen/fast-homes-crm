@@ -817,6 +817,21 @@ model SurplusDetail {
   /// its next letter once the last one is older than this.
   letterCadenceDays Int?
 
+  // ── The attorney ──────────────────────────────────────────────────────────
+  // Most counties do not require one. Where one is engaged, every contact
+  // with the county or the court goes through them, and the case says so
+  // out loud so nobody rings the clerk by mistake.
+  /// Null means the county's answer applies; true or false overrides it for this case.
+  attorneyRequired  Boolean?
+  attorneyName      String?
+  attorneyFirm      String?
+  attorneyPhone     String?
+  attorneyEmail     String?
+  /// 'martindale' | 'lawyers_com' | 'county_records' | 'referral' | 'other'
+  attorneySource    String?
+  attorneyEngagedAt DateTime?
+  attorneyNotes     String?
+
   // ── The notary ────────────────────────────────────────────────────────────
   // The course's rule: the notary signs the instruction sheet BEFORE any
   // paperwork goes to the claimant or an appointment is booked, so the

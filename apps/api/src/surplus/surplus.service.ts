@@ -123,17 +123,24 @@ const CHANNELS = ['called', 'texted', 'emailed', 'lettered'] as const;
 const CONTACT_RANK: Record<string, number> = { not_tapped: 0, tapped: 1, recap_scheduled: 2 };
 
 /** Days after a stage change before its follow-up task comes due. */
-const STAGE_TASK_DAYS: Partial<Record<SurplusStage, { title: (name: string) => string; days: number }>> = {
+/**
+ * The follow-up each stage change creates. Where an attorney is engaged the
+ * county tasks are addressed to the attorney, per the course: once one is on
+ * the case, nobody contacts the clerk directly.
+ */
+const STAGE_TASK_DAYS: Partial<
+  Record<SurplusStage, { title: (name: string, attorney: string | null) => string; days: number }>
+> = {
   [SurplusStage.AGREEMENT_SIGNED]: {
     title: (n) => `Book the notary and get ${n}'s assignment signed`,
     days: 7,
   },
   [SurplusStage.ASSIGNMENT_NOTARIZED]: {
-    title: (n) => `File ${n}'s claim with the clerk`,
+    title: (n, a) => (a ? `Have ${a} file ${n}'s claim with the clerk` : `File ${n}'s claim with the clerk`),
     days: 7,
   },
   [SurplusStage.CLAIM_FILED]: {
-    title: (n) => `Check with the clerk on ${n}'s claim`,
+    title: (n, a) => (a ? `Ask ${a} where ${n}'s claim stands with the clerk` : `Check with the clerk on ${n}'s claim`),
     days: 21,
   },
 };
@@ -413,6 +420,8 @@ export class SurplusService {
       'entitlementVerified', 'titleSearchComplete', 'doNotCall', 'callNotes',
       'letterMailedTo',
       'notaryName', 'notaryPhone', 'notaryEmail', 'notarySource', 'notaryNotes', 'notaryAppointmentPlace',
+      'attorneyRequired', 'attorneyName', 'attorneyFirm', 'attorneyPhone', 'attorneyEmail', 'attorneySource',
+      'attorneyNotes',
     ];
     for (const k of passthrough) {
       if (patch[k] !== undefined) detailPatch[k] = patch[k];
@@ -439,7 +448,7 @@ export class SurplusService {
     // not on a day. The agreement date is the gate on the appointment, per
     // the course: the notary signs the instruction sheet before anything is
     // booked, so the document list and the signing order are locked first.
-    for (const k of ['notaryAgreementSignedAt', 'notaryAppointmentAt', 'notarySignedInOrderAt']) {
+    for (const k of ['notaryAgreementSignedAt', 'notaryAppointmentAt', 'notarySignedInOrderAt', 'attorneyEngagedAt']) {
       if (patch[k] === undefined) continue;
       if (patch[k] === null) {
         detailPatch[k] = null;
@@ -489,7 +498,7 @@ export class SurplusService {
       const after = { ...d, ...detailPatch };
       // The gate is checked against the values being written, so ticking the
       // last checkbox and advancing the stage in one request is allowed.
-      const refused = stageGateError(after, next, this.gateContext(lead, after));
+      const refused = stageGateError(after, next, await this.gateContext(lead, after));
       if (refused) throw new BadRequestException(refused);
       detailPatch.stage = next;
       if (next === SurplusStage.DEAD) leadPatch.status = 'DEAD';
@@ -574,7 +583,39 @@ export class SurplusService {
       await this.recordSignedInOrder(id, organizationId, userId);
     }
 
+    // Engaging an attorney is a rule change on the case, not a note: from
+    // here every county contact goes through them. Logged on the timeline
+    // so the thread says when it changed, and the open county tasks are
+    // re-addressed so nobody picks one up and rings the clerk.
+    if (detailPatch.attorneyEngagedAt && !d.attorneyEngagedAt) {
+      const who = detailPatch.attorneyName || d.attorneyName || 'the attorney';
+      await this.prisma.activity.create({
+        data: {
+          leadId: id,
+          userId: userId || undefined,
+          type: 'ATTORNEY_ENGAGED',
+          description: `${who} engaged. All contact with the county and the court now goes through them.`,
+          metadata: { attorneyName: who, firm: detailPatch.attorneyFirm || d.attorneyFirm || null },
+        },
+      });
+      await this.readdressCountyTasks(id, claimant, who);
+    }
+
     return this.get(id, organizationId);
+  }
+
+  /** Open county tasks re-titled to go through the attorney. */
+  private async readdressCountyTasks(leadId: string, claimant: string, attorney: string) {
+    const open = await this.prisma.task.findMany({ where: { leadId, completed: false } });
+    const fileTitle = `File ${claimant}'s claim with the clerk`;
+    const checkTitle = `Check with the clerk on ${claimant}'s claim`;
+    for (const t of open) {
+      if (t.title === fileTitle) {
+        await this.prisma.task.update({ where: { id: t.id }, data: { title: `Have ${attorney} file ${claimant}'s claim with the clerk` } });
+      } else if (t.title === checkTitle) {
+        await this.prisma.task.update({ where: { id: t.id }, data: { title: `Ask ${attorney} where ${claimant}'s claim stands with the clerk` } });
+      }
+    }
   }
 
   /**
@@ -633,7 +674,13 @@ export class SurplusService {
    * still missing. Built from the detail as it stands (or as it is about to
    * be written), so the gate and the panel's explanation agree.
    */
-  private gateContext(lead: any, d: any): StageGateContext {
+  private async gateContext(lead: any, d: any): Promise<StageGateContext> {
+    // The county's attorney answer is the default the case inherits, so the
+    // gate has to read it here as well as in the row builder.
+    const countyRow = d.county
+      ? (await this.counties.mapFor(lead.organizationId)).get(String(d.county).toLowerCase()) || null
+      : null;
+    lead = { ...lead, _countyRow: countyRow };
     const facts = {
       surplusType: d.surplusType,
       fundLocation: d.fundLocation,
@@ -658,7 +705,23 @@ export class SurplusService {
     });
     const docs: Record<string, string> = {};
     for (const doc of d.documents || []) docs[doc.kind] = doc.status;
-    return { docs, complianceBlocks: complianceGate(facts).blocks, docsMissing: checklist.missing };
+    return {
+      docs,
+      complianceBlocks: complianceGate(facts).blocks,
+      docsMissing: checklist.missing,
+      ...this.attorneyGate(d, lead),
+    };
+  }
+
+  /**
+   * Whether this case needs an attorney and has one. The case's own flag
+   * wins; otherwise the county's answer applies. Engaged means a person
+   * marked them engaged, or at least named them.
+   */
+  private attorneyGate(d: any, lead: any): { attorneyRequired: boolean; attorneyEngaged: boolean } {
+    const county = lead?._countyRow || null;
+    const required = d.attorneyRequired ?? county?.attorneyRequired ?? false;
+    return { attorneyRequired: !!required, attorneyEngaged: !!(d.attorneyEngagedAt || d.attorneyName) };
   }
 
   /**
@@ -672,10 +735,18 @@ export class SurplusService {
     if (!rule) return;
     const lead = await this.prisma.lead.findUnique({
       where: { id: leadId },
-      select: { sellerFirstName: true, sellerLastName: true },
+      select: {
+        sellerFirstName: true,
+        sellerLastName: true,
+        surplusDetail: { select: { attorneyName: true, attorneyEngagedAt: true } },
+      },
     });
     const name = `${lead?.sellerFirstName || ''} ${lead?.sellerLastName || ''}`.trim() || 'the claimant';
-    await this.createTaskOnce(leadId, rule.title(name), rule.days, userId);
+    const attorney =
+      lead?.surplusDetail?.attorneyEngagedAt || lead?.surplusDetail?.attorneyName
+        ? lead.surplusDetail.attorneyName || 'the attorney'
+        : null;
+    await this.createTaskOnce(leadId, rule.title(name, attorney), rule.days, userId);
   }
 
   private async createTaskOnce(leadId: string, title: string, days: number, userId?: string | null) {
@@ -875,13 +946,16 @@ export class SurplusService {
     // The same gate as update(). Refused as a whole rather than moving the
     // claimants that pass: a kanban drag restages one property, and half a
     // property at Agreement Signed reads as if the agreement covered everyone.
-    const refused = leads
-      .map((l) => ({
-        name: `${l.sellerFirstName || ''} ${l.sellerLastName || ''}`.trim() || 'a claimant',
-        why: l.surplusDetail
-          ? stageGateError(l.surplusDetail, target, this.gateContext(l, l.surplusDetail))
-          : null,
-      }))
+    const refused = (
+      await Promise.all(
+        leads.map(async (l) => ({
+          name: `${l.sellerFirstName || ''} ${l.sellerLastName || ''}`.trim() || 'a claimant',
+          why: l.surplusDetail
+            ? stageGateError(l.surplusDetail, target, await this.gateContext(l, l.surplusDetail))
+            : null,
+        })),
+      )
+    )
       .filter((r) => r.why);
     if (refused.length) {
       const first = refused[0];
@@ -1510,7 +1584,23 @@ export class SurplusService {
             docs,
             complianceBlocks: gate.blocks,
             docsMissing: checklist.missing,
+            ...this.attorneyGate(d, { _countyRow: county }),
           }),
+          // The attorney, and the rule that follows from one being engaged.
+          attorney: {
+            required: d.attorneyRequired ?? county?.attorneyRequired ?? null,
+            requiredFrom: d.attorneyRequired != null ? 'case' : county?.attorneyRequired != null ? 'county' : null,
+            name: d.attorneyName || null,
+            firm: d.attorneyFirm || null,
+            phone: d.attorneyPhone || null,
+            email: d.attorneyEmail || null,
+            source: d.attorneySource || null,
+            engagedAt: d.attorneyEngagedAt || null,
+            notes: d.attorneyNotes || null,
+            engaged: !!(d.attorneyEngagedAt || d.attorneyName),
+          },
+          /** Who to contact about the claim: the attorney once one is engaged, the clerk otherwise. */
+          countyContactVia: d.attorneyEngagedAt || d.attorneyName ? 'attorney' : 'clerk',
         };
       })(),
 

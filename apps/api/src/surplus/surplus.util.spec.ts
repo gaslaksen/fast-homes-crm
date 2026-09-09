@@ -457,6 +457,27 @@ describe('stageGateError', () => {
     expect(stageGateError(clean, SurplusStage.CLAIM_FILED, { docs: signedUp, docsMissing: [] })).toBeNull();
   });
 
+  it('needs an attorney engaged to file only where one is required', () => {
+    expect(
+      stageGateError(clean, SurplusStage.CLAIM_FILED, { docs: signedUp, docsMissing: [], attorneyRequired: true }),
+    ).toBe('Claim Filed needs an attorney engaged, this county requires one to file.');
+    expect(
+      stageGateError(clean, SurplusStage.CLAIM_FILED, {
+        docs: signedUp,
+        docsMissing: [],
+        attorneyRequired: true,
+        attorneyEngaged: true,
+      }),
+    ).toBeNull();
+    expect(
+      stageGateError(clean, SurplusStage.CLAIM_FILED, { docs: signedUp, docsMissing: [], attorneyRequired: false }),
+    ).toBeNull();
+    // Only Claim Filed cares: an attorney is for the filing, not the retention.
+    expect(
+      stageGateError(clean, SurplusStage.ASSIGNMENT_NOTARIZED, { docs: signedUp, attorneyRequired: true }),
+    ).toBeNull();
+  });
+
   it('is cumulative, so a jump from New to Claim Filed is checked against the whole order', () => {
     const msg = stageGateError(
       { entitlementVerified: false, noticeConfirmed: true, titleSearchComplete: true },
