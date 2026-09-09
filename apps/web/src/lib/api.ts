@@ -211,8 +211,11 @@ export const surplusAPI = {
   create: (data: any) => api.post('/surplus', data),
   update: (id: string, data: any) => api.patch(`/surplus/${id}`, data),
   bulkDelete: (ids: string[]) => api.post('/surplus/bulk-delete', { ids }),
-  bulkStage: (ids: string[], stage: string, dead?: { deadReason?: string | null; deadNote?: string | null }) =>
-    api.post('/surplus/bulk-stage', { ids, stage, ...(dead || {}) }),
+  bulkStage: (
+    ids: string[],
+    stage: string,
+    dead?: { deadReason?: string | null; deadNote?: string | null; deadOverride?: boolean },
+  ) => api.post('/surplus/bulk-stage', { ids, stage, ...(dead || {}) }),
   letterMailed: (
     ids: string[],
     data: {

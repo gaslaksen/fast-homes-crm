@@ -66,6 +66,8 @@ import {
   governingPct,
   canQualify,
   stageGateError,
+  deadGateError,
+  deadGateMissing,
   stageBlocks,
   StageGateContext,
   complianceGate,
@@ -602,6 +604,10 @@ export class SurplusService {
         if (!deadReasonOf(reason)) {
           throw new BadRequestException('Marking a claim Dead needs a reason: below the floor, deceased with no heirs, competing claim, unresponsive, already assigned, or other.');
         }
+        // "Unresponsive" is a claim about the effort, so the effort is checked.
+        const note = patch.deadNote !== undefined ? patch.deadNote : d.deadNote;
+        const refusedDead = deadGateError(reason, this.deadEffort(lead, d), { on: !!patch.deadOverride, note });
+        if (refusedDead) throw new BadRequestException(refusedDead);
         detailPatch.deadReason = reason;
         detailPatch.deadNote = patch.deadNote !== undefined ? (patch.deadNote || '').trim() || null : d.deadNote;
         detailPatch.deadAt = d.stage === SurplusStage.DEAD && d.deadAt ? d.deadAt : new Date();
@@ -1470,7 +1476,7 @@ export class SurplusService {
     stage: string,
     organizationId?: string | null,
     userId?: string | null,
-    dead?: { reason?: string | null; note?: string | null },
+    dead?: { reason?: string | null; note?: string | null; override?: boolean | null },
   ) {
     const target = stageFromText(stage);
     if (target === SurplusStage.DEAD && !deadReasonOf(dead?.reason)) {
@@ -1489,7 +1495,10 @@ export class SurplusService {
         leads.map(async (l) => ({
           name: `${l.sellerFirstName || ''} ${l.sellerLastName || ''}`.trim() || 'a claimant',
           why: l.surplusDetail
-            ? stageGateError(l.surplusDetail, target, await this.gateContext(l, l.surplusDetail))
+            ? stageGateError(l.surplusDetail, target, await this.gateContext(l, l.surplusDetail)) ||
+              (target === SurplusStage.DEAD
+                ? deadGateError(dead?.reason, this.deadEffort(l, l.surplusDetail), { on: !!dead?.override, note: dead?.note })
+                : null)
             : null,
         })),
       )
@@ -2386,6 +2395,8 @@ export class SurplusService {
 
       // Why it died, when it did. Kept so the board's Dead column reads as
       // a list of reasons and a re-listed case says what happened last time.
+      /** What "unresponsive" still needs before it is a reason. Empty when it is. */
+      deadGateMissing: deadGateMissing(SurplusDeadReason.UNRESPONSIVE, this.deadEffort(lead, d)),
       deadReason: d.deadReason || null,
       deadReasonLabel: d.deadReason ? SURPLUS_DEAD_REASON_LABEL[d.deadReason as SurplusDeadReason] || d.deadReason : null,
       deadNote: d.deadNote || null,
@@ -2470,6 +2481,20 @@ export class SurplusService {
    * standard letters, the next one goes Priority or FedEx so it is actually
    * opened.
    */
+  /**
+   * What has been tried on this claimant, for the effort gate before Dead.
+   * Attempts against an heir or an associate do not count: the claimant is
+   * the one being called unresponsive.
+   */
+  private deadEffort(lead: any, d: any) {
+    const own = ((d.traceAttempts || []) as any[]).filter((a) => !a.heirId && a.result !== 'skipped');
+    return {
+      channelsTried: Array.from(new Set(own.map((a) => String(a.channel)))),
+      letterCount: ((d.letters || []) as any[]).length,
+      callCount: lead._count?.callLogs || 0,
+    };
+  }
+
   private letterState(d: any) {
     const letters = ((d.letters || []) as any[]).map((l) => ({
       id: l.id,

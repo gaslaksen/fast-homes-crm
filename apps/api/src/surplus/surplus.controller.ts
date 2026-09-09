@@ -800,7 +800,7 @@ export class SurplusController {
    */
   @Post('bulk-stage')
   async bulkStage(
-    @Body() body: { ids: string[]; stage: string; deadReason?: string | null; deadNote?: string | null },
+    @Body() body: { ids: string[]; stage: string; deadReason?: string | null; deadNote?: string | null; deadOverride?: boolean | null },
     @Headers('authorization') authHeader?: string,
   ) {
     if (!Array.isArray(body?.ids) || body.ids.length === 0) {
@@ -811,6 +811,7 @@ export class SurplusController {
     return this.surplus.bulkStage(body.ids, body.stage, organizationId, userId, {
       reason: body.deadReason,
       note: body.deadNote,
+      override: !!body.deadOverride,
     });
   }
 

@@ -179,6 +179,8 @@ export interface SurplusPanelLead {
   /** Why it died, when it did. */
   deadReason: string | null;
   deadNote: string | null;
+  /** What "unresponsive" still needs before it is a reason. Empty when it is. */
+  deadGateMissing: string[];
   deadAt: string | null;
   /** Every search run for this person, and what the escalation rule makes of it. */
   tracing: {
@@ -3635,17 +3637,28 @@ function StageControl({
   const [deadOpen, setDeadOpen] = useState(false);
   const [deadReason, setDeadReason] = useState('');
   const [deadNote, setDeadNote] = useState('');
+  const [deadOverride, setDeadOverride] = useState(false);
   const stages = SURPLUS_STAGES.concat('Dead');
+  // The effort gate: "unresponsive" is a claim about the work done, and the
+  // panel knows what is still missing before the button is pressed.
+  const gateMissing = deadReason === 'unresponsive' ? lead.deadGateMissing || [] : [];
+  const gateBlocks = gateMissing.length > 0 && !(deadOverride && deadNote.trim());
 
   const markDead = async () => {
-    if (!deadReason || saving) return;
+    if (!deadReason || saving || gateBlocks) return;
     setSaving(true);
     try {
-      await surplusAPI.update(lead.id, { stage: 'Dead', deadReason, deadNote: deadNote.trim() || null });
+      await surplusAPI.update(lead.id, {
+        stage: 'Dead',
+        deadReason,
+        deadNote: deadNote.trim() || null,
+        ...(deadOverride ? { deadOverride: true } : {}),
+      });
       say(`${lead.claimant} marked dead: ${deadReasonLabel(deadReason)}`);
       setDeadOpen(false);
       setDeadReason('');
       setDeadNote('');
+      setDeadOverride(false);
       onChanged();
     } catch (err: any) {
       say(err?.response?.data?.message || 'That could not be saved.');
@@ -3716,9 +3729,20 @@ function StageControl({
           <input
             className="dc-input"
             value={deadNote}
-            placeholder="Anything worth remembering, optional"
+            placeholder={deadOverride ? 'Why the file is done despite the gaps (required)' : 'Anything worth remembering, optional'}
             onChange={(e) => setDeadNote(e.target.value)}
           />
+          {gateMissing.length > 0 && (
+            <div style={{ fontSize: 11.5, color: 'var(--amber)', display: 'grid', gap: 4 }}>
+              <div>
+                Nobody is unresponsive until the free routes, the mail and the calls have been tried. Still needed: {gateMissing.join(', ')}.
+              </div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                <input type="checkbox" checked={deadOverride} onChange={(e) => setDeadOverride(e.target.checked)} />
+                Override, with a note saying why
+              </label>
+            </div>
+          )}
           <div style={{ fontSize: 11, color: 'var(--faint)' }}>
             The lead stays on file with the reason, and the county poll will not bring it back as new.
           </div>
@@ -3726,7 +3750,7 @@ function StageControl({
             <button type="button" className="dc-wp-btn" disabled={saving} onClick={() => setDeadOpen(false)}>
               Cancel
             </button>
-            <button type="button" className="dc-wp-btn on" disabled={saving || !deadReason} onClick={markDead}>
+            <button type="button" className="dc-wp-btn on" disabled={saving || !deadReason || gateBlocks} onClick={markDead}>
               Mark dead
             </button>
           </div>

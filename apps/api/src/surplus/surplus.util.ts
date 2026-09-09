@@ -17,6 +17,8 @@ import {
   SurplusDocumentStatus,
   SURPLUS_DOCUMENT_LABEL,
   surplusDocumentAtLeast,
+  SurplusDeadReason,
+  SurplusTraceChannel,
 } from '@fast-homes/shared';
 import { CLAIM_STATUS_LABEL, CLAIM_STATUS_RANK, isWorkable } from './surplus-classify.util';
 import {
@@ -595,6 +597,65 @@ export function stageBlocks(
   const out: Record<string, string[]> = {};
   for (const s of GATED_STAGES) out[s] = stageRequirementsMissing(facts, s, ctx);
   return out;
+}
+
+// ─── The effort gate before Dead ────────────────────────────────────────────
+
+/** Calls that must have been placed before "unresponsive" is a reason. */
+export const DEAD_MIN_CALLS = 3;
+
+/** What has been tried on a claimant, as the dead gate reads it. */
+export interface DeadEffort {
+  /** Channels with at least one real attempt logged for the claimant (not skipped). */
+  channelsTried: string[];
+  /** Letters mailed to the claimant. */
+  letterCount: number;
+  /** Calls placed from the dialer or the AI caller. */
+  callCount: number;
+}
+
+/**
+ * What "unresponsive" still needs before it is a reason to retire a claim.
+ *
+ * The course's rule: nobody is unresponsive until the free searches, the
+ * social search, the mail and a run of calls have all been tried. Before
+ * this, a claim could be marked dead after two voicemails, and the money
+ * sat with the county until somebody else claimed it. Every other reason
+ * is a fact about the claim, not about the effort, so it passes as is.
+ */
+export function deadGateMissing(reason: string | null | undefined, effort: DeadEffort): string[] {
+  if (reason !== SurplusDeadReason.UNRESPONSIVE) return [];
+  const tried = new Set(effort.channelsTried || []);
+  const missing: string[] = [];
+  if (!tried.has(SurplusTraceChannel.FREE_SEARCH) && !tried.has(SurplusTraceChannel.GOV_RECORDS)) {
+    missing.push('a free search or a records check logged');
+  }
+  if (!tried.has(SurplusTraceChannel.SOCIAL)) missing.push('a social search logged');
+  if (!(effort.letterCount > 0) && !tried.has(SurplusTraceChannel.MAIL)) missing.push('a letter mailed');
+  const calls = effort.callCount || 0;
+  if (calls < DEAD_MIN_CALLS) {
+    const more = DEAD_MIN_CALLS - calls;
+    missing.push(calls ? `${more} more call${more === 1 ? '' : 's'}` : `${DEAD_MIN_CALLS} calls`);
+  }
+  return missing;
+}
+
+/**
+ * Why marking a claim Dead is refused, or null when it is allowed. An
+ * override needs a note saying why, so the file records what was skipped.
+ */
+export function deadGateError(
+  reason: string | null | undefined,
+  effort: DeadEffort,
+  override?: { on?: boolean | null; note?: string | null },
+): string | null {
+  const missing = deadGateMissing(reason, effort);
+  if (!missing.length) return null;
+  if (override?.on) {
+    if (!String(override.note || '').trim()) return 'Overriding the effort gate needs a note saying why.';
+    return null;
+  }
+  return `Unresponsive needs ${missing.join(', ')}. Override with a note if the file is really done.`;
 }
 
 // ─── The gate ───────────────────────────────────────────────────────────────
