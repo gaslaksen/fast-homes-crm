@@ -840,6 +840,36 @@ model SurplusDetail {
   additionalDocsRequested     String?
   expectedDisbursementAt      DateTime?
 
+  // ── The money coming back ─────────────────────────────────────────────────
+  // The course's disbursement: check received and the claimant told the same
+  // day, a report itemizing every expense with both shares shown, signed by
+  // the claimant before funds move, a thirty-day clearing period, and the
+  // claimant's check sent tracked.
+  checkReceivedAt DateTime?
+  checkAmount     Float?
+  /// The agreed fee as a percent of the check. Defaults to the rule's cap
+  /// when the report is first built; never above it.
+  feePercent      Float?
+  /// Whether itemized expenses come out of the claimant's share. Off by
+  /// default: they count as consideration under FS 45.033 and push the
+  /// total toward the cap.
+  expensesFromClaimantShare Boolean @default(false)
+  disbursementReportSignedAt DateTime?
+  /// Auto-set thirty days from the check received date.
+  clearingDueAt   DateTime?
+  checkSentAt     DateTime?
+  /// 'usps' | 'fedex' | 'ups' | 'in_person'
+  checkSentMethod         String?
+  checkSentTrackingNumber String?
+  /// The shares as they stood when the claimant's check went out, so the
+  /// record does not drift if a fee or an expense is edited afterwards.
+  claimantShare Float?
+  companyShare  Float?
+  /// Company share less the expenses it bore.
+  companyNet    Float?
+  /// Itemized on the disbursement report.
+  expenses SurplusExpense[]
+
   // ── Why it died ───────────────────────────────────────────────────────────
   /// SurplusDeadReason. Required to enter Dead, so a retired claim always
   /// says why and a re-listed case is matched against a reason.
@@ -2291,6 +2321,29 @@ model SurplusDocument {
 /// biweekly until somebody replies, and the third unanswered letter is what
 /// triggers the upgrade to Priority or FedEx. Neither can be counted off a
 /// single date.
+/// One expense on a surplus claim, itemized on the disbursement report:
+/// the title search, the notary, the filing fee, postage, a skip trace, the
+/// attorney. Kept per line so the report shows exactly what was spent and
+/// the company's net is real.
+model SurplusExpense {
+  id              String        @id @default(cuid())
+  surplusDetailId String
+  surplusDetail   SurplusDetail @relation(fields: [surplusDetailId], references: [id], onDelete: Cascade)
+  organizationId  String?
+
+  /// 'title_search' | 'notary' | 'filing' | 'postage' | 'skip_trace' | 'attorney' | 'other'
+  kind       String
+  amount     Float
+  incurredAt DateTime
+  note       String?
+  createdByUserId String?
+
+  createdAt DateTime @default(now())
+
+  @@index([surplusDetailId])
+  @@map("surplus_expenses")
+}
+
 model SurplusLetter {
   id              String        @id @default(cuid())
   surplusDetailId String

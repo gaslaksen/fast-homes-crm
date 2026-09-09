@@ -492,6 +492,40 @@ describe('stageGateError', () => {
     ).toBeNull();
   });
 
+  it('holds Check Received on the check and Paid on the signed report, the clearing, and the check out', () => {
+    const acknowledged = {
+      docs: signedUp,
+      docsMissing: [] as string[],
+      submissionMethod: 'efile',
+      countyAcknowledgedAt: '2026-08-01',
+    };
+    expect(stageGateError(clean, SurplusStage.CHECK_RECEIVED, acknowledged)).toBe(
+      'Check Received needs the check received date.',
+    );
+    const received = { ...acknowledged, checkReceivedAt: '2026-08-20' };
+    expect(stageGateError(clean, SurplusStage.CHECK_RECEIVED, received)).toBeNull();
+    expect(stageGateError(clean, SurplusStage.PAID, received)).toBe(
+      "Paid needs the claimant signing the disbursement report, the claimant's check sent.",
+    );
+    const farFuture = new Date(Date.now() + 10 * 86_400_000).toISOString();
+    expect(
+      stageGateError(clean, SurplusStage.PAID, {
+        ...received,
+        disbursementReportSignedAt: '2026-08-25',
+        clearingDueAt: farFuture,
+        checkSentAt: '2026-09-20',
+      }),
+    ).toBe('Paid needs the thirty-day clearing period to pass.');
+    expect(
+      stageGateError(clean, SurplusStage.PAID, {
+        ...received,
+        disbursementReportSignedAt: '2026-08-25',
+        clearingDueAt: '2026-09-19',
+        checkSentAt: '2026-09-20',
+      }),
+    ).toBeNull();
+  });
+
   it('needs an attorney engaged to file only where one is required', () => {
     expect(
       stageGateError(clean, SurplusStage.CLAIM_FILED, { docs: signedUp, docsMissing: [], submissionMethod: 'in_person', attorneyRequired: true }),

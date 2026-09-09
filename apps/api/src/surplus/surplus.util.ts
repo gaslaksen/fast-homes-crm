@@ -460,6 +460,14 @@ export interface StageGateContext {
   submissionTrackingNumber?: string | null;
   /** The county confirmed it has the package. */
   countyAcknowledgedAt?: Date | string | null;
+  /** The county's check is in hand. */
+  checkReceivedAt?: Date | string | null;
+  /** The claimant signed the disbursement report. */
+  disbursementReportSignedAt?: Date | string | null;
+  /** Thirty days from the check, and whether that has passed. */
+  clearingDueAt?: Date | string | null;
+  /** The claimant's check went out. */
+  checkSentAt?: Date | string | null;
 }
 
 /** Submission methods that hand back a tracking number. The rest hand back a receipt or a confirmation. */
@@ -471,6 +479,8 @@ const GATED_STAGES: SurplusStage[] = [
   SurplusStage.ASSIGNMENT_NOTARIZED,
   SurplusStage.CLAIM_FILED,
   SurplusStage.AWAITING_DISBURSEMENT,
+  SurplusStage.CHECK_RECEIVED,
+  SurplusStage.PAID,
 ];
 
 /**
@@ -539,6 +549,21 @@ export function stageRequirementsMissing(
   // Awaiting Disbursement: the county has said it has the package.
   if (idx >= 3 && !ctx.countyAcknowledgedAt) {
     missing.push('the county acknowledging receipt');
+  }
+
+  // Check Received: the county's check is in hand, dated.
+  if (idx >= 4 && !ctx.checkReceivedAt) {
+    missing.push('the check received date');
+  }
+
+  // Paid: the course's three conditions before money moves. The claimant
+  // has signed the report, the check has cleared, and theirs has gone out.
+  if (idx >= 5) {
+    if (!ctx.disbursementReportSignedAt) missing.push('the claimant signing the disbursement report');
+    if (ctx.clearingDueAt && new Date(ctx.clearingDueAt).getTime() > Date.now()) {
+      missing.push('the thirty-day clearing period to pass');
+    }
+    if (!ctx.checkSentAt) missing.push("the claimant's check sent");
   }
 
   return Array.from(new Set(missing));

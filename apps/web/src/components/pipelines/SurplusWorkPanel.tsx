@@ -8,6 +8,7 @@ import type { NoteItem, TimelineItem } from '@/components/communications/types';
 import { authAPI, campaignsAPI, leadsAPI, surplusAPI, tasksAPI } from '@/lib/api';
 import { dueLabel, isOverdue, quickDueDates } from '@/lib/dates';
 import { SURPLUS_DEAD_REASONS, deadReasonLabel } from '@/lib/surplus-dead';
+import { SURPLUS_EXPENSE_KINDS, expenseLabel, usd } from '@/lib/surplus-money';
 import { useDialer } from '@/components/dialer/DialerContext';
 import { DNC_STATE, SURPLUS_STAGES } from './format';
 import ContactEditor from './ContactEditor';
@@ -174,6 +175,30 @@ export interface SurplusPanelLead {
   deadReason: string | null;
   deadNote: string | null;
   deadAt: string | null;
+  /** The money coming back: the county's check, the fee, expenses, both shares, the claimant's check. */
+  disbursement: {
+    checkReceivedAt: string | null;
+    checkAmount: number | null;
+    feePercent: number | null;
+    capPct: number | null;
+    expenses: { id: string; kind: string; amount: number; incurredAt: string; note: string | null }[];
+    expensesFromClaimantShare: boolean;
+    gross: number;
+    fee: number;
+    expensesTotal: number;
+    claimantShare: number;
+    companyShare: number;
+    companyNet: number;
+    considerationPct: number;
+    overCap: boolean;
+    frozen: boolean;
+    reportSignedAt: string | null;
+    clearingDueAt: string | null;
+    clearingPassed: boolean;
+    checkSentAt: string | null;
+    checkSentMethod: string | null;
+    checkSentTrackingNumber: string | null;
+  };
   /** The monthly word to a signed claimant. */
   claimantUpdate: { applies: boolean; lastAt: string | null; daysSince: number | null; overdue: boolean };
   /** The filing: how the package went to the county and what the county said. */
@@ -513,6 +538,290 @@ function DocumentsSection({
           })}
         </div>
       ))}
+    </Section>
+  );
+}
+
+/**
+ * The money coming back, in the course's order: the check arrives and the
+ * claimant is told the same day, every expense is itemized, the report is
+ * signed by the claimant before funds move, the county's check clears for
+ * thirty days, then the claimant's check goes out tracked. The Paid stage
+ * follows from the last step rather than being set by hand.
+ */
+function DisbursementSection({
+  lead,
+  onChanged,
+  say,
+}: {
+  lead: SurplusPanelLead;
+  onChanged: () => void;
+  say: (msg: string) => void;
+}) {
+  const m = lead.disbursement || ({} as SurplusPanelLead['disbursement']);
+  const [busy, setBusy] = useState(false);
+  const [receivedAt, setReceivedAt] = useState(m.checkReceivedAt ? m.checkReceivedAt.slice(0, 10) : '');
+  const [amount, setAmount] = useState(m.checkAmount != null ? String(m.checkAmount) : '');
+  const [feePct, setFeePct] = useState(m.feePercent != null ? String(m.feePercent) : '');
+  const [expKind, setExpKind] = useState('title_search');
+  const [expAmount, setExpAmount] = useState('');
+  const [expNote, setExpNote] = useState('');
+  const [sentAt, setSentAt] = useState(m.checkSentAt ? m.checkSentAt.slice(0, 10) : '');
+  const [sentMethod, setSentMethod] = useState(m.checkSentMethod || 'usps');
+  const [sentTracking, setSentTracking] = useState(m.checkSentTrackingNumber || '');
+
+  useEffect(() => {
+    setReceivedAt(m.checkReceivedAt ? m.checkReceivedAt.slice(0, 10) : '');
+    setAmount(m.checkAmount != null ? String(m.checkAmount) : '');
+    setFeePct(m.feePercent != null ? String(m.feePercent) : '');
+    setSentAt(m.checkSentAt ? m.checkSentAt.slice(0, 10) : '');
+    setSentMethod(m.checkSentMethod || 'usps');
+    setSentTracking(m.checkSentTrackingNumber || '');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lead.id, m.checkReceivedAt, m.checkAmount, m.feePercent, m.checkSentAt]);
+
+  const save = async (patch: any, done: string) => {
+    setBusy(true);
+    try {
+      await surplusAPI.update(lead.id, patch);
+      say(done);
+      onChanged();
+      return true;
+    } catch (err: any) {
+      say(err?.response?.data?.message || 'That could not be saved.');
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const addExpense = async () => {
+    const n = Number(expAmount);
+    if (!Number.isFinite(n) || n <= 0) return;
+    setBusy(true);
+    try {
+      await surplusAPI.addExpense(lead.id, { kind: expKind, amount: n, note: expNote.trim() || null });
+      setExpAmount('');
+      setExpNote('');
+      say('Expense added');
+      onChanged();
+    } catch (err: any) {
+      say(err?.response?.data?.message || 'The expense could not be added.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const removeExpense = async (id: string) => {
+    setBusy(true);
+    try {
+      await surplusAPI.removeExpense(id);
+      onChanged();
+    } catch (err: any) {
+      say(err?.response?.data?.message || 'The expense could not be removed.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const field: React.CSSProperties = {
+    width: '100%',
+    boxSizing: 'border-box',
+    fontSize: 12.5,
+    padding: '6px 8px',
+    border: '1px solid var(--border)',
+    borderRadius: 6,
+    background: 'var(--surface2)',
+    color: 'inherit',
+  };
+  const lbl: React.CSSProperties = { fontSize: 11, color: 'var(--dim)' };
+  const relevant = ['Awaiting Disbursement', 'Check Received', 'Paid'].includes(lead.stage) || !!m.checkReceivedAt;
+  if (!relevant) return null;
+
+  const openReport = () => window.open(`/surplus-funds/disbursement?lead=${encodeURIComponent(lead.id)}`, '_blank', 'noopener');
+
+  return (
+    <Section
+      title="The money coming back"
+      note={m.frozen ? `Paid ${fmtDate(m.checkSentAt)}` : m.checkReceivedAt ? `Check in hand ${fmtDate(m.checkReceivedAt)}` : undefined}
+    >
+      {/* 1. The check. */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
+        <label style={lbl}>
+          Check received
+          <input type="date" style={field} value={receivedAt} disabled={m.frozen} onChange={(e) => setReceivedAt(e.target.value)} />
+        </label>
+        <label style={lbl}>
+          Amount
+          <input style={field} value={amount} disabled={m.frozen} placeholder="0.00" onChange={(e) => setAmount(e.target.value)} />
+        </label>
+        <label style={lbl}>
+          Fee %{m.capPct != null ? `, cap ${m.capPct}` : ''}
+          <input style={field} value={feePct} disabled={m.frozen} placeholder={m.capPct != null ? String(m.capPct) : ''} onChange={(e) => setFeePct(e.target.value)} />
+        </label>
+      </div>
+      {!m.frozen && (
+        <div>
+          <button
+            type="button"
+            className="dc-wp-btn on"
+            disabled={busy}
+            onClick={() =>
+              save(
+                {
+                  checkReceivedAt: receivedAt ? new Date(receivedAt).toISOString() : null,
+                  checkAmount: amount.trim() ? Number(amount) : null,
+                  feePercent: feePct.trim() ? Number(feePct) : null,
+                },
+                receivedAt && !m.checkReceivedAt ? 'Check recorded. Clearing started, the claimant is owed a call today.' : 'Saved',
+              )
+            }
+          >
+            Save the check
+          </button>
+        </div>
+      )}
+      {m.clearingDueAt && (
+        <div style={{ fontSize: 11.5, color: m.clearingPassed ? 'var(--mint)' : 'var(--amber)' }}>
+          {m.clearingPassed ? `Cleared ${fmtDate(m.clearingDueAt)}.` : `Clearing until ${fmtDate(m.clearingDueAt)}. Nothing goes out before then.`}
+        </div>
+      )}
+
+      {/* 2. Expenses. */}
+      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--dim)', letterSpacing: 0.3, marginTop: 4 }}>Expenses</div>
+      {m.expenses.length === 0 && <div style={{ fontSize: 12, color: 'var(--faint)' }}>None recorded.</div>}
+      {m.expenses.map((e) => (
+        <div key={e.id} style={{ display: 'flex', gap: 8, alignItems: 'baseline', fontSize: 12.5 }}>
+          <span style={{ flex: 1 }}>
+            {expenseLabel(e.kind)}
+            {e.note ? <span style={{ color: 'var(--faint)' }}> · {e.note}</span> : null}
+            <span style={{ color: 'var(--faint)', fontSize: 11 }}> {fmtDate(e.incurredAt)}</span>
+          </span>
+          <span style={{ fontVariantNumeric: 'tabular-nums' }}>{usd(e.amount)}</span>
+          {!m.frozen && (
+            <button type="button" className="dc-wp-btn" style={{ padding: '2px 7px', fontSize: 11 }} disabled={busy} onClick={() => removeExpense(e.id)}>
+              ✕
+            </button>
+          )}
+        </div>
+      ))}
+      {!m.frozen && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px 1fr auto', gap: 6, alignItems: 'end' }}>
+          <select className="dc-wp-sel" value={expKind} onChange={(e) => setExpKind(e.target.value)} aria-label="Expense kind">
+            {SURPLUS_EXPENSE_KINDS.map(([k, l]) => (
+              <option key={k} value={k}>
+                {l}
+              </option>
+            ))}
+          </select>
+          <input style={field} value={expAmount} placeholder="0.00" onChange={(e) => setExpAmount(e.target.value)} aria-label="Amount" />
+          <input style={field} value={expNote} placeholder="Note" onChange={(e) => setExpNote(e.target.value)} aria-label="Note" />
+          <button type="button" className="dc-wp-btn" disabled={busy || !expAmount} onClick={addExpense}>
+            Add
+          </button>
+        </div>
+      )}
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+        <input
+          type="checkbox"
+          checked={!!m.expensesFromClaimantShare}
+          disabled={m.frozen || busy}
+          onChange={(e) => save({ expensesFromClaimantShare: e.target.checked }, e.target.checked ? 'Expenses come out of the claimant’s share' : 'Expenses borne by the company')}
+        />
+        <span>
+          Expenses come out of the claimant's share
+          <span style={{ display: 'block', fontSize: 11, color: 'var(--faint)' }}>
+            They then count as consideration toward the Florida cap. Off, the company bears them.
+          </span>
+        </span>
+      </label>
+
+      {/* 3. The shares. */}
+      <div style={{ display: 'grid', gap: 3, fontSize: 13, padding: '8px 10px', borderRadius: 6, background: 'var(--bg2)' }}>
+        <Row k="Surplus received" v={usd(m.gross)} />
+        <Row k={`Fee at ${m.feePercent ?? 0}%`} v={usd(m.fee)} />
+        <Row k={m.expensesFromClaimantShare ? 'Expenses, from the claimant' : 'Expenses, borne by us'} v={usd(m.expensesTotal)} />
+        <Row k={`To ${lead.claimant}`} v={usd(m.claimantShare)} tone="var(--mint)" />
+        <Row k="Company share" v={usd(m.companyShare)} />
+        <Row k="Company net after expenses" v={usd(m.companyNet)} tone={m.companyNet < 0 ? 'var(--red)' : undefined} />
+        <div style={{ fontSize: 11, color: m.overCap ? 'var(--red)' : 'var(--faint)' }}>
+          Total consideration {m.considerationPct}% of the check{m.capPct != null ? `, cap ${m.capPct}%` : ''}.
+          {m.overCap ? ' Over the cap: reduce the fee or stop passing expenses before this is signed.' : ''}
+        </div>
+      </div>
+
+      {/* 4. The report and the claimant's signature. */}
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+        <button type="button" className="dc-wp-btn" onClick={openReport}>
+          Print the report
+        </button>
+        {m.reportSignedAt ? (
+          <span style={{ fontSize: 12, color: 'var(--mint)' }}>Signed by {lead.claimant} {fmtDate(m.reportSignedAt)}</span>
+        ) : (
+          <button
+            type="button"
+            className="dc-wp-btn"
+            disabled={busy || !m.checkAmount || m.overCap}
+            title={!m.checkAmount ? 'Record the check first' : m.overCap ? 'Over the cap' : 'Record that the claimant signed the report today'}
+            onClick={() => save({ disbursementReportSignedAt: new Date().toISOString() }, 'Report recorded as signed')}
+          >
+            Claimant signed the report
+          </button>
+        )}
+      </div>
+
+      {/* 5. The claimant's check. */}
+      {m.reportSignedAt && !m.frozen && (
+        <div style={{ display: 'grid', gap: 6, padding: 8, border: '1px solid var(--border)', borderRadius: 8 }}>
+          <div style={{ fontSize: 12, fontWeight: 700 }}>Send {lead.claimant}'s check, {usd(m.claimantShare)}</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
+            <label style={lbl}>
+              Sent
+              <input type="date" style={field} value={sentAt} onChange={(e) => setSentAt(e.target.value)} />
+            </label>
+            <label style={lbl}>
+              By
+              <select style={field} value={sentMethod} onChange={(e) => setSentMethod(e.target.value)}>
+                <option value="usps">USPS</option>
+                <option value="fedex">FedEx</option>
+                <option value="ups">UPS</option>
+                <option value="in_person">In person</option>
+              </select>
+            </label>
+            <label style={lbl}>
+              Tracking, signature required
+              <input style={field} value={sentTracking} onChange={(e) => setSentTracking(e.target.value)} />
+            </label>
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button
+              type="button"
+              className="dc-wp-btn on"
+              disabled={busy || !sentAt || !m.clearingPassed}
+              title={m.clearingPassed ? 'Records the check as sent, freezes the shares, and marks the claim Paid' : `Clearing until ${fmtDate(m.clearingDueAt)}`}
+              onClick={() =>
+                save(
+                  {
+                    checkSentAt: new Date(sentAt).toISOString(),
+                    checkSentMethod: sentMethod,
+                    checkSentTrackingNumber: sentTracking.trim() || null,
+                  },
+                  `${lead.claimant} paid. Claim closed.`,
+                )
+              }
+            >
+              Check sent, claim paid
+            </button>
+            {!m.clearingPassed && <span style={{ fontSize: 11, color: 'var(--amber)' }}>Waits for the clearing period.</span>}
+          </div>
+        </div>
+      )}
+      {m.frozen && (
+        <div style={{ fontSize: 12, color: 'var(--mint)' }}>
+          Check sent {fmtDate(m.checkSentAt)}{m.checkSentMethod ? ` by ${m.checkSentMethod.toUpperCase()}` : ''}
+          {m.checkSentTrackingNumber ? `, tracking ${m.checkSentTrackingNumber}` : ''}. Shares frozen.
+        </div>
+      )}
     </Section>
   );
 }
@@ -1986,6 +2295,8 @@ function CaseTab({
       <AttorneySection lead={lead} onChanged={onChanged} say={say} />
 
       <FilingSection lead={lead} onChanged={onChanged} say={say} />
+
+      <DisbursementSection lead={lead} onChanged={onChanged} say={say} />
 
       {/* Heirs lead for a deceased claimant, because they are the only people
           who can file. For a living one the section still appears once heirs

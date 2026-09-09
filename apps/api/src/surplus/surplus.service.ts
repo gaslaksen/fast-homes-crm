@@ -14,6 +14,8 @@ import {
   surplusCallConnected,
   SurplusDeadReason,
   SURPLUS_DEAD_REASON_LABEL,
+  SURPLUS_EXPENSE_KINDS,
+  surplusDisbursement,
   SurplusDocumentKind,
   SurplusDocumentStatus,
   surplusDocumentAtLeast,
@@ -70,7 +72,9 @@ import {
   SURPLUS_FLOOR,
   DISCLOSURE_LABELS,
   courtRecordsUrl,
+  ruleFor,
 } from './surplus-compliance';
+import { DIG_DEEPER_BRAND } from '../common/company.constants';
 import { SurplusLeadInput, SurplusListFilters, SurplusPhoneInput } from './surplus.types';
 import { SurplusCountiesService, CountyRow } from './surplus-counties.service';
 import { SurplusDocumentsService } from './surplus-documents.service';
@@ -100,6 +104,7 @@ const LEAD_INCLUDE = {
       heirs: true,
       letters: { orderBy: { mailedAt: 'desc' as const }, take: 10 },
       documents: true,
+      expenses: { orderBy: { incurredAt: 'asc' as const } },
     },
   },
   tasks: {
@@ -167,6 +172,8 @@ function deadReasonOf(raw: unknown): SurplusDeadReason | null {
 const LETTER_FOLLOW_UP_DAYS = 14;
 /** The course's cadence: a signed claimant hears from us at least this often. */
 export const CLAIMANT_UPDATE_DAYS = 30;
+/** The county's check clears before the claimant's goes out. */
+export const CLEARING_DAYS = 30;
 /** And the county is asked about a filed claim at least this often after the first check. */
 export const COUNTY_FOLLOW_UP_DAYS = 30;
 
@@ -456,7 +463,21 @@ export class SurplusService {
       'attorneyNotes',
       'submissionTrackingNumber', 'submissionSignatureRequired', 'clerkContactName', 'clerkStatusNote',
       'additionalDocsRequested',
+      'expensesFromClaimantShare', 'checkSentTrackingNumber',
     ];
+    for (const k of ['checkAmount', 'feePercent']) {
+      if (patch[k] === undefined) continue;
+      const n = patch[k] === null ? null : Number(patch[k]);
+      if (n !== null && (!Number.isFinite(n) || n < 0)) throw new BadRequestException(`${k} must be a positive number.`);
+      detailPatch[k] = n;
+    }
+    if (patch.checkSentMethod !== undefined) {
+      const m = patch.checkSentMethod === null ? null : String(patch.checkSentMethod).toLowerCase();
+      if (m && !['usps', 'fedex', 'ups', 'in_person'].includes(m)) {
+        throw new BadRequestException('The check goes by USPS, FedEx, UPS, or in person.');
+      }
+      detailPatch.checkSentMethod = m;
+    }
     if (patch.submissionMethod !== undefined) {
       const m = patch.submissionMethod === null ? null : String(patch.submissionMethod).toLowerCase();
       if (m && !['usps', 'fedex', 'ups', 'in_person', 'efile'].includes(m)) {
@@ -497,6 +518,9 @@ export class SurplusService {
       'submittedAt',
       'countyAcknowledgedAt',
       'expectedDisbursementAt',
+      'checkReceivedAt',
+      'disbursementReportSignedAt',
+      'checkSentAt',
     ]) {
       if (patch[k] === undefined) continue;
       if (patch[k] === null) {
@@ -655,6 +679,76 @@ export class SurplusService {
       await this.recordSignedInOrder(id, organizationId, userId);
     }
 
+    // The county's check arriving is what Check Received means. The
+    // clearing clock starts, the claimant is told within a day, and the
+    // fee defaults to the rule's cap so the report has a number.
+    if (detailPatch.checkReceivedAt && !d.checkReceivedAt) {
+      const received = new Date(detailPatch.checkReceivedAt);
+      const clearing = new Date(received.getTime() + CLEARING_DAYS * 86_400_000);
+      const rule = ruleFor(d.surplusType, d.fundLocation);
+      await this.prisma.surplusDetail.update({
+        where: { id: d.id },
+        data: {
+          clearingDueAt: clearing,
+          ...(d.feePercent == null && rule?.feeCap != null ? { feePercent: rule.feeCap } : {}),
+          ...((detailPatch.stage || d.stage) === SurplusStage.AWAITING_DISBURSEMENT
+            ? { stage: SurplusStage.CHECK_RECEIVED }
+            : {}),
+        },
+      });
+      await this.completeOpenTasks(id, [
+        `Check with the clerk on ${claimant}'s disbursement`,
+        `Ask ${d.attorneyName || 'the attorney'} when the county will pay ${claimant}'s claim`,
+      ]);
+      await this.prisma.activity.create({
+        data: {
+          leadId: id,
+          userId: userId || undefined,
+          type: 'CHECK_RECEIVED',
+          description: `The county's check arrived${detailPatch.checkAmount ?? d.checkAmount ? ` for $${Math.round(detailPatch.checkAmount ?? d.checkAmount).toLocaleString('en-US')}` : ''}. Clearing until ${clearing.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}.`,
+          metadata: { receivedAt: received.toISOString(), clearingDueAt: clearing.toISOString() },
+        },
+      });
+      if ((detailPatch.stage || d.stage) === SurplusStage.AWAITING_DISBURSEMENT) {
+        await this.scheduleStageTask(id, SurplusStage.CHECK_RECEIVED, userId);
+      }
+    }
+
+    // The claimant's check going out is the last act. It is refused until
+    // the report is signed and the clearing has passed, and once it goes
+    // the shares are frozen on the row and the claim is Paid.
+    if (detailPatch.checkSentAt && !d.checkSentAt) {
+      const signedAt = detailPatch.disbursementReportSignedAt ?? d.disbursementReportSignedAt;
+      if (!signedAt) {
+        throw new BadRequestException("Record the claimant signing the disbursement report before sending their check.");
+      }
+      if (d.clearingDueAt && new Date(d.clearingDueAt).getTime() > Date.now()) {
+        throw new BadRequestException(
+          `The thirty-day clearing period runs until ${new Date(d.clearingDueAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}. The check waits for it.`,
+        );
+      }
+      const calc = this.disbursementFor({ ...d, ...detailPatch });
+      await this.prisma.surplusDetail.update({
+        where: { id: d.id },
+        data: {
+          claimantShare: calc.claimantShare,
+          companyShare: calc.companyShare,
+          companyNet: calc.companyNet,
+          stage: SurplusStage.PAID,
+        },
+      });
+      await this.completeOpenTasks(id, [`Tell ${claimant} the check arrived and start the disbursement report`]);
+      await this.prisma.activity.create({
+        data: {
+          leadId: id,
+          userId: userId || undefined,
+          type: 'CLAIMANT_PAID',
+          description: `${claimant}'s check for $${Math.round(calc.claimantShare).toLocaleString('en-US')} sent${detailPatch.checkSentMethod || d.checkSentMethod ? ` by ${String(detailPatch.checkSentMethod || d.checkSentMethod).toUpperCase()}` : ''}. Company share $${Math.round(calc.companyShare).toLocaleString('en-US')}.`,
+          metadata: { ...calc, method: detailPatch.checkSentMethod || d.checkSentMethod || null },
+        },
+      });
+    }
+
     // The county acknowledging receipt is what Awaiting Disbursement means,
     // so a claim at Claim Filed moves on its own when the date is recorded,
     // and the "check with the clerk" task that was waiting for it closes.
@@ -751,6 +845,126 @@ export class SurplusService {
     });
   }
 
+  /** The disbursement arithmetic for a detail row as it stands, or as it is about to be. */
+  private disbursementFor(d: any) {
+    const rule = ruleFor(d.surplusType, d.fundLocation);
+    const expenses = (d.expenses || []) as any[];
+    return surplusDisbursement({
+      checkAmount: d.checkAmount,
+      feePercent: d.feePercent ?? rule?.feeCap ?? 0,
+      expensesTotal: expenses.reduce((s, e) => s + Number(e.amount || 0), 0),
+      expensesFromClaimantShare: !!d.expensesFromClaimantShare,
+      capPct: rule?.feeCap ?? null,
+    });
+  }
+
+  /** Every expense on a claim, oldest first. */
+  async listExpenses(leadId: string, organizationId?: string | null) {
+    const d = await this.detailOf(leadId, organizationId);
+    return this.prisma.surplusExpense.findMany({ where: { surplusDetailId: d.id }, orderBy: { incurredAt: 'asc' } });
+  }
+
+  async addExpense(
+    leadId: string,
+    input: { kind: string; amount: number; incurredAt?: string | null; note?: string | null },
+    organizationId?: string | null,
+    userId?: string | null,
+  ) {
+    const d = await this.detailOf(leadId, organizationId);
+    const kind = String(input.kind || '').trim();
+    if (!SURPLUS_EXPENSE_KINDS.some(([k]) => k === kind)) throw new BadRequestException('Pick an expense kind.');
+    const amount = Number(input.amount);
+    if (!Number.isFinite(amount) || amount <= 0) throw new BadRequestException('The amount must be more than zero.');
+    const incurredAt = input.incurredAt ? new Date(input.incurredAt) : new Date();
+    if (Number.isNaN(incurredAt.getTime())) throw new BadRequestException('The date could not be read.');
+    const row = await this.prisma.surplusExpense.create({
+      data: {
+        surplusDetailId: d.id,
+        organizationId: d.organizationId,
+        kind,
+        amount,
+        incurredAt,
+        note: (input.note || '').trim() || null,
+        createdByUserId: userId || null,
+      },
+    });
+    await this.prisma.activity.create({
+      data: {
+        leadId,
+        userId: userId || undefined,
+        type: 'EXPENSE_ADDED',
+        description: `Expense: ${SURPLUS_EXPENSE_KINDS.find(([k]) => k === kind)?.[1] || kind}, $${amount.toFixed(2)}`,
+        metadata: { kind, amount },
+      },
+    });
+    return row;
+  }
+
+  async removeExpense(expenseId: string, organizationId?: string | null) {
+    const row = await this.prisma.surplusExpense.findFirst({
+      where: { id: expenseId, ...(organizationId ? { organizationId } : {}) },
+    });
+    if (!row) throw new BadRequestException('Expense not found');
+    await this.prisma.surplusExpense.delete({ where: { id: row.id } });
+    return { removed: 1 };
+  }
+
+  /**
+   * The disbursement report for the print page: every expense, the fee per
+   * the rule, both shares, and the cap check. Frozen numbers win once the
+   * claimant's check has gone; before that it is live.
+   */
+  async disbursementReport(leadId: string, organizationId?: string | null) {
+    const lead = await this.prisma.lead.findFirst({
+      where: { id: leadId, source: LeadSource.SURPLUS, ...(organizationId ? { organizationId } : {}) },
+      include: LEAD_INCLUDE,
+    });
+    if (!lead?.surplusDetail) throw new BadRequestException('Surplus lead not found');
+    const d: any = lead.surplusDetail;
+    const rule = ruleFor(d.surplusType, d.fundLocation);
+    const calc = this.disbursementFor(d);
+    const frozen = d.checkSentAt && d.claimantShare != null;
+    return {
+      claimant: `${lead.sellerFirstName || ''} ${lead.sellerLastName || ''}`.trim(),
+      propertyAddress: [lead.propertyAddress, lead.propertyCity].filter(Boolean).join(', '),
+      county: d.county,
+      caseNumber: d.caseNumber,
+      checkReceivedAt: d.checkReceivedAt,
+      checkAmount: d.checkAmount,
+      feePercent: d.feePercent ?? rule?.feeCap ?? null,
+      capPct: rule?.feeCap ?? null,
+      capBasis: rule?.capBasis || null,
+      expenses: (d.expenses || []).map((e: any) => ({
+        id: e.id,
+        kind: e.kind,
+        label: SURPLUS_EXPENSE_KINDS.find(([k]) => k === e.kind)?.[1] || e.kind,
+        amount: e.amount,
+        incurredAt: e.incurredAt,
+        note: e.note,
+      })),
+      expensesFromClaimantShare: !!d.expensesFromClaimantShare,
+      ...calc,
+      ...(frozen ? { claimantShare: d.claimantShare, companyShare: d.companyShare, companyNet: d.companyNet } : {}),
+      frozen: !!frozen,
+      reportSignedAt: d.disbursementReportSignedAt,
+      clearingDueAt: d.clearingDueAt,
+      checkSentAt: d.checkSentAt,
+      checkSentMethod: d.checkSentMethod,
+      checkSentTrackingNumber: d.checkSentTrackingNumber,
+      company: { name: DIG_DEEPER_BRAND.companyName, phone: DIG_DEEPER_BRAND.phone },
+      today: new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'America/New_York' }),
+    };
+  }
+
+  private async detailOf(leadId: string, organizationId?: string | null) {
+    const d = await this.prisma.surplusDetail.findFirst({
+      where: { leadId, ...(organizationId ? { organizationId } : {}) },
+      select: { id: true, organizationId: true },
+    });
+    if (!d) throw new BadRequestException('Surplus lead not found');
+    return d;
+  }
+
   /** Close open tasks by title, when the thing they waited for has happened. */
   private async completeOpenTasks(leadId: string, titles: string[]) {
     await this.prisma.task.updateMany({
@@ -820,6 +1034,10 @@ export class SurplusService {
       submissionMethod: d.submissionMethod,
       submissionTrackingNumber: d.submissionTrackingNumber,
       countyAcknowledgedAt: d.countyAcknowledgedAt,
+      checkReceivedAt: d.checkReceivedAt,
+      disbursementReportSignedAt: d.disbursementReportSignedAt,
+      clearingDueAt: d.clearingDueAt,
+      checkSentAt: d.checkSentAt,
     };
   }
 
@@ -1543,6 +1761,15 @@ export class SurplusService {
       missingChannel: props.filter((p: any) => p.channelsMissing?.length > 0 && p.workScore > 0).length,
       letterDue: props.filter((p: any) => p.letterDue).length,
       updateOverdue: props.filter((p: any) => p.claimantUpdateOverdue).length,
+      // Real money, off the check: what the county has paid in, and what
+      // the company kept on claims that have paid out.
+      collected: all
+        .filter((r) => [SurplusStage.CHECK_RECEIVED, SurplusStage.PAID].includes(r.stage as SurplusStage))
+        .reduce((s, r) => s + (r.disbursement?.checkAmount || 0), 0),
+      feesEarned: all
+        .filter((r) => r.stage === SurplusStage.PAID)
+        .reduce((s, r) => s + (r.disbursement?.companyShare || 0), 0),
+      recoveries: all.filter((r) => r.stage === SurplusStage.PAID).length,
       complianceBlocked: all.filter((r) => !r.compliance.clear).length,
       belowFloor: all.length - all.filter((r) => r.grossSurplus >= SURPLUS_FLOOR).length,
       total: all.length,
@@ -1719,6 +1946,10 @@ export class SurplusService {
             submissionMethod: d.submissionMethod,
             submissionTrackingNumber: d.submissionTrackingNumber,
             countyAcknowledgedAt: d.countyAcknowledgedAt,
+            checkReceivedAt: d.checkReceivedAt,
+            disbursementReportSignedAt: d.disbursementReportSignedAt,
+            clearingDueAt: d.clearingDueAt,
+            checkSentAt: d.checkSentAt,
           }),
           // The attorney, and the rule that follows from one being engaged.
           attorney: {
@@ -1829,6 +2060,36 @@ export class SurplusService {
           lastAt,
           daysSince,
           overdue: applies && (daysSince === null || daysSince > CLAIMANT_UPDATE_DAYS),
+        };
+      })(),
+
+      // The money coming back, live until the claimant's check goes and
+      // frozen after. The stats read companyShare off Paid rows.
+      disbursement: (() => {
+        const calc = this.disbursementFor(d);
+        const frozen = !!(d.checkSentAt && d.claimantShare != null);
+        return {
+          checkReceivedAt: d.checkReceivedAt || null,
+          checkAmount: d.checkAmount ?? null,
+          feePercent: d.feePercent ?? gate.rule?.feeCap ?? null,
+          capPct: gate.rule?.feeCap ?? null,
+          expenses: ((d.expenses || []) as any[]).map((e) => ({
+            id: e.id,
+            kind: e.kind,
+            amount: e.amount,
+            incurredAt: e.incurredAt,
+            note: e.note || null,
+          })),
+          expensesFromClaimantShare: !!d.expensesFromClaimantShare,
+          ...calc,
+          ...(frozen ? { claimantShare: d.claimantShare, companyShare: d.companyShare, companyNet: d.companyNet } : {}),
+          frozen,
+          reportSignedAt: d.disbursementReportSignedAt || null,
+          clearingDueAt: d.clearingDueAt || null,
+          clearingPassed: !!d.clearingDueAt && new Date(d.clearingDueAt).getTime() <= Date.now(),
+          checkSentAt: d.checkSentAt || null,
+          checkSentMethod: d.checkSentMethod || null,
+          checkSentTrackingNumber: d.checkSentTrackingNumber || null,
         };
       })(),
 

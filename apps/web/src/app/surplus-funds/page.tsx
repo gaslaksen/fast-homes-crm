@@ -632,6 +632,9 @@ export default function SurplusFundsPage() {
     missingChannel: null as number | null,
     letterDue: null as number | null,
     updateOverdue: null as number | null,
+    collected: 0,
+    feesEarned: 0,
+    recoveries: 0,
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1134,6 +1137,15 @@ export default function SurplusFundsPage() {
             <div className="dc-stat">
               <div className="k">Net in pipeline</div>
               <div className="v" style={{ color: 'var(--mint)', fontSize: 24 }}>{money(stats.netInPipeline)}</div>
+            </div>
+            {/* Real money, off the county's checks, as against the pipeline
+                estimate beside it. */}
+            <div className="dc-stat">
+              <div className="k">Collected</div>
+              <div className="v" style={{ color: 'var(--mint)', fontSize: 24 }}>{money(stats.collected || 0)}</div>
+              <div style={{ fontSize: 11, color: 'var(--faint)', marginTop: 2 }}>
+                {stats.recoveries || 0} paid out · {money(stats.feesEarned || 0)} earned
+              </div>
             </div>
           </div>
 

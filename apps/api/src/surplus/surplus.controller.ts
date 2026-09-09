@@ -360,6 +360,37 @@ export class SurplusController {
     return out;
   }
 
+  // ── Disbursement ──────────────────────────────────────────────────────────
+
+  @Get(':id/expenses')
+  async listExpenses(@Param('id') id: string, @Headers('authorization') authHeader?: string) {
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.surplus.listExpenses(id, organizationId);
+  }
+
+  @Post(':id/expenses')
+  async addExpense(
+    @Param('id') id: string,
+    @Body() body: { kind: string; amount: number; incurredAt?: string | null; note?: string | null },
+    @Headers('authorization') authHeader?: string,
+  ) {
+    const { organizationId, userId } = this.decodeToken(authHeader);
+    return this.surplus.addExpense(id, body || ({} as any), organizationId, userId);
+  }
+
+  @Post('expenses/:expenseId/delete')
+  async removeExpense(@Param('expenseId') expenseId: string, @Headers('authorization') authHeader?: string) {
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.surplus.removeExpense(expenseId, organizationId);
+  }
+
+  /** The disbursement report for the print page: expenses, fee, both shares, the cap check. */
+  @Get(':id/disbursement-report')
+  async disbursementReport(@Param('id') id: string, @Headers('authorization') authHeader?: string) {
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.surplus.disbursementReport(id, organizationId);
+  }
+
   /**
    * The mobile notary packet for the print page: the instruction sheet as a
    * cover, then the documents for this appointment in signing order. The
