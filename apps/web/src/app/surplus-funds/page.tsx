@@ -1089,6 +1089,9 @@ export default function SurplusFundsPage() {
               <button className="dc-btn" onClick={() => fileRef.current?.click()} disabled={busy}>
                 {busy ? 'Importing...' : 'Import county list'}
               </button>
+              <a className="dc-btn" href="/surplus-funds/references" style={{ textDecoration: 'none' }}>
+                References{stats.recoveries ? ` · ${stats.recoveries} paid` : ''}
+              </a>
               <button className="dc-btn pri" onClick={() => setAdding(true)}>
                 Add lead
               </button>

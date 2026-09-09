@@ -870,6 +870,18 @@ model SurplusDetail {
   /// Itemized on the disbursement report.
   expenses SurplusExpense[]
 
+  // ── After the payout ──────────────────────────────────────────────────────
+  // The course's satisfaction survey goes out with the claimant's check, a
+  // small bonus rewards a quick return, and a returned survey is where the
+  // reference library is built from.
+  surveySentAt      DateTime?
+  surveyReturnedAt  DateTime?
+  surveyBonusPaidAt DateTime?
+  /// One to five.
+  surveyScore    Int?
+  surveyComments String?
+  reference      SurplusReference?
+
   // ── Why it died ───────────────────────────────────────────────────────────
   /// SurplusDeadReason. Required to enter Dead, so a retired claim always
   /// says why and a re-listed case is matched against a reason.
@@ -2325,6 +2337,36 @@ model SurplusDocument {
 /// the title search, the notary, the filing fee, postage, a skip trace, the
 /// attorney. Kept per line so the report shows exactly what was spent and
 /// the company's net is real.
+/// A paid claimant who may be named to the next one. The course's strongest
+/// answer to "can I trust you" is somebody who was paid saying so, so every
+/// payout is asked, consent is recorded, and the library is searchable by
+/// county so the nearest story is the one that gets sent.
+model SurplusReference {
+  id              String        @id @default(cuid())
+  surplusDetailId String        @unique
+  surplusDetail   SurplusDetail @relation(fields: [surplusDetailId], references: [id], onDelete: Cascade)
+  organizationId  String?
+
+  claimantName    String
+  county          String?
+  state           String  @default("FL")
+  /// They agreed to be named to future claimants. Nothing is shared without it.
+  consented       Boolean @default(false)
+  consentedAt     DateTime?
+  /// What happened, in a few sentences, for the packet and the phone.
+  story           String? @db.Text
+  /// A line in their words, when they gave one.
+  quote           String?
+  amountRecovered Float?
+
+  createdByUserId String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId, consented, county])
+  @@map("surplus_references")
+}
+
 model SurplusExpense {
   id              String        @id @default(cuid())
   surplusDetailId String

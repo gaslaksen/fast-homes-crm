@@ -300,6 +300,13 @@ export const surplusAPI = {
   ) => api.patch(`/surplus/${id}/documents/${kind}`, data),
   /** One of our standard documents rendered from its template, for the print page. */
   documentDraft: (id: string, kind: string) => api.get(`/surplus/${id}/document-draft`, { params: { kind } }),
+  // ── References ──
+  references: (county?: string | null) => api.get('/surplus/references', { params: { county: county || undefined } }),
+  saveReference: (
+    id: string,
+    data: { consented?: boolean; story?: string | null; quote?: string | null; amountRecovered?: number | null },
+  ) => api.post(`/surplus/${id}/reference`, data),
+
   // ── Disbursement ──
   expenses: (id: string) => api.get(`/surplus/${id}/expenses`),
   addExpense: (id: string, data: { kind: string; amount: number; incurredAt?: string | null; note?: string | null }) =>

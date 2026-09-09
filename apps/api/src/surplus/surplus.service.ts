@@ -105,6 +105,7 @@ const LEAD_INCLUDE = {
       letters: { orderBy: { mailedAt: 'desc' as const }, take: 10 },
       documents: true,
       expenses: { orderBy: { incurredAt: 'asc' as const } },
+      reference: true,
     },
   },
   tasks: {
@@ -174,6 +175,8 @@ const LETTER_FOLLOW_UP_DAYS = 14;
 export const CLAIMANT_UPDATE_DAYS = 30;
 /** The county's check clears before the claimant's goes out. */
 export const CLEARING_DAYS = 30;
+/** Days after the survey goes out before somebody asks after it. */
+export const SURVEY_FOLLOW_UP_DAYS = 10;
 /** And the county is asked about a filed claim at least this often after the first check. */
 export const COUNTY_FOLLOW_UP_DAYS = 30;
 
@@ -464,7 +467,13 @@ export class SurplusService {
       'submissionTrackingNumber', 'submissionSignatureRequired', 'clerkContactName', 'clerkStatusNote',
       'additionalDocsRequested',
       'expensesFromClaimantShare', 'checkSentTrackingNumber',
+      'surveyComments',
     ];
+    if (patch.surveyScore !== undefined) {
+      const n = patch.surveyScore === null ? null : Number(patch.surveyScore);
+      if (n !== null && (!Number.isInteger(n) || n < 1 || n > 5)) throw new BadRequestException('The survey score is one to five.');
+      detailPatch.surveyScore = n;
+    }
     for (const k of ['checkAmount', 'feePercent']) {
       if (patch[k] === undefined) continue;
       const n = patch[k] === null ? null : Number(patch[k]);
@@ -521,6 +530,9 @@ export class SurplusService {
       'checkReceivedAt',
       'disbursementReportSignedAt',
       'checkSentAt',
+      'surveySentAt',
+      'surveyReturnedAt',
+      'surveyBonusPaidAt',
     ]) {
       if (patch[k] === undefined) continue;
       if (patch[k] === null) {
@@ -738,6 +750,15 @@ export class SurplusService {
         },
       });
       await this.completeOpenTasks(id, [`Tell ${claimant} the check arrived and start the disbursement report`]);
+      // The survey goes out with the check. Ten days later, if it is not
+      // back, somebody asks; the course pays a small bonus for a quick one.
+      if (!d.surveySentAt && detailPatch.surveySentAt === undefined) {
+        await this.prisma.surplusDetail.update({
+          where: { id: d.id },
+          data: { surveySentAt: new Date(detailPatch.checkSentAt) },
+        });
+      }
+      await this.createTaskOnce(id, `Survey back from ${claimant}?`, SURVEY_FOLLOW_UP_DAYS, userId);
       await this.prisma.activity.create({
         data: {
           leadId: id,
@@ -745,6 +766,22 @@ export class SurplusService {
           type: 'CLAIMANT_PAID',
           description: `${claimant}'s check for $${Math.round(calc.claimantShare).toLocaleString('en-US')} sent${detailPatch.checkSentMethod || d.checkSentMethod ? ` by ${String(detailPatch.checkSentMethod || d.checkSentMethod).toUpperCase()}` : ''}. Company share $${Math.round(calc.companyShare).toLocaleString('en-US')}.`,
           metadata: { ...calc, method: detailPatch.checkSentMethod || d.checkSentMethod || null },
+        },
+      });
+    }
+
+    // The survey coming back closes its reminder and is the moment to ask
+    // for the reference, so the library grows from day one rather than
+    // being collected informally later.
+    if (detailPatch.surveyReturnedAt && !d.surveyReturnedAt) {
+      await this.completeOpenTasks(id, [`Survey back from ${claimant}?`]);
+      await this.prisma.activity.create({
+        data: {
+          leadId: id,
+          userId: userId || undefined,
+          type: 'SURVEY_RETURNED',
+          description: `${claimant} returned the survey${detailPatch.surveyScore ?? d.surveyScore ? `, ${detailPatch.surveyScore ?? d.surveyScore} of 5` : ''}`,
+          metadata: { score: detailPatch.surveyScore ?? d.surveyScore ?? null },
         },
       });
     }
@@ -963,6 +1000,96 @@ export class SurplusService {
     });
     if (!d) throw new BadRequestException('Surplus lead not found');
     return d;
+  }
+
+  /**
+   * The reference library: paid claimants, whether they agreed to be
+   * named, and their story. Searchable by county so the nearest one is
+   * the one that gets sent. Recoveries is the milestone counter.
+   */
+  async listReferences(organizationId?: string | null, county?: string | null) {
+    const org = organizationId ? { organizationId } : {};
+    const [rows, recoveries] = await Promise.all([
+      this.prisma.surplusReference.findMany({
+        where: { ...org, ...(county ? { county: { equals: county, mode: 'insensitive' } } : {}) },
+        orderBy: [{ consented: 'desc' }, { updatedAt: 'desc' }],
+        include: { surplusDetail: { select: { leadId: true, stage: true, checkSentAt: true } } },
+      }),
+      this.prisma.surplusDetail.count({ where: { ...org, stage: SurplusStage.PAID } }),
+    ]);
+    return {
+      recoveries,
+      consented: rows.filter((r) => r.consented).length,
+      references: rows.map((r) => ({
+        id: r.id,
+        leadId: r.surplusDetail.leadId,
+        claimantName: r.claimantName,
+        county: r.county,
+        state: r.state,
+        consented: r.consented,
+        consentedAt: r.consentedAt,
+        story: r.story,
+        quote: r.quote,
+        amountRecovered: r.amountRecovered,
+        paidAt: r.surplusDetail.checkSentAt,
+        updatedAt: r.updatedAt,
+      })),
+    };
+  }
+
+  /** Create or update the reference for a claim. Consent is a dated fact, never implied. */
+  async saveReference(
+    leadId: string,
+    input: { consented?: boolean; story?: string | null; quote?: string | null; amountRecovered?: number | null },
+    organizationId?: string | null,
+    userId?: string | null,
+  ) {
+    const lead = await this.prisma.lead.findFirst({
+      where: { id: leadId, source: LeadSource.SURPLUS, ...(organizationId ? { organizationId } : {}) },
+      select: {
+        id: true,
+        organizationId: true,
+        sellerFirstName: true,
+        sellerLastName: true,
+        surplusDetail: { select: { id: true, county: true, claimantShare: true, reference: true } },
+      },
+    });
+    if (!lead?.surplusDetail) throw new BadRequestException('Surplus lead not found');
+    const d = lead.surplusDetail;
+    const name = `${lead.sellerFirstName || ''} ${lead.sellerLastName || ''}`.trim() || 'Claimant';
+    const existing = d.reference;
+    const consented = input.consented !== undefined ? !!input.consented : existing?.consented ?? false;
+    const data = {
+      claimantName: name,
+      county: d.county,
+      consented,
+      consentedAt: consented ? existing?.consentedAt || new Date() : null,
+      story: input.story !== undefined ? (input.story || '').trim() || null : existing?.story ?? null,
+      quote: input.quote !== undefined ? (input.quote || '').trim() || null : existing?.quote ?? null,
+      amountRecovered:
+        input.amountRecovered !== undefined
+          ? input.amountRecovered === null
+            ? null
+            : Number(input.amountRecovered)
+          : existing?.amountRecovered ?? d.claimantShare ?? null,
+    };
+    const row = existing
+      ? await this.prisma.surplusReference.update({ where: { id: existing.id }, data })
+      : await this.prisma.surplusReference.create({
+          data: { surplusDetailId: d.id, organizationId: lead.organizationId, createdByUserId: userId || null, ...data },
+        });
+    if (consented && !existing?.consented) {
+      await this.prisma.activity.create({
+        data: {
+          leadId,
+          userId: userId || undefined,
+          type: 'REFERENCE_CONSENTED',
+          description: `${name} agreed to be a reference for future claimants`,
+          metadata: { referenceId: row.id },
+        },
+      });
+    }
+    return row;
   }
 
   /** Close open tasks by title, when the thing they waited for has happened. */
@@ -2062,6 +2189,32 @@ export class SurplusService {
           overdue: applies && (daysSince === null || daysSince > CLAIMANT_UPDATE_DAYS),
         };
       })(),
+
+      // After the payout: the survey and whether this claimant may be
+      // named to the next one.
+      survey: {
+        sentAt: d.surveySentAt || null,
+        returnedAt: d.surveyReturnedAt || null,
+        bonusPaidAt: d.surveyBonusPaidAt || null,
+        score: d.surveyScore ?? null,
+        comments: d.surveyComments || null,
+        /** Sent, not back, and past the reminder window. */
+        overdue:
+          !!d.surveySentAt &&
+          !d.surveyReturnedAt &&
+          Date.now() - new Date(d.surveySentAt).getTime() > SURVEY_FOLLOW_UP_DAYS * 86_400_000,
+      },
+      reference: d.reference
+        ? {
+            id: d.reference.id,
+            consented: d.reference.consented,
+            consentedAt: d.reference.consentedAt,
+            story: d.reference.story,
+            quote: d.reference.quote,
+            county: d.reference.county,
+            amountRecovered: d.reference.amountRecovered,
+          }
+        : null,
 
       // The money coming back, live until the claimant's check goes and
       // frozen after. The stats read companyShare off Paid rows.

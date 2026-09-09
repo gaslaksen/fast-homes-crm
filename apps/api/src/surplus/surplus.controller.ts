@@ -360,6 +360,26 @@ export class SurplusController {
     return out;
   }
 
+  // ── References ────────────────────────────────────────────────────────────
+
+  /** The reference library, with the recoveries counter. Optional county filter. */
+  @Get('references')
+  async listReferences(@Query('county') county?: string, @Headers('authorization') authHeader?: string) {
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.surplus.listReferences(organizationId, county || null);
+  }
+
+  /** Create or update the reference for one paid claimant. */
+  @Post(':id/reference')
+  async saveReference(
+    @Param('id') id: string,
+    @Body() body: { consented?: boolean; story?: string | null; quote?: string | null; amountRecovered?: number | null },
+    @Headers('authorization') authHeader?: string,
+  ) {
+    const { organizationId, userId } = this.decodeToken(authHeader);
+    return this.surplus.saveReference(id, body || {}, organizationId, userId);
+  }
+
   // ── Disbursement ──────────────────────────────────────────────────────────
 
   @Get(':id/expenses')

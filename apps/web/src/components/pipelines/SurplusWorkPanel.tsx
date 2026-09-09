@@ -175,6 +175,24 @@ export interface SurplusPanelLead {
   deadReason: string | null;
   deadNote: string | null;
   deadAt: string | null;
+  /** After the payout: the survey and whether this claimant may be named to the next one. */
+  survey: {
+    sentAt: string | null;
+    returnedAt: string | null;
+    bonusPaidAt: string | null;
+    score: number | null;
+    comments: string | null;
+    overdue: boolean;
+  };
+  reference: {
+    id: string;
+    consented: boolean;
+    consentedAt: string | null;
+    story: string | null;
+    quote: string | null;
+    county: string | null;
+    amountRecovered: number | null;
+  } | null;
   /** The money coming back: the county's check, the fee, expenses, both shares, the claimant's check. */
   disbursement: {
     checkReceivedAt: string | null;
@@ -538,6 +556,200 @@ function DocumentsSection({
           })}
         </div>
       ))}
+    </Section>
+  );
+}
+
+/**
+ * After the payout: the survey that went with the check, and the ask that
+ * builds the reference library. The course's strongest answer to "can I
+ * trust you" is somebody who was paid saying so, so every payout is asked
+ * and consent is a dated fact rather than an assumption.
+ */
+function SurveySection({
+  lead,
+  onChanged,
+  say,
+}: {
+  lead: SurplusPanelLead;
+  onChanged: () => void;
+  say: (msg: string) => void;
+}) {
+  const s = lead.survey || ({} as SurplusPanelLead['survey']);
+  const ref = lead.reference;
+  const [busy, setBusy] = useState(false);
+  const [score, setScore] = useState<number | null>(s.score ?? null);
+  const [comments, setComments] = useState(s.comments || '');
+  const [story, setStory] = useState(ref?.story || '');
+  const [quote, setQuote] = useState(ref?.quote || '');
+  const [refOpen, setRefOpen] = useState(false);
+
+  useEffect(() => {
+    setScore(s.score ?? null);
+    setComments(s.comments || '');
+    setStory(ref?.story || '');
+    setQuote(ref?.quote || '');
+    setRefOpen(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lead.id, s.score, ref?.story, ref?.quote]);
+
+  const paid = lead.stage === 'Paid' || !!s.sentAt;
+  if (!paid) return null;
+
+  const save = async (patch: any, done: string) => {
+    setBusy(true);
+    try {
+      await surplusAPI.update(lead.id, patch);
+      say(done);
+      onChanged();
+    } catch (err: any) {
+      say(err?.response?.data?.message || 'That could not be saved.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveRef = async (consented: boolean) => {
+    setBusy(true);
+    try {
+      await surplusAPI.saveReference(lead.id, { consented, story: story.trim() || null, quote: quote.trim() || null });
+      say(consented ? `${lead.claimant} is now a reference` : 'Reference saved, not consented');
+      setRefOpen(false);
+      onChanged();
+    } catch (err: any) {
+      say(err?.response?.data?.message || 'The reference could not be saved.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const field: React.CSSProperties = {
+    width: '100%',
+    boxSizing: 'border-box',
+    fontSize: 12.5,
+    padding: '6px 8px',
+    border: '1px solid var(--border)',
+    borderRadius: 6,
+    background: 'var(--surface2)',
+    color: 'inherit',
+  };
+  const lbl: React.CSSProperties = { fontSize: 11, color: 'var(--dim)' };
+
+  return (
+    <Section
+      title="After the payout"
+      note={ref?.consented ? 'Reference on file' : s.returnedAt ? 'Survey back' : s.sentAt ? 'Survey out' : undefined}
+    >
+      <Row k="Survey sent with the check" v={s.sentAt ? fmtDate(s.sentAt) : 'not yet'} />
+      {s.overdue && (
+        <div style={{ fontSize: 11.5, color: 'var(--amber)' }}>
+          Ten days and no survey back. Ask {lead.claimant}, and remind them of the bonus for returning it.
+        </div>
+      )}
+      {!s.returnedAt ? (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+          <button
+            type="button"
+            className="dc-wp-btn on"
+            disabled={busy}
+            onClick={() => save({ surveyReturnedAt: new Date().toISOString() }, 'Survey recorded as returned')}
+          >
+            Survey came back
+          </button>
+        </div>
+      ) : (
+        <>
+          <Row k="Survey returned" v={fmtDate(s.returnedAt)} tone="var(--mint)" />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+            <span style={{ color: 'var(--dim)' }}>Score</span>
+            {[1, 2, 3, 4, 5].map((n) => (
+              <button
+                key={n}
+                type="button"
+                className={`dc-wp-btn${score === n ? ' on' : ''}`}
+                style={{ padding: '3px 8px', fontSize: 11 }}
+                disabled={busy}
+                onClick={() => {
+                  setScore(n);
+                  save({ surveyScore: n }, `Score ${n} of 5`);
+                }}
+              >
+                {n}
+              </button>
+            ))}
+          </div>
+          <label style={lbl}>
+            What they said
+            <input
+              style={field}
+              value={comments}
+              placeholder="Their comments, in brief"
+              onChange={(e) => setComments(e.target.value)}
+              onBlur={() => comments !== (s.comments || '') && save({ surveyComments: comments.trim() || null }, 'Comments saved')}
+            />
+          </label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+            <span style={{ color: 'var(--dim)' }}>Return bonus</span>
+            {s.bonusPaidAt ? (
+              <span style={{ color: 'var(--mint)' }}>paid {fmtDate(s.bonusPaidAt)}</span>
+            ) : (
+              <button
+                type="button"
+                className="dc-wp-btn"
+                style={{ padding: '3px 8px', fontSize: 11 }}
+                disabled={busy}
+                onClick={() => save({ surveyBonusPaidAt: new Date().toISOString() }, 'Bonus recorded as paid')}
+              >
+                Mark paid
+              </button>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* The reference. */}
+      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--dim)', letterSpacing: 0.3, marginTop: 4 }}>Reference</div>
+      {ref?.consented ? (
+        <div style={{ fontSize: 12.5 }}>
+          <span style={{ color: 'var(--mint)', fontWeight: 600 }}>Agreed to be named</span>
+          <span style={{ color: 'var(--faint)' }}> {ref.consentedAt ? fmtDate(ref.consentedAt) : ''}</span>
+          {ref.quote && <div style={{ color: 'var(--dim)', marginTop: 2 }}>"{ref.quote}"</div>}
+          {ref.story && <div style={{ fontSize: 11.5, color: 'var(--faint)', marginTop: 2 }}>{ref.story}</div>}
+        </div>
+      ) : (
+        <div style={{ fontSize: 12, color: 'var(--faint)' }}>
+          {ref ? 'On file, not consented to be named.' : `Ask ${lead.claimant} whether their story can be shared with the next claimant.`}
+        </div>
+      )}
+      {!refOpen ? (
+        <div>
+          <button type="button" className="dc-wp-btn" onClick={() => setRefOpen(true)}>
+            {ref ? 'Edit the reference' : 'Record the reference'}
+          </button>
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gap: 6, padding: 8, border: '1px solid var(--border)', borderRadius: 8 }}>
+          <label style={lbl}>
+            Their story, a few sentences
+            <textarea style={{ ...field, minHeight: 60 }} value={story} onChange={(e) => setStory(e.target.value)} />
+          </label>
+          <label style={lbl}>
+            A line in their words, optional
+            <input style={field} value={quote} onChange={(e) => setQuote(e.target.value)} />
+          </label>
+          <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+            <button type="button" className="dc-wp-btn" disabled={busy} onClick={() => setRefOpen(false)}>
+              Cancel
+            </button>
+            <button type="button" className="dc-wp-btn" disabled={busy} onClick={() => saveRef(false)}>
+              Save, not consented
+            </button>
+            <button type="button" className="dc-wp-btn on" disabled={busy} onClick={() => saveRef(true)}>
+              Save, they agreed to be named
+            </button>
+          </div>
+        </div>
+      )}
     </Section>
   );
 }
@@ -2297,6 +2509,8 @@ function CaseTab({
       <FilingSection lead={lead} onChanged={onChanged} say={say} />
 
       <DisbursementSection lead={lead} onChanged={onChanged} say={say} />
+
+      <SurveySection lead={lead} onChanged={onChanged} say={say} />
 
       {/* Heirs lead for a deceased claimant, because they are the only people
           who can file. For a living one the section still appears once heirs

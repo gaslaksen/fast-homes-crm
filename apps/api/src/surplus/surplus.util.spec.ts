@@ -411,7 +411,8 @@ describe('stageGateError', () => {
     const bare = { entitlementVerified: false, noticeConfirmed: false, titleSearchComplete: false };
     expect(stageGateError(bare, SurplusStage.CONTACTED)).toBeNull();
     expect(stageGateError(bare, SurplusStage.DEAD)).toBeNull();
-    expect(stageGateError(bare, SurplusStage.PAID)).toBeNull();
+    // Paid is gated now: the money does not move on a bare claim.
+    expect(stageGateError(bare, SurplusStage.PAID)).not.toBeNull();
   });
 
   it('passes Agreement Signed for a qualified claimant with the agreement marked signed', () => {
@@ -516,11 +517,12 @@ describe('stageGateError', () => {
         checkSentAt: '2026-09-20',
       }),
     ).toBe('Paid needs the thirty-day clearing period to pass.');
+    const lastMonth = new Date(Date.now() - 10 * 86_400_000).toISOString();
     expect(
       stageGateError(clean, SurplusStage.PAID, {
         ...received,
         disbursementReportSignedAt: '2026-08-25',
-        clearingDueAt: '2026-09-19',
+        clearingDueAt: lastMonth,
         checkSentAt: '2026-09-20',
       }),
     ).toBeNull();
