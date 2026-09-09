@@ -162,6 +162,107 @@ export interface SurplusPanelLead {
   escalateMail: boolean;
   /** Heirs on file, for addressing a letter. Same shape the heirs panel uses. */
   heirs: { id: string; name: string; address: string | null; deceased: boolean }[];
+  /** What this county requires to file, off the county table. Null when not on the list. */
+  countyInfo: {
+    id: string;
+    claimFormUrl: string | null;
+    surplusListUrl: string | null;
+    assignmentPreference: string | null;
+    acceptedMethods: string[];
+    signatureRequired: boolean | null;
+    attorneyRequired: boolean | null;
+    clerkContactName: string | null;
+    clerkContactPhone: string | null;
+    clerkContactEmail: string | null;
+    clerkAddress: string | null;
+    notes: string | null;
+    practiceRunAt: string | null;
+    lastVerifiedAt: string | null;
+    stale: boolean;
+    unknowns: string[];
+  } | null;
+}
+
+const METHOD_LABEL: Record<string, string> = {
+  usps: 'USPS',
+  fedex: 'FedEx',
+  ups: 'UPS',
+  in_person: 'in person',
+  efile: 'e-file',
+};
+
+/**
+ * What this county requires to file, so the answer is on the case and not in
+ * somebody's head. Read-only here; the county table is edited in settings.
+ * Says plainly when the county has not been asked yet or the answer is
+ * older than 180 days, because a filing built on a stale answer is the
+ * expensive mistake.
+ */
+function CountySection({ lead }: { lead: SurplusPanelLead }) {
+  const c = lead.countyInfo;
+  const name = lead.county || 'this county';
+  const edit = (
+    <a href="/settings/surplus/counties" target="_blank" rel="noopener noreferrer" className="dc-wp-link" style={{ fontSize: 11 }}>
+      Edit counties
+    </a>
+  );
+  if (!c) {
+    return (
+      <Section title={`Filing in ${name}`}>
+        <div style={{ fontSize: 12, color: 'var(--faint)' }}>
+          {name} is not on the county list yet, so nothing is known about how it takes a claim. {edit}
+        </div>
+      </Section>
+    );
+  }
+  const yesNo = (v: boolean | null) => (v === null ? 'not asked' : v ? 'yes' : 'no');
+  const verified = c.lastVerifiedAt
+    ? `Checked with the clerk ${fmtDate(c.lastVerifiedAt)}${c.stale ? ', older than 180 days' : ''}`
+    : 'Never checked with the clerk';
+  return (
+    <Section title={`Filing in ${name}`} note={verified}>
+      {(c.stale || !c.lastVerifiedAt) && (
+        <div style={{ fontSize: 11.5, color: 'var(--amber)' }}>
+          Confirm these with the clerk before filing. {edit}
+        </div>
+      )}
+      <Row
+        k="Claim form"
+        v={c.claimFormUrl ? 'on file' : 'not on file'}
+        note={c.claimFormUrl ? undefined : 'Find the county form and add its link in settings.'}
+      />
+      {c.claimFormUrl && (
+        <div style={{ fontSize: 12 }}>
+          <a href={c.claimFormUrl} target="_blank" rel="noopener noreferrer" className="dc-wp-link">
+            Open the county claim form
+          </a>
+        </div>
+      )}
+      <Row
+        k="Submit by"
+        v={c.acceptedMethods.length ? c.acceptedMethods.map((m) => METHOD_LABEL[m] || m).join(', ') : 'not asked'}
+      />
+      <Row k="Signature on delivery" v={yesNo(c.signatureRequired)} />
+      <Row
+        k="Attorney required"
+        v={yesNo(c.attorneyRequired)}
+        tone={c.attorneyRequired ? 'var(--amber)' : undefined}
+        note={c.attorneyRequired ? 'Once an attorney is engaged, all contact with the county goes through them.' : undefined}
+      />
+      <Row k="Assignment of rights" v={c.assignmentPreference ? c.assignmentPreference : 'not asked'} />
+      {(c.clerkContactName || c.clerkContactPhone || c.clerkContactEmail) && (
+        <Row k="Clerk contact" v={[c.clerkContactName, c.clerkContactPhone, c.clerkContactEmail].filter(Boolean).join(' · ')} />
+      )}
+      {c.clerkAddress && <Row k="Mail claims to" v={c.clerkAddress} />}
+      {c.notes && <div style={{ fontSize: 11.5, color: 'var(--dim)', whiteSpace: 'pre-wrap' }}>{c.notes}</div>}
+      <Row
+        k="Practice run"
+        v={c.practiceRunAt ? `done ${fmtDate(c.practiceRunAt)}` : 'not yet'}
+        note={c.practiceRunAt ? undefined : 'Fill out the whole document set once for this county before the first real case.'}
+      />
+      {c.lastVerifiedAt && !c.stale && <div style={{ fontSize: 11, color: 'var(--faint)' }}>{edit}</div>}
+    </Section>
+  );
 }
 
 const CONTACT_LABEL: Record<string, string> = {
@@ -816,6 +917,8 @@ function CaseTab({
         )}
         <LetterHistory lead={lead} onChanged={onChanged} say={say} />
       </Section>
+
+      <CountySection lead={lead} />
 
       {/* Heirs lead for a deceased claimant, because they are the only people
           who can file. For a living one the section still appears once heirs

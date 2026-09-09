@@ -262,6 +262,13 @@ export const surplusAPI = {
   activateTemplate: (kind: string, version: number) =>
     api.post(`/surplus/templates/${kind}/activate`, { version }),
 
+  // ── Counties: what each clerk requires to file ──
+  counties: () => api.get('/surplus/counties'),
+  createCounty: (name: string) => api.post('/surplus/counties', { name }),
+  updateCounty: (id: string, data: any) => api.patch(`/surplus/counties/${id}`, data),
+  /** The answers were just checked with the clerk. Resets the staleness clock. */
+  verifyCounty: (id: string) => api.post(`/surplus/counties/${id}/verified`),
+
   // ── Credibility packet ──
   /** Whether the packet's links are configured, and which are missing. */
   credibilityStatus: () => api.get('/surplus/credibility/status'),

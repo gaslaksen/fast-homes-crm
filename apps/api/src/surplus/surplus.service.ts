@@ -65,6 +65,12 @@ import {
   courtRecordsUrl,
 } from './surplus-compliance';
 import { SurplusLeadInput, SurplusListFilters, SurplusPhoneInput } from './surplus.types';
+import { SurplusCountiesService, CountyRow } from './surplus-counties.service';
+
+/** What toRow needs beyond the lead: per-request lookups fetched once. */
+interface RowContext {
+  counties?: Map<string, CountyRow>;
+}
 
 /**
  * What every surplus read pulls alongside the lead. Heirs, because an Estate
@@ -162,7 +168,10 @@ const ENTITY_NAME =
 export class SurplusService {
   private readonly logger = new Logger(SurplusService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private counties: SurplusCountiesService,
+  ) {}
 
   // ─── Writing ──────────────────────────────────────────────────────────────
 
@@ -917,7 +926,8 @@ export class SurplusService {
       // panel all depend on whether a living heir is on file.
       include: LEAD_INCLUDE,
     });
-    return lead && lead.surplusDetail ? this.toRow(lead) : null;
+    if (!lead || !lead.surplusDetail) return null;
+    return this.toRow(lead, { counties: await this.counties.mapFor(organizationId) });
   }
 
   async list(filters: SurplusListFilters) {
@@ -1001,7 +1011,8 @@ export class SurplusService {
       take: 5000,
     });
 
-    let rows = leads.filter((l) => l.surplusDetail).map((l) => this.toRow(l));
+    const ctx: RowContext = { counties: await this.counties.mapFor(filters.organizationId) };
+    let rows = leads.filter((l) => l.surplusDetail).map((l) => this.toRow(l, ctx));
 
     // These read the compliance gate, a derived clock, or the per-number DNC
     // flags, none of which is a single column, so they are the passes done in
@@ -1153,7 +1164,8 @@ export class SurplusService {
       // panel all depend on whether a living heir is on file.
       include: LEAD_INCLUDE,
     });
-    const all = leads.filter((l) => l.surplusDetail).map((l) => this.toRow(l));
+    const ctx: RowContext = { counties: await this.counties.mapFor(organizationId) };
+    const all = leads.filter((l) => l.surplusDetail).map((l) => this.toRow(l, ctx));
     const feed = all.filter(
       (r) => r.grossSurplus >= SURPLUS_FLOOR && r.claimantType !== SurplusClaimantType.LIENHOLDER,
     );
@@ -1200,8 +1212,9 @@ export class SurplusService {
 
   // ─── Shaping ──────────────────────────────────────────────────────────────
 
-  private toRow(lead: any) {
+  private toRow(lead: any, ctx: RowContext = {}) {
     const d = lead.surplusDetail;
+    const county = d.county ? ctx.counties?.get(String(d.county).toLowerCase()) || null : null;
 
     const phones = [
       { number: normalizePhoneDigits(lead.sellerPhone) || '', type: d.phone1Type, dnc: d.phone1Dnc },
@@ -1258,7 +1271,32 @@ export class SurplusService {
       caseNumber: d.caseNumber,
       parcelId: d.parcelId,
       /** Where to find this county's probate filings by hand, when known. */
-      courtRecordsUrl: courtRecordsUrl(d.county),
+      courtRecordsUrl: county?.courtRecordsUrl || courtRecordsUrl(d.county),
+      /**
+       * What this county requires to file, off the county table. Null when
+       * the county is not on the list yet, which the panel says out loud
+       * rather than showing an empty section.
+       */
+      countyInfo: county
+        ? {
+            id: county.id,
+            claimFormUrl: county.claimFormUrl,
+            surplusListUrl: county.surplusListUrl,
+            assignmentPreference: county.assignmentPreference,
+            acceptedMethods: county.acceptedMethods,
+            signatureRequired: county.signatureRequired,
+            attorneyRequired: county.attorneyRequired,
+            clerkContactName: county.clerkContactName,
+            clerkContactPhone: county.clerkContactPhone,
+            clerkContactEmail: county.clerkContactEmail,
+            clerkAddress: county.clerkAddress,
+            notes: county.notes,
+            practiceRunAt: county.practiceRunAt,
+            lastVerifiedAt: county.lastVerifiedAt,
+            stale: county.stale,
+            unknowns: county.unknowns,
+          }
+        : null,
 
       deceased: d.deceased,
       heirsRequired: d.heirsRequired,
