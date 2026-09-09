@@ -809,6 +809,9 @@ model SurplusDetail {
   /// Every letter that went out on this claim, newest first. letterMailedAt
   /// and letterMailedTo above are a cache of the latest for the queue.
   letters SurplusLetter[]
+  /// The document set for this claim, one row per kind. Replaces the `docs`
+  /// booleans above, which stay only so old rows still read.
+  documents SurplusDocument[]
   /// How often a letter goes out while nobody has replied: 7 or 14 days.
   /// Null means the default, fourteen. The board flags the file as due for
   /// its next letter once the last one is older than this.
@@ -2176,6 +2179,50 @@ model SurplusHeir {
   @@map("surplus_heirs")
 }
 
+/// One document on a surplus claim: the fee agreement, the claimant's ID,
+/// the county's form. One row per kind per claim, so the row is the
+/// checklist entry and the file is attached to it when there is one. The
+/// status is ordered (outstanding, drafted, sent, received, signed,
+/// notarized, filed) and the signing-order gate reads it: the fund source is
+/// not disclosed until the fee agreement and the POA are signed.
+model SurplusDocument {
+  id              String        @id @default(cuid())
+  surplusDetailId String
+  surplusDetail   SurplusDetail @relation(fields: [surplusDetailId], references: [id], onDelete: Cascade)
+  organizationId  String?
+
+  /// SurplusDocumentKind.
+  kind   String
+  /// 'ours' | 'county' | 'claimant', derived from the kind and stored for filtering.
+  docSet String
+  /// SurplusDocumentStatus.
+  status String @default("outstanding")
+
+  /// Object key in the bucket, when a file is attached.
+  fileKey     String?
+  fileName    String?
+  contentType String?
+  size        Int?
+
+  /// SurplusTemplateKind and version, when the document was generated from one.
+  templateKind    String?
+  templateVersion Int?
+
+  signedAt    DateTime?
+  notarizedAt DateTime?
+  filedAt     DateTime?
+  note        String?
+
+  uploadedByUserId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([surplusDetailId, kind])
+  @@index([organizationId, kind])
+  @@map("surplus_documents")
+}
+
 /// One envelope that went out on a surplus claim. A row per letter rather
 /// than a date on the claimant, because the course's cadence is weekly or
 /// biweekly until somebody replies, and the third unanswered letter is what
@@ -2281,6 +2328,11 @@ model SurplusCounty {
   /// Where a claim package is mailed.
   clerkAddress      String?
   notes             String? @db.Text
+
+  /// The county's own claim form as a stored file, once uploaded. The URL
+  /// above stays as the link to the clerk's copy.
+  claimFormKey  String?
+  claimFormName String?
 
   /// The course's dry run: every document in the set filled out once before
   /// the first real case in a new county.
