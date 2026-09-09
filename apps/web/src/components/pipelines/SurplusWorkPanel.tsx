@@ -121,6 +121,10 @@ export interface SurplusPanelLead {
   heirCount: number;
   livingHeirCount: number;
   callableHeirCount: number;
+  /** Relatives, neighbors, friends: people who may know where the claimant is. */
+  associateCount: number;
+  callableAssociateCount: number;
+  associatesUntried: number;
   /** Per-claimant skip trace state, computed server side. */
   trace: {
     state: string;
@@ -2782,15 +2786,18 @@ function CaseTab({
       <SurveySection lead={lead} onChanged={onChanged} say={say} />
 
       {/* Heirs lead for a deceased claimant, because they are the only people
-          who can file. For a living one the section still appears once heirs
-          exist, since an estate can be opened mid-claim. */}
-      {(lead.isDeceased || (lead.heirCount || 0) > 0) && (
+          who can file. For a living one the section appears once heirs or
+          associates exist, or while nobody has reached them: a relative or a
+          neighbor is the course's route to a claimant with no working number. */}
+      {(lead.isDeceased || (lead.heirCount || 0) > 0 || (lead.associateCount || 0) > 0 || !lead.tappedAt) && (
         <Section
-          title="Who inherited"
+          title={lead.isDeceased ? 'Who inherited' : 'People around the claimant'}
           note={
             lead.isDeceased
               ? 'Only a living heir can file this claim'
-              : undefined
+              : lead.associateCount
+                ? `${lead.associateCount} who may know where ${lead.claimant} is${lead.associatesUntried ? `, ${lead.associatesUntried} not yet contacted` : ''}`
+                : 'A relative or a neighbor usually knows where they are'
           }
         >
           <SurplusHeirs

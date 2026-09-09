@@ -412,6 +412,42 @@ export const SURPLUS_DEAD_REASON_LABEL: Record<SurplusDeadReason, string> = {
   [SurplusDeadReason.OTHER]: 'Other',
 };
 
+/**
+ * Who a person on a claim is to the claimant. Only a heir can file, so the
+ * signer counts read this. Everybody else is a route to the person: the
+ * course's relative and neighbor outreach, logged as its own contact.
+ */
+export enum SurplusPersonRole {
+  HEIR = 'heir',
+  RELATIVE = 'relative',
+  NEIGHBOR = 'neighbor',
+  FRIEND = 'friend',
+  ASSOCIATE = 'associate',
+}
+
+export const SURPLUS_PERSON_ROLE_LABEL: Record<SurplusPersonRole, string> = {
+  [SurplusPersonRole.HEIR]: 'Heir',
+  [SurplusPersonRole.RELATIVE]: 'Relative',
+  [SurplusPersonRole.NEIGHBOR]: 'Neighbor',
+  [SurplusPersonRole.FRIEND]: 'Friend',
+  [SurplusPersonRole.ASSOCIATE]: 'Associate',
+};
+
+/** Where the outreach to one person stands. */
+export enum SurplusContactStatus {
+  NOT_CONTACTED = 'not_contacted',
+  CONTACTED = 'contacted',
+  MESSAGE_PASSED = 'message_passed',
+  DEAD_END = 'dead_end',
+}
+
+export const SURPLUS_CONTACT_STATUS_LABEL: Record<SurplusContactStatus, string> = {
+  [SurplusContactStatus.NOT_CONTACTED]: 'Not contacted',
+  [SurplusContactStatus.CONTACTED]: 'Contacted',
+  [SurplusContactStatus.MESSAGE_PASSED]: 'Passed a message on',
+  [SurplusContactStatus.DEAD_END]: 'Dead end',
+};
+
 // Banding from the surplus spec. It leaves two gaps on purpose: a living owner
 // at $25k+ who already has a competing lien filed, and a deceased owner under
 // $25k. Neither matches a band, so both land in UNBANDED rather than being

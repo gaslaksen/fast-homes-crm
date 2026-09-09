@@ -2005,8 +2005,11 @@ export class SurplusService {
     // callable. The counts consider only the LIVING: a dead heir cannot sign
     // either, and their share needs its own estate opened.
     const heirRows = (d.heirs || []).map((h: any) => heirRow(h));
-    const livingHeirs = heirRows.filter((h: any) => !h.deceased);
+    // Signer counts read heirs only. A neighbor with a phone number is a
+    // route to the claimant, not somebody who can file.
+    const livingHeirs = heirRows.filter((h: any) => !h.deceased && h.isHeir);
     const callableHeirs = livingHeirs.filter((h: any) => h.callable);
+    const associates = heirRows.filter((h: any) => !h.deceased && !h.isHeir);
 
     const week = isoWeekKey();
     const staleWeek = d.touchWeek && d.touchWeek !== week;
@@ -2218,10 +2221,14 @@ export class SurplusService {
       // Who inherited, living first. The counts are what the queue and the card
       // key on; heirs is what the panel renders.
       heirs: heirRows,
-      heirCount: heirRows.length,
+      heirCount: heirRows.filter((h: any) => h.isHeir).length,
       livingHeirCount: livingHeirs.length,
       callableHeirCount: callableHeirs.length,
-      deceasedHeirCount: heirRows.length - livingHeirs.length,
+      deceasedHeirCount: heirRows.filter((h: any) => h.isHeir && h.deceased).length,
+      /** Relatives, neighbors, friends: people who may know where the claimant is. */
+      associateCount: associates.length,
+      callableAssociateCount: associates.filter((h: any) => h.callable).length,
+      associatesUntried: associates.filter((h: any) => h.contactStatus === 'not_contacted').length,
       doNotCall: d.doNotCall,
       callNotes: d.callNotes || '',
       letterMailedAt: d.letterMailedAt,

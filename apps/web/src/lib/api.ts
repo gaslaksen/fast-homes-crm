@@ -363,6 +363,22 @@ export const surplusAPI = {
     id: string,
     body: { heirs: any[]; caseNumber?: string | null; sourceDocument?: string | null },
   ) => api.post(`/surplus/${id}/heirs`, body),
+  /** One person added by hand: a missed heir, or somebody who may know where the claimant is. */
+  addHeir: (
+    id: string,
+    body: {
+      name: string;
+      role?: string | null;
+      relationship?: string | null;
+      street?: string | null;
+      city?: string | null;
+      state?: string | null;
+      zip?: string | null;
+      phones?: string[];
+      emails?: string[];
+      callNotes?: string | null;
+    },
+  ) => api.post(`/surplus/${id}/heirs/add`, body),
   updateHeir: (heirId: string, body: any) => api.patch(`/surplus/heirs/${heirId}`, body),
   deleteHeir: (heirId: string) => api.post(`/surplus/heirs/${heirId}/delete`),
   skipTraceHeirs: (body: { heirIds?: string[]; limit?: number; includeTraced?: boolean }) =>

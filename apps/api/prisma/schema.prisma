@@ -2267,6 +2267,14 @@ model SurplusHeir {
   doNotCall Boolean @default(false)
   callNotes String?
 
+  /// 'heir' | 'relative' | 'neighbor' | 'friend' | 'associate'. Only a heir
+  /// can file, so the signer counts read this; everybody else is a route to
+  /// the person, not a person with standing.
+  role String @default("heir")
+  /// 'not_contacted' | 'contacted' | 'message_passed' | 'dead_end'
+  contactStatus   String    @default("not_contacted")
+  lastContactedAt DateTime?
+
   // Provenance. Which filing said so, so a disputed heir can be checked against
   // the document rather than argued about.
   sourceCaseNumber String?
@@ -2284,6 +2292,7 @@ model SurplusHeir {
   updatedAt DateTime @updatedAt
 
   @@index([surplusDetailId])
+  @@index([surplusDetailId, role])
   @@index([organizationId, name])
   @@index([phone1])
   @@map("surplus_heirs")

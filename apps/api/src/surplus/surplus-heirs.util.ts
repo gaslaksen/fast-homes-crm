@@ -1,4 +1,10 @@
 import { traceState } from './surplus-skiptrace.util';
+import {
+  SurplusPersonRole,
+  SURPLUS_PERSON_ROLE_LABEL,
+  SurplusContactStatus,
+  SURPLUS_CONTACT_STATUS_LABEL,
+} from '@fast-homes/shared';
 
 /**
  * One heir as every surface sees it.
@@ -15,10 +21,19 @@ export function heirRow(h: any) {
     .filter((p) => p.number);
   const emails = [h.email1, h.email2].filter(Boolean);
   const cleanPhoneCount = phones.filter((p) => !p.dnc).length;
+  const role = (h.role || SurplusPersonRole.HEIR) as SurplusPersonRole;
+  const contactStatus = (h.contactStatus || SurplusContactStatus.NOT_CONTACTED) as SurplusContactStatus;
 
   return {
     id: h.id,
     name: h.name,
+    /** Heir by default. Anybody else is a route to the claimant, not a signer. */
+    role,
+    roleLabel: SURPLUS_PERSON_ROLE_LABEL[role] || role,
+    isHeir: role === SurplusPersonRole.HEIR,
+    contactStatus,
+    contactStatusLabel: SURPLUS_CONTACT_STATUS_LABEL[contactStatus] || contactStatus,
+    lastContactedAt: h.lastContactedAt || null,
     relationship: h.relationship,
     share: h.share,
     street: h.street,

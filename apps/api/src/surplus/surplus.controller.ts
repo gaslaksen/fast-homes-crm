@@ -645,6 +645,13 @@ export class SurplusController {
     return { ...saved, heirs: await this.heirs.list(id, organizationId) };
   }
 
+  /** One person added by hand: a missed heir, or somebody who may know where the claimant is. */
+  @Post(':id/heirs/add')
+  async addHeir(@Param('id') id: string, @Body() body: any, @Headers('authorization') authHeader?: string) {
+    const { organizationId, userId } = this.decodeToken(authHeader);
+    return this.heirs.add(id, body || {}, organizationId, userId);
+  }
+
   @Patch('heirs/:heirId')
   async updateHeir(
     @Param('heirId') heirId: string,
