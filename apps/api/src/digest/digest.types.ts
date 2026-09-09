@@ -180,6 +180,8 @@ export interface DigestBrief {
   /** Signed claimants owed their monthly update, longest silence first. */
   surplusUpdateOverdue: { claimant: string; stage: string; days: number | null; url: string }[];
   surplusUpdateOverdueTotal: number;
+  /** Unreached claimants due the free searches again or another letter, as open tasks. */
+  surplusRechecksDue: number;
   /** What each automated county pull did, or failed to do. */
   feeds: FeedRow[];
   yesterday: YesterdayStat[];

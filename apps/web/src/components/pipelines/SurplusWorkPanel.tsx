@@ -201,6 +201,9 @@ export interface SurplusPanelLead {
     tierSkipped: boolean;
     proTracerEligible: boolean;
     lastTier1At: string | null;
+    tier1AgeDays: number | null;
+    /** No number, nobody reached, and the free searches are sixty days old. */
+    tier1RecheckDue: boolean;
     totalCost: number;
   };
   /** After the payout: the survey and whether this claimant may be named to the next one. */
@@ -1956,6 +1959,11 @@ function SearchLog({
       {t.tierSkipped && (
         <div style={{ color: 'var(--amber)', fontSize: 11.5 }}>
           A paid database was run before any free search was logged. Cheapest first: log the Google, social and county-records checks.
+        </div>
+      )}
+      {t.tier1RecheckDue && (
+        <div style={{ color: 'var(--amber)', fontSize: 11.5 }}>
+          The free searches are {t.tier1AgeDays} days old and nobody has reached {lead.claimant}. Run them again: people move, and an obituary or a new listing may have appeared since.
         </div>
       )}
       {own.slice(0, 6).map((a) => (

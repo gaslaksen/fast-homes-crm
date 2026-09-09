@@ -19,6 +19,7 @@ import {
   SurplusTraceChannel,
   SURPLUS_TRACE_CHANNEL_LABEL,
   SURPLUS_TIER1_CHANNELS,
+  SurplusPersonRole,
   SurplusDocumentKind,
   SurplusDocumentStatus,
   surplusDocumentAtLeast,
@@ -185,6 +186,10 @@ export const CLEARING_DAYS = 30;
 export const SURVEY_FOLLOW_UP_DAYS = 10;
 /** And the county is asked about a filed claim at least this often after the first check. */
 export const COUNTY_FOLLOW_UP_DAYS = 30;
+/** An unreached claimant with no number gets the free searches run again this often. */
+export const TIER1_RECHECK_DAYS = 60;
+/** And another letter this long after the last one, when nothing has come back. */
+export const REMAIL_DAYS = 90;
 
 const EMPTY_DISCLOSURES = {
   financial: false,
@@ -2300,6 +2305,12 @@ export class SurplusService {
         const tier1Done = SURPLUS_TIER1_CHANNELS.some((c) => channelsTried.includes(c));
         const paidRuns = own.filter((a) => a.channel === SurplusTraceChannel.PAID_DB && a.result !== 'skipped');
         const tier = tierOf(facts);
+        const lastTier1At =
+          own
+            .filter((a) => SURPLUS_TIER1_CHANNELS.includes(a.channel as SurplusTraceChannel) && a.result !== 'skipped')
+            .map((a) => new Date(a.ranAt).getTime())
+            .sort((x, y) => y - x)[0] || null;
+        const tier1AgeDays = lastTier1At ? Math.floor((Date.now() - lastTier1At) / 86_400_000) : null;
         return {
           attempts,
           channelsTried,
@@ -2309,12 +2320,15 @@ export class SurplusService {
           tierSkipped: paidRuns.length > 0 && !tier1Done,
           /** The course reserves a professional tracer for the big claims. */
           proTracerEligible: tier === SurplusTier.A || tier === SurplusTier.B,
-          lastTier1At:
-            own
-              .filter((a) => SURPLUS_TIER1_CHANNELS.includes(a.channel as SurplusTraceChannel))
-              .map((a) => a.ranAt)
-              .sort()
-              .pop() || null,
+          lastTier1At: lastTier1At ? new Date(lastTier1At) : null,
+          tier1AgeDays,
+          /**
+           * The recheck: nobody has heard from them, there is no number to
+           * ring, and the free searches are old enough that the web may have
+           * moved on. The cadence cron turns this into a task.
+           */
+          tier1RecheckDue:
+            !d.tappedAt && !d.doNotCall && phones.filter((p) => !p.dnc).length === 0 && tier1AgeDays !== null && tier1AgeDays >= TIER1_RECHECK_DAYS,
           totalCost: attempts.reduce((s, a) => s + (a.cost || 0), 0),
         };
       })(),

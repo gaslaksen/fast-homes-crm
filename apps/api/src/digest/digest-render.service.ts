@@ -41,6 +41,20 @@ const FONT = `-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-s
 
 @Injectable()
 export class DigestRenderService {
+  /**
+   * The course's working lists as one line: people never heard from, files
+   * with a channel nobody has tried, and the rechecks the cadence has queued.
+   * Empty when there is nothing to say, so the brief does not print "0".
+   */
+  private surplusWorkingLine(b: Pick<DigestBrief, 'surplusNotTapped' | 'surplusMissingChannel' | 'surplusRechecksDue'>): string {
+    const parts = [
+      b.surplusNotTapped ? `${b.surplusNotTapped} not yet reached` : null,
+      b.surplusMissingChannel ? `${b.surplusMissingChannel} missing a channel` : null,
+      b.surplusRechecksDue ? `${b.surplusRechecksDue} recheck${b.surplusRechecksDue === 1 ? '' : 's'} due` : null,
+    ].filter(Boolean);
+    return parts.length ? `${parts.join(', ')}. ` : '';
+  }
+
   /** Escape anything that came out of the database before it hits the HTML. */
   private esc(s: string | null | undefined): string {
     return String(s ?? '')
@@ -298,7 +312,7 @@ export class DigestRenderService {
     const footer = `${overdue}${silent}<div style="padding-top:12px;font-size:13px;color:${MUTED};line-height:1.55;">
         ${b.surplusIngestNote ? `<b style="color:${INK};">Overnight:</b> ${this.esc(b.surplusIngestNote)} ` : ''}
         ${b.surplusCallableTotal} of ${b.surplusOpenTotal} open claimants have a live number.
-        ${b.surplusNotTapped ? `${b.surplusNotTapped} not yet reached` : ''}${b.surplusNotTapped && b.surplusMissingChannel ? ', ' : ''}${b.surplusMissingChannel ? `${b.surplusMissingChannel} missing a channel` : ''}${b.surplusNotTapped || b.surplusMissingChannel ? '. ' : ''}
+        ${this.surplusWorkingLine(b)}
         <a href="${this.esc(b.appUrl)}/surplus-funds" style="color:${TEAL};font-weight:600;text-decoration:none;">Open the board &rarr;</a>
       </div>`;
 
@@ -564,15 +578,8 @@ export class DigestRenderService {
       }
       if (b.surplusIngestNote) out.push(`  Overnight: ${b.surplusIngestNote}`);
       out.push(`  ${b.surplusCallableTotal} of ${b.surplusOpenTotal} open claimants have a live number.`);
-      if (b.surplusNotTapped || b.surplusMissingChannel) {
-        out.push(
-          `  ${[
-            b.surplusNotTapped ? `${b.surplusNotTapped} not yet reached` : null,
-            b.surplusMissingChannel ? `${b.surplusMissingChannel} missing a channel` : null,
-          ]
-            .filter(Boolean)
-            .join(', ')}.`,
-        );
+      if (b.surplusNotTapped || b.surplusMissingChannel || b.surplusRechecksDue) {
+        out.push(`  ${this.surplusWorkingLine(b)}`);
       }
       out.push('');
     }

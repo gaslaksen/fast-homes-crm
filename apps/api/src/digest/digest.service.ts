@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { RECHECK_TITLE_PREFIX, REMAIL_TITLE_PREFIX, REMAIL_TITLE_SUFFIX } from '../surplus/surplus-cadence.service';
 import { DigestNewsService } from './digest-news.service';
 import { SurplusService } from '../surplus/surplus.service';
 import { SurplusIngestService } from '../surplus/surplus-ingest.service';
@@ -509,6 +510,21 @@ export class DigestService {
         },
       })
       .catch(() => [] as any[]);
+    // The rechecks the cadence has queued on unreached claimants: the free
+    // searches again at sixty days, another letter at ninety. Counted rather
+    // than listed; the tasks themselves show on the lead.
+    const surplusRechecksDue = await this.prisma.task
+      .count({
+        where: {
+          completed: false,
+          lead: { source: 'SURPLUS', ...org },
+          OR: [
+            { title: { startsWith: RECHECK_TITLE_PREFIX } },
+            { title: { startsWith: REMAIL_TITLE_PREFIX, endsWith: REMAIL_TITLE_SUFFIX } },
+          ],
+        },
+      })
+      .catch(() => 0);
     const surplusOverdue: SurplusTaskRow[] = surplusOverdueTasks.slice(0, 5).map((t: any) => {
       const days = Math.max(1, Math.floor((now.getTime() - new Date(t.dueDate).getTime()) / 86_400_000));
       return {
@@ -750,6 +766,7 @@ export class DigestService {
       surplusMissingChannel,
       surplusUpdateOverdue,
       surplusUpdateOverdueTotal: surplusUpdateOverdueRows.length,
+      surplusRechecksDue,
       feeds,
       yesterday,
       news,
