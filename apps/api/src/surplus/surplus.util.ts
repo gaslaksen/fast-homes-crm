@@ -712,6 +712,10 @@ export function claimantTypeFromText(raw?: string | null): SurplusClaimantType {
 export function stageFromText(raw?: string | null): SurplusStage {
   const s = String(raw || '').toLowerCase();
   if (s.includes('paid')) return SurplusStage.PAID;
+  // The two back-half stages, matched before "filed" because a clerk's own
+  // wording for either can mention the filing.
+  if (s.includes('awaiting') || s.includes('disburse')) return SurplusStage.AWAITING_DISBURSEMENT;
+  if (s.includes('check')) return SurplusStage.CHECK_RECEIVED;
   if (s.includes('filed')) return SurplusStage.CLAIM_FILED;
   if (s.includes('notariz')) return SurplusStage.ASSIGNMENT_NOTARIZED;
   if (s.includes('signed') || s.includes('agreement')) return SurplusStage.AGREEMENT_SIGNED;

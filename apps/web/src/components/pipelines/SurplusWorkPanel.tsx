@@ -7,6 +7,7 @@ import NotesPanel from '@/components/communications/NotesPanel';
 import type { NoteItem, TimelineItem } from '@/components/communications/types';
 import { authAPI, campaignsAPI, leadsAPI, surplusAPI, tasksAPI } from '@/lib/api';
 import { dueLabel, isOverdue, quickDueDates } from '@/lib/dates';
+import { SURPLUS_DEAD_REASONS, deadReasonLabel } from '@/lib/surplus-dead';
 import { useDialer } from '@/components/dialer/DialerContext';
 import { DNC_STATE, SURPLUS_STAGES } from './format';
 import ContactEditor from './ContactEditor';
@@ -169,6 +170,10 @@ export interface SurplusPanelLead {
   docsComplete: boolean;
   /** What each gated stage still needs, keyed by stage name. Empty means ready. */
   stageBlocks: Record<string, string[]>;
+  /** Why it died, when it did. */
+  deadReason: string | null;
+  deadNote: string | null;
+  deadAt: string | null;
   /** The attorney, where the county requires one, and the rule that follows. */
   attorney: {
     required: boolean | null;
@@ -2609,15 +2614,36 @@ function StageControl({
   say: (msg: string) => void;
 }) {
   const [saving, setSaving] = useState(false);
+  const [deadOpen, setDeadOpen] = useState(false);
+  const [deadReason, setDeadReason] = useState('');
+  const [deadNote, setDeadNote] = useState('');
   const stages = SURPLUS_STAGES.concat('Dead');
+
+  const markDead = async () => {
+    if (!deadReason || saving) return;
+    setSaving(true);
+    try {
+      await surplusAPI.update(lead.id, { stage: 'Dead', deadReason, deadNote: deadNote.trim() || null });
+      say(`${lead.claimant} marked dead: ${deadReasonLabel(deadReason)}`);
+      setDeadOpen(false);
+      setDeadReason('');
+      setDeadNote('');
+      onChanged();
+    } catch (err: any) {
+      say(err?.response?.data?.message || 'That could not be saved.');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const move = async (stage: string) => {
     if (!stage || stage === lead.stage || saving) return;
-    const warning =
-      stage === 'Dead'
-        ? `Mark ${lead.claimant} as Dead? The lead stays on file and the county poll will not bring it back as new.`
-        : `Move ${lead.claimant} to ${stage}?`;
-    if (!window.confirm(warning)) return;
+    // Dead needs a reason, so it opens a form instead of a confirm.
+    if (stage === 'Dead') {
+      setDeadOpen(true);
+      return;
+    }
+    if (!window.confirm(`Move ${lead.claimant} to ${stage}?`)) return;
     setSaving(true);
     try {
       await surplusAPI.update(lead.id, { stage });
@@ -2652,6 +2678,42 @@ function StageControl({
           ))}
         </select>
       </div>
+      {lead.stage === 'Dead' && lead.deadReason && (
+        <div style={{ fontSize: 12, color: 'var(--red)' }}>
+          Dead{lead.deadAt ? ` since ${fmtDate(lead.deadAt)}` : ''}: {deadReasonLabel(lead.deadReason)}
+          {lead.deadNote ? <span style={{ color: 'var(--dim)' }}>. {lead.deadNote}</span> : null}
+        </div>
+      )}
+      {deadOpen && (
+        <div style={{ display: 'grid', gap: 6, padding: 8, border: '1px solid var(--red)', borderRadius: 8 }}>
+          <div style={{ fontSize: 12, fontWeight: 700 }}>Why is this claim dead?</div>
+          <select className="dc-wp-sel" value={deadReason} onChange={(e) => setDeadReason(e.target.value)} aria-label="Dead reason">
+            <option value="">Pick a reason</option>
+            {SURPLUS_DEAD_REASONS.map(([k, l]) => (
+              <option key={k} value={k}>
+                {l}
+              </option>
+            ))}
+          </select>
+          <input
+            className="dc-input"
+            value={deadNote}
+            placeholder="Anything worth remembering, optional"
+            onChange={(e) => setDeadNote(e.target.value)}
+          />
+          <div style={{ fontSize: 11, color: 'var(--faint)' }}>
+            The lead stays on file with the reason, and the county poll will not bring it back as new.
+          </div>
+          <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+            <button type="button" className="dc-wp-btn" disabled={saving} onClick={() => setDeadOpen(false)}>
+              Cancel
+            </button>
+            <button type="button" className="dc-wp-btn on" disabled={saving || !deadReason} onClick={markDead}>
+              Mark dead
+            </button>
+          </div>
+        </div>
+      )}
       <StageGateHint lead={lead} />
       <ContactLine lead={lead} />
     </Section>

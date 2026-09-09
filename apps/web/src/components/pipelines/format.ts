@@ -155,6 +155,8 @@ export const SURPLUS_STAGES = [
   'Agreement Signed',
   'Assignment Notarized',
   'Claim Filed',
+  'Awaiting Disbursement',
+  'Check Received',
   'Paid',
 ];
 
@@ -164,6 +166,8 @@ export const SURPLUS_STAGE_COLOR: Record<string, ChipColor> = {
   'Agreement Signed': CHIP.amber,
   'Assignment Notarized': CHIP.violet,
   'Claim Filed': CHIP.mint,
+  'Awaiting Disbursement': CHIP.mint,
+  'Check Received': CHIP.mint,
   Paid: CHIP.mint,
   Dead: CHIP.red,
 };

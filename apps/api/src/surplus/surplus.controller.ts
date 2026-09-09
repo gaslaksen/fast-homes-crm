@@ -701,7 +701,7 @@ export class SurplusController {
    */
   @Post('bulk-stage')
   async bulkStage(
-    @Body() body: { ids: string[]; stage: string },
+    @Body() body: { ids: string[]; stage: string; deadReason?: string | null; deadNote?: string | null },
     @Headers('authorization') authHeader?: string,
   ) {
     if (!Array.isArray(body?.ids) || body.ids.length === 0) {
@@ -709,7 +709,10 @@ export class SurplusController {
     }
     if (!body?.stage) throw new BadRequestException('stage is required');
     const { organizationId, userId } = this.decodeToken(authHeader);
-    return this.surplus.bulkStage(body.ids, body.stage, organizationId, userId);
+    return this.surplus.bulkStage(body.ids, body.stage, organizationId, userId, {
+      reason: body.deadReason,
+      note: body.deadNote,
+    });
   }
 
   @Get(':id')
