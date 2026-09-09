@@ -300,6 +300,20 @@ export const surplusAPI = {
   ) => api.patch(`/surplus/${id}/documents/${kind}`, data),
   /** One of our standard documents rendered from its template, for the print page. */
   documentDraft: (id: string, kind: string) => api.get(`/surplus/${id}/document-draft`, { params: { kind } }),
+  // ── Trace attempts: the search log ──
+  addTraceAttempt: (
+    id: string,
+    data: {
+      channel: string;
+      source?: string | null;
+      result: string;
+      summary?: string | null;
+      cost?: number | null;
+      heirId?: string | null;
+    },
+  ) => api.post(`/surplus/${id}/trace-attempts`, data),
+  removeTraceAttempt: (attemptId: string) => api.post(`/surplus/trace-attempts/${attemptId}/delete`),
+
   // ── References ──
   references: (county?: string | null) => api.get('/surplus/references', { params: { county: county || undefined } }),
   saveReference: (

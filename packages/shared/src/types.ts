@@ -312,6 +312,36 @@ export enum SurplusStage {
   DEAD = 'Dead',
 }
 
+/**
+ * The channels a person can be searched through, cheapest first. The tier
+ * is the course's escalation rule: free routes before a paid database,
+ * and a professional tracer only for the big claims once both have failed.
+ */
+export enum SurplusTraceChannel {
+  FREE_SEARCH = 'free_search',
+  SOCIAL = 'social',
+  GOV_RECORDS = 'gov_records',
+  PAID_DB = 'paid_db',
+  PRO_TRACER = 'pro_tracer',
+  MAIL = 'mail',
+}
+
+export const SURPLUS_TRACE_CHANNEL_LABEL: Record<SurplusTraceChannel, string> = {
+  [SurplusTraceChannel.FREE_SEARCH]: 'Free search',
+  [SurplusTraceChannel.SOCIAL]: 'Social',
+  [SurplusTraceChannel.GOV_RECORDS]: 'Government records',
+  [SurplusTraceChannel.PAID_DB]: 'Paid database',
+  [SurplusTraceChannel.PRO_TRACER]: 'Professional tracer',
+  [SurplusTraceChannel.MAIL]: 'Mail',
+};
+
+/** Tier 1 is free and always first. */
+export const SURPLUS_TIER1_CHANNELS: SurplusTraceChannel[] = [
+  SurplusTraceChannel.FREE_SEARCH,
+  SurplusTraceChannel.SOCIAL,
+  SurplusTraceChannel.GOV_RECORDS,
+];
+
 /** What money gets spent on a surplus claim, itemized on the disbursement report. */
 export const SURPLUS_EXPENSE_KINDS: [string, string][] = [
   ['title_search', 'Title search'],

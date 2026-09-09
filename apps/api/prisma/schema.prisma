@@ -979,6 +979,9 @@ model SurplusDetail {
   /// Living people who inherited this claimant's interest. Populated from a
   /// probate filing somebody read; never inferred.
   heirs SurplusHeir[]
+  /// Every search run for this claimant, by channel, so nothing is run
+  /// twice and the free routes are provably exhausted before a paid one.
+  traceAttempts SurplusTraceAttempt[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2274,6 +2277,8 @@ model SurplusHeir {
 
   /// Letters addressed to this heir rather than the claimant.
   letters SurplusLetter[]
+  /// Searches run for this heir or associate rather than the claimant.
+  traceAttempts SurplusTraceAttempt[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2337,6 +2342,38 @@ model SurplusDocument {
 /// the title search, the notary, the filing fee, postage, a skip trace, the
 /// attorney. Kept per line so the report shows exactly what was spent and
 /// the company's net is real.
+/// One search for a person, by channel. The course's skip tracing is
+/// tenacity across every channel, cheapest first: free search, social,
+/// government records, then a paid database, then a professional tracer for
+/// the big ones. Logging each attempt is what makes "cheapest first" a rule
+/// the app can check, and "we tried everything" a fact rather than a memory.
+model SurplusTraceAttempt {
+  id              String        @id @default(cuid())
+  surplusDetailId String
+  surplusDetail   SurplusDetail @relation(fields: [surplusDetailId], references: [id], onDelete: Cascade)
+  /// Set when the search was for an heir or associate rather than the claimant.
+  heirId          String?
+  heir            SurplusHeir?  @relation(fields: [heirId], references: [id], onDelete: SetNull)
+  organizationId  String?
+
+  /// SurplusTraceChannel: free_search | social | gov_records | paid_db | pro_tracer | mail
+  channel String
+  /// Where, in the channel: Google, Facebook, Sunbiz, BatchData, a tracer's name.
+  source  String?
+  /// found | nothing | mismatch | skipped
+  result  String
+  summary String?
+  cost    Float?
+  ranAt   DateTime
+  byUserId String?
+
+  createdAt DateTime @default(now())
+
+  @@index([surplusDetailId, ranAt])
+  @@index([organizationId, channel])
+  @@map("surplus_trace_attempts")
+}
+
 /// A paid claimant who may be named to the next one. The course's strongest
 /// answer to "can I trust you" is somebody who was paid saying so, so every
 /// payout is asked, consent is recorded, and the library is searchable by

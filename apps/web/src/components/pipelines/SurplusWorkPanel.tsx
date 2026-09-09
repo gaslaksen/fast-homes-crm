@@ -9,6 +9,7 @@ import { authAPI, campaignsAPI, leadsAPI, surplusAPI, tasksAPI } from '@/lib/api
 import { dueLabel, isOverdue, quickDueDates } from '@/lib/dates';
 import { SURPLUS_DEAD_REASONS, deadReasonLabel } from '@/lib/surplus-dead';
 import { SURPLUS_EXPENSE_KINDS, expenseLabel, usd } from '@/lib/surplus-money';
+import { SURPLUS_TRACE_CHANNELS, SURPLUS_TIER1_CHANNELS, TRACE_RESULTS, channelForSite, traceChannelLabel } from '@/lib/surplus-trace';
 import { useDialer } from '@/components/dialer/DialerContext';
 import { DNC_STATE, SURPLUS_STAGES } from './format';
 import ContactEditor from './ContactEditor';
@@ -175,6 +176,27 @@ export interface SurplusPanelLead {
   deadReason: string | null;
   deadNote: string | null;
   deadAt: string | null;
+  /** Every search run for this person, and what the escalation rule makes of it. */
+  tracing: {
+    attempts: {
+      id: string;
+      heirId: string | null;
+      channel: string;
+      channelLabel: string;
+      source: string | null;
+      result: string;
+      summary: string | null;
+      cost: number | null;
+      ranAt: string;
+    }[];
+    channelsTried: string[];
+    tier1Done: boolean;
+    paidRuns: number;
+    tierSkipped: boolean;
+    proTracerEligible: boolean;
+    lastTier1At: string | null;
+    totalCost: number;
+  };
   /** After the payout: the survey and whether this claimant may be named to the next one. */
   survey: {
     sentAt: string | null;
@@ -1756,6 +1778,253 @@ function NotarySection({
   );
 }
 
+/**
+ * One name-search link with the logging beside it. Opening the site is the
+ * search; the two small buttons afterwards are what puts it on the record,
+ * which is what the escalation rule and the recheck cadence read.
+ */
+function SearchLink({
+  lead,
+  link,
+  say,
+  onChanged,
+}: {
+  lead: SurplusPanelLead;
+  link: { site: string; url: string; free: boolean };
+  say: (msg: string) => void;
+  onChanged: () => void;
+}) {
+  const [opened, setOpened] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const channel = channelForSite(link.site);
+  const already = (lead.tracing?.attempts || []).find(
+    (a) => !a.heirId && a.source && a.source.toLowerCase() === link.site.toLowerCase(),
+  );
+
+  const log = async (result: string) => {
+    setBusy(true);
+    try {
+      await surplusAPI.addTraceAttempt(lead.id, { channel, source: link.site, result });
+      say(`${link.site}: ${result === 'found' ? 'found something' : result === 'mismatch' ? 'wrong person' : 'nothing'}. Logged.`);
+      setOpened(false);
+      onChanged();
+    } catch (err: any) {
+      say(err?.response?.data?.message || 'That could not be logged.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+      <a
+        href={link.url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="dc-wp-searchlink"
+        onClick={() => setOpened(true)}
+        title={already ? `Logged ${fmtDate(already.ranAt)}: ${already.result}` : 'Opens the search. Log what you found afterwards.'}
+        style={already ? { borderColor: 'var(--mint)' } : undefined}
+      >
+        {link.site}
+        {link.free && <span className="free">free</span>}
+        {already && <span style={{ marginLeft: 4, color: 'var(--mint)' }}>✓</span>}
+      </a>
+      {opened && !busy && (
+        <>
+          {TRACE_RESULTS.map(([k, l]) => (
+            <button
+              key={k}
+              type="button"
+              className="dc-wp-btn"
+              style={{ padding: '2px 6px', fontSize: 10.5 }}
+              onClick={() => log(k)}
+            >
+              {l}
+            </button>
+          ))}
+        </>
+      )}
+    </span>
+  );
+}
+
+/**
+ * Every search run for this person, by channel, and what the course's
+ * escalation rule makes of it. Cheapest first is a rule the panel can
+ * check only because the free searches are logged too.
+ */
+function SearchLog({
+  lead,
+  say,
+  onChanged,
+}: {
+  lead: SurplusPanelLead;
+  say: (msg: string) => void;
+  onChanged: () => void;
+}) {
+  const t = lead.tracing;
+  const [open, setOpen] = useState(false);
+  const [channel, setChannel] = useState('free_search');
+  const [source, setSource] = useState('');
+  const [result, setResult] = useState('nothing');
+  const [summary, setSummary] = useState('');
+  const [cost, setCost] = useState('');
+  const [busy, setBusy] = useState(false);
+  if (!t) return null;
+
+  const add = async () => {
+    setBusy(true);
+    try {
+      await surplusAPI.addTraceAttempt(lead.id, {
+        channel,
+        source: source.trim() || null,
+        result,
+        summary: summary.trim() || null,
+        cost: cost.trim() ? Number(cost) : null,
+      });
+      say('Logged');
+      setOpen(false);
+      setSource('');
+      setSummary('');
+      setCost('');
+      onChanged();
+    } catch (err: any) {
+      say(err?.response?.data?.message || 'That could not be logged.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async (id: string) => {
+    setBusy(true);
+    try {
+      await surplusAPI.removeTraceAttempt(id);
+      onChanged();
+    } catch (err: any) {
+      say(err?.response?.data?.message || 'That could not be removed.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const field: React.CSSProperties = {
+    width: '100%',
+    boxSizing: 'border-box',
+    fontSize: 12.5,
+    padding: '6px 8px',
+    border: '1px solid var(--border)',
+    borderRadius: 6,
+    background: 'var(--surface2)',
+    color: 'inherit',
+  };
+  const own = t.attempts.filter((a) => !a.heirId);
+  const tone = (r: string) => (r === 'found' ? 'var(--mint)' : r === 'mismatch' ? 'var(--red)' : 'var(--dim)');
+
+  return (
+    <div style={{ display: 'grid', gap: 6, padding: '7px 10px', marginBottom: 8, borderRadius: 6, background: 'var(--bg2)', fontSize: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <span style={{ fontWeight: 700 }}>Search log</span>
+        <span style={{ color: 'var(--faint)' }}>
+          {own.length ? `${own.length} attempt${own.length === 1 ? '' : 's'}` : 'nothing logged yet'}
+          {t.totalCost ? ` · ${usd(t.totalCost)} spent` : ''}
+        </span>
+        <span style={{ display: 'inline-flex', gap: 4, marginLeft: 'auto' }}>
+          {SURPLUS_TIER1_CHANNELS.map((c) => (
+            <span
+              key={c}
+              title={`${traceChannelLabel(c)}: ${t.channelsTried.includes(c) ? 'tried' : 'not yet'}`}
+              style={{
+                fontSize: 10.5,
+                padding: '1px 6px',
+                borderRadius: 4,
+                background: t.channelsTried.includes(c) ? 'var(--mintGhost)' : 'var(--surface3)',
+                color: t.channelsTried.includes(c) ? 'var(--mint)' : 'var(--faint)',
+              }}
+            >
+              {traceChannelLabel(c)}
+            </span>
+          ))}
+        </span>
+      </div>
+      {t.tierSkipped && (
+        <div style={{ color: 'var(--amber)', fontSize: 11.5 }}>
+          A paid database was run before any free search was logged. Cheapest first: log the Google, social and county-records checks.
+        </div>
+      )}
+      {own.slice(0, 6).map((a) => (
+        <div key={a.id} style={{ display: 'flex', gap: 8, alignItems: 'baseline', fontSize: 11.5 }}>
+          <span style={{ color: 'var(--faint)', whiteSpace: 'nowrap' }}>{fmtDate(a.ranAt)}</span>
+          <span style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}>
+            {a.channelLabel}
+            {a.source ? ` · ${a.source}` : ''}
+            <span style={{ color: tone(a.result), fontWeight: 600 }}> · {a.result}</span>
+            {a.summary ? <span style={{ color: 'var(--dim)' }}> · {a.summary}</span> : null}
+          </span>
+          {a.source !== 'batchdata' && (
+            <button type="button" className="dc-wp-btn" style={{ padding: '1px 6px', fontSize: 10.5 }} disabled={busy} onClick={() => remove(a.id)} title="Remove a mistaken entry">
+              ✕
+            </button>
+          )}
+        </div>
+      ))}
+      {own.length > 6 && <div style={{ fontSize: 11, color: 'var(--faint)' }}>and {own.length - 6} more</div>}
+      {!open ? (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <button type="button" className="dc-wp-btn" style={{ padding: '3px 8px', fontSize: 11 }} onClick={() => setOpen(true)}>
+            Log a search
+          </button>
+          {t.proTracerEligible && !t.channelsTried.includes('pro_tracer') && (
+            <button
+              type="button"
+              className="dc-wp-btn"
+              style={{ padding: '3px 8px', fontSize: 11 }}
+              title="Tier A and B only, once the free routes and the paid database have both failed"
+              onClick={() => {
+                setChannel('pro_tracer');
+                setResult('nothing');
+                setOpen(true);
+              }}
+            >
+              Engage a professional tracer
+            </button>
+          )}
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gap: 6, padding: 8, border: '1px solid var(--border)', borderRadius: 8 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+            <select style={field} value={channel} onChange={(e) => setChannel(e.target.value)} aria-label="Channel">
+              {SURPLUS_TRACE_CHANNELS.filter(([k]) => k !== 'paid_db' && (k !== 'pro_tracer' || t.proTracerEligible)).map(([k, l]) => (
+                <option key={k} value={k}>
+                  {l}
+                </option>
+              ))}
+            </select>
+            <input style={field} value={source} placeholder="Where: Google, Facebook, Sunbiz, tracer's name" onChange={(e) => setSource(e.target.value)} />
+            <select style={field} value={result} onChange={(e) => setResult(e.target.value)} aria-label="Result">
+              {TRACE_RESULTS.map(([k, l]) => (
+                <option key={k} value={k}>
+                  {l}
+                </option>
+              ))}
+            </select>
+            <input style={field} value={cost} placeholder="Cost, optional" onChange={(e) => setCost(e.target.value)} />
+          </div>
+          <input style={field} value={summary} placeholder="What came back, in a line" onChange={(e) => setSummary(e.target.value)} />
+          <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+            <button type="button" className="dc-wp-btn" disabled={busy} onClick={() => setOpen(false)}>
+              Cancel
+            </button>
+            <button type="button" className="dc-wp-btn on" disabled={busy} onClick={add}>
+              Log it
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 const METHOD_LABEL: Record<string, string> = {
   usps: 'USPS',
   fedex: 'FedEx',
@@ -2549,6 +2818,7 @@ function CaseTab({
         }
       >
         <CredibilityBlock lead={lead} say={say} onChanged={onChanged} />
+        <SearchLog lead={lead} say={say} onChanged={onChanged} />
         {/* The verdict, stated before the contacts rather than inferred from
             their absence. "Nothing has been tried" and "everything has been
             tried" both render as an empty contact list, and they want opposite
@@ -2587,7 +2857,19 @@ function CaseTab({
               <button
                 type="button"
                 className="dc-wp-btn"
-                onClick={onTrace}
+                onClick={() => {
+                  // Cheapest first. A credit before any free route is logged
+                  // is the thing the course's escalation rule exists to stop.
+                  if (
+                    !lead.tracing?.tier1Done &&
+                    !window.confirm(
+                      `No free search has been logged for ${lead.claimant} yet. The course says Google, social and the county records come before a paid database. Spend the credit anyway?`,
+                    )
+                  ) {
+                    return;
+                  }
+                  onTrace();
+                }}
                 disabled={tracing || lead.trace?.actionable === false}
                 title={
                   lead.trace?.actionable === false
@@ -2715,16 +2997,7 @@ function CaseTab({
           )}
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
             {lead.nameSearch.links.map((l: any) => (
-              <a
-                key={l.site}
-                href={l.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="dc-wp-searchlink"
-              >
-                {l.site}
-                {l.free && <span className="free">free</span>}
-              </a>
+              <SearchLink key={l.site} lead={lead} link={l} say={say} onChanged={onChanged} />
             ))}
           </div>
         </Section>

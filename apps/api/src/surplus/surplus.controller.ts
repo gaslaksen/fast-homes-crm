@@ -360,6 +360,34 @@ export class SurplusController {
     return out;
   }
 
+  // ── Trace attempts ────────────────────────────────────────────────────────
+
+  /** Log a search run by hand, so the free routes are on the record. */
+  @Post(':id/trace-attempts')
+  async addTraceAttempt(
+    @Param('id') id: string,
+    @Body()
+    body: {
+      channel: string;
+      source?: string | null;
+      result: string;
+      summary?: string | null;
+      cost?: number | null;
+      heirId?: string | null;
+      ranAt?: string | null;
+    },
+    @Headers('authorization') authHeader?: string,
+  ) {
+    const { organizationId, userId } = this.decodeToken(authHeader);
+    return this.surplus.addTraceAttempt(id, body || ({} as any), organizationId, userId);
+  }
+
+  @Post('trace-attempts/:attemptId/delete')
+  async removeTraceAttempt(@Param('attemptId') attemptId: string, @Headers('authorization') authHeader?: string) {
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.surplus.removeTraceAttempt(attemptId, organizationId);
+  }
+
   // ── References ────────────────────────────────────────────────────────────
 
   /** The reference library, with the recoveries counter. Optional county filter. */

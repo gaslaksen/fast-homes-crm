@@ -16,6 +16,9 @@ import {
   SURPLUS_DEAD_REASON_LABEL,
   SURPLUS_EXPENSE_KINDS,
   surplusDisbursement,
+  SurplusTraceChannel,
+  SURPLUS_TRACE_CHANNEL_LABEL,
+  SURPLUS_TIER1_CHANNELS,
   SurplusDocumentKind,
   SurplusDocumentStatus,
   surplusDocumentAtLeast,
@@ -106,6 +109,7 @@ const LEAD_INCLUDE = {
       documents: true,
       expenses: { orderBy: { incurredAt: 'asc' as const } },
       reference: true,
+      traceAttempts: { orderBy: { ranAt: 'desc' as const }, take: 50 },
     },
   },
   tasks: {
@@ -1000,6 +1004,76 @@ export class SurplusService {
     });
     if (!d) throw new BadRequestException('Surplus lead not found');
     return d;
+  }
+
+  /**
+   * A search somebody ran by hand: a Google, a Facebook look, a Sunbiz or
+   * official-records check, a letter, a professional tracer engaged. The
+   * paid database logs itself; this is for the free routes, which are the
+   * ones the escalation rule needs proof of.
+   */
+  async addTraceAttempt(
+    leadId: string,
+    input: {
+      channel: string;
+      source?: string | null;
+      result: string;
+      summary?: string | null;
+      cost?: number | null;
+      heirId?: string | null;
+      ranAt?: string | null;
+    },
+    organizationId?: string | null,
+    userId?: string | null,
+  ) {
+    const d = await this.detailOf(leadId, organizationId);
+    const channel = String(input.channel || '');
+    if (!(Object.values(SurplusTraceChannel) as string[]).includes(channel)) {
+      throw new BadRequestException('Pick a channel: free search, social, government records, paid database, professional tracer, or mail.');
+    }
+    const result = String(input.result || '');
+    if (!['found', 'nothing', 'mismatch', 'skipped'].includes(result)) {
+      throw new BadRequestException('The result is found, nothing, mismatch, or skipped.');
+    }
+    if (input.heirId) {
+      const heir = await this.prisma.surplusHeir.findFirst({ where: { id: input.heirId, surplusDetailId: d.id } });
+      if (!heir) throw new BadRequestException('That heir is not on this claim.');
+    }
+    const ranAt = input.ranAt ? new Date(input.ranAt) : new Date();
+    if (Number.isNaN(ranAt.getTime())) throw new BadRequestException('The date could not be read.');
+    const row = await this.prisma.surplusTraceAttempt.create({
+      data: {
+        surplusDetailId: d.id,
+        heirId: input.heirId || null,
+        organizationId: d.organizationId,
+        channel,
+        source: (input.source || '').trim() || null,
+        result,
+        summary: (input.summary || '').trim() || null,
+        cost: input.cost != null && Number.isFinite(Number(input.cost)) ? Number(input.cost) : null,
+        ranAt,
+        byUserId: userId || null,
+      },
+    });
+    await this.prisma.activity.create({
+      data: {
+        leadId,
+        userId: userId || undefined,
+        type: 'TRACE_ATTEMPT',
+        description: `${SURPLUS_TRACE_CHANNEL_LABEL[channel as SurplusTraceChannel]}${row.source ? ` (${row.source})` : ''}: ${result}${row.summary ? `. ${row.summary}` : ''}`,
+        metadata: { channel, source: row.source, result, heirId: row.heirId },
+      },
+    });
+    return row;
+  }
+
+  async removeTraceAttempt(attemptId: string, organizationId?: string | null) {
+    const row = await this.prisma.surplusTraceAttempt.findFirst({
+      where: { id: attemptId, ...(organizationId ? { organizationId } : {}) },
+    });
+    if (!row) throw new BadRequestException('Attempt not found');
+    await this.prisma.surplusTraceAttempt.delete({ where: { id: row.id } });
+    return { removed: 1 };
   }
 
   /**
@@ -2187,6 +2261,45 @@ export class SurplusService {
           lastAt,
           daysSince,
           overdue: applies && (daysSince === null || daysSince > CLAIMANT_UPDATE_DAYS),
+        };
+      })(),
+
+      // Every search run for this person, by channel, and what the
+      // escalation rule makes of it: were the free routes tried before the
+      // paid one, and is a professional tracer worth it here.
+      tracing: (() => {
+        const attempts = ((d.traceAttempts || []) as any[]).map((a) => ({
+          id: a.id,
+          heirId: a.heirId || null,
+          channel: a.channel,
+          channelLabel: SURPLUS_TRACE_CHANNEL_LABEL[a.channel as SurplusTraceChannel] || a.channel,
+          source: a.source || null,
+          result: a.result,
+          summary: a.summary || null,
+          cost: a.cost ?? null,
+          ranAt: a.ranAt,
+        }));
+        const own = attempts.filter((a) => !a.heirId);
+        const channelsTried = Array.from(new Set(own.map((a) => a.channel)));
+        const tier1Done = SURPLUS_TIER1_CHANNELS.some((c) => channelsTried.includes(c));
+        const paidRuns = own.filter((a) => a.channel === SurplusTraceChannel.PAID_DB && a.result !== 'skipped');
+        const tier = tierOf(facts);
+        return {
+          attempts,
+          channelsTried,
+          tier1Done,
+          paidRuns: paidRuns.length,
+          /** A credit was spent before any free route was logged. */
+          tierSkipped: paidRuns.length > 0 && !tier1Done,
+          /** The course reserves a professional tracer for the big claims. */
+          proTracerEligible: tier === SurplusTier.A || tier === SurplusTier.B,
+          lastTier1At:
+            own
+              .filter((a) => SURPLUS_TIER1_CHANNELS.includes(a.channel as SurplusTraceChannel))
+              .map((a) => a.ranAt)
+              .sort()
+              .pop() || null,
+          totalCost: attempts.reduce((s, a) => s + (a.cost || 0), 0),
         };
       })(),
 

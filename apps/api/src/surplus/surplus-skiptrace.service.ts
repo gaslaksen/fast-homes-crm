@@ -32,7 +32,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
 import { PrismaService } from '../prisma/prisma.service';
-import { DncRegistry, LeadSource } from '@fast-homes/shared';
+import { DncRegistry, LeadSource, SurplusTraceChannel } from '@fast-homes/shared';
 import { normalizePhoneDigits } from '../foreclosures/foreclosure-scoring.util';
 import {
   addressCaseCounts,
@@ -442,7 +442,7 @@ export class SurplusSkiptraceService {
    * address history, so it confirms the family rather than the person.
    */
   private async applyToHeir(
-    heir: { id: string; name: string; street: string | null; city: string | null },
+    heir: { id: string; surplusDetailId: string; name: string; street: string | null; city: string | null },
     persons: TracedPerson[],
     result: SurplusTraceResult,
   ): Promise<void> {
@@ -485,6 +485,7 @@ export class SurplusSkiptraceService {
           ),
         },
       });
+      await this.logAttempt(heir.surplusDetailId, heir.id, 'mismatch', `Returned ${name || 'an unnamed person'} ${where}, not ${heir.name}.`);
       return;
     }
 
@@ -528,6 +529,7 @@ export class SurplusSkiptraceService {
         ),
       },
     });
+    await this.logAttempt(heir.surplusDetailId, heir.id, 'found', `Returned ${name || 'contacts'} ${where}. ${best.reason}`);
     result.contacted += 1;
   }
 
@@ -539,8 +541,16 @@ export class SurplusSkiptraceService {
   ): Promise<void> {
     const row = await this.prisma.surplusHeir.findUnique({
       where: { id: heirId },
-      select: { callNotes: true },
+      select: { callNotes: true, surplusDetailId: true },
     });
+    if (row) {
+      await this.logAttempt(
+        row.surplusDetailId,
+        heirId,
+        state.outcome === 'skipped' ? 'skipped' : state.outcome === 'mismatch' ? 'mismatch' : 'nothing',
+        state.detail,
+      );
+    }
     await this.prisma.surplusHeir.update({
       where: { id: heirId },
       data: {
@@ -797,6 +807,7 @@ export class SurplusSkiptraceService {
             ),
           },
         });
+        await this.logAttempt(c.detailId, null, 'mismatch', `Returned ${name || 'an unnamed person'} ${where}, not ${c.claimant}.`);
         continue;
       }
 
@@ -855,6 +866,7 @@ export class SurplusSkiptraceService {
           ),
         },
       });
+      await this.logAttempt(c.detailId, null, 'found', `Returned ${name || 'contacts'} ${where}. ${best.reason}`);
       result.contacted += 1;
     }
   }
@@ -867,11 +879,53 @@ export class SurplusSkiptraceService {
    * cannot reliably infer state from prose and previously guessed by matching
    * substrings.
    */
+  /**
+   * One line in the attempt log per submission, so the panel can show what
+   * has been tried and the escalation rule can be checked. A refusal to
+   * submit (skipped) costs nothing and is logged at zero; a real submission
+   * carries the vendor's per-address cost when configured.
+   */
+  private async logAttempt(
+    detailId: string,
+    heirId: string | null,
+    result: 'found' | 'nothing' | 'mismatch' | 'skipped',
+    summary: string,
+  ): Promise<void> {
+    const cost = result === 'skipped' ? 0 : Number(this.config.get<string>('BATCHDATA_COST_PER_ADDRESS') || 0) || null;
+    try {
+      const detail = await this.prisma.surplusDetail.findUnique({ where: { id: detailId }, select: { organizationId: true } });
+      await this.prisma.surplusTraceAttempt.create({
+        data: {
+          surplusDetailId: detailId,
+          heirId,
+          organizationId: detail?.organizationId || null,
+          channel: SurplusTraceChannel.PAID_DB,
+          source: 'batchdata',
+          result,
+          summary: summary.slice(0, 500),
+          cost,
+          ranAt: new Date(),
+        },
+      });
+    } catch (err: any) {
+      // The log is a record of the trace, never a reason for it to fail.
+      this.logger.warn(`Could not log the trace attempt on ${detailId}: ${err?.message || err}`);
+    }
+  }
+
   private async note(
     detailId: string,
     text: string,
     state?: { outcome: string; detail: string },
   ): Promise<void> {
+    if (state) {
+      await this.logAttempt(
+        detailId,
+        null,
+        state.outcome === 'skipped' ? 'skipped' : state.outcome === 'mismatch' ? 'mismatch' : 'nothing',
+        state.detail,
+      );
+    }
     const row = await this.prisma.surplusDetail.findUnique({
       where: { id: detailId },
       select: { callNotes: true },
