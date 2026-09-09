@@ -87,6 +87,7 @@ export class SurplusController {
     @Query('hideDnc') hideDnc?: string,
     @Query('contact') contact?: string,
     @Query('missingChannel') missingChannel?: string,
+    @Query('letterDue') letterDue?: string,
     @Query('sort') sort?: string,
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
@@ -112,6 +113,7 @@ export class SurplusController {
       hideDnc: hideDnc === 'true',
       contact,
       missingChannel: missingChannel === 'true',
+      letterDue: letterDue === 'true',
       sort,
       page: num(page),
       pageSize: num(pageSize),
@@ -466,19 +468,52 @@ export class SurplusController {
    */
   @Post('letter-mailed')
   async letterMailed(
-    @Body() body: { ids: string[]; mailedAt?: string | null; address?: string | null; note?: string | null },
+    @Body()
+    body: {
+      ids: string[];
+      mailedAt?: string | null;
+      address?: string | null;
+      note?: string | null;
+      mailType?: string | null;
+      trackingNumber?: string | null;
+      templateKind?: string | null;
+      templateVersion?: number | null;
+      recipientName?: string | null;
+      heirId?: string | null;
+    },
     @Headers('authorization') authHeader?: string,
   ) {
     if (!Array.isArray(body?.ids) || body.ids.length === 0) {
       throw new BadRequestException('No lead ids provided');
     }
     const { userId, organizationId } = this.decodeToken(authHeader);
-    return this.surplus.markLetterMailed(
-      body.ids,
-      { mailedAt: body.mailedAt, address: body.address, note: body.note },
-      userId,
-      organizationId,
-    );
+    const { ids, ...opts } = body;
+    return this.surplus.markLetterMailed(ids, opts, userId, organizationId);
+  }
+
+  /** Take one envelope out of the history. Re-caches the latest for the queue. */
+  @Post('letters/:letterId/delete')
+  async removeLetter(@Param('letterId') letterId: string, @Headers('authorization') authHeader?: string) {
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.surplus.removeLetter(letterId, organizationId);
+  }
+
+  /**
+   * A letter for one claimant or heir, rendered from the template of that
+   * kind, ready for the print view. Nothing is recorded until the person
+   * says it was mailed.
+   */
+  @Get(':id/letter')
+  async letter(
+    @Param('id') id: string,
+    @Query('kind') kind?: string,
+    @Query('heirId') heirId?: string,
+    @Headers('authorization') authHeader?: string,
+  ) {
+    const { organizationId, userId } = this.decodeToken(authHeader);
+    const out = await this.templates.letterFor(id, kind || 'letter_claimant', heirId || null, organizationId, userId);
+    if (!out) throw new BadRequestException('Surplus lead not found');
+    return out;
   }
 
   /**

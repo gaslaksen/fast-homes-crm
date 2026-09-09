@@ -114,6 +114,8 @@ export interface SurplusListFilters {
   contact?: string;
   /** Only claimants with at least one of call, text, email, letter not yet attempted. */
   missingChannel?: boolean;
+  /** Only claimants due their next letter under their cadence. */
+  letterDue?: boolean;
   /** 'notice' | 'surplus' | 'net' | 'tier' */
   sort?: string;
   page?: number;

@@ -309,9 +309,17 @@ const SURPLUS_COLUMNS: PipelineColumn<any>[] = [
         {/* Which envelopes have gone out, so the row says so before anyone
             opens the panel to write the same person twice. */}
         {r.letterMailedCount > 0 && (
-          <div style={{ fontSize: 11.5, color: 'var(--faint)' }} title={`${r.letterMailedCount} of ${r.claimantCount} claimant${r.claimantCount === 1 ? '' : 's'} mailed`}>
+          <div style={{ fontSize: 11.5, color: 'var(--faint)' }} title={`${r.letterCount || r.letterMailedCount} letter${(r.letterCount || r.letterMailedCount) === 1 ? '' : 's'} across ${r.claimantCount} claimant${r.claimantCount === 1 ? '' : 's'}`}>
             {'✉'} Letter sent {fmtDate(r.letterMailedAt)}
+            {r.letterCount > 1 ? ` (${r.letterCount})` : ''}
             {r.letterMailedCount < r.claimantCount ? ` (${r.letterMailedCount} of ${r.claimantCount})` : ''}
+          </div>
+        )}
+        {/* The cadence, off the history: due for the next envelope, or three
+            unanswered and time to upgrade the postage. */}
+        {r.letterDue && (
+          <div style={{ fontSize: 11, color: 'var(--amber)', fontWeight: 600 }}>
+            {r.escalateMail ? 'Letter due, send Priority or FedEx' : 'Letter due'}
           </div>
         )}
       </div>
@@ -612,6 +620,7 @@ export default function SurplusFundsPage() {
     /** Properties nobody has heard back from, and with an untried channel. */
     notTapped: null as number | null,
     missingChannel: null as number | null,
+    letterDue: null as number | null,
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -683,6 +692,7 @@ export default function SurplusFundsPage() {
         hideDnc: hideDnc || undefined,
         contact: chipQ === 'not_tapped' ? 'not_tapped' : undefined,
         missingChannel: chipQ === 'missing' || undefined,
+        letterDue: chipQ === 'letter_due' || undefined,
         sort,
         pageSize: 200,
       });
@@ -1170,6 +1180,7 @@ export default function SurplusFundsPage() {
               [
                 ['not_tapped', 'Not tapped'],
                 ['missing', 'Missing a channel'],
+                ['letter_due', 'Letter due'],
                 ['new', 'New, 7 days'],
                 ['estate', 'Estate or probate'],
                 ['lien', 'Competing lien filed'],
@@ -1186,7 +1197,9 @@ export default function SurplusFundsPage() {
                       ? 'Nobody has heard back from anyone on this property yet. The working list.'
                       : k === 'missing'
                         ? 'At least one of call, text, email, letter has not been tried on this property.'
-                        : undefined
+                        : k === 'letter_due'
+                          ? 'Nobody has replied, there is an address, and the last letter is older than the cadence, or none has gone out.'
+                          : undefined
                 }
               >
                 {l}
@@ -1195,6 +1208,9 @@ export default function SurplusFundsPage() {
                 )}
                 {k === 'missing' && stats.missingChannel != null && (
                   <span style={{ marginLeft: 5, opacity: 0.6 }}>{stats.missingChannel}</span>
+                )}
+                {k === 'letter_due' && stats.letterDue != null && (
+                  <span style={{ marginLeft: 5, opacity: 0.6 }}>{stats.letterDue}</span>
                 )}
               </button>
             ))}

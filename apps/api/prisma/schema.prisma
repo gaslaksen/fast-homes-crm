@@ -806,6 +806,13 @@ model SurplusDetail {
   /// is a different channel and the letter does not make it less worth dialling.
   letterMailedAt DateTime?
   letterMailedTo String?
+  /// Every letter that went out on this claim, newest first. letterMailedAt
+  /// and letterMailedTo above are a cache of the latest for the queue.
+  letters SurplusLetter[]
+  /// How often a letter goes out while nobody has replied: 7 or 14 days.
+  /// Null means the default, fourteen. The board flags the file as due for
+  /// its next letter once the last one is older than this.
+  letterCadenceDays Int?
 
   /// When the claimant first responded through any channel: answered a call
   /// and it was them, texted back, or emailed back. The course's Tapped / Not
@@ -2157,6 +2164,9 @@ model SurplusHeir {
   sourceKind       String? @default("probate_petition")
   addedByUserId    String?
 
+  /// Letters addressed to this heir rather than the claimant.
+  letters SurplusLetter[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -2164,6 +2174,39 @@ model SurplusHeir {
   @@index([organizationId, name])
   @@index([phone1])
   @@map("surplus_heirs")
+}
+
+/// One envelope that went out on a surplus claim. A row per letter rather
+/// than a date on the claimant, because the course's cadence is weekly or
+/// biweekly until somebody replies, and the third unanswered letter is what
+/// triggers the upgrade to Priority or FedEx. Neither can be counted off a
+/// single date.
+model SurplusLetter {
+  id              String        @id @default(cuid())
+  surplusDetailId String
+  surplusDetail   SurplusDetail @relation(fields: [surplusDetailId], references: [id], onDelete: Cascade)
+  /// Set when the envelope went to an heir instead of the claimant.
+  heirId          String?
+  heir            SurplusHeir?  @relation(fields: [heirId], references: [id], onDelete: SetNull)
+  organizationId  String?
+
+  mailedAt      DateTime
+  recipientName String?
+  address       String?
+  /// SurplusTemplateKind of the letter, when it was generated from one.
+  templateKind    String?
+  templateVersion Int?
+  /// 'standard' | 'priority' | 'fedex'
+  mailType       String  @default("standard")
+  trackingNumber String?
+  note           String?
+  sentByUserId   String?
+
+  createdAt DateTime @default(now())
+
+  @@index([surplusDetailId, mailedAt])
+  @@index([organizationId, mailedAt])
+  @@map("surplus_letters")
 }
 
 /// A surplus case the team removed, kept so the next county poll cannot

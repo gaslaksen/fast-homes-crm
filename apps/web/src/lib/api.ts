@@ -214,8 +214,25 @@ export const surplusAPI = {
   bulkStage: (ids: string[], stage: string) => api.post('/surplus/bulk-stage', { ids, stage }),
   letterMailed: (
     ids: string[],
-    data: { mailedAt?: string | null; address?: string | null; note?: string | null } = {},
+    data: {
+      mailedAt?: string | null;
+      address?: string | null;
+      note?: string | null;
+      /** 'standard' | 'priority' | 'fedex' */
+      mailType?: string | null;
+      trackingNumber?: string | null;
+      templateKind?: string | null;
+      templateVersion?: number | null;
+      recipientName?: string | null;
+      /** The envelope went to this heir rather than the claimant. */
+      heirId?: string | null;
+    } = {},
   ) => api.post('/surplus/letter-mailed', { ids, ...data }),
+  /** Take one envelope out of a claimant's letter history. */
+  deleteLetter: (letterId: string) => api.post(`/surplus/letters/${letterId}/delete`),
+  /** A rendered letter for the print view. Records nothing. */
+  letter: (id: string, kind: string, heirId?: string | null) =>
+    api.get(`/surplus/${id}/letter`, { params: { kind, heirId: heirId || undefined } }),
   // `limit` caps the ADDRESSES submitted, which is what costs BatchData credits.
   // Co-owners at one property share a submission because the vendor matches on
   // address and ignores names.

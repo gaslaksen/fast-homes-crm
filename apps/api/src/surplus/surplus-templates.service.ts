@@ -48,6 +48,9 @@ export const MERGE_FIELDS: { key: string; meaning: string }[] = [
   { key: 'sunbizLink', meaning: "The company's Florida state filing on Sunbiz, from DIGDEEPER_SUNBIZ_URL" },
   { key: 'onePagerLink', meaning: 'The one-page company overview PDF, from DIGDEEPER_ONEPAGER_URL' },
   { key: 'window', meaning: 'The decision window asked for at the close' },
+  { key: 'today', meaning: "Today's date, for the top of a letter" },
+  { key: 'recipientName', meaning: 'Who the letter is addressed to: the claimant, or the heir or relative chosen' },
+  { key: 'recipientAddress', meaning: 'Their mailing address, one line' },
 ];
 
 /** What is left in a rendered body that the app could not fill. */
@@ -98,9 +101,72 @@ That is fine. I will send you our information so you can look us over. Can I cal
 
 Do not name the amount to a third party.`,
   },
-  [SurplusTemplateKind.LETTER_CLAIMANT]: { name: '', body: '' },
-  [SurplusTemplateKind.LETTER_FAMILY]: { name: '', body: '' },
-  [SurplusTemplateKind.LETTER_ASSOCIATE]: { name: '', body: '' },
+  // The three letters the course's mailing library calls for. Drafts: they
+  // follow the phone script's shape (honest effort, good news, no amount to a
+  // third party, a number to call) and are meant to be edited in settings.
+  [SurplusTemplateKind.LETTER_CLAIMANT]: {
+    name: 'Draft, direct to the claimant',
+    body: `{{today}}
+
+{{recipientName}}
+{{recipientAddress}}
+
+Dear {{claimantFirstName}},
+
+I have spent the last {{daysSearching}} days trying to reach you, and I am writing because I could not find a working phone number.
+
+We do audit work on {{county}} County records. In the course of that work your name came up in connection with {{propertyAddress}}, and I have good news for you about it. It is not something I can explain properly in a letter, but it is real, it is time sensitive, and it costs you nothing to hear.
+
+Please call me at {{callbackNumber}} and ask for {{callerName}}. If you would rather I call you, write your number on this letter and mail it back, or email us and I will ring you the same day.
+
+Sincerely,
+
+{{callerName}}
+{{companyName}}
+{{callbackNumber}}`,
+  },
+  [SurplusTemplateKind.LETTER_FAMILY]: {
+    name: 'Draft, to a family member',
+    body: `{{today}}
+
+{{recipientName}}
+{{recipientAddress}}
+
+Dear {{recipientName}},
+
+I am trying to reach {{claimant}}, and our research suggests you may be family. I apologise for writing to you out of the blue.
+
+We do audit work on {{county}} County records, and {{claimant}} has come up in connection with a property that was sold there. There is good news waiting for them, but I have not been able to find a way to reach them directly.
+
+Would you pass this letter along, or ask them to call me at {{callbackNumber}} and ask for {{callerName}}? If you are able to share a phone number or address for them, that would help too. This is not a sales matter and nothing is being asked of you.
+
+With thanks,
+
+{{callerName}}
+{{companyName}}
+{{callbackNumber}}`,
+  },
+  [SurplusTemplateKind.LETTER_ASSOCIATE]: {
+    name: 'Draft, to a neighbour or associate',
+    body: `{{today}}
+
+{{recipientName}}
+{{recipientAddress}}
+
+Dear {{recipientName}},
+
+I am trying to reach {{claimant}}, who I understand may have lived near you or been known to you. I apologise for writing to you out of the blue.
+
+I have good news for {{claimant}} connected to a property in {{county}} County, and I have not been able to find a way to reach them directly. If you know how to get a message to them, I would be grateful if you would pass this along, or ask them to call me at {{callbackNumber}} and ask for {{callerName}}.
+
+Nothing is being asked of you, and this is not a sales matter.
+
+With thanks,
+
+{{callerName}}
+{{companyName}}
+{{callbackNumber}}`,
+  },
   [SurplusTemplateKind.CREDIBILITY_SMS]: {
     name: 'Course packet',
     body: `{{claimantFirstName}}, this is {{callerName}} with {{companyName}}. As promised, so you can check us yourself: our website {{websiteUrl}} and our Florida state filing {{sunbizLink}}. Our one-page overview: {{onePagerLink}}. Call me back any time on {{callbackNumber}}.`,
@@ -375,6 +441,78 @@ export class SurplusTemplatesService {
         sentAt: detail.credibilitySentAt,
         channels: detail.credibilityChannels ? String(detail.credibilityChannels).split(',') : [],
       },
+    };
+  }
+
+  /**
+   * A letter for the print view. The recipient is the claimant unless an
+   * heir is named, in which case the envelope goes to the heir's own address
+   * off the filing and the body still names the claimant. Nothing is
+   * recorded here: the print page asks the person to confirm it was mailed.
+   */
+  async letterFor(
+    leadId: string,
+    rawKind: string,
+    heirId: string | null,
+    organizationId?: string | null,
+    userId?: string | null,
+  ) {
+    const kind = kindOf(rawKind);
+    if (!String(kind).startsWith('letter_')) {
+      throw new BadRequestException('That template kind is not a letter.');
+    }
+    const built = await this.fieldsFor(leadId, organizationId, userId);
+    if (!built) return null;
+    const d = built.detail;
+
+    const heir = heirId
+      ? await this.prisma.surplusHeir.findFirst({ where: { id: heirId, surplusDetailId: d.id } })
+      : null;
+    if (heirId && !heir) throw new BadRequestException('That heir is not on this claim.');
+
+    const joinAddress = (parts: (string | null | undefined)[]) => parts.filter(Boolean).join(', ');
+    const recipientName = heir ? heir.name : built.facts.claimant;
+    const recipientAddress = heir
+      ? joinAddress([heir.street, heir.city, [heir.state, heir.zip].filter(Boolean).join(' ')])
+      : joinAddress([
+          d.ownerMailingStreet,
+          d.ownerMailingCity,
+          [d.ownerMailingState, d.ownerMailingZip].filter(Boolean).join(' '),
+        ]);
+    const today = new Date().toLocaleDateString('en-US', {
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric',
+      timeZone: 'America/New_York',
+    });
+
+    const fields = { ...built.fields, recipientName, recipientAddress: recipientAddress || null, today };
+    const active = await this.list(organizationId);
+    const t = active.kinds.find((k) => k.kind === kind)!;
+    const body = renderTemplate(t.body, fields);
+
+    return {
+      kind,
+      label: t.label,
+      version: t.version,
+      versionLabel: t.version ? `v${t.version}` : 'built-in',
+      hasText: !!t.body.trim(),
+      body,
+      unfilled: unfilledFields(body),
+      recipient: {
+        heirId: heir?.id || null,
+        name: recipientName,
+        address: recipientAddress || null,
+      },
+      sender: {
+        companyName: DIG_DEEPER_BRAND.companyName,
+        phone: DIG_DEEPER_BRAND.phone,
+        callerName: built.facts.callerName,
+        website: DIG_DEEPER_BRAND.website || this.credibilityLinks().websiteUrl || null,
+      },
+      claimant: built.facts.claimant,
+      propertyAddress: built.facts.propertyAddress,
+      today,
     };
   }
 
