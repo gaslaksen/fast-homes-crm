@@ -14,6 +14,9 @@ out/
 build/
 dist/
 
+# TypeScript incremental build cache
+*.tsbuildinfo
+
 # Environment variables
 .env
 .env.local
