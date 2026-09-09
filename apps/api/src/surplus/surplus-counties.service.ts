@@ -14,7 +14,7 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
-import { FL_COUNTIES, FL_COUNTY_LINKS, RULE_MAX_AGE_DAYS } from './surplus-compliance';
+import { FL_COUNTIES, FL_COUNTY_SEED, RULE_MAX_AGE_DAYS, CountySeed } from './surplus-compliance';
 
 export const ACCEPTED_METHODS = ['usps', 'fedex', 'ups', 'in_person', 'efile'] as const;
 export const ACCEPTED_METHOD_LABEL: Record<string, string> = {
@@ -41,6 +41,32 @@ const EDITABLE = [
   'clerkAddress',
   'notes',
 ] as const;
+
+/** The seed as column values, so the create and the blank-fill agree on names. */
+export function seedColumns(seed?: CountySeed): Record<string, string | boolean | null> {
+  if (!seed) return {};
+  const out: Record<string, string | boolean | null> = {};
+  if (seed.courtRecords) out.courtRecordsUrl = seed.courtRecords;
+  if (seed.surplusList) out.surplusListUrl = seed.surplusList;
+  if (seed.claimForm) out.claimFormUrl = seed.claimForm;
+  if (seed.acceptedMethods) out.acceptedMethods = seed.acceptedMethods;
+  if (seed.attorneyRequired !== undefined) out.attorneyRequired = seed.attorneyRequired;
+  if (seed.clerkContactPhone) out.clerkContactPhone = seed.clerkContactPhone;
+  if (seed.clerkContactEmail) out.clerkContactEmail = seed.clerkContactEmail;
+  if (seed.clerkAddress) out.clerkAddress = seed.clerkAddress;
+  if (seed.notes) out.notes = seed.notes;
+  return out;
+}
+
+/** Only the seeded columns the row still has empty. Never a column with a value. */
+export function blanksToFill(row: Record<string, any>, seed: Record<string, string | boolean | null>) {
+  const fill: Record<string, string | boolean | null> = {};
+  for (const [k, v] of Object.entries(seed)) {
+    const cur = row[k];
+    if (cur === null || cur === undefined || cur === '') fill[k] = v;
+  }
+  return fill;
+}
 
 export interface CountyRow {
   id: string;
@@ -115,7 +141,11 @@ export class SurplusCountiesService {
     return this.toRow(saved);
   }
 
-  /** Make sure every county in the code list has a row for this org. */
+  /**
+   * Make sure every county in the code list has a row for this org, and
+   * that every fact the code knows is on it. Blanks only: a value somebody
+   * typed in after ringing the clerk beats anything read off a website.
+   */
   private async ensureSeeded(organizationId: string | null) {
     const seed = FL_COUNTIES.active
       .map((name) => ({ name, active: true }))
@@ -125,9 +155,19 @@ export class SurplusCountiesService {
         name: c.name,
         state: 'FL',
         active: c.active,
-        courtRecordsUrl: FL_COUNTY_LINKS[c.name]?.courtRecords || null,
+        ...seedColumns(FL_COUNTY_SEED[c.name]),
       }));
     await this.prisma.surplusCounty.createMany({ data: seed, skipDuplicates: true });
+
+    const rows = await this.prisma.surplusCounty.findMany({
+      where: { organizationId, name: { in: Object.keys(FL_COUNTY_SEED) } },
+    });
+    for (const row of rows) {
+      const fill = blanksToFill(row, seedColumns(FL_COUNTY_SEED[row.name]));
+      if (Object.keys(fill).length) {
+        await this.prisma.surplusCounty.update({ where: { id: row.id }, data: fill });
+      }
+    }
   }
 
   async list(organizationId?: string | null): Promise<CountyRow[]> {
