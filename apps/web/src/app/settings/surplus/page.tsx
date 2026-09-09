@@ -217,6 +217,13 @@ export default function SurplusTemplatesPage() {
                   </>
                 )}
 
+                {current.kind.startsWith('doc_') && current.kind !== 'doc_claims_checklist' && (
+                  <div className="mb-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
+                    This is a legal instrument. Paste the text approved by counsel, with merge fields where the
+                    claimant's details go. Saving makes a new version; every copy built from it records which one,
+                    and shows as stale once you revise it.
+                  </div>
+                )}
                 <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Text</label>
                 <textarea
                   className="input w-full font-mono text-[13px] leading-relaxed"

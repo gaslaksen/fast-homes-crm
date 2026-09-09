@@ -54,6 +54,28 @@ describe('SurplusDocumentsService.checklist', () => {
     expect(poa.hasFile).toBe(false);
   });
 
+  it('flags a copy built from a template that has since been revised, and only those', () => {
+    const rows = [
+      { kind: 'fee_agreement', status: 'drafted', templateKind: 'doc_fee_agreement', templateVersion: 2 },
+      { kind: 'limited_poa', status: 'signed', templateKind: 'doc_limited_poa', templateVersion: 3 },
+      { kind: 'photo_id', status: 'received', fileKey: 'k' },
+    ];
+    const c = svc.checklist(rows, { deceased: false, isEntity: false }, { doc_fee_agreement: 3, doc_limited_poa: 3 });
+    const fee = c.documents.find((d) => d.kind === SurplusDocumentKind.FEE_AGREEMENT)!;
+    expect(fee.hasTemplate).toBe(true);
+    expect(fee.templateStale).toBe(true);
+    expect(fee.templateActiveVersion).toBe(3);
+    const poa = c.documents.find((d) => d.kind === SurplusDocumentKind.LIMITED_POA)!;
+    expect(poa.templateStale).toBe(false);
+    const id = c.documents.find((d) => d.kind === SurplusDocumentKind.PHOTO_ID)!;
+    expect(id.hasTemplate).toBe(false);
+    expect(id.templateStale).toBe(false);
+    // Never built from a template: nothing to be stale against, even if the template moved.
+    const assignment = c.documents.find((d) => d.kind === SurplusDocumentKind.ASSIGNMENT_OF_RIGHTS)!;
+    expect(assignment.hasTemplate).toBe(true);
+    expect(assignment.templateStale).toBe(false);
+  });
+
   it('is complete once every required kind is in hand, whatever the optional ones say', () => {
     const rows = [
       'fee_agreement',

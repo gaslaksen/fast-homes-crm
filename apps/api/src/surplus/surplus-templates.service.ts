@@ -25,6 +25,10 @@ import {
   LeadSource,
   SurplusTemplateKind,
   SURPLUS_TEMPLATE_KIND_LABEL,
+  SurplusDocumentKind,
+  SURPLUS_DOCUMENT_LABEL,
+  SURPLUS_DOCUMENT_TEMPLATE,
+  SURPLUS_LEGAL_TEMPLATE_KINDS,
 } from '@fast-homes/shared';
 import { DIG_DEEPER_BRAND } from '../common/company.constants';
 import { ruleFor } from './surplus-compliance';
@@ -48,7 +52,9 @@ export const MERGE_FIELDS: { key: string; meaning: string }[] = [
   { key: 'sunbizLink', meaning: "The company's Florida state filing on Sunbiz, from DIGDEEPER_SUNBIZ_URL" },
   { key: 'onePagerLink', meaning: 'The one-page company overview PDF, from DIGDEEPER_ONEPAGER_URL' },
   { key: 'window', meaning: 'The decision window asked for at the close' },
-  { key: 'today', meaning: "Today's date, for the top of a letter" },
+  { key: 'today', meaning: "Today's date, for the top of a letter or document" },
+  { key: 'claimantAddress', meaning: "The claimant's mailing address on file, one line" },
+  { key: 'feeCapPct', meaning: 'The fee cap for this case as a number, from the compliance rule (blank when unconfirmed)' },
   { key: 'recipientName', meaning: 'Who the letter is addressed to: the claimant, or the heir or relative chosen' },
   { key: 'recipientAddress', meaning: 'Their mailing address, one line' },
 ];
@@ -188,7 +194,95 @@ Phone: {{callbackNumber}}, ask for {{callerName}}
 {{callerName}}
 {{companyName}}`,
   },
-  [SurplusTemplateKind.NOTARY_INSTRUCTIONS]: { name: '', body: '' },
+  // The notary's instruction sheet, per the course: it locks in the document
+  // list, the payment and the signing order before the appointment, and the
+  // fee agreement is signed and put away before the claimant sees anything
+  // that names the fund source.
+  [SurplusTemplateKind.NOTARY_INSTRUCTIONS]: {
+    name: 'Course signing order',
+    body: `MOBILE NOTARY INSTRUCTIONS
+
+Client: {{companyName}}, {{callbackNumber}}
+Signer: {{claimant}}
+Signing address: {{claimantAddress}}
+Matter: {{propertyAddress}}, {{county}} County, case {{caseNumber}}
+Date: {{today}}
+
+Please read these instructions before the appointment and confirm by signing below. The order of signing is the whole point of this sheet.
+
+1. CONTINGENCY FEE AGREEMENT. Present this document first and alone. Have the signer read and sign it. Put it away before presenting anything else.
+
+2. LIMITED POWER OF ATTORNEY. Present and have signed once the fee agreement is put away.
+
+3. ASSIGNMENT OF RIGHTS. Present only after items 1 and 2 are signed and put away. This document names the source of the funds. Notarize the signature.
+
+4. LETTER OF DIRECTION and the COUNTY CLAIM FORM, in that order. Notarize where the form calls for it.
+
+Do not present any document out of this order, and do not discuss the source or amount of the funds before item 3. If the signer asks, say the paperwork answers that in order and that you are instructed to follow it.
+
+Take a photocopy or photograph of the signer's photo ID for the file.
+
+Return every signed original to {{companyName}} the same day. Call {{callbackNumber}} with any question before or during the appointment.
+
+Payment: as agreed in advance, on return of the signed documents.
+
+Notary name: ____________________   Signature: ____________________   Date: __________
+
+I confirm the documents were signed in the order above and the fee agreement was put away before the assignment was presented.`,
+  },
+  // The legal instruments ship empty on purpose. Counsel writes them; the
+  // app fills the names in and records which version a case was built from.
+  [SurplusTemplateKind.DOC_FEE_AGREEMENT]: { name: '', body: '' },
+  [SurplusTemplateKind.DOC_LIMITED_POA]: { name: '', body: '' },
+  [SurplusTemplateKind.DOC_ASSIGNMENT_OF_RIGHTS]: { name: '', body: '' },
+  [SurplusTemplateKind.DOC_LETTER_OF_DIRECTION]: { name: '', body: '' },
+  [SurplusTemplateKind.DOC_CLAIMS_CHECKLIST]: {
+    name: 'Course standard set',
+    body: `CLAIMS CHECKLIST
+
+Claimant: {{claimant}}
+Property: {{propertyAddress}}, {{county}} County, case {{caseNumber}}
+Surplus stated in the notice: {{surplusAmount}}
+Prepared: {{today}}
+
+BEFORE THE AGREEMENT
+[ ] Entitlement verified: the claimant is who the clerk noticed and nobody has a better claim
+[ ] Notice date confirmed with the clerk
+[ ] Title search complete, every lien on the waterfall known
+[ ] Fee terms checked against the rule: {{feeTerms}}
+[ ] Disclosures the rule requires are in the agreement
+
+OUR DOCUMENTS, IN SIGNING ORDER
+[ ] Contingency fee agreement, signed first and put away
+[ ] Limited power of attorney, signed
+[ ] Assignment of rights, signed and notarized (fund source disclosed here, not before)
+[ ] Letter of direction
+[ ] Mobile notary agreement signed by the notary BEFORE the appointment is booked
+
+THE COUNTY'S DOCUMENT
+[ ] County claim form, completed and packaged as {{county}} County requires
+
+FROM THE CLAIMANT
+[ ] Photo ID copy
+[ ] W-9
+[ ] Deed or proof of ownership, if the county asks
+[ ] Estate: death certificate and letters of administration
+[ ] Entity: formation documents and authority to sign
+
+FILING
+[ ] Attorney required in this county? If yes, all county contact goes through the attorney
+[ ] Submitted by an accepted method, tracking number recorded, signature required
+[ ] County acknowledged receipt (date)
+[ ] County follow-up: three weeks after filing, then monthly
+[ ] Claimant update: at least monthly, whether or not there is news
+
+DISBURSEMENT
+[ ] Check received, claimant told the same day
+[ ] Disbursement report itemized and signed by the claimant before funds move
+[ ] Thirty-day clearing period observed
+[ ] Claimant's check sent tracked, signature required
+[ ] Satisfaction survey sent with the check`,
+  },
 };
 
 const KINDS = Object.values(SurplusTemplateKind) as SurplusTemplateKind[];
@@ -444,6 +538,55 @@ export class SurplusTemplatesService {
     };
   }
 
+  /** Active version per kind, for stamping documents and flagging stale ones. Zero is the built-in. */
+  async activeVersions(organizationId?: string | null): Promise<Record<string, number>> {
+    const active = await this.list(organizationId);
+    const out: Record<string, number> = {};
+    for (const k of active.kinds) out[k.kind] = k.version;
+    return out;
+  }
+
+  /**
+   * One of our standard documents for a claim, rendered from its template:
+   * the fee agreement, the POA, the assignment, the letter of direction,
+   * the notary sheet or the checklist. Same shape as a letter so the print
+   * page is shared. Nothing is recorded until the person marks it drafted,
+   * which stamps the version that was on the page.
+   */
+  async documentFor(leadId: string, rawDocKind: string, organizationId?: string | null, userId?: string | null) {
+    const docKind = (Object.values(SurplusDocumentKind) as string[]).includes(rawDocKind)
+      ? (rawDocKind as SurplusDocumentKind)
+      : null;
+    if (!docKind) throw new BadRequestException(`Unknown document kind: ${rawDocKind}`);
+    const kind = SURPLUS_DOCUMENT_TEMPLATE[docKind];
+    if (!kind) throw new BadRequestException(`${SURPLUS_DOCUMENT_LABEL[docKind]} is not generated from a template.`);
+    const built = await this.fieldsFor(leadId, organizationId, userId);
+    if (!built) return null;
+
+    const active = await this.list(organizationId);
+    const t = active.kinds.find((k) => k.kind === kind)!;
+    const body = renderTemplate(t.body, built.fields);
+    return {
+      docKind,
+      kind,
+      label: SURPLUS_DOCUMENT_LABEL[docKind],
+      version: t.version,
+      versionLabel: t.version ? `v${t.version}` : 'built-in',
+      hasText: !!t.body.trim(),
+      legal: SURPLUS_LEGAL_TEMPLATE_KINDS.includes(kind),
+      body,
+      unfilled: unfilledFields(body),
+      claimant: built.facts.claimant,
+      propertyAddress: built.facts.propertyAddress,
+      sender: {
+        companyName: DIG_DEEPER_BRAND.companyName,
+        phone: DIG_DEEPER_BRAND.phone,
+        website: DIG_DEEPER_BRAND.website || this.credibilityLinks().websiteUrl || null,
+      },
+      today: built.fields.today,
+    };
+  }
+
   /**
    * A letter for the print view. The recipient is the claimant unless an
    * heir is named, in which case the envelope goes to the heir's own address
@@ -579,6 +722,23 @@ export class SurplusTemplatesService {
         facts.surplusAmount != null
           ? `$${Math.round(facts.surplusAmount).toLocaleString('en-US')}`
           : null,
+      // A case with no number yet still has to render a document.
+      caseNumber: facts.caseNumber || 'not yet assigned',
+      today: new Date().toLocaleDateString('en-US', {
+        month: 'long',
+        day: 'numeric',
+        year: 'numeric',
+        timeZone: 'America/New_York',
+      }),
+      claimantAddress:
+        [
+          d.ownerMailingStreet,
+          d.ownerMailingCity,
+          [d.ownerMailingState, d.ownerMailingZip].filter(Boolean).join(' '),
+        ]
+          .filter(Boolean)
+          .join(', ') || null,
+      feeCapPct: facts.feeCap != null ? facts.feeCap : null,
     };
     // The bare website merge field reads as a link too once one exists.
     if (!DIG_DEEPER_BRAND.website && links.websiteUrl) fields.website = links.websiteUrl;

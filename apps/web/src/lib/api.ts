@@ -286,8 +286,19 @@ export const surplusAPI = {
     if (data.note) fd.append('note', data.note);
     return api.post(`/surplus/${id}/documents/${kind}`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
   },
-  setDocumentStatus: (id: string, kind: string, data: { status: string; note?: string | null; signedAt?: string | null }) =>
-    api.patch(`/surplus/${id}/documents/${kind}`, data),
+  setDocumentStatus: (
+    id: string,
+    kind: string,
+    data: {
+      status: string;
+      note?: string | null;
+      signedAt?: string | null;
+      templateKind?: string | null;
+      templateVersion?: number | null;
+    },
+  ) => api.patch(`/surplus/${id}/documents/${kind}`, data),
+  /** One of our standard documents rendered from its template, for the print page. */
+  documentDraft: (id: string, kind: string) => api.get(`/surplus/${id}/document-draft`, { params: { kind } }),
   documentUrl: (docId: string) => api.get(`/surplus/documents/${docId}/url`),
   removeDocument: (docId: string) => api.post(`/surplus/documents/${docId}/delete`),
 

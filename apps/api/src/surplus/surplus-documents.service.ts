@@ -20,6 +20,7 @@ import {
   SURPLUS_DOCUMENT_LABEL,
   SURPLUS_DOCUMENT_SET,
   SURPLUS_DOCUMENT_STATUS_LABEL,
+  SURPLUS_DOCUMENT_TEMPLATE,
   surplusDocumentCollected,
   surplusDocumentsRequired,
 } from '@fast-homes/shared';
@@ -54,6 +55,12 @@ export interface DocumentRow {
   size: number | null;
   templateKind: string | null;
   templateVersion: number | null;
+  /** Whether this kind is generated from a template at all. */
+  hasTemplate: boolean;
+  /** The template's active version, to compare against templateVersion. */
+  templateActiveVersion: number | null;
+  /** Built from a template that has since been revised. */
+  templateStale: boolean;
   signedAt: Date | null;
   notarizedAt: Date | null;
   filedAt: Date | null;
@@ -127,13 +134,25 @@ export class SurplusDocumentsService {
   checklist(
     rows: any[],
     facts: { deceased: boolean; isEntity: boolean },
+    /** Active template version per template kind, for the stale flag. */
+    activeVersions: Record<string, number> = {},
   ): Omit<DocumentChecklist, 'storageConfigured'> {
     const required = surplusDocumentsRequired(facts);
     const byKind = new Map<string, any>(rows.map((r) => [r.kind, r]));
     const documents: DocumentRow[] = (Object.values(SurplusDocumentKind) as SurplusDocumentKind[]).map((kind) => {
       const r = byKind.get(kind) || null;
       const status = r?.status || SurplusDocumentStatus.OUTSTANDING;
+      const templateKind = SURPLUS_DOCUMENT_TEMPLATE[kind] || null;
+      const activeVersion = templateKind ? activeVersions[templateKind] ?? null : null;
+      // Stale means the wording moved on after this copy was built. Only a
+      // copy that was built from a template can be stale; one uploaded from
+      // paper has no version to compare.
+      const templateStale =
+        !!templateKind && r?.templateVersion != null && activeVersion != null && r.templateVersion < activeVersion;
       return {
+        hasTemplate: !!templateKind,
+        templateActiveVersion: activeVersion,
+        templateStale,
         id: r?.id || null,
         kind,
         label: SURPLUS_DOCUMENT_LABEL[kind],
@@ -239,7 +258,14 @@ export class SurplusDocumentsService {
   async setStatus(
     leadId: string,
     rawKind: string,
-    input: { status: string; note?: string | null; signedAt?: string | null },
+    input: {
+      status: string;
+      note?: string | null;
+      signedAt?: string | null;
+      /** The template and version the document was built from, when it was. */
+      templateKind?: string | null;
+      templateVersion?: number | null;
+    },
     organizationId?: string | null,
     userId?: string | null,
   ) {
@@ -274,6 +300,8 @@ export class SurplusDocumentsService {
     const data: any = {
       status: input.status,
       note: input.note !== undefined ? (input.note || '').trim() || null : undefined,
+      ...(input.templateKind ? { templateKind: input.templateKind } : {}),
+      ...(input.templateVersion != null ? { templateVersion: Number(input.templateVersion) } : {}),
       ...this.stampFor(input.status, input.signedAt ? new Date(input.signedAt) : undefined),
     };
     const row = existing

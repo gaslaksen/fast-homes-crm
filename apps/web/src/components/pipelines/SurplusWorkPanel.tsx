@@ -219,6 +219,11 @@ interface PanelDocument {
   signedAt: string | null;
   note: string | null;
   updatedAt: string | null;
+  /** Generated from a template, and which version this copy came from. */
+  hasTemplate: boolean;
+  templateVersion: number | null;
+  templateActiveVersion: number | null;
+  templateStale: boolean;
 }
 
 const DOC_SET_LABEL: Record<string, string> = {
@@ -374,7 +379,35 @@ function DocumentsSection({
                       {doc.signedAt ? ` · signed ${fmtDate(doc.signedAt)}` : ''}
                     </span>
                   )}
+                  {/* Which wording this copy was built from, and whether the
+                      template has moved on since. A stale draft is fine to
+                      regenerate; a stale signed copy is a fact to know. */}
+                  {doc.templateVersion != null && (
+                    <span
+                      style={{ display: 'block', fontSize: 11, color: doc.templateStale ? 'var(--amber)' : 'var(--faint)' }}
+                    >
+                      from template v{doc.templateVersion}
+                      {doc.templateStale ? `, revised since (now v${doc.templateActiveVersion})` : ''}
+                    </span>
+                  )}
                 </span>
+                {doc.hasTemplate && (
+                  <button
+                    type="button"
+                    className="dc-wp-btn"
+                    style={{ padding: '3px 8px', fontSize: 11 }}
+                    onClick={() =>
+                      window.open(
+                        `/surplus-funds/document?lead=${encodeURIComponent(lead.id)}&kind=${encodeURIComponent(doc.kind)}`,
+                        '_blank',
+                        'noopener',
+                      )
+                    }
+                    title={doc.templateStale ? 'Regenerate from the current template' : 'Build this document from its template'}
+                  >
+                    {doc.templateStale ? 'Regenerate' : 'Draft'}
+                  </button>
+                )}
                 <select
                   className="dc-wp-sel"
                   value={doc.status}
