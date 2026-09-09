@@ -474,6 +474,25 @@ export const SURPLUS_DOCUMENT_STATUS_LABEL: Record<SurplusDocumentStatus, string
   [SurplusDocumentStatus.FILED]: 'Filed',
 };
 
+/** The status order, so "at least signed" is one comparison. */
+export const SURPLUS_DOCUMENT_STATUS_RANK: Record<SurplusDocumentStatus, number> = {
+  [SurplusDocumentStatus.OUTSTANDING]: 0,
+  [SurplusDocumentStatus.DRAFTED]: 1,
+  [SurplusDocumentStatus.SENT]: 2,
+  [SurplusDocumentStatus.RECEIVED]: 3,
+  [SurplusDocumentStatus.SIGNED]: 4,
+  [SurplusDocumentStatus.NOTARIZED]: 5,
+  [SurplusDocumentStatus.FILED]: 6,
+};
+
+export function surplusDocumentAtLeast(
+  status: string | null | undefined,
+  min: SurplusDocumentStatus,
+): boolean {
+  const have = SURPLUS_DOCUMENT_STATUS_RANK[(status || '') as SurplusDocumentStatus];
+  return have !== undefined && have >= SURPLUS_DOCUMENT_STATUS_RANK[min];
+}
+
 /** Statuses that mean the document is in hand, for the completeness line. */
 export function surplusDocumentCollected(status: string | null | undefined): boolean {
   return (

@@ -167,6 +167,23 @@ export interface SurplusPanelLead {
   docsRequired: string[];
   docsMissing: string[];
   docsComplete: boolean;
+  /** What each gated stage still needs, keyed by stage name. Empty means ready. */
+  stageBlocks: Record<string, string[]>;
+  /** The qualification gate and the compliance gate. */
+  entitlementVerified: boolean;
+  titleSearchComplete: boolean;
+  disclosures: Record<string, boolean>;
+  compliance: {
+    clear: boolean;
+    blocks: string[];
+    warns: string[];
+    rule: {
+      feeCap: number | null;
+      capConfidence: string;
+      requiredDisclosures: string[];
+      statuteRefs: string[];
+    } | null;
+  };
   /** What this county requires to file, off the county table. Null when not on the list. */
   countyInfo: {
     id: string;
@@ -1065,6 +1082,8 @@ function CaseTab({
   return (
     <div style={{ display: 'grid', gap: 16 }}>
       <StageControl lead={lead} onChanged={onChanged} say={say} />
+
+      <QualificationSection lead={lead} onChanged={onChanged} say={say} />
 
       <TasksSection lead={lead} currentUser={currentUser} onChanged={onChanged} say={say} />
 
@@ -2032,14 +2051,161 @@ function StageControl({
             </option>
           ))}
         </select>
-        {lead.stage !== 'Agreement Signed' && !lead.stage.match(/Notarized|Filed|Paid|Dead/) && (
-          <span style={{ fontSize: 11, color: 'var(--faint)' }}>
-            Agreement Signed needs entitlement verified, the notice date confirmed and the title search
-            complete.
-          </span>
-        )}
       </div>
+      <StageGateHint lead={lead} />
       <ContactLine lead={lead} />
+    </Section>
+  );
+}
+
+/** The next gated stage after the current one, or null past Claim Filed. */
+function nextGatedStage(stage: string): string | null {
+  const order = ['New', 'Contacted', 'Agreement Signed', 'Assignment Notarized', 'Claim Filed'];
+  const gated = ['Agreement Signed', 'Assignment Notarized', 'Claim Filed'];
+  const idx = order.indexOf(stage);
+  if (idx < 0) return null;
+  return gated.find((g) => order.indexOf(g) > idx) || null;
+}
+
+/**
+ * What the next stage still needs, said before a move is tried. The list
+ * comes from the same function the API refuses with, so the panel and the
+ * refusal can never disagree.
+ */
+function StageGateHint({ lead }: { lead: SurplusPanelLead }) {
+  const next = nextGatedStage(lead.stage);
+  if (!next) return null;
+  const missing = lead.stageBlocks?.[next] || [];
+  if (!missing.length) {
+    return (
+      <div style={{ fontSize: 11, color: 'var(--mint)' }}>
+        Ready for {next}.
+      </div>
+    );
+  }
+  return (
+    <div style={{ fontSize: 11, color: 'var(--faint)' }}>
+      <span style={{ color: 'var(--amber)', fontWeight: 600 }}>{next}</span> still needs {missing.join(', ')}.
+    </div>
+  );
+}
+
+const DISCLOSURE_LABEL: Record<string, string> = {
+  financial: 'Financial disclosure',
+  noAttorneyNeeded: 'No attorney needed',
+  allConsideration: 'All consideration stated',
+};
+
+/**
+ * The qualification gate and the compliance gate, as switches a person
+ * flips, with the rule that decides the fee cap shown beside them. These
+ * used to live on the old card and had no home in the panel, which left the
+ * Agreement Signed gate satisfiable by nobody. Nothing here is automatic:
+ * each is a fact somebody has checked.
+ */
+function QualificationSection({
+  lead,
+  onChanged,
+  say,
+}: {
+  lead: SurplusPanelLead;
+  onChanged: () => void;
+  say: (msg: string) => void;
+}) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const flip = async (key: string, patch: any, label: string) => {
+    setBusy(key);
+    try {
+      await surplusAPI.update(lead.id, patch);
+      say(label);
+      onChanged();
+    } catch (err: any) {
+      say(err?.response?.data?.message || 'That could not be saved.');
+    } finally {
+      setBusy(null);
+    }
+  };
+  const Toggle = ({
+    on,
+    label,
+    keyName,
+    patch,
+    note,
+  }: {
+    on: boolean;
+    label: string;
+    keyName: string;
+    patch: any;
+    note?: string;
+  }) => (
+    <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+      <input
+        type="checkbox"
+        checked={on}
+        disabled={busy === keyName}
+        onChange={() => flip(keyName, patch, `${label}: ${on ? 'cleared' : 'checked'}`)}
+        style={{ marginTop: 3, accentColor: 'var(--mint)' }}
+      />
+      <span>
+        <span style={{ fontWeight: 600, color: on ? 'var(--mint)' : 'inherit' }}>{label}</span>
+        {note && <span style={{ display: 'block', fontSize: 11, color: 'var(--faint)' }}>{note}</span>}
+      </span>
+    </label>
+  );
+  const rule = lead.compliance?.rule || null;
+  const disclosures = lead.disclosures || {};
+  return (
+    <Section
+      title="Before the agreement"
+      note={lead.compliance?.clear ? 'Compliance clear' : 'Compliance blocked'}
+    >
+      <Toggle
+        on={!!lead.entitlementVerified}
+        label="Entitlement verified"
+        keyName="entitlementVerified"
+        patch={{ entitlementVerified: !lead.entitlementVerified }}
+        note="The claimant is who the clerk noticed, and nobody else has a better claim."
+      />
+      <Toggle
+        on={!!lead.noticeConfirmed}
+        label="Notice date confirmed with the clerk"
+        keyName="noticeConfirmed"
+        patch={{ noticeConfirmed: !lead.noticeConfirmed }}
+        note="The claim window runs from the mailed notice, not the sale. Until confirmed the countdown is a guess."
+      />
+      <Toggle
+        on={!!lead.titleSearchComplete}
+        label="Title search complete"
+        keyName="titleSearchComplete"
+        patch={{ titleSearchComplete: !lead.titleSearchComplete }}
+        note="Every lien on the waterfall is known, so the net to the claimant is real."
+      />
+      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--dim)', letterSpacing: 0.3, marginTop: 6 }}>
+        Disclosures in the agreement
+      </div>
+      {(rule?.requiredDisclosures || Object.keys(DISCLOSURE_LABEL)).map((k) => (
+        <Toggle
+          key={k}
+          on={!!disclosures[k]}
+          label={DISCLOSURE_LABEL[k] || k}
+          keyName={`disclosure:${k}`}
+          patch={{ disclosures: { [k]: !disclosures[k] } }}
+        />
+      ))}
+      {rule && (
+        <div style={{ fontSize: 11.5, color: 'var(--dim)', marginTop: 4 }}>
+          Fee cap: {rule.feeCap != null ? `${rule.feeCap}% of total consideration` : 'none confirmed, sending is blocked'}
+          {rule.capConfidence !== 'confirmed' ? ` (${rule.capConfidence})` : ''}. {rule.statuteRefs?.join(', ')}.
+        </div>
+      )}
+      {lead.compliance?.blocks?.length > 0 && (
+        <div style={{ fontSize: 11.5, color: 'var(--red)' }}>
+          Blocks the send: {lead.compliance.blocks.join('; ')}.
+        </div>
+      )}
+      {lead.compliance?.warns?.length > 0 && (
+        <div style={{ fontSize: 11.5, color: 'var(--amber)' }}>{lead.compliance.warns.join('; ')}.</div>
+      )}
     </Section>
   );
 }
