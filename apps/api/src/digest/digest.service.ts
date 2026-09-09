@@ -429,6 +429,18 @@ export class DigestService {
     const surplusLive = surplusClaimants.filter((c) => c.workScore > 0);
     const surplusNotTapped = surplusLive.filter((c) => c.contactStatus === 'not_tapped').length;
     const surplusMissingChannel = surplusLive.filter((c) => (c.channelsMissing || []).length > 0).length;
+    // Signed claimants nobody has spoken to in a month. The course's rule
+    // is a monthly word whether or not there is news; the brief names who
+    // is owed one, longest silence first.
+    const surplusUpdateOverdueRows = surplusClaimants
+      .filter((c) => c.claimantUpdate?.overdue)
+      .sort((a, b) => (b.claimantUpdate?.daysSince ?? 9999) - (a.claimantUpdate?.daysSince ?? 9999));
+    const surplusUpdateOverdue = surplusUpdateOverdueRows.slice(0, 5).map((c) => ({
+      claimant: c.claimant,
+      stage: c.stage,
+      days: c.claimantUpdate?.daysSince ?? null,
+      url: this.leadUrl(c.id),
+    }));
     const surplusCallable = surplusClaimants.filter(
       (c) => c.workScore > 0 && c.cleanPhoneCount > 0 && !c.doNotCall,
     );
@@ -736,6 +748,8 @@ export class DigestService {
       surplusOverdueTotal: surplusOverdueTasks.length,
       surplusNotTapped,
       surplusMissingChannel,
+      surplusUpdateOverdue,
+      surplusUpdateOverdueTotal: surplusUpdateOverdueRows.length,
       feeds,
       yesterday,
       news,

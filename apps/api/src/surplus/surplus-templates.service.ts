@@ -23,6 +23,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   LeadSource,
+  SurplusStage,
   SurplusTemplateKind,
   SURPLUS_TEMPLATE_KIND_LABEL,
   SurplusDocumentKind,
@@ -58,6 +59,8 @@ export const MERGE_FIELDS: { key: string; meaning: string }[] = [
   { key: 'claimantAddress', meaning: "The claimant's mailing address on file, one line" },
   { key: 'feeCapPct', meaning: 'The fee cap for this case as a number, from the compliance rule (blank when unconfirmed)' },
   { key: 'notaryName', meaning: 'The mobile notary on the claim, for the instruction sheet' },
+  { key: 'recoveriesCount', meaning: 'How many claims have paid out, the milestone counter' },
+  { key: 'referenceLine', meaning: 'The nearest consented reference with their quote, or the recoveries count, or "References available on request". Never blank.' },
   { key: 'recipientName', meaning: 'Who the letter is addressed to: the claimant, or the heir or relative chosen' },
   { key: 'recipientAddress', meaning: 'Their mailing address, one line' },
 ];
@@ -194,6 +197,8 @@ Phone: {{callbackNumber}}, ask for {{callerName}}
 
 {{feeTerms}} There is no upfront cost and nothing to pay if nothing is recovered.
 
+{{referenceLine}}
+
 {{callerName}}
 {{companyName}}`,
   },
@@ -327,6 +332,10 @@ export interface ScriptFacts {
   companyName: string;
   website: string;
   window: string;
+  /** Claims paid out, the milestone counter. */
+  recoveriesCount: number;
+  /** The nearest consented reference, or the count, or an offer. Never blank. */
+  referenceLine: string;
 }
 
 @Injectable()
@@ -814,6 +823,37 @@ export class SurplusTemplatesService {
     const daysSearching = Math.max(1, Math.round((Date.now() - new Date(firstAttempt).getTime()) / 86_400_000));
 
     const rule = ruleFor(d.surplusType, d.fundLocation);
+    // The milestone and the nearest consented story, for the packet. The
+    // course names references as the strongest closer, so the line is never
+    // blank: it degrades from a named neighbour to a count to an offer.
+    const [recoveriesCount, reference] = await Promise.all([
+      this.prisma.surplusDetail.count({
+        where: { ...(organizationId ? { organizationId } : {}), stage: SurplusStage.PAID },
+      }),
+      this.prisma.surplusReference.findFirst({
+        where: { ...(organizationId ? { organizationId } : {}), consented: true },
+        orderBy: [{ updatedAt: 'desc' }],
+        ...(d.county
+          ? {
+              // Same county first; Prisma cannot order by "matches", so try
+              // the county and fall back below.
+              where: { ...(organizationId ? { organizationId } : {}), consented: true, county: { equals: d.county, mode: 'insensitive' } },
+            }
+          : {}),
+      }).then((r) =>
+        r ||
+        this.prisma.surplusReference.findFirst({
+          where: { ...(organizationId ? { organizationId } : {}), consented: true },
+          orderBy: [{ updatedAt: 'desc' }],
+        }),
+      ),
+    ]);
+    const referenceLine = reference
+      ? `${reference.claimantName}${reference.county ? ` in ${reference.county} County` : ''} let us share their story${reference.quote ? `: "${reference.quote}"` : '.'}`
+      : recoveriesCount > 0
+        ? `We have completed ${recoveriesCount} recover${recoveriesCount === 1 ? 'y' : 'ies'} for Florida families.`
+        : 'References available on request.';
+
     const feeTerms =
       rule && rule.feeCap != null
         ? `Our fee is contingent on recovery only, and by Florida law it is capped at ${rule.feeCap} percent of the surplus.`
@@ -839,6 +879,8 @@ export class SurplusTemplatesService {
       companyName: DIG_DEEPER_BRAND.companyName,
       website: DIG_DEEPER_BRAND.website || 'our website (coming soon)',
       window: '24 to 48 hours',
+      recoveriesCount,
+      referenceLine,
     };
     const links = this.credibilityLinks();
     const fields: Record<string, string | number | boolean | null> = {

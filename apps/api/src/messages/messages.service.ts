@@ -250,6 +250,7 @@ export class MessagesService {
       },
     });
     await this.syncThreadSummary(leadId, outboundBody, 'OUTBOUND');
+    await this.markSurplusUpdated(leadId, lead.source);
 
     try {
       const sent = await this.smsProvider.sendSms(to, from, outboundBody);
@@ -778,6 +779,18 @@ You decide the right approach based on the conversation flow.${photoNudge}`.trim
    * Tapped. First reply only: the date is when contact was first made, and a
    * later reply does not move it.
    */
+  /**
+   * We told a surplus claimant something: the monthly-update clock resets.
+   * Every outbound counts, whether or not there was news, because the
+   * course's point is that silence is what loses trust.
+   */
+  private async markSurplusUpdated(leadId: string, source?: string | null) {
+    if (source !== 'SURPLUS') return;
+    await this.prisma.surplusDetail
+      .updateMany({ where: { leadId }, data: { lastClaimantUpdateAt: new Date() } })
+      .catch((err: any) => this.logger.warn(`Could not stamp the claimant update on ${leadId}: ${err.message}`));
+  }
+
   private async markSurplusTapped(leadId: string, source?: string | null) {
     if (source !== 'SURPLUS') return;
     await this.prisma.surplusDetail
@@ -1479,6 +1492,7 @@ You decide the right approach based on the conversation flow.${photoNudge}`.trim
     }
 
     await this.syncThreadSummary(lead.id, bodyText || subject, 'OUTBOUND');
+    await this.markSurplusUpdated(lead.id, lead.source);
     await this.leadsService.recordTouch(lead.id, 'EMAIL_SENT', {
       description: `Email sent to ${recipient} from ${user.email}`,
       metadata: { subject, mailgunId: res.mailgunId, sentByUserId: userId },

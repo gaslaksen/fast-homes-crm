@@ -15,6 +15,7 @@ import { SurplusCredibilityService, CredibilityChannel } from './surplus-credibi
 import { SurplusCountiesService, ACCEPTED_METHOD_LABEL } from './surplus-counties.service';
 import { SurplusDocumentsService, DOCUMENT_MIME_TYPES, DOCUMENT_MAX_BYTES } from './surplus-documents.service';
 import { StorageService } from '../storage/storage.service';
+import { SurplusCadenceService } from './surplus-cadence.service';
 import { COMPLIANCE_RULES, DISCLOSURE_LABELS, FL_COUNTIES, SURPLUS_FLOOR } from './surplus-compliance';
 
 /**
@@ -74,6 +75,7 @@ export class SurplusController {
     private counties: SurplusCountiesService,
     private documents: SurplusDocumentsService,
     private storage: StorageService,
+    private cadence: SurplusCadenceService,
   ) {}
 
   private decodeToken(authHeader?: string): { userId?: string; organizationId?: string } {
@@ -107,6 +109,7 @@ export class SurplusController {
     @Query('contact') contact?: string,
     @Query('missingChannel') missingChannel?: string,
     @Query('letterDue') letterDue?: string,
+    @Query('updateOverdue') updateOverdue?: string,
     @Query('sort') sort?: string,
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
@@ -133,6 +136,7 @@ export class SurplusController {
       contact,
       missingChannel: missingChannel === 'true',
       letterDue: letterDue === 'true',
+      updateOverdue: updateOverdue === 'true',
       sort,
       page: num(page),
       pageSize: num(pageSize),
@@ -184,6 +188,15 @@ export class SurplusController {
   async callStats(@Headers('authorization') authHeader?: string) {
     const { organizationId } = this.decodeToken(authHeader);
     return this.surplus.callStats(organizationId);
+  }
+
+  /**
+   * Run the two follow-up cadences now rather than at 6:15. For checking
+   * the rule against real claims without waiting for the morning.
+   */
+  @Post('cadence/run')
+  async runCadence() {
+    return this.cadence.runOnce();
   }
 
   // ── Scripts and letters, versioned ────────────────────────────────────────
@@ -345,6 +358,57 @@ export class SurplusController {
     const out = await this.templates.documentFor(id, kind, organizationId, userId);
     if (!out) throw new BadRequestException('Surplus lead not found');
     return out;
+  }
+
+  // ── References ────────────────────────────────────────────────────────────
+
+  /** The reference library, with the recoveries counter. Optional county filter. */
+  @Get('references')
+  async listReferences(@Query('county') county?: string, @Headers('authorization') authHeader?: string) {
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.surplus.listReferences(organizationId, county || null);
+  }
+
+  /** Create or update the reference for one paid claimant. */
+  @Post(':id/reference')
+  async saveReference(
+    @Param('id') id: string,
+    @Body() body: { consented?: boolean; story?: string | null; quote?: string | null; amountRecovered?: number | null },
+    @Headers('authorization') authHeader?: string,
+  ) {
+    const { organizationId, userId } = this.decodeToken(authHeader);
+    return this.surplus.saveReference(id, body || {}, organizationId, userId);
+  }
+
+  // ── Disbursement ──────────────────────────────────────────────────────────
+
+  @Get(':id/expenses')
+  async listExpenses(@Param('id') id: string, @Headers('authorization') authHeader?: string) {
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.surplus.listExpenses(id, organizationId);
+  }
+
+  @Post(':id/expenses')
+  async addExpense(
+    @Param('id') id: string,
+    @Body() body: { kind: string; amount: number; incurredAt?: string | null; note?: string | null },
+    @Headers('authorization') authHeader?: string,
+  ) {
+    const { organizationId, userId } = this.decodeToken(authHeader);
+    return this.surplus.addExpense(id, body || ({} as any), organizationId, userId);
+  }
+
+  @Post('expenses/:expenseId/delete')
+  async removeExpense(@Param('expenseId') expenseId: string, @Headers('authorization') authHeader?: string) {
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.surplus.removeExpense(expenseId, organizationId);
+  }
+
+  /** The disbursement report for the print page: expenses, fee, both shares, the cap check. */
+  @Get(':id/disbursement-report')
+  async disbursementReport(@Param('id') id: string, @Headers('authorization') authHeader?: string) {
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.surplus.disbursementReport(id, organizationId);
   }
 
   /**

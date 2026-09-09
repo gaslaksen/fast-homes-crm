@@ -821,6 +821,12 @@ model SurplusDetail {
   // How the claim package went to the county and what the county said. A
   // tracking number is required to enter Claim Filed for anything sent by a
   // carrier, because "we mailed it" without one is the expensive mistake.
+  /// When we last told the claimant anything: an outbound text or email, a
+  /// letter, or a call where they picked up. The course's rule is at least
+  /// monthly once they have signed, whether or not there is news, and this
+  /// is what the monthly-update flag and task read.
+  lastClaimantUpdateAt DateTime?
+
   /// 'usps' | 'fedex' | 'ups' | 'in_person' | 'efile'
   submissionMethod            String?
   submissionTrackingNumber    String?
@@ -833,6 +839,48 @@ model SurplusDetail {
   /// What the county asked for after filing, if anything.
   additionalDocsRequested     String?
   expectedDisbursementAt      DateTime?
+
+  // ── The money coming back ─────────────────────────────────────────────────
+  // The course's disbursement: check received and the claimant told the same
+  // day, a report itemizing every expense with both shares shown, signed by
+  // the claimant before funds move, a thirty-day clearing period, and the
+  // claimant's check sent tracked.
+  checkReceivedAt DateTime?
+  checkAmount     Float?
+  /// The agreed fee as a percent of the check. Defaults to the rule's cap
+  /// when the report is first built; never above it.
+  feePercent      Float?
+  /// Whether itemized expenses come out of the claimant's share. Off by
+  /// default: they count as consideration under FS 45.033 and push the
+  /// total toward the cap.
+  expensesFromClaimantShare Boolean @default(false)
+  disbursementReportSignedAt DateTime?
+  /// Auto-set thirty days from the check received date.
+  clearingDueAt   DateTime?
+  checkSentAt     DateTime?
+  /// 'usps' | 'fedex' | 'ups' | 'in_person'
+  checkSentMethod         String?
+  checkSentTrackingNumber String?
+  /// The shares as they stood when the claimant's check went out, so the
+  /// record does not drift if a fee or an expense is edited afterwards.
+  claimantShare Float?
+  companyShare  Float?
+  /// Company share less the expenses it bore.
+  companyNet    Float?
+  /// Itemized on the disbursement report.
+  expenses SurplusExpense[]
+
+  // ── After the payout ──────────────────────────────────────────────────────
+  // The course's satisfaction survey goes out with the claimant's check, a
+  // small bonus rewards a quick return, and a returned survey is where the
+  // reference library is built from.
+  surveySentAt      DateTime?
+  surveyReturnedAt  DateTime?
+  surveyBonusPaidAt DateTime?
+  /// One to five.
+  surveyScore    Int?
+  surveyComments String?
+  reference      SurplusReference?
 
   // ── Why it died ───────────────────────────────────────────────────────────
   /// SurplusDeadReason. Required to enter Dead, so a retired claim always
@@ -2285,6 +2333,59 @@ model SurplusDocument {
 /// biweekly until somebody replies, and the third unanswered letter is what
 /// triggers the upgrade to Priority or FedEx. Neither can be counted off a
 /// single date.
+/// One expense on a surplus claim, itemized on the disbursement report:
+/// the title search, the notary, the filing fee, postage, a skip trace, the
+/// attorney. Kept per line so the report shows exactly what was spent and
+/// the company's net is real.
+/// A paid claimant who may be named to the next one. The course's strongest
+/// answer to "can I trust you" is somebody who was paid saying so, so every
+/// payout is asked, consent is recorded, and the library is searchable by
+/// county so the nearest story is the one that gets sent.
+model SurplusReference {
+  id              String        @id @default(cuid())
+  surplusDetailId String        @unique
+  surplusDetail   SurplusDetail @relation(fields: [surplusDetailId], references: [id], onDelete: Cascade)
+  organizationId  String?
+
+  claimantName    String
+  county          String?
+  state           String  @default("FL")
+  /// They agreed to be named to future claimants. Nothing is shared without it.
+  consented       Boolean @default(false)
+  consentedAt     DateTime?
+  /// What happened, in a few sentences, for the packet and the phone.
+  story           String? @db.Text
+  /// A line in their words, when they gave one.
+  quote           String?
+  amountRecovered Float?
+
+  createdByUserId String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId, consented, county])
+  @@map("surplus_references")
+}
+
+model SurplusExpense {
+  id              String        @id @default(cuid())
+  surplusDetailId String
+  surplusDetail   SurplusDetail @relation(fields: [surplusDetailId], references: [id], onDelete: Cascade)
+  organizationId  String?
+
+  /// 'title_search' | 'notary' | 'filing' | 'postage' | 'skip_trace' | 'attorney' | 'other'
+  kind       String
+  amount     Float
+  incurredAt DateTime
+  note       String?
+  createdByUserId String?
+
+  createdAt DateTime @default(now())
+
+  @@index([surplusDetailId])
+  @@map("surplus_expenses")
+}
+
 model SurplusLetter {
   id              String        @id @default(cuid())
   surplusDetailId String

@@ -300,6 +300,20 @@ export const surplusAPI = {
   ) => api.patch(`/surplus/${id}/documents/${kind}`, data),
   /** One of our standard documents rendered from its template, for the print page. */
   documentDraft: (id: string, kind: string) => api.get(`/surplus/${id}/document-draft`, { params: { kind } }),
+  // ── References ──
+  references: (county?: string | null) => api.get('/surplus/references', { params: { county: county || undefined } }),
+  saveReference: (
+    id: string,
+    data: { consented?: boolean; story?: string | null; quote?: string | null; amountRecovered?: number | null },
+  ) => api.post(`/surplus/${id}/reference`, data),
+
+  // ── Disbursement ──
+  expenses: (id: string) => api.get(`/surplus/${id}/expenses`),
+  addExpense: (id: string, data: { kind: string; amount: number; incurredAt?: string | null; note?: string | null }) =>
+    api.post(`/surplus/${id}/expenses`, data),
+  removeExpense: (expenseId: string) => api.post(`/surplus/expenses/${expenseId}/delete`),
+  /** The disbursement report: expenses, fee, both shares, the cap check. */
+  disbursementReport: (id: string) => api.get(`/surplus/${id}/disbursement-report`),
   /** The mobile notary packet: cover sheet plus the documents for this appointment. */
   notaryPacket: (id: string, includeAll = false) =>
     api.get(`/surplus/${id}/notary-packet`, { params: { includeAll: includeAll ? 'true' : undefined } }),

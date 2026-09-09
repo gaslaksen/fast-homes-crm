@@ -116,6 +116,8 @@ export interface SurplusListFilters {
   missingChannel?: boolean;
   /** Only claimants due their next letter under their cadence. */
   letterDue?: boolean;
+  /** Only signed claimants who have not heard from us in thirty days. */
+  updateOverdue?: boolean;
   /** 'notice' | 'surplus' | 'net' | 'tier' */
   sort?: string;
   page?: number;

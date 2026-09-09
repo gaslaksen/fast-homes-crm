@@ -411,7 +411,8 @@ describe('stageGateError', () => {
     const bare = { entitlementVerified: false, noticeConfirmed: false, titleSearchComplete: false };
     expect(stageGateError(bare, SurplusStage.CONTACTED)).toBeNull();
     expect(stageGateError(bare, SurplusStage.DEAD)).toBeNull();
-    expect(stageGateError(bare, SurplusStage.PAID)).toBeNull();
+    // Paid is gated now: the money does not move on a bare claim.
+    expect(stageGateError(bare, SurplusStage.PAID)).not.toBeNull();
   });
 
   it('passes Agreement Signed for a qualified claimant with the agreement marked signed', () => {
@@ -489,6 +490,41 @@ describe('stageGateError', () => {
     );
     expect(
       stageGateError(clean, SurplusStage.AWAITING_DISBURSEMENT, { ...filed, countyAcknowledgedAt: '2026-09-01' }),
+    ).toBeNull();
+  });
+
+  it('holds Check Received on the check and Paid on the signed report, the clearing, and the check out', () => {
+    const acknowledged = {
+      docs: signedUp,
+      docsMissing: [] as string[],
+      submissionMethod: 'efile',
+      countyAcknowledgedAt: '2026-08-01',
+    };
+    expect(stageGateError(clean, SurplusStage.CHECK_RECEIVED, acknowledged)).toBe(
+      'Check Received needs the check received date.',
+    );
+    const received = { ...acknowledged, checkReceivedAt: '2026-08-20' };
+    expect(stageGateError(clean, SurplusStage.CHECK_RECEIVED, received)).toBeNull();
+    expect(stageGateError(clean, SurplusStage.PAID, received)).toBe(
+      "Paid needs the claimant signing the disbursement report, the claimant's check sent.",
+    );
+    const farFuture = new Date(Date.now() + 10 * 86_400_000).toISOString();
+    expect(
+      stageGateError(clean, SurplusStage.PAID, {
+        ...received,
+        disbursementReportSignedAt: '2026-08-25',
+        clearingDueAt: farFuture,
+        checkSentAt: '2026-09-20',
+      }),
+    ).toBe('Paid needs the thirty-day clearing period to pass.');
+    const lastMonth = new Date(Date.now() - 10 * 86_400_000).toISOString();
+    expect(
+      stageGateError(clean, SurplusStage.PAID, {
+        ...received,
+        disbursementReportSignedAt: '2026-08-25',
+        clearingDueAt: lastMonth,
+        checkSentAt: '2026-09-20',
+      }),
     ).toBeNull();
   });
 

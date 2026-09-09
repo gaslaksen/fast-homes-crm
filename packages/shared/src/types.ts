@@ -312,6 +312,53 @@ export enum SurplusStage {
   DEAD = 'Dead',
 }
 
+/** What money gets spent on a surplus claim, itemized on the disbursement report. */
+export const SURPLUS_EXPENSE_KINDS: [string, string][] = [
+  ['title_search', 'Title search'],
+  ['notary', 'Mobile notary'],
+  ['filing', 'Filing fee'],
+  ['postage', 'Postage and courier'],
+  ['skip_trace', 'Skip trace'],
+  ['attorney', 'Attorney'],
+  ['other', 'Other'],
+];
+
+/**
+ * The disbursement arithmetic, in one place so the report, the row and the
+ * stats agree. Expenses come out of the company's share unless the
+ * agreement passes them to the claimant, in which case they count toward
+ * the Florida cap on total consideration alongside the fee.
+ */
+export function surplusDisbursement(input: {
+  checkAmount: number | null | undefined;
+  feePercent: number | null | undefined;
+  expensesTotal: number;
+  expensesFromClaimantShare: boolean;
+  capPct: number | null | undefined;
+}): {
+  gross: number;
+  fee: number;
+  expensesTotal: number;
+  claimantShare: number;
+  companyShare: number;
+  companyNet: number;
+  /** Fee plus any expenses passed to the claimant, as a percent of the check. */
+  considerationPct: number;
+  overCap: boolean;
+} {
+  const gross = Math.max(0, Number(input.checkAmount || 0));
+  const pct = Math.max(0, Number(input.feePercent || 0));
+  const fee = Math.round(gross * pct) / 100;
+  const expensesTotal = Math.max(0, Number(input.expensesTotal || 0));
+  const passed = input.expensesFromClaimantShare ? expensesTotal : 0;
+  const claimantShare = Math.max(0, Math.round((gross - fee - passed) * 100) / 100);
+  const companyShare = Math.round((fee + passed) * 100) / 100;
+  const companyNet = Math.round((companyShare - expensesTotal) * 100) / 100;
+  const considerationPct = gross > 0 ? Math.round(((fee + passed) / gross) * 10000) / 100 : 0;
+  const overCap = input.capPct != null && considerationPct > input.capPct + 1e-9;
+  return { gross, fee, expensesTotal, claimantShare, companyShare, companyNet, considerationPct, overCap };
+}
+
 /**
  * Why a claim was retired. Recorded, never deleted, so a county pull that
  * lists the case again is matched against a reason rather than a blank,
