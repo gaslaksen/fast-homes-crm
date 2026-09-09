@@ -451,6 +451,10 @@ export interface StageGateContext {
   complianceBlocks?: string[];
   /** Required document kinds not yet in hand, from the checklist. */
   docsMissing?: string[];
+  /** This county (or this case) needs an attorney to file. */
+  attorneyRequired?: boolean;
+  /** One is engaged on the case. */
+  attorneyEngaged?: boolean;
 }
 
 /** The three forward stages the gate guards, in order. Later ones inherit earlier requirements. */
@@ -504,11 +508,15 @@ export function stageRequirementsMissing(
     }
   }
 
-  // Claim Filed: provably complete, not assumed complete.
+  // Claim Filed: provably complete, not assumed complete, and where the
+  // county requires an attorney, one engaged to do the filing.
   if (idx >= 2) {
     for (const kind of ctx.docsMissing || []) {
       const l = SURPLUS_DOCUMENT_LABEL[kind as SurplusDocumentKind] || kind;
       if (!missing.some((m) => m.startsWith(l.toLowerCase()))) missing.push(`${l.toLowerCase()} in hand`);
+    }
+    if (ctx.attorneyRequired && !ctx.attorneyEngaged) {
+      missing.push('an attorney engaged, this county requires one to file');
     }
   }
 

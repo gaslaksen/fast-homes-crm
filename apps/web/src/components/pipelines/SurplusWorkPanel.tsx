@@ -169,6 +169,21 @@ export interface SurplusPanelLead {
   docsComplete: boolean;
   /** What each gated stage still needs, keyed by stage name. Empty means ready. */
   stageBlocks: Record<string, string[]>;
+  /** The attorney, where the county requires one, and the rule that follows. */
+  attorney: {
+    required: boolean | null;
+    requiredFrom: 'case' | 'county' | null;
+    name: string | null;
+    firm: string | null;
+    phone: string | null;
+    email: string | null;
+    source: string | null;
+    engagedAt: string | null;
+    notes: string | null;
+    engaged: boolean;
+  };
+  /** 'attorney' once one is engaged, 'clerk' otherwise. */
+  countyContactVia: 'attorney' | 'clerk';
   /** The mobile notary and where the appointment stands. */
   notary: {
     name: string | null;
@@ -478,6 +493,252 @@ function DocumentsSection({
           })}
         </div>
       ))}
+    </Section>
+  );
+}
+
+const ATTORNEY_SOURCES: [string, string][] = [
+  ['martindale', 'Martindale.com'],
+  ['lawyers_com', 'Lawyers.com'],
+  ['county_records', 'A prior overage case in county records'],
+  ['referral', 'Referral'],
+  ['other', 'Other'],
+];
+
+/**
+ * The attorney, where the county requires one, and the rule that follows
+ * from engaging one: every contact with the county and the court goes
+ * through them. The rule is printed on the case rather than remembered, so
+ * nobody rings the clerk by mistake, and the county follow-up tasks are
+ * addressed to the attorney the moment one is engaged.
+ */
+function AttorneySection({
+  lead,
+  onChanged,
+  say,
+}: {
+  lead: SurplusPanelLead;
+  onChanged: () => void;
+  say: (msg: string) => void;
+}) {
+  const a = lead.attorney || ({} as SurplusPanelLead['attorney']);
+  const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(a.name || '');
+  const [firm, setFirm] = useState(a.firm || '');
+  const [phone, setPhone] = useState(a.phone || '');
+  const [email, setEmail] = useState(a.email || '');
+  const [source, setSource] = useState(a.source || '');
+  const [notes, setNotes] = useState(a.notes || '');
+
+  useEffect(() => {
+    setEditing(false);
+    setName(a.name || '');
+    setFirm(a.firm || '');
+    setPhone(a.phone || '');
+    setEmail(a.email || '');
+    setSource(a.source || '');
+    setNotes(a.notes || '');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lead.id]);
+
+  const save = async (patch: any, done: string) => {
+    setBusy(true);
+    try {
+      await surplusAPI.update(lead.id, patch);
+      say(done);
+      onChanged();
+      return true;
+    } catch (err: any) {
+      say(err?.response?.data?.message || 'That could not be saved.');
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const field: React.CSSProperties = {
+    width: '100%',
+    boxSizing: 'border-box',
+    fontSize: 12.5,
+    padding: '6px 8px',
+    border: '1px solid var(--border)',
+    borderRadius: 6,
+    background: 'var(--surface2)',
+    color: 'inherit',
+  };
+  const lbl: React.CSSProperties = { fontSize: 11, color: 'var(--dim)' };
+
+  const requiredLabel =
+    a.required === null
+      ? 'not known'
+      : a.required
+        ? `yes${a.requiredFrom === 'county' ? ', per the county' : ', set on this case'}`
+        : `no${a.requiredFrom === 'county' ? ', per the county' : ', set on this case'}`;
+
+  return (
+    <Section
+      title="The attorney"
+      note={a.engaged ? `Engaged${a.engagedAt ? ` ${fmtDate(a.engagedAt)}` : ''}` : undefined}
+    >
+      {/* The rule, first and loud, because it is the thing that gets broken. */}
+      {a.engaged && (
+        <div
+          style={{
+            padding: '8px 10px',
+            borderRadius: 6,
+            background: 'var(--bg2)',
+            borderLeft: '3px solid var(--amber)',
+            fontSize: 12.5,
+          }}
+        >
+          <b style={{ color: 'var(--amber)' }}>All contact with the county and the court goes through {a.name || 'the attorney'}.</b>
+          <div style={{ fontSize: 11.5, color: 'var(--dim)', marginTop: 2 }}>
+            Do not ring the clerk about this claim. County follow-up tasks on this file are addressed to the attorney.
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, flexWrap: 'wrap' }}>
+        <span style={{ color: 'var(--dim)' }}>Required to file</span>
+        <span style={{ fontWeight: 600, color: a.required ? 'var(--amber)' : 'inherit' }}>{requiredLabel}</span>
+        <span style={{ display: 'inline-flex', gap: 4, marginLeft: 'auto' }}>
+          {([
+            [null, 'County default'],
+            [true, 'Yes'],
+            [false, 'No'],
+          ] as [boolean | null, string][]).map(([v, l]) => (
+            <button
+              key={String(v)}
+              type="button"
+              className={`dc-wp-btn${(a.requiredFrom === 'case' ? a.required : null) === v ? ' on' : ''}`}
+              style={{ padding: '3px 8px', fontSize: 11 }}
+              disabled={busy}
+              onClick={() => save({ attorneyRequired: v }, v === null ? 'Using the county answer' : `Attorney required: ${l.toLowerCase()}`)}
+              title={v === null ? "Use the county's answer from the county table" : `Override the county for this case: ${l.toLowerCase()}`}
+            >
+              {l}
+            </button>
+          ))}
+        </span>
+      </div>
+
+      {!editing ? (
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, fontSize: 13, flexWrap: 'wrap' }}>
+          <span style={{ color: 'var(--dim)' }}>Attorney</span>
+          <span style={{ fontWeight: 600, flex: 1 }}>
+            {a.name || <span style={{ color: 'var(--faint)', fontWeight: 400 }}>none on the case</span>}
+            {a.firm ? `, ${a.firm}` : ''}
+            {a.phone ? ` · ${a.phone}` : ''}
+            {a.email ? ` · ${a.email}` : ''}
+            {a.source ? (
+              <span style={{ fontSize: 11, color: 'var(--faint)', fontWeight: 400 }}>
+                {' '}
+                found via {ATTORNEY_SOURCES.find(([k]) => k === a.source)?.[1] || a.source}
+              </span>
+            ) : null}
+          </span>
+          <button type="button" className="dc-wp-btn" style={{ padding: '3px 8px', fontSize: 11 }} onClick={() => setEditing(true)}>
+            {a.name ? 'Edit' : 'Add attorney'}
+          </button>
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gap: 6, padding: 8, border: '1px solid var(--border)', borderRadius: 8 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+            <label style={lbl}>
+              Name
+              <input style={field} value={name} onChange={(e) => setName(e.target.value)} />
+            </label>
+            <label style={lbl}>
+              Firm
+              <input style={field} value={firm} onChange={(e) => setFirm(e.target.value)} />
+            </label>
+            <label style={lbl}>
+              Phone
+              <input style={field} value={phone} onChange={(e) => setPhone(e.target.value)} />
+            </label>
+            <label style={lbl}>
+              Email
+              <input style={field} value={email} onChange={(e) => setEmail(e.target.value)} />
+            </label>
+          </div>
+          <label style={lbl}>
+            Found on
+            <select style={field} value={source} onChange={(e) => setSource(e.target.value)}>
+              <option value="">Not recorded</option>
+              {ATTORNEY_SOURCES.map(([k, l]) => (
+                <option key={k} value={k}>
+                  {l}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label style={lbl}>
+            Notes
+            <input style={field} value={notes} placeholder="Fee, scope, anything to remember" onChange={(e) => setNotes(e.target.value)} />
+          </label>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <button type="button" className="dc-wp-btn" disabled={busy} onClick={() => setEditing(false)}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="dc-wp-btn on"
+              disabled={busy}
+              onClick={async () => {
+                const ok = await save(
+                  {
+                    attorneyName: name.trim() || null,
+                    attorneyFirm: firm.trim() || null,
+                    attorneyPhone: phone.trim() || null,
+                    attorneyEmail: email.trim() || null,
+                    attorneySource: source || null,
+                    attorneyNotes: notes.trim() || null,
+                  },
+                  'Attorney saved',
+                );
+                if (ok) setEditing(false);
+              }}
+            >
+              Save
+            </button>
+          </div>
+        </div>
+      )}
+
+      {a.name && !a.engagedAt && (
+        <div>
+          <button
+            type="button"
+            className="dc-wp-btn on"
+            disabled={busy}
+            onClick={() => {
+              if (!window.confirm(`Mark ${a.name} as engaged on this claim? From then on all county and court contact goes through them, and the open county tasks are re-addressed.`)) return;
+              save({ attorneyEngagedAt: new Date().toISOString() }, `${a.name} engaged. County contact now goes through them.`);
+            }}
+          >
+            Mark engaged
+          </button>
+        </div>
+      )}
+      {a.engagedAt && (
+        <div>
+          <button
+            type="button"
+            className="dc-wp-btn"
+            disabled={busy}
+            onClick={() => save({ attorneyEngagedAt: null }, 'Engagement cleared')}
+            title="Undo a mistaken mark. The attorney stays on the case."
+          >
+            Clear engagement
+          </button>
+        </div>
+      )}
+      {a.required && !a.engaged && (
+        <div style={{ fontSize: 11.5, color: 'var(--amber)' }}>
+          This county requires an attorney to file. Claim Filed stays closed until one is engaged.
+        </div>
+      )}
     </Section>
   );
 }
@@ -832,6 +1093,11 @@ function CountySection({ lead }: { lead: SurplusPanelLead }) {
         tone={c.attorneyRequired ? 'var(--amber)' : undefined}
         note={c.attorneyRequired ? 'Once an attorney is engaged, all contact with the county goes through them.' : undefined}
       />
+      {lead.countyContactVia === 'attorney' && (
+        <div style={{ fontSize: 11.5, color: 'var(--amber)', fontWeight: 600 }}>
+          Contact about this claim goes through {lead.attorney?.name || 'the attorney'}, not the clerk.
+        </div>
+      )}
       <Row k="Assignment of rights" v={c.assignmentPreference ? c.assignmentPreference : 'not asked'} />
       {(c.clerkContactName || c.clerkContactPhone || c.clerkContactEmail) && (
         <Row k="Clerk contact" v={[c.clerkContactName, c.clerkContactPhone, c.clerkContactEmail].filter(Boolean).join(' · ')} />
@@ -1508,6 +1774,8 @@ function CaseTab({
       <DocumentsSection lead={lead} onChanged={onChanged} say={say} />
 
       <NotarySection lead={lead} onChanged={onChanged} say={say} />
+
+      <AttorneySection lead={lead} onChanged={onChanged} say={say} />
 
       {/* Heirs lead for a deceased claimant, because they are the only people
           who can file. For a living one the section still appears once heirs
