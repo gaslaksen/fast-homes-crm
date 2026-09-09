@@ -26,6 +26,7 @@ import {
   governingPct,
   canQualify,
   stageGateError,
+  stageBlocks,
   complianceGate,
   SurplusFacts,
   queueOf,
@@ -396,27 +397,88 @@ describe('canQualify', () => {
 });
 
 describe('stageGateError', () => {
-  it('only guards Agreement Signed', () => {
+  const signedUp = { fee_agreement: 'signed', limited_poa: 'signed', assignment_of_rights: 'notarized' };
+
+  it('leaves the early and terminal stages alone', () => {
     const bare = { entitlementVerified: false, noticeConfirmed: false, titleSearchComplete: false };
     expect(stageGateError(bare, SurplusStage.CONTACTED)).toBeNull();
     expect(stageGateError(bare, SurplusStage.DEAD)).toBeNull();
-    expect(stageGateError(bare, SurplusStage.CLAIM_FILED)).toBeNull();
+    expect(stageGateError(bare, SurplusStage.PAID)).toBeNull();
   });
 
-  it('passes a qualified claimant', () => {
-    expect(stageGateError(clean, SurplusStage.AGREEMENT_SIGNED)).toBeNull();
+  it('passes Agreement Signed for a qualified claimant with the agreement marked signed', () => {
+    expect(stageGateError(clean, SurplusStage.AGREEMENT_SIGNED, { docs: { fee_agreement: 'signed' } })).toBeNull();
   });
 
-  it('names only what is missing', () => {
-    expect(stageGateError({ ...clean, noticeConfirmed: false }, SurplusStage.AGREEMENT_SIGNED)).toBe(
-      'Agreement Signed needs notice date confirmed.',
+  it('names only what is missing, qualification first, then the agreement', () => {
+    expect(
+      stageGateError({ ...clean, noticeConfirmed: false }, SurplusStage.AGREEMENT_SIGNED, {
+        docs: { fee_agreement: 'signed' },
+      }),
+    ).toBe('Agreement Signed needs notice date confirmed.');
+    expect(stageGateError(clean, SurplusStage.AGREEMENT_SIGNED)).toBe(
+      'Agreement Signed needs contingency fee agreement marked signed.',
+    );
+    expect(stageGateError(clean, SurplusStage.AGREEMENT_SIGNED, { docs: { fee_agreement: 'sent' } })).toBe(
+      'Agreement Signed needs contingency fee agreement marked signed.',
+    );
+  });
+
+  it('carries the compliance blocks into Agreement Signed', () => {
+    expect(
+      stageGateError(clean, SurplusStage.AGREEMENT_SIGNED, {
+        docs: { fee_agreement: 'signed' },
+        complianceBlocks: ['Missing disclosure: financial'],
+      }),
+    ).toBe('Agreement Signed needs compliance: Missing disclosure: financial.');
+  });
+
+  it('holds the fund source until the retention documents are signed', () => {
+    expect(
+      stageGateError(clean, SurplusStage.ASSIGNMENT_NOTARIZED, { docs: { fee_agreement: 'signed' } }),
+    ).toBe(
+      'Assignment Notarized needs limited power of attorney marked signed, assignment of rights marked notarized.',
     );
     expect(
-      stageGateError(
-        { ...clean, noticeConfirmed: false, titleSearchComplete: false },
-        SurplusStage.AGREEMENT_SIGNED,
-      ),
-    ).toBe('Agreement Signed needs notice date confirmed, title search complete.');
+      stageGateError(clean, SurplusStage.ASSIGNMENT_NOTARIZED, {
+        docs: { fee_agreement: 'signed', limited_poa: 'signed', assignment_of_rights: 'signed' },
+      }),
+    ).toBe('Assignment Notarized needs assignment of rights marked notarized.');
+    expect(stageGateError(clean, SurplusStage.ASSIGNMENT_NOTARIZED, { docs: signedUp })).toBeNull();
+  });
+
+  it('files nothing until every required document is in hand', () => {
+    expect(
+      stageGateError(clean, SurplusStage.CLAIM_FILED, {
+        docs: signedUp,
+        docsMissing: ['county_claim_form', 'photo_id'],
+      }),
+    ).toBe('Claim Filed needs county claim form in hand, photo id in hand.');
+    expect(stageGateError(clean, SurplusStage.CLAIM_FILED, { docs: signedUp, docsMissing: [] })).toBeNull();
+  });
+
+  it('is cumulative, so a jump from New to Claim Filed is checked against the whole order', () => {
+    const msg = stageGateError(
+      { entitlementVerified: false, noticeConfirmed: true, titleSearchComplete: true },
+      SurplusStage.CLAIM_FILED,
+      { docs: {}, docsMissing: ['fee_agreement'] },
+    );
+    expect(msg).toContain('entitlement verified');
+    expect(msg).toContain('contingency fee agreement marked signed');
+    expect(msg).toContain('limited power of attorney marked signed');
+    expect(msg).toContain('assignment of rights marked notarized');
+    // The fee agreement is named once, as "marked signed", not again as "in hand".
+    expect(msg!.match(/contingency fee agreement/g)!.length).toBe(1);
+  });
+
+  it('reports every gated stage at once for the panel', () => {
+    const blocks = stageBlocks(clean, { docs: { fee_agreement: 'signed' }, docsMissing: ['photo_id'] });
+    expect(blocks[SurplusStage.AGREEMENT_SIGNED]).toEqual([]);
+    expect(blocks[SurplusStage.ASSIGNMENT_NOTARIZED]).toEqual([
+      'limited power of attorney marked signed',
+      'assignment of rights marked notarized',
+    ]);
+    expect(blocks[SurplusStage.CLAIM_FILED]).toContain('photo id in hand');
   });
 });
 

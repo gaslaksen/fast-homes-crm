@@ -13,6 +13,10 @@ import {
   SurplusStage,
   SurplusTier,
   SurplusQueue,
+  SurplusDocumentKind,
+  SurplusDocumentStatus,
+  SURPLUS_DOCUMENT_LABEL,
+  surplusDocumentAtLeast,
 } from '@fast-homes/shared';
 import { CLAIM_STATUS_LABEL, CLAIM_STATUS_RANK, isWorkable } from './surplus-classify.util';
 import {
@@ -440,17 +444,103 @@ export function canQualify(lead: SurplusFacts): boolean {
  * on the card. A gate that one of two buttons skips is not a gate. Names the
  * missing items rather than the whole list, so the message says what to do.
  */
-export function stageGateError(
+export interface StageGateContext {
+  /** Document kind to its status, off the claim's document set. */
+  docs?: Record<string, string | null | undefined>;
+  /** What the compliance gate blocks on, from complianceGate(). */
+  complianceBlocks?: string[];
+  /** Required document kinds not yet in hand, from the checklist. */
+  docsMissing?: string[];
+}
+
+/** The three forward stages the gate guards, in order. Later ones inherit earlier requirements. */
+const GATED_STAGES: SurplusStage[] = [
+  SurplusStage.AGREEMENT_SIGNED,
+  SurplusStage.ASSIGNMENT_NOTARIZED,
+  SurplusStage.CLAIM_FILED,
+];
+
+/**
+ * What a stage needs before a claim can enter it. This is the course's
+ * signing order made mechanical: the claimant is retained (fee agreement,
+ * then the POA) before the fund source is disclosed and the assignment
+ * signed, and nothing is filed until every required document is in hand.
+ *
+ * Cumulative: Claim Filed needs everything Assignment Notarized needs, which
+ * needs everything Agreement Signed needs, so a jump from New straight to
+ * Claim Filed is checked against the whole list.
+ */
+export function stageRequirementsMissing(
   facts: Pick<SurplusFacts, 'entitlementVerified' | 'noticeConfirmed' | 'titleSearchComplete'>,
   next: SurplusStage,
-): string | null {
-  if (next !== SurplusStage.AGREEMENT_SIGNED) return null;
+  ctx: StageGateContext = {},
+): string[] {
+  const idx = GATED_STAGES.indexOf(next);
+  if (idx < 0) return [];
+  const docs = ctx.docs || {};
+  const at = (kind: SurplusDocumentKind, min: SurplusDocumentStatus) => surplusDocumentAtLeast(docs[kind], min);
+  const label = (kind: SurplusDocumentKind) => SURPLUS_DOCUMENT_LABEL[kind].toLowerCase();
   const missing: string[] = [];
+
+  // Agreement Signed: the qualification gate, the compliance gate, and the
+  // fee agreement itself marked signed. A signed agreement over the cap is
+  // void, so the compliance blocks stop the stage as well as the send.
   if (!facts.entitlementVerified) missing.push('entitlement verified');
   if (!facts.noticeConfirmed) missing.push('notice date confirmed');
   if (!facts.titleSearchComplete) missing.push('title search complete');
+  for (const b of ctx.complianceBlocks || []) missing.push(`compliance: ${b}`);
+  if (!at(SurplusDocumentKind.FEE_AGREEMENT, SurplusDocumentStatus.SIGNED)) {
+    missing.push(`${label(SurplusDocumentKind.FEE_AGREEMENT)} marked signed`);
+  }
+
+  // Assignment Notarized: retention documents signed before the fund source
+  // is disclosed, then the assignment itself notarized.
+  if (idx >= 1) {
+    if (!at(SurplusDocumentKind.LIMITED_POA, SurplusDocumentStatus.SIGNED)) {
+      missing.push(`${label(SurplusDocumentKind.LIMITED_POA)} marked signed`);
+    }
+    if (!at(SurplusDocumentKind.ASSIGNMENT_OF_RIGHTS, SurplusDocumentStatus.NOTARIZED)) {
+      missing.push(`${label(SurplusDocumentKind.ASSIGNMENT_OF_RIGHTS)} marked notarized`);
+    }
+  }
+
+  // Claim Filed: provably complete, not assumed complete.
+  if (idx >= 2) {
+    for (const kind of ctx.docsMissing || []) {
+      const l = SURPLUS_DOCUMENT_LABEL[kind as SurplusDocumentKind] || kind;
+      if (!missing.some((m) => m.startsWith(l.toLowerCase()))) missing.push(`${l.toLowerCase()} in hand`);
+    }
+  }
+
+  return Array.from(new Set(missing));
+}
+
+/**
+ * Why a stage change is refused, or null when it is allowed.
+ *
+ * One function for the single-card edit and the bulk restage, because the
+ * bulk path used to write the stage straight through and the gate only held
+ * on the card. A gate that one of two buttons skips is not a gate. Names the
+ * missing items rather than the whole list, so the message says what to do.
+ */
+export function stageGateError(
+  facts: Pick<SurplusFacts, 'entitlementVerified' | 'noticeConfirmed' | 'titleSearchComplete'>,
+  next: SurplusStage,
+  ctx: StageGateContext = {},
+): string | null {
+  const missing = stageRequirementsMissing(facts, next, ctx);
   if (!missing.length) return null;
-  return `Agreement Signed needs ${missing.join(', ')}.`;
+  return `${next} needs ${missing.join(', ')}.`;
+}
+
+/** The blocks for every gated stage at once, for the panel to show before a move is tried. */
+export function stageBlocks(
+  facts: Pick<SurplusFacts, 'entitlementVerified' | 'noticeConfirmed' | 'titleSearchComplete'>,
+  ctx: StageGateContext = {},
+): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const s of GATED_STAGES) out[s] = stageRequirementsMissing(facts, s, ctx);
+  return out;
 }
 
 // ─── The gate ───────────────────────────────────────────────────────────────

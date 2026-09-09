@@ -12,6 +12,7 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
+import { complianceGate } from './surplus.util';
 import {
   LeadSource,
   SurplusDocumentKind,
@@ -93,7 +94,24 @@ export class SurplusDocumentsService {
         sellerFirstName: true,
         sellerLastName: true,
         surplusDetail: {
-          select: { id: true, deceased: true, heirsRequired: true, claimantType: true, documents: true },
+          select: {
+          id: true,
+          deceased: true,
+          heirsRequired: true,
+          claimantType: true,
+          documents: true,
+          // For the compliance gate on sending the fee agreement.
+          surplusType: true,
+          fundLocation: true,
+          grossSurplus: true,
+          liens: true,
+          noticeDate: true,
+          noticeConfirmed: true,
+          certOfDisbursements: true,
+          totalConsideration: true,
+          licensedRepId: true,
+          disclosures: true,
+        },
         },
       },
     });
@@ -230,6 +248,29 @@ export class SurplusDocumentsService {
     const lead = await this.detailFor(leadId, organizationId);
     const d = lead.surplusDetail!;
     const existing = d.documents.find((x: any) => x.kind === kind) || null;
+
+    // The compliance gate guards the SEND of the fee agreement, which is the
+    // act that puts a contract in front of a claimant. A contract over the
+    // Florida cap or missing a required disclosure is void, so it does not
+    // go out. Recording that one was signed on paper is not blocked here;
+    // the stage gate refuses Agreement Signed with the same reasons.
+    if (kind === SurplusDocumentKind.FEE_AGREEMENT && input.status === SurplusDocumentStatus.SENT) {
+      const blocks = complianceGate({
+        surplusType: d.surplusType,
+        fundLocation: d.fundLocation,
+        grossSurplus: d.grossSurplus,
+        liens: (d.liens as any) || [],
+        noticeDate: d.noticeDate,
+        noticeConfirmed: d.noticeConfirmed,
+        certOfDisbursements: d.certOfDisbursements,
+        totalConsideration: d.totalConsideration,
+        licensedRepId: d.licensedRepId,
+        disclosures: (d.disclosures as Record<string, boolean>) || {},
+      }).blocks;
+      if (blocks.length) {
+        throw new BadRequestException(`The fee agreement cannot be sent: ${blocks.join('; ')}`);
+      }
+    }
     const data: any = {
       status: input.status,
       note: input.note !== undefined ? (input.note || '').trim() || null : undefined,

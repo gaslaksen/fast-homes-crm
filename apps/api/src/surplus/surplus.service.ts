@@ -56,6 +56,8 @@ import {
   governingPct,
   canQualify,
   stageGateError,
+  stageBlocks,
+  StageGateContext,
   complianceGate,
   SurplusLien,
 } from './surplus.util';
@@ -457,7 +459,7 @@ export class SurplusService {
       const after = { ...d, ...detailPatch };
       // The gate is checked against the values being written, so ticking the
       // last checkbox and advancing the stage in one request is allowed.
-      const refused = stageGateError(after, next);
+      const refused = stageGateError(after, next, this.gateContext(lead, after));
       if (refused) throw new BadRequestException(refused);
       detailPatch.stage = next;
       if (next === SurplusStage.DEAD) leadPatch.status = 'DEAD';
@@ -520,6 +522,40 @@ export class SurplusService {
     }
 
     return this.get(id, organizationId);
+  }
+
+  /**
+   * What the stage gate reads beyond the three qualification flags: the
+   * document statuses, the compliance blocks, and the required documents
+   * still missing. Built from the detail as it stands (or as it is about to
+   * be written), so the gate and the panel's explanation agree.
+   */
+  private gateContext(lead: any, d: any): StageGateContext {
+    const facts = {
+      surplusType: d.surplusType,
+      fundLocation: d.fundLocation,
+      claimantType: d.claimantType,
+      deceased: d.deceased,
+      heirsRequired: d.heirsRequired,
+      grossSurplus: d.grossSurplus,
+      liens: (d.liens as SurplusLien[]) || [],
+      noticeDate: d.noticeDate,
+      noticeConfirmed: d.noticeConfirmed,
+      certOfDisbursements: d.certOfDisbursements,
+      totalConsideration: d.totalConsideration,
+      licensedRepId: d.licensedRepId,
+      disclosures: (d.disclosures as Record<string, boolean>) || {},
+      entitlementVerified: d.entitlementVerified,
+      titleSearchComplete: d.titleSearchComplete,
+      stage: d.stage,
+    };
+    const checklist = this.documents.checklist(d.documents || [], {
+      deceased: isDeceased(facts),
+      isEntity: ENTITY_NAME.test(`${lead.sellerFirstName || ''} ${lead.sellerLastName || ''}`),
+    });
+    const docs: Record<string, string> = {};
+    for (const doc of d.documents || []) docs[doc.kind] = doc.status;
+    return { docs, complianceBlocks: complianceGate(facts).blocks, docsMissing: checklist.missing };
   }
 
   /**
@@ -730,17 +766,7 @@ export class SurplusService {
     const target = stageFromText(stage);
     const where: any = { id: { in: ids }, source: LeadSource.SURPLUS };
     if (organizationId) where.organizationId = organizationId;
-    const leads = await this.prisma.lead.findMany({
-      where,
-      select: {
-        id: true,
-        sellerFirstName: true,
-        sellerLastName: true,
-        surplusDetail: {
-          select: { entitlementVerified: true, noticeConfirmed: true, titleSearchComplete: true },
-        },
-      },
-    });
+    const leads = await this.prisma.lead.findMany({ where, include: LEAD_INCLUDE });
     if (!leads.length) return { updated: 0, stage: target };
 
     // The same gate as update(). Refused as a whole rather than moving the
@@ -749,7 +775,9 @@ export class SurplusService {
     const refused = leads
       .map((l) => ({
         name: `${l.sellerFirstName || ''} ${l.sellerLastName || ''}`.trim() || 'a claimant',
-        why: l.surplusDetail ? stageGateError(l.surplusDetail, target) : null,
+        why: l.surplusDetail
+          ? stageGateError(l.surplusDetail, target, this.gateContext(l, l.surplusDetail))
+          : null,
       }))
       .filter((r) => r.why);
     if (refused.length) {
@@ -1353,11 +1381,20 @@ export class SurplusService {
           deceased: isDeceased(facts),
           isEntity: ENTITY_NAME.test(`${lead.sellerFirstName || ''} ${lead.sellerLastName || ''}`),
         });
+        const docs: Record<string, string> = {};
+        for (const doc of d.documents || []) docs[doc.kind] = doc.status;
         return {
           documents: checklist.documents,
           docsRequired: checklist.required,
           docsMissing: checklist.missing,
           docsComplete: checklist.complete,
+          // What each gated stage still needs, so the panel can say it
+          // before a move is tried and the refusal never surprises anyone.
+          stageBlocks: stageBlocks(facts, {
+            docs,
+            complianceBlocks: gate.blocks,
+            docsMissing: checklist.missing,
+          }),
         };
       })(),
 
