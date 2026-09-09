@@ -26,9 +26,11 @@ import {
   SurplusTemplateKind,
   SURPLUS_TEMPLATE_KIND_LABEL,
   SurplusDocumentKind,
+  SurplusDocumentStatus,
   SURPLUS_DOCUMENT_LABEL,
   SURPLUS_DOCUMENT_TEMPLATE,
   SURPLUS_LEGAL_TEMPLATE_KINDS,
+  surplusDocumentAtLeast,
 } from '@fast-homes/shared';
 import { DIG_DEEPER_BRAND } from '../common/company.constants';
 import { ruleFor } from './surplus-compliance';
@@ -55,6 +57,7 @@ export const MERGE_FIELDS: { key: string; meaning: string }[] = [
   { key: 'today', meaning: "Today's date, for the top of a letter or document" },
   { key: 'claimantAddress', meaning: "The claimant's mailing address on file, one line" },
   { key: 'feeCapPct', meaning: 'The fee cap for this case as a number, from the compliance rule (blank when unconfirmed)' },
+  { key: 'notaryName', meaning: 'The mobile notary on the claim, for the instruction sheet' },
   { key: 'recipientName', meaning: 'Who the letter is addressed to: the claimant, or the heir or relative chosen' },
   { key: 'recipientAddress', meaning: 'Their mailing address, one line' },
 ];
@@ -203,6 +206,7 @@ Phone: {{callbackNumber}}, ask for {{callerName}}
     body: `MOBILE NOTARY INSTRUCTIONS
 
 Client: {{companyName}}, {{callbackNumber}}
+Notary: {{notaryName}}
 Signer: {{claimant}}
 Signing address: {{claimantAddress}}
 Matter: {{propertyAddress}}, {{county}} County, case {{caseNumber}}
@@ -588,6 +592,128 @@ export class SurplusTemplatesService {
   }
 
   /**
+   * The mobile notary packet: the instruction sheet as a cover, then each
+   * document the notary needs for THIS appointment, in signing order, each
+   * rendered from its template with the claim's names filled in.
+   *
+   * What goes in follows the course's rule. Until the retention documents
+   * (fee agreement and POA) are confirmed signed, the packet carries those
+   * two and withholds the assignment, because the assignment names the fund
+   * source and the claimant must be retained before seeing it. Once
+   * retention is confirmed, the packet carries the assignment, the letter
+   * of direction and the county form, and lists the retention pair as
+   * already signed. A team that signs everything at one appointment, with
+   * the notary keeping the order, can ask for the whole set.
+   */
+  async notaryPacket(
+    leadId: string,
+    opts: { includeAll?: boolean },
+    organizationId?: string | null,
+    userId?: string | null,
+  ) {
+    const built = await this.fieldsFor(leadId, organizationId, userId);
+    if (!built) return null;
+    const d = built.detail;
+    const docs = new Map<string, any>(((d as any).documents || []).map((x: any) => [x.kind, x]));
+    const at = (kind: SurplusDocumentKind, min: SurplusDocumentStatus) =>
+      surplusDocumentAtLeast(docs.get(kind)?.status, min);
+    const retentionConfirmed =
+      at(SurplusDocumentKind.FEE_AGREEMENT, SurplusDocumentStatus.SIGNED) &&
+      at(SurplusDocumentKind.LIMITED_POA, SurplusDocumentStatus.SIGNED);
+
+    // The signing order, and why each is in or out of this packet.
+    const order: { kind: SurplusDocumentKind; step: number; note: string }[] = [
+      { kind: SurplusDocumentKind.FEE_AGREEMENT, step: 1, note: 'Signed first and put away before anything else is shown.' },
+      { kind: SurplusDocumentKind.LIMITED_POA, step: 2, note: 'Signed once the fee agreement is put away.' },
+      { kind: SurplusDocumentKind.ASSIGNMENT_OF_RIGHTS, step: 3, note: 'Names the fund source. Notarize the signature.' },
+      { kind: SurplusDocumentKind.LETTER_OF_DIRECTION, step: 4, note: 'Signed after the assignment.' },
+      { kind: SurplusDocumentKind.COUNTY_CLAIM_FORM, step: 5, note: 'The county form, completed. Notarize where it calls for it.' },
+    ];
+    const active = await this.list(organizationId);
+    const items = [] as any[];
+    for (const o of order) {
+      const row = docs.get(o.kind) || null;
+      const status = row?.status || SurplusDocumentStatus.OUTSTANDING;
+      const alreadySigned = surplusDocumentAtLeast(status, SurplusDocumentStatus.SIGNED);
+      const isRetention = o.step <= 2;
+      let included: boolean;
+      let reason: string;
+      if (opts.includeAll) {
+        included = !alreadySigned;
+        reason = alreadySigned ? 'Already signed, not included.' : 'Included, whole set requested.';
+      } else if (!retentionConfirmed) {
+        included = isRetention && !alreadySigned;
+        reason = isRetention
+          ? alreadySigned
+            ? 'Already signed, not included.'
+            : 'Included: retention comes first.'
+          : 'Withheld until the fee agreement and the POA are confirmed signed.';
+      } else {
+        included = !isRetention && !alreadySigned;
+        reason = alreadySigned ? 'Already signed, not included.' : 'Included: retention is confirmed.';
+      }
+      const templateKind = SURPLUS_DOCUMENT_TEMPLATE[o.kind] || null;
+      const t = templateKind ? active.kinds.find((k) => k.kind === templateKind) || null : null;
+      const body = included && t ? renderTemplate(t.body, built.fields) : null;
+      items.push({
+        step: o.step,
+        kind: o.kind,
+        label: SURPLUS_DOCUMENT_LABEL[o.kind],
+        note: o.note,
+        status,
+        included,
+        reason,
+        templateKind,
+        version: t?.version ?? null,
+        versionLabel: t ? (t.version ? `v${t.version}` : 'built-in') : null,
+        hasText: !!t?.body.trim(),
+        body,
+        unfilled: body ? unfilledFields(body) : [],
+        /** The county form has no template: the stored county copy is attached instead. */
+        attachCountyForm: o.kind === SurplusDocumentKind.COUNTY_CLAIM_FORM,
+      });
+    }
+
+    const cover = active.kinds.find((k) => k.kind === SurplusTemplateKind.NOTARY_INSTRUCTIONS)!;
+    const coverBody = renderTemplate(cover.body, {
+      ...built.fields,
+      notaryName: (d as any).notaryName || '____________________',
+    });
+    const includedNames = items.filter((i) => i.included).map((i) => `${i.step}. ${i.label}`);
+
+    return {
+      claimant: built.facts.claimant,
+      propertyAddress: built.facts.propertyAddress,
+      county: built.facts.county,
+      retentionConfirmed,
+      includeAll: !!opts.includeAll,
+      notary: {
+        name: (d as any).notaryName || null,
+        phone: (d as any).notaryPhone || null,
+        email: (d as any).notaryEmail || null,
+        agreementSignedAt: (d as any).notaryAgreementSignedAt || null,
+        appointmentAt: (d as any).notaryAppointmentAt || null,
+        appointmentPlace: (d as any).notaryAppointmentPlace || null,
+      },
+      cover: {
+        version: cover.version,
+        versionLabel: cover.version ? `v${cover.version}` : 'built-in',
+        body: coverBody,
+        unfilled: unfilledFields(coverBody),
+      },
+      items,
+      /** For the cover sheet: exactly what is in this envelope. */
+      contents: includedNames,
+      sender: {
+        companyName: DIG_DEEPER_BRAND.companyName,
+        phone: DIG_DEEPER_BRAND.phone,
+        website: DIG_DEEPER_BRAND.website || this.credibilityLinks().websiteUrl || null,
+      },
+      today: built.fields.today,
+    };
+  }
+
+  /**
    * A letter for the print view. The recipient is the claimant unless an
    * heir is named, in which case the envelope goes to the heir's own address
    * off the filing and the body still names the claimant. Nothing is
@@ -668,7 +794,7 @@ export class SurplusTemplatesService {
         ...(organizationId ? { organizationId } : {}),
       },
       include: {
-        surplusDetail: true,
+        surplusDetail: { include: { documents: true } },
         activities: {
           where: { type: 'CALL_PLACED' },
           orderBy: { createdAt: 'asc' },

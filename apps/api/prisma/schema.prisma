@@ -817,6 +817,24 @@ model SurplusDetail {
   /// its next letter once the last one is older than this.
   letterCadenceDays Int?
 
+  // ── The notary ────────────────────────────────────────────────────────────
+  // The course's rule: the notary signs the instruction sheet BEFORE any
+  // paperwork goes to the claimant or an appointment is booked, so the
+  // document list, the payment and the signing order are locked in advance.
+  notaryName   String?
+  notaryPhone  String?
+  notaryEmail  String?
+  /// '123notary' | 'notaryrotary' | 'other'
+  notarySource String?
+  notaryNotes  String?
+  /// The gate: no appointment until this is set.
+  notaryAgreementSignedAt DateTime?
+  notaryAppointmentAt     DateTime?
+  notaryAppointmentPlace  String?
+  /// The notary reported every document signed in the printed order, and the
+  /// fee agreement was put away before the assignment was presented.
+  notarySignedInOrderAt   DateTime?
+
   /// When the claimant first responded through any channel: answered a call
   /// and it was them, texted back, or emailed back. The course's Tapped / Not
   /// Tapped line. Set by the channel that heard from them, never ticked by
