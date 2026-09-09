@@ -13,6 +13,7 @@
 
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { StorageService } from '../storage/storage.service';
 import { FL_COUNTIES, FL_COUNTY_LINKS, RULE_MAX_AGE_DAYS } from './surplus-compliance';
 
 export const ACCEPTED_METHODS = ['usps', 'fedex', 'ups', 'in_person', 'efile'] as const;
@@ -49,6 +50,8 @@ export interface CountyRow {
   courtRecordsUrl: string | null;
   surplusListUrl: string | null;
   claimFormUrl: string | null;
+  /** The stored copy of the county's form, when one has been uploaded. */
+  claimFormFile: { name: string } | null;
   assignmentPreference: string | null;
   acceptedMethods: string[];
   signatureRequired: boolean | null;
@@ -69,7 +72,48 @@ export interface CountyRow {
 
 @Injectable()
 export class SurplusCountiesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private storage: StorageService,
+  ) {}
+
+  /** Store the county's own claim form, replacing any earlier upload. */
+  async uploadClaimForm(
+    id: string,
+    file: { buffer: Buffer; originalname: string; mimetype: string; size: number },
+    organizationId?: string | null,
+  ) {
+    const row = await this.prisma.surplusCounty.findFirst({ where: { id, organizationId: organizationId || null } });
+    if (!row) throw new BadRequestException('County not found');
+    if (file.mimetype !== 'application/pdf' && !/\.pdf$/i.test(file.originalname)) {
+      throw new BadRequestException('The claim form should be a PDF.');
+    }
+    const key = this.storage.keyFor(['surplus-counties', row.organizationId, row.id, 'claim-form'], file.originalname);
+    await this.storage.put(key, file.buffer, 'application/pdf');
+    if (row.claimFormKey && row.claimFormKey !== key) await this.storage.remove(row.claimFormKey);
+    const saved = await this.prisma.surplusCounty.update({
+      where: { id: row.id },
+      data: { claimFormKey: key, claimFormName: file.originalname },
+    });
+    return this.toRow(saved);
+  }
+
+  async claimFormUrl(id: string, organizationId?: string | null): Promise<{ url: string; fileName: string | null }> {
+    const row = await this.prisma.surplusCounty.findFirst({ where: { id, organizationId: organizationId || null } });
+    if (!row?.claimFormKey) throw new BadRequestException('No claim form has been uploaded for this county.');
+    return { url: await this.storage.signedUrl(row.claimFormKey, row.claimFormName), fileName: row.claimFormName };
+  }
+
+  async removeClaimForm(id: string, organizationId?: string | null) {
+    const row = await this.prisma.surplusCounty.findFirst({ where: { id, organizationId: organizationId || null } });
+    if (!row) throw new BadRequestException('County not found');
+    if (row.claimFormKey) await this.storage.remove(row.claimFormKey);
+    const saved = await this.prisma.surplusCounty.update({
+      where: { id: row.id },
+      data: { claimFormKey: null, claimFormName: null },
+    });
+    return this.toRow(saved);
+  }
 
   /** Make sure every county in the code list has a row for this org. */
   private async ensureSeeded(organizationId: string | null) {
@@ -172,7 +216,7 @@ export class SurplusCountiesService {
       ? (Date.now() - new Date(r.lastVerifiedAt).getTime()) / 86_400_000
       : Infinity;
     const unknowns: string[] = [];
-    if (!r.claimFormUrl) unknowns.push('claim form');
+    if (!r.claimFormUrl && !r.claimFormKey) unknowns.push('claim form');
     if (!r.acceptedMethods) unknowns.push('how claims are submitted');
     if (r.signatureRequired == null) unknowns.push('whether a signature is required');
     if (r.attorneyRequired == null) unknowns.push('whether an attorney is required');
@@ -185,6 +229,7 @@ export class SurplusCountiesService {
       courtRecordsUrl: r.courtRecordsUrl || null,
       surplusListUrl: r.surplusListUrl || null,
       claimFormUrl: r.claimFormUrl || null,
+      claimFormFile: r.claimFormKey ? { name: r.claimFormName || 'claim form' } : null,
       assignmentPreference: r.assignmentPreference || null,
       acceptedMethods: r.acceptedMethods ? String(r.acceptedMethods).split(',').filter(Boolean) : [],
       signatureRequired: r.signatureRequired ?? null,

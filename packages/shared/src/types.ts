@@ -389,6 +389,122 @@ export const SURPLUS_TEMPLATE_KIND_LABEL: Record<SurplusTemplateKind, string> = 
   [SurplusTemplateKind.NOTARY_INSTRUCTIONS]: 'Notary instructions',
 };
 
+/**
+ * Every document a surplus claim can carry, in three sets: ours (the
+ * templates we sign the claimant on), the county's (its own claim form), and
+ * the claimant's (what they hand us). The set decides who produces it; the
+ * kind decides where it sits in the signing order.
+ */
+export enum SurplusDocumentKind {
+  FEE_AGREEMENT = 'fee_agreement',
+  LIMITED_POA = 'limited_poa',
+  ASSIGNMENT_OF_RIGHTS = 'assignment_of_rights',
+  LETTER_OF_DIRECTION = 'letter_of_direction',
+  NOTARY_AGREEMENT = 'notary_agreement',
+  CLAIMS_CHECKLIST = 'claims_checklist',
+  COUNTY_CLAIM_FORM = 'county_claim_form',
+  PHOTO_ID = 'photo_id',
+  W9 = 'w9',
+  PROOF_OF_OWNERSHIP = 'proof_of_ownership',
+  DEATH_CERTIFICATE = 'death_certificate',
+  LETTERS_OF_ADMINISTRATION = 'letters_of_administration',
+  ENTITY_DOCUMENTS = 'entity_documents',
+  TITLE_SEARCH = 'title_search',
+}
+
+export type SurplusDocumentSet = 'ours' | 'county' | 'claimant';
+
+export const SURPLUS_DOCUMENT_SET: Record<SurplusDocumentKind, SurplusDocumentSet> = {
+  [SurplusDocumentKind.FEE_AGREEMENT]: 'ours',
+  [SurplusDocumentKind.LIMITED_POA]: 'ours',
+  [SurplusDocumentKind.ASSIGNMENT_OF_RIGHTS]: 'ours',
+  [SurplusDocumentKind.LETTER_OF_DIRECTION]: 'ours',
+  [SurplusDocumentKind.NOTARY_AGREEMENT]: 'ours',
+  [SurplusDocumentKind.CLAIMS_CHECKLIST]: 'ours',
+  [SurplusDocumentKind.COUNTY_CLAIM_FORM]: 'county',
+  [SurplusDocumentKind.PHOTO_ID]: 'claimant',
+  [SurplusDocumentKind.W9]: 'claimant',
+  [SurplusDocumentKind.PROOF_OF_OWNERSHIP]: 'claimant',
+  [SurplusDocumentKind.DEATH_CERTIFICATE]: 'claimant',
+  [SurplusDocumentKind.LETTERS_OF_ADMINISTRATION]: 'claimant',
+  [SurplusDocumentKind.ENTITY_DOCUMENTS]: 'claimant',
+  [SurplusDocumentKind.TITLE_SEARCH]: 'ours',
+};
+
+export const SURPLUS_DOCUMENT_LABEL: Record<SurplusDocumentKind, string> = {
+  [SurplusDocumentKind.FEE_AGREEMENT]: 'Contingency fee agreement',
+  [SurplusDocumentKind.LIMITED_POA]: 'Limited power of attorney',
+  [SurplusDocumentKind.ASSIGNMENT_OF_RIGHTS]: 'Assignment of rights',
+  [SurplusDocumentKind.LETTER_OF_DIRECTION]: 'Letter of direction',
+  [SurplusDocumentKind.NOTARY_AGREEMENT]: 'Mobile notary agreement',
+  [SurplusDocumentKind.CLAIMS_CHECKLIST]: 'Claims checklist',
+  [SurplusDocumentKind.COUNTY_CLAIM_FORM]: 'County claim form',
+  [SurplusDocumentKind.PHOTO_ID]: 'Photo ID',
+  [SurplusDocumentKind.W9]: 'W-9',
+  [SurplusDocumentKind.PROOF_OF_OWNERSHIP]: 'Deed or proof of ownership',
+  [SurplusDocumentKind.DEATH_CERTIFICATE]: 'Death certificate',
+  [SurplusDocumentKind.LETTERS_OF_ADMINISTRATION]: 'Letters of administration',
+  [SurplusDocumentKind.ENTITY_DOCUMENTS]: 'Entity documents',
+  [SurplusDocumentKind.TITLE_SEARCH]: 'Title search',
+};
+
+/**
+ * Where a document stands. Ordered: a later status implies the earlier
+ * ones, so "signed" counts as collected for the checklist.
+ */
+export enum SurplusDocumentStatus {
+  OUTSTANDING = 'outstanding',
+  /** Prepared by us, not yet in front of anyone. */
+  DRAFTED = 'drafted',
+  SENT = 'sent',
+  /** Handed to us by the claimant or the county. Collected, nothing to sign. */
+  RECEIVED = 'received',
+  SIGNED = 'signed',
+  NOTARIZED = 'notarized',
+  FILED = 'filed',
+}
+
+export const SURPLUS_DOCUMENT_STATUS_LABEL: Record<SurplusDocumentStatus, string> = {
+  [SurplusDocumentStatus.OUTSTANDING]: 'Outstanding',
+  [SurplusDocumentStatus.DRAFTED]: 'Drafted',
+  [SurplusDocumentStatus.SENT]: 'Sent',
+  [SurplusDocumentStatus.RECEIVED]: 'Received',
+  [SurplusDocumentStatus.SIGNED]: 'Signed',
+  [SurplusDocumentStatus.NOTARIZED]: 'Notarized',
+  [SurplusDocumentStatus.FILED]: 'Filed',
+};
+
+/** Statuses that mean the document is in hand, for the completeness line. */
+export function surplusDocumentCollected(status: string | null | undefined): boolean {
+  return (
+    status === SurplusDocumentStatus.RECEIVED ||
+    status === SurplusDocumentStatus.SIGNED ||
+    status === SurplusDocumentStatus.NOTARIZED ||
+    status === SurplusDocumentStatus.FILED
+  );
+}
+
+/**
+ * Which documents a given claim needs before it can be filed, per the
+ * course's standard set. Estate and entity documents only when the claim is
+ * one; the notary agreement and checklist are ours to keep, not to file.
+ */
+export function surplusDocumentsRequired(facts: { deceased: boolean; isEntity: boolean }): SurplusDocumentKind[] {
+  const required = [
+    SurplusDocumentKind.FEE_AGREEMENT,
+    SurplusDocumentKind.LIMITED_POA,
+    SurplusDocumentKind.ASSIGNMENT_OF_RIGHTS,
+    SurplusDocumentKind.LETTER_OF_DIRECTION,
+    SurplusDocumentKind.COUNTY_CLAIM_FORM,
+    SurplusDocumentKind.PHOTO_ID,
+  ];
+  if (facts.deceased) {
+    required.push(SurplusDocumentKind.DEATH_CERTIFICATE, SurplusDocumentKind.LETTERS_OF_ADMINISTRATION);
+  }
+  if (facts.isEntity) required.push(SurplusDocumentKind.ENTITY_DOCUMENTS);
+  return required;
+}
+
 /** The Big Four from the course, plus the deferral and a catch-all. */
 export enum SurplusObjection {
   WHO_ARE_YOU = 'who_are_you',

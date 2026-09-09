@@ -13,12 +13,27 @@ import { SurplusSkiptraceService } from './surplus-skiptrace.service';
 import { SurplusTemplatesService } from './surplus-templates.service';
 import { SurplusCredibilityService, CredibilityChannel } from './surplus-credibility.service';
 import { SurplusCountiesService, ACCEPTED_METHOD_LABEL } from './surplus-counties.service';
+import { SurplusDocumentsService, DOCUMENT_MIME_TYPES, DOCUMENT_MAX_BYTES } from './surplus-documents.service';
+import { StorageService } from '../storage/storage.service';
 import { COMPLIANCE_RULES, DISCLOSURE_LABELS, FL_COUNTIES, SURPLUS_FLOOR } from './surplus-compliance';
 
 /**
  * A probate filing upload. PDFs only and capped, because this goes straight to
  * a vision model: a wrong file type wastes a call and a huge one fails halfway.
  */
+/** A claim document: scans and photos of paper, capped at 20 MB. */
+const DOCUMENT_UPLOAD_OPTIONS = {
+  storage: memoryStorage(),
+  fileFilter: (_req: any, file: any, cb: any) => {
+    if (DOCUMENT_MIME_TYPES.includes(file.mimetype) || /\.(pdf|jpe?g|png|heic|webp)$/i.test(file.originalname)) {
+      cb(null, true);
+    } else {
+      cb(new BadRequestException('Upload a PDF or an image (JPEG, PNG, HEIC, WebP)'), false);
+    }
+  },
+  limits: { fileSize: DOCUMENT_MAX_BYTES },
+};
+
 const PDF_UPLOAD_OPTIONS = {
   storage: memoryStorage(),
   fileFilter: (_req: any, file: any, cb: any) => {
@@ -57,6 +72,8 @@ export class SurplusController {
     private templates: SurplusTemplatesService,
     private credibility: SurplusCredibilityService,
     private counties: SurplusCountiesService,
+    private documents: SurplusDocumentsService,
+    private storage: StorageService,
   ) {}
 
   private decodeToken(authHeader?: string): { userId?: string; organizationId?: string } {
@@ -243,6 +260,88 @@ export class SurplusController {
   ) {
     const { organizationId } = this.decodeToken(authHeader);
     return this.counties.update(countyId, body || {}, organizationId);
+  }
+
+  /** The county's own claim form, stored. PDF only. */
+  @Post('counties/:countyId/claim-form')
+  @UseInterceptors(FileInterceptor('file', PDF_UPLOAD_OPTIONS))
+  async uploadCountyForm(
+    @Param('countyId') countyId: string,
+    @UploadedFile() file: Express.Multer.File,
+    @Headers('authorization') authHeader?: string,
+  ) {
+    if (!file) throw new BadRequestException('No file uploaded');
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.counties.uploadClaimForm(countyId, file, organizationId);
+  }
+
+  @Get('counties/:countyId/claim-form/url')
+  async countyFormUrl(@Param('countyId') countyId: string, @Headers('authorization') authHeader?: string) {
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.counties.claimFormUrl(countyId, organizationId);
+  }
+
+  @Post('counties/:countyId/claim-form/delete')
+  async removeCountyForm(@Param('countyId') countyId: string, @Headers('authorization') authHeader?: string) {
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.counties.removeClaimForm(countyId, organizationId);
+  }
+
+  // ── Documents ─────────────────────────────────────────────────────────────
+
+  /** Whether files can be stored at all, for the settings page and the panel. */
+  @Get('storage/status')
+  async storageStatus() {
+    return { configured: this.storage.configured(), ...(await this.storage.ping()) };
+  }
+
+  /** The document checklist for one claim, with what is still missing. */
+  @Get(':id/documents')
+  async listDocuments(@Param('id') id: string, @Headers('authorization') authHeader?: string) {
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.documents.list(id, organizationId);
+  }
+
+  /** Attach a file to one document kind. Replaces any file already on it. */
+  @Post(':id/documents/:kind')
+  @UseInterceptors(FileInterceptor('file', DOCUMENT_UPLOAD_OPTIONS))
+  async uploadDocument(
+    @Param('id') id: string,
+    @Param('kind') kind: string,
+    @UploadedFile() file: Express.Multer.File,
+    @Body() body: { status?: string; note?: string },
+    @Headers('authorization') authHeader?: string,
+  ) {
+    if (!file) throw new BadRequestException('No file uploaded');
+    const { organizationId, userId } = this.decodeToken(authHeader);
+    return this.documents.upload(id, kind, file, body || {}, organizationId, userId);
+  }
+
+  /** Move a document's status without a file: ticked from paper. */
+  @Patch(':id/documents/:kind')
+  async setDocumentStatus(
+    @Param('id') id: string,
+    @Param('kind') kind: string,
+    @Body() body: { status: string; note?: string | null; signedAt?: string | null },
+    @Headers('authorization') authHeader?: string,
+  ) {
+    if (!body?.status) throw new BadRequestException('status is required');
+    const { organizationId, userId } = this.decodeToken(authHeader);
+    return this.documents.setStatus(id, kind, body, organizationId, userId);
+  }
+
+  /** A five-minute link to the file itself. */
+  @Get('documents/:docId/url')
+  async documentUrl(@Param('docId') docId: string, @Headers('authorization') authHeader?: string) {
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.documents.signedUrl(docId, organizationId);
+  }
+
+  /** Detach the file and reset the checklist entry to outstanding. */
+  @Post('documents/:docId/delete')
+  async removeDocument(@Param('docId') docId: string, @Headers('authorization') authHeader?: string) {
+    const { organizationId, userId } = this.decodeToken(authHeader);
+    return this.documents.remove(docId, organizationId, userId);
   }
 
   /** The answers were just checked with the clerk. Resets the 180-day clock. */

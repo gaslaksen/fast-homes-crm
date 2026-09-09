@@ -66,6 +66,7 @@ import {
 } from './surplus-compliance';
 import { SurplusLeadInput, SurplusListFilters, SurplusPhoneInput } from './surplus.types';
 import { SurplusCountiesService, CountyRow } from './surplus-counties.service';
+import { SurplusDocumentsService } from './surplus-documents.service';
 
 /** What toRow needs beyond the lead: per-request lookups fetched once. */
 interface RowContext {
@@ -88,6 +89,7 @@ const LEAD_INCLUDE = {
     include: {
       heirs: true,
       letters: { orderBy: { mailedAt: 'desc' as const }, take: 10 },
+      documents: true,
     },
   },
   tasks: {
@@ -171,6 +173,7 @@ export class SurplusService {
   constructor(
     private prisma: PrismaService,
     private counties: SurplusCountiesService,
+    private documents: SurplusDocumentsService,
   ) {}
 
   // ─── Writing ──────────────────────────────────────────────────────────────
@@ -1342,6 +1345,21 @@ export class SurplusService {
       canQualify: canQualify(facts),
       disclosures: facts.disclosures,
       docs: (d.docs as Record<string, boolean>) || {},
+      // The document set: what this claim needs, what is in hand, what is
+      // missing. Computed against the claim (an estate needs the death
+      // certificate; an entity its papers) so "complete" means filable.
+      ...(() => {
+        const checklist = this.documents.checklist(d.documents || [], {
+          deceased: isDeceased(facts),
+          isEntity: ENTITY_NAME.test(`${lead.sellerFirstName || ''} ${lead.sellerLastName || ''}`),
+        });
+        return {
+          documents: checklist.documents,
+          docsRequired: checklist.required,
+          docsMissing: checklist.missing,
+          docsComplete: checklist.complete,
+        };
+      })(),
 
       compliance: {
         clear: gate.clear,

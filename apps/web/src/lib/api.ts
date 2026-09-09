@@ -268,6 +268,28 @@ export const surplusAPI = {
   updateCounty: (id: string, data: any) => api.patch(`/surplus/counties/${id}`, data),
   /** The answers were just checked with the clerk. Resets the staleness clock. */
   verifyCounty: (id: string) => api.post(`/surplus/counties/${id}/verified`),
+  uploadCountyForm: (id: string, file: File) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    return api.post(`/surplus/counties/${id}/claim-form`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+  },
+  countyFormUrl: (id: string) => api.get(`/surplus/counties/${id}/claim-form/url`),
+  removeCountyForm: (id: string) => api.post(`/surplus/counties/${id}/claim-form/delete`),
+
+  // ── Documents: the claim's document set ──
+  storageStatus: () => api.get('/surplus/storage/status'),
+  documents: (id: string) => api.get(`/surplus/${id}/documents`),
+  uploadDocument: (id: string, kind: string, file: File, data: { status?: string; note?: string } = {}) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    if (data.status) fd.append('status', data.status);
+    if (data.note) fd.append('note', data.note);
+    return api.post(`/surplus/${id}/documents/${kind}`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+  },
+  setDocumentStatus: (id: string, kind: string, data: { status: string; note?: string | null; signedAt?: string | null }) =>
+    api.patch(`/surplus/${id}/documents/${kind}`, data),
+  documentUrl: (docId: string) => api.get(`/surplus/documents/${docId}/url`),
+  removeDocument: (docId: string) => api.post(`/surplus/documents/${docId}/delete`),
 
   // ── Credibility packet ──
   /** Whether the packet's links are configured, and which are missing. */

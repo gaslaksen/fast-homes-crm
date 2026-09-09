@@ -162,6 +162,11 @@ export interface SurplusPanelLead {
   escalateMail: boolean;
   /** Heirs on file, for addressing a letter. Same shape the heirs panel uses. */
   heirs: { id: string; name: string; address: string | null; deceased: boolean }[];
+  /** The document set: one entry per kind, with the file when there is one. */
+  documents: PanelDocument[];
+  docsRequired: string[];
+  docsMissing: string[];
+  docsComplete: boolean;
   /** What this county requires to file, off the county table. Null when not on the list. */
   countyInfo: {
     id: string;
@@ -181,6 +186,237 @@ export interface SurplusPanelLead {
     stale: boolean;
     unknowns: string[];
   } | null;
+}
+
+interface PanelDocument {
+  id: string | null;
+  kind: string;
+  label: string;
+  docSet: 'ours' | 'county' | 'claimant';
+  status: string;
+  statusLabel: string;
+  collected: boolean;
+  required: boolean;
+  hasFile: boolean;
+  fileName: string | null;
+  signedAt: string | null;
+  note: string | null;
+  updatedAt: string | null;
+}
+
+const DOC_SET_LABEL: Record<string, string> = {
+  ours: 'Ours',
+  county: "The county's",
+  claimant: 'From the claimant',
+};
+
+const DOC_STATUSES: [string, string][] = [
+  ['outstanding', 'Outstanding'],
+  ['drafted', 'Drafted'],
+  ['sent', 'Sent'],
+  ['received', 'Received'],
+  ['signed', 'Signed'],
+  ['notarized', 'Notarized'],
+  ['filed', 'Filed'],
+];
+
+/**
+ * The document set for this claim, in the course's three sets, with what is
+ * still missing said out loud. A file is attached to the checklist entry,
+ * so "signed" with a scan behind it and "signed" ticked from paper look
+ * different here: one has a View link.
+ */
+function DocumentsSection({
+  lead,
+  onChanged,
+  say,
+}: {
+  lead: SurplusPanelLead;
+  onChanged: () => void;
+  say: (msg: string) => void;
+}) {
+  const [storage, setStorage] = useState<{ configured: boolean; message?: string } | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [pendingKind, setPendingKind] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    surplusAPI
+      .storageStatus()
+      .then((r) => setStorage(r.data || { configured: false }))
+      .catch(() => setStorage({ configured: false, message: 'status unavailable' }));
+  }, []);
+
+  const pick = (kind: string) => {
+    setPendingKind(kind);
+    fileRef.current?.click();
+  };
+
+  const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    e.target.value = '';
+    const kind = pendingKind;
+    setPendingKind(null);
+    if (!f || !kind) return;
+    setBusy(kind);
+    try {
+      await surplusAPI.uploadDocument(lead.id, kind, f);
+      say(`${f.name} attached`);
+      onChanged();
+    } catch (err: any) {
+      say(err?.response?.data?.message || 'That file could not be uploaded.');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const setStatus = async (doc: PanelDocument, status: string) => {
+    if (status === doc.status) return;
+    setBusy(doc.kind);
+    try {
+      await surplusAPI.setDocumentStatus(lead.id, doc.kind, { status });
+      onChanged();
+    } catch (err: any) {
+      say(err?.response?.data?.message || 'That status could not be saved.');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const view = async (doc: PanelDocument) => {
+    if (!doc.id) return;
+    try {
+      const r = await surplusAPI.documentUrl(doc.id);
+      window.open(r.data?.url, '_blank', 'noopener');
+    } catch (err: any) {
+      say(err?.response?.data?.message || 'The file could not be opened.');
+    }
+  };
+
+  const remove = async (doc: PanelDocument) => {
+    if (!doc.id) return;
+    if (!window.confirm(`Remove the ${doc.label.toLowerCase()} file and reset it to outstanding?`)) return;
+    setBusy(doc.kind);
+    try {
+      await surplusAPI.removeDocument(doc.id);
+      onChanged();
+    } catch (err: any) {
+      say(err?.response?.data?.message || 'The file could not be removed.');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const docs = lead.documents || [];
+  const required = docs.filter((d) => d.required);
+  const inHand = required.filter((d) => d.collected).length;
+  const canUpload = !!storage?.configured;
+  const groups = (['ours', 'county', 'claimant'] as const).map((set) => ({
+    set,
+    label: DOC_SET_LABEL[set],
+    docs: docs.filter((d) => d.docSet === set),
+  }));
+
+  return (
+    <Section
+      title="Documents"
+      note={required.length ? `${inHand} of ${required.length} required in hand` : undefined}
+    >
+      <input ref={fileRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.heic,.webp" style={{ display: 'none' }} onChange={onFile} />
+      {lead.docsMissing?.length > 0 ? (
+        <div style={{ fontSize: 11.5, color: 'var(--amber)' }}>
+          Still needed before filing:{' '}
+          {lead.docsMissing.map((k) => docs.find((d) => d.kind === k)?.label || k).join(', ')}.
+        </div>
+      ) : (
+        <div style={{ fontSize: 11.5, color: 'var(--mint)' }}>Every required document is in hand.</div>
+      )}
+      {storage && !storage.configured && (
+        <div style={{ fontSize: 11, color: 'var(--faint)' }}>
+          File upload is off until document storage is configured on the API. Statuses can still be set from paper.
+        </div>
+      )}
+      {groups.map((g) => (
+        <div key={g.set} style={{ display: 'grid', gap: 4 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--dim)', letterSpacing: 0.3, marginTop: 4 }}>{g.label}</div>
+          {g.docs.map((doc) => {
+            const tone = doc.collected ? 'var(--mint)' : doc.required ? 'var(--amber)' : 'var(--faint)';
+            return (
+              <div
+                key={doc.kind}
+                style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, flexWrap: 'wrap' }}
+              >
+                <span style={{ flex: 1, minWidth: 140 }}>
+                  {doc.label}
+                  {doc.required && !doc.collected && (
+                    <span style={{ color: 'var(--amber)', fontSize: 10.5, marginLeft: 5 }}>required</span>
+                  )}
+                  {doc.fileName && (
+                    <span style={{ display: 'block', fontSize: 11, color: 'var(--faint)', overflowWrap: 'anywhere' }}>
+                      {doc.fileName}
+                      {doc.signedAt ? ` · signed ${fmtDate(doc.signedAt)}` : ''}
+                    </span>
+                  )}
+                </span>
+                <select
+                  className="dc-wp-sel"
+                  value={doc.status}
+                  disabled={busy === doc.kind}
+                  onChange={(e) => setStatus(doc, e.target.value)}
+                  style={{ color: tone, padding: '4px 8px', fontSize: 11.5 }}
+                  aria-label={`${doc.label} status`}
+                >
+                  {DOC_STATUSES.map(([k, l]) => (
+                    <option key={k} value={k}>
+                      {l}
+                    </option>
+                  ))}
+                </select>
+                {doc.hasFile ? (
+                  <>
+                    <button type="button" className="dc-wp-btn" style={{ padding: '3px 8px', fontSize: 11 }} onClick={() => view(doc)}>
+                      View
+                    </button>
+                    <button
+                      type="button"
+                      className="dc-wp-btn"
+                      style={{ padding: '3px 8px', fontSize: 11 }}
+                      disabled={busy === doc.kind}
+                      onClick={() => pick(doc.kind)}
+                      title="Replace the file"
+                    >
+                      Replace
+                    </button>
+                    <button
+                      type="button"
+                      className="dc-wp-btn"
+                      style={{ padding: '3px 8px', fontSize: 11 }}
+                      disabled={busy === doc.kind}
+                      onClick={() => remove(doc)}
+                      title="Remove the file and reset to outstanding"
+                    >
+                      ✕
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    className="dc-wp-btn"
+                    style={{ padding: '3px 8px', fontSize: 11 }}
+                    disabled={!canUpload || busy === doc.kind}
+                    onClick={() => pick(doc.kind)}
+                    title={canUpload ? 'Attach a PDF or photo' : 'Document storage is not configured'}
+                  >
+                    {busy === doc.kind ? 'Uploading...' : 'Upload'}
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ))}
+    </Section>
+  );
 }
 
 const METHOD_LABEL: Record<string, string> = {
@@ -919,6 +1155,8 @@ function CaseTab({
       </Section>
 
       <CountySection lead={lead} />
+
+      <DocumentsSection lead={lead} onChanged={onChanged} say={say} />
 
       {/* Heirs lead for a deceased claimant, because they are the only people
           who can file. For a living one the section still appears once heirs

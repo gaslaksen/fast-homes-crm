@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import AppShell from '@/components/AppShell';
 import { surplusAPI } from '@/lib/api';
@@ -23,6 +23,8 @@ interface County {
   courtRecordsUrl: string | null;
   surplusListUrl: string | null;
   claimFormUrl: string | null;
+  /** The stored copy of the county's form, when one has been uploaded. */
+  claimFormFile: { name: string } | null;
   assignmentPreference: string | null;
   acceptedMethods: string[];
   signatureRequired: boolean | null;
@@ -191,6 +193,53 @@ export default function SurplusCountiesPage() {
     }
   };
 
+  const formFileRef = useRef<HTMLInputElement>(null);
+  const [uploadingForm, setUploadingForm] = useState(false);
+  const [storageOk, setStorageOk] = useState(false);
+  useEffect(() => {
+    surplusAPI
+      .storageStatus()
+      .then((r) => setStorageOk(!!r.data?.configured))
+      .catch(() => setStorageOk(false));
+  }, []);
+
+  const onFormFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    e.target.value = '';
+    if (!f || !current) return;
+    setUploadingForm(true);
+    try {
+      await surplusAPI.uploadCountyForm(current.id, f);
+      say(`${f.name} stored for ${current.name}.`);
+      await load();
+    } catch (err: any) {
+      say(err?.response?.data?.message || 'The form could not be uploaded.');
+    } finally {
+      setUploadingForm(false);
+    }
+  };
+
+  const openForm = async () => {
+    if (!current) return;
+    try {
+      const r = await surplusAPI.countyFormUrl(current.id);
+      window.open(r.data?.url, '_blank', 'noopener');
+    } catch (err: any) {
+      say(err?.response?.data?.message || 'The form could not be opened.');
+    }
+  };
+
+  const removeForm = async () => {
+    if (!current || !window.confirm(`Remove the stored claim form for ${current.name}?`)) return;
+    try {
+      await surplusAPI.removeCountyForm(current.id);
+      say('Stored form removed.');
+      await load();
+    } catch (err: any) {
+      say(err?.response?.data?.message || 'The form could not be removed.');
+    }
+  };
+
   const toggleMethod = (m: string) => {
     const cur = new Set(form.acceptedMethods || []);
     if (cur.has(m)) cur.delete(m);
@@ -301,6 +350,33 @@ export default function SurplusCountiesPage() {
                   <div className="md:col-span-2">
                     <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">County claim form (link to the clerk's copy)</label>
                     <input className="input w-full" value={form.claimFormUrl || ''} onChange={(e) => set({ claimFormUrl: e.target.value })} placeholder="https://" />
+                    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                      <input ref={formFileRef} type="file" accept=".pdf" className="hidden" onChange={onFormFile} />
+                      {current.claimFormFile ? (
+                        <>
+                          <span className="text-gray-600 dark:text-gray-400">Stored copy: {current.claimFormFile.name}</span>
+                          <button type="button" onClick={openForm} className="text-primary-600 hover:underline">
+                            Open
+                          </button>
+                          <button type="button" onClick={() => formFileRef.current?.click()} className="text-primary-600 hover:underline">
+                            Replace
+                          </button>
+                          <button type="button" onClick={removeForm} className="text-red-600 hover:underline">
+                            Remove
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => formFileRef.current?.click()}
+                          disabled={!storageOk}
+                          title={storageOk ? 'Upload the county form as a PDF' : 'Document storage is not configured on the API'}
+                          className="px-2.5 py-1 rounded-md border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+                        >
+                          {uploadingForm ? 'Uploading...' : 'Upload a stored copy (PDF)'}
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Court records search</label>
