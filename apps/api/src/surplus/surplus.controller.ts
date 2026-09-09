@@ -15,6 +15,7 @@ import { SurplusCredibilityService, CredibilityChannel } from './surplus-credibi
 import { SurplusCountiesService, ACCEPTED_METHOD_LABEL } from './surplus-counties.service';
 import { SurplusDocumentsService, DOCUMENT_MIME_TYPES, DOCUMENT_MAX_BYTES } from './surplus-documents.service';
 import { StorageService } from '../storage/storage.service';
+import { SurplusCadenceService } from './surplus-cadence.service';
 import { COMPLIANCE_RULES, DISCLOSURE_LABELS, FL_COUNTIES, SURPLUS_FLOOR } from './surplus-compliance';
 
 /**
@@ -74,6 +75,7 @@ export class SurplusController {
     private counties: SurplusCountiesService,
     private documents: SurplusDocumentsService,
     private storage: StorageService,
+    private cadence: SurplusCadenceService,
   ) {}
 
   private decodeToken(authHeader?: string): { userId?: string; organizationId?: string } {
@@ -107,6 +109,7 @@ export class SurplusController {
     @Query('contact') contact?: string,
     @Query('missingChannel') missingChannel?: string,
     @Query('letterDue') letterDue?: string,
+    @Query('updateOverdue') updateOverdue?: string,
     @Query('sort') sort?: string,
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
@@ -133,6 +136,7 @@ export class SurplusController {
       contact,
       missingChannel: missingChannel === 'true',
       letterDue: letterDue === 'true',
+      updateOverdue: updateOverdue === 'true',
       sort,
       page: num(page),
       pageSize: num(pageSize),
@@ -184,6 +188,15 @@ export class SurplusController {
   async callStats(@Headers('authorization') authHeader?: string) {
     const { organizationId } = this.decodeToken(authHeader);
     return this.surplus.callStats(organizationId);
+  }
+
+  /**
+   * Run the two follow-up cadences now rather than at 6:15. For checking
+   * the rule against real claims without waiting for the morning.
+   */
+  @Post('cadence/run')
+  async runCadence() {
+    return this.cadence.runOnce();
   }
 
   // ── Scripts and letters, versioned ────────────────────────────────────────

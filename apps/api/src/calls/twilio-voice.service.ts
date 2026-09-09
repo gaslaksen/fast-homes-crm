@@ -1038,6 +1038,11 @@ export class TwilioVoiceService {
         where: { id: detail.id, tappedAt: null },
         data: { tappedAt: new Date() },
       });
+      // Talking to the claimant is an update to the claimant. Every time.
+      await this.prisma.surplusDetail.update({
+        where: { id: detail.id },
+        data: { lastClaimantUpdateAt: new Date() },
+      });
     }
     if (detail && outcome === SurplusCallOutcome.DO_NOT_CALL && !detail.doNotCall) {
       await this.prisma.lead.update({

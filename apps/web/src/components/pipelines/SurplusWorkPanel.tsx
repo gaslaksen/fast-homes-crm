@@ -174,6 +174,8 @@ export interface SurplusPanelLead {
   deadReason: string | null;
   deadNote: string | null;
   deadAt: string | null;
+  /** The monthly word to a signed claimant. */
+  claimantUpdate: { applies: boolean; lastAt: string | null; daysSince: number | null; overdue: boolean };
   /** The filing: how the package went to the county and what the county said. */
   submission: {
     method: string | null;
@@ -2713,6 +2715,14 @@ function TasksSection({
       title="Next action"
       note={tasks && tasks.length ? `${tasks.length} open` : undefined}
     >
+      {lead.claimantUpdate?.applies && (
+        <div style={{ fontSize: 11.5, color: lead.claimantUpdate.overdue ? 'var(--red)' : 'var(--faint)' }}>
+          {lead.claimantUpdate.lastAt
+            ? `Last word to ${lead.claimant}: ${fmtDate(lead.claimantUpdate.lastAt)}, ${lead.claimantUpdate.daysSince} day${lead.claimantUpdate.daysSince === 1 ? '' : 's'} ago.`
+            : `Nothing has been said to ${lead.claimant} since they signed.`}
+          {lead.claimantUpdate.overdue ? ' A monthly update is owed, news or not.' : ''}
+        </div>
+      )}
       {tasks === null ? (
         <div style={{ fontSize: 12, color: 'var(--faint)' }}>Loading...</div>
       ) : tasks.length === 0 ? (

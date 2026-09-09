@@ -280,7 +280,22 @@ export class DigestRenderService {
         </div>`
       : '';
 
-    const footer = `${overdue}<div style="padding-top:12px;font-size:13px;color:${MUTED};line-height:1.55;">
+    // Signed claimants owed a word. Red for the same reason as the tasks:
+    // a month of silence after a signature is how a claimant starts to
+    // wonder whether they were had.
+    const silent = b.surplusUpdateOverdue?.length
+      ? `<div style="padding-top:12px;font-size:13px;color:${BODY};line-height:1.6;">
+          <b style="color:#b91c1c;">${b.surplusUpdateOverdueTotal} signed claimant${b.surplusUpdateOverdueTotal === 1 ? '' : 's'} owed a monthly update</b>
+          ${b.surplusUpdateOverdue
+            .map(
+              (u) =>
+                `<div><a href="${this.esc(u.url)}" style="color:${INK};font-weight:600;text-decoration:none;">${this.esc(u.claimant)}</a> <span style="color:${MUTED};">${this.esc(u.stage)}${u.days != null ? `, ${u.days} days since we last said anything` : ', never updated'}</span></div>`,
+            )
+            .join('')}
+        </div>`
+      : '';
+
+    const footer = `${overdue}${silent}<div style="padding-top:12px;font-size:13px;color:${MUTED};line-height:1.55;">
         ${b.surplusIngestNote ? `<b style="color:${INK};">Overnight:</b> ${this.esc(b.surplusIngestNote)} ` : ''}
         ${b.surplusCallableTotal} of ${b.surplusOpenTotal} open claimants have a live number.
         ${b.surplusNotTapped ? `${b.surplusNotTapped} not yet reached` : ''}${b.surplusNotTapped && b.surplusMissingChannel ? ', ' : ''}${b.surplusMissingChannel ? `${b.surplusMissingChannel} missing a channel` : ''}${b.surplusNotTapped || b.surplusMissingChannel ? '. ' : ''}
@@ -538,6 +553,13 @@ export class DigestRenderService {
         for (const t of b.surplusOverdue) {
           out.push(`     ${t.title}, ${t.due}${t.owner ? `, ${t.owner}` : ''}`);
           out.push(`     ${t.url}`);
+        }
+      }
+      if (b.surplusUpdateOverdue?.length) {
+        out.push(`  ${b.surplusUpdateOverdueTotal} signed claimant${b.surplusUpdateOverdueTotal === 1 ? '' : 's'} owed a monthly update:`);
+        for (const u of b.surplusUpdateOverdue) {
+          out.push(`     ${u.claimant}, ${u.stage}${u.days != null ? `, ${u.days} days` : ', never updated'}`);
+          out.push(`     ${u.url}`);
         }
       }
       if (b.surplusIngestNote) out.push(`  Overnight: ${b.surplusIngestNote}`);

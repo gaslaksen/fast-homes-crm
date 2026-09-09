@@ -821,6 +821,12 @@ model SurplusDetail {
   // How the claim package went to the county and what the county said. A
   // tracking number is required to enter Claim Filed for anything sent by a
   // carrier, because "we mailed it" without one is the expensive mistake.
+  /// When we last told the claimant anything: an outbound text or email, a
+  /// letter, or a call where they picked up. The course's rule is at least
+  /// monthly once they have signed, whether or not there is news, and this
+  /// is what the monthly-update flag and task read.
+  lastClaimantUpdateAt DateTime?
+
   /// 'usps' | 'fedex' | 'ups' | 'in_person' | 'efile'
   submissionMethod            String?
   submissionTrackingNumber    String?

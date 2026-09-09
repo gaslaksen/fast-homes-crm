@@ -165,6 +165,10 @@ function deadReasonOf(raw: unknown): SurplusDeadReason | null {
 
 /** Days after a letter goes out before checking for a reply. */
 const LETTER_FOLLOW_UP_DAYS = 14;
+/** The course's cadence: a signed claimant hears from us at least this often. */
+export const CLAIMANT_UPDATE_DAYS = 30;
+/** And the county is asked about a filed claim at least this often after the first check. */
+export const COUNTY_FOLLOW_UP_DAYS = 30;
 
 const EMPTY_DISCLOSURES = {
   financial: false,
@@ -985,7 +989,12 @@ export class SurplusService {
       // is the same claim waiting on the same reply.
       await this.prisma.surplusDetail.update({
         where: { id: d.id },
-        data: { letterMailedAt: mailedAt, letterMailedTo: address },
+        data: {
+          letterMailedAt: mailedAt,
+          letterMailedTo: address,
+          // A letter to the claimant themselves is an update to the claimant.
+          ...(heir ? {} : { lastClaimantUpdateAt: mailedAt }),
+        },
       });
       updated += 1;
 
@@ -1377,6 +1386,7 @@ export class SurplusService {
     if (filters.contact) rows = rows.filter((r) => r.contactStatus === filters.contact);
     if (filters.missingChannel) rows = rows.filter((r) => r.channelsMissing.length > 0);
     if (filters.letterDue) rows = rows.filter((r) => r.letterDue);
+    if (filters.updateOverdue) rows = rows.filter((r) => r.claimantUpdate?.overdue);
 
     if (filters.sort === 'untapped') {
       rows.sort(
@@ -1532,6 +1542,7 @@ export class SurplusService {
       notTapped: props.filter((p: any) => p.contactStatus === 'not_tapped' && p.workScore > 0).length,
       missingChannel: props.filter((p: any) => p.channelsMissing?.length > 0 && p.workScore > 0).length,
       letterDue: props.filter((p: any) => p.letterDue).length,
+      updateOverdue: props.filter((p: any) => p.claimantUpdateOverdue).length,
       complianceBlocked: all.filter((r) => !r.compliance.clear).length,
       belowFloor: all.length - all.filter((r) => r.grossSurplus >= SURPLUS_FLOOR).length,
       total: all.length,
@@ -1799,6 +1810,28 @@ export class SurplusService {
 
       // Tapped / Not Tapped, and which of the four channels have been tried.
       // Recap scheduled is tapped with a dated follow-up on the books.
+      // The monthly update to the claimant. Overdue once they have signed
+      // and thirty days have passed with nothing said to them, until the
+      // claim is paid or dead. Silence is what loses trust.
+      claimantUpdate: (() => {
+        const signedStages = [
+          SurplusStage.AGREEMENT_SIGNED,
+          SurplusStage.ASSIGNMENT_NOTARIZED,
+          SurplusStage.CLAIM_FILED,
+          SurplusStage.AWAITING_DISBURSEMENT,
+          SurplusStage.CHECK_RECEIVED,
+        ];
+        const applies = signedStages.includes(d.stage as SurplusStage);
+        const lastAt: Date | null = d.lastClaimantUpdateAt || d.notaryAgreementSignedAt || null;
+        const daysSince = lastAt ? Math.floor((Date.now() - new Date(lastAt).getTime()) / 86_400_000) : null;
+        return {
+          applies,
+          lastAt,
+          daysSince,
+          overdue: applies && (daysSince === null || daysSince > CLAIMANT_UPDATE_DAYS),
+        };
+      })(),
+
       // The filing: how the package went and what the county said.
       submission: {
         method: d.submissionMethod || null,
@@ -2080,6 +2113,7 @@ export function groupByProperty(rows: any[]): any[] {
       letterCount: ranked.reduce((n: number, m: any) => n + (m.letterCount || 0), 0),
       letterDue: ranked.some((m: any) => m.letterDue && m.workScore > 0),
       escalateMail: ranked.some((m: any) => m.escalateMail),
+      claimantUpdateOverdue: ranked.some((m: any) => m.claimantUpdate?.overdue),
       letterMailedAt: ranked
         .map((m: any) => m.letterMailedAt)
         .filter(Boolean)

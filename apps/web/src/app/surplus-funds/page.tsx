@@ -423,7 +423,16 @@ const SURPLUS_COLUMNS: PipelineColumn<any>[] = [
     // nearest date gets the largest value and rows with nothing due go last.
     sortValue: (r) => (r.nextTask?.dueDate ? -new Date(r.nextTask.dueDate).getTime() : -Infinity),
     render: (r) =>
-      r.nextTask ? (
+      r.claimantUpdateOverdue ? (
+        <div style={{ fontSize: 12, minWidth: 0 }}>
+          <div style={{ fontWeight: 600, color: 'var(--red)' }}>Monthly update owed</div>
+          {r.nextTask && (
+            <div style={{ fontSize: 11, color: isOverdue(r.nextTask.dueDate) ? 'var(--red)' : 'var(--faint)' }}>
+              {r.nextTask.title}, {dueLabel(r.nextTask.dueDate)}
+            </div>
+          )}
+        </div>
+      ) : r.nextTask ? (
         <div style={{ fontSize: 12, minWidth: 0 }}>
           <div
             style={{
@@ -622,6 +631,7 @@ export default function SurplusFundsPage() {
     notTapped: null as number | null,
     missingChannel: null as number | null,
     letterDue: null as number | null,
+    updateOverdue: null as number | null,
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -698,6 +708,7 @@ export default function SurplusFundsPage() {
         contact: chipQ === 'not_tapped' ? 'not_tapped' : undefined,
         missingChannel: chipQ === 'missing' || undefined,
         letterDue: chipQ === 'letter_due' || undefined,
+        updateOverdue: chipQ === 'update_overdue' || undefined,
         sort,
         pageSize: 200,
       });
@@ -1197,6 +1208,7 @@ export default function SurplusFundsPage() {
                 ['not_tapped', 'Not tapped'],
                 ['missing', 'Missing a channel'],
                 ['letter_due', 'Letter due'],
+                ['update_overdue', 'Update overdue'],
                 ['new', 'New, 7 days'],
                 ['estate', 'Estate or probate'],
                 ['lien', 'Competing lien filed'],
@@ -1215,10 +1227,15 @@ export default function SurplusFundsPage() {
                         ? 'At least one of call, text, email, letter has not been tried on this property.'
                         : k === 'letter_due'
                           ? 'Nobody has replied, there is an address, and the last letter is older than the cadence, or none has gone out.'
-                          : undefined
+                          : k === 'update_overdue'
+                            ? 'A signed claimant who has not heard from us in thirty days. The course says monthly, news or not.'
+                            : undefined
                 }
               >
                 {l}
+                {k === 'update_overdue' && stats.updateOverdue != null && (
+                  <span style={{ marginLeft: 5, opacity: 0.6 }}>{stats.updateOverdue}</span>
+                )}
                 {k === 'not_tapped' && stats.notTapped != null && (
                   <span style={{ marginLeft: 5, opacity: 0.6 }}>{stats.notTapped}</span>
                 )}

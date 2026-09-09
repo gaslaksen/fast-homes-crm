@@ -177,6 +177,9 @@ export interface DigestBrief {
   surplusNotTapped: number;
   /** Live claimants with at least one of call, text, email, letter untried. */
   surplusMissingChannel: number;
+  /** Signed claimants owed their monthly update, longest silence first. */
+  surplusUpdateOverdue: { claimant: string; stage: string; days: number | null; url: string }[];
+  surplusUpdateOverdueTotal: number;
   /** What each automated county pull did, or failed to do. */
   feeds: FeedRow[];
   yesterday: YesterdayStat[];
