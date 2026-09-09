@@ -830,7 +830,7 @@ export default function CampaignBuilder({ initial, onSave }: CampaignBuilderProp
                       <span className="text-xs text-gray-400 dark:text-gray-500">{delayLabel}</span>
                       {step.channel === 'EMAIL' && step.subject && (
                         <span className="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[200px]">
-                          "{step.subject}"
+                          &quot;{step.subject}&quot;
                         </span>
                       )}
                     </div>
