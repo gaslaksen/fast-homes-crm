@@ -45,6 +45,10 @@ export interface Brand {
   /** Optional: a brand with no public site simply omits the line. */
   website?: string;
   websiteUrl?: string;
+  /** The spoken name, for a script: "D.I.G. Deeper" rather than the filed "D.I.G. Deeper LLC". */
+  shortName?: string;
+  /** The business address as it appears on the company's own documents. */
+  address?: string;
 }
 
 export const QCHB_BRAND: Brand = {
@@ -70,6 +74,8 @@ export const DIG_DEEPER_BRAND: Brand = {
   phoneE164: '+19045959620',
   website: 'digdeeperllc.com',
   websiteUrl: 'https://digdeeperllc.com',
+  shortName: 'D.I.G. Deeper',
+  address: '7901 4th St N, Suite 300, St. Petersburg, Florida 33702',
 };
 
 /** Everything that is not explicitly another brand is Quick Cash. */

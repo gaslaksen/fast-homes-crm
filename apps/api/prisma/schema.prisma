@@ -2479,6 +2479,9 @@ model SurplusTemplate {
   organizationId String?
   /// SurplusTemplateKind.
   kind           String
+  /// Null means every county. A county's own version wins over the general
+  /// one, so a notary package can differ where the clerk's form does.
+  county         String?
   version        Int
   name           String?
   /// For email kinds. Ignored elsewhere.
@@ -2495,8 +2498,8 @@ model SurplusTemplate {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([organizationId, kind, version])
-  @@index([organizationId, kind, active])
+  @@unique([organizationId, kind, county, version])
+  @@index([organizationId, kind, county, active])
   @@map("surplus_templates")
 }
 

@@ -37,6 +37,7 @@ import { DIG_DEEPER_BRAND } from '../common/company.constants';
 import { ruleFor } from './surplus-compliance';
 import { CLAIM_STATUS_LABEL } from './surplus-classify.util';
 import { relativeOutreachScript } from './surplus-name-search.util';
+import { NOTARY_COVER, LIMITED_POA, DIRECTION_TO_PAY, NOTARY_PACKAGE_NAME } from './surplus-notary-package';
 
 /** Every merge field a template may use, with what it fills in. */
 export const MERGE_FIELDS: { key: string; meaning: string }[] = [
@@ -50,6 +51,11 @@ export const MERGE_FIELDS: { key: string; meaning: string }[] = [
   { key: 'callbackNumber', meaning: 'The Dig Deeper line' },
   { key: 'callerName', meaning: 'Your first name' },
   { key: 'companyName', meaning: 'D.I.G. Deeper LLC, as filed on Sunbiz' },
+  { key: 'companyShortName', meaning: 'D.I.G. Deeper, the spoken name for a script' },
+  { key: 'companyAddress', meaning: 'The business address, for a document' },
+  { key: 'caseNumber', meaning: "The clerk's case, file or tax deed number" },
+  { key: 'parcelId', meaning: 'The parcel number (STRAP number in Lee)' },
+  { key: 'saleDate', meaning: 'The date of the tax deed sale, spelled out' },
   { key: 'website', meaning: 'The company website, once there is one' },
   { key: 'websiteUrl', meaning: 'The website as a full link, from DIGDEEPER_WEBSITE_URL' },
   { key: 'sunbizLink', meaning: "The company's Florida state filing on Sunbiz, from DIGDEEPER_SUNBIZ_URL" },
@@ -78,34 +84,53 @@ export function unfilledFields(body: string): string[] {
  */
 const DEFAULTS: Record<SurplusTemplateKind, { name: string; body: string; subject?: string }> = {
   [SurplusTemplateKind.PHONE_SCRIPT]: {
-    name: 'Course outline, filled in',
-    body: `OPENING
-Hi, is this {{claimantFirstName}}? My name is {{callerName}} with {{companyName}}. I have spent the last {{daysSearching}} days trying to find you. Did you used to own {{propertyAddress}}? We do audit work on county records, and your name came up.
+    name: 'Master phone script, September 2026',
+    body: `Before dialing: this is good news. We are not hurting anyone, we are only helping. The whole call should feel exciting from start to finish, not just the opening. Smile, have fun with it, and let them hear that you are genuinely excited to tell them this. Keep the opening short and let them talk: ask the question and listen instead of delivering a monologue. There is a real person on the other end who needs this help.
 
-SQUEEZE (keep as scripted)
-When a property sells at a county sale for more than what was owed, the extra is held by the county for the former owner. If nobody claims it inside the window, it goes to the government. That is why I have been trying to reach you.
+1. OPENING (INTRO AND QUESTION)
+Hi {{claimantFirstName}}, this is {{callerName}} with {{companyShortName}}. We're a company that helps track down funds and return them to the people they actually belong to. Did you have any idea there's money out there that belongs to you, or has anyone already reached out to help you recover it?
 
-PITCH
-{{feeTerms}} There is no upfront cost to you and nothing to pay if nothing is recovered.
+Note: pause here and let them answer. Their response tells you what you're working with: a cold lead who had no idea, or a warm lead someone else has already contacted.
 
-BIG FOUR, BEFORE THEY ASK
-Who we are: {{companyName}}, a Florida company. Are we real: I am going to text you our website and our state filing so you can check us yourself while we talk. What it costs: {{feeTerms}} Can you trust us: everything I have said is in writing before you sign anything, and you can call me back on {{callbackNumber}}.
+2. THE REVEAL (EXCITING NEWS AND FULL CREDIBILITY)
+That's exactly why I'm calling! I found some money that I believe belongs to you, or to an entity you've been a part of. I know that might sound like it's too good to be true, so let me tell you exactly who we are. We're {{companyShortName}}, you can check us out anytime at {{website}}, and I'm happy to text or email you our website and our official state filing right now so you can see it for yourself. We're only paid if and when you're paid, so there's never any cost to you out of pocket. I'm not going to ask you for a penny. And here's the exciting part: as of right now I found approximately {{surplusAmount}} that belongs to you!
 
-OBJECTION: WHO ARE YOU?
-{{companyName}}, based in Florida. We recover funds the county is holding for former owners. Our website is {{website}}. Ask me anything you want to know.
+Note: this is where skepticism is highest, right after they hear there's money involved, so this is where all of the Big Four get addressed together: who you are, that you're real, what it costs, and why they can trust you, before the amount lands as the exciting payoff. Deliver it like it's genuinely good news, because it is. If they hesitate, send the credibility packet from the buttons above right then.
 
-OBJECTION: TELL ME MORE
-I will tell you every detail once we have an agreement in place. That protects both of us: you know exactly what we do for you and what it costs before we go any further, and we know the work we do is for you.
+3. THE CLOSE
+I'd like to see your claim filed in the next {{window}} just to be safe. Every case is a little different, but the window to collect these funds is typically about one to three months, and if it's not collected in that time, sometimes people lose the ability to claim it at all, so I want to jump on this for you. Let me just grab your full name for the paperwork, and what's the best address to send our notary out to so we can get started?
 
-CLOSE
-Can we get the agreement to you in the next {{window}}? Once it is signed, I will arrange a notary to come to you at a time that suits you.
+Note: this is also where you confirm their identity, their full name and current address, since you need both to schedule the notary anyway. Asked here, it reads as normal logistics rather than a verification question up front. The urgency reasoning flows straight into the ask, no separate transition needed.
 
-NOT READY YET
-That is fine. I will send you our information so you can look us over. Can I call you back in a couple of days? My number is {{callbackNumber}}. Ask for {{callerName}}.`,
+4. IF THEY NEED TIME OR AREN'T READY TO COMMIT
+That's completely understandable, I'm sure you'll want to look into us and make sure we're a legitimate company. With that being said, I'm going to follow up with you in a day or two. As I mentioned, this is a time sensitive issue, and I don't want you to lose out on funds that belong to you. I want to get to work on this and have the satisfaction of putting this money back in your hands, and the chance to hand you a check in person. In the meantime I'll text or email you our website and our business filing so you can look us over and have my direct number saved. My number is {{callbackNumber}}.
+
+Note: log a dated follow-up task immediately after this call. Do not leave it open ended.
+
+OBJECTIONS (REFERENCE AS NEEDED)
+Not part of the normal flow. Refer back to these only if one comes up.
+
+Objection: "Who are you?"
+My firm is called {{companyShortName}}. We're experts in the unclaimed funds recovery business. You can check us out online at our website, {{website}}, or I'd be happy to answer any questions you have about us.
+
+Note: the Reveal already covers this up front, so this is a fallback if they ask again or want more. Follow immediately with the instant credibility offer: "I can text or email you our website link and our official state filing right now if that would help while we're on the phone."
+
+Objection: "Tell me more"
+I'd love to, but I can't. Since we don't charge an upfront fee, I can't disclose the exact nature of the location until I've signed a collection agreement with you. I'm sure you can understand why we both want certain guarantees in place before moving forward.
+
+REMINDERS ON EVERY CALL
+- Keep the energy and excitement up through the entire call, not just the opening. Smile and have fun with it.
+- Lead with the question, not the pitch. Let them talk first.
+- Address skepticism head on in the Reveal. That is the moment it is highest. Do not wait to build credibility later.
+- The urgency reasoning is folded into the Close, so it reads as looking out for them.
+- Stay honest and direct. Truthful positioning beats clever framing every time.
+- Never disclose the fund source before the fee agreement is signed.
+- Log the call outcome immediately after hanging up.
+- If they hesitate, send the credibility packet right then. Do not wait for them to ask.`,
   },
   [SurplusTemplateKind.VOICEMAIL]: {
-    name: 'Curiosity is killing me',
-    body: `Hi {{claimantFirstName}}, you don't know me, but I've spent the last {{daysSearching}} days trying to find you. I can't say what this is about on the voicemail, but I can tell you that it's really good news, and you should call me the minute you hear this message. My number is {{callbackNumber}}. Ask for {{callerName}}.`,
+    name: 'Voicemail script, September 2026',
+    body: `Hey {{claimantFirstName}}, my name is {{callerName}} with the company {{companyShortName}}. We're a legitimate funds recovery service, you can check us out at {{website}}. I found a good chunk of money that's owed to you, and I'd like to talk to you more about it over the phone. This is really good news, so please call me back as soon as you can so I can fill you in on all the details. I'm not going to ask you for any money, I don't need anything from you other than to share this good news with you. My number is {{callbackNumber}}, ask for {{callerName}}.`,
   },
   [SurplusTemplateKind.RELATIVE_SCRIPT]: {
     name: 'From the name search panel',
@@ -202,49 +227,17 @@ Phone: {{callbackNumber}}, ask for {{callerName}}
 {{callerName}}
 {{companyName}}`,
   },
-  // The notary's instruction sheet, per the course: it locks in the document
-  // list, the payment and the signing order before the appointment, and the
-  // fee agreement is signed and put away before the claimant sees anything
-  // that names the fund source.
-  [SurplusTemplateKind.NOTARY_INSTRUCTIONS]: {
-    name: 'Course signing order',
-    body: `MOBILE NOTARY INSTRUCTIONS
-
-Client: {{companyName}}, {{callbackNumber}}
-Notary: {{notaryName}}
-Signer: {{claimant}}
-Signing address: {{claimantAddress}}
-Matter: {{propertyAddress}}, {{county}} County, case {{caseNumber}}
-Date: {{today}}
-
-Please read these instructions before the appointment and confirm by signing below. The order of signing is the whole point of this sheet.
-
-1. CONTINGENCY FEE AGREEMENT. Present this document first and alone. Have the signer read and sign it. Put it away before presenting anything else.
-
-2. LIMITED POWER OF ATTORNEY. Present and have signed once the fee agreement is put away.
-
-3. ASSIGNMENT OF RIGHTS. Present only after items 1 and 2 are signed and put away. This document names the source of the funds. Notarize the signature.
-
-4. LETTER OF DIRECTION and the COUNTY CLAIM FORM, in that order. Notarize where the form calls for it.
-
-Do not present any document out of this order, and do not discuss the source or amount of the funds before item 3. If the signer asks, say the paperwork answers that in order and that you are instructed to follow it.
-
-Take a photocopy or photograph of the signer's photo ID for the file.
-
-Return every signed original to {{companyName}} the same day. Call {{callbackNumber}} with any question before or during the appointment.
-
-Payment: as agreed in advance, on return of the signed documents.
-
-Notary name: ____________________   Signature: ____________________   Date: __________
-
-I confirm the documents were signed in the order above and the fee agreement was put away before the assignment was presented.`,
-  },
-  // The legal instruments ship empty on purpose. Counsel writes them; the
-  // app fills the names in and records which version a case was built from.
+  // The notary package cover, from the team's September 2026 draft. The
+  // county versions (Duval, Lee) live in COUNTY_DEFAULTS and win for a
+  // claim in that county.
+  [SurplusTemplateKind.NOTARY_INSTRUCTIONS]: { name: NOTARY_PACKAGE_NAME, body: NOTARY_COVER.general },
+  // The fee agreement and the assignment ship empty: counsel writes them.
+  // The POA and the direction to pay carry the team's working draft, with
+  // its own caveat that Florida counsel has not reviewed it.
   [SurplusTemplateKind.DOC_FEE_AGREEMENT]: { name: '', body: '' },
-  [SurplusTemplateKind.DOC_LIMITED_POA]: { name: '', body: '' },
+  [SurplusTemplateKind.DOC_LIMITED_POA]: { name: NOTARY_PACKAGE_NAME, body: LIMITED_POA },
   [SurplusTemplateKind.DOC_ASSIGNMENT_OF_RIGHTS]: { name: '', body: '' },
-  [SurplusTemplateKind.DOC_LETTER_OF_DIRECTION]: { name: '', body: '' },
+  [SurplusTemplateKind.DOC_LETTER_OF_DIRECTION]: { name: NOTARY_PACKAGE_NAME, body: DIRECTION_TO_PAY.general },
   [SurplusTemplateKind.DOC_CLAIMS_CHECKLIST]: {
     name: 'Course standard set',
     body: `CLAIMS CHECKLIST
@@ -293,6 +286,84 @@ DISBURSEMENT
 [ ] Satisfaction survey sent with the check`,
   },
 };
+
+/**
+ * Built-in text that differs by county. A claim in one of these counties
+ * gets this over the general default; a saved county version beats both.
+ */
+export const COUNTY_DEFAULTS: Partial<Record<SurplusTemplateKind, Record<string, { name: string; body: string }>>> = {
+  [SurplusTemplateKind.NOTARY_INSTRUCTIONS]: {
+    Duval: { name: NOTARY_PACKAGE_NAME, body: NOTARY_COVER.Duval },
+    Lee: { name: NOTARY_PACKAGE_NAME, body: NOTARY_COVER.Lee },
+  },
+  [SurplusTemplateKind.DOC_LETTER_OF_DIRECTION]: {
+    Duval: { name: NOTARY_PACKAGE_NAME, body: DIRECTION_TO_PAY.Duval },
+    Lee: { name: NOTARY_PACKAGE_NAME, body: DIRECTION_TO_PAY.Lee },
+  },
+};
+
+/** The county name as the built-ins spell it, or trimmed as given. Null for "every county". */
+export function canonicalCounty(raw?: string | null): string | null {
+  const v = String(raw || '').trim();
+  if (!v) return null;
+  const known = new Set<string>();
+  for (const perCounty of Object.values(COUNTY_DEFAULTS)) for (const k of Object.keys(perCounty || {})) known.add(k);
+  return Array.from(known).find((k) => k.toLowerCase() === v.toLowerCase()) || v;
+}
+
+function countyDefault(kind: SurplusTemplateKind, county: string | null) {
+  if (!county) return null;
+  const perCounty = COUNTY_DEFAULTS[kind];
+  if (!perCounty) return null;
+  const key = Object.keys(perCounty).find((k) => k.toLowerCase() === county.toLowerCase());
+  return key ? perCounty[key] : null;
+}
+
+/** Where a kind's active text came from, most specific first. */
+export type TemplateScope = 'county' | 'county_builtin' | 'all' | 'builtin';
+
+export interface TemplateRowLike {
+  kind: string;
+  county: string | null;
+  version: number;
+  active: boolean;
+  name: string | null;
+  subject: string | null;
+  body: string;
+  lastReviewedAt?: Date | null;
+  updatedAt?: Date | null;
+}
+
+/**
+ * The text a kind resolves to for a county: the county's saved version,
+ * then the county's built-in, then the general saved version, then the
+ * general built-in. The most specific text wins, so a county package can
+ * differ from the rest without anybody re-saving every other kind.
+ */
+export function resolveKind(kind: SurplusTemplateKind, rows: TemplateRowLike[], county: string | null) {
+  const sameCounty = (r: TemplateRowLike) =>
+    !!county && !!r.county && r.county.toLowerCase() === county.toLowerCase();
+  const mine = rows.filter((r) => r.kind === kind);
+  const countyActive = county ? mine.find((r) => r.active && sameCounty(r)) || null : null;
+  const generalActive = mine.find((r) => r.active && !r.county) || null;
+  const cd = countyDefault(kind, county);
+  const def = DEFAULTS[kind];
+  const row = countyActive || (cd ? null : generalActive);
+  const scope: TemplateScope = countyActive ? 'county' : cd ? 'county_builtin' : generalActive ? 'all' : 'builtin';
+  const text = row ? { name: row.name, subject: row.subject, body: row.body } : cd ? { name: cd.name, subject: null, body: cd.body } : { name: def.name, subject: def.subject || null, body: def.body };
+  return {
+    row,
+    scope,
+    version: row ? row.version : 0,
+    name: text.name,
+    subject: text.subject,
+    body: text.body,
+    /** Saved versions in exactly this scope (the county's, or the general ones). */
+    versionCount: mine.filter((r) => (county ? sameCounty(r) : !r.county)).length,
+    /** A general saved version exists but is not what this county uses. */
+    generalVersionShadowed: !!county && scope !== 'all' && scope !== 'builtin' && !!generalActive,
+  };
+}
 
 const KINDS = Object.values(SurplusTemplateKind) as SurplusTemplateKind[];
 
@@ -383,7 +454,7 @@ export class SurplusTemplatesService {
     const built = await this.fieldsFor(leadId, organizationId, userId);
     if (!built) throw new BadRequestException('Surplus lead not found');
     const readiness = this.credibilityReadiness();
-    const active = await this.list(organizationId);
+    const active = await this.list(organizationId, built.facts.county);
     const render = (kind: SurplusTemplateKind) => {
       const t = active.kinds.find((k) => k.kind === kind)!;
       const body = renderTemplate(t.body, built.fields);
@@ -403,43 +474,61 @@ export class SurplusTemplatesService {
     };
   }
 
-  /** The active version of every kind, with the built-in default standing in. */
-  async list(organizationId?: string | null) {
+  /**
+   * The active text of every kind for a county (or in general, with no
+   * county). A county's own text, saved or built-in, beats the general
+   * text; the response says which it was.
+   */
+  async list(organizationId?: string | null, rawCounty?: string | null) {
+    const county = canonicalCounty(rawCounty);
     const rows = await this.prisma.surplusTemplate.findMany({
-      where: { organizationId: organizationId || null },
+      where: {
+        organizationId: organizationId || null,
+        ...(county ? { OR: [{ county: null }, { county: { equals: county, mode: 'insensitive' } }] } : { county: null }),
+      },
       orderBy: [{ kind: 'asc' }, { version: 'desc' }],
     });
     return {
+      county,
       kinds: KINDS.map((kind) => {
-        const versions = rows.filter((r) => r.kind === kind);
-        const active = versions.find((r) => r.active) || null;
-        const def = DEFAULTS[kind];
+        const r = resolveKind(kind, rows, county);
         return {
           kind,
           label: SURPLUS_TEMPLATE_KIND_LABEL[kind],
-          version: active ? active.version : 0,
-          name: active ? active.name : def.name,
-          subject: active ? active.subject : def.subject || null,
-          body: active ? active.body : def.body,
-          builtIn: !active,
-          hasText: !!(active ? active.body : def.body).trim(),
-          lastReviewedAt: active?.lastReviewedAt || null,
-          updatedAt: active?.updatedAt || null,
-          versionCount: versions.length,
+          version: r.version,
+          name: r.name,
+          subject: r.subject,
+          body: r.body,
+          builtIn: !r.row,
+          scope: r.scope,
+          /** The text shown is this county's, not the general text. */
+          countySpecific: r.scope === 'county' || r.scope === 'county_builtin',
+          generalVersionShadowed: r.generalVersionShadowed,
+          hasText: !!r.body.trim(),
+          lastReviewedAt: r.row?.lastReviewedAt || null,
+          updatedAt: r.row?.updatedAt || null,
+          versionCount: r.versionCount,
         };
       }),
       mergeFields: MERGE_FIELDS,
     };
   }
 
-  async versions(organizationId: string | null | undefined, rawKind: string) {
+  async versions(organizationId: string | null | undefined, rawKind: string, rawCounty?: string | null) {
     const kind = kindOf(rawKind);
+    const county = canonicalCounty(rawCounty);
     const rows = await this.prisma.surplusTemplate.findMany({
-      where: { organizationId: organizationId || null, kind },
+      where: {
+        organizationId: organizationId || null,
+        kind,
+        ...(county ? { county: { equals: county, mode: 'insensitive' } } : { county: null }),
+      },
       orderBy: { version: 'desc' },
     });
+    const cd = countyDefault(kind, county);
     return {
       kind,
+      county,
       versions: rows.map((r) => ({
         version: r.version,
         name: r.name,
@@ -449,7 +538,9 @@ export class SurplusTemplatesService {
         subject: r.subject,
         createdAt: r.createdAt,
       })),
-      builtIn: { version: 0, name: DEFAULTS[kind].name, body: DEFAULTS[kind].body },
+      builtIn: cd
+        ? { version: 0, name: cd.name, body: cd.body, countySpecific: true }
+        : { version: 0, name: DEFAULTS[kind].name, body: DEFAULTS[kind].body, countySpecific: false },
     };
   }
 
@@ -457,27 +548,30 @@ export class SurplusTemplatesService {
   async save(
     organizationId: string | null | undefined,
     rawKind: string,
-    input: { body: string; name?: string; subject?: string; notes?: string },
+    input: { body: string; name?: string; subject?: string; notes?: string; county?: string | null },
     userId?: string | null,
   ) {
     const kind = kindOf(rawKind);
     const body = String(input?.body || '').trim();
     if (!body) throw new BadRequestException('The template body is empty.');
     const org = organizationId || null;
+    const county = canonicalCounty(input?.county);
+    const scope = county ? { county: { equals: county, mode: 'insensitive' as const } } : { county: null };
     return this.prisma.$transaction(async (tx) => {
       const last = await tx.surplusTemplate.findFirst({
-        where: { organizationId: org, kind },
+        where: { organizationId: org, kind, ...scope },
         orderBy: { version: 'desc' },
         select: { version: true },
       });
       await tx.surplusTemplate.updateMany({
-        where: { organizationId: org, kind, active: true },
+        where: { organizationId: org, kind, ...scope, active: true },
         data: { active: false },
       });
       return tx.surplusTemplate.create({
         data: {
           organizationId: org,
           kind,
+          county,
           version: (last?.version || 0) + 1,
           name: (input.name || '').trim() || null,
           subject: (input.subject || '').trim() || null,
@@ -491,22 +585,25 @@ export class SurplusTemplatesService {
     });
   }
 
-  async activate(organizationId: string | null | undefined, rawKind: string, version: number) {
+  async activate(organizationId: string | null | undefined, rawKind: string, version: number, rawCounty?: string | null) {
     const kind = kindOf(rawKind);
     const org = organizationId || null;
+    const county = canonicalCounty(rawCounty);
+    const scope = county ? { county: { equals: county, mode: 'insensitive' as const } } : { county: null };
     if (!Number.isInteger(version)) throw new BadRequestException('version is required');
     return this.prisma.$transaction(async (tx) => {
       await tx.surplusTemplate.updateMany({
-        where: { organizationId: org, kind, active: true },
+        where: { organizationId: org, kind, ...scope, active: true },
         data: { active: false },
       });
       // Version 0 is the built-in: activating it means no stored version is
-      // active, and the default shows again.
-      if (version === 0) return { kind, version: 0 };
-      const target = await tx.surplusTemplate.findFirst({ where: { organizationId: org, kind, version } });
-      if (!target) throw new BadRequestException(`No version ${version} of ${kind}`);
+      // active in this scope, and the default (the county's, if it has one)
+      // shows again.
+      if (version === 0) return { kind, county, version: 0 };
+      const target = await tx.surplusTemplate.findFirst({ where: { organizationId: org, kind, ...scope, version } });
+      if (!target) throw new BadRequestException(`No version ${version} of ${kind}${county ? ` for ${county}` : ''}`);
       await tx.surplusTemplate.update({ where: { id: target.id }, data: { active: true } });
-      return { kind, version };
+      return { kind, county, version };
     });
   }
 
@@ -519,7 +616,7 @@ export class SurplusTemplatesService {
     if (!built) return null;
     const { facts, fields, detail } = built;
 
-    const active = await this.list(organizationId);
+    const active = await this.list(organizationId, facts.county);
     const pick = (kind: SurplusTemplateKind) => {
       const t = active.kinds.find((k) => k.kind === kind)!;
       return {
@@ -552,10 +649,32 @@ export class SurplusTemplatesService {
   }
 
   /** Active version per kind, for stamping documents and flagging stale ones. Zero is the built-in. */
-  async activeVersions(organizationId?: string | null): Promise<Record<string, number>> {
-    const active = await this.list(organizationId);
+  async activeVersions(organizationId?: string | null, county?: string | null): Promise<Record<string, number>> {
+    const active = await this.list(organizationId, county);
     const out: Record<string, number> = {};
     for (const k of active.kinds) out[k.kind] = k.version;
+    return out;
+  }
+
+  /**
+   * The same, for every county the board shows at once, keyed by the
+   * lower-cased county name with '' for the general set. One query.
+   */
+  async activeVersionsByCounty(
+    organizationId?: string | null,
+    counties: string[] = [],
+  ): Promise<Record<string, Record<string, number>>> {
+    const rows = await this.prisma.surplusTemplate.findMany({
+      where: { organizationId: organizationId || null },
+      orderBy: [{ kind: 'asc' }, { version: 'desc' }],
+    });
+    const forCounty = (county: string | null) => {
+      const out: Record<string, number> = {};
+      for (const kind of KINDS) out[kind] = resolveKind(kind, rows, county).version;
+      return out;
+    };
+    const out: Record<string, Record<string, number>> = { '': forCounty(null) };
+    for (const c of counties) out[c.toLowerCase()] = forCounty(c);
     return out;
   }
 
@@ -576,7 +695,7 @@ export class SurplusTemplatesService {
     const built = await this.fieldsFor(leadId, organizationId, userId);
     if (!built) return null;
 
-    const active = await this.list(organizationId);
+    const active = await this.list(organizationId, built.facts.county);
     const t = active.kinds.find((k) => k.kind === kind)!;
     const body = renderTemplate(t.body, built.fields);
     return {
@@ -638,7 +757,7 @@ export class SurplusTemplatesService {
       { kind: SurplusDocumentKind.LETTER_OF_DIRECTION, step: 4, note: 'Signed after the assignment.' },
       { kind: SurplusDocumentKind.COUNTY_CLAIM_FORM, step: 5, note: 'The county form, completed. Notarize where it calls for it.' },
     ];
-    const active = await this.list(organizationId);
+    const active = await this.list(organizationId, built.facts.county);
     const items = [] as any[];
     for (const o of order) {
       const row = docs.get(o.kind) || null;
@@ -765,7 +884,7 @@ export class SurplusTemplatesService {
     });
 
     const fields = { ...built.fields, recipientName, recipientAddress: recipientAddress || null, today };
-    const active = await this.list(organizationId);
+    const active = await this.list(organizationId, built.facts.county);
     const t = active.kinds.find((k) => k.kind === kind)!;
     const body = renderTemplate(t.body, fields);
 
@@ -907,6 +1026,12 @@ export class SurplusTemplatesService {
           .filter(Boolean)
           .join(', ') || null,
       feeCapPct: facts.feeCap != null ? facts.feeCap : null,
+      companyShortName: DIG_DEEPER_BRAND.shortName || DIG_DEEPER_BRAND.companyName,
+      companyAddress: DIG_DEEPER_BRAND.address || null,
+      parcelId: d.parcelId || null,
+      saleDate: d.saleDate
+        ? new Date(d.saleDate).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
+        : null,
     };
     // The bare website merge field reads as a link too once one exists.
     if (!DIG_DEEPER_BRAND.website && links.websiteUrl) fields.website = links.websiteUrl;
