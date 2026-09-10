@@ -270,7 +270,7 @@ export const SURPLUS_QUEUE_LABEL: Record<SurplusQueue, string> = {
   [SurplusQueue.CALL]: 'Call now',
   [SurplusQueue.ENTITY]: 'Entity, find the agent',
   [SurplusQueue.HEIRS]: 'Find the heirs',
-  [SurplusQueue.TRACE]: 'Skip trace it',
+  [SurplusQueue.TRACE]: 'Skip trace',
   [SurplusQueue.NAME_SEARCH]: 'Name search',
   [SurplusQueue.MAILED]: 'Letter sent',
   [SurplusQueue.CLOSED]: 'Closed',

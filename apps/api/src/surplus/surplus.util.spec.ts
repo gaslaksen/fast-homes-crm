@@ -604,7 +604,7 @@ describe('stageGateError', () => {
       SurplusStage.CLAIM_FILED,
       { docs: {}, docsMissing: ['fee_agreement'] },
     );
-    expect(msg).toContain('entitlement verified');
+    expect(msg).toContain('right person confirmed');
     expect(msg).toContain('contingency fee agreement marked signed');
     expect(msg).toContain('limited power of attorney marked signed');
     expect(msg).toContain('direction to pay surplus funds marked notarized');

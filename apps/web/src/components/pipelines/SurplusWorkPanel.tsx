@@ -886,7 +886,7 @@ function DisbursementSection({
 
   return (
     <Section
-      title="The money coming back"
+      title="The check and the shares"
       note={m.frozen ? `Paid ${fmtDate(m.checkSentAt)}` : m.checkReceivedAt ? `Check in hand ${fmtDate(m.checkReceivedAt)}` : undefined}
     >
       {/* 1. The check. */}
@@ -2128,9 +2128,9 @@ function CountySection({ lead }: { lead: SurplusPanelLead }) {
 }
 
 const CONTACT_LABEL: Record<string, string> = {
-  not_tapped: 'Not tapped',
-  tapped: 'Tapped',
-  recap_scheduled: 'Recap scheduled',
+  not_tapped: 'No reply yet',
+  tapped: 'Replied',
+  recap_scheduled: 'Follow-up booked',
 };
 const CONTACT_TONE: Record<string, string> = {
   not_tapped: 'var(--amber)',
@@ -2969,13 +2969,13 @@ function CaseTab({
           />
           {property.daysRemaining != null && (
             <Row
-              k="Lien window"
+              k="Other claims"
               v={
                 property.daysRemaining > 0
-                  ? `${property.daysRemaining} days left`
-                  : `closed ${Math.abs(property.daysRemaining)} days ago`
+                  ? `still possible until ${fmtDate(new Date(Date.now() + property.daysRemaining * 86400000))}`
+                  : `closed ${fmtDate(new Date(Date.now() + property.daysRemaining * 86400000))}`
               }
-              note="Whether another lienholder can still appear and shrink the payout. A previous owner is not barred by it."
+              note="Until then another lienholder can still appear and shrink the payout. A previous owner is not barred by it."
             />
           )}
         </div>
@@ -4340,14 +4340,15 @@ function QualificationSection({
   );
   const rule = lead.compliance?.rule || null;
   const disclosures = lead.disclosures || {};
+  const talking = STAGE_ORDER.indexOf(lead.stage) >= 1;
   return (
     <Section
       title="Checks"
-      note={lead.compliance?.clear ? 'Compliance clear' : 'Compliance blocked'}
+      note={lead.compliance?.blocks?.length ? 'Agreement not yet allowed' : 'Agreement allowed'}
     >
       <Toggle
         on={!!lead.entitlementVerified}
-        label="Entitlement verified"
+        label="Right person confirmed"
         keyName="entitlementVerified"
         patch={{ entitlementVerified: !lead.entitlementVerified }}
         note="The claimant is who the clerk noticed, and nobody else has a better claim."
@@ -4378,18 +4379,20 @@ function QualificationSection({
           patch={{ disclosures: { [k]: !disclosures[k] } }}
         />
       ))}
-      {rule && (
+      {/* The fee cap and its statute belong to the agreement, so they show
+          once somebody is talking to the claimant and not before. */}
+      {talking && rule && (
         <div style={{ fontSize: 11.5, color: 'var(--dim)', marginTop: 4 }}>
-          Fee cap: {rule.feeCap != null ? `${rule.feeCap}% of total consideration` : 'none confirmed, sending is blocked'}
+          Fee cap: {rule.feeCap != null ? `${rule.feeCap}% of total consideration` : 'none confirmed, so no agreement can go out'}
           {rule.capConfidence !== 'confirmed' ? ` (${rule.capConfidence})` : ''}. {rule.statuteRefs?.join(', ')}.
         </div>
       )}
-      {lead.compliance?.blocks?.length > 0 && (
+      {talking && lead.compliance?.blocks?.length > 0 && (
         <div style={{ fontSize: 11.5, color: 'var(--red)' }}>
-          Blocks the send: {lead.compliance.blocks.join('; ')}.
+          Stops the agreement: {lead.compliance.blocks.join('; ')}.
         </div>
       )}
-      {lead.compliance?.warns?.length > 0 && (
+      {talking && lead.compliance?.warns?.length > 0 && (
         <div style={{ fontSize: 11.5, color: 'var(--amber)' }}>{lead.compliance.warns.join('; ')}.</div>
       )}
     </Section>
@@ -4483,7 +4486,13 @@ function CredibilityBlock({
   };
 
   const ready = !!status?.ready;
-  const why = status ? `Not set up: ${status.missing.join(', ')}` : 'Checking...';
+  // The API names the missing settings. On screen they read as what they
+  // are, not as environment variables.
+  const plain = (k: string) =>
+    /WEBSITE/i.test(k) ? 'the website link' : /SUNBIZ/i.test(k) ? 'the Sunbiz filing link' : /ONEPAGER/i.test(k) ? 'the one-pager link' : k.toLowerCase().replace(/_/g, ' ');
+  const why = status
+    ? `Packet links are not set up yet: ${status.missing.map(plain).join(', ')}. Add them in the API settings.`
+    : 'Checking...';
   return (
     <div
       style={{

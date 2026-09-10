@@ -143,9 +143,9 @@ export const WORKUP_LABEL: Record<string, string> = {
 // ── Surplus Funds ───────────────────────────────────────────────────────────
 
 export const TIER: Record<string, { icon: string; label: string } & ChipColor> = {
-  A: { icon: '🔥', label: 'Tier A', ...CHIP.red },
-  B: { icon: '⚡', label: 'Tier B', ...CHIP.amber },
-  C: { icon: '⚖', label: 'Tier C', ...CHIP.violet },
+  A: { icon: '🔥', label: 'Tier A · $25k+, living owner', ...CHIP.red },
+  B: { icon: '⚡', label: 'Tier B · $10k to $25k', ...CHIP.amber },
+  C: { icon: '⚖', label: 'Tier C · $25k+, estate', ...CHIP.violet },
   U: { icon: '•', label: 'Unbanded', ...CHIP.blue },
 };
 

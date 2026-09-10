@@ -527,5 +527,5 @@ export const CLAIM_STATUS_LABEL: Record<SurplusClaimStatus, string> = {
   [SurplusClaimStatus.PENDING]: 'Claim pending',
   [SurplusClaimStatus.ASSIGNED]: 'Owner already signed',
   [SurplusClaimStatus.DISTRIBUTED]: 'Paid out',
-  [SurplusClaimStatus.UNKNOWN]: 'Unclassified',
+  [SurplusClaimStatus.UNKNOWN]: 'Status unknown',
 };

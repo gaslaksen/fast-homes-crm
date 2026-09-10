@@ -1090,7 +1090,7 @@ export default function SurplusFundsPage() {
               set={setSort}
               opts={[
                 ['work', 'Sort: Call first'],
-                ['untapped', 'Sort: Not tapped first'],
+                ['untapped', 'Sort: No reply first'],
                 ['surplus', 'Sort: Biggest surplus'],
                 ['net', 'Sort: Net to claimant'],
                 ['notice', 'Sort: Newest notice'],
@@ -1155,8 +1155,8 @@ export default function SurplusFundsPage() {
                 <span className="dc-flabel">Status</span>
                 {(
                   [
-                    ['not_tapped', 'Not tapped'],
-                    ['missing', 'Missing a channel'],
+                    ['not_tapped', 'No reply yet'],
+                    ['missing', 'Untried channel'],
                     ['letter_due', 'Letter due'],
                     ['update_overdue', 'Update overdue'],
                     ['new', 'New, 7 days'],
@@ -1235,7 +1235,7 @@ export default function SurplusFundsPage() {
                 <Sel
                   v={lienWin}
                   set={setLienWin}
-                  opts={[['all', 'Any lienholder window'], ['open', 'Lienholder window open'], ['closed', 'Lienholder window closed']]}
+                  opts={[['all', 'Any claim window'], ['open', 'Other claims still possible'], ['closed', 'Other claims closed']]}
                 />
                 <button className={`dc-danger${hideDead ? '' : ' off'}`} onClick={() => setHideDead(!hideDead)}>
                   Hide dead
