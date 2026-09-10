@@ -81,6 +81,12 @@ interface Props<T> {
   toolbarRight?: ReactNode;
   empty?: ReactNode;
   loading?: boolean;
+  /**
+   * Leave out the Cards view. It shows the kanban's card without the columns,
+   * a third way to see the same list; a pipeline that has retired it passes
+   * this and a stored 'cards' preference falls back to the table.
+   */
+  hideCards?: boolean;
 }
 
 export default function PipelineBoard<T>({
@@ -102,6 +108,7 @@ export default function PipelineBoard<T>({
   toolbarRight,
   empty,
   loading,
+  hideCards,
 }: Props<T>) {
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -167,9 +174,11 @@ export default function PipelineBoard<T>({
               Board
             </button>
           )}
-          <button className={view === 'cards' ? 'on' : ''} onClick={() => onViewChange('cards')}>
-            Cards
-          </button>
+          {!hideCards && (
+            <button className={view === 'cards' ? 'on' : ''} onClick={() => onViewChange('cards')}>
+              Cards
+            </button>
+          )}
         </div>
 
         <div className="dc-seg">
@@ -188,7 +197,7 @@ export default function PipelineBoard<T>({
         <div className="dc-pb-empty">Loading...</div>
       ) : rows.length === 0 ? (
         <div className="dc-pb-empty">{empty || 'Nothing here yet.'}</div>
-      ) : view === 'table' ? (
+      ) : view === 'table' || (hideCards && view === 'cards') ? (
         <div className="dc-pb-tablewrap">
           <table className="dc-pb-table">
             <thead>

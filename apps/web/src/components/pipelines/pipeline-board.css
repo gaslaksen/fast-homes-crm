@@ -692,3 +692,49 @@ details.dc-fold-sub > summary .flag {
 .dc-wp-gate details > summary::-webkit-details-marker { display: none; }
 .dc-wp-gate details > summary::before { content: "+ "; }
 .dc-wp-gate details[open] > summary::before { content: "\2212 "; }
+
+/* ── Board header, feed line, More menu, Filters drawer ────────────────────
+ *
+ * The board's job is to pick the next lead. Everything a caller does not do
+ * on a normal day (the county pull, the import, the references) sits behind
+ * More; the secondary filters sit in a drawer whose button says how many are
+ * on; the feed health is one line with a dot rather than two paragraphs.
+ * Interactive selectors are element-qualified for the reason on
+ * button.dc-daybox.
+ */
+.dc-feedline { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--faint); margin-top: 6px; cursor: help; }
+.dc-feedline i { width: 7px; height: 7px; border-radius: 50%; background: var(--mint); flex: 0 0 7px; }
+.dc-feedline.warn { color: var(--amber); }
+.dc-feedline.warn i { background: var(--amber); }
+
+details.dc-menu { position: relative; }
+details.dc-menu > summary { list-style: none; }
+details.dc-menu > summary::-webkit-details-marker { display: none; }
+details.dc-menu > summary::after { content: "\25BE"; font-size: 11px; opacity: 0.7; }
+details.dc-menu > summary:focus-visible { outline: 2px solid var(--mint); outline-offset: 2px; }
+.dc-menu-list {
+  position: absolute; right: 0; top: calc(100% + 6px); min-width: 230px; z-index: 20;
+  background: var(--surface); border: 1px solid var(--border2); border-radius: 10px; padding: 6px;
+  box-shadow: 0 10px 30px rgba(6, 9, 14, 0.18); display: grid; gap: 2px;
+}
+button.dc-menu-item, a.dc-menu-item, label.dc-menu-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%;
+  text-align: left; padding: 8px 10px; border-radius: 7px; font-size: 13px; font-weight: 600;
+  color: var(--text); background: transparent; border: none; white-space: nowrap;
+}
+button.dc-menu-item:hover:not(:disabled), a.dc-menu-item:hover { background: var(--surface2); }
+button.dc-menu-item:disabled { opacity: 0.45; cursor: not-allowed; }
+label.dc-menu-item { font-weight: 500; color: var(--dim); font-size: 12px; cursor: default; }
+label.dc-menu-item select.dc-in { width: auto; padding: 5px 8px; font-size: 12.5px; }
+
+.dc-btn.on { border-color: var(--mint); color: var(--mint); background: var(--mintGhost); }
+.dc-count {
+  display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px;
+  border-radius: 999px; background: var(--mint); color: var(--mintInk); font-size: 11px; font-weight: 700;
+}
+.dc-drawer {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+  padding: 12px 14px; margin-bottom: 14px; display: grid; gap: 10px;
+}
+.dc-drawer-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.dc-drawer-row > .dc-flabel { min-width: 56px; }
