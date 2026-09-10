@@ -491,6 +491,23 @@ export class SurplusService {
       if (n !== null && (!Number.isFinite(n) || n < 0)) throw new BadRequestException(`${k} must be a positive number.`);
       detailPatch[k] = n;
     }
+    // The fee never exceeds the rule's cap. An agreement over it is void, so
+    // a percent above the cap is refused rather than clamped, with the cap
+    // named so the number typed next is the right one.
+    if (detailPatch.feePercent != null) {
+      const cap = ruleFor(d.surplusType, d.fundLocation)?.feeCap ?? null;
+      if (cap != null && detailPatch.feePercent > cap) {
+        throw new BadRequestException(`The fee is capped at ${cap} percent for this claim.`);
+      }
+    }
+    // The clearing clock is computed in the same write as the check's
+    // arrival, so the stage gate and the check-sent rule below see it even
+    // when both dates arrive in one request. Computed in a follow-up update,
+    // as before, the gate read a null and let the claimant's check go the
+    // same day the county's arrived.
+    if (detailPatch.checkReceivedAt && !d.checkReceivedAt) {
+      detailPatch.clearingDueAt = new Date(new Date(detailPatch.checkReceivedAt).getTime() + CLEARING_DAYS * 86_400_000);
+    }
     if (patch.checkSentMethod !== undefined) {
       const m = patch.checkSentMethod === null ? null : String(patch.checkSentMethod).toLowerCase();
       if (m && !['usps', 'fedex', 'ups', 'in_person'].includes(m)) {
@@ -711,7 +728,7 @@ export class SurplusService {
     // fee defaults to the rule's cap so the report has a number.
     if (detailPatch.checkReceivedAt && !d.checkReceivedAt) {
       const received = new Date(detailPatch.checkReceivedAt);
-      const clearing = new Date(received.getTime() + CLEARING_DAYS * 86_400_000);
+      const clearing = detailPatch.clearingDueAt as Date;
       const rule = ruleFor(d.surplusType, d.fundLocation);
       await this.prisma.surplusDetail.update({
         where: { id: d.id },
@@ -741,20 +758,40 @@ export class SurplusService {
       }
     }
 
+    // The report the claimant signs states the shares, so it cannot be
+    // signed over the cap: the API refuses, not just the button in the web.
+    if (detailPatch.disbursementReportSignedAt && !d.disbursementReportSignedAt) {
+      const calc = this.disbursementFor({ ...d, ...detailPatch });
+      if (calc.overCap) {
+        const cap = ruleFor(d.surplusType, d.fundLocation)?.feeCap;
+        throw new BadRequestException(
+          `Total consideration is ${calc.considerationPct}% of the check, over the ${cap}% cap. Reduce the fee or stop passing expenses to the claimant before the report is signed.`,
+        );
+      }
+    }
+
     // The claimant's check going out is the last act. It is refused until
-    // the report is signed and the clearing has passed, and once it goes
-    // the shares are frozen on the row and the claim is Paid.
+    // the report is signed, the clearing has passed and the shares are under
+    // the cap, and once it goes the shares are frozen on the row and the
+    // claim is Paid.
     if (detailPatch.checkSentAt && !d.checkSentAt) {
       const signedAt = detailPatch.disbursementReportSignedAt ?? d.disbursementReportSignedAt;
       if (!signedAt) {
         throw new BadRequestException("Record the claimant signing the disbursement report before sending their check.");
       }
-      if (d.clearingDueAt && new Date(d.clearingDueAt).getTime() > Date.now()) {
+      const clearingDue = detailPatch.clearingDueAt ?? d.clearingDueAt;
+      if (clearingDue && new Date(clearingDue).getTime() > Date.now()) {
         throw new BadRequestException(
-          `The thirty-day clearing period runs until ${new Date(d.clearingDueAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}. The check waits for it.`,
+          `The thirty-day clearing period runs until ${new Date(clearingDue).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}. The check waits for it.`,
         );
       }
       const calc = this.disbursementFor({ ...d, ...detailPatch });
+      if (calc.overCap) {
+        const cap = ruleFor(d.surplusType, d.fundLocation)?.feeCap;
+        throw new BadRequestException(
+          `Total consideration is ${calc.considerationPct}% of the check, over the ${cap}% cap. The check cannot go until the shares are under it.`,
+        );
+      }
       await this.prisma.surplusDetail.update({
         where: { id: d.id },
         data: {

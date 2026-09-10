@@ -209,6 +209,13 @@ export class MessagesService {
     const to = toNumber
       ? await this.leadPhones.resolveTo(leadId, toNumber)
       : formatPhoneNumber(lead.sellerPhone);
+    // The per-number flag, not just the lead's do-not-contact. A surplus skip
+    // trace routinely returns numbers on the federal registry or a litigator
+    // list, and the flag beside the number was only ever a hint until here.
+    const flag = await this.leadPhones.dncFor(leadId, to).catch(() => null);
+    if (flag) {
+      throw new Error(`That number is flagged ${flag} and cannot be texted`);
+    }
     const from =
       (await this.phoneNumbers.resolveForLead(leadId, fromNumber).catch(() => null)) ||
       this.twilioNumber;
@@ -947,6 +954,16 @@ You decide the right approach based on the conversation flow.${photoNudge}`.trim
     if (!match) {
       console.warn(`No lead found for phone: ${from}`);
       return { success: false, reason: 'Lead not found' };
+    }
+    // A surplus heir or associate texting back is marked on their own row so
+    // the panel shows who answered, not just that somebody did.
+    if (match.heirId) {
+      await this.prisma.surplusHeir
+        .update({ where: { id: match.heirId }, data: { lastContactedAt: new Date() } })
+        .catch(() => undefined);
+      await this.prisma.surplusHeir
+        .updateMany({ where: { id: match.heirId, contactStatus: 'not_contacted' }, data: { contactStatus: 'contacted' } })
+        .catch(() => undefined);
     }
 
     const lead = await this.prisma.lead.findUnique({

@@ -2,9 +2,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 const BOLDSIGN_API = 'https://api.boldsign.com';
-const BOLDSIGN_KEY =
-  process.env.BOLDSIGN_API_KEY ||
-  'Zjg2OWNhZDMtZmU4MS00YzZlLThjZDQtZTg1MWVhOTg0MWQx';
+// From the environment only. A fallback key used to live here in source,
+// which put a live credential in every clone of the repository; that key
+// should be rotated in BoldSign and set in Railway.
+const BOLDSIGN_KEY = process.env.BOLDSIGN_API_KEY || '';
 
 const PURCHASE_CONTRACT_TEMPLATE = '07f21edb-5c6a-4287-8cf1-27f5b44d83d0';
 const AIF_NOTARY_TEMPLATE = '555f6321-66aa-4e0f-a44d-3e20473e2211';
@@ -17,6 +18,7 @@ export class BoldSignService {
   constructor(private prisma: PrismaService) {}
 
   private headers() {
+    if (!BOLDSIGN_KEY) throw new Error('BOLDSIGN_API_KEY is not configured');
     return { 'X-API-KEY': BOLDSIGN_KEY, 'Content-Type': 'application/json' };
   }
 

@@ -59,6 +59,21 @@ export function badEmailsOf(v: unknown): string[] {
 export interface LeadPhoneMatch {
   leadId: string;
   isPrimary: boolean;
+  /**
+   * Set when the number belongs to a surplus heir or associate rather than to
+   * the claimant. The call or text still lands on the claim; the heir row is
+   * what gets marked contacted.
+   */
+  heirId?: string | null;
+  /** The heir's role, so a caller can tell an heir from a neighbor. */
+  heirRole?: string | null;
+}
+
+/** Prisma OR clauses matching a ten digit number in a detail table's slots. */
+function slotsMatching(ten: string, slots: number): Record<string, string>[] {
+  const out: Record<string, string>[] = [];
+  for (let i = 2; i <= slots; i++) out.push({ [`phone${i}`]: ten });
+  return out;
 }
 
 /**
@@ -393,18 +408,58 @@ export class LeadPhonesService {
     });
     if (primary) return { leadId: primary.id, isPrimary: true };
 
+    // Every pipeline's extra slots, off the same table the writes use. The
+    // surplus and tax sale slots were missing here, which is how a claimant
+    // ringing back from a skip-traced second number arrived as "unknown
+    // caller" and was never stamped as a reply.
     const alternate = await this.prisma.lead.findFirst({
       where: {
-        OR: [
-          { foreclosureDetail: { OR: [{ phone2: ten }, { phone3: ten }, { phone4: ten }] } },
-          { probateDetail: { phone2: ten } },
-        ],
+        OR: DETAIL_RELATIONS.map((r) => ({ [r.relation]: { OR: slotsMatching(ten, r.slots) } })),
       },
       orderBy: { createdAt: 'desc' },
       select: { id: true },
     });
     if (alternate) return { leadId: alternate.id, isPrimary: false };
 
+    // A surplus heir or associate calling back from a letter. Their numbers
+    // live on their own row, indexed, and the letter's whole purpose is this
+    // call, so it has to land on the claim rather than in the unmatched pile.
+    const heir = await this.prisma.surplusHeir.findFirst({
+      where: { OR: [{ phone1: ten }, { phone2: ten }, { phone3: ten }, { phone4: ten }] },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, role: true, surplusDetail: { select: { leadId: true } } },
+    });
+    if (heir?.surplusDetail?.leadId) {
+      return { leadId: heir.surplusDetail.leadId, isPrimary: false, heirId: heir.id, heirRole: heir.role };
+    }
+
+    return null;
+  }
+
+  /**
+   * Why this number must not be dialled or texted, or null when it is clean.
+   *
+   * Checks the lead's own slots first, then the heirs and associates on a
+   * surplus claim, since the panel offers their numbers too. Consulted before
+   * a send or a dial rather than after: the flag is a legal reason not to
+   * contact a number that may work perfectly well.
+   */
+  async dncFor(leadId: string, phone: string): Promise<string | null> {
+    const ten = numberKey(phone);
+    if (ten.length !== 10) return null;
+    const own = (await this.listForLead(leadId)).find((p) => numberKey(p.number) === ten);
+    if (own) return own.dnc || null;
+    const heir = await this.prisma.surplusHeir.findFirst({
+      where: {
+        surplusDetail: { leadId },
+        OR: [{ phone1: ten }, { phone2: ten }, { phone3: ten }, { phone4: ten }],
+      },
+      select: { phone1: true, phone2: true, phone3: true, phone4: true, phone1Dnc: true, phone2Dnc: true, phone3Dnc: true, phone4Dnc: true },
+    });
+    if (!heir) return null;
+    for (const i of [1, 2, 3, 4]) {
+      if (numberKey((heir as any)[`phone${i}`] || '') === ten) return (heir as any)[`phone${i}Dnc`] || null;
+    }
     return null;
   }
 
@@ -424,13 +479,16 @@ export class LeadPhonesService {
           { sellerPhone: `+1${ten}` },
           { sellerPhone: ten },
           { sellerPhone: `1${ten}` },
-          { foreclosureDetail: { OR: [{ phone2: ten }, { phone3: ten }, { phone4: ten }] } },
-          { probateDetail: { phone2: ten } },
+          ...DETAIL_RELATIONS.map((r) => ({ [r.relation]: { OR: slotsMatching(ten, r.slots) } })),
         ],
       },
       select: { id: true },
     });
-    return leads.map((l) => l.id);
+    const heirs = await this.prisma.surplusHeir.findMany({
+      where: { OR: [{ phone1: ten }, { phone2: ten }, { phone3: ten }, { phone4: ten }] },
+      select: { surplusDetail: { select: { leadId: true } } },
+    });
+    return Array.from(new Set([...leads.map((l) => l.id), ...heirs.map((h) => h.surplusDetail?.leadId).filter(Boolean) as string[]]));
   }
   // ─── Editing what we hold ─────────────────────────────────────────────────
 

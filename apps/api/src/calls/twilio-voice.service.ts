@@ -188,6 +188,18 @@ export class TwilioVoiceService {
       return response.toString();
     }
 
+    // A number flagged on a do-not-call registry, a litigator list or with a
+    // TCPA restriction is refused here, before the carrier is asked. The panel
+    // shows the flag beside the number; this is what makes it more than a hint.
+    if (leadId) {
+      const flag = await this.leadPhones.dncFor(leadId, to).catch(() => null);
+      if (flag) {
+        this.logger.warn(`Refusing to dial ${to} for lead ${leadId}: flagged ${flag}`);
+        response.say('That number is on a do not call list and cannot be dialled from Dealcore.');
+        return response.toString();
+      }
+    }
+
     const conferenceName = this.conferenceNameFor(callSid);
 
     // Open a CallLog row keyed by the browser leg's CallSid
@@ -685,11 +697,29 @@ export class TwilioVoiceService {
     }
 
     // A surplus claimant ringing us back is contact made, whatever happens
-    // next on the call. The voicemail's whole job is to produce this.
+    // next on the call. The voicemail's whole job is to produce this. An heir
+    // counts too, since the heir is who can sign; a neighbor or relative
+    // ringing back is marked on their own row and does not count as the
+    // claim being reached.
     if (lead?.id && (lead as any).source === LeadSource.SURPLUS) {
-      await this.prisma.surplusDetail
-        .updateMany({ where: { leadId: lead.id, tappedAt: null }, data: { tappedAt: new Date() } })
-        .catch(() => undefined);
+      const heirId = (lead as any).heirId as string | null;
+      const heirRole = (lead as any).heirRole as string | null;
+      if (heirId) {
+        await this.prisma.surplusHeir
+          .update({
+            where: { id: heirId },
+            data: { lastContactedAt: new Date() },
+          })
+          .catch(() => undefined);
+        await this.prisma.surplusHeir
+          .updateMany({ where: { id: heirId, contactStatus: 'not_contacted' }, data: { contactStatus: 'contacted' } })
+          .catch(() => undefined);
+      }
+      if (!heirId || heirRole === 'heir') {
+        await this.prisma.surplusDetail
+          .updateMany({ where: { leadId: lead.id, tappedAt: null }, data: { tappedAt: new Date() } })
+          .catch(() => undefined);
+      }
     }
 
     const identities = await this.getRingIdentities();
@@ -751,10 +781,11 @@ export class TwilioVoiceService {
     if (!phone) return null;
     const match = await this.leadPhones.findLeadByPhone(phone);
     if (!match) return null;
-    return this.prisma.lead.findUnique({
+    const lead = await this.prisma.lead.findUnique({
       where: { id: match.leadId },
       select: { id: true, sellerFirstName: true, sellerLastName: true, source: true },
     });
+    return lead ? { ...lead, heirId: match.heirId || null, heirRole: match.heirRole || null } : null;
   }
 
   /** Status callback (Dial action + per-call status). Updates CallLog by CallSid. */
@@ -883,9 +914,17 @@ export class TwilioVoiceService {
     });
     this.logger.log(`📝 Transcribed ${callSid} (${text.length} chars)`);
 
-    // Reuse the existing CAMP extraction (generic over any call transcript)
+    // Reuse the existing CAMP extraction, which is written for a property
+    // seller. A surplus claimant is not selling anything: run through it, the
+    // extractor invents an asking price and a timeline and can move the
+    // lead's status, so surplus calls keep the transcript and skip it.
     if (call.leadId) {
-      await this.callsService.processCallTranscript(call.leadId, text);
+      const owner = await this.prisma.lead.findUnique({ where: { id: call.leadId }, select: { source: true } });
+      if (owner?.source === LeadSource.SURPLUS) {
+        this.logger.log(`Surplus call ${callSid}: transcript kept, CAMP extraction skipped`);
+      } else {
+        await this.callsService.processCallTranscript(call.leadId, text);
+      }
     }
   }
 
