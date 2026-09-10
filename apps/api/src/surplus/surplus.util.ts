@@ -511,7 +511,7 @@ export function stageRequirementsMissing(
   // Agreement Signed: the qualification gate, the compliance gate, and the
   // fee agreement itself marked signed. A signed agreement over the cap is
   // void, so the compliance blocks stop the stage as well as the send.
-  if (!facts.entitlementVerified) missing.push('entitlement verified');
+  if (!facts.entitlementVerified) missing.push('right person confirmed');
   if (!facts.noticeConfirmed) missing.push('notice date confirmed');
   if (!facts.titleSearchComplete) missing.push('title search complete');
   for (const b of ctx.complianceBlocks || []) missing.push(`compliance: ${b}`);
