@@ -14,7 +14,6 @@ import '@/components/pipelines/pipeline-board.css';
 import {
   CHIP,
   CLAIMANT_TYPE_LABEL,
-  DNC_STATE,
   SURPLUS_STAGES,
   SURPLUS_STAGE_COLOR,
   TIER,
@@ -27,15 +26,6 @@ import {
   agoLabel,
   agoDays,
 } from '@/components/pipelines/format';
-
-/**
- * Contract sending is not built. The button below only advanced the stage and
- * showed a toast, which reads as "sent" without anything having been sent, and
- * the compliance gate exists to guard that send. Until there is a real send,
- * both are hidden rather than deleted, so the FL disclosure and fee-cap work
- * survives intact. Flip this to true when contracts are wired up.
- */
-const CONTRACTS_ENABLED = false;
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -191,6 +181,14 @@ const QUEUE_CHIP: Record<string, { bg: string; fg: string }> = {
   closed: CHIP.slate,
 };
 
+/**
+ * The table, in the order somebody picks a lead: what to do, for whom, how
+ * much, whether anyone else is on the money, whether we can reach them,
+ * what is promised next, and when we last tried. Seven columns. The owner
+ * address, the days since sale and the touch count moved to the panel; at
+ * thirteen columns the table was 1,252px wide in an 1,131px space and the
+ * two that said whether to bother were the ones cut off.
+ */
 const SURPLUS_COLUMNS: PipelineColumn<any>[] = [
   {
     // What to do with this one, first column and first read. Sorts on the
@@ -198,7 +196,7 @@ const SURPLUS_COLUMNS: PipelineColumn<any>[] = [
     // alphabetically by queue name.
     key: 'queue',
     label: 'Next step',
-    width: '150px',
+    width: '140px',
     sortValue: (r) => r.workScore,
     render: (r) => {
       const c = QUEUE_CHIP[r.queue] || CHIP.slate;
@@ -221,62 +219,32 @@ const SURPLUS_COLUMNS: PipelineColumn<any>[] = [
     },
   },
   {
-    key: 'claimStatus',
-    label: 'Status',
-    width: '150px',
-    sortValue: (r) => r.workScore,
-    render: (r) => {
-      const c = CLAIM_STATUS_CHIP[r.claimStatus] || CHIP.slate;
-      return (
-        <span className="dc-tag" style={{ background: c.bg, color: c.fg }}>
-          {r.claimStatusLabel}
-        </span>
-      );
-    },
-  },
-  {
-    key: 'surplus',
-    label: 'Surplus',
-    align: 'right',
-    width: '92px',
-    nowrap: true,
-    sortValue: (r) => r.grossSurplus,
-    render: (r) => <b title={money(r.grossSurplus)}>{moneyShort(r.grossSurplus)}</b>,
-  },
-  {
+    // The house and the people owed on it, one cell. The claimant used to
+    // have a column of its own, which cost a row of height for every
+    // property with a long name.
     key: 'property',
-    label: 'Property',
+    label: 'Property and claimant',
     sortValue: (r) => r.address || '',
     render: (r) => (
-      <div>
-        <div style={{ fontWeight: 600 }}>{r.address}</div>
-        <div style={{ fontSize: 11.5, color: 'var(--faint)' }}>
-          {[r.city, r.zip].filter(Boolean).join(' ')} · {r.county} · {r.caseNumber}
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontWeight: 600, overflowWrap: 'anywhere' }}>
+          {r.address}
+          <span style={{ fontWeight: 400, color: 'var(--faint)' }}>, {r.city}</span>
         </div>
-      </div>
-    ),
-  },
-  {
-    key: 'claimants',
-    label: 'Claimants',
-    sortValue: (r) => r.claimantNames[0] || '',
-    render: (r) => (
-      <div>
-        <div style={r.allDeceased ? { textDecoration: 'line-through', color: 'var(--dim)' } : undefined}>
-          {r.claimantNames.slice(0, 2).join(', ')}
+        <div style={{ fontSize: 11.5, color: 'var(--dim)', overflowWrap: 'anywhere' }}>
+          <span style={r.allDeceased ? { textDecoration: 'line-through' } : undefined}>
+            {r.claimantNames.slice(0, 2).join(', ')}
+          </span>
+          {r.claimantCount > 2 && ` +${r.claimantCount - 2} more`}
+          <span style={{ color: 'var(--faint)' }}>
+            {' '}· {r.county}
+            {r.caseNumber ? ` · ${r.caseNumber}` : ''}
+          </span>
         </div>
-        {r.claimantCount > 2 && (
-          <div style={{ fontSize: 11.5, color: 'var(--faint)' }}>+{r.claimantCount - 2} more</div>
-        )}
         {/* The whole point of the heirs work: say who can actually sign, so
             nobody spends an afternoon on a dead claimant. */}
         {r.anyDeceased && (
-          <div
-            style={{
-              fontSize: 11.5,
-              color: r.needsHeirs ? 'var(--red)' : 'var(--mint)',
-            }}
-          >
+          <div style={{ fontSize: 11.5, color: r.needsHeirs ? 'var(--red)' : 'var(--mint)' }}>
             {r.needsHeirs
               ? 'deceased, no heirs on file'
               : `${r.livingHeirCount} heir${r.livingHeirCount === 1 ? '' : 's'}${
@@ -288,129 +256,60 @@ const SURPLUS_COLUMNS: PipelineColumn<any>[] = [
     ),
   },
   {
-    key: 'owner',
-    label: 'Owner address',
-    width: '150px',
+    key: 'surplus',
+    label: 'Surplus',
+    align: 'right',
+    width: '92px',
     nowrap: true,
-    sortValue: (r) => r.ownerMailingState || '',
+    sortValue: (r) => r.grossSurplus,
+    render: (r) => <b title={money(r.grossSurplus)}>{moneyShort(r.grossSurplus)}</b>,
+  },
+  {
+    key: 'claimStatus',
+    label: 'Claim',
+    width: '130px',
+    sortValue: (r) => r.workScore,
+    render: (r) => {
+      const c = CLAIM_STATUS_CHIP[r.claimStatus] || CHIP.slate;
+      return (
+        <span className="dc-tag" style={{ background: c.bg, color: c.fg }}>
+          {r.claimStatusLabel}
+        </span>
+      );
+    },
+  },
+  {
+    // Can we reach anyone who can sign. One line, in priority order. A
+    // deceased claimant with no heirs on file comes first even when a number
+    // exists, because that number is the dead claimant's and rings nobody
+    // who can sign; after that a live number is what makes a lead callable
+    // today, and everything else explains why there is not one.
+    key: 'reach',
+    label: 'Reach',
+    width: '140px',
+    sortValue: (r) => (r.needsHeirs ? 1 : r.anyContactable ? 3 : r.anyMismatch ? 0 : 2),
     render: (r) => (
-      <div>
-        {r.ownerMailingStreet ? (
-          <span
-            style={{ color: 'var(--mint)', fontSize: 12 }}
-            title={[r.ownerMailingStreet, r.ownerMailingCity, r.ownerMailingState, r.ownerMailingZip]
-              .filter(Boolean)
-              .join(', ')}
-          >
-            {[r.ownerMailingCity, r.ownerMailingState].filter(Boolean).join(', ')}
-          </span>
+      <div style={{ fontSize: 12 }}>
+        {r.needsHeirs ? (
+          <span style={{ color: 'var(--red)' }}>no heirs on file</span>
+        ) : r.anyContactable ? (
+          <span style={{ color: 'var(--mint)' }}>☏ callable</span>
+        ) : r.anyMismatch ? (
+          <span style={{ color: 'var(--red)' }}>⚠ wrong person</span>
         ) : (
-          <span style={{ color: 'var(--faint)', fontSize: 12 }}>not recovered</span>
-        )}
-        {/* Which envelopes have gone out, so the row says so before anyone
-            opens the panel to write the same person twice. */}
-        {r.letterMailedCount > 0 && (
-          <div style={{ fontSize: 11.5, color: 'var(--faint)' }} title={`${r.letterCount || r.letterMailedCount} letter${(r.letterCount || r.letterMailedCount) === 1 ? '' : 's'} across ${r.claimantCount} claimant${r.claimantCount === 1 ? '' : 's'}`}>
-            {'✉'} Letter sent {fmtDate(r.letterMailedAt)}
-            {r.letterCount > 1 ? ` (${r.letterCount})` : ''}
-            {r.letterMailedCount < r.claimantCount ? ` (${r.letterMailedCount} of ${r.claimantCount})` : ''}
-          </div>
+          <span style={{ color: 'var(--faint)' }}>no number</span>
         )}
         {/* The cadence, off the history: due for the next envelope, or three
             unanswered and time to upgrade the postage. */}
-        {r.letterDue && (
+        {r.letterDue ? (
           <div style={{ fontSize: 11, color: 'var(--amber)', fontWeight: 600 }}>
             {r.escalateMail ? 'Letter due, send Priority or FedEx' : 'Letter due'}
           </div>
-        )}
+        ) : r.letterMailedCount > 0 ? (
+          <div style={{ fontSize: 11, color: 'var(--faint)' }}>✉ letter {fmtDate(r.letterMailedAt)}</div>
+        ) : null}
       </div>
     ),
-  },
-  {
-    key: 'age',
-    label: 'Days since sale',
-    align: 'right',
-    width: '110px',
-    // Sorts oldest-first on the first click, which is the useful direction: a
-    // stale case is either already worked by somebody else or close to the end
-    // of its window.
-    sortValue: (r) => r.daysSinceSale ?? -1,
-    render: (r) =>
-      r.daysSinceSale == null ? (
-        <span style={{ color: 'var(--faint)' }}>unknown</span>
-      ) : (
-        <span
-          style={{
-            color:
-              r.daysSinceSale > 365
-                ? 'var(--red)'
-                : r.daysSinceSale > 120
-                  ? 'var(--amber)'
-                  : 'var(--mint)',
-            fontWeight: 600,
-          }}
-          title={r.saleDate ? `Sold ${fmtDate(r.saleDate)}` : undefined}
-        >
-          {r.daysSinceSale}d
-        </span>
-      ),
-  },
-  {
-    // What we have actually done, not what somebody planned to do. Written by
-    // the channel that sent it: every call placed, text and email.
-    key: 'touches',
-    label: 'Touches',
-    align: 'right',
-    width: '112px',
-    nowrap: true,
-    // Sorts the most neglected first, so the column answers "who has nobody
-    // been calling" rather than "who is popular".
-    sortValue: (r) => -agoDays(r.lastTouchedAt),
-    // One line, not a stack. Two short values stacked set the row height for
-    // every other cell in the table and read as a wrap rather than a design.
-    render: (r) => (
-      <span style={{ fontSize: 12, color: r.touches ? 'var(--text)' : 'var(--faint)' }}>
-        <b>{r.touches || 0}</b>
-        <span style={{ color: 'var(--faint)' }}> · {agoLabel(r.lastTouchedAt)}</span>
-      </span>
-    ),
-  },
-  {
-    // Tapped or not, and the four channels. Tapped is stamped by the channel
-    // that heard back; a channel counts as tried when its own record exists.
-    // Nothing here is ticked by hand, so it cannot drift from what went out.
-    key: 'contactStatus',
-    label: 'Contact',
-    width: '150px',
-    sortValue: (r) => (r.contactStatus === 'not_tapped' ? 0 : r.contactStatus === 'tapped' ? 1 : 2),
-    render: (r) => {
-      const status = r.contactStatus || 'not_tapped';
-      const label = status === 'not_tapped' ? 'Not tapped' : status === 'tapped' ? 'Tapped' : 'Recap set';
-      const tone = status === 'not_tapped' ? 'var(--amber)' : 'var(--mint)';
-      const glyphs: [string, string][] = [
-        ['called', '☎'],
-        ['texted', '\u{1F4AC}'],
-        ['emailed', '@'],
-        ['lettered', '✉'],
-      ];
-      return (
-        <div style={{ fontSize: 12 }}>
-          <div style={{ fontWeight: 600, color: tone }}>{label}</div>
-          <div style={{ display: 'flex', gap: 5, fontSize: 11 }} title="Called, texted, emailed, lettered">
-            {glyphs.map(([k, g]) => (
-              <span key={k} style={{ color: r.channels?.[k] ? 'var(--mint)' : 'var(--faint)', opacity: r.channels?.[k] ? 1 : 0.5 }}>
-                {g}
-              </span>
-            ))}
-            {r.channelsMissing?.length ? (
-              <span style={{ color: 'var(--faint)' }}>{r.channelsMissing.length} to go</span>
-            ) : (
-              <span style={{ color: 'var(--mint)' }}>all four</span>
-            )}
-          </div>
-        </div>
-      );
-    },
   },
   {
     // What somebody has promised to do next, and whether it has slipped. The
@@ -456,26 +355,29 @@ const SURPLUS_COLUMNS: PipelineColumn<any>[] = [
       ),
   },
   {
-    key: 'contact',
-    label: 'Reach',
-    width: '150px',
-    // Sorts contactable to the top: a lead you can call outranks one you cannot.
-    sortValue: (r) => (r.anyContactable ? 2 : r.anyMismatch ? 0 : 1),
-    render: (r) =>
-      r.anyContactable ? (
-        <span style={{ color: 'var(--mint)', fontSize: 12 }}>☏ callable</span>
-      ) : r.anyMismatch ? (
-        <span style={{ color: 'var(--red)', fontSize: 12 }}>⚠ wrong person</span>
-      ) : (
-        <span style={{ color: 'var(--faint)', fontSize: 12 }}>no number</span>
-      ),
-  },
-  {
-    key: 'open',
-    label: '',
-    align: 'right',
-    width: '80px',
-    render: () => <span style={{ color: 'var(--mint)', fontWeight: 600, fontSize: 12 }}>Work it</span>,
+    // When we last tried, and whether anyone has ever answered. Tapped is
+    // stamped by the channel that heard back, so it cannot drift from what
+    // went out. Sorts the most neglected first, so the column answers "who
+    // has nobody been calling" rather than "who is popular".
+    key: 'touches',
+    label: 'Last touch',
+    width: '120px',
+    nowrap: true,
+    sortValue: (r) => -agoDays(r.lastTouchedAt),
+    render: (r) => {
+      const status = r.contactStatus || 'not_tapped';
+      return (
+        <div style={{ fontSize: 12 }}>
+          <span style={{ color: r.touches ? 'var(--text)' : 'var(--faint)' }}>
+            {agoLabel(r.lastTouchedAt)}
+            {r.touches ? <span style={{ color: 'var(--faint)' }}> · {r.touches}</span> : null}
+          </span>
+          <div style={{ fontSize: 11, fontWeight: 600, color: status === 'not_tapped' ? 'var(--amber)' : 'var(--mint)' }}>
+            {status === 'not_tapped' ? 'No reply yet' : status === 'tapped' ? 'Replied' : 'Follow-up booked'}
+          </div>
+        </div>
+      );
+    },
   },
 ];
 
@@ -495,15 +397,16 @@ const SURPLUS_KANBAN: PipelineStage[] = SURPLUS_STAGES.map((st) => ({
  * "Closed" is offered as a filter but never leads, because its whole purpose is
  * to be out of the way.
  */
-const QUEUES: [string, string, string][] = [
-  ['call', 'Call now', '\u260E'],
-  ['heirs', 'Find the heirs', '\u2696'],
-  ['trace', 'Skip trace', '\u2318'],
-  ['name_search', 'Name search', '\u{1F50E}'],
-  ['entity', 'Entity', '\u{1F3E2}'],
-  ['mailed', 'Letter sent', '\u2709'],
-  ['closed', 'Closed', '\u2713'],
+const QUEUES: [string, string][] = [
+  ['call', 'Call now'],
+  ['heirs', 'Find the heirs'],
+  ['trace', 'Skip trace'],
+  ['name_search', 'Name search'],
+  ['entity', 'Entity'],
+  ['mailed', 'Letter sent'],
+  ['closed', 'Closed'],
 ];
+const QUEUE_LABEL: Record<string, string> = Object.fromEntries(QUEUES);
 
 const QUEUE_HELP: Record<string, string> = {
   call: 'A callable number and a claim still open. Pick up the phone.',
@@ -546,40 +449,38 @@ function scheduleLabel(cadence?: string): string {
   return cadence === 'weekly' ? 'every Monday at 4:30' : 'every morning at 5:45';
 }
 
-function FeedHealth({ runs, sources }: { runs: any[]; sources: FeedSource[] }) {
+function FeedLine({ runs, sources }: { runs: any[]; sources: FeedSource[] }) {
   if (!runs.length && !sources.length) return null;
-  // One line per registered feed. A weekly feed judged by the daily rule was
+  // One entry per registered feed. A weekly feed judged by the daily rule was
   // amber six days out of seven, which taught everyone to ignore the line.
   const feeds: FeedSource[] = sources.length
     ? sources
     : [{ key: 'duval_taxdeed', county: 'Duval', cadence: 'daily' }];
 
+  const items = feeds.map((f) => {
+    const lastCron = runs.find((r) => r.trigger === 'cron' && r.ok && (!r.source || r.source === f.key));
+    const ageHours = lastCron ? (Date.now() - new Date(lastCron.startedAt).getTime()) / 3600000 : Infinity;
+    const late = !lastCron || ageHours > staleAfterHours(f.cadence);
+    // The short form is what sits under the title. The sentence, which used
+    // to sit there in full on every visit, is the tooltip.
+    const short = !lastCron
+      ? `${f.county} pull has never run`
+      : late
+        ? `${f.county} pull late, last ${agoLabel(lastCron.startedAt)}`
+        : `${f.county} pulled ${agoLabel(lastCron.startedAt)}`;
+    const detail = !lastCron
+      ? `The ${f.county} pull (${scheduleLabel(f.cadence)}) has never succeeded. Cases only arrive when somebody chooses Refresh feed.`
+      : late
+        ? `The ${f.county} pull last succeeded ${agoLabel(lastCron.startedAt)}. It should run ${scheduleLabel(f.cadence)}.`
+        : `${f.county}, ${scheduleLabel(f.cadence)}: ${lastCron.scanned} scanned, ${lastCron.created} new, ${lastCron.updated} updated, ${lastCron.belowFloor} under the floor.`;
+    return { key: f.key, late, short, detail };
+  });
+  const bad = items.some((i) => i.late);
+
   return (
-    <div style={{ display: 'grid', gap: 2, marginTop: 6 }}>
-      {feeds.map((f) => {
-        const lastCron = runs.find((r) => r.trigger === 'cron' && r.ok && (!r.source || r.source === f.key));
-        const ageHours = lastCron
-          ? (Date.now() - new Date(lastCron.startedAt).getTime()) / 3600000
-          : Infinity;
-        let warn: string | null = null;
-        if (!lastCron) {
-          warn = `The ${f.county} pull (${scheduleLabel(f.cadence)}) has never succeeded. Cases only arrive when somebody clicks Refresh feed.`;
-        } else if (ageHours > staleAfterHours(f.cadence)) {
-          warn = `The ${f.county} pull last succeeded ${agoLabel(lastCron.startedAt)}. It should run ${scheduleLabel(f.cadence)}.`;
-        }
-        return (
-          <div key={f.key} style={{ fontSize: 12, color: warn ? 'var(--amber)' : 'var(--faint)' }}>
-            {warn ? (
-              <>&#9888; {warn}</>
-            ) : (
-              <>
-                {f.county} pulled {agoLabel(lastCron.startedAt)} (scheduled): {lastCron.scanned} scanned,{' '}
-                {lastCron.created} new, {lastCron.updated} updated, {lastCron.belowFloor} under the floor
-              </>
-            )}
-          </div>
-        );
-      })}
+    <div className={`dc-feedline${bad ? ' warn' : ''}`} title={items.map((i) => i.detail).join('\n')}>
+      <i />
+      Feeds: {items.map((i) => i.short).join(' · ')}
     </div>
   );
 }
@@ -645,8 +546,15 @@ export default function SurplusFundsPage() {
   // I ring first": it bands the dollars, and a big surplus whose owner already
   // signed with a competitor is worth less than a small one with a live number.
   const [sort, setSort] = useState('work');
-  /** The work queue chip. Replaced the dollar tier as the board's primary cut. */
-  const [queueQ, setQueueQ] = useState<string | null>(null);
+  /**
+   * The work queue chip. Replaced the dollar tier as the board's primary cut,
+   * and the board lands on Call now: the first screen of the day is the phone
+   * list, and one click clears it.
+   */
+  const [queueQ, setQueueQ] = useState<string | null>('call');
+  /** The secondary filters live in a drawer that says how many are on. */
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const menuRef = useRef<HTMLDetailsElement>(null);
   const [chipQ, setChipQ] = useState<string | null>(null);
   const [stageQ, setStageQ] = useState<string | null>(null);
   const [county, setCounty] = useState('all');
@@ -1049,6 +957,22 @@ export default function SurplusFundsPage() {
     say(`Exported ${list.length} lead${list.length === 1 ? '' : 's'}.`);
   };
 
+  // How many secondary filters are on, for the badge on the Filters button.
+  // The queue chip is not counted: it is the board's primary cut, not a filter
+  // somebody could forget they set.
+  const activeFilters = [
+    tierQ,
+    chipQ,
+    stageQ,
+    county !== 'all',
+    band !== 'all',
+    ctype !== 'all',
+    ageQ !== 'all',
+    lienWin !== 'all',
+    !hideDead,
+    !hideDnc,
+  ].filter(Boolean).length;
+
   // Only counties we hold leads for. Offering the ones we intend to work next
   // put seven options on the menu that every returned an empty board.
   const countyOpts: [string, string][] = [
@@ -1063,43 +987,51 @@ export default function SurplusFundsPage() {
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, flexWrap: 'wrap' }}>
             <div style={{ flex: 1, minWidth: 260 }}>
               <h1 className="dc-h1">Surplus Funds</h1>
-              <FeedHealth runs={runs} sources={sources} />
+              <FeedLine runs={runs} sources={sources} />
               <CallWindows stats={callStats} />
             </div>
-            <div style={{ display: 'flex', gap: 9, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: 9, flexWrap: 'wrap', alignItems: 'center' }}>
               <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls" style={{ display: 'none' }} onChange={onFile} />
-              {sources.length > 1 && (
-                <select
-                  className="dc-in"
-                  value={source || sources[0].key}
-                  onChange={(e) => setSource(e.target.value)}
-                  disabled={polling}
-                  aria-label="County feed to pull"
-                  title="Which county feed Refresh feed pulls"
-                >
-                  {sources.map((s) => (
-                    <option key={s.key} value={s.key}>
-                      {s.county}
-                    </option>
-                  ))}
-                </select>
-              )}
-              <button className="dc-btn" onClick={pollCounty} disabled={polling || busy}>
-                {polling ? 'Pulling from the county...' : 'Refresh feed'}
-              </button>
-              <button className="dc-btn" onClick={() => fileRef.current?.click()} disabled={busy}>
-                {busy ? 'Importing...' : 'Import county list'}
-              </button>
-              <a className="dc-btn" href="/surplus-funds/references" style={{ textDecoration: 'none' }}>
-                References{stats.recoveries ? ` · ${stats.recoveries} paid` : ''}
-              </a>
+              {/* Everything a caller does not do on a normal day sits behind
+                  More: the county pull, the import, the references. One
+                  primary button remains. */}
+              <details className="dc-menu" ref={menuRef}>
+                <summary className="dc-btn">More</summary>
+                <div className="dc-menu-list" onClick={() => menuRef.current?.removeAttribute('open')}>
+                  {sources.length > 1 && (
+                    <label className="dc-menu-item" onClick={(e) => e.stopPropagation()}>
+                      Feed to pull
+                      <select
+                        className="dc-in"
+                        value={source || sources[0].key}
+                        onChange={(e) => setSource(e.target.value)}
+                        disabled={polling}
+                        aria-label="County feed to pull"
+                      >
+                        {sources.map((s) => (
+                          <option key={s.key} value={s.key}>
+                            {s.county}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                  <button type="button" className="dc-menu-item" onClick={pollCounty} disabled={polling || busy}>
+                    {polling ? 'Pulling from the county...' : 'Refresh feed'}
+                  </button>
+                  <button type="button" className="dc-menu-item" onClick={() => fileRef.current?.click()} disabled={busy}>
+                    {busy ? 'Importing...' : 'Import county list'}
+                  </button>
+                  <a className="dc-menu-item" href="/surplus-funds/references">
+                    References{stats.recoveries ? ` (${stats.recoveries} paid)` : ''}
+                  </a>
+                </div>
+              </details>
               <button className="dc-btn pri" onClick={() => setAdding(true)}>
                 Add lead
               </button>
             </div>
           </div>
-
-
 
           {error && (
             <div className="dc-panel bad" style={{ marginBottom: 16 }}>
@@ -1109,6 +1041,8 @@ export default function SurplusFundsPage() {
             </div>
           )}
 
+          {/* Three tiles. "New, 7 days" and "Callable now" were the same
+              numbers as two chips one row below. */}
           <div className="dc-stats">
             {/* Properties, matching the row count under the board. It used to
                 count claimants, so the headline read 74 against 47 rows. */}
@@ -1121,26 +1055,10 @@ export default function SurplusFundsPage() {
                 </div>
               )}
             </div>
-            <button className={`dc-stat${chipQ === 'new' ? ' on' : ''}`} onClick={() => setChipQ(chipQ === 'new' ? null : 'new')}>
-              <div className="k">New, 7 days</div>
-              <div className="v" style={{ color: 'var(--red)' }}>{stats.newSevenDays}</div>
-            </button>
-            <button
-              className={`dc-stat${queueQ === 'call' ? ' on' : ''}`}
-              onClick={() => setQueueQ(queueQ === 'call' ? null : 'call')}
-            >
-              <div className="k">Callable now</div>
-              <div className="v" style={{ color: 'var(--mint)' }}>{stats.queues?.call ?? 0}</div>
-            </button>
-            {CONTRACTS_ENABLED && (
-              <div className="dc-stat">
-                <div className="k">Compliance blocked</div>
-                <div className="v" style={{ color: 'var(--red)' }}>{stats.complianceBlocked}</div>
-              </div>
-            )}
             <div className="dc-stat">
               <div className="k">Net in pipeline</div>
               <div className="v" style={{ color: 'var(--mint)', fontSize: 24 }}>{money(stats.netInPipeline)}</div>
+              <div style={{ fontSize: 11, color: 'var(--faint)', marginTop: 2 }}>estimate, before liens are confirmed</div>
             </div>
             {/* Real money, off the county's checks, as against the pipeline
                 estimate beside it. */}
@@ -1153,7 +1071,7 @@ export default function SurplusFundsPage() {
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
             <div className="dc-search" style={{ flex: '1 1 320px' }}>
               <span>🔍</span>
               <input
@@ -1178,140 +1096,159 @@ export default function SurplusFundsPage() {
                 ['notice', 'Sort: Newest notice'],
               ]}
             />
+            <button
+              className={`dc-btn${filtersOpen ? ' on' : ''}`}
+              onClick={() => setFiltersOpen((v) => !v)}
+              aria-expanded={filtersOpen}
+              title="Tier, contact status, stage, county, amount, notice age and the lienholder window"
+            >
+              Filters
+              {activeFilters > 0 && <span className="dc-count">{activeFilters}</span>}
+            </button>
           </div>
 
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
-            <span className="dc-flabel">Quick filters</span>
-            {/* The work queue, not the dollar band. Each names what to do next
-                and who does it; the dollars are a sort, which is what they are
-                good for: ordering inside a queue, not choosing between them. */}
-            {QUEUES.map(([k, label, icon]) => (
+          {/* The work queue, not the dollar band. Each names what to do next
+              and who does it; the dollars are a sort, which is what they are
+              good for: ordering inside a queue, not choosing between them.
+              These stay on the front row. They are the workflow. */}
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
+            {QUEUES.map(([k, label]) => (
               <button
                 key={k}
                 className={`dc-tab${queueQ === k ? ' on' : ''}`}
                 onClick={() => setQueueQ(queueQ === k ? null : k)}
                 title={QUEUE_HELP[k]}
               >
-                {icon} {label}
+                {label}
                 {stats.queues?.[k] != null && (
                   <span style={{ marginLeft: 5, opacity: 0.6 }}>{stats.queues[k]}</span>
                 )}
               </button>
             ))}
-            <span className="dc-sep" />
-            {/* The dollar band. Computed on every row and kept as a sort, but
-                the course's first quick filter is tier and a caller working
-                the big ones first should not need the dropdowns. */}
-            {(['A', 'B', 'C'] as const).map((t) => (
-              <button
-                key={t}
-                className={`dc-tab${tierQ === t ? ' on' : ''}`}
-                onClick={() => setTierQ(tierQ === t ? null : t)}
-                title={
-                  t === 'A'
-                    ? '$25k and up, living owner, no competing lien'
-                    : t === 'B'
-                      ? '$10k to $25k, living owner'
-                      : '$25k and up, owner deceased'
-                }
-              >
-                {TIER[t].icon} {TIER[t].label}
-              </button>
-            ))}
-            <span className="dc-sep" />
-            {(
-              [
-                ['not_tapped', 'Not tapped'],
-                ['missing', 'Missing a channel'],
-                ['letter_due', 'Letter due'],
-                ['update_overdue', 'Update overdue'],
-                ['new', 'New, 7 days'],
-                ['estate', 'Estate or probate'],
-                ['lien', 'Competing lien filed'],
-              ] as [string, string][]
-            ).map(([k, l]) => (
-              <button
-                key={k}
-                className={`dc-tab${chipQ === k ? ' on' : ''}`}
-                onClick={() => setChipQ(chipQ === k ? null : k)}
-                title={
-                  k === 'lien'
-                    ? 'Informational. Does not block outreach, but the payout may land under the posted surplus.'
-                    : k === 'not_tapped'
-                      ? 'Nobody has heard back from anyone on this property yet. The working list.'
-                      : k === 'missing'
-                        ? 'At least one of call, text, email, letter has not been tried on this property.'
-                        : k === 'letter_due'
-                          ? 'Nobody has replied, there is an address, and the last letter is older than the cadence, or none has gone out.'
-                          : k === 'update_overdue'
-                            ? 'A signed claimant who has not heard from us in thirty days. The course says monthly, news or not.'
-                            : undefined
-                }
-              >
-                {l}
-                {k === 'update_overdue' && stats.updateOverdue != null && (
-                  <span style={{ marginLeft: 5, opacity: 0.6 }}>{stats.updateOverdue}</span>
-                )}
-                {k === 'not_tapped' && stats.notTapped != null && (
-                  <span style={{ marginLeft: 5, opacity: 0.6 }}>{stats.notTapped}</span>
-                )}
-                {k === 'missing' && stats.missingChannel != null && (
-                  <span style={{ marginLeft: 5, opacity: 0.6 }}>{stats.missingChannel}</span>
-                )}
-                {k === 'letter_due' && stats.letterDue != null && (
-                  <span style={{ marginLeft: 5, opacity: 0.6 }}>{stats.letterDue}</span>
-                )}
-              </button>
-            ))}
-            <span className="dc-sep" />
-            {['Agreement Signed', 'Claim Filed', 'Paid'].map((k) => (
-              <button key={k} className={`dc-tab${stageQ === k ? ' on' : ''}`} onClick={() => setStageQ(stageQ === k ? null : k)}>
-                {k}
-              </button>
-            ))}
           </div>
 
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
-            <span className="dc-flabel">Filters</span>
-            <Sel v={county} set={setCounty} opts={countyOpts} />
-            <Sel v={band} set={setBand} opts={[['all', 'Any surplus'], ['15-25', '$15k to $25k'], ['25-50', '$25k to $50k'], ['50+', '$50k+']]} />
-            <Sel
-              v={ctype}
-              set={setCtype}
-              opts={[['all', 'Owners and heirs'] as [string, string]].concat(
-                Object.entries(CLAIMANT_TYPE_LABEL) as [string, string][],
-              )}
-            />
-            <Sel
-              v={ageQ}
-              set={setAgeQ}
-              opts={[['all', 'Any notice age'], ['0-7', '0 to 7 days'], ['8-30', '8 to 30 days'], ['31-120', '31 to 120 days'], ['120+', '120+ days']]}
-            />
-            <Sel
-              v={lienWin}
-              set={setLienWin}
-              opts={[['all', 'Any lienholder window'], ['open', 'Lienholder window open'], ['closed', 'Lienholder window closed']]}
-            />
-            <Sel
-              v={stageQ || 'all'}
-              set={(v) => setStageQ(v === 'all' ? null : v)}
-              opts={[['all', 'Any pipeline status'] as [string, string]].concat(
-                SURPLUS_STAGES.map((x) => [x, x] as [string, string]),
-              )}
-            />
-            <button className={`dc-danger${hideDead ? '' : ' off'}`} onClick={() => setHideDead(!hideDead)}>
-              Hide dead
-            </button>
-            <button className={`dc-danger${hideDnc ? '' : ' off'}`} onClick={() => setHideDnc(!hideDnc)}>
-              Hide Do-Not-Call
-            </button>
-          </div>
-
-          <div style={{ display: 'flex', marginBottom: 16 }}>
-            <button className="dc-btn" style={{ marginLeft: 'auto' }} onClick={reset}>
-              Reset filters
-            </button>
-          </div>
+          {filtersOpen && (
+            <div className="dc-drawer">
+              {/* The dollar band. Computed on every row and kept as a sort, but
+                  the course's first quick filter is tier and a caller working
+                  the big ones first should not need the dropdowns. */}
+              <div className="dc-drawer-row">
+                <span className="dc-flabel">Tier</span>
+                {(['A', 'B', 'C'] as const).map((t) => (
+                  <button
+                    key={t}
+                    className={`dc-tab${tierQ === t ? ' on' : ''}`}
+                    onClick={() => setTierQ(tierQ === t ? null : t)}
+                    title={
+                      t === 'A'
+                        ? '$25k and up, living owner, no competing lien'
+                        : t === 'B'
+                          ? '$10k to $25k, living owner'
+                          : '$25k and up, owner deceased'
+                    }
+                  >
+                    {TIER[t].icon} {TIER[t].label}
+                  </button>
+                ))}
+              </div>
+              <div className="dc-drawer-row">
+                <span className="dc-flabel">Status</span>
+                {(
+                  [
+                    ['not_tapped', 'Not tapped'],
+                    ['missing', 'Missing a channel'],
+                    ['letter_due', 'Letter due'],
+                    ['update_overdue', 'Update overdue'],
+                    ['new', 'New, 7 days'],
+                    ['estate', 'Estate or probate'],
+                    ['lien', 'Competing lien filed'],
+                  ] as [string, string][]
+                ).map(([k, l]) => (
+                  <button
+                    key={k}
+                    className={`dc-tab${chipQ === k ? ' on' : ''}`}
+                    onClick={() => setChipQ(chipQ === k ? null : k)}
+                    title={
+                      k === 'lien'
+                        ? 'Informational. Does not block outreach, but the payout may land under the posted surplus.'
+                        : k === 'not_tapped'
+                          ? 'Nobody has heard back from anyone on this property yet. The working list.'
+                          : k === 'missing'
+                            ? 'At least one of call, text, email, letter has not been tried on this property.'
+                            : k === 'letter_due'
+                              ? 'Nobody has replied, there is an address, and the last letter is older than the cadence, or none has gone out.'
+                              : k === 'update_overdue'
+                                ? 'A signed claimant who has not heard from us in thirty days. The course says monthly, news or not.'
+                                : k === 'new'
+                                  ? 'Notice mailed in the last seven days.'
+                                  : undefined
+                    }
+                  >
+                    {l}
+                    {k === 'new' && <span style={{ marginLeft: 5, opacity: 0.6 }}>{stats.newSevenDays}</span>}
+                    {k === 'update_overdue' && stats.updateOverdue != null && (
+                      <span style={{ marginLeft: 5, opacity: 0.6 }}>{stats.updateOverdue}</span>
+                    )}
+                    {k === 'not_tapped' && stats.notTapped != null && (
+                      <span style={{ marginLeft: 5, opacity: 0.6 }}>{stats.notTapped}</span>
+                    )}
+                    {k === 'missing' && stats.missingChannel != null && (
+                      <span style={{ marginLeft: 5, opacity: 0.6 }}>{stats.missingChannel}</span>
+                    )}
+                    {k === 'letter_due' && stats.letterDue != null && (
+                      <span style={{ marginLeft: 5, opacity: 0.6 }}>{stats.letterDue}</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+              <div className="dc-drawer-row">
+                <span className="dc-flabel">Stage</span>
+                {['Agreement Signed', 'Claim Filed', 'Paid'].map((k) => (
+                  <button key={k} className={`dc-tab${stageQ === k ? ' on' : ''}`} onClick={() => setStageQ(stageQ === k ? null : k)}>
+                    {k}
+                  </button>
+                ))}
+                <Sel
+                  v={stageQ || 'all'}
+                  set={(v) => setStageQ(v === 'all' ? null : v)}
+                  opts={[['all', 'Any pipeline status'] as [string, string]].concat(
+                    SURPLUS_STAGES.map((x) => [x, x] as [string, string]),
+                  )}
+                />
+              </div>
+              <div className="dc-drawer-row">
+                <span className="dc-flabel">Narrow</span>
+                <Sel v={county} set={setCounty} opts={countyOpts} />
+                <Sel v={band} set={setBand} opts={[['all', 'Any surplus'], ['15-25', '$15k to $25k'], ['25-50', '$25k to $50k'], ['50+', '$50k+']]} />
+                <Sel
+                  v={ctype}
+                  set={setCtype}
+                  opts={[['all', 'Owners and heirs'] as [string, string]].concat(
+                    Object.entries(CLAIMANT_TYPE_LABEL) as [string, string][],
+                  )}
+                />
+                <Sel
+                  v={ageQ}
+                  set={setAgeQ}
+                  opts={[['all', 'Any notice age'], ['0-7', '0 to 7 days'], ['8-30', '8 to 30 days'], ['31-120', '31 to 120 days'], ['120+', '120+ days']]}
+                />
+                <Sel
+                  v={lienWin}
+                  set={setLienWin}
+                  opts={[['all', 'Any lienholder window'], ['open', 'Lienholder window open'], ['closed', 'Lienholder window closed']]}
+                />
+                <button className={`dc-danger${hideDead ? '' : ' off'}`} onClick={() => setHideDead(!hideDead)}>
+                  Hide dead
+                </button>
+                <button className={`dc-danger${hideDnc ? '' : ' off'}`} onClick={() => setHideDnc(!hideDnc)}>
+                  Hide Do-Not-Call
+                </button>
+                <button className="dc-btn sm" style={{ marginLeft: 'auto' }} onClick={reset}>
+                  Reset filters
+                </button>
+              </div>
+            </div>
+          )}
 
           {adding && (
             <AddLeadSheet
@@ -1378,14 +1315,32 @@ export default function SurplusFundsPage() {
                 onOpen={() => setOpenId(r.key)}
               />
             )}
+            hideCards
             empty={
-              stats.total === 0
-                ? 'No surplus leads yet. Import a county list to get started.'
-                : 'Nothing matches those filters.'
+              stats.total === 0 ? (
+                'No surplus leads yet. Import a county list (under More) to get started.'
+              ) : queueQ ? (
+                <span>
+                  Nothing in {QUEUE_LABEL[queueQ] || queueQ} right now.{' '}
+                  <button className="dc-btn sm" onClick={() => setQueueQ(null)}>
+                    Show all {stats.openClaims} open
+                  </button>
+                </span>
+              ) : (
+                'Nothing matches those filters.'
+              )
             }
             toolbarLeft={
               <span>
-                {rows.length} propert{rows.length === 1 ? 'y' : 'ies'}
+                {queueQ ? (
+                  <>
+                    {rows.length} in <b>{QUEUE_LABEL[queueQ] || queueQ}</b> · {stats.openClaims} open
+                  </>
+                ) : (
+                  <>
+                    {rows.length} propert{rows.length === 1 ? 'y' : 'ies'}
+                  </>
+                )}
                 {leadCount !== rows.length && `, ${leadCount} claimants`}
                 {chosenKeys.length > 0 && (
                   <>
