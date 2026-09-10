@@ -34,7 +34,7 @@ import { SURPLUS_PERSON_ROLES, SURPLUS_CONTACT_STATUSES, personRoleLabel } from 
  * know. A web search for the clerk beats a guessed URL: clerks' public-access
  * systems differ per county and a wrong link reads as broken.
  */
-function courtRecordsSearch(county: string | null): string {
+export function courtRecordsSearch(county: string | null): string {
   const q = `${county || 'Florida'} County Clerk of Court records search probate`;
   return `https://www.google.com/search?q=${encodeURIComponent(q)}`;
 }

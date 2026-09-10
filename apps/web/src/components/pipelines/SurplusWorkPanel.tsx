@@ -13,7 +13,8 @@ import { SURPLUS_TRACE_CHANNELS, SURPLUS_TIER1_CHANNELS, TRACE_RESULTS, channelF
 import { useDialer } from '@/components/dialer/DialerContext';
 import { DNC_STATE, SURPLUS_STAGES } from './format';
 import ContactEditor from './ContactEditor';
-import SurplusHeirs from './SurplusHeirs';
+import SurplusHeirs, { courtRecordsSearch } from './SurplusHeirs';
+import { Fold, useFolds } from './PanelFold';
 import { fmtDate, money, phoneDisplay } from './format';
 
 /**
@@ -2346,6 +2347,22 @@ export default function SurplusWorkPanel({
   };
 
   /**
+   * Cheapest first. A paid credit before any free route is logged is the
+   * thing the course's escalation rule exists to stop, so the button asks.
+   */
+  const traceGated = () => {
+    if (
+      !lead.tracing?.tier1Done &&
+      !window.confirm(
+        `No free search has been logged for ${lead.claimant} yet. The course says Google, social and the county records come before a paid database. Spend the credit anyway?`,
+      )
+    ) {
+      return;
+    }
+    trace();
+  };
+
+  /**
    * Call a number straight from the panel. The dialer is app-wide, so this is
    * the same call path as the lead page and the floating dialer, and the call
    * is attributed to this lead rather than appearing as an anonymous dial.
@@ -2399,6 +2416,10 @@ export default function SurplusWorkPanel({
                 {property.anyDeceased && (
                   <span style={{ fontSize: 11, color: 'var(--amber)' }}>Estate</span>
                 )}
+                <span className="dc-wp-stagepill" title="This claimant's stage">
+                  <i />
+                  {lead.stage}
+                </span>
                 {lead.doNotCall && (
                   <span style={{ fontSize: 11, color: 'var(--red)' }}>Do not call</span>
                 )}
@@ -2465,26 +2486,37 @@ export default function SurplusWorkPanel({
             </button>
           </div>
 
-          {/* Why this lead sits where it does. The ranking has to be auditable. */}
-          <div
-            style={{
-              marginTop: 10,
-              padding: '7px 10px',
-              borderRadius: 6,
-              background: 'var(--bg2)',
-              fontSize: 12,
-              color: 'var(--dim)',
-            }}
-          >
-            <strong style={{ color: tone }}>Rank {property.workScore}</strong> {property.workReason}
-          </div>
+          <NextStepBanner
+            lead={lead}
+            property={property}
+            onCall={call}
+            onText={message}
+            onTrace={traceGated}
+            tracing={tracing}
+          />
 
           {/* One property, several claims. Each claimant is contacted separately,
               so the conversation and notes tabs follow this selection. */}
           {/* Always shown, even for a single claimant. The NAME is what gets
               searched and traced, and burying it made it unclear whose result
               the panel below was showing. */}
-          {property.claimants.length > 0 && (
+          {property.claimants.length === 1 && (
+            <div style={{ fontSize: 12.5, marginTop: 10, display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap' }}>
+              <b style={lead.isDeceased ? { textDecoration: 'line-through' } : undefined}>{lead.claimant}</b>
+              <span style={{ fontSize: 11.5, color: lead.isDeceased ? (lead.callableHeirCount > 0 ? 'var(--mint)' : 'var(--red)') : TRACE_TONE[lead.trace?.tone || 'idle'] }}>
+                {lead.isDeceased
+                  ? lead.callableHeirCount > 0
+                    ? `deceased, ${lead.callableHeirCount} callable heir${lead.callableHeirCount === 1 ? '' : 's'}`
+                    : lead.livingHeirCount > 0
+                      ? `deceased, ${lead.livingHeirCount} heir${lead.livingHeirCount === 1 ? '' : 's'} on file, no number`
+                      : 'deceased, no heirs on file'
+                  : lead.phones.filter((p) => !p.dnc).length > 0
+                    ? `${lead.phones.filter((p) => !p.dnc).length} callable number${lead.phones.filter((p) => !p.dnc).length === 1 ? '' : 's'}`
+                    : lead.trace?.label || 'Never skip traced'}
+              </span>
+            </div>
+          )}
+          {property.claimants.length > 1 && (
             <div style={{ display: 'flex', gap: 6, marginTop: 11, flexWrap: 'wrap' }}>
               {property.claimants.map((c: any) => (
                 <button
@@ -2546,7 +2578,7 @@ export default function SurplusWorkPanel({
               property={property}
               ledger={ledger}
               currentUser={currentUser}
-              onTrace={trace}
+              onTrace={traceGated}
               tracing={tracing}
               onCall={call}
               onText={message}
@@ -2651,6 +2683,79 @@ export default function SurplusWorkPanel({
 
 // ─── Case tab ───────────────────────────────────────────────────────────────
 
+/** The lifecycle, in order. Dead is off it. */
+const STAGE_ORDER = [
+  'New',
+  'Contacted',
+  'Agreement Signed',
+  'Package Notarized',
+  'Claim Filed',
+  'Awaiting Disbursement',
+  'Check Received',
+  'Paid',
+];
+
+/** The job each back-half stage is doing, for the banner. */
+const STAGE_JOB: Record<string, string> = {
+  'Agreement Signed': 'Sign and notarize',
+  'Package Notarized': 'File with the county',
+  'Claim Filed': 'File with the county',
+  'Awaiting Disbursement': 'Get paid',
+  'Check Received': 'Get paid',
+  Paid: 'Paid',
+};
+
+type FoldPlan = 'open' | 'done' | 'wait' | 'later';
+type FoldKey = 'reach' | 'case' | 'qualify' | 'sign' | 'file' | 'paid';
+
+/**
+ * Which section is the work right now, which are finished, and which are not
+ * yet possible.
+ *
+ * Read off the stage and the queue the API already sends on every row, so
+ * nothing here is stored or configured. A New lead opens on its queue's
+ * tools and never sees the notary; a lead at Agreement Signed opens on the
+ * documents and the notary and finds the outreach folded with a check. Dead
+ * reads like New: nothing later is possible, so nothing later is shown.
+ */
+function planFolds(lead: SurplusPanelLead): Record<FoldKey, FoldPlan> {
+  const idx = STAGE_ORDER.indexOf(lead.stage);
+  const i = idx < 0 ? 0 : idx;
+  const replied = !!lead.tappedAt;
+  return {
+    reach: i >= 2 || replied ? 'done' : 'wait',
+    case: 'wait',
+    qualify: i >= 2 ? 'done' : i === 1 ? (replied ? 'open' : 'wait') : 'later',
+    sign: i === 2 ? 'open' : i >= 3 ? 'done' : 'later',
+    file: i === 3 || i === 4 ? 'open' : i >= 5 ? 'done' : 'later',
+    paid: i >= 5 ? 'open' : 'later',
+  };
+}
+
+/** Why a later section is folded away, in its own words. */
+const LATER_NOTE: Record<FoldKey, string> = {
+  reach: '',
+  case: '',
+  qualify: 'Opens once someone with standing has replied. The three checks and the disclosures live here.',
+  sign: 'Opens at Agreement Signed: the document set, the notary and the attorney.',
+  file: 'Opens at Package Notarized: how the package goes to the county and what the county says back.',
+  paid: 'Opens when the county acknowledges the filing: the check, the expenses, the shares and the survey.',
+};
+
+const FOLD_TITLE: Record<FoldKey, string> = {
+  reach: 'Reach the claimant',
+  case: 'The case',
+  qualify: 'Qualify the claim',
+  sign: 'Sign and notarize',
+  file: 'File with the county',
+  paid: 'Get paid',
+};
+
+/** The channels tried, as a short list for a fold header. */
+function channelsTried(lead: SurplusPanelLead): string[] {
+  return CHANNEL_GLYPH.filter(([k]) => lead.channels?.[k]).map(([, , label]) => label.toLowerCase());
+}
+
 function CaseTab({
   lead,
   property,
@@ -2676,289 +2781,133 @@ function CaseTab({
   onChanged: () => void;
   say: (msg: string) => void;
 }) {
-  /** The contact editor is opt-in, so the panel stays readable when reading. */
-  const [editing, setEditing] = useState(false);
-  const grouped = LEDGER_GROUPS.map((g) => ({
-    ...g,
-    docs: ledger.filter((d) => d.kind === g.kind),
-  })).filter((g) => g.docs.length > 0);
+  const { overrides, set } = useFolds(lead.id, lead.stage);
+  const plan = planFolds(lead);
+  const idx = STAGE_ORDER.indexOf(lead.stage);
+  const back = idx >= 2;
+  const dead = lead.stage === 'Dead';
+  const queue: string = (lead as any).queue || property.queue || '';
 
-  const other = ledger.filter(
-    (d) => !LEDGER_GROUPS.some((g) => g.kind === d.kind),
-  );
+  // Which tool belongs in Next step. Whatever is not the next step renders in
+  // Reach, so every tool is on the panel exactly once.
+  const front = !back && !dead;
+  const inNext = {
+    contacts: front && queue === 'call',
+    heirs: front && queue === 'heirs',
+    trace: front && queue === 'trace',
+    search: front && (queue === 'name_search' || queue === 'entity'),
+    letters: front && queue === 'mailed',
+  };
+  const showHeirs =
+    lead.isDeceased || (lead.heirCount || 0) > 0 || (lead.associateCount || 0) > 0 || !lead.tappedAt;
 
-  return (
-    <div style={{ display: 'grid', gap: 16 }}>
-      <StageControl lead={lead} onChanged={onChanged} say={say} />
-
-      <QualificationSection lead={lead} onChanged={onChanged} say={say} />
-
-      <TasksSection lead={lead} currentUser={currentUser} onChanged={onChanged} say={say} />
-
-      <Section title="The money">
-        <Row k="Surplus posted today" v={money(property.grossSurplus)} />
-        {property.surplusAtNotice != null && property.surplusAtNotice !== property.grossSurplus && (
-          <Row
-            k="Stated in the mailed notice"
-            v={money(property.surplusAtNotice)}
-            note="What the claimant was told they are owed. Use this number on a call."
-          />
-        )}
-        <Row k="Net to claimant" v={money(property.netToClaimant)} />
-        {property.estFee != null && <Row k="Fee at the cap" v={money(property.estFee)} />}
-      </Section>
-
-      <Section title="The clock">
-        <Row
-          k="Sale"
-          v={
-            property.saleDate
-              ? `${fmtDate(property.saleDate)}${property.daysSinceSale != null ? ` (${property.daysSinceSale} days ago)` : ''}`
-              : 'unknown'
-          }
-        />
-        <Row
-          k="Notice mailed"
-          v={property.noticeDate ? fmtDate(property.noticeDate) : 'unknown'}
-          note={
-            property.noticeConfirmed
-              ? undefined
-              : 'Estimated from the sale date. Duval publishes no filing dates and its notice is a scan, so this is a floor, not a confirmed date.'
-          }
-        />
-        {property.daysRemaining != null && (
-          <Row
-            k="Lien window"
-            v={
-              property.daysRemaining > 0
-                ? `${property.daysRemaining} days left`
-                : `closed ${Math.abs(property.daysRemaining)} days ago`
-            }
-            note="Whether another lienholder can still appear and shrink the payout. A previous owner is not barred by it."
-          />
-        )}
-      </Section>
-
-      {/* The two addresses are different things and the difference is the whole
-          game. The property is where the tax deed sold; the mailing address is
-          where the clerk actually wrote to the owner, and it is what gets
-          traced. On case 2025-0023TD those are Jacksonville and Hartford. */}
-      <Section title="Addresses">
-        <Row k="Property that sold" v={[property.address, property.city, property.zip].filter(Boolean).join(', ')} />
-        {/* Per CLAIMANT, not per property. The clerk prints one notice page per
-            recipient and co-owners are frequently at different addresses, so
-            lifting the first page's address onto everyone gives one claimant
-            the other's address and then traces them at it. */}
-        {lead.ownerMailingStreet ? (
-          <Row
-            k={`Where the clerk wrote to ${lead.noticeRecipient || lead.claimant}`}
-            v={[
-              lead.ownerMailingStreet,
-              lead.ownerMailingCity,
-              [lead.ownerMailingState, lead.ownerMailingZip].filter(Boolean).join(', ').replace(', ', ' '),
-            ]
-              .filter(Boolean)
-              .join(', ')}
-            tone="var(--mint)"
-            note={
-              lead.noticeRecipient && lead.noticeRecipient !== lead.claimant
-                ? `The notice names ${lead.noticeRecipient}, matched to this claimant. This is the address that gets skip traced.`
-                : 'This is the address that gets skip traced.'
-            }
-          />
-        ) : (
-          <Row
-            k={`Where the clerk wrote to ${lead.claimant}`}
-            v="not recovered"
-            tone="var(--amber)"
-            note={
-              property.claimants.some((c: any) => c.ownerMailingStreet)
-                ? 'The notice was read for this case but no page was addressed to this claimant, so a trace here would fall back to the property address, which is usually not where they are.'
-                : 'The Notice of Surplus Funds has not been read for this case, so any trace falls back to the property address, which is usually not where the owner is.'
-            }
-          />
-        )}
-        <LetterHistory lead={lead} onChanged={onChanged} say={say} />
-      </Section>
-
-      <CountySection lead={lead} />
-
-      <DocumentsSection lead={lead} onChanged={onChanged} say={say} />
-
-      <NotarySection lead={lead} onChanged={onChanged} say={say} />
-
-      <AttorneySection lead={lead} onChanged={onChanged} say={say} />
-
-      <FilingSection lead={lead} onChanged={onChanged} say={say} />
-
-      <DisbursementSection lead={lead} onChanged={onChanged} say={say} />
-
-      <SurveySection lead={lead} onChanged={onChanged} say={say} />
-
-      {/* Heirs lead for a deceased claimant, because they are the only people
-          who can file. For a living one the section appears once heirs or
-          associates exist, or while nobody has reached them: a relative or a
-          neighbor is the course's route to a claimant with no working number. */}
-      {(lead.isDeceased || (lead.heirCount || 0) > 0 || (lead.associateCount || 0) > 0 || !lead.tappedAt) && (
-        <Section
-          title={lead.isDeceased ? 'Who inherited' : 'People around the claimant'}
-          note={
-            lead.isDeceased
-              ? 'Only a living heir can file this claim'
-              : lead.associateCount
-                ? `${lead.associateCount} who may know where ${lead.claimant} is${lead.associatesUntried ? `, ${lead.associatesUntried} not yet contacted` : ''}`
-                : 'A relative or a neighbor usually knows where they are'
-          }
-        >
-          <SurplusHeirs
-            leadId={lead.id}
-            claimant={lead.claimant}
-            claimantDeceased={!!lead.isDeceased}
-            propertyAddress={property.address}
-            county={property.county}
-            courtRecordsUrl={lead.courtRecordsUrl}
-            onCall={onCall}
-            onText={onText}
-            onEmail={onEmail}
-            onChanged={onChanged}
-            say={say}
-          />
-        </Section>
-      )}
-
-      <Section
-        title={`Reaching ${lead.claimant}`}
+  const heirsBlock = showHeirs && (
+    <div>
+      <SubHead
+        title={lead.isDeceased ? 'Who inherited' : 'People around the claimant'}
         note={
           lead.isDeceased
-            ? 'Deceased. These are the claimant\u2019s own contacts and cannot sign anything.'
-            : undefined
+            ? 'Only a living heir can file this claim'
+            : lead.associateCount
+              ? `${lead.associateCount} who may know where ${lead.claimant} is${lead.associatesUntried ? `, ${lead.associatesUntried} not yet contacted` : ''}`
+              : 'A relative or a neighbor usually knows where they are'
         }
-      >
-        <CredibilityBlock lead={lead} say={say} onChanged={onChanged} />
+      />
+      <SurplusHeirs
+        leadId={lead.id}
+        claimant={lead.claimant}
+        claimantDeceased={!!lead.isDeceased}
+        propertyAddress={property.address}
+        county={property.county}
+        courtRecordsUrl={lead.courtRecordsUrl}
+        onCall={onCall}
+        onText={onText}
+        onEmail={onEmail}
+        onChanged={onChanged}
+        say={say}
+      />
+    </div>
+  );
+  const contactsBlock = (
+    <ContactsBlock lead={lead} onCall={onCall} onText={onText} onEmail={onEmail} onChanged={onChanged} say={say} />
+  );
+  const traceBlock = lead.phones.length === 0 && <TraceBlock lead={lead} tracing={tracing} onTrace={onTrace} />;
+  const searchBlock = lead.nameSearch && <NameSearchBlock lead={lead} property={property} say={say} onChanged={onChanged} />;
+  const lettersBlock = (
+    <div>
+      <SubHead title="Letters" />
+      <LetterHistory lead={lead} onChanged={onChanged} say={say} />
+    </div>
+  );
+
+  // ── Header lines for the folded sections ────────────────────────────────
+  const tried = channelsTried(lead);
+  const reachStatus = [
+    lead.tappedAt ? `Replied ${fmtDate(lead.tappedAt)}` : 'No reply yet',
+    tried.length ? tried.join(', ') : 'nothing tried yet',
+    lead.letterCount ? `${lead.letterCount} letter${lead.letterCount === 1 ? '' : 's'}` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const caseStatus = [
+    money(property.grossSurplus),
+    property.saleDate ? `sold ${fmtDate(property.saleDate)}` : 'sale date unknown',
+    property.noticeConfirmed ? 'notice confirmed' : 'notice date estimated',
+  ].join(' · ');
+  const checksDone = [lead.entitlementVerified, lead.noticeConfirmed, lead.titleSearchComplete].filter(Boolean).length;
+  const qualifyStatus =
+    plan.qualify === 'later'
+      ? ''
+      : `${checksDone} of 3 checks${lead.compliance?.blocks?.length && idx >= 1 ? ' · compliance blocked' : ''}`;
+  const required = (lead.documents || []).filter((d) => d.required);
+  const inHand = required.filter((d) => d.collected).length;
+  const n = lead.notary || ({} as SurplusPanelLead['notary']);
+  const signStatus =
+    plan.sign === 'later'
+      ? ''
+      : [
+          required.length ? `${inHand} of ${required.length} documents in hand` : null,
+          n.signedInOrderAt ? `notarized ${fmtDate(n.signedInOrderAt)}` : n.appointmentAt ? 'notary booked' : null,
+        ]
+          .filter(Boolean)
+          .join(' · ');
+  const s = lead.submission || ({} as SurplusPanelLead['submission']);
+  const fileStatus =
+    plan.file === 'later'
+      ? ''
+      : s.countyAcknowledgedAt
+        ? `Acknowledged ${fmtDate(s.countyAcknowledgedAt)}`
+        : s.submittedAt
+          ? `Submitted ${fmtDate(s.submittedAt)}, awaiting acknowledgement`
+          : 'Not filed yet';
+  const m = lead.disbursement || ({} as SurplusPanelLead['disbursement']);
+  const paidStatus =
+    plan.paid === 'later'
+      ? ''
+      : m.frozen
+        ? `Paid ${fmtDate(m.checkSentAt)}`
+        : m.checkReceivedAt
+          ? `Check in hand ${fmtDate(m.checkReceivedAt)}`
+          : "Waiting for the county's check";
+
+  // ── The folds themselves ────────────────────────────────────────────────
+  const bodies: Record<FoldKey, React.ReactNode> = {
+    reach: (
+      <>
+        {!inNext.contacts && <CredibilityBlock lead={lead} say={say} onChanged={onChanged} />}
+        <ContactLine lead={lead} />
+        {!inNext.contacts && (
+          <div>
+            <SubHead
+              title={`Reaching ${lead.claimant}`}
+              note={lead.isDeceased ? 'Deceased. Their own contacts cannot sign anything.' : undefined}
+            />
+            {!inNext.trace && traceBlock}
+            {contactsBlock}
+          </div>
+        )}
+        {inNext.contacts && !inNext.trace && traceBlock}
         <SearchLog lead={lead} say={say} onChanged={onChanged} />
-        {/* The verdict, stated before the contacts rather than inferred from
-            their absence. "Nothing has been tried" and "everything has been
-            tried" both render as an empty contact list, and they want opposite
-            next actions: one costs a credit, the other a name search. */}
-        {lead.trace && (
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'baseline',
-              gap: 8,
-              flexWrap: 'wrap',
-              padding: '7px 10px',
-              marginBottom: 8,
-              borderRadius: 6,
-              background: 'var(--bg2)',
-              borderLeft: `3px solid ${TRACE_TONE[lead.trace.tone]}`,
-            }}
-          >
-            <strong style={{ fontSize: 12.5, color: TRACE_TONE[lead.trace.tone] }}>
-              {lead.trace.label}
-            </strong>
-            {lead.trace.at && (
-              <span style={{ fontSize: 11, color: 'var(--faint)' }}>{fmtDate(lead.trace.at)}</span>
-            )}
-            <div style={{ flexBasis: '100%', fontSize: 11.5, color: 'var(--dim)' }}>
-              {lead.trace.detail}
-            </div>
-          </div>
-        )}
-        {lead.phones.length === 0 && (
-          <div style={{ fontSize: 12, color: 'var(--faint)' }}>
-            <div style={{ marginTop: 2 }}>
-              {/* Offered only when a submission could still tell us something.
-                  Re-running an address that already answered spends a credit to
-                  hear the same answer. */}
-              <button
-                type="button"
-                className="dc-wp-btn"
-                onClick={() => {
-                  // Cheapest first. A credit before any free route is logged
-                  // is the thing the course's escalation rule exists to stop.
-                  if (
-                    !lead.tracing?.tier1Done &&
-                    !window.confirm(
-                      `No free search has been logged for ${lead.claimant} yet. The course says Google, social and the county records come before a paid database. Spend the credit anyway?`,
-                    )
-                  ) {
-                    return;
-                  }
-                  onTrace();
-                }}
-                disabled={tracing || lead.trace?.actionable === false}
-                title={
-                  lead.trace?.actionable === false
-                    ? 'Already submitted. The same address returns the same answer; use the name search below.'
-                    : undefined
-                }
-              >
-                {tracing ? 'Tracing...' : `Skip trace ${lead.claimant}`}
-              </button>
-              {lead.trace?.actionable === false && (
-                <span style={{ marginLeft: 8, fontSize: 11 }}>
-                  Already submitted, so this is spent. The route now is the name search below.
-                </span>
-              )}
-            </div>
-            <div style={{ marginTop: 4, fontSize: 11 }}>
-              {lead.ownerMailingStreet
-                ? `Traces ${lead.ownerMailingStreet}, ${lead.ownerMailingCity || ''} ${lead.ownerMailingState || ''}, the address the surplus notice was mailed to ${lead.noticeRecipient || lead.claimant}.`
-                : `No owner address recovered for ${lead.claimant}, so this would trace the property at ${lead.address}, which is usually not where the owner is.`}
-            </div>
-          </div>
-        )}
-        {/* Clickable: dial it, or open the conversation already addressed to it.
-            A flagged number still shows and is still clickable, because the
-            decision belongs to the person making the call, but the flag is
-            loud enough that it cannot be missed. */}
-        {lead.phones.map((p) => {
-          const flag = p.dnc ? DNC_STATE[p.dnc] : null;
-          return (
-            <div key={p.number} className="dc-wp-contact">
-              <div className="dc-wp-contact-main">
-                <span className="num">{phoneDisplay(p.number)}</span>
-                <span className="meta">{p.type || 'Phone'}</span>
-                {flag && <span className="flag">{flag.label}</span>}
-              </div>
-              <div className="dc-wp-contact-actions">
-                <button type="button" className="dc-wp-btn" onClick={() => onCall(p.number)}>
-                  Call
-                </button>
-                <button type="button" className="dc-wp-btn" onClick={() => onText(p.number)}>
-                  Text
-                </button>
-              </div>
-            </div>
-          );
-        })}
-        {lead.emails.map((e) => (
-          <div key={e} className="dc-wp-contact">
-            <div className="dc-wp-contact-main">
-              <span className="num">{e}</span>
-              <span className="meta">Email</span>
-            </div>
-            <div className="dc-wp-contact-actions">
-              <button type="button" className="dc-wp-btn" onClick={() => onEmail(e)}>
-                Email
-              </button>
-            </div>
-          </div>
-        ))}
-
-        {/* Research turns up numbers the vendor never had. This is where they
-            go, and where a number that turned out to be somebody else gets
-            marked rather than deleted. */}
-        <div style={{ marginTop: 4 }}>
-          <button type="button" className="dc-wp-btn" onClick={() => setEditing((v) => !v)}>
-            {editing ? 'Done editing' : 'Edit contacts'}
-          </button>
-        </div>
-        {editing && (
-          <ContactEditor leadId={lead.id} onChanged={onChanged} say={say} />
-        )}
-
         {property.mailVerdict && (
           <Row
             k="Clerk mail"
@@ -2979,83 +2928,584 @@ function CaseTab({
             }
           />
         )}
-      </Section>
+        {!inNext.letters && lettersBlock}
+        {!inNext.heirs && heirsBlock}
+        {!inNext.search && searchBlock}
+      </>
+    ),
+    case: (
+      <>
+        <div>
+          <SubHead title="The money" />
+          <Row k="Surplus posted today" v={money(property.grossSurplus)} />
+          {property.surplusAtNotice != null && property.surplusAtNotice !== property.grossSurplus && (
+            <Row
+              k="Stated in the mailed notice"
+              v={money(property.surplusAtNotice)}
+              note="What the claimant was told they are owed. Use this number on a call."
+            />
+          )}
+          <Row k="Net to claimant" v={money(property.netToClaimant)} />
+          {property.estFee != null && <Row k="Fee at the cap" v={money(property.estFee)} />}
+        </div>
+        <div>
+          <SubHead title="The clock" />
+          <Row
+            k="Sale"
+            v={
+              property.saleDate
+                ? `${fmtDate(property.saleDate)}${property.daysSinceSale != null ? ` (${property.daysSinceSale} days ago)` : ''}`
+                : 'unknown'
+            }
+          />
+          <Row
+            k="Notice mailed"
+            v={property.noticeDate ? fmtDate(property.noticeDate) : 'unknown'}
+            note={
+              property.noticeConfirmed
+                ? undefined
+                : 'Estimated from the sale date. Duval publishes no filing dates and its notice is a scan, so this is a floor, not a confirmed date.'
+            }
+          />
+          {property.daysRemaining != null && (
+            <Row
+              k="Lien window"
+              v={
+                property.daysRemaining > 0
+                  ? `${property.daysRemaining} days left`
+                  : `closed ${Math.abs(property.daysRemaining)} days ago`
+              }
+              note="Whether another lienholder can still appear and shrink the payout. A previous owner is not barred by it."
+            />
+          )}
+        </div>
+        {/* The two addresses are different things and the difference is the
+            whole game. The property is where the tax deed sold; the mailing
+            address is where the clerk actually wrote to the owner, and it is
+            what gets traced. */}
+        <div>
+          <SubHead title="Addresses" />
+          <Row k="Property that sold" v={[property.address, property.city, property.zip].filter(Boolean).join(', ')} />
+          {lead.ownerMailingStreet ? (
+            <Row
+              k={`Where the clerk wrote to ${lead.noticeRecipient || lead.claimant}`}
+              v={[
+                lead.ownerMailingStreet,
+                lead.ownerMailingCity,
+                [lead.ownerMailingState, lead.ownerMailingZip].filter(Boolean).join(', ').replace(', ', ' '),
+              ]
+                .filter(Boolean)
+                .join(', ')}
+              tone="var(--mint)"
+              note={
+                lead.noticeRecipient && lead.noticeRecipient !== lead.claimant
+                  ? `The notice names ${lead.noticeRecipient}, matched to this claimant. This is the address that gets skip traced.`
+                  : 'This is the address that gets skip traced.'
+              }
+            />
+          ) : (
+            <Row
+              k={`Where the clerk wrote to ${lead.claimant}`}
+              v="not recovered"
+              tone="var(--amber)"
+              note={
+                property.claimants.some((c: any) => c.ownerMailingStreet)
+                  ? 'The notice was read for this case but no page was addressed to this claimant, so a trace here would fall back to the property address, which is usually not where they are.'
+                  : 'The Notice of Surplus Funds has not been read for this case, so any trace falls back to the property address, which is usually not where the owner is.'
+              }
+            />
+          )}
+        </div>
+        <CountySection lead={lead} />
+        <DocketBlock property={property} ledger={ledger} />
+      </>
+    ),
+    qualify: (
+      <>
+        <QualificationSection lead={lead} onChanged={onChanged} say={say} />
+        {plan.qualify === 'later' && <div style={{ fontSize: 11.5, color: 'var(--faint)' }}>{LATER_NOTE.qualify}</div>}
+      </>
+    ),
+    sign: (
+      <>
+        {plan.sign === 'later' && <div style={{ fontSize: 11.5, color: 'var(--faint)' }}>{LATER_NOTE.sign}</div>}
+        <DocumentsSection lead={lead} onChanged={onChanged} say={say} />
+        <NotarySection lead={lead} onChanged={onChanged} say={say} />
+        <AttorneySection lead={lead} onChanged={onChanged} say={say} />
+      </>
+    ),
+    file: (
+      <>
+        {plan.file === 'later' && <div style={{ fontSize: 11.5, color: 'var(--faint)' }}>{LATER_NOTE.file}</div>}
+        <FilingSection lead={lead} onChanged={onChanged} say={say} />
+      </>
+    ),
+    paid: (
+      <>
+        {plan.paid === 'later' && <div style={{ fontSize: 11.5, color: 'var(--faint)' }}>{LATER_NOTE.paid}</div>}
+        <DisbursementSection lead={lead} onChanged={onChanged} say={say} />
+        <SurveySection lead={lead} onChanged={onChanged} say={say} />
+      </>
+    ),
+  };
+  const status: Record<FoldKey, string> = {
+    reach: reachStatus,
+    case: caseStatus,
+    qualify: qualifyStatus,
+    sign: signStatus,
+    file: fileStatus,
+    paid: paidStatus,
+  };
 
-      {/* When the address route is exhausted, the name route is what is left.
-          The course teaches searching NAME plus STATE and confirming against
-          the property that was sold, which is the inverse of what BatchData
-          does and is why the two complement each other. */}
-      {lead.nameSearch && (
-        <Section
-          title={`Find ${lead.claimant} by name`}
-          note={
-            property.claimants.length > 1
-              ? `One claimant at a time. Switch at the top to search ${property.claimants
-                  .filter((c: any) => c.id !== lead.id)
-                  .map((c: any) => c.claimant)
-                  .join(' or ')}.`
+  const fold = (key: FoldKey) => {
+    const state = plan[key] === 'later' ? 'wait' : plan[key];
+    return (
+      <Fold
+        key={key}
+        title={FOLD_TITLE[key]}
+        status={status[key]}
+        state={state}
+        open={overrides[key] ?? state === 'open'}
+        onToggle={(o) => set(key, o)}
+      >
+        {bodies[key]}
+      </Fold>
+    );
+  };
+
+  // The order: the work first, then what is waiting, then what is done with
+  // the most recent on top, then the reference facts, then what is not yet
+  // possible behind one line.
+  const order: FoldKey[] = ['reach', 'qualify', 'sign', 'file', 'paid'];
+  const open = order.filter((k) => plan[k] === 'open');
+  const wait = order.filter((k) => plan[k] === 'wait');
+  const done = order.filter((k) => plan[k] === 'done').reverse();
+  const later = order.filter((k) => plan[k] === 'later');
+
+  return (
+    <div>
+      <Fold title="Next step" status={dead ? 'Dead' : undefined} state="open" open={overrides.next ?? true} onToggle={(o) => set('next', o)}>
+        {dead && lead.deadReason && (
+          <div style={{ fontSize: 12, color: 'var(--red)' }}>
+            Dead{lead.deadAt ? ` since ${fmtDate(lead.deadAt)}` : ''}: {deadReasonLabel(lead.deadReason)}
+            {lead.deadNote ? <span style={{ color: 'var(--dim)' }}>. {lead.deadNote}</span> : null}
+          </div>
+        )}
+        <TasksSection lead={lead} currentUser={currentUser} onChanged={onChanged} say={say} />
+        {inNext.contacts && (
+          <div>
+            <SubHead title={`Reaching ${lead.claimant}`} />
+            {contactsBlock}
+            <div style={{ marginTop: 8 }}>
+              <CredibilityBlock lead={lead} say={say} onChanged={onChanged} />
+            </div>
+          </div>
+        )}
+        {inNext.heirs && heirsBlock}
+        {inNext.trace && (
+          <div>
+            <SubHead title={`Skip trace ${lead.claimant}`} />
+            {traceBlock}
+          </div>
+        )}
+        {inNext.search && searchBlock}
+        {inNext.letters && lettersBlock}
+      </Fold>
+
+      {open.map(fold)}
+      {wait.map(fold)}
+      {done.map(fold)}
+      {fold('case')}
+
+      {later.length > 0 && (
+        <details className="dc-fold-later">
+          <summary>
+            <b>Later steps ({later.length})</b>
+            <span>{later.map((k) => FOLD_TITLE[k]).join(' · ')}</span>
+          </summary>
+          <div>{later.map(fold)}</div>
+        </details>
+      )}
+
+      <StageControl lead={lead} onChanged={onChanged} say={say} />
+    </div>
+  );
+}
+
+/** A heading inside a fold. Smaller than the fold's own title on purpose. */
+function SubHead({ title, note }: { title: string; note?: string }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6 }}>
+      <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: 0.6, textTransform: 'uppercase', color: 'var(--dim)' }}>
+        {title}
+      </div>
+      {note && <div style={{ fontSize: 11, color: 'var(--faint)' }}>{note}</div>}
+    </div>
+  );
+}
+
+/**
+ * The claimant's own numbers and emails, clickable. For a deceased claimant
+ * they are folded under a plain warning: the buttons used to sit at full
+ * weight under a grey note that they could not sign, which is how time went
+ * into ringing a dead man's mobile.
+ */
+function ContactsBlock({
+  lead,
+  onCall,
+  onText,
+  onEmail,
+  onChanged,
+  say,
+}: {
+  lead: SurplusPanelLead;
+  onCall: (number: string) => void;
+  onText: (number: string) => void;
+  onEmail: (address: string) => void;
+  onChanged: () => void;
+  say: (msg: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const list = (
+    <>
+      {lead.phones.length === 0 && lead.emails.length === 0 && (
+        <div style={{ fontSize: 12, color: 'var(--faint)' }}>No phone or email on file.</div>
+      )}
+      {/* A flagged number still shows and is still clickable, because the
+          decision belongs to the person making the call, but the flag is
+          loud enough that it cannot be missed. */}
+      {lead.phones.map((p) => {
+        const flag = p.dnc ? DNC_STATE[p.dnc] : null;
+        return (
+          <div key={p.number} className="dc-wp-contact">
+            <div className="dc-wp-contact-main">
+              <span className="num">{phoneDisplay(p.number)}</span>
+              <span className="meta">{p.type || 'Phone'}</span>
+              {flag && <span className="flag">{flag.label}</span>}
+            </div>
+            <div className="dc-wp-contact-actions">
+              <button type="button" className="dc-wp-btn" onClick={() => onCall(p.number)}>
+                Call
+              </button>
+              <button type="button" className="dc-wp-btn" onClick={() => onText(p.number)}>
+                Text
+              </button>
+            </div>
+          </div>
+        );
+      })}
+      {lead.emails.map((e) => (
+        <div key={e} className="dc-wp-contact">
+          <div className="dc-wp-contact-main">
+            <span className="num">{e}</span>
+            <span className="meta">Email</span>
+          </div>
+          <div className="dc-wp-contact-actions">
+            <button type="button" className="dc-wp-btn" onClick={() => onEmail(e)}>
+              Email
+            </button>
+          </div>
+        </div>
+      ))}
+      {/* Research turns up numbers the vendor never had. This is where they
+          go, and where a number that turned out to be somebody else gets
+          marked rather than deleted. */}
+      <div style={{ marginTop: 6 }}>
+        <button type="button" className="dc-wp-btn" onClick={() => setEditing((v) => !v)}>
+          {editing ? 'Done editing' : 'Edit contacts'}
+        </button>
+      </div>
+      {editing && <ContactEditor leadId={lead.id} onChanged={onChanged} say={say} />}
+    </>
+  );
+  if (!lead.isDeceased) return <div>{list}</div>;
+  return (
+    <details className="dc-fold-sub">
+      <summary>
+        {lead.claimant}&apos;s own contacts <span className="flag">cannot sign</span>
+      </summary>
+      <div style={{ fontSize: 11.5, color: 'var(--faint)', margin: '4px 0 6px' }}>
+        Kept for the record. Nothing here can sign or be paid; the heirs are the route.
+      </div>
+      {list}
+    </details>
+  );
+}
+
+/**
+ * The trace verdict, stated before the contacts rather than inferred from
+ * their absence. "Nothing has been tried" and "everything has been tried"
+ * both render as an empty contact list, and they want opposite next actions:
+ * one costs a credit, the other a name search.
+ */
+function TraceBlock({ lead, tracing, onTrace }: { lead: SurplusPanelLead; tracing: boolean; onTrace: () => void }) {
+  return (
+    <div>
+      {lead.trace && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'baseline',
+            gap: 8,
+            flexWrap: 'wrap',
+            padding: '7px 10px',
+            marginBottom: 8,
+            borderRadius: 6,
+            background: 'var(--bg2)',
+            borderLeft: `3px solid ${TRACE_TONE[lead.trace.tone]}`,
+          }}
+        >
+          <strong style={{ fontSize: 12.5, color: TRACE_TONE[lead.trace.tone] }}>{lead.trace.label}</strong>
+          {lead.trace.at && <span style={{ fontSize: 11, color: 'var(--faint)' }}>{fmtDate(lead.trace.at)}</span>}
+          <div style={{ flexBasis: '100%', fontSize: 11.5, color: 'var(--dim)' }}>{lead.trace.detail}</div>
+        </div>
+      )}
+      <div style={{ fontSize: 12, color: 'var(--faint)' }}>
+        {/* Offered only when a submission could still tell us something.
+            Re-running an address that already answered spends a credit to
+            hear the same answer. */}
+        <button
+          type="button"
+          className="dc-wp-btn"
+          onClick={onTrace}
+          disabled={tracing || lead.trace?.actionable === false}
+          title={
+            lead.trace?.actionable === false
+              ? 'Already submitted. The same address returns the same answer; use the name search.'
               : undefined
           }
         >
-          {lead.nameSearch.reason && (
-            <div style={{ fontSize: 11.5, color: 'var(--amber)', marginBottom: 4 }}>
-              {lead.nameSearch.reason}
-            </div>
-          )}
-          <Row k="Search for" v={lead.nameSearch.query} />
-          {lead.nameSearch.state && <Row k="In state" v={lead.nameSearch.state} />}
-          {lead.nameSearch.verifyAgainst && (
-            <Row
-              k="Confirm against"
-              v={lead.nameSearch.verifyAgainst}
-              tone="var(--mint)"
-              note="A result whose address history includes this property is your claimant. One that does not is a different person with the same name."
-            />
-          )}
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
-            {lead.nameSearch.links.map((l: any) => (
-              <SearchLink key={l.site} lead={lead} link={l} say={say} onChanged={onChanged} />
-            ))}
-          </div>
-        </Section>
-      )}
-
-      <Section
-        title="The docket"
-        note={
-          property.lastPolledAt
-            ? `Last checked ${fmtDate(property.lastPolledAt)}`
-            : 'Not yet pulled from the county'
-        }
-      >
-        {ledger.length === 0 && (
-          <div style={{ fontSize: 12, color: 'var(--faint)' }}>
-            No document list on file. This lead came from an upload rather than a county poll.
-          </div>
+          {tracing ? 'Tracing...' : `Skip trace ${lead.claimant}`}
+        </button>
+        {lead.trace?.actionable === false && (
+          <span style={{ marginLeft: 8, fontSize: 11 }}>Already submitted, so this is spent. The route now is the name search.</span>
         )}
-        {grouped.map((g) => (
-          <div key={g.kind} style={{ marginBottom: 8 }}>
-            <div style={{ fontSize: 11, color: g.tone, fontWeight: 700, marginBottom: 3 }}>
-              {g.label} ({g.docs.length})
-            </div>
-            {g.docs.map((d, i) => (
+        <div style={{ marginTop: 4, fontSize: 11 }}>
+          {lead.ownerMailingStreet
+            ? `Traces ${lead.ownerMailingStreet}, ${lead.ownerMailingCity || ''} ${lead.ownerMailingState || ''}, the address the surplus notice was mailed to ${lead.noticeRecipient || lead.claimant}.`
+            : `No owner address recovered for ${lead.claimant}, so this would trace the property at ${lead.address}, which is usually not where the owner is.`}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * When the address route is exhausted, the name route is what is left. The
+ * course teaches searching NAME plus STATE and confirming against the
+ * property that was sold, which is the inverse of what BatchData does and is
+ * why the two complement each other.
+ */
+function NameSearchBlock({
+  lead,
+  property,
+  say,
+  onChanged,
+}: {
+  lead: SurplusPanelLead;
+  property: any;
+  say: (msg: string) => void;
+  onChanged: () => void;
+}) {
+  const ns = lead.nameSearch!;
+  return (
+    <div>
+      <SubHead
+        title={`Find ${lead.claimant} by name`}
+        note={
+          property.claimants.length > 1
+            ? `One claimant at a time. Switch at the top to search ${property.claimants
+                .filter((c: any) => c.id !== lead.id)
+                .map((c: any) => c.claimant)
+                .join(' or ')}.`
+            : undefined
+        }
+      />
+      {ns.reason && <div style={{ fontSize: 11.5, color: 'var(--amber)', marginBottom: 4 }}>{ns.reason}</div>}
+      <Row k="Search for" v={ns.query} />
+      {ns.state && <Row k="In state" v={ns.state} />}
+      {ns.verifyAgainst && (
+        <Row
+          k="Confirm against"
+          v={ns.verifyAgainst}
+          tone="var(--mint)"
+          note="A result whose address history includes this property is your claimant. One that does not is a different person with the same name."
+        />
+      )}
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
+        {ns.links.map((l: any) => (
+          <SearchLink key={l.site} lead={lead} link={l} say={say} onChanged={onChanged} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** The county's document list for the case, grouped by what matters. */
+function DocketBlock({ property, ledger }: { property: any; ledger: LedgerDoc[] }) {
+  const grouped = LEDGER_GROUPS.map((g) => ({ ...g, docs: ledger.filter((d) => d.kind === g.kind) })).filter(
+    (g) => g.docs.length > 0,
+  );
+  const other = ledger.filter((d) => !LEDGER_GROUPS.some((g) => g.kind === d.kind));
+  return (
+    <div>
+      <SubHead
+        title="The docket"
+        note={property.lastPolledAt ? `Last checked ${fmtDate(property.lastPolledAt)}` : 'Not yet pulled from the county'}
+      />
+      {ledger.length === 0 && (
+        <div style={{ fontSize: 12, color: 'var(--faint)' }}>
+          No document list on file. This lead came from an upload rather than a county poll.
+        </div>
+      )}
+      {grouped.map((g) => (
+        <div key={g.kind} style={{ marginBottom: 8 }}>
+          <div style={{ fontSize: 11, color: g.tone, fontWeight: 700, marginBottom: 3 }}>
+            {g.label} ({g.docs.length})
+          </div>
+          {g.docs.map((d, i) => (
+            <DocLink key={`${d.docId || d.title}-${i}`} doc={d} source={property.sourceSystem} />
+          ))}
+        </div>
+      ))}
+      {other.length > 0 && (
+        <details>
+          <summary style={{ fontSize: 11, color: 'var(--faint)', cursor: 'pointer' }}>{other.length} routine filings</summary>
+          <div style={{ marginTop: 4 }}>
+            {other.map((d, i) => (
               <DocLink key={`${d.docId || d.title}-${i}`} doc={d} source={property.sourceSystem} />
             ))}
           </div>
-        ))}
-        {other.length > 0 && (
-          <details>
-            <summary style={{ fontSize: 11, color: 'var(--faint)', cursor: 'pointer' }}>
-              {other.length} routine filings
-            </summary>
-            <div style={{ marginTop: 4 }}>
-              {other.map((d, i) => (
-                <DocLink key={`${d.docId || d.title}-${i}`} doc={d} source={property.sourceSystem} />
-              ))}
-            </div>
-          </details>
-        )}
-      </Section>
+        </details>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The instruction at the top of the panel: what to do with this claimant,
+ * in plain words, with the button that does it.
+ *
+ * On the front half it is the queue the API assigns and the reason it gives.
+ * From Agreement Signed on it is the job the stage is doing and what the
+ * next stage still needs. It replaces the "Rank 153.7" line, which was
+ * auditable and not actionable; the rank still decides the board's order.
+ */
+function NextStepBanner({
+  lead,
+  property,
+  onCall,
+  onText,
+  onTrace,
+  tracing,
+}: {
+  lead: SurplusPanelLead;
+  property: any;
+  onCall: (number: string) => void;
+  onText: (number: string) => void;
+  onTrace: () => void;
+  tracing: boolean;
+}) {
+  const idx = STAGE_ORDER.indexOf(lead.stage);
+  const l = lead as any;
+  const queue: string = l.queue || property.queue || '';
+  const label: string = l.queueLabel || property.queueLabel || '';
+  const reason: string = l.queueReason || property.queueReason || '';
+
+  let tone = 'mint';
+  let head = label;
+  let text = reason;
+  let actions: React.ReactNode = null;
+
+  if (lead.stage === 'Dead') {
+    tone = 'slate';
+    head = 'Dead';
+    text = lead.deadReason
+      ? `${deadReasonLabel(lead.deadReason)}${lead.deadAt ? `, since ${fmtDate(lead.deadAt)}` : ''}.${lead.deadNote ? ` ${lead.deadNote}` : ''}`
+      : 'Retired without a reason on file.';
+  } else if (idx >= 2) {
+    const next = nextGatedStage(lead.stage);
+    const missing = next ? lead.stageBlocks?.[next] || [] : [];
+    head = STAGE_JOB[lead.stage] || lead.stage;
+    text = !next
+      ? `Claim closed. ${lead.disbursement?.checkSentAt ? `${lead.claimant}'s check went out ${fmtDate(lead.disbursement.checkSentAt)}.` : ''}`
+      : missing.length
+        ? `${next} still needs ${missing.slice(0, 3).join(', ')}${missing.length > 3 ? ` and ${missing.length - 3} more` : ''}.`
+        : `Ready for ${next}. Everything it needs is in hand.`;
+    if (lead.claimantUpdate?.overdue) {
+      tone = 'amber';
+      text += ` ${lead.claimant} is owed a monthly update, news or not.`;
+    }
+  } else {
+    const phone = lead.phones.find((p) => !p.dnc)?.number || null;
+    switch (queue) {
+      case 'call':
+        tone = 'mint';
+        if (lead.isDeceased) {
+          text = `${reason}. Work the heirs below; ${lead.claimant} cannot sign.`;
+        } else if (phone) {
+          text = `${reason}${lead.tappedAt ? '' : '. Nobody has heard back yet'}.`;
+          actions = (
+            <>
+              <button type="button" className="dc-wp-btn on" onClick={() => onCall(phone)}>
+                Call {phoneDisplay(phone)}
+              </button>
+              <button type="button" className="dc-wp-btn" onClick={() => onText(phone)}>
+                Text
+              </button>
+            </>
+          );
+        }
+        break;
+      case 'heirs':
+        tone = 'red';
+        text = `${lead.claimant} is deceased and no living heir is on file. Only a living heir can sign, so a phone number for the claimant is worth nothing yet. Find the probate case and read the petition.`;
+        actions = (
+          <a
+            href={lead.courtRecordsUrl || courtRecordsSearch(property.county)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="dc-wp-btn on"
+          >
+            Open {property.county || 'county'} court records
+          </a>
+        );
+        break;
+      case 'trace':
+        tone = 'amber';
+        actions = (
+          <button type="button" className="dc-wp-btn on" onClick={onTrace} disabled={tracing || lead.trace?.actionable === false}>
+            {tracing ? 'Tracing...' : `Skip trace ${lead.claimant}`}
+          </button>
+        );
+        break;
+      case 'name_search':
+      case 'entity': {
+        tone = 'amber';
+        const first = lead.nameSearch?.links?.[0];
+        if (first) {
+          actions = (
+            <a href={first.url} target="_blank" rel="noopener noreferrer" className="dc-wp-btn on">
+              Search {first.site}
+            </a>
+          );
+        }
+        break;
+      }
+      case 'mailed':
+        tone = 'slate';
+        text = `${reason}. ${lead.letterDue ? 'The next letter is due.' : lead.letterDueAt ? `Next letter due ${fmtDate(lead.letterDueAt)}.` : ''}`;
+        break;
+      default:
+        tone = 'slate';
+    }
+  }
+
+  return (
+    <div className={`dc-wp-banner ${tone}`}>
+      <div className="head">{head}</div>
+      {text && <div className="text">{text}</div>}
+      {actions && <div className="acts">{actions}</div>}
     </div>
   );
 }
@@ -3527,7 +3977,7 @@ function TasksSection({
 
   return (
     <Section
-      title="Next action"
+      title="Follow-ups"
       note={tasks && tasks.length ? `${tasks.length} open` : undefined}
     >
       {lead.claimantUpdate?.applies && (
@@ -3696,7 +4146,7 @@ function StageControl({
   };
 
   return (
-    <Section title="Where the claim stands" note="This claimant only">
+    <Section title="Stage" note="This claimant only">
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <select
           className="dc-wp-sel"
@@ -3765,7 +4215,6 @@ function StageControl({
         </div>
       )}
       <StageGateHint lead={lead} />
-      <ContactLine lead={lead} />
     </Section>
   );
 }
@@ -3780,9 +4229,10 @@ function nextGatedStage(stage: string): string | null {
 }
 
 /**
- * What the next stage still needs, said before a move is tried. The list
- * comes from the same function the API refuses with, so the panel and the
- * refusal can never disagree.
+ * What the next stage still needs, as a checklist rather than a sentence.
+ * The list comes from the same function the API refuses with, so the panel
+ * and the refusal can never disagree. Three items show; the rest fold, so a
+ * New lead is not read a paragraph about a filing months away.
  */
 function StageGateHint({ lead }: { lead: SurplusPanelLead }) {
   const next = nextGatedStage(lead.stage);
@@ -3790,14 +4240,38 @@ function StageGateHint({ lead }: { lead: SurplusPanelLead }) {
   const missing = lead.stageBlocks?.[next] || [];
   if (!missing.length) {
     return (
-      <div style={{ fontSize: 11, color: 'var(--mint)' }}>
-        Ready for {next}.
+      <div className="dc-wp-gate">
+        <div className="lead">
+          Next: <b>{next}</b>
+        </div>
+        <div style={{ color: 'var(--mint)' }}>Ready. Everything it needs is in hand.</div>
       </div>
     );
   }
+  const shown = missing.slice(0, 3);
+  const rest = missing.slice(3);
   return (
-    <div style={{ fontSize: 11, color: 'var(--faint)' }}>
-      <span style={{ color: 'var(--amber)', fontWeight: 600 }}>{next}</span> still needs {missing.join(', ')}.
+    <div className="dc-wp-gate">
+      <div className="lead">
+        Next: <b>{next}</b> still needs
+      </div>
+      {shown.map((m) => (
+        <div key={m} className="item">
+          <span className="box" aria-hidden="true" />
+          {m}
+        </div>
+      ))}
+      {rest.length > 0 && (
+        <details>
+          <summary>and {rest.length} more</summary>
+          {rest.map((m) => (
+            <div key={m} className="item">
+              <span className="box" aria-hidden="true" />
+              {m}
+            </div>
+          ))}
+        </details>
+      )}
     </div>
   );
 }
@@ -3868,7 +4342,7 @@ function QualificationSection({
   const disclosures = lead.disclosures || {};
   return (
     <Section
-      title="Before the agreement"
+      title="Checks"
       note={lead.compliance?.clear ? 'Compliance clear' : 'Compliance blocked'}
     >
       <Toggle
