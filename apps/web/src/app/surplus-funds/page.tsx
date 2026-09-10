@@ -196,7 +196,7 @@ const SURPLUS_COLUMNS: PipelineColumn<any>[] = [
     // alphabetically by queue name.
     key: 'queue',
     label: 'Next step',
-    width: '140px',
+    width: '130px',
     sortValue: (r) => r.workScore,
     render: (r) => {
       const c = QUEUE_CHIP[r.queue] || CHIP.slate;
@@ -265,9 +265,42 @@ const SURPLUS_COLUMNS: PipelineColumn<any>[] = [
     render: (r) => <b title={money(r.grossSurplus)}>{moneyShort(r.grossSurplus)}</b>,
   },
   {
+    // Age since the sale. Past a year the money can only be requested through
+    // an attorney, which is why the team filters those out; the column went
+    // in the Phase 2 trim and came straight back.
+    key: 'age',
+    label: 'Age',
+    align: 'right',
+    width: '80px',
+    nowrap: true,
+    // Oldest first on the first click: a stale case is either already worked
+    // by somebody else or past the point where we can file it ourselves.
+    sortValue: (r) => r.daysSinceSale ?? -1,
+    render: (r) =>
+      r.daysSinceSale == null ? (
+        <span style={{ color: 'var(--faint)', fontSize: 12 }}>unknown</span>
+      ) : (
+        <span
+          style={{
+            color: r.daysSinceSale > 365 ? 'var(--red)' : r.daysSinceSale > 120 ? 'var(--amber)' : 'var(--mint)',
+            fontWeight: 600,
+          }}
+          title={
+            r.daysSinceSale > 365
+              ? `Sold ${fmtDate(r.saleDate)}. Over a year: only an attorney can request this one.`
+              : r.saleDate
+                ? `Sold ${fmtDate(r.saleDate)}`
+                : undefined
+          }
+        >
+          {r.daysSinceSale > 365 ? `${(r.daysSinceSale / 365).toFixed(1)}y` : `${r.daysSinceSale}d`}
+        </span>
+      ),
+  },
+  {
     key: 'claimStatus',
     label: 'Claim',
-    width: '130px',
+    width: '120px',
     sortValue: (r) => r.workScore,
     render: (r) => {
       const c = CLAIM_STATUS_CHIP[r.claimStatus] || CHIP.slate;
@@ -286,7 +319,7 @@ const SURPLUS_COLUMNS: PipelineColumn<any>[] = [
     // today, and everything else explains why there is not one.
     key: 'reach',
     label: 'Reach',
-    width: '140px',
+    width: '130px',
     sortValue: (r) => (r.needsHeirs ? 1 : r.anyContactable ? 3 : r.anyMismatch ? 0 : 2),
     render: (r) => (
       <div style={{ fontSize: 12 }}>
@@ -317,7 +350,7 @@ const SURPLUS_COLUMNS: PipelineColumn<any>[] = [
     // where the board shows whether the dates are being kept.
     key: 'nextTask',
     label: 'Next action',
-    width: '170px',
+    width: '160px',
     // Soonest first on the first click: the board sorts descending, so the
     // nearest date gets the largest value and rows with nothing due go last.
     sortValue: (r) => (r.nextTask?.dueDate ? -new Date(r.nextTask.dueDate).getTime() : -Infinity),
@@ -361,7 +394,7 @@ const SURPLUS_COLUMNS: PipelineColumn<any>[] = [
     // has nobody been calling" rather than "who is popular".
     key: 'touches',
     label: 'Last touch',
-    width: '120px',
+    width: '110px',
     nowrap: true,
     sortValue: (r) => -agoDays(r.lastTouchedAt),
     render: (r) => {
@@ -554,6 +587,29 @@ export default function SurplusFundsPage() {
   const [queueQ, setQueueQ] = useState<string | null>('call');
   /** The secondary filters live in a drawer that says how many are on. */
   const [filtersOpen, setFiltersOpen] = useState(false);
+  /**
+   * Hide sales older than a year. Past that the money can only be requested
+   * through an attorney, so the team works the under-a-year list almost
+   * always. Remembered in the browser: once on, it stays on. A case with no
+   * sale date stays visible, because "unknown" is not "too old".
+   */
+  const [underYear, setUnderYear] = useState(false);
+  useEffect(() => {
+    try {
+      setUnderYear(localStorage.getItem('dc-surplus-under-year') === '1');
+    } catch {
+      /* defaults are fine */
+    }
+  }, []);
+  const toggleUnderYear = () => {
+    const next = !underYear;
+    setUnderYear(next);
+    try {
+      localStorage.setItem('dc-surplus-under-year', next ? '1' : '0');
+    } catch {
+      /* defaults are fine */
+    }
+  };
   const menuRef = useRef<HTMLDetailsElement>(null);
   const [chipQ, setChipQ] = useState<string | null>(null);
   const [stageQ, setStageQ] = useState<string | null>(null);
@@ -631,6 +687,7 @@ export default function SurplusFundsPage() {
       // claimant on it qualifies.
       if (chipQ === 'estate') data = data.filter((r) => r.anyDeceased);
       if (chipQ === 'lien') data = data.filter((r) => r.competingLien);
+      if (underYear) data = data.filter((r) => r.daysSinceSale == null || r.daysSinceSale <= 365);
       setRows(data);
       setLeadCount(res.data.leadCount ?? data.length);
       setCounties(Array.isArray(res.data.counties) ? res.data.counties : []);
@@ -642,7 +699,7 @@ export default function SurplusFundsPage() {
     } finally {
       setLoading(false);
     }
-  }, [q, queueQ, tierQ, stageQ, ctype, county, band, chipQ, ageQ, lienWin, hideDead, hideDnc, sort]);
+  }, [q, queueQ, tierQ, stageQ, ctype, county, band, chipQ, ageQ, lienWin, hideDead, hideDnc, sort, underYear]);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -1096,6 +1153,13 @@ export default function SurplusFundsPage() {
                 ['notice', 'Sort: Newest notice'],
               ]}
             />
+            <button
+              className={`dc-tab${underYear ? ' on' : ''}`}
+              onClick={toggleUnderYear}
+              title="Hide sales older than a year. Past that, only an attorney can request the money. Stays on until you turn it off."
+            >
+              Under a year
+            </button>
             <button
               className={`dc-btn${filtersOpen ? ' on' : ''}`}
               onClick={() => setFiltersOpen((v) => !v)}
