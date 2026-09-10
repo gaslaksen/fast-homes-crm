@@ -339,6 +339,14 @@ export class CallsService {
    */
   async processCallTranscript(leadId: string, transcript: string, summary?: string) {
     if (!this.anthropic || !transcript) return;
+    // The prompt below describes an investor talking to a property seller and
+    // the result can advance lead.status. Neither fits a surplus claimant, so
+    // the guard lives here as well as at the callers.
+    const owner = await this.prisma.lead.findUnique({ where: { id: leadId }, select: { source: true } });
+    if (owner?.source === 'SURPLUS') {
+      this.logger.log(`Skipping CAMP extraction for surplus lead ${leadId}`);
+      return;
+    }
 
     this.logger.log(`Extracting CAMP data from call transcript for lead ${leadId}`);
 

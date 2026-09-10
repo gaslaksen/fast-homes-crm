@@ -42,12 +42,22 @@ export class CampaignEnrollmentService {
       where: { id: leadId },
       select: {
         id: true,
+        source: true,
         sellerEmail: true,
         sellerPhone: true,
         doNotContact: true,
       },
     });
     if (!lead) throw new NotFoundException('Lead not found');
+    // Surplus outreach is regulated speech: the fee agreement gate enforces
+    // FS 45.033's disclosures, and a wholesaling drip pointed at a claimant
+    // would text around it. Nothing automated goes to a claimant until a
+    // surplus campaign exists and counsel has seen its wording.
+    if (lead.source === 'SURPLUS') {
+      throw new BadRequestException(
+        'Surplus claimants cannot be enrolled in a drip campaign. Outreach to them is regulated and goes out by hand.',
+      );
+    }
 
     const channels = new Set<string>(
       (campaign.steps ?? []).map((s: any) => s.channel),
