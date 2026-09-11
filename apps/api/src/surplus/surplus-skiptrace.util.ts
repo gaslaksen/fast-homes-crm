@@ -273,6 +273,11 @@ export function traceEligibility(
      * verdict condemns that address, not just the property.
      */
     mailVerdict?: string | null;
+    /**
+     * The claimant has a given name and a surname for the vendor to match
+     * on, so a dead mailing address is worked around rather than fatal.
+     */
+    nameKnown?: boolean;
   } = {},
 ): TraceEligibility {
   // An entity has no consumer identity to find. 37 of 204 targets on a sampled
@@ -355,18 +360,22 @@ export function traceEligibility(
   }
 
   // The clerk already wrote to this claimant and it came back. Whatever address
-  // we have for them is the one that bounced, so a trace of it returns whoever
-  // is there NOW rather than the claimant.
+  // we have for them is the one that bounced, so an ADDRESS-ONLY trace of it
+  // returns whoever is there NOW rather than the claimant.
   //
-  // The evidence is unambiguous. Every submission against an address whose mail
-  // had already been returned came back a stranger: six of six on the property
-  // addresses, then Maxine Fletcher at the Bronx mailing address and Kelli
-  // Grimes at the Bradford St one. Not one produced a contact.
+  // The evidence for that was unambiguous under the v1 address-only query:
+  // every submission against an address whose mail had already been returned
+  // came back a stranger, six of six on the property addresses, then Maxine
+  // Fletcher at the Bronx mailing address and Kelli Grimes at the Bradford St
+  // one. Not one produced a contact.
   //
-  // These claimants are not unreachable, they are unreachable BY ADDRESS. They
-  // need a name-first search, which is what the surplus course teaches and what
-  // `nameSearchLinks` exists for.
-  if (opts.mailVerdict === 'undeliverable') {
+  // The v3 query sends the claimant's NAME and the property that sold, and the
+  // vendor confirms the person against both. When the name is known the caller
+  // submits name plus property and leaves the dead mailing address out, so
+  // the gate applies only when there is no name to match on. Polk made this
+  // matter: 116 of its 141 properties carry a returned surplus letter, and an
+  // address-only rule would have written the whole county off.
+  if (opts.mailVerdict === 'undeliverable' && !opts.nameKnown) {
     return {
       ok: false,
       reason: 'mail_returned',
