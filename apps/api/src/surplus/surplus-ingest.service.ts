@@ -21,7 +21,7 @@ import {
 } from '@fast-homes/shared';
 import { SurplusService } from './surplus.service';
 import { DuvalTaxDeedAdapter } from './duval-taxdeed.adapter';
-import { LeeRealTdmAdapter, PolkRealTdmAdapter, OWNER_ROLES } from './realtdm.adapter';
+import { BrevardRealTdmAdapter, LeeRealTdmAdapter, PolkRealTdmAdapter, OWNER_ROLES } from './realtdm.adapter';
 import { SurplusNoticeService, NoticeExtract } from './surplus-notice.service';
 import { matchRecipient } from './surplus-name-search.util';
 import { SurplusSourceAdapter, SurplusCaseDetail, SurplusCaseSummary } from './surplus-source.types';
@@ -205,11 +205,12 @@ export class SurplusIngestService {
     private notice: SurplusNoticeService,
     private lee?: LeeRealTdmAdapter,
     private polk?: PolkRealTdmAdapter,
+    private brevard?: BrevardRealTdmAdapter,
   ) {}
 
-  /** Every adapter wired up: Duval daily, Lee and Polk (RealTDM) weekly. */
+  /** Every adapter wired up: Duval daily; Lee, Polk and Brevard (RealTDM) weekly. */
   adapters(): SurplusSourceAdapter[] {
-    const all: (SurplusSourceAdapter | undefined)[] = [this.duval, this.lee, this.polk];
+    const all: (SurplusSourceAdapter | undefined)[] = [this.duval, this.lee, this.polk, this.brevard];
     return all.filter((a): a is SurplusSourceAdapter => !!a);
   }
 
@@ -368,6 +369,9 @@ export class SurplusIngestService {
     const verdict = classifyCase(detail.documents, {
       owners: detail.owners,
       receiptsImplyClaim: !!adapter.receiptsImplyClaim,
+      applicants: String(detail.applicantNames || '')
+        .split(/\s*,\s*/)
+        .filter(Boolean),
     });
     const claimants = collapseClaimants(detail.owners);
     const out = { created: 0, updated: 0, skipped: 0, retired: false };

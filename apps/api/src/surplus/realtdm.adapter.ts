@@ -357,9 +357,11 @@ export function parseParties(html: string): SurplusCaseParty[] {
 export function claimantFromTitle(title: string): string | null {
   const t = String(title || '').trim();
   // Polk: "Surplus Claims Received- NELSON J FREEMAN". Lee: "Surplus Claim_Kevin Saturno".
+  // Brevard: "STATEMENT OF CLAIM ALFRED A SMITH.pdf", also STATMENT, STATEMENT CLAIM, STATE OF CLAIM.
   const m =
     /surplus\s*claims?\s*received\s*[-:]\s*([\s\S]+?)(?:\.pdf)?\s*$/i.exec(t) ||
-    /surplus\s*claim[_\s-]+([\s\S]+?)(?:\.pdf)?\s*$/i.exec(t);
+    /surplus\s*claim[_\s-]+([\s\S]+?)(?:\.pdf)?\s*$/i.exec(t) ||
+    /\b(?:statement|statment|state)\s*(?:of\s*)?claim[_\s-]+([\s\S]+?)(?:\.pdf)?\s*$/i.exec(t);
   if (!m) return null;
   const name = m[1].replace(/^\d{4,}-?\d*\s+/, '').replace(/\s+/g, ' ').trim();
   return name || null;
@@ -489,11 +491,48 @@ export function noticeDateFromLetter(letterText: string): string | null {
  */
 export function splitCompoundOwner(name: string): string[] {
   const s = String(name || '').trim();
-  if (!/\d+(?:\.\d+)?\s*%/.test(s)) return s ? [s] : [];
-  return s
-    .split(/,?\s*\d+(?:\.\d+)?\s*%\s*/)
-    .map((p) => p.replace(/^[,\s]+|[,\s]+$/g, ''))
-    .filter(Boolean);
+  if (!s) return [];
+  // Polk: shares.
+  if (/\d+(?:\.\d+)?\s*%/.test(s)) {
+    return s
+      .split(/,?\s*\d+(?:\.\d+)?\s*%\s*/)
+      .map((p) => p.replace(/^[,\s]+|[,\s]+$/g, ''))
+      .filter(Boolean);
+  }
+  // Brevard: "ANITA ZUMSTEG AND/OR BERNHARD F ZUMSTEG", "A AND B". Only when
+  // every side is a whole name, so "HOUSING AND NEIGHBORHOOD DEVELOPMENT"
+  // stays one entity.
+  const conj = s.split(/\s+AND\/OR\s+|\s+AND\s+|\s*&\s*/i).map((p) => p.trim()).filter(Boolean);
+  if (conj.length > 1 && conj.every((p) => p.split(/\s+/).length >= 2 && !/,/.test(p))) return conj;
+
+  // Comma forms. One comma with a single token before it is surname-first
+  // ("Smith, Alfred A") and stays whole; a suffix or estate marker after the
+  // comma stays whole too ("JOHNNY LOVE WILLIAMS, SR", "EVELYN ALTFELD,
+  // ESTATE OF"). Two whole names either side of a comma are two people
+  // ("ALFRED A SMITH, MEGGAN SALMON-SMITH"). Brevard's repeated surname-first
+  // form "ZUMSTEG, ANITA ZUMSTEG, BERNARD F" is rebuilt person by person: each
+  // segment after the first ends with the NEXT person's surname.
+  const segs = s.split(/\s*,\s*/).filter(Boolean);
+  if (segs.length < 2) return [s];
+  const KEEP = /^(SR|JR|II|III|IV|V|ESQ|TRUSTEE|TR|ET\s*AL|ETAL|ESTATE\s*OF|DECEASED|LLC|INC|CORP|LTD|LP|LLP|PA|PLLC)\.?$/i;
+  if (segs.some((g) => KEEP.test(g))) return [s];
+  const firstIsSurname = segs[0].split(/\s+/).length === 1;
+  if (segs.length === 2) {
+    return firstIsSurname || segs.some((g) => g.split(/\s+/).length < 2) ? [s] : segs;
+  }
+  if (firstIsSurname) {
+    const out: string[] = [];
+    let surname = segs[0];
+    for (let i = 1; i < segs.length; i++) {
+      const tokens = segs[i].split(/\s+/);
+      const last = i === segs.length - 1;
+      const given = last ? tokens : tokens.slice(0, -1);
+      if (given.length) out.push(`${surname}, ${given.join(' ')}`);
+      if (!last) surname = tokens[tokens.length - 1];
+    }
+    return out.length ? out : [s];
+  }
+  return segs.every((g) => g.split(/\s+/).length >= 2) ? segs : [s];
 }
 
 // ─── The adapter ────────────────────────────────────────────────────────────
@@ -819,5 +858,20 @@ export class LeeRealTdmAdapter extends RealTdmAdapter {
 export class PolkRealTdmAdapter extends RealTdmAdapter {
   constructor(config: ConfigService) {
     super(config, { key: 'realtdm_polk', county: 'Polk', subdomain: 'polk' });
+  }
+}
+
+/**
+ * Brevard County, `brevard.realtdm.com`. Discovery pass 2026-09-11 on ten
+ * cases: owners are OWNER (TITLE HOLDER AGENT is an agent), one party line can
+ * hold two people joined by AND/OR or in the repeated surname-first form,
+ * claims are "STATEMENT OF CLAIM NAME" with the spec's typos, mail comes back
+ * as RTS or RETURNED and green cards as RETURN RECEIPT, and the county files
+ * NO CLAIM on its own behalf. No bare "Receipt".
+ */
+@Injectable()
+export class BrevardRealTdmAdapter extends RealTdmAdapter {
+  constructor(config: ConfigService) {
+    super(config, { key: 'realtdm_brevard', county: 'Brevard', subdomain: 'brevard' });
   }
 }
