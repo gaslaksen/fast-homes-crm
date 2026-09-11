@@ -132,6 +132,13 @@ const RULES: Rule[] = [
   // but it contains "SURPLUS_LETTER" and is filed seconds after the real
   // letter, so without this trap it becomes the operative notice.
   { kind: 'other', re: /_labels\b|labels\s*available/i, seenIn: 'Lee' },
+  // Polk re-mails copies of the surplus letter months later ("SURPLUS LETTER
+  // - Mailed out copies from Cathedral"). Counting that as the notice would
+  // move the 120 day clock to the copy's date.
+  { kind: 'other', re: /mailed\s*out\s*copies/i, seenIn: 'Polk' },
+  // Polk files the sheriff's fee check as "SHERIFF SERVICE FEE- CHECK", which
+  // contains "sheriff service" and is a payment, not a return of service.
+  { kind: 'other', re: /sheriff\s*service\s*fee/i, seenIn: 'Polk' },
   // The clerk's fee receipt, filed beside a claim. Exactly "Receipt" on Lee;
   // Duval's "RealAuction Payment Receipt" is the BIDDER's receipt, sits on
   // every case, and must stay 'other'.
@@ -142,10 +149,14 @@ const RULES: Rule[] = [
     // Duval ships three spellings of this on the same docket:
     // "Certified Mail Undelieverd", "Regular Mail Undelievered",
     // "Certified Mail Undelivered". Match the mangled stem, not the word.
-    re: /undeliver|undelieve|unable\s*to\s*forward|returned\s*mail|vacant|no\s*such\s*number|attempted\s*-?\s*not\s*known/i,
-    seenIn: 'Duval, Brevard',
+    re: /undeliver|undelieve|unable\s*to\s*forward|returned\s*(?:certified\s*|regular\s*)?mail|vacant|no\s*such\s*number|attempted\s*-?\s*not\s*known/i,
+    seenIn: 'Duval, Brevard, Polk',
   },
-  { kind: 'mail_delivered', re: /mail\s*delivered|returned\s*signed|green\s*card/i, seenIn: 'Duval' },
+  {
+    kind: 'mail_delivered',
+    re: /mail\s*delivered|returned\s*signed|green\s*card|proof\s*of\s*delivery/i,
+    seenIn: 'Duval, Polk',
+  },
   {
     kind: 'sheriff_not_served',
     re: /returned\s*not\s*served|not\s*served\s*sheriff/i,
@@ -175,8 +186,8 @@ const RULES: Rule[] = [
   },
   {
     kind: 'claim',
-    re: /submitted\s*claim|statement\s*of\s*claim|statment\s*of\s*claim|state\s*of\s*claim|statement\s*claim|surplus\s*claim|claim\s*to\s*receive/i,
-    seenIn: 'Duval, Lee, Brevard, Alachua',
+    re: /submitted\s*claim|statement\s*of\s*claim|statment\s*of\s*claim|state\s*of\s*claim|statement\s*claim|surplus\s*claims?\s*received|surplus\s*claim|claim\s*to\s*receive/i,
+    seenIn: 'Duval, Lee, Brevard, Alachua, Polk',
   },
 
   // ── Context signals ───────────────────────────────────────────────────────
@@ -456,15 +467,24 @@ export function collapseClaimants(owners: string[]): CollapsedClaimant[] {
     // `HEAVENLY HANDS FUNDING` beside `HEAVENLY HANDS FUNDING, LLC`. Without
     // this each pair becomes two claimants, two leads, and the same company
     // called twice, which is exactly what this function exists to prevent.
+    // Polk writes the estate form TRAILING ("EVELYN ALTFELD, ESTATE OF") and
+    // the tax roll spells the same person surname-first on one line and
+    // given-first on the next ("HANKINS PEGGY", "PEGGY HANKINS"). The key is
+    // therefore the SORTED tokens, with "ESTATE OF" removed wherever it sits,
+    // so both of those pairs are one claimant rather than two leads.
     const core = original
       .toUpperCase()
       .replace(ESTATE_OF, '')
+      .replace(/\bESTATE\s+OF\b/g, ' ')
       .replace(/[.,\-\/]/g, ' ')
       .replace(ESTATE_MARK, ' ')
       .replace(NAME_SUFFIX, ' ')
       .replace(ENTITY_TAIL, ' ')
       .replace(/\s+/g, ' ')
-      .trim();
+      .trim()
+      .split(' ')
+      .sort()
+      .join(' ');
     if (!core) continue;
 
     const deceased = ESTATE_MARK.test(original.toUpperCase()) || ESTATE_OF.test(original);
