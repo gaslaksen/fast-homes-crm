@@ -19,6 +19,7 @@ import {
   surplusDocumentAtLeast,
   SurplusDeadReason,
   SurplusTraceChannel,
+  surplusFeeSchedule,
 } from '@fast-homes/shared';
 import { CLAIM_STATUS_LABEL, CLAIM_STATUS_RANK, isWorkable } from './surplus-classify.util';
 import {
@@ -180,11 +181,16 @@ export function netToClaimant(lead: SurplusFacts): number {
   return Math.max(0, (lead.grossSurplus || 0) - totalLiens(lead));
 }
 
-/** The fee at the governing cap, or null when no cap is confirmed for this regime. */
+/**
+ * The fee the agreement's schedule would earn on what reaches the claimant
+ * (the clerk pays valid liens before releasing the surplus), reduced to the
+ * legal cap where one applies to these funds. Null only when no rule
+ * matches at all.
+ */
 export function estFee(lead: SurplusFacts): number | null {
   const rule = ruleFor(lead.surplusType, lead.fundLocation);
-  if (!rule || rule.feeCap == null) return null;
-  return Math.round(netToClaimant(lead) * (rule.feeCap / 100));
+  if (!rule) return null;
+  return Math.round(surplusFeeSchedule(netToClaimant(lead), { capPct: rule.feeCap }).fee);
 }
 
 /**
@@ -694,8 +700,12 @@ export function complianceGate(lead: SurplusFacts, now = new Date()): Compliance
     );
   }
 
+  // No cap with the statute read and found silent is a finding and passes;
+  // no cap because nobody has checked is a gap and blocks.
   if (rule.feeCap == null) {
-    blocks.push('No confirmed fee cap for this regime, so a contract cannot be sent.');
+    if (rule.capConfidence !== 'none') {
+      blocks.push('No confirmed fee cap for this regime, so a contract cannot be sent.');
+    }
   } else if (consideration(lead) > 0 && governingPct(lead) > rule.feeCap) {
     blocks.push(
       `Total consideration is ${governingPct(lead).toFixed(1)}% against the ${rule.feeCap}% cap.`,
@@ -717,7 +727,7 @@ export function complianceGate(lead: SurplusFacts, now = new Date()): Compliance
 
   if (rule.capConfidence === 'ambiguous') {
     warns.push(
-      'Fee cap for this regime is unsettled. 12% is our conservative default, not a confirmed number.',
+      `Fee cap for this regime is unsettled. ${rule.feeCap}% is our conservative default, not a confirmed number.`,
     );
   }
   if (rule.capConfidence === 'unverified') {

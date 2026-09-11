@@ -21,7 +21,11 @@ interface Report {
   caseNumber: string | null;
   checkReceivedAt: string | null;
   checkAmount: number | null;
-  feePercent: number | null;
+  feePercentOverride: number | null;
+  feePercent: number;
+  feeScheduled: boolean;
+  feeLabel: string;
+  feeSchedule: string;
   capPct: number | null;
   capBasis: string | null;
   expenses: { id: string; kind: string; label: string; amount: number; incurredAt: string; note: string | null }[];
@@ -83,7 +87,7 @@ function DisbursementPage() {
 
   const rows: [string, string][] = [
     ['Surplus received from the county', usd(r.gross)],
-    [`Contingency fee, ${r.feePercent ?? 0}% of the surplus`, `(${usd(r.fee)})`],
+    [r.feeScheduled ? `Contingency fee under section 3(d), ${r.feeLabel}` : `Contingency fee, ${r.feePercent}% of the surplus`, `(${usd(r.fee)})`],
   ];
 
   return (
@@ -185,7 +189,7 @@ function DisbursementPage() {
 
         <p className="mt-6 text-[10.5pt] text-gray-700">
           Total consideration to {r.company.name} is {r.considerationPct}% of the surplus
-          {r.capPct != null ? `, within the ${r.capPct}% permitted by Florida law` : ''}.
+          {r.capPct != null ? `, within the ${r.capPct}% permitted by Florida law` : ', under the schedule in section 3(d) of the agreement'}.
           {r.clearingDueAt ? ` Funds are released after the county’s check clears, on or after ${fmt(r.clearingDueAt)}.` : ''}
         </p>
 

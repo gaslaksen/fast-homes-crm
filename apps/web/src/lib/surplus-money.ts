@@ -14,6 +14,19 @@ export const SURPLUS_EXPENSE_KINDS: [string, string][] = [
   ['other', 'Other'],
 ];
 
+/**
+ * The agreement's fee schedule, section 3(d). Mirrors SURPLUS_FEE_TIERS in
+ * packages/shared/src/types.ts. The API does the arithmetic; this is for
+ * labels and the estimate a person sees before a check exists.
+ */
+export const SURPLUS_FEE_TIERS: { upTo: number | null; pct: number }[] = [
+  { upTo: 50_000, pct: 40 },
+  { upTo: 100_000, pct: 35 },
+  { upTo: null, pct: 30 },
+];
+
+export const SURPLUS_FEE_SCHEDULE_LABEL = '40% of the first $50,000, 35% of the next $50,000, and 30% above $100,000';
+
 export function expenseLabel(kind: string): string {
   return SURPLUS_EXPENSE_KINDS.find(([k]) => k === kind)?.[1] || kind;
 }
