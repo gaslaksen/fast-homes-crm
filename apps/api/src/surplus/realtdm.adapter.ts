@@ -67,6 +67,12 @@ export interface RealTdmCountySpec {
   county: string;
   /** The `<subdomain>.realtdm.com` host. */
   subdomain: string;
+  /**
+   * Whether a bare "Receipt" on the docket means a claim was filed. Only true
+   * where the discovery pass showed every receipt on a claimed case (Lee: 68
+   * of 68). Default false, because assuming it inverts the answer elsewhere.
+   */
+  receiptsImplyClaim?: boolean;
 }
 
 export const REALTDM_USER_AGENT =
@@ -97,11 +103,13 @@ const LIST_COLUMNS = [
 
 /**
  * Party roles that mean owner of record. Every county labels these
- * differently: Lee says OWNER, Pinellas TITLEHOLDER and LEGAL TITLE HOLDER,
- * Brevard OWNER beside TITLE HOLDER AGENT (an agent, not an owner). A role
- * filter carried across counties caught 15 of 393 owner records once.
+ * differently: Lee says OWNER, Polk ASSESSED OWNER, Pinellas TITLEHOLDER and
+ * LEGAL TITLE HOLDER, Brevard OWNER beside TITLE HOLDER AGENT (an agent, not
+ * an owner). Polk also lists PROPERTY and OCCUPANT, neither of which owns
+ * anything. A role filter carried across counties caught 15 of 393 owner
+ * records once, and on Polk the Lee filter found zero owners on ten cases.
  */
-export const OWNER_ROLES = /^(OWNER|TITLE\s*HOLDER|TITLEHOLDER|LEGAL\s*TITLE\s*HOLDER)$/i;
+export const OWNER_ROLES = /^(OWNER|ASSESSED\s*OWNER|TITLE\s*HOLDER|TITLEHOLDER|LEGAL\s*TITLE\s*HOLDER)$/i;
 
 const MONTHS: Record<string, number> = {
   jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6,
@@ -347,9 +355,13 @@ export function parseParties(html: string): SurplusCaseParty[] {
  * returns null rather than a guess.
  */
 export function claimantFromTitle(title: string): string | null {
-  const m = /surplus\s*claim[_\s-]+([\s\S]+?)(?:\.pdf)?\s*$/i.exec(String(title || '').trim());
+  const t = String(title || '').trim();
+  // Polk: "Surplus Claims Received- NELSON J FREEMAN". Lee: "Surplus Claim_Kevin Saturno".
+  const m =
+    /surplus\s*claims?\s*received\s*[-:]\s*([\s\S]+?)(?:\.pdf)?\s*$/i.exec(t) ||
+    /surplus\s*claim[_\s-]+([\s\S]+?)(?:\.pdf)?\s*$/i.exec(t);
   if (!m) return null;
-  const name = m[1].replace(/^\d{6,}\s+/, '').replace(/\s+/g, ' ').trim();
+  const name = m[1].replace(/^\d{4,}-?\d*\s+/, '').replace(/\s+/g, ' ').trim();
   return name || null;
 }
 
@@ -436,18 +448,52 @@ export function parseNotifications(html: string): SurplusNoticeRecipient[] {
  * what the claimant was told they are owed and is the number to say on a call.
  */
 export function surplusFromLetter(letterText: string): number | null {
-  const m = /surplus\s+of\s+approximately\s*\$?\s*([\d,]+(?:\.\d{2})?)/i.exec(String(letterText || ''));
+  // Lee: "a surplus of approximately $180,791.34". Polk: "a surplus of $123,467.01 (subject to change)".
+  const m = /surplus\s+of\s+(?:approximately\s+)?\$?\s*([\d,]+(?:\.\d{2})?)/i.exec(String(letterText || ''));
   return m ? money(m[1]) : null;
 }
 
 /**
- * The certificate number the letter cites, eg "23-04107". pdf-parse runs the
- * value straight into the next label ("23-04107Certificate Year"), so the
- * match stops at the digits-hyphen-digits shape rather than at whitespace.
+ * The certificate number the letter cites. Lee prints "Certificate
+ * Number:23-04107 Certificate Year:2023" and pdf-parse runs the value straight
+ * into the next label; Polk prints "Certificate #5963". The match stops at
+ * whitespace or at the next "Certificate".
  */
 export function certificateFromLetter(letterText: string): string | null {
-  const m = /Certificate\s+Number\s*:\s*(\d+-\d+)/i.exec(String(letterText || ''));
-  return m ? m[1] : null;
+  const m = /Certificate\s*(?:Number|No\.?|#)?\s*:?\s*#?\s*([A-Z0-9-]+?)(?=\s|Certificate|$)/i.exec(String(letterText || ''));
+  return m && /\d/.test(m[1]) ? m[1] : null;
+}
+
+const MONTH_NAMES =
+  '(?:January|February|March|April|May|June|July|August|September|October|November|December)';
+
+/**
+ * The date the clerk put on the letter, which starts the 120 day clock. Both
+ * counties print it near the top ("September 17, 2025" on Lee, "Date January
+ * 09, 2026" on Polk). Preferred over the docket's upload date: Polk uploaded
+ * one letter on 12/30 that is dated 1/09, and the clock runs from the date on
+ * the paper the owner received.
+ */
+export function noticeDateFromLetter(letterText: string): string | null {
+  // No leading word boundary: pdf-parse runs Polk's label into the value
+  // ("DateJanuary 09, 2026") and a \b there never matches.
+  const m = new RegExp(`(${MONTH_NAMES})\\s+(\\d{1,2}),\\s+(\\d{4})(?!\\d)`).exec(String(letterText || ''));
+  return m ? realTdmDate(`${m[1]} ${m[2]}, ${m[3]}`) : null;
+}
+
+/**
+ * Polk packs co-owners with their shares into ONE party line:
+ * "PEGGY HANKINS, 33.34% PATTY HANKINS, 33.33% ROBERT P HILL, 33.33%".
+ * Left whole it becomes a claimant named with percentages. Split on the share
+ * tokens; a line with no shares is one owner.
+ */
+export function splitCompoundOwner(name: string): string[] {
+  const s = String(name || '').trim();
+  if (!/\d+(?:\.\d+)?\s*%/.test(s)) return s ? [s] : [];
+  return s
+    .split(/,?\s*\d+(?:\.\d+)?\s*%\s*/)
+    .map((p) => p.replace(/^[,\s]+|[,\s]+$/g, ''))
+    .filter(Boolean);
 }
 
 // ─── The adapter ────────────────────────────────────────────────────────────
@@ -457,13 +503,8 @@ export class RealTdmAdapter implements SurplusSourceAdapter {
   readonly county: string;
   readonly cadence = 'weekly' as const;
   readonly detailDelayMs = DETAIL_DELAY_MS;
-  /**
-   * Lee files a "Receipt" only when a claim's fee is paid: 68 of 68 sat on
-   * claimed cases in the spec pull, none on an unclaimed one. Verify this on
-   * every further county before reusing the spec; Duval's receipts are the
-   * bidder's and sit on open cases.
-   */
-  readonly receiptsImplyClaim = true;
+  /** Per county, from the discovery pass. See RealTdmCountySpec. */
+  readonly receiptsImplyClaim: boolean;
   readonly baseUrl: string;
 
   private readonly logger: Logger;
@@ -481,6 +522,7 @@ export class RealTdmAdapter implements SurplusSourceAdapter {
   ) {
     this.key = spec.key;
     this.county = spec.county;
+    this.receiptsImplyClaim = !!spec.receiptsImplyClaim;
     this.logger = new Logger(`RealTdmAdapter:${spec.county}`);
     this.baseUrl = (
       this.config.get<string>(`REALTDM_${spec.subdomain.toUpperCase()}_BASE_URL`) ||
@@ -628,8 +670,9 @@ export class RealTdmAdapter implements SurplusSourceAdapter {
     // collapseClaimants, which is where that rule lives.
     const owners: string[] = [];
     for (const p of parties) {
-      if (OWNER_ROLES.test(p.role) && !owners.some((o) => o.toUpperCase() === p.name.toUpperCase())) {
-        owners.push(p.name);
+      if (!OWNER_ROLES.test(p.role)) continue;
+      for (const name of splitCompoundOwner(p.name)) {
+        if (!owners.some((o) => o.toUpperCase() === name.toUpperCase())) owners.push(name);
       }
     }
 
@@ -639,12 +682,14 @@ export class RealTdmAdapter implements SurplusSourceAdapter {
     const letter = letters[letters.length - 1];
     let surplusAtNotice: number | null = null;
     let certificateNumber: string | null = null;
+    let noticeDate: string | null = letter?.filedAt || null;
     // The letter never changes once filed, so a lite fetch of a held case
     // skips the link request and the PDF download, the two heaviest calls.
     if (letter?.docId && !opts.lite) {
       const read = await this.readLetter(http, letter);
       surplusAtNotice = read.surplusAtNotice;
       certificateNumber = read.certificateNumber;
+      noticeDate = read.noticeDate || noticeDate;
     }
 
     return {
@@ -670,7 +715,7 @@ export class RealTdmAdapter implements SurplusSourceAdapter {
       // interested parties, and a single-recipient fallback must not hand an
       // interested party's address to the owner.
       noticeRecipients: recipients.filter((r) => !r.role || OWNER_ROLES.test(r.role)),
-      noticeDate: letter?.filedAt || null,
+      noticeDate,
       surplusAtNotice,
       sourceUrl: `${this.baseUrl}/public/cases/list`,
     };
@@ -726,8 +771,8 @@ export class RealTdmAdapter implements SurplusSourceAdapter {
   private async readLetter(
     http: AxiosInstance,
     doc: SurplusCaseDocument,
-  ): Promise<{ surplusAtNotice: number | null; certificateNumber: string | null }> {
-    const none = { surplusAtNotice: null, certificateNumber: null };
+  ): Promise<{ surplusAtNotice: number | null; certificateNumber: string | null; noticeDate: string | null }> {
+    const none = { surplusAtNotice: null, certificateNumber: null, noticeDate: null };
     try {
       const url = await this.resolveDocumentUrl(doc);
       if (!url) return none;
@@ -739,7 +784,11 @@ export class RealTdmAdapter implements SurplusSourceAdapter {
       });
       const parsed = await pdfParse(Buffer.from(res.data));
       const t = parsed?.text || '';
-      return { surplusAtNotice: surplusFromLetter(t), certificateNumber: certificateFromLetter(t) };
+      return {
+        surplusAtNotice: surplusFromLetter(t),
+        certificateNumber: certificateFromLetter(t),
+        noticeDate: noticeDateFromLetter(t),
+      };
     } catch (e: any) {
       this.logger.warn(`${this.county}: could not read surplus letter ${doc.docId}: ${e.message}`);
       return none;
@@ -747,10 +796,28 @@ export class RealTdmAdapter implements SurplusSourceAdapter {
   }
 }
 
-/** Lee County, `lee.realtdm.com`. The first RealTDM county wired up. */
+/**
+ * Lee County, `lee.realtdm.com`. The first RealTDM county wired up. Lee files
+ * a "Receipt" only when a claim's fee is paid: 68 of 68 sat on claimed cases
+ * in the spec pull, none on an unclaimed one.
+ */
 @Injectable()
 export class LeeRealTdmAdapter extends RealTdmAdapter {
   constructor(config: ConfigService) {
-    super(config, { key: 'realtdm_lee', county: 'Lee', subdomain: 'lee' });
+    super(config, { key: 'realtdm_lee', county: 'Lee', subdomain: 'lee', receiptsImplyClaim: true });
+  }
+}
+
+/**
+ * Polk County, `polk.realtdm.com`. Discovery pass 2026-09-11 on ten cases:
+ * owners are ASSESSED OWNER, claims are "Surplus Claims Received- NAME", the
+ * clerk mails the surplus letter to interested parties as well as the owner,
+ * and no bare "Receipt" appears on the docket (fee checks are CHECK_REQUEST),
+ * so receipts imply nothing here.
+ */
+@Injectable()
+export class PolkRealTdmAdapter extends RealTdmAdapter {
+  constructor(config: ConfigService) {
+    super(config, { key: 'realtdm_polk', county: 'Polk', subdomain: 'polk' });
   }
 }

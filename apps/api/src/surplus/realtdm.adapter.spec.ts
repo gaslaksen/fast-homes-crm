@@ -3,6 +3,7 @@ import {
   certificateFromLetter,
   claimantFromTitle,
   inFilingOrder,
+  noticeDateFromLetter,
   parseDocumentsPage,
   parseListPage,
   parseNotifications,
@@ -10,9 +11,10 @@ import {
   parseSummary,
   realTdmDate,
   splitAddressLines,
+  splitCompoundOwner,
   surplusFromLetter,
 } from './realtdm.adapter';
-import { classifyCase } from './surplus-classify.util';
+import { classifyCase, collapseClaimants } from './surplus-classify.util';
 
 /**
  * Fixtures are verbatim fragments from lee.realtdm.com, pulled 2026-09-03
@@ -410,10 +412,45 @@ describe('claimantFromTitle', () => {
     expect(claimantFromTitle('2025000500 Surplus Claim_Ashley Berger.pdf')).toBe('Ashley Berger');
   });
 
+  it('reads the Polk form, where the clerk writes "Surplus Claims Received- NAME"', () => {
+    expect(claimantFromTitle('Surplus Claims Received- NELSON J FREEMAN')).toBe('NELSON J FREEMAN');
+    expect(
+      claimantFromTitle('Surplus Claims Received- LAW OFFICES OF AL NICOLETTI/RILEY A.KENDALL,ESQ -PEGGY HANKINS'),
+    ).toBe('LAW OFFICES OF AL NICOLETTI/RILEY A.KENDALL,ESQ -PEGGY HANKINS');
+  });
+
   it('never invents a claimant from a document that is not a claim', () => {
     expect(claimantFromTitle('SURPLUS_LETTER')).toBeNull();
     expect(claimantFromTitle('Returned Mail')).toBeNull();
     expect(claimantFromTitle('Receipt')).toBeNull();
+  });
+});
+
+describe('Polk owner names', () => {
+  it('splits a party line that packs co-owners with their shares', () => {
+    // Polk 00058-2026, verbatim. Left whole it became a claimant named with
+    // percentages, and the three real people were missed.
+    expect(splitCompoundOwner('PEGGY HANKINS, 33.34% PATTY HANKINS, 33.33% ROBERT P HILL, 33.33%')).toEqual([
+      'PEGGY HANKINS',
+      'PATTY HANKINS',
+      'ROBERT P HILL',
+    ]);
+    expect(splitCompoundOwner('NELSON J FREEMAN')).toEqual(['NELSON J FREEMAN']);
+    expect(splitCompoundOwner('')).toEqual([]);
+  });
+
+  it('collapses the roll\'s surname-first spelling and the trailing estate form', () => {
+    // Polk lists "HANKINS PEGGY" and "PEGGY HANKINS" as two parties, and
+    // "EVELYN ALTFELD, ESTATE OF" beside "EVELYN ALTFELD". Each pair is one
+    // person, and each would otherwise be two leads and two calls.
+    const hankins = collapseClaimants(['HANKINS PEGGY', 'PATTY HANKINS', 'PEGGY HANKINS', 'ROBERT P HILL']);
+    expect(hankins.map((c) => c.name)).toEqual(['HANKINS PEGGY', 'PATTY HANKINS', 'ROBERT P HILL']);
+
+    const altfeld = collapseClaimants(['ALBERT H ALTFELD', 'EVELYN ALTFELD, ESTATE OF', 'EVELYN ALTFELD']);
+    expect(altfeld).toHaveLength(2);
+    const evelyn = altfeld.find((c) => /EVELYN/.test(c.name))!;
+    expect(evelyn.name).toBe('EVELYN ALTFELD');
+    expect(evelyn.deceased).toBe(true);
   });
 });
 
@@ -502,6 +539,26 @@ having an interest in this property, as described in 197.502(4), Florida Statute
   it('reads the surplus as stated at notice, which is the number to say on a call', () => {
     expect(surplusFromLetter(LETTER)).toBe(31806.04);
     expect(certificateFromLetter(LETTER)).toBe('23-04107');
+    expect(noticeDateFromLetter(LETTER)).toBe('2025-09-17');
+  });
+
+  it('reads the Polk letter, which words all three differently', () => {
+    // Verbatim from Polk 00891-2025, pulled 2026-09-11. Note the letter is
+    // dated 1/09 while the docket uploaded it on 12/30; the paper date wins.
+    const POLK = `CLERK OF THE CIRCUIT COURT
+POLK COUNTY, FLORIDA
+NOTICE OF SURPLUS FUNDS FROM TAX DEED SALE
+Date January 09, 2026
+Tax Deed #00891-2025
+Certificate #5963
+
+Property 25-29-27-3622-8000-0710
+    Pursuant to Chapter 197, Florida Statutes, the above property was sold at public sale on
+12/18/2025 and a surplus of $123,467.01 (subject to change) will remain and be held by this office
+for 120 days beginning on the date of this notice`;
+    expect(surplusFromLetter(POLK)).toBe(123467.01);
+    expect(certificateFromLetter(POLK)).toBe('5963');
+    expect(noticeDateFromLetter(POLK)).toBe('2026-01-09');
   });
 
   it('returns null on a scan with no text layer', () => {
@@ -632,6 +689,47 @@ describe('classifying live Lee dockets', () => {
       { owners: ['MYRTIS GRIFFIN'] },
     );
     expect(undated.mailVerdict).toBe('undeliverable');
+  });
+
+  it('Polk 00891-2025: an unnamed-owner claim is pending, and the returned surplus letter is a dead address', () => {
+    // Verbatim docket labels from the 2026-09-11 discovery pass. Polk writes
+    // the claimant into the title in its own form, files returned NOA mail as
+    // "Returned Certified Mail" before the letter, and the returned SURPLUS
+    // LETTER after it. Only the latter may condemn the address.
+    const v = classifyCase(
+      [
+        { title: 'Application for Tax Deed', filedAt: '2025-07-25' },
+        { title: 'NOA_PARTIES', filedAt: '2025-10-20' },
+        { title: 'SHERIFF SERVICE FEE- CHECK-POLK CO', filedAt: '2025-11-07' },
+        { title: '00891-2025 Processed Sheriff Services', filedAt: '2025-11-26' },
+        { title: '00891-2025 Returned Certified Mail', filedAt: '2025-11-26' },
+        { title: 'SURPLUS_LETTER_LABELS', filedAt: '2025-12-30' },
+        { title: 'SURPLUS_LETTER', filedAt: '2025-12-30' },
+        { title: 'REFUND APPLICANT- ELEVENTH TALENT LLC', filedAt: '2026-01-08' },
+        { title: 'Surplus Claims Received- NELSON J FREEMAN', filedAt: '2026-01-21', claimant: 'NELSON J FREEMAN' },
+        { title: '00891-2025 SURPLUS LETTER-Returned Mail', filedAt: '2026-01-22' },
+      ],
+      { owners: ['NELSON J FREEMAN'] },
+    );
+    // The owner of record filed the claim himself: assigned, not contestable.
+    expect(v.claimStatus).toBe('assigned');
+    expect(v.mailVerdict).toBe('undeliverable');
+    expect(v.ledger.find((d) => /FEE- CHECK/.test(d.title))?.kind).toBe('other');
+    expect(v.ledger.find((d) => /Returned Certified Mail/.test(d.title))?.kind).toBe('mail_undeliverable');
+  });
+
+  it('Polk 00523-2025: a re-mailed copy of the letter is not a second notice, and proof of delivery is live mail', () => {
+    const v = classifyCase(
+      [
+        { title: 'SURPLUS_LETTER', filedAt: '2025-10-21' },
+        { title: '00523-2025 SURPLUS LETTER - Mailed out copies from Cathedral', filedAt: '2026-03-05' },
+        { title: '00523-2025 Certified Mail Proof of Delivery.pdf', filedAt: '2026-05-29' },
+      ],
+      { owners: ['JANE DOE'] },
+    );
+    expect(v.claimStatus).toBe('open');
+    expect(v.counts.notices).toBe(1);
+    expect(v.mailVerdict).toBe('delivered');
   });
 
   it('a competitor claim leaves the owner residual contestable', () => {

@@ -21,7 +21,7 @@ import {
 } from '@fast-homes/shared';
 import { SurplusService } from './surplus.service';
 import { DuvalTaxDeedAdapter } from './duval-taxdeed.adapter';
-import { LeeRealTdmAdapter, OWNER_ROLES } from './realtdm.adapter';
+import { LeeRealTdmAdapter, PolkRealTdmAdapter, OWNER_ROLES } from './realtdm.adapter';
 import { SurplusNoticeService, NoticeExtract } from './surplus-notice.service';
 import { matchRecipient } from './surplus-name-search.util';
 import { SurplusSourceAdapter, SurplusCaseDetail, SurplusCaseSummary } from './surplus-source.types';
@@ -204,11 +204,12 @@ export class SurplusIngestService {
     private duval: DuvalTaxDeedAdapter,
     private notice: SurplusNoticeService,
     private lee?: LeeRealTdmAdapter,
+    private polk?: PolkRealTdmAdapter,
   ) {}
 
-  /** Every adapter wired up: Duval daily, Lee (RealTDM) weekly. */
+  /** Every adapter wired up: Duval daily, Lee and Polk (RealTDM) weekly. */
   adapters(): SurplusSourceAdapter[] {
-    const all: (SurplusSourceAdapter | undefined)[] = [this.duval, this.lee];
+    const all: (SurplusSourceAdapter | undefined)[] = [this.duval, this.lee, this.polk];
     return all.filter((a): a is SurplusSourceAdapter => !!a);
   }
 
