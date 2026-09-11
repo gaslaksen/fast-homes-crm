@@ -305,12 +305,35 @@ describe('choosing which address to submit', () => {
     expect(r.skipped.placeholder_address).toBeUndefined();
   });
 
-  it('refuses the property fallback when the clerk\'s mail to it bounced', async () => {
-    // Direct evidence the owner was gone before we started looking. Six of six
-    // such submissions came back strangers on the first live run.
+  it('traces by name and property when the clerk\'s mail bounced, and leaves the dead address out', async () => {
+    // Under the v1 address-only query every such submission came back a
+    // stranger, so the gate refused them. The v3 query confirms the NAME
+    // against the property that sold, so the dead mailing address is dropped
+    // from the request and the claimant is still worked. Polk carries a
+    // returned surplus letter on 116 of 141 properties.
     const { svc } = harness([
       lead({
         street: '2817 EAVERSON ST',
+        mailStreet: '1228 ADEE AVENUE', mailCity: 'BRONX', mailState: 'NY', mailZip: '10469',
+        mailVerdict: 'undeliverable',
+      }),
+    ]);
+    respond([person('Myrtis', 'Griffin')]);
+
+    const r = await svc.traceLeads({ organizationId: 'org' });
+
+    expect(r.submitted).toBe(1);
+    expect(r.skipped.mail_returned).toBeUndefined();
+    const req = (mockedAxios.post.mock.calls[0][1] as any).requests[0];
+    expect(req.name).toEqual({ first: 'Myrtis', last: 'Griffin' });
+    expect(req.propertyAddress.street).toBe('2817 EAVERSON ST');
+    expect(req.mailingAddress).toBeUndefined();
+  });
+
+  it('still refuses a bounced address when there is no name to match on', async () => {
+    const { svc } = harness([
+      lead({
+        first: '', last: 'ESTATE',
         mailStreet: '1228 ADEE AVENUE', mailCity: 'BRONX', mailState: 'NY', mailZip: '10469',
         mailVerdict: 'undeliverable',
       }),
@@ -558,10 +581,10 @@ describe('recording that a trace happened', () => {
   });
 
   it('stamps a refusal to submit, so it does not read as never tried', async () => {
-    // Returned clerk mail means no address we hold is live. We decline to spend
-    // the credit, and that decision is a fact about the claimant too.
+    // An entity has no consumer identity to trace. We decline to spend the
+    // credit, and that decision is a fact about the claimant too.
     const { svc, detailUpdates } = harness([
-      lead({ detailId: 'd7', mailVerdict: 'undeliverable', mailStreet: '72 SMITH DRIVE', mailCity: 'HARTFORD', mailState: 'CT', mailZip: '06118' }),
+      lead({ detailId: 'd7', first: 'HEAVENLY HANDS', last: 'FUNDING LLC', mailStreet: '72 SMITH DRIVE', mailCity: 'HARTFORD', mailState: 'CT', mailZip: '06118' }),
     ]);
 
     await svc.traceLeads({ organizationId: 'org' });

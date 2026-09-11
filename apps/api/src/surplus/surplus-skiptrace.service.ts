@@ -87,6 +87,11 @@ interface Candidate {
   /** 'notice' when this is the owner's own address, 'property' when it is not. */
   addressSource: 'notice' | 'property';
   /**
+   * A given name and a surname are on file, so the vendor can confirm the
+   * person against the property rather than against an address alone.
+   */
+  nameKnown: boolean;
+  /**
    * Which address the VENDOR keys the match on.
    *
    * 'property' for a claimant: they owned the parcel, so the parcel is the
@@ -224,7 +229,16 @@ export class SurplusSkiptraceService {
         // the property returned a stranger, as it did on all six of the first
         // live submissions.
         const hasMailing = !!d.ownerMailingStreet;
-        const c = hasMailing
+        const isEntity = ENTITY.test(claimant);
+        const nameKnown = !isEntity && claimant.split(/\s+/).filter(Boolean).length >= 2;
+        // A mailing address the clerk's own letter bounced from is not sent.
+        // Under the v3 query the vendor confirms the NAME against the property
+        // that sold, so a claimant with a dead address and a known name is
+        // traced by name plus property instead of being written off. Polk
+        // carries returned letters on 116 of 141 properties.
+        const mailDead = d.mailVerdict === 'undeliverable';
+        const useMailing = hasMailing && !(mailDead && nameKnown);
+        const c = useMailing
           ? {
               street: d.ownerMailingStreet,
               city: d.ownerMailingCity,
@@ -242,10 +256,11 @@ export class SurplusSkiptraceService {
           detailId: d.id,
           claimant,
           caseNumber: d.caseNumber,
-          isEntity: ENTITY.test(claimant),
+          isEntity,
+          nameKnown,
           ...c,
           addressKey: addressKeyOf(c),
-          addressSource: (hasMailing ? 'notice' : 'property') as 'notice' | 'property',
+          addressSource: (useMailing ? 'notice' : 'property') as 'notice' | 'property',
           propertyStreet: l.propertyAddress,
           propertyCity: l.propertyCity,
           propertyState: l.propertyState,
@@ -271,8 +286,10 @@ export class SurplusSkiptraceService {
         addressCaseCount: caseCounts.get(c.addressKey) || 0,
         // Applies to the notice address too, not just the property fallback.
         // The notice IS what went to the owner's mailing address, so a returned
-        // verdict says that address is dead.
+        // verdict says that address is dead. With a name on file the candidate
+        // was already switched to the property and the gate stands down.
         mailVerdict: mailVerdicts.get(c.detailId),
+        nameKnown: c.nameKnown,
       });
       if (!elig.ok) {
         const reason = elig.reason || 'ineligible';
@@ -415,6 +432,7 @@ export class SurplusSkiptraceService {
           // every heir on the case.
           matchOn: 'self',
           addressSource: 'notice',
+          nameKnown: true,
           propertyStreet: property?.propertyAddress ?? null,
           propertyCity: property?.propertyCity ?? null,
           propertyState: property?.propertyState ?? null,
