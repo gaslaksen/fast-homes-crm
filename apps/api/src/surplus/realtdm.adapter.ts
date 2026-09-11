@@ -489,8 +489,22 @@ export function noticeDateFromLetter(letterText: string): string | null {
  * Left whole it becomes a claimant named with percentages. Split on the share
  * tokens; a line with no shares is one owner.
  */
+/** A comma segment that is a suffix or marker, not a person. */
+const KEEP_SEGMENT = /^(SR|JR|II|III|IV|V|ESQ|TRUSTEE|TR|ET\s*AL|ETAL|ESTATE\s*OF|DECEASED|LLC|INC|CORP|LTD|LP|LLP|PA|PLLC)\.?$/i;
+
+/** Whole name: at least two tokens, and any comma segment after the first is a suffix. */
+function isWholeName(p: string): boolean {
+  const segs = p.split(/\s*,\s*/);
+  return segs[0].split(/\s+/).length >= 2 && segs.slice(1).every((g) => KEEP_SEGMENT.test(g));
+}
+
 export function splitCompoundOwner(name: string): string[] {
-  const s = String(name || '').trim();
+  // Brevard lists the registered agent as an OWNER party, "REGISTERED AGENT
+  // O/B/O FLORIDAIM LLC". The owner is the entity; the prefix is dropped so
+  // the line collapses onto it instead of becoming a second claimant.
+  const s = String(name || '')
+    .trim()
+    .replace(/^REGISTERED\s+AGENT\s+(?:O\/B\/O|OBO|ON\s+BEHALF\s+OF|FOR)\s+/i, '');
   if (!s) return [];
   // Polk: shares.
   if (/\d+(?:\.\d+)?\s*%/.test(s)) {
@@ -499,11 +513,11 @@ export function splitCompoundOwner(name: string): string[] {
       .map((p) => p.replace(/^[,\s]+|[,\s]+$/g, ''))
       .filter(Boolean);
   }
-  // Brevard: "ANITA ZUMSTEG AND/OR BERNHARD F ZUMSTEG", "A AND B". Only when
-  // every side is a whole name, so "HOUSING AND NEIGHBORHOOD DEVELOPMENT"
-  // stays one entity.
+  // Brevard: "ANITA ZUMSTEG AND/OR BERNHARD F ZUMSTEG", "LOTTIE WILLIAMS AND
+  // ESTATE OF WALTER IVORY, DECEASED". Only when every side is a whole name,
+  // so "HOUSING AND NEIGHBORHOOD DEVELOPMENT" stays one entity.
   const conj = s.split(/\s+AND\/OR\s+|\s+AND\s+|\s*&\s*/i).map((p) => p.trim()).filter(Boolean);
-  if (conj.length > 1 && conj.every((p) => p.split(/\s+/).length >= 2 && !/,/.test(p))) return conj;
+  if (conj.length > 1 && conj.every(isWholeName)) return conj;
 
   // Comma forms. One comma with a single token before it is surname-first
   // ("Smith, Alfred A") and stays whole; a suffix or estate marker after the
@@ -514,7 +528,7 @@ export function splitCompoundOwner(name: string): string[] {
   // segment after the first ends with the NEXT person's surname.
   const segs = s.split(/\s*,\s*/).filter(Boolean);
   if (segs.length < 2) return [s];
-  const KEEP = /^(SR|JR|II|III|IV|V|ESQ|TRUSTEE|TR|ET\s*AL|ETAL|ESTATE\s*OF|DECEASED|LLC|INC|CORP|LTD|LP|LLP|PA|PLLC)\.?$/i;
+  const KEEP = KEEP_SEGMENT;
   if (segs.some((g) => KEEP.test(g))) return [s];
   const firstIsSurname = segs[0].split(/\s+/).length === 1;
   if (segs.length === 2) {

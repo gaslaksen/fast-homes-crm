@@ -458,6 +458,14 @@ describe('Polk owner names', () => {
     expect(splitCompoundOwner('EVELYN ALTFELD, ESTATE OF')).toEqual(['EVELYN ALTFELD, ESTATE OF']);
     // An entity with AND in its name is one entity.
     expect(splitCompoundOwner('HOUSING AND NEIGHBORHOOD DEVELOPMENT')).toEqual(['HOUSING AND NEIGHBORHOOD DEVELOPMENT']);
+    // A joined pair where one side carries an estate marker (Brevard 240757).
+    expect(splitCompoundOwner('LOTTIE WILLIAMS AND ESTATE OF WALTER IVORY, DECEASED')).toEqual([
+      'LOTTIE WILLIAMS',
+      'ESTATE OF WALTER IVORY, DECEASED',
+    ]);
+    // The registered agent line is the entity it stands for (Brevard 240625).
+    expect(splitCompoundOwner('REGISTERED AGENT O/B/O FLORIDAIM LLC')).toEqual(['FLORIDAIM LLC']);
+    expect(splitCompoundOwner('REGISTERED AGENT OBO FLORIDAIM LLC')).toEqual(['FLORIDAIM LLC']);
   });
 
   it('collapses Brevard\'s surname-first spelling with the given-first one', () => {
