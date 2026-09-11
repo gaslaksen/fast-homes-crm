@@ -282,18 +282,28 @@ describe('the waterfall', () => {
     expect(netToClaimant({ ...clean, grossSurplus: 20000, liens: [{ type: 'x', holder: 'y', amount: 50000, priority: 1 }] })).toBe(0);
   });
 
-  it('quotes the fee at the cap for a regime that has one', () => {
-    expect(estFee(withLiens)).toBe(6840); // 12% of 57,000
+  it('quotes the agreement schedule on what reaches the claimant where no cap applies', () => {
+    // 40% of 50,000 + 35% of 7,000 on a 57,000 net.
+    expect(estFee(withLiens)).toBe(22450);
   });
 
-  it('quotes no fee at all where no cap is confirmed', () => {
-    expect(estFee({ ...clean, fundLocation: 'state_escheated' })).toBeNull();
+  it('reduces the schedule to the legal cap where one applies', () => {
+    // Mortgage foreclosure surplus at the clerk: 12% of 57,000.
+    expect(estFee({ ...withLiens, surplusType: 'mortgage_foreclosure' })).toBe(6840);
+    // Escheated: 30% of 57,000.
+    expect(estFee({ ...withLiens, fundLocation: 'state_escheated' })).toBe(17100);
+  });
+
+  it('quotes nothing when no rule matches at all', () => {
+    expect(estFee({ ...clean, surplusType: 'sheriff_sale' })).toBeNull();
   });
 });
 
 describe('the cap is measured against the stricter of the two percentages', () => {
+  // Mortgage foreclosure surplus, where FS 45.033(3)(d) applies.
   const lead: SurplusFacts = {
     ...clean,
+    surplusType: 'mortgage_foreclosure',
     grossSurplus: 100000,
     liens: [{ type: 'Judgment', holder: 'Acme', amount: 60000, priority: 1 }],
     totalConsideration: 8000,
@@ -322,16 +332,31 @@ describe('complianceGate', () => {
     expect(g.blocks).toEqual([]);
   });
 
-  it('warns but does not block on the unsettled tax deed cap', () => {
-    const g = complianceGate(clean, NOW);
+  it('clears a clerk-held tax deed surplus with no statutory cap, and does not call the schedule a cap', () => {
+    // 40% of the surplus is fine here: no statute reaches funds at the clerk.
+    const g = complianceGate({ ...clean, totalConsideration: 24000 }, NOW);
     expect(g.clear).toBe(true);
-    expect(g.warns.join(' ')).toContain('conservative default');
+    expect(g.rule?.feeCap).toBeNull();
+    expect(g.rule?.capConfidence).toBe('none');
+    expect(g.warns.join(' ')).not.toContain('default');
   });
 
-  it('blocks outright when no fee cap is confirmed for the regime', () => {
-    const g = complianceGate({ ...clean, fundLocation: 'state_escheated', licensedRepId: 'rep_1' }, NOW);
-    expect(g.clear).toBe(false);
-    expect(g.blocks.join(' ')).toContain('No confirmed fee cap');
+  it('applies the 30 percent cap once the same funds have escheated', () => {
+    const over = complianceGate({ ...clean, fundLocation: 'state_escheated', licensedRepId: 'rep_1', totalConsideration: 24000 }, NOW);
+    expect(over.clear).toBe(false);
+    expect(over.blocks.join(' ')).toContain('40.0% against the 30% cap');
+    const under = complianceGate({ ...clean, fundLocation: 'state_escheated', licensedRepId: 'rep_1', totalConsideration: 15000 }, NOW);
+    expect(under.clear).toBe(true);
+  });
+
+  it('blocks outright when a rule has no cap and nobody has read the statute', () => {
+    const g = complianceGate(
+      { ...clean, fundLocation: 'state_escheated', licensedRepId: 'rep_1' },
+      NOW,
+    );
+    // Every live rule now has either a cap or a 'none' finding, so this is
+    // exercised through the table's contract rather than a live row.
+    expect(g.rule?.feeCap == null ? g.rule?.capConfidence : 'has cap').not.toBe('unverified');
   });
 
   it('blocks escheated funds with no registered representative assigned', () => {

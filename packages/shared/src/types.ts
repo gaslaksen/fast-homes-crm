@@ -355,20 +355,107 @@ export const SURPLUS_EXPENSE_KINDS: [string, string][] = [
 ];
 
 /**
+ * The fee schedule in the Client Recovery Services Agreement, section 3(d):
+ * tiers applied to successive portions of the Gross Recovery. The agreement's
+ * own examples: $10,000 pays $4,000; $75,000 pays $28,750; $150,000 pays
+ * $52,500. Section 3(f) reduces the fee to any legal maximum that applies.
+ */
+export interface SurplusFeeTier {
+  /** The top of this portion, or null for everything above the last one. */
+  upTo: number | null;
+  pct: number;
+}
+
+export const SURPLUS_FEE_TIERS: SurplusFeeTier[] = [
+  { upTo: 50_000, pct: 40 },
+  { upTo: 100_000, pct: 35 },
+  { upTo: null, pct: 30 },
+];
+
+/** "40% of the first $50,000, 35% of the next $50,000, and 30% above $100,000". */
+export function surplusFeeScheduleLabel(tiers: SurplusFeeTier[] = SURPLUS_FEE_TIERS): string {
+  const money = (n: number) => `$${n.toLocaleString('en-US')}`;
+  const parts = tiers.map((t, i) => {
+    const from = i === 0 ? 0 : tiers[i - 1].upTo || 0;
+    if (t.upTo == null) return `${t.pct}% above ${money(from)}`;
+    return i === 0 ? `${t.pct}% of the first ${money(t.upTo)}` : `${t.pct}% of the next ${money(t.upTo - from)}`;
+  });
+  return parts.length > 1 ? `${parts.slice(0, -1).join(', ')}, and ${parts[parts.length - 1]}` : parts[0] || '';
+}
+
+/**
+ * The fee on a gross recovery under the schedule, reduced to the legal cap
+ * when one applies to the funds. The breakdown is what the disbursement
+ * report prints, tier by tier, so the claimant can check the arithmetic
+ * against the agreement's own table.
+ */
+export function surplusFeeSchedule(
+  grossRecovery: number | null | undefined,
+  opts: { tiers?: SurplusFeeTier[]; capPct?: number | null } = {},
+): {
+  fee: number;
+  /** The fee as a percent of the gross, after any cap. */
+  effectivePct: number;
+  breakdown: { from: number; to: number; pct: number; amount: number }[];
+  /** The schedule came out above the legal cap and was reduced to it. */
+  capped: boolean;
+  /** "40% of $50,000 + 35% of $25,000", or "30% cap" when reduced. */
+  label: string;
+} {
+  const tiers = opts.tiers || SURPLUS_FEE_TIERS;
+  const gross = Math.max(0, Number(grossRecovery || 0));
+  const breakdown: { from: number; to: number; pct: number; amount: number }[] = [];
+  let from = 0;
+  for (const t of tiers) {
+    if (gross <= from) break;
+    const to = t.upTo == null ? gross : Math.min(gross, t.upTo);
+    const portion = to - from;
+    if (portion > 0) breakdown.push({ from, to, pct: t.pct, amount: Math.round(portion * t.pct) / 100 });
+    from = to;
+    if (t.upTo == null || gross <= t.upTo) break;
+  }
+  const scheduled = Math.round(breakdown.reduce((s, b) => s + b.amount, 0) * 100) / 100;
+  const capFee = opts.capPct != null ? Math.round(gross * opts.capPct) / 100 : null;
+  const capped = capFee != null && scheduled > capFee + 1e-9;
+  const fee = capped ? (capFee as number) : scheduled;
+  const money = (n: number) => `$${n.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
+  const label = capped
+    ? `${opts.capPct}% cap`
+    : breakdown.map((b) => `${b.pct}% of ${money(b.to - b.from)}`).join(' + ') || 'no recovery yet';
+  return {
+    fee,
+    effectivePct: gross > 0 ? Math.round((fee / gross) * 10000) / 100 : 0,
+    breakdown,
+    capped,
+    label,
+  };
+}
+
+/**
  * The disbursement arithmetic, in one place so the report, the row and the
- * stats agree. Expenses come out of the company's share unless the
- * agreement passes them to the claimant, in which case they count toward
- * the Florida cap on total consideration alongside the fee.
+ * stats agree. The fee follows the agreement's schedule unless a percent
+ * was typed for this claim. Expenses come out of the company's share unless
+ * the agreement passes them to the claimant, in which case they count
+ * toward any legal cap on total consideration alongside the fee.
  */
 export function surplusDisbursement(input: {
   checkAmount: number | null | undefined;
+  /** A percent typed for this claim, overriding the schedule. Null means the schedule applies. */
   feePercent: number | null | undefined;
   expensesTotal: number;
   expensesFromClaimantShare: boolean;
+  /** The legal cap on total consideration for these funds, or null when none applies. */
   capPct: number | null | undefined;
+  tiers?: SurplusFeeTier[];
 }): {
   gross: number;
   fee: number;
+  /** The fee as a percent of the check: the typed percent, or the schedule's effective rate. */
+  feePercent: number;
+  /** True when the schedule set the fee, false when a percent was typed. */
+  feeScheduled: boolean;
+  /** How the fee was arrived at, for the report: "40% of $50,000 + 35% of $25,000" or "12%". */
+  feeLabel: string;
   expensesTotal: number;
   claimantShare: number;
   companyShare: number;
@@ -378,8 +465,12 @@ export function surplusDisbursement(input: {
   overCap: boolean;
 } {
   const gross = Math.max(0, Number(input.checkAmount || 0));
-  const pct = Math.max(0, Number(input.feePercent || 0));
-  const fee = Math.round(gross * pct) / 100;
+  const feeScheduled = input.feePercent == null;
+  const schedule = feeScheduled ? surplusFeeSchedule(gross, { tiers: input.tiers, capPct: input.capPct }) : null;
+  const typedPct = Math.max(0, Number(input.feePercent || 0));
+  const fee = schedule ? schedule.fee : Math.round(gross * typedPct) / 100;
+  const feePercent = schedule ? schedule.effectivePct : typedPct;
+  const feeLabel = schedule ? schedule.label : `${typedPct}%`;
   const expensesTotal = Math.max(0, Number(input.expensesTotal || 0));
   const passed = input.expensesFromClaimantShare ? expensesTotal : 0;
   const claimantShare = Math.max(0, Math.round((gross - fee - passed) * 100) / 100);
@@ -387,7 +478,7 @@ export function surplusDisbursement(input: {
   const companyNet = Math.round((companyShare - expensesTotal) * 100) / 100;
   const considerationPct = gross > 0 ? Math.round(((fee + passed) / gross) * 10000) / 100 : 0;
   const overCap = input.capPct != null && considerationPct > input.capPct + 1e-9;
-  return { gross, fee, expensesTotal, claimantShare, companyShare, companyNet, considerationPct, overCap };
+  return { gross, fee, feePercent, feeScheduled, feeLabel, expensesTotal, claimantShare, companyShare, companyNet, considerationPct, overCap };
 }
 
 /**

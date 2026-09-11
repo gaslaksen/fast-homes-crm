@@ -9,13 +9,15 @@
  * names exactly one set of words forever, so saving an edit creates the next
  * version rather than overwriting, and the call log stamps the number.
  *
- * ── Why the fee comes from the compliance rule ─────────────────────────────
+ * ── Why the fee comes from the agreement and the compliance rule ───────────
  *
- * The course's pitch says "split, currently 60/40". Florida caps total
- * consideration on clerk-held surplus at 12 percent under FS 45.033(3)(d),
- * and the app blocks a contract over the cap. So the script never carries a
- * typed percentage: {{feeTerms}} is filled from the rule for THIS case, and
- * where the rule has no confirmed cap the merge field says not to quote one.
+ * The course's pitch says "split, currently 60/40". The Client Recovery
+ * Services Agreement sets a tiered schedule (40/35/30), and Florida caps
+ * total consideration only where a statute reaches the funds: 12 percent on
+ * mortgage foreclosure surplus (FS 45.033(3)(d)), 30 percent once funds
+ * have escheated (FS 717.135(2)(j)), and nothing on tax deed surplus the
+ * clerk still holds. So the script never carries a typed percentage:
+ * {{feeTerms}} is filled from the schedule and the rule for THIS case.
  */
 
 import { Injectable, BadRequestException } from '@nestjs/common';
@@ -33,6 +35,8 @@ import {
   SURPLUS_LEGAL_TEMPLATE_KINDS,
   SURPLUS_RETIRED_TEMPLATE_KINDS,
   surplusDocumentAtLeast,
+  surplusFeeSchedule,
+  surplusFeeScheduleLabel,
 } from '@fast-homes/shared';
 import { DIG_DEEPER_BRAND } from '../common/company.constants';
 import { ruleFor } from './surplus-compliance';
@@ -48,7 +52,10 @@ export const MERGE_FIELDS: { key: string; meaning: string }[] = [
   { key: 'propertyAddress', meaning: 'The property that sold' },
   { key: 'county', meaning: 'The county' },
   { key: 'surplusAmount', meaning: 'The surplus as stated in the mailed notice. Never say it to a third party.' },
-  { key: 'feeTerms', meaning: 'The fee wording for this case, from the compliance rule' },
+  { key: 'feeTerms', meaning: "The fee wording for this case: the agreement's schedule, and the legal cap where one applies" },
+  { key: 'feeSchedule', meaning: "The agreement's tiers in words: 40% of the first $50,000, 35% of the next $50,000, and 30% above $100,000" },
+  { key: 'estimatedFee', meaning: "The fee the schedule would earn on the surplus stated in the notice, for the Schedule of Funds" },
+  { key: 'estimatedNet', meaning: 'The surplus stated in the notice less the estimated fee' },
   { key: 'callbackNumber', meaning: 'The Dig Deeper line' },
   { key: 'callerName', meaning: 'Your first name' },
   { key: 'companyName', meaning: 'D.I.G. Deeper LLC, as filed on Sunbiz' },
@@ -64,7 +71,7 @@ export const MERGE_FIELDS: { key: string; meaning: string }[] = [
   { key: 'window', meaning: 'The decision window asked for at the close' },
   { key: 'today', meaning: "Today's date, for the top of a letter or document" },
   { key: 'claimantAddress', meaning: "The claimant's mailing address on file, one line" },
-  { key: 'feeCapPct', meaning: 'The fee cap for this case as a number, from the compliance rule (blank when unconfirmed)' },
+  { key: 'feeCapPct', meaning: 'The legal cap for these funds as a number (blank when none applies, as with tax deed surplus held by the clerk)' },
   { key: 'notaryName', meaning: 'The mobile notary on the claim, for the instruction sheet' },
   { key: 'recoveriesCount', meaning: 'How many claims have paid out, the milestone counter' },
   { key: 'referenceLine', meaning: 'The nearest consented reference with their quote, or the recoveries count, or "References available on request". Never blank.' },
@@ -973,10 +980,20 @@ export class SurplusTemplatesService {
         ? `We have completed ${recoveriesCount} recover${recoveriesCount === 1 ? 'y' : 'ies'} for Florida families.`
         : 'References available on request.';
 
-    const feeTerms =
-      rule && rule.feeCap != null
-        ? `Our fee is contingent on recovery only, and by Florida law it is capped at ${rule.feeCap} percent of the surplus.`
-        : 'Do not quote a fee on this case: the fee cap for this kind of surplus is not confirmed. Say the fee is contingent on recovery and that the agreement states it.';
+    // The agreement sets the fee. Florida caps it only for funds the
+    // statutes reach (foreclosure surplus at 12 percent, escheated accounts
+    // at 30), and the agreement reduces itself to any such cap. Tax deed
+    // surplus held by the clerk has no statutory cap, so the schedule is
+    // the whole story there.
+    const schedule = surplusFeeScheduleLabel();
+    const feeTerms = !rule
+      ? 'Do not quote a fee on this case: no compliance rule matches it. Say the fee is contingent on recovery and that the agreement states it.'
+      : rule.feeCap != null
+        ? `Our fee is contingent on recovery only. The agreement sets it at ${schedule}, and Florida law caps it at ${rule.feeCap} percent of the surplus for these funds, so the schedule is reduced to that limit where it applies.`
+        : rule.capConfidence === 'none'
+          ? `Our fee is contingent on recovery only. The agreement sets it at ${schedule}, and it is never more than Florida law allows.`
+          : 'Do not quote a fee on this case: the fee cap for this kind of surplus is not confirmed. Say the fee is contingent on recovery and that the agreement states it.';
+    const estimated = surplusFeeSchedule(d.surplusAtNotice ?? d.grossSurplus ?? null, { capPct: rule?.feeCap ?? null });
 
     const claimant = `${lead.sellerFirstName || ''} ${lead.sellerLastName || ''}`.trim();
     const facts: ScriptFacts = {
@@ -1026,6 +1043,10 @@ export class SurplusTemplatesService {
           .filter(Boolean)
           .join(', ') || null,
       feeCapPct: facts.feeCap != null ? facts.feeCap : null,
+      feeSchedule: schedule,
+      estimatedFee: facts.surplusAmount != null ? `$${Math.round(estimated.fee).toLocaleString('en-US')}` : null,
+      estimatedNet:
+        facts.surplusAmount != null ? `$${Math.round(facts.surplusAmount - estimated.fee).toLocaleString('en-US')}` : null,
       companyShortName: DIG_DEEPER_BRAND.shortName || DIG_DEEPER_BRAND.companyName,
       companyAddress: DIG_DEEPER_BRAND.address || null,
       parcelId: d.parcelId || null,

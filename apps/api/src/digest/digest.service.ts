@@ -1209,7 +1209,7 @@ export class DigestService {
             bestSurplus.workReason,
           ].filter(Boolean).join(' · '),
           whyItMatters: `The money sits with the clerk until somebody files, and recovery firms work the same list. ${
-            net > 0 ? `Roughly ${this.money(net)} would reach the claimant after the fee cap. ` : ''
+            net > 0 ? `Roughly ${this.money(net)} would reach the claimant after the fee. ` : ''
           }A first call today is the whole game.`,
           ctaLabel: 'Open surplus lead',
           ctaUrl: this.leadUrl(bestSurplus.id),

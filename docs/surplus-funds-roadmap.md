@@ -278,7 +278,13 @@ digest surfaces due rechecks.
 ## Decisions the team owns
 
 1. Fee terms for Florida: the 12 percent cap versus the course's split, and a
-   written opinion on tax deed surplus.
+   written opinion on tax deed surplus. Read against the statute text
+   2026-09-11: FS 45.033 (12 percent) is mortgage foreclosure surplus, FS
+   717.135 (30 percent) is accounts held by the Department of Financial
+   Services, and FS 197.582 has no cap. Tax deed surplus held by the clerk
+   is uncapped, so the agreement's 40/35/30 schedule applies there; the 30
+   percent cap reaches a claim only once it has escheated. Counsel
+   confirmation still pending.
 2. Retention instrument: assignment, limited POA, or both, and full versus
    partial per county. Decided 2026-09-09: the limited POA plus an
    irrevocable direction to pay, no assignment. The claimant stays claimant

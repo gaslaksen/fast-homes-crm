@@ -16,6 +16,7 @@ import {
   SURPLUS_DEAD_REASON_LABEL,
   SURPLUS_EXPENSE_KINDS,
   surplusDisbursement,
+  surplusFeeScheduleLabel,
   SurplusTraceChannel,
   SURPLUS_TRACE_CHANNEL_LABEL,
   SURPLUS_TIER1_CHANNELS,
@@ -491,9 +492,9 @@ export class SurplusService {
       if (n !== null && (!Number.isFinite(n) || n < 0)) throw new BadRequestException(`${k} must be a positive number.`);
       detailPatch[k] = n;
     }
-    // The fee never exceeds the rule's cap. An agreement over it is void, so
-    // a percent above the cap is refused rather than clamped, with the cap
-    // named so the number typed next is the right one.
+    // A typed percent overrides the agreement's schedule for this claim. It
+    // never exceeds a legal cap where one applies: an agreement over it is
+    // void, so a percent above the cap is refused rather than clamped.
     if (detailPatch.feePercent != null) {
       const cap = ruleFor(d.surplusType, d.fundLocation)?.feeCap ?? null;
       if (cap != null && detailPatch.feePercent > cap) {
@@ -725,16 +726,14 @@ export class SurplusService {
 
     // The county's check arriving is what Check Received means. The
     // clearing clock starts, the claimant is told within a day, and the
-    // fee defaults to the rule's cap so the report has a number.
+    // fee follows the agreement's schedule unless a percent was typed.
     if (detailPatch.checkReceivedAt && !d.checkReceivedAt) {
       const received = new Date(detailPatch.checkReceivedAt);
       const clearing = detailPatch.clearingDueAt as Date;
-      const rule = ruleFor(d.surplusType, d.fundLocation);
       await this.prisma.surplusDetail.update({
         where: { id: d.id },
         data: {
           clearingDueAt: clearing,
-          ...(d.feePercent == null && rule?.feeCap != null ? { feePercent: rule.feeCap } : {}),
           ...((detailPatch.stage || d.stage) === SurplusStage.AWAITING_DISBURSEMENT
             ? { stage: SurplusStage.CHECK_RECEIVED }
             : {}),
@@ -940,7 +939,7 @@ export class SurplusService {
     const expenses = (d.expenses || []) as any[];
     return surplusDisbursement({
       checkAmount: d.checkAmount,
-      feePercent: d.feePercent ?? rule?.feeCap ?? 0,
+      feePercent: d.feePercent ?? null,
       expensesTotal: expenses.reduce((s, e) => s + Number(e.amount || 0), 0),
       expensesFromClaimantShare: !!d.expensesFromClaimantShare,
       capPct: rule?.feeCap ?? null,
@@ -1020,7 +1019,9 @@ export class SurplusService {
       caseNumber: d.caseNumber,
       checkReceivedAt: d.checkReceivedAt,
       checkAmount: d.checkAmount,
-      feePercent: d.feePercent ?? rule?.feeCap ?? null,
+      /** The percent typed for this claim, or null when the agreement's schedule applies. */
+      feePercentOverride: d.feePercent ?? null,
+      feeSchedule: surplusFeeScheduleLabel(),
       capPct: rule?.feeCap ?? null,
       capBasis: rule?.capBasis || null,
       expenses: (d.expenses || []).map((e: any) => ({
@@ -2406,7 +2407,9 @@ export class SurplusService {
         return {
           checkReceivedAt: d.checkReceivedAt || null,
           checkAmount: d.checkAmount ?? null,
-          feePercent: d.feePercent ?? gate.rule?.feeCap ?? null,
+          /** The percent typed for this claim, or null when the agreement's schedule applies. */
+          feePercentOverride: d.feePercent ?? null,
+          feeSchedule: surplusFeeScheduleLabel(),
           capPct: gate.rule?.feeCap ?? null,
           expenses: ((d.expenses || []) as any[]).map((e) => ({
             id: e.id,

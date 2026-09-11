@@ -8,7 +8,7 @@ import type { NoteItem, TimelineItem } from '@/components/communications/types';
 import { authAPI, campaignsAPI, leadsAPI, surplusAPI, tasksAPI } from '@/lib/api';
 import { dueLabel, isOverdue, quickDueDates } from '@/lib/dates';
 import { SURPLUS_DEAD_REASONS, deadReasonLabel } from '@/lib/surplus-dead';
-import { SURPLUS_EXPENSE_KINDS, expenseLabel, usd } from '@/lib/surplus-money';
+import { SURPLUS_EXPENSE_KINDS, SURPLUS_FEE_SCHEDULE_LABEL, expenseLabel, usd } from '@/lib/surplus-money';
 import { SURPLUS_TRACE_CHANNELS, SURPLUS_TIER1_CHANNELS, TRACE_RESULTS, channelForSite, traceChannelLabel } from '@/lib/surplus-trace';
 import { useDialer } from '@/components/dialer/DialerContext';
 import { DNC_STATE, SURPLUS_STAGES } from './format';
@@ -229,7 +229,14 @@ export interface SurplusPanelLead {
   disbursement: {
     checkReceivedAt: string | null;
     checkAmount: number | null;
-    feePercent: number | null;
+    /** The percent typed for this claim, or null when the agreement's schedule applies. */
+    feePercentOverride: number | null;
+    /** The fee as a percent of the check, typed or the schedule's effective rate. */
+    feePercent: number;
+    feeScheduled: boolean;
+    /** How the fee was arrived at: "40% of $50,000 + 35% of $25,000" or "12%". */
+    feeLabel: string;
+    feeSchedule: string;
     capPct: number | null;
     expenses: { id: string; kind: string; amount: number; incurredAt: string; note: string | null }[];
     expensesFromClaimantShare: boolean;
@@ -806,7 +813,7 @@ function DisbursementSection({
   const [busy, setBusy] = useState(false);
   const [receivedAt, setReceivedAt] = useState(m.checkReceivedAt ? m.checkReceivedAt.slice(0, 10) : '');
   const [amount, setAmount] = useState(m.checkAmount != null ? String(m.checkAmount) : '');
-  const [feePct, setFeePct] = useState(m.feePercent != null ? String(m.feePercent) : '');
+  const [feePct, setFeePct] = useState(m.feePercentOverride != null ? String(m.feePercentOverride) : '');
   const [expKind, setExpKind] = useState('title_search');
   const [expAmount, setExpAmount] = useState('');
   const [expNote, setExpNote] = useState('');
@@ -817,12 +824,12 @@ function DisbursementSection({
   useEffect(() => {
     setReceivedAt(m.checkReceivedAt ? m.checkReceivedAt.slice(0, 10) : '');
     setAmount(m.checkAmount != null ? String(m.checkAmount) : '');
-    setFeePct(m.feePercent != null ? String(m.feePercent) : '');
+    setFeePct(m.feePercentOverride != null ? String(m.feePercentOverride) : '');
     setSentAt(m.checkSentAt ? m.checkSentAt.slice(0, 10) : '');
     setSentMethod(m.checkSentMethod || 'usps');
     setSentTracking(m.checkSentTrackingNumber || '');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lead.id, m.checkReceivedAt, m.checkAmount, m.feePercent, m.checkSentAt]);
+  }, [lead.id, m.checkReceivedAt, m.checkAmount, m.feePercentOverride, m.checkSentAt]);
 
   const save = async (patch: any, done: string) => {
     setBusy(true);
@@ -899,9 +906,9 @@ function DisbursementSection({
           Amount
           <input style={field} value={amount} disabled={m.frozen} placeholder="0.00" onChange={(e) => setAmount(e.target.value)} />
         </label>
-        <label style={lbl}>
-          Fee %{m.capPct != null ? `, cap ${m.capPct}` : ''}
-          <input style={field} value={feePct} disabled={m.frozen} placeholder={m.capPct != null ? String(m.capPct) : ''} onChange={(e) => setFeePct(e.target.value)} />
+        <label style={lbl} title={`Blank means the agreement's schedule: ${m.feeSchedule || SURPLUS_FEE_SCHEDULE_LABEL}${m.capPct != null ? `, reduced to the ${m.capPct}% legal cap` : ''}`}>
+          Fee % override{m.capPct != null ? `, cap ${m.capPct}` : ''}
+          <input style={field} value={feePct} disabled={m.frozen} placeholder="schedule" onChange={(e) => setFeePct(e.target.value)} />
         </label>
       </div>
       {!m.frozen && (
@@ -983,13 +990,13 @@ function DisbursementSection({
       {/* 3. The shares. */}
       <div style={{ display: 'grid', gap: 3, fontSize: 13, padding: '8px 10px', borderRadius: 6, background: 'var(--bg2)' }}>
         <Row k="Surplus received" v={usd(m.gross)} />
-        <Row k={`Fee at ${m.feePercent ?? 0}%`} v={usd(m.fee)} />
+        <Row k={m.feeScheduled ? `Fee, ${m.feeLabel}` : `Fee at ${m.feePercent}%`} v={usd(m.fee)} />
         <Row k={m.expensesFromClaimantShare ? 'Expenses, from the claimant' : 'Expenses, borne by us'} v={usd(m.expensesTotal)} />
         <Row k={`To ${lead.claimant}`} v={usd(m.claimantShare)} tone="var(--mint)" />
         <Row k="Company share" v={usd(m.companyShare)} />
         <Row k="Company net after expenses" v={usd(m.companyNet)} tone={m.companyNet < 0 ? 'var(--red)' : undefined} />
         <div style={{ fontSize: 11, color: m.overCap ? 'var(--red)' : 'var(--faint)' }}>
-          Total consideration {m.considerationPct}% of the check{m.capPct != null ? `, cap ${m.capPct}%` : ''}.
+          Total consideration {m.considerationPct}% of the check{m.capPct != null ? `, cap ${m.capPct}%` : ', no statutory cap while the clerk holds the funds'}.
           {m.overCap ? ' Over the cap: reduce the fee or stop passing expenses before this is signed.' : ''}
         </div>
       </div>
@@ -2946,7 +2953,7 @@ function CaseTab({
             />
           )}
           <Row k="Net to claimant" v={money(property.netToClaimant)} />
-          {property.estFee != null && <Row k="Fee at the cap" v={money(property.estFee)} />}
+          {property.estFee != null && <Row k="Estimated fee under the agreement" v={money(property.estFee)} note={SURPLUS_FEE_SCHEDULE_LABEL} />}
         </div>
         <div>
           <SubHead title="The clock" />
@@ -4383,8 +4390,12 @@ function QualificationSection({
           once somebody is talking to the claimant and not before. */}
       {talking && rule && (
         <div style={{ fontSize: 11.5, color: 'var(--dim)', marginTop: 4 }}>
-          Fee cap: {rule.feeCap != null ? `${rule.feeCap}% of total consideration` : 'none confirmed, so no agreement can go out'}
-          {rule.capConfidence !== 'confirmed' ? ` (${rule.capConfidence})` : ''}. {rule.statuteRefs?.join(', ')}.
+          {rule.feeCap != null
+            ? `Legal cap: ${rule.feeCap}% of total consideration${rule.capConfidence !== 'confirmed' ? ` (${rule.capConfidence})` : ''}. The agreement's schedule is reduced to it.`
+            : rule.capConfidence === 'none'
+              ? `No statutory cap while the clerk holds these funds; the agreement's schedule applies (${SURPLUS_FEE_SCHEDULE_LABEL}). Counsel confirmation pending.`
+              : 'No cap confirmed, so no agreement can go out.'}{' '}
+          {rule.statuteRefs?.join(', ')}.
         </div>
       )}
       {talking && lead.compliance?.blocks?.length > 0 && (

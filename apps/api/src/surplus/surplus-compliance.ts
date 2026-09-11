@@ -23,13 +23,18 @@
 
 import { SurplusType, SurplusFundLocation } from '@fast-homes/shared';
 
-export type CapConfidence = 'confirmed' | 'ambiguous' | 'unverified';
+/**
+ * How sure the table is about the cap. 'none' means the statute text was
+ * read and no cap reaches funds in this location, which is a finding, not
+ * a gap: it does not block. 'unverified' with no cap still blocks.
+ */
+export type CapConfidence = 'confirmed' | 'ambiguous' | 'unverified' | 'none';
 
 export interface ComplianceRule {
   state: string;
   surplusType: string;
   fundLocation: string;
-  /** Percent cap on TOTAL consideration. null means no confirmed cap, which blocks. */
+  /** Percent cap on TOTAL consideration. null with 'none' means no cap reaches these funds; null otherwise blocks. */
   feeCap: number | null;
   capConfidence: CapConfidence;
   capBasis: string;
@@ -47,6 +52,7 @@ export interface ComplianceRule {
 }
 
 const RESEARCH_ONLY = 'Research only, not counsel';
+const STATUTE_TEXT = 'Statute text read 2026-09-11, counsel confirmation pending';
 
 export const COMPLIANCE_RULES: ComplianceRule[] = [
   {
@@ -72,29 +78,29 @@ export const COMPLIANCE_RULES: ComplianceRule[] = [
     state: 'FL',
     surplusType: SurplusType.TAX_DEED,
     fundLocation: SurplusFundLocation.CLERK,
-    feeCap: 12,
-    capConfidence: 'ambiguous',
+    feeCap: null,
+    capConfidence: 'none',
     capBasis:
-      'FS 45.033 sits in Chapter 45, is titled for property subject to foreclosure, and subsection (7) narrows it further. Tax deed surplus is Chapter 197 and FS 197.582 carries no cap language. Florida practitioners write about the two together and treat 45.033(3)(d) as capping recovery fees on both, but that is commentary rather than authority. 12% is applied conservatively pending a written opinion.',
+      'No statutory cap reaches tax deed surplus while the clerk holds it. FS 197.582 has no fee, cap or assignment language. FS 45.033(3)(d) caps a transferee or assignee at 12% but sits in Chapter 45 and is built on the lis pendens presumption, so it is mortgage foreclosure surplus. FS 717.135(2)(j) caps a claimant representative at 30% but subsection (6) scopes it to accounts held by the Department of Financial Services. Under FS 197.582(9) the clerk hands unclaimed surplus to chapter 717 after the claim period, and Lee remits each May one to two years after the sale, so the 30% cap reaches a claim only once it has escheated. The agreement\'s schedule (40/35/30) applies, with its own section 3(f) reduction to any legal maximum.',
     licenseRequired: false,
     licenseTypes: [],
     registrationBody: null,
     filingDeadlineRule:
-      'Assignment filing deadline unconfirmed for Chapter 197. Treat the 60 day rule as the working assumption.',
+      'Lienholder claims within 120 days of the notice of surplus (FS 197.582(3)). The owner may claim while the clerk holds the funds. No assignment is filed.',
     claimWindowDays: 120,
     requiredDisclosures: ['financial', 'noAttorneyNeeded', 'allConsideration'],
-    statuteRefs: ['FS 197.582', 'FS 45.033'],
-    lastVerified: '2026-07-28',
-    verifiedBy: RESEARCH_ONLY,
+    statuteRefs: ['FS 197.582', 'FS 45.033', 'FS 717.135'],
+    lastVerified: '2026-09-11',
+    verifiedBy: STATUTE_TEXT,
   },
   {
     state: 'FL',
     surplusType: SurplusType.MORTGAGE_FORECLOSURE,
     fundLocation: SurplusFundLocation.STATE_ESCHEATED,
-    feeCap: null,
-    capConfidence: 'unverified',
+    feeCap: 30,
+    capConfidence: 'confirmed',
     capBasis:
-      'FS 717.135 cap unconfirmed. Older text showed 20%, a newer source showed 30%, and a 2016 bill proposed removing the maximum.',
+      'FS 717.135(2)(j): total fees and costs, or the total discount on a purchase agreement, may not exceed 30 percent of the claimed amount. Applies to accounts held by the Department of Financial Services (subsection (6)).',
     licenseRequired: true,
     licenseTypes: [
       'Florida attorney',
@@ -106,16 +112,17 @@ export const COMPLIANCE_RULES: ComplianceRule[] = [
     claimWindowDays: null,
     requiredDisclosures: ['financial', 'noAttorneyNeeded', 'allConsideration'],
     statuteRefs: ['FS 717.124', 'FS 717.135', 'FS 717.1400'],
-    lastVerified: '2026-07-28',
-    verifiedBy: RESEARCH_ONLY,
+    lastVerified: '2026-09-11',
+    verifiedBy: STATUTE_TEXT,
   },
   {
     state: 'FL',
     surplusType: SurplusType.TAX_DEED,
     fundLocation: SurplusFundLocation.STATE_ESCHEATED,
-    feeCap: null,
-    capConfidence: 'unverified',
-    capBasis: 'Same Chapter 717 licensing wall, cap unconfirmed.',
+    feeCap: 30,
+    capConfidence: 'confirmed',
+    capBasis:
+      'FS 717.135(2)(j): 30 percent of the claimed amount, once the clerk has remitted the surplus under FS 197.582(9). Same Chapter 717 licensing wall: a registered claimant representative is required, so the team does not work these.',
     licenseRequired: true,
     licenseTypes: [
       'Florida attorney',
@@ -127,8 +134,8 @@ export const COMPLIANCE_RULES: ComplianceRule[] = [
     claimWindowDays: null,
     requiredDisclosures: ['financial', 'noAttorneyNeeded', 'allConsideration'],
     statuteRefs: ['FS 717.124', 'FS 717.135', 'FS 717.1400'],
-    lastVerified: '2026-07-28',
-    verifiedBy: RESEARCH_ONLY,
+    lastVerified: '2026-09-11',
+    verifiedBy: STATUTE_TEXT,
   },
 ];
 
