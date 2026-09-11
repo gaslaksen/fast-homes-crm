@@ -419,6 +419,13 @@ describe('claimantFromTitle', () => {
     ).toBe('LAW OFFICES OF AL NICOLETTI/RILEY A.KENDALL,ESQ -PEGGY HANKINS');
   });
 
+  it('reads Brevard\'s STATEMENT OF CLAIM form and the spec\'s typos of it', () => {
+    expect(claimantFromTitle('STATEMENT OF CLAIM ALFRED A SMITH.pdf')).toBe('ALFRED A SMITH');
+    expect(claimantFromTitle('STATMENT OF CLAIM BAREFOOT BAY RECREATION DISTRICT.pdf')).toBe('BAREFOOT BAY RECREATION DISTRICT');
+    expect(claimantFromTitle('STATEMENT CLAIM JANE DOE')).toBe('JANE DOE');
+    expect(claimantFromTitle('STATE OF CLAIM JANE DOE')).toBe('JANE DOE');
+  });
+
   it('never invents a claimant from a document that is not a claim', () => {
     expect(claimantFromTitle('SURPLUS_LETTER')).toBeNull();
     expect(claimantFromTitle('Returned Mail')).toBeNull();
@@ -437,6 +444,25 @@ describe('Polk owner names', () => {
     ]);
     expect(splitCompoundOwner('NELSON J FREEMAN')).toEqual(['NELSON J FREEMAN']);
     expect(splitCompoundOwner('')).toEqual([]);
+  });
+
+  it('splits Brevard\'s joined and repeated surname-first forms, and leaves single people whole', () => {
+    // Verbatim from Brevard 250285 and 260072.
+    expect(splitCompoundOwner('ANITA ZUMSTEG AND/OR BERNHARD F ZUMSTEG')).toEqual(['ANITA ZUMSTEG', 'BERNHARD F ZUMSTEG']);
+    expect(splitCompoundOwner('BERNHARD ZUMSTEG AND ANTIA ZUMSTEG')).toEqual(['BERNHARD ZUMSTEG', 'ANTIA ZUMSTEG']);
+    expect(splitCompoundOwner('ZUMSTEG, ANITA ZUMSTEG, BERNARD F')).toEqual(['ZUMSTEG, ANITA', 'ZUMSTEG, BERNARD F']);
+    expect(splitCompoundOwner('ALFRED A SMITH, MEGGAN SALMON-SMITH')).toEqual(['ALFRED A SMITH', 'MEGGAN SALMON-SMITH']);
+    // One person, surname first, or with a suffix or estate marker: whole.
+    expect(splitCompoundOwner('Smith, Alfred A')).toEqual(['Smith, Alfred A']);
+    expect(splitCompoundOwner('JOHNNY LOVE WILLIAMS, SR')).toEqual(['JOHNNY LOVE WILLIAMS, SR']);
+    expect(splitCompoundOwner('EVELYN ALTFELD, ESTATE OF')).toEqual(['EVELYN ALTFELD, ESTATE OF']);
+    // An entity with AND in its name is one entity.
+    expect(splitCompoundOwner('HOUSING AND NEIGHBORHOOD DEVELOPMENT')).toEqual(['HOUSING AND NEIGHBORHOOD DEVELOPMENT']);
+  });
+
+  it('collapses Brevard\'s surname-first spelling with the given-first one', () => {
+    const c = collapseClaimants(['Smith, Alfred A', 'ALFRED A SMITH', 'Salmon-Smith, Meggan', 'MEGGAN SALMON-SMITH']);
+    expect(c).toHaveLength(2);
   });
 
   it('collapses the roll\'s surname-first spelling and the trailing estate form', () => {
@@ -730,6 +756,62 @@ describe('classifying live Lee dockets', () => {
     expect(v.claimStatus).toBe('open');
     expect(v.counts.notices).toBe(1);
     expect(v.mailVerdict).toBe('delivered');
+  });
+
+  it('Brevard 260072: both owners claimed, the applicant refund is routine, the green card is live mail', () => {
+    // Verbatim labels from the 2026-09-11 discovery pass. Filing order.
+    const v = classifyCase(
+      [
+        { title: 'CERTIFIED MAIL RETURN RECEIPT X2.pdf', filedAt: '2026-07-08' },
+        { title: 'RETURN OF SERVICE BREVARD COUNTY SHERIFF X 2.pdf', filedAt: '2026-07-16' },
+        { title: 'CERTIFIED MAIL UNDELIVERABLE X4.pdf', filedAt: '2026-07-30' },
+        { title: 'SURPLUS_LETTER', filedAt: '2026-08-25' },
+        { title: 'SURPLUS_LETTER_LABELS', filedAt: '2026-08-25' },
+        { title: 'COM_SURPLUS', filedAt: '2026-08-25' },
+        { title: 'MERCURY FUNDING LLC DISBURSEMENT (4).pdf', filedAt: '2026-08-27' },
+        { title: 'STATEMENT OF CLAIM ALFRED A SMITH.pdf', filedAt: '2026-09-10', claimant: 'ALFRED A SMITH' },
+        { title: 'STATEMENT OF CLAIM MEGGAN SALMON SMITH.pdf', filedAt: '2026-09-10', claimant: 'MEGGAN SALMON SMITH' },
+      ],
+      { owners: ['ALFRED A SMITH', 'MEGGAN SALMON-SMITH'], applicants: ['MERCURY FUNDING LLC'] },
+    );
+    expect(v.claimStatus).toBe('assigned');
+    expect(v.ledger.find((d) => /MERCURY/.test(d.title))?.kind).toBe('routine_disbursement');
+    expect(v.ledger.find((d) => /RETURN RECEIPT/.test(d.title))?.kind).toBe('mail_delivered');
+    // Nothing came back after the letter, so the address is not condemned.
+    expect(v.mailVerdict).toBe('unknown');
+  });
+
+  it('Brevard 260097: the county\'s NO CLAIM is not a claim, and a recreation district is a government lien', () => {
+    const v = classifyCase(
+      [
+        { title: 'BREVARD COUNTY CODE ENFORCMENT NO CLAIM.pdf', filedAt: '2026-08-06' },
+        { title: 'SURPLUS_LETTER', filedAt: '2026-08-25' },
+        { title: 'MERCURY FUNDING LLC DISBURSEMENT (3).pdf', filedAt: '2026-08-27' },
+        { title: 'CERTIFIED MAIL RTS x 2.pdf', filedAt: '2026-09-02' },
+        { title: 'STATMENT OF CLAIM BAREFOOT BAY RECREATION DISTRICT.pdf', filedAt: '2026-09-08', claimant: 'BAREFOOT BAY RECREATION DISTRICT' },
+      ],
+      { owners: ['CHRISTINA P FRASIER'] },
+    );
+    // A government unit's claim takes a slice; the owner residual is still open.
+    expect(v.counts.claims).toBe(0);
+    expect(v.counts.govLiens).toBe(1);
+    expect(v.claimStatus).toBe('gov_lien');
+    expect(v.ledger.find((d) => /NO CLAIM/.test(d.title))?.kind).toBe('other');
+    expect(v.ledger.find((d) => /RTS/.test(d.title))?.kind).toBe('mail_undeliverable');
+    expect(v.mailVerdict).toBe('undeliverable');
+  });
+
+  it('a named disbursement filed AFTER a claim is the money leaving', () => {
+    const v = classifyCase(
+      [
+        { title: 'SURPLUS_LETTER', filedAt: '2026-01-21' },
+        { title: 'STATEMENT OF CLAIM JANE DOE.pdf', filedAt: '2026-03-01', claimant: 'JANE DOE' },
+        { title: 'JANE DOE DISBURSEMENT (1).pdf', filedAt: '2026-04-15' },
+      ],
+      { owners: ['JANE DOE'] },
+    );
+    expect(v.ledger.find((d) => /DISBURSEMENT/.test(d.title))?.kind).toBe('distribution');
+    expect(v.claimStatus).toBe('distributed');
   });
 
   it('a competitor claim leaves the owner residual contestable', () => {

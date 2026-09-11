@@ -144,25 +144,35 @@ const RULES: Rule[] = [
   // every case, and must stay 'other'.
   { kind: 'receipt', re: /^receipt$/i, seenIn: 'Lee' },
   // "RETURNED MAIL UNCLAIMED" contains "claim". Mail rules run before claim rules.
+  //
+  // RTS is "return to sender" in any form, including a green card that came
+  // back unsigned ("GREEN CARD RTS"), so it runs before the delivered rule.
+  { kind: 'mail_undeliverable', re: /\brts\b/i, seenIn: 'Brevard' },
+  // Delivered runs before the general undeliverable rule because "CERTIFIED
+  // MAIL RETURNED SIGNED" and "CERTIFIED MAIL RETURN RECEIPT" both contain
+  // "mail return", which the next rule reads as a bounce.
+  {
+    kind: 'mail_delivered',
+    re: /mail\s*delivered|returned\s*signed|return(?:ed)?\s*receipt|green\s*card|proof\s*of\s*delivery/i,
+    seenIn: 'Duval, Polk, Brevard',
+  },
   {
     kind: 'mail_undeliverable',
     // Duval ships three spellings of this on the same docket:
     // "Certified Mail Undelieverd", "Regular Mail Undelievered",
     // "Certified Mail Undelivered". Match the mangled stem, not the word.
-    re: /undeliver|undelieve|unable\s*to\s*forward|returned\s*(?:certified\s*|regular\s*)?mail|vacant|no\s*such\s*number|attempted\s*-?\s*not\s*known/i,
+    // Brevard adds "CERTIFIED MAIL RETURN X2", "REGULAR MAIL RETURNED x 5"
+    // and "CERIFIED MAIL RETURNED".
+    re: /undeliver|undelieve|unable\s*to\s*forward|returned\s*(?:certified\s*|regular\s*)?mail|\bmail\s*return(?:ed)?\b|vacant|no\s*such\s*number|attempted\s*-?\s*not\s*known/i,
     seenIn: 'Duval, Brevard, Polk',
-  },
-  {
-    kind: 'mail_delivered',
-    re: /mail\s*delivered|returned\s*signed|green\s*card|proof\s*of\s*delivery/i,
-    seenIn: 'Duval, Polk',
   },
   {
     kind: 'sheriff_not_served',
     re: /returned\s*not\s*served|not\s*served\s*sheriff/i,
     seenIn: 'Duval',
   },
-  { kind: 'sheriff_served', re: /return\s*of\s*service/i, seenIn: 'Duval' },
+  // Brevard also files "RETURN OF SEVICES" and "RETURN OF SERVICES".
+  { kind: 'sheriff_served', re: /return\s*of\s*se(?:r)?vices?/i, seenIn: 'Duval, Brevard' },
   // Lee files the sheriff's return as "Sheriff's Service" with an ROS filename.
   // Service is at the PROPERTY and says nothing about the owner's mailing
   // address, which is why the mail verdict ignores this kind entirely.
@@ -207,10 +217,43 @@ export function classifyDocuments(docs: SurplusDoc[]): ClassifiedDoc[] {
   return (docs || []).map((d) => ({ ...d, kind: classifyDocument(d.title) }));
 }
 
+/**
+ * A disbursement titled only with a NAME. Brevard files the tax deed
+ * applicant's refund as "MERCURY FUNDING LLC DISBURSEMENT" two to nine days
+ * after the surplus letter, and would file a payout to a claimant the same
+ * way. Two things separate them. The applicant's name, when the county lists
+ * it. Failing that, order: a disbursement filed after a claim is the money
+ * leaving; one filed before any claim is the routine refund off the top. A
+ * distribution is terminal, so guessing wrong in that direction retires a
+ * live lead, and guessing wrong the other way keeps calling about paid money.
+ * Mutates the ledger in place.
+ */
+function resolveNamedDisbursements(ledger: ClassifiedDoc[], applicants: string[]): void {
+  const applicantTokens = applicants
+    .flatMap((a) => String(a || '').toUpperCase().replace(/[.,]/g, ' ').split(/\s+/))
+    .filter((t) => t.length > 2 && !/^(LLC|INC|CORP|CO|THE|AND|OF)$/.test(t));
+  const firstClaimAt = ledger
+    .filter((d) => d.kind === 'claim' && d.filedAt)
+    .map((d) => d.filedAt as string)
+    .sort()[0];
+
+  for (const d of ledger) {
+    if (d.kind !== 'other' || !/disburse?ment/i.test(d.title)) continue;
+    const tokens = d.title.toUpperCase().replace(/[.,]/g, ' ').split(/\s+/);
+    if (applicantTokens.length && tokens.some((t) => t.length > 2 && applicantTokens.includes(t))) {
+      d.kind = 'routine_disbursement';
+    } else if (firstClaimAt && d.filedAt && d.filedAt > firstClaimAt) {
+      d.kind = 'distribution';
+    } else {
+      d.kind = 'routine_disbursement';
+    }
+  }
+}
+
 // ─── Claimant reading, where the source gives us one ────────────────────────
 
 /** A claimant that is a unit of government takes a slice, it is not a competitor. */
-const GOVERNMENT = /\b(city|county|state|town|code\s*enforc|utilit|clerk|sheriff|tax\s*collector|dept|department)\b/i;
+const GOVERNMENT = /\b(city|county|state|town|code\s*enforc|utilit|clerk|sheriff|tax\s*collector|dept|department|district|authority)\b/i;
 /** A claimant that reads like a recovery shop or a law firm is a competitor. */
 const COMPETITOR = /\b(llc|l\.l\.c|inc|law|recovery|group|funding|capital|partners|services|associates)\b/i;
 /**
@@ -280,16 +323,33 @@ export function classifyCase(
      * kind of rule that inverts the answer when carried across counties.
      */
     receiptsImplyClaim?: boolean;
+    /**
+     * The tax deed applicants of record. Brevard files the applicant's refund
+     * as "<APPLICANT> DISBURSEMENT" with no other marker, and a payout to a
+     * claimant would be filed the same way, so the name decides.
+     */
+    applicants?: string[];
   } = {},
 ): CaseClassification {
   const ledger = classifyDocuments(docs);
   const owners = opts.owners || [];
+  resolveNamedDisbursements(ledger, opts.applicants || []);
   const of = (k: SurplusDocKind) => ledger.filter((d) => d.kind === k);
 
-  const claims = of('claim');
+  // A claim FILED BY a unit of government is a government lien whatever the
+  // county titled it: Polk's "Surplus Claims Received- POLK COUNTY CLERK OF
+  // COURTS" and Brevard's "STATMENT OF CLAIM BAREFOOT BAY RECREATION DISTRICT"
+  // take a slice off the top and leave the owner residual open, exactly like
+  // Duval's "Surplus - Ad Valorem Homestead Liens". Counting them as competing
+  // claims marked those cases contested when nobody is contesting the owner.
+  const allClaims = of('claim');
+  const claims = allClaims.filter((c) => classifyClaimant(c.claimant, owners) !== 'government');
   const denials = of('denial');
   const distributions = of('distribution');
-  const govLiens = of('gov_lien_claim');
+  const govLiens = [
+    ...of('gov_lien_claim'),
+    ...allClaims.filter((c) => classifyClaimant(c.claimant, owners) === 'government'),
+  ];
   const notices = of('notice_surplus');
   const receipts = of('receipt');
 
