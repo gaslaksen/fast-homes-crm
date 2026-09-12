@@ -226,9 +226,12 @@ export class SurplusIngestService {
   async ingestCounty(
     adapterKey: string,
     opts: IngestOpts = {},
-  ): Promise<SurplusIngestResult & { runId: string }> {
+  ): Promise<SurplusIngestResult & { runId: string; createdLeadIds: string[] }> {
     const adapter = this.adapterFor(adapterKey);
     const organizationId = opts.organizationId || null;
+    // Every lead this run created, so the poll can hand exactly these to the
+    // skip trace and never re-spend on a lead an earlier run already tried.
+    const createdLeadIds: string[] = [];
 
     const run = await this.prisma.surplusPollRun.create({
       data: {
@@ -256,7 +259,7 @@ export class SurplusIngestService {
       result.errors = 1;
       result.message = `No surplus adapter registered for "${adapterKey}"`;
       await this.finish(run.id, result);
-      return { ...result, runId: run.id };
+      return { ...result, runId: run.id, createdLeadIds };
     }
 
     try {
@@ -330,6 +333,7 @@ export class SurplusIngestService {
           }
           const outcome = await this.ingestCase(adapter, detail, organizationId, !!opts.reread);
           result.created += outcome.created;
+          createdLeadIds.push(...outcome.createdLeadIds);
           result.updated += outcome.updated;
           result.skipped += outcome.skipped;
           result.classified += 1;
@@ -349,7 +353,23 @@ export class SurplusIngestService {
     }
 
     await this.finish(run.id, result);
-    return { ...result, runId: run.id };
+    return { ...result, runId: run.id, createdLeadIds };
+  }
+
+  /**
+   * Append a line to a finished run's message. The skip trace that follows a
+   * cron poll reports here, because the run row is what the health strip and
+   * the Daily Brief read, and a trace nobody can see is a trace nobody trusts.
+   */
+  async noteRun(runId: string, note: string): Promise<void> {
+    const run = await this.prisma.surplusPollRun.findUnique({
+      where: { id: runId },
+      select: { message: true },
+    });
+    await this.prisma.surplusPollRun.update({
+      where: { id: runId },
+      data: { message: [run?.message, note].filter(Boolean).join('. ') },
+    });
   }
 
   /**
@@ -365,7 +385,13 @@ export class SurplusIngestService {
     detail: SurplusCaseDetail,
     organizationId: string | null,
     reread = false,
-  ): Promise<{ created: number; updated: number; skipped: number; retired: boolean }> {
+  ): Promise<{
+    created: number;
+    updated: number;
+    skipped: number;
+    retired: boolean;
+    createdLeadIds: string[];
+  }> {
     const verdict = classifyCase(detail.documents, {
       owners: detail.owners,
       receiptsImplyClaim: !!adapter.receiptsImplyClaim,
@@ -374,7 +400,7 @@ export class SurplusIngestService {
         .filter(Boolean),
     });
     const claimants = collapseClaimants(detail.owners);
-    const out = { created: 0, updated: 0, skipped: 0, retired: false };
+    const out = { created: 0, updated: 0, skipped: 0, retired: false, createdLeadIds: [] as string[] };
 
     const workable = isWorkable(verdict.claimStatus);
     if (!workable) out.retired = true;
@@ -536,8 +562,10 @@ export class SurplusIngestService {
         { organizationId },
       );
 
-      if (res.created) out.created += 1;
-      else out.skipped += 1;
+      if (res.created) {
+        out.created += 1;
+        if (res.leadId) out.createdLeadIds.push(res.leadId);
+      } else out.skipped += 1;
     }
 
     return out;

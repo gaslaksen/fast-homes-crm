@@ -92,4 +92,24 @@ describe('describeFeed', () => {
     );
     expect(text).toBe('1,756 scanned · 0 new · 1 updated · 2 retired · 308 unchanged');
   });
+
+  it('reads the trace that followed the pull out of the run message', () => {
+    const text = describeCounts(
+      run({ source: 'realtdm_polk', startedAt: '2026-09-14T08:30:00Z', scanned: 400, created: 6, updated: 0, dead: 0, message: '380 unchanged since last poll. Traced 4 of 6 new to a number (5 address lookups, 3 name searches)' }),
+    );
+    expect(text).toBe('400 scanned · 6 new · 4 of those traced to a number · 380 unchanged');
+  });
+
+  it('a pull whose trace blew up is amber, and says why, not green', () => {
+    // The pull succeeded, so the row is ok and the counts are real. But new
+    // leads with no numbers on a Monday morning is exactly what somebody
+    // needs to hear about before they wonder why the Call now column is empty.
+    const row = describeFeed(
+      LEE,
+      [run({ source: 'realtdm_lee', startedAt: '2026-09-07T08:30:00Z', created: 9, message: 'Trace failed on the 9 new: Endato rejected the credentials' })],
+      MONDAY_7AM,
+    );
+    expect(row.urgency).toBe('warn');
+    expect(row.detail).toBe('Ran 4:30am in 1 min: 441 scanned · 9 new · trace did not run · 71 updated · 21 retired. Trace failed on the 9 new: Endato rejected the credentials.');
+  });
 });
