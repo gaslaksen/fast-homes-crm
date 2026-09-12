@@ -572,9 +572,9 @@ export class SurplusController {
    * not the number of leads touched: co-owners at one property share a single
    * submission because BatchData matches on address and ignores names.
    *
-   * Deliberately a manual call rather than something ingestion does on its own.
-   * Every submission spends money, and a trace of a property that has just sold
-   * at auction often returns the new occupant rather than the former owner.
+   * The cron polls run this same waterfall on the leads they create (see
+   * SurplusPollService), so the manual call is for the rest: a re-trace with
+   * `includeTraced`, a capped name-only pass, or a board imported by hand.
    */
   @Post('skip-trace')
   async skipTrace(@Body() body: any, @Headers('authorization') authHeader?: string) {

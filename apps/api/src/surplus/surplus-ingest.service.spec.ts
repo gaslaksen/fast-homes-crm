@@ -364,3 +364,31 @@ describe('tiered refresh', () => {
     expect(adapter.fetchCase).toHaveBeenCalledWith('82214', { lite: false });
   });
 });
+
+describe('what a run created', () => {
+  it('returns the id of every lead it created, and nothing for the ones it already had', async () => {
+    // The cron poll hands exactly these to the skip trace. A lead the run
+    // found already on the board must not be in the list, or Monday's refresh
+    // re-buys every miss from the week before.
+    const { svc, prisma } = harness([]);
+    prisma.surplusDetail.count = jest.fn().mockResolvedValue(0);
+    const created = [true, false];
+    const surplus: any = {
+      createSurplusLead: jest.fn(async () => {
+        const made = created.shift();
+        return made
+          ? { leadId: `lead-${created.length}`, created: true }
+          : { leadId: 'lead-old', created: false, reason: 'already on the board' };
+      }),
+    };
+    (svc as any).surplus = surplus;
+
+    const res = await svc.ingestCounty('duval_taxdeed', {});
+
+    expect(surplus.createSurplusLead).toHaveBeenCalledTimes(2);
+    expect(res.created).toBe(1);
+    expect(res.createdLeadIds).toHaveLength(1);
+    expect(res.createdLeadIds[0]).toMatch(/^lead-/);
+    expect(res.createdLeadIds).not.toContain('lead-old');
+  });
+});

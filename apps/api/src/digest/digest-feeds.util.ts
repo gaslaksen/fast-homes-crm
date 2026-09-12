@@ -71,15 +71,27 @@ export function describeCounts(run: FeedRun): string {
   const unchanged = Number((/(\d+) unchanged/.exec(run.message || '') || [])[1] || 0);
   const retiredFromList = Number((/(\d+) retired from the list/.exec(run.message || '') || [])[1] || 0);
   const retired = run.dead + retiredFromList;
+  // The skip trace that follows a cron pull writes "Traced X of Y new to a
+  // number" on the run (describeTrace in surplus-poll.service.ts).
+  const traced = /Traced (\d+) of (\d+) new to a number/.exec(run.message || '');
+  const traceFailed = /Trace (?:failed|skipped) on the \d+ new/.test(run.message || '');
   const bits = [
     `${n(run.scanned)} scanned`,
     `${n(run.created)} new`,
+    traced ? `${n(Number(traced[1]))} of those traced to a number` : null,
+    traceFailed ? 'trace did not run' : null,
     run.updated ? `${n(run.updated)} updated` : null,
     retired ? `${n(retired)} retired` : null,
     unchanged ? `${n(unchanged)} unchanged` : null,
     run.errors ? `${n(run.errors)} error${run.errors === 1 ? '' : 's'}` : null,
   ].filter(Boolean);
   return bits.join(' · ');
+}
+
+/** The trace after a pull did not happen or blew up. The pull itself was fine. */
+function traceProblem(run: FeedRun): string | null {
+  const m = /(Trace (?:failed|skipped) on the \d+ new: [^.]+)/.exec(run.message || '');
+  return m ? m[1] : null;
 }
 
 function duration(run: FeedRun): string | null {
@@ -123,6 +135,13 @@ export function describeFeed(source: FeedSource, runs: FeedRun[], now: Date): Fe
       };
     }
     const dur = duration(latest);
+    const trace = traceProblem(latest);
+    if (trace) {
+      return {
+        label, schedule, urgency: 'warn',
+        detail: `Ran ${at}${dur ? ` in ${dur}` : ''}: ${describeCounts(latest)}. ${trace}.`,
+      };
+    }
     return {
       label, schedule,
       urgency: latest.created ? 'good' : 'neutral',
