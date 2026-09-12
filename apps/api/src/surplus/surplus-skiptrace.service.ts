@@ -37,10 +37,18 @@ import { normalizePhoneDigits } from '../foreclosures/foreclosure-scoring.util';
 import {
   addressCaseCounts,
   addressKeyOf,
+  splitClaimantName,
   traceEligibility,
   verifyTracedName,
   TraceVerdict,
 } from './surplus-skiptrace.util';
+import {
+  SurplusEndatoService,
+  EndatoPerson,
+  currentAddress,
+  historyKey,
+  verifiedVia,
+} from './surplus-endato.service';
 
 /**
  * V3, not V1, and the difference is not cosmetic.
@@ -69,9 +77,30 @@ export interface SurplusTraceResult {
   mismatched: number;
   /** Leads refused before submission, by reason. */
   skipped: Record<string, number>;
+  /**
+   * The name-first rung (Endato), run on every claimant the address rung could
+   * not place. `verified` is people tied to the case by address history;
+   * `namesakes` is people returned and refused for lack of that tie.
+   */
+  nameSearch: { searched: number; verified: number; namesakes: number };
   errors: number;
   message?: string;
 }
+
+/** A vendor the trace can consult. Decides the note wording and the log's source. */
+type TraceSource = 'batchdata' | 'endato';
+
+/**
+ * Address-rung refusals that the name rung can still work. An entity or a
+ * claimant with no name to search on stays refused.
+ */
+const NAME_SEARCH_AFTER = new Set([
+  'no_house_number',
+  'placeholder_address',
+  'no_address',
+  'not_us_address',
+  'shared_address',
+]);
 
 interface Candidate {
   leadId: string;
@@ -111,6 +140,11 @@ interface Candidate {
   propertyCity: string | null;
   propertyState: string | null;
   propertyZip: string | null;
+  /** Where the clerk wrote to the owner, whether or not it is what we submit. */
+  mailingStreet?: string | null;
+  mailingCity?: string | null;
+  mailingState?: string | null;
+  mailingZip?: string | null;
 }
 
 interface TracedPhone {
@@ -138,6 +172,11 @@ interface TracedPerson {
   livedAtProperty: boolean;
   /** The vendor's own view that this is an owner of record. */
   propertyOwner: boolean;
+  /**
+   * Anything else the caller should read beside the match: the vendor's latest
+   * address for the person, relatives, a death record. Appended to the reason.
+   */
+  extra?: string;
 }
 
 /** Strongest identity first. Shared by the matcher and the assignment order. */
@@ -153,7 +192,7 @@ const VERDICT_RANK: Record<TraceVerdict, number> = {
  * result instead of leaving two contradictory ones on one lead.
  */
 const TRACE_NOTE =
-  /^(Skip trace |Entity owner\.|The clerk's own mail|No mailing address|"[^"]*" is a tax roll)/;
+  /^(Skip trace |Name search |Entity owner\.|The clerk's own mail|No mailing address|"[^"]*" is a tax roll)/;
 
 const ENTITY = /\b(LLC|L\.L\.C|INC|CORP|CORPORATION|COMPANY|LP|LLP|LLLP|LTD|TRUST|ASSOCIATION|CHURCH|BANK|PARTNERS|HOLDINGS)\b/i;
 
@@ -166,6 +205,7 @@ export class SurplusSkiptraceService {
   constructor(
     private prisma: PrismaService,
     private config: ConfigService,
+    private endato?: SurplusEndatoService,
   ) {
     this.batchKey = this.config.get<string>('BATCHDATA_API_KEY');
     this.batchBaseUrl = (
@@ -185,6 +225,10 @@ export class SurplusSkiptraceService {
     limit?: number;
     /** Work the leads even if they already carry a number. */
     includeTraced?: boolean;
+    /** Run the name-first rung on what the address rung could not place. Default on. */
+    nameSearch?: boolean;
+    /** Cap the name searches, which is what costs Endato credits. */
+    nameSearchLimit?: number;
   }): Promise<SurplusTraceResult> {
     const result: SurplusTraceResult = {
       candidates: 0,
@@ -192,6 +236,7 @@ export class SurplusSkiptraceService {
       contacted: 0,
       mismatched: 0,
       skipped: {},
+      nameSearch: { searched: 0, verified: 0, namesakes: 0 },
       errors: 0,
     };
 
@@ -265,6 +310,10 @@ export class SurplusSkiptraceService {
           propertyCity: l.propertyCity,
           propertyState: l.propertyState,
           propertyZip: l.propertyZip,
+          mailingStreet: d.ownerMailingStreet,
+          mailingCity: d.ownerMailingCity,
+          mailingState: d.ownerMailingState,
+          mailingZip: d.ownerMailingZip,
         };
       });
 
@@ -280,6 +329,8 @@ export class SurplusSkiptraceService {
 
     // Group by address so one submission serves every claimant on it.
     const groups = new Map<string, Candidate[]>();
+    // Everyone the address rung refuses or fails on, for the name rung.
+    const secondRung: Candidate[] = [];
     for (const c of candidates) {
       const elig = traceEligibility(c, {
         isEntity: c.isEntity,
@@ -300,6 +351,7 @@ export class SurplusSkiptraceService {
           outcome: 'skipped',
           detail: elig.detail || `Not eligible: ${reason}.`,
         });
+        if (c.nameKnown && NAME_SEARCH_AFTER.has(reason)) secondRung.push(c);
         continue;
       }
       groups.set(c.addressKey, [...(groups.get(c.addressKey) || []), c]);
@@ -311,7 +363,8 @@ export class SurplusSkiptraceService {
       submitted += 1;
       try {
         const persons = await this.lookup(group[0]);
-        await this.applyToGroup(group, persons, result);
+        const contacted = await this.applyToGroup(group, persons, result);
+        for (const c of group) if (!contacted.has(c.detailId) && c.nameKnown) secondRung.push(c);
       } catch (e: any) {
         result.errors += 1;
         this.logger.warn(`Surplus skip trace failed for ${group[0].claimant}: ${e.message}`);
@@ -327,7 +380,146 @@ export class SurplusSkiptraceService {
     }
     result.submitted = submitted;
 
+    if (opts.nameSearch !== false) {
+      await this.nameSearchRung(secondRung, result, opts.nameSearchLimit);
+    }
+
     return result;
+  }
+
+  /**
+   * Rung two: the name-first search, for every claimant the address rung could
+   * not place.
+   *
+   * BatchData asks "who is at this address?", which is the wrong question on a
+   * lot nobody lived on or an address of record that died years ago: 6 people
+   * out of 132 across Polk and Brevard. Endato asks "where is this person?"
+   * and answered 5 of 7 on the Brevard claimants BatchData had missed. The
+   * verification is the same rule as everywhere else in this file, and it is
+   * what makes the name rung safe: a person is the claimant only when their
+   * address history contains the property that sold or the address the clerk
+   * wrote to. Namesakes come back five at a time and are refused.
+   *
+   * One search per PERSON per case, not per lead: the county spells one owner
+   * four ways and each spelling is a lead.
+   */
+  private async nameSearchRung(
+    cands: Candidate[],
+    result: SurplusTraceResult,
+    limit?: number,
+  ): Promise<void> {
+    if (!cands.length || !this.endato?.available) return;
+
+    const groups = new Map<string, Candidate[]>();
+    for (const c of cands) {
+      const n = splitClaimantName(displayName(c.claimant));
+      if (!n.surname || !n.given.length) continue;
+      const key = `${c.caseNumber || c.propertyStreet || ''}|${n.given[0]} ${n.surname}`;
+      groups.set(key, [...(groups.get(key) || []), c]);
+    }
+
+    let searched = 0;
+    for (const [, group] of groups) {
+      if (limit && searched >= limit) break;
+      // Verification and the note compare names given-first; the county's
+      // "ZUMSTEG, ANITA" is turned round once, here, for the whole rung.
+      const people = group.map((c) => ({ ...c, claimant: displayName(c.claimant) }));
+      const c = people[0];
+      // The splitter lowercases; the vendor does not care and the notes read
+      // better in the county's own capitals.
+      const split = splitClaimantName(c.claimant);
+      const n = { given: split.given.map((g) => g.toUpperCase()), surname: split.surname.toUpperCase() };
+      // The clerk's mailing address narrows the search when it is a US one;
+      // otherwise the property's city and state, which is where the person was.
+      const hint =
+        c.mailingZip && c.mailingState
+          ? { city: c.mailingCity, state: c.mailingState }
+          : { city: c.propertyCity, state: c.propertyState || 'FL' };
+
+      searched += 1;
+      result.nameSearch.searched += 1;
+      let found: EndatoPerson[];
+      try {
+        found = await this.endato.search({ first: n.given[0], last: n.surname, city: hint.city, state: hint.state });
+      } catch (e: any) {
+        result.errors += 1;
+        if (!result.message) result.message = e.message;
+        this.logger.warn(`Name search failed for ${c.claimant}: ${e.message}`);
+        if (/auth|out of searches|rate limited/i.test(e.message)) break;
+        continue;
+      }
+
+      const keys = {
+        property: historyKey(c.propertyStreet, c.propertyCity, c.propertyZip),
+        mailing: historyKey(c.mailingStreet, c.mailingCity, c.mailingZip),
+      };
+      const verified: TracedPerson[] = [];
+      for (const p of found) {
+        const via = verifiedVia(p, keys);
+        if (via) verified.push(this.endatoToTraced(p, via));
+      }
+
+      if (!verified.length) {
+        result.nameSearch.namesakes += found.length;
+        const who = `${n.given[0]} ${n.surname}`;
+        const text = found.length
+          ? `Name search found ${found.length} ${found.length === 1 ? 'person' : 'people'} named ${who}, none with the property or the clerk's address in their history.`
+          : `Name search found nobody named ${who} near ${hint.city || hint.state}.`;
+        for (const cc of people) {
+          await this.note(
+            cc.detailId,
+            text,
+            { outcome: 'no_person', detail: `${text} Both vendors have now been tried. The free name-search links and a professional tracer are what is left.` },
+            'endato',
+          );
+        }
+        await this.pause(CALL_DELAY_MS);
+        continue;
+      }
+
+      result.nameSearch.verified += verified.length;
+      // Every lead in the group IS this person, spelled differently by the
+      // county, so each gets the match. Passing them as one group would let
+      // the first spelling claim the person and leave the rest empty.
+      for (const cc of people) await this.applyToGroup([cc], verified, result, 'endato');
+      await this.pause(CALL_DELAY_MS);
+    }
+  }
+
+  /** An Endato person as the matcher sees one, with what else it learned in `extra`. */
+  private endatoToTraced(p: EndatoPerson, via: 'property' | 'mailing'): TracedPerson {
+    const cur = currentAddress(p);
+    const connected = p.phones.filter((x) => x.connected);
+    const phones: TracedPhone[] = (connected.length ? connected : p.phones)
+      .slice(0, 4)
+      // Endato does not flag DNC. Null means "not checked", which the board
+      // shows as unscrubbed rather than as clear.
+      .map((x) => ({ num: x.num, type: x.type, dnc: null }));
+    const rel = p.relatives
+      .slice(0, 4)
+      .map((r) => (r.type ? `${r.name} (${r.type.toLowerCase()})` : r.name))
+      .join(', ');
+    return {
+      first: p.first,
+      last: p.last,
+      akas: p.akas,
+      phones,
+      emails: p.emails.slice(0, 2),
+      deceased: p.deceased,
+      livedAtProperty: via === 'property',
+      propertyOwner: false,
+      extra: [
+        via === 'mailing' ? "Their address history includes the address the clerk wrote to." : null,
+        cur
+          ? `Endato's latest address for them is ${cur.street}, ${[cur.city, cur.state, cur.zip].filter(Boolean).join(' ')}${cur.lastSeen ? ` (${cur.lastSeen})` : ''}.`
+          : null,
+        p.deceased ? 'Endato holds a death record for this person.' : null,
+        rel ? `Relatives on file: ${rel}.` : null,
+        'Numbers came from a name search and are not DNC scrubbed.',
+      ]
+        .filter(Boolean)
+        .join(' '),
+    };
   }
 
   /**
@@ -356,6 +548,7 @@ export class SurplusSkiptraceService {
       contacted: 0,
       mismatched: 0,
       skipped: {},
+      nameSearch: { searched: 0, verified: 0, namesakes: 0 },
       errors: 0,
     };
 
@@ -757,6 +950,7 @@ export class SurplusSkiptraceService {
           reason: `${check.reason} Their address history includes the property that sold.`,
         };
       }
+      if (p.extra) check = { ...check, reason: `${check.reason} ${p.extra}` };
 
       if (!best || VERDICT_RANK[check.verdict] > VERDICT_RANK[best.verdict]) {
         best = { person: p, verdict: check.verdict, reason: check.reason };
@@ -771,11 +965,17 @@ export class SurplusSkiptraceService {
     group: Candidate[],
     persons: TracedPerson[],
     result: SurplusTraceResult,
-  ): Promise<void> {
+    source: TraceSource = 'batchdata',
+  ): Promise<Set<string>> {
+    /** Detail ids that came away with a contact, so the caller knows who is left. */
+    const contacted = new Set<string>();
+    const verb = source === 'endato' ? 'Name search' : 'Skip trace';
     const where =
-      group[0].addressSource === 'notice'
-        ? `at ${group[0].street}, ${group[0].city || ''}`.trim().replace(/,$/, '')
-        : 'at the property';
+      source === 'endato'
+        ? 'by name'
+        : group[0].addressSource === 'notice'
+          ? `at ${group[0].street}, ${group[0].city || ''}`.trim().replace(/,$/, '')
+          : 'at the property';
 
     // A returned person may be claimed by ONE lead. Without this, a property
     // whose trace returns fewer people than it has claimants hands the same
@@ -797,10 +997,15 @@ export class SurplusSkiptraceService {
       if (best) taken.add(best.person);
 
       if (!best) {
-        await this.note(c.detailId, `Skip trace returned no matched person ${where}.`, {
-          outcome: 'no_person',
-          detail: `The submission went through and came back with nobody matching ${c.claimant} ${where}. Re-running the same address returns the same nothing; the route now is a name search.`,
-        });
+        await this.note(
+          c.detailId,
+          `${verb} returned no matched person ${where}.`,
+          {
+            outcome: 'no_person',
+            detail: `The submission went through and came back with nobody matching ${c.claimant} ${where}. Re-running the same address returns the same nothing; the route now is a name search.`,
+          },
+          source,
+        );
         continue;
       }
 
@@ -821,20 +1026,25 @@ export class SurplusSkiptraceService {
             traceDetail: `Returned ${name || 'an unnamed person'} ${where}, who is not ${c.claimant}. ${best.reason}`,
             callNotes: this.appendNote(
               null,
-              `Skip trace returned ${name || 'an unnamed person'} ${where}. ${best.reason} Contacts discarded. The claimant needs a name based route: Sunbiz for an entity, official records for a later deed, or an obituary if deceased.`,
+              `${verb} returned ${name || 'an unnamed person'} ${where}. ${best.reason} Contacts discarded. The claimant needs a name based route: Sunbiz for an entity, official records for a later deed, or an obituary if deceased.`,
             ),
           },
         });
-        await this.logAttempt(c.detailId, null, 'mismatch', `Returned ${name || 'an unnamed person'} ${where}, not ${c.claimant}.`);
+        await this.logAttempt(c.detailId, null, 'mismatch', `Returned ${name || 'an unnamed person'} ${where}, not ${c.claimant}.`, source);
         continue;
       }
 
       const hasContact = best.person.phones.length > 0 || best.person.emails.length > 0;
       if (!hasContact) {
-        await this.note(c.detailId, `Skip trace matched ${name || 'a person'} but returned no phone or email.`, {
-          outcome: 'no_contact',
-          detail: `Matched ${name || 'a person'}, but the vendor holds no phone or email for them. The identification is good; the contact route is not.`,
-        });
+        await this.note(
+          c.detailId,
+          `${verb} matched ${name || 'a person'} but returned no phone or email.${best.person.extra ? ` ${best.person.extra}` : ''}`,
+          {
+            outcome: 'no_contact',
+            detail: `Matched ${name || 'a person'}, but the vendor holds no phone or email for them. The identification is good; the contact route is not.`,
+          },
+          source,
+        );
         continue;
       }
 
@@ -863,7 +1073,9 @@ export class SurplusSkiptraceService {
           phone2Dnc: ph[1]?.dnc || null,
           phone3Dnc: ph[2]?.dnc || null,
           phone4Dnc: ph[3]?.dnc || null,
-          dncScrubbedAt: new Date(),
+          // BatchData flags DNC per number, so its result counts as scrubbed.
+          // Endato does not, and a null here is what makes the board say so.
+          dncScrubbedAt: source === 'batchdata' ? new Date() : null,
           email2: best.person.emails[1] || null,
           contactMismatch: false,
           mismatchedName: null,
@@ -873,20 +1085,22 @@ export class SurplusSkiptraceService {
           callNotes: this.appendNote(
             null,
             best.verdict === 'relative'
-              ? `Skip trace returned ${name}, not the claimant. ${best.reason}`
+              ? `${verb} returned ${name}, not the claimant. ${best.reason}`
               : best.verdict === 'unverified'
-                ? `Skip trace returned ${name || 'contacts'} ${where}. ${best.reason}`
+                ? `${verb} returned ${name || 'contacts'} ${where}. ${best.reason}`
                 : // Say HOW it matched, not just that it did. An exact name match
                   // and a match confirmed by the property's address history are
                   // different levels of confidence, and the person calling
                   // should be able to see which one they have.
-                  `Skip trace matched ${name}. ${best.reason}`,
+                  `${verb} matched ${name}. ${best.reason}`,
           ),
         },
       });
-      await this.logAttempt(c.detailId, null, 'found', `Returned ${name || 'contacts'} ${where}. ${best.reason}`);
+      await this.logAttempt(c.detailId, null, 'found', `Returned ${name || 'contacts'} ${where}. ${best.reason}`, source);
       result.contacted += 1;
+      contacted.add(c.detailId);
     }
+    return contacted;
   }
 
   /**
@@ -908,8 +1122,14 @@ export class SurplusSkiptraceService {
     heirId: string | null,
     result: 'found' | 'nothing' | 'mismatch' | 'skipped',
     summary: string,
+    source: TraceSource = 'batchdata',
   ): Promise<void> {
-    const cost = result === 'skipped' ? 0 : Number(this.config.get<string>('BATCHDATA_COST_PER_ADDRESS') || 0) || null;
+    const cost =
+      result === 'skipped'
+        ? 0
+        : source === 'endato'
+          ? this.endato?.costPerSearch ?? null
+          : Number(this.config.get<string>('BATCHDATA_COST_PER_ADDRESS') || 0) || null;
     try {
       const detail = await this.prisma.surplusDetail.findUnique({ where: { id: detailId }, select: { organizationId: true } });
       await this.prisma.surplusTraceAttempt.create({
@@ -918,7 +1138,7 @@ export class SurplusSkiptraceService {
           heirId,
           organizationId: detail?.organizationId || null,
           channel: SurplusTraceChannel.PAID_DB,
-          source: 'batchdata',
+          source,
           result,
           summary: summary.slice(0, 500),
           cost,
@@ -935,6 +1155,7 @@ export class SurplusSkiptraceService {
     detailId: string,
     text: string,
     state?: { outcome: string; detail: string },
+    source: TraceSource = 'batchdata',
   ): Promise<void> {
     if (state) {
       await this.logAttempt(
@@ -942,6 +1163,7 @@ export class SurplusSkiptraceService {
         null,
         state.outcome === 'skipped' ? 'skipped' : state.outcome === 'mismatch' ? 'mismatch' : 'nothing',
         state.detail,
+        source,
       );
     }
     const row = await this.prisma.surplusDetail.findUnique({
@@ -979,4 +1201,19 @@ export class SurplusSkiptraceService {
   private pause(ms: number): Promise<void> {
     return new Promise((r) => setTimeout(r, ms));
   }
+}
+
+/**
+ * "ZUMSTEG, ANITA" as the county writes it, turned round to "ANITA ZUMSTEG"
+ * so the name matcher and the vendor see the same shape. A name without a
+ * comma is returned as is.
+ */
+function displayName(raw: string): string {
+  const s = String(raw || '').trim();
+  const m = /^([^,]+),\s*(.+)$/.exec(s);
+  if (!m) return s;
+  const [, last, given] = m;
+  // "JOHNNY LOVE WILLIAMS, SR" is a suffix, not a surname-first form.
+  if (/^(SR|JR|II|III|IV|V|ESQ|ET\s*AL|ETAL|ESTATE\s*OF|DECEASED|TRUSTEE|TR)\.?$/i.test(given.trim())) return s;
+  return `${given.trim()} ${last.trim()}`;
 }

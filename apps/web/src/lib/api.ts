@@ -240,7 +240,9 @@ export const surplusAPI = {
   // `limit` caps the ADDRESSES submitted, which is what costs BatchData credits.
   // Co-owners at one property share a submission because the vendor matches on
   // address and ignores names.
-  skipTrace: (body: { leadIds?: string[]; limit?: number; includeTraced?: boolean }) =>
+  // `nameSearch` (default on) runs the Endato name-first rung on whatever the
+  // address rung could not place; `nameSearchLimit` caps those searches.
+  skipTrace: (body: { leadIds?: string[]; limit?: number; includeTraced?: boolean; nameSearch?: boolean; nameSearchLimit?: number }) =>
     api.post('/surplus/skip-trace', body),
   /**
    * Pull the county docket now. This is what actually contacts Duval; the
