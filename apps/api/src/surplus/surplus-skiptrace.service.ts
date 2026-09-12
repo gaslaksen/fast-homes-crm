@@ -145,6 +145,8 @@ interface Candidate {
   mailingCity?: string | null;
   mailingState?: string | null;
   mailingZip?: string | null;
+  /** When the name rung last searched this claimant, hit or miss. */
+  nameSearchedAt?: Date | null;
 }
 
 interface TracedPhone {
@@ -321,6 +323,7 @@ export class SurplusSkiptraceService {
           mailingCity: d.ownerMailingCity,
           mailingState: d.ownerMailingState,
           mailingZip: d.ownerMailingZip,
+          nameSearchedAt: d.nameSearchedAt,
         };
       });
 
@@ -333,7 +336,7 @@ export class SurplusSkiptraceService {
 
     if (opts.addressSearch === false) {
       if (opts.nameSearch !== false) {
-        await this.nameSearchRung(candidates.filter((c) => c.nameKnown), result, opts.nameSearchLimit);
+        await this.nameSearchRung(candidates.filter((c) => c.nameKnown), result, opts.nameSearchLimit, opts.includeTraced);
       }
       return result;
     }
@@ -399,7 +402,7 @@ export class SurplusSkiptraceService {
     result.submitted = submitted;
 
     if (opts.nameSearch !== false) {
-      await this.nameSearchRung(secondRung, result, opts.nameSearchLimit);
+      await this.nameSearchRung(secondRung, result, opts.nameSearchLimit, opts.includeTraced);
     }
 
     return result;
@@ -425,11 +428,20 @@ export class SurplusSkiptraceService {
     cands: Candidate[],
     result: SurplusTraceResult,
     limit?: number,
+    includeSearched = false,
   ): Promise<void> {
     if (!cands.length || !this.endato?.available) return;
 
     const groups = new Map<string, Candidate[]>();
     for (const c of cands) {
+      // Searched before and missed: the vendor's answer does not change from
+      // one week to the next, and the uncapped runs of 2026-09-12 re-bought
+      // 58 of the previous day's misses for want of this check. includeTraced
+      // is the explicit way to ask again.
+      if (c.nameSearchedAt && !includeSearched) {
+        result.skipped.name_searched = (result.skipped.name_searched || 0) + 1;
+        continue;
+      }
       const n = splitClaimantName(displayName(c.claimant));
       if (!n.surname || !n.given.length) continue;
       const key = `${c.caseNumber || c.propertyStreet || ''}|${n.given[0]} ${n.surname}`;
@@ -459,6 +471,13 @@ export class SurplusSkiptraceService {
       let found: EndatoPerson[];
       try {
         found = await this.endato.search({ first: n.given[0], last: n.surname, city: hint.city, state: hint.state });
+        // Stamped on every spelling of this person, hit or miss, the moment
+        // the credit is spent. A failed request is not stamped, so it is
+        // retried next run.
+        await this.prisma.surplusDetail.updateMany({
+          where: { id: { in: people.map((cc) => cc.detailId) } },
+          data: { nameSearchedAt: new Date() },
+        });
       } catch (e: any) {
         result.errors += 1;
         if (!result.message) result.message = e.message;

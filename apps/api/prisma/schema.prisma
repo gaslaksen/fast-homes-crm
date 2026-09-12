@@ -977,6 +977,10 @@ model SurplusDetail {
   /// The sentence behind the outcome, including the refusal reason when we
   /// declined to submit at all.
   traceDetail     String?
+  /// When the name-first rung (Endato) last searched this claimant, hit or
+  /// miss. A miss does not change from one week to the next, so a re-run
+  /// skips stamped rows unless asked to include them.
+  nameSearchedAt  DateTime?
 
   /// Living people who inherited this claimant's interest. Populated from a
   /// probate filing somebody read; never inferred.
