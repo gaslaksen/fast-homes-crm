@@ -583,11 +583,20 @@ export class SurplusController {
     if (limit != null && (!Number.isFinite(limit) || limit < 1)) {
       throw new BadRequestException('limit must be a positive number');
     }
+    const nameSearchLimit = body?.nameSearchLimit == null ? undefined : Number(body.nameSearchLimit);
+    if (nameSearchLimit != null && (!Number.isFinite(nameSearchLimit) || nameSearchLimit < 1)) {
+      throw new BadRequestException('nameSearchLimit must be a positive number');
+    }
     return this.skiptrace.traceLeads({
       organizationId: body?.organizationId || organizationId || null,
       leadIds: Array.isArray(body?.leadIds) ? body.leadIds : undefined,
       limit,
       includeTraced: body?.includeTraced === true,
+      // The name-first rung (Endato) runs on whatever the address rung could
+      // not place. Off only when asked, since it is what reaches the owners who
+      // left years ago.
+      nameSearch: body?.nameSearch !== false,
+      nameSearchLimit,
     });
   }
 

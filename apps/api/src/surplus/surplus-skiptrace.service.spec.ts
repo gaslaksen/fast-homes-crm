@@ -9,7 +9,7 @@ const mockedAxios = axios as jest.Mocked<typeof axios>;
  * The behaviours worth pinning are the ones that cost money or attach a wrong
  * number to a real person, so the vendor is stubbed and the database is a spy.
  */
-function harness(leads: any[]) {
+function harness(leads: any[], endato: any = null) {
   const leadUpdates: any[] = [];
   const detailUpdates: any[] = [];
   const attempts: any[] = [];
@@ -27,8 +27,20 @@ function harness(leads: any[]) {
     },
   };
   const config = { get: (k: string) => (k === 'BATCHDATA_API_KEY' ? 'test-key' : undefined) };
-  const svc = new SurplusSkiptraceService(prisma, config as unknown as ConfigService);
+  const svc = new SurplusSkiptraceService(prisma, config as unknown as ConfigService, endato as any);
   return { svc, prisma, leadUpdates, detailUpdates, attempts };
+}
+
+/**
+ * A stand-in for the Endato rung. `people` is what a search returns, in the
+ * parsed shape; absent means the rung is not configured and stays silent.
+ */
+function endatoStub(people: any[] | null = null) {
+  return {
+    available: people !== null,
+    costPerSearch: 0.25,
+    search: jest.fn().mockResolvedValue(people || []),
+  };
 }
 
 const lead = (over: any = {}) => ({
@@ -592,6 +604,120 @@ describe('recording that a trace happened', () => {
     expect(mockedAxios.post).not.toHaveBeenCalled();
     const u = detailUpdates.find((x) => x.where.id === 'd7');
     expect(u.data.traceOutcome).toBe('skipped');
+  });
+});
+
+describe('the name-first rung (Endato)', () => {
+  /** Endato's parsed shape for a person tied to the property. */
+  const zumsteg = (over: any = {}) => ({
+    first: 'Bernhard',
+    last: 'Zumsteg',
+    age: 61,
+    akas: [],
+    addresses: [{ street: '256 Treu', city: 'Palm Bay', state: 'FL', zip: '32907', lastSeen: '2026-08-01' }],
+    phones: [{ num: '3215550101', type: 'Mobile', connected: true }],
+    emails: [],
+    deceased: false,
+    relatives: [{ name: 'Anita Zumsteg', type: 'Spouse' }],
+    ...over,
+  });
+
+  it('runs on a claimant the address rung returned a stranger for, and takes only a verified person', async () => {
+    // BatchData at the property returns whoever lives there now. Endato,
+    // searched by name, returns the owner, whose history includes the parcel.
+    // The lead helper files every property in Jacksonville 32209; the vendor's
+    // history must carry the same place for the address key to meet it.
+    const endato = endatoStub([
+      zumsteg({ addresses: [{ street: '256 Treu', city: 'Jacksonville', state: 'FL', zip: '32209', lastSeen: '2026-08-01' }] }),
+    ]);
+    const { svc, leadUpdates, detailUpdates, attempts } = harness(
+      [lead({ street: '256 TREU TER NW', first: 'ZUMSTEG,', last: 'BERNHARD F', mailVerdict: 'undeliverable', mailStreet: 'VOR DEN HALDENSTR 1', mailCity: 'EIKEN' })],
+      endato,
+    );
+    respond([person('Lazaro', 'Perez', ['3215559999'])]);
+
+    const r = await svc.traceLeads({ organizationId: 'org' });
+
+    expect(r.mismatched).toBe(1);
+    expect(endato.search).toHaveBeenCalledWith({ first: 'BERNHARD', last: 'ZUMSTEG', city: 'JACKSONVILLE', state: 'FL' });
+    expect(r.nameSearch).toEqual({ searched: 1, verified: 1, namesakes: 0 });
+    expect(r.contacted).toBe(1);
+    expect(leadUpdates.at(-1).data.sellerPhone).toBe('+13215550101');
+    const patch = detailUpdates.at(-1).data;
+    expect(patch.traceOutcome).toBe('matched');
+    expect(patch.dncScrubbedAt).toBeNull();
+    expect(patch.callNotes).toMatch(/^Name search matched Bernhard Zumsteg\./);
+    expect(patch.callNotes).toContain("Endato's latest address for them is 256 Treu, Jacksonville FL 32209 (2026-08-01)");
+    expect(patch.callNotes).toContain('Relatives on file: Anita Zumsteg (spouse)');
+    expect(patch.callNotes).toContain('not DNC scrubbed');
+    expect(attempts.at(-1)).toMatchObject({ source: 'endato', result: 'found', cost: 0.25 });
+  });
+
+  it('refuses namesakes and says both vendors have been tried', async () => {
+    // Five James Simses, none of whom ever lived at 630 S Kentucky Ave.
+    const endato = endatoStub([
+      zumsteg({ first: 'James', last: 'Sims', addresses: [{ street: '529 20th', city: 'Bradenton', state: 'FL', zip: '34205', lastSeen: '2004-09-07' }] }),
+    ]);
+    const { svc, detailUpdates, attempts } = harness(
+      [lead({ street: '630 S KENTUCKY AVE', first: 'JAMES MICHAEL', last: 'SIMS' })],
+      endato,
+    );
+    respond([]);
+
+    const r = await svc.traceLeads({ organizationId: 'org' });
+
+    expect(r.nameSearch).toEqual({ searched: 1, verified: 0, namesakes: 1 });
+    expect(r.contacted).toBe(0);
+    const patch = detailUpdates.at(-1).data;
+    expect(patch.traceOutcome).toBe('no_person');
+    expect(patch.callNotes).toMatch(/^Name search found 1 person named JAMES SIMS, none with the property/);
+    expect(attempts.at(-1)).toMatchObject({ source: 'endato', result: 'nothing' });
+  });
+
+  it('runs on a lot the address rung refused, once per person however many spellings', async () => {
+    // Three spellings of one man on one lot. The address rung refuses the
+    // placeholder parcel; the name rung verifies him through the address the
+    // clerk wrote to, and every spelling gets his numbers. A lot with NO
+    // verifiable address is refused by design: nothing ties a namesake to it.
+    const endato = endatoStub([zumsteg()]);
+    const mailing = { mailStreet: '256 TREU TER NW', mailCity: 'PALM BAY', mailState: 'FL', mailZip: '32907', mailVerdict: 'undeliverable' };
+    const { svc, leadUpdates } = harness(
+      [
+        lead({ id: 'a', detailId: 'da', street: '0 UNKNOWN', first: 'ZUMSTEG,', last: 'BERNHARD F', caseNumber: '250285', ...mailing }),
+        lead({ id: 'b', detailId: 'db', street: '0 UNKNOWN', first: 'ZUMSTEG,', last: 'BERNARD F', caseNumber: '250285', ...mailing }),
+        lead({ id: 'c', detailId: 'dc', street: '0 UNKNOWN', first: 'BERNHARD F', last: 'ZUMSTEG', caseNumber: '250285', ...mailing }),
+      ],
+      endato,
+    );
+
+    const r = await svc.traceLeads({ organizationId: 'org' });
+
+    expect(mockedAxios.post).not.toHaveBeenCalled();
+    expect(r.skipped.placeholder_address).toBe(3);
+    // BERNHARD and BERNARD are two spellings of one man to us but two names
+    // to the vendor, so they cost two searches; the third row shares the first.
+    expect(endato.search).toHaveBeenCalledTimes(2);
+    expect(leadUpdates.filter((u) => u.data.sellerPhone === '+13215550101')).toHaveLength(3);
+  });
+
+  it('stays silent when Endato is not configured', async () => {
+    const { svc } = harness([lead({ street: '0 UNKNOWN' })], endatoStub(null));
+    const r = await svc.traceLeads({ organizationId: 'org' });
+    expect(r.nameSearch).toEqual({ searched: 0, verified: 0, namesakes: 0 });
+  });
+
+  it('honours the name-search cap', async () => {
+    const endato = endatoStub([]);
+    const { svc } = harness(
+      [
+        lead({ id: 'a', detailId: 'da', street: '0 UNKNOWN', first: 'JOHN', last: 'KISH', caseNumber: '1' }),
+        lead({ id: 'b', detailId: 'db', street: '0 UNKNOWN', first: 'KATERINA', last: 'KISH', caseNumber: '1' }),
+      ],
+      endato,
+    );
+    const r = await svc.traceLeads({ organizationId: 'org', nameSearchLimit: 1 });
+    expect(endato.search).toHaveBeenCalledTimes(1);
+    expect(r.nameSearch.searched).toBe(1);
   });
 });
 

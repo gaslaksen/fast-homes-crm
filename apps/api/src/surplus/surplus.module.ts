@@ -8,6 +8,7 @@ import { DuvalTaxDeedAdapter } from './duval-taxdeed.adapter';
 import { BrevardRealTdmAdapter, LeeRealTdmAdapter, PolkRealTdmAdapter } from './realtdm.adapter';
 import { SurplusSkiptraceService } from './surplus-skiptrace.service';
 import { SurplusNoticeService } from './surplus-notice.service';
+import { SurplusEndatoService } from './surplus-endato.service';
 import { SurplusProbateService } from './surplus-probate.service';
 import { SurplusHeirsService } from './surplus-heirs.service';
 import { SurplusTemplatesService } from './surplus-templates.service';
@@ -38,6 +39,7 @@ import { MessagesModule } from '../messages/messages.module';
     LeeRealTdmAdapter,
     PolkRealTdmAdapter,
     BrevardRealTdmAdapter,
+    SurplusEndatoService,
     SurplusSkiptraceService,
     SurplusNoticeService,
     SurplusProbateService,
