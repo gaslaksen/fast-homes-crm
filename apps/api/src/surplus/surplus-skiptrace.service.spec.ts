@@ -55,6 +55,7 @@ const lead = (over: any = {}) => ({
   surplusDetail: {
     id: over.detailId || 'd1',
     caseNumber: over.caseNumber ?? '2025-0023TD',
+    grossSurplus: over.surplus ?? 10000,
     mailVerdict: over.mailVerdict ?? null,
     ownerMailingStreet: over.mailStreet ?? null,
     ownerMailingCity: over.mailCity ?? null,
@@ -704,6 +705,24 @@ describe('the name-first rung (Endato)', () => {
     const { svc } = harness([lead({ street: '0 UNKNOWN' })], endatoStub(null));
     const r = await svc.traceLeads({ organizationId: 'org' });
     expect(r.nameSearch).toEqual({ searched: 0, verified: 0, namesakes: 0 });
+  });
+
+  it('can skip the address rung entirely and spends the cap on the biggest surplus first', async () => {
+    const endato = endatoStub([]);
+    const { svc } = harness(
+      [
+        lead({ id: 'small', detailId: 'ds', first: 'JOHN', last: 'KISH', caseNumber: '1', surplus: 5000 }),
+        lead({ id: 'big', detailId: 'db', first: 'JULIET', last: 'ABE', caseNumber: '2', surplus: 47000 }),
+      ],
+      endato,
+    );
+
+    const r = await svc.traceLeads({ organizationId: 'org', addressSearch: false, nameSearchLimit: 1 });
+
+    expect(mockedAxios.post).not.toHaveBeenCalled();
+    expect(r.submitted).toBe(0);
+    expect(endato.search).toHaveBeenCalledTimes(1);
+    expect(endato.search.mock.calls[0][0]).toMatchObject({ first: 'JULIET', last: 'ABE' });
   });
 
   it('honours the name-search cap', async () => {

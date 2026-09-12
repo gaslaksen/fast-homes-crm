@@ -242,7 +242,7 @@ export const surplusAPI = {
   // address and ignores names.
   // `nameSearch` (default on) runs the Endato name-first rung on whatever the
   // address rung could not place; `nameSearchLimit` caps those searches.
-  skipTrace: (body: { leadIds?: string[]; limit?: number; includeTraced?: boolean; nameSearch?: boolean; nameSearchLimit?: number }) =>
+  skipTrace: (body: { leadIds?: string[]; limit?: number; includeTraced?: boolean; nameSearch?: boolean; nameSearchLimit?: number; addressSearch?: boolean }) =>
     api.post('/surplus/skip-trace', body),
   /**
    * Pull the county docket now. This is what actually contacts Duval; the
