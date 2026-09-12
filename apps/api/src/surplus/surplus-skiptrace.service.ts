@@ -229,6 +229,13 @@ export class SurplusSkiptraceService {
     nameSearch?: boolean;
     /** Cap the name searches, which is what costs Endato credits. */
     nameSearchLimit?: number;
+    /**
+     * Run the address rung at all. Default on. Off sends every named claimant
+     * straight to the name rung, for a board the address rung has already
+     * been over: re-submitting Brevard's 90 addresses to learn the same
+     * nothing again is 90 credits for no information.
+     */
+    addressSearch?: boolean;
   }): Promise<SurplusTraceResult> {
     const result: SurplusTraceResult = {
       candidates: 0,
@@ -317,8 +324,19 @@ export class SurplusSkiptraceService {
         };
       });
 
+    // Biggest surplus first, so a capped run spends its credits where the fee is.
+    const surplusOf = new Map(leads.map((l) => [l.id, l.surplusDetail?.grossSurplus || 0]));
+    candidates.sort((a, b) => (surplusOf.get(b.leadId) || 0) - (surplusOf.get(a.leadId) || 0));
+
     result.candidates = candidates.length;
     if (!candidates.length) return result;
+
+    if (opts.addressSearch === false) {
+      if (opts.nameSearch !== false) {
+        await this.nameSearchRung(candidates.filter((c) => c.nameKnown), result, opts.nameSearchLimit);
+      }
+      return result;
+    }
 
     // A professional address is one that recurs across DIFFERENT cases. Repeats
     // inside one case are a household and stay eligible.

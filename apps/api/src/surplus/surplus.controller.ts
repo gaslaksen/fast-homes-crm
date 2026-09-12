@@ -597,6 +597,9 @@ export class SurplusController {
       // left years ago.
       nameSearch: body?.nameSearch !== false,
       nameSearchLimit,
+      // Off skips BatchData and sends every named claimant to the name rung,
+      // for a board the address rung has already been over.
+      addressSearch: body?.addressSearch !== false,
     });
   }
 
