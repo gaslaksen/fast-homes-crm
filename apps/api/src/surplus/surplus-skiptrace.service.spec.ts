@@ -21,6 +21,7 @@ function harness(leads: any[], endato: any = null) {
     surplusDetail: {
       findUnique: jest.fn().mockResolvedValue({ callNotes: null, organizationId: 'org' }),
       update: jest.fn(async (a: any) => { detailUpdates.push(a); return {}; }),
+      updateMany: jest.fn(async (a: any) => { detailUpdates.push(a); return { count: 1 }; }),
     },
     surplusTraceAttempt: {
       create: jest.fn(async (a: any) => { attempts.push(a.data); return a.data; }),
@@ -56,6 +57,7 @@ const lead = (over: any = {}) => ({
     id: over.detailId || 'd1',
     caseNumber: over.caseNumber ?? '2025-0023TD',
     grossSurplus: over.surplus ?? 10000,
+    nameSearchedAt: over.nameSearchedAt ?? null,
     mailVerdict: over.mailVerdict ?? null,
     ownerMailingStreet: over.mailStreet ?? null,
     ownerMailingCity: over.mailCity ?? null,
@@ -723,6 +725,38 @@ describe('the name-first rung (Endato)', () => {
     expect(r.submitted).toBe(0);
     expect(endato.search).toHaveBeenCalledTimes(1);
     expect(endato.search.mock.calls[0][0]).toMatchObject({ first: 'JULIET', last: 'ABE' });
+  });
+
+  it('stamps every spelling it searched and skips a stamped miss next time', async () => {
+    const endato = endatoStub([]);
+    const { svc, detailUpdates } = harness(
+      [lead({ id: 'a', detailId: 'da', street: '0 UNKNOWN', first: 'JOHN', last: 'KISH', caseNumber: '1' })],
+      endato,
+    );
+
+    await svc.traceLeads({ organizationId: 'org' });
+
+    expect(endato.search).toHaveBeenCalledTimes(1);
+    const stamp = detailUpdates.find((u) => u.data?.nameSearchedAt);
+    expect(stamp.where.id.in).toEqual(['da']);
+
+    // The same miss a week later costs nothing.
+    const again = harness(
+      [lead({ id: 'a', detailId: 'da', street: '0 UNKNOWN', first: 'JOHN', last: 'KISH', caseNumber: '1', nameSearchedAt: new Date('2026-09-12') })],
+      endatoStub([]),
+    );
+    const r = await again.svc.traceLeads({ organizationId: 'org' });
+    expect(r.nameSearch.searched).toBe(0);
+    expect(r.skipped.name_searched).toBe(1);
+
+    // Unless somebody asks for it.
+    const forced = endatoStub([]);
+    const third = harness(
+      [lead({ id: 'a', detailId: 'da', street: '0 UNKNOWN', first: 'JOHN', last: 'KISH', caseNumber: '1', nameSearchedAt: new Date('2026-09-12') })],
+      forced,
+    );
+    await third.svc.traceLeads({ organizationId: 'org', includeTraced: true });
+    expect(forced.search).toHaveBeenCalledTimes(1);
   });
 
   it('honours the name-search cap', async () => {
