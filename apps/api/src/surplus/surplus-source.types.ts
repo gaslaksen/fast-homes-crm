@@ -140,6 +140,12 @@ export interface SurplusSourceAdapter {
    * filed. True where every receipt observed sat on a claimed case (Lee),
    * false where receipts appear on open cases too (Duval). See classifyCase.
    */
+  /**
+   * The county pays claimants one at a time and keeps the case open with the
+   * balance posted, so a payout to a private claimant is not the end of the
+   * case. Pinellas. Elsewhere a distribution filing closes the file.
+   */
+  readonly payoutsArePartial?: boolean;
   readonly receiptsImplyClaim?: boolean;
   /**
    * Every case the county currently flags as carrying a surplus. Adapters
