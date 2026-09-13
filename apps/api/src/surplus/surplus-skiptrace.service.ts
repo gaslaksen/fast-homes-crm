@@ -196,7 +196,9 @@ const VERDICT_RANK: Record<TraceVerdict, number> = {
 const TRACE_NOTE =
   /^(Skip trace |Name search |Entity owner\.|The clerk's own mail|No mailing address|"[^"]*" is a tax roll)/;
 
-const ENTITY = /\b(LLC|L\.L\.C|INC|CORP|CORPORATION|COMPANY|LP|LLP|LLLP|LTD|TRUST|ASSOCIATION|CHURCH|BANK|PARTNERS|HOLDINGS)\b/i;
+// Keep in step with the collapse's ENTITY in surplus-classify.util.ts.
+const ENTITY =
+  /\b(LLC|L\.L\.C|INC|CORP|CORPORATION|COMPANY|LP|LLP|LLLP|LTD|TRUST|ASSOCIATION|CHURCH|BANK|PARTNERS|HOLDINGS|DEPARTMENT|DEPT|SECRETARY|HOUSING|DEVELOPMENT|DEV|UNITED\s+STATES|USA|COUNTY|CITY\s+OF|STATE\s+OF|AUTHORITY|MORTGAGE|CREDIT\s+UNION|MINISTR(?:Y|IES)|FOUNDATION)\b/i;
 
 @Injectable()
 export class SurplusSkiptraceService {

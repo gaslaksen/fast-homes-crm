@@ -198,7 +198,7 @@ export function relativeOutreachScript(claimant: string, relative?: string | nul
  * share one. When nothing matches, returns null rather than guessing: a wrong
  * address is worse than none, because none is visible and wrong is not.
  */
-export function matchRecipient<T extends { name?: string | null }>(
+export function matchRecipient<T extends { name?: string | null; zip?: string | null }>(
   claimant: string,
   recipients: T[],
 ): T | null {
@@ -214,7 +214,9 @@ export function matchRecipient<T extends { name?: string | null }>(
     const surnameHit = got.surname === want.surname || all.includes(got.surname);
     if (!surnameHit) continue;
     const givenHit = got.given.some((g) => want.given.includes(g) || g === want.surname);
-    const score = givenHit ? 2 : 1;
+    // Pinellas notices the same person twice, once as the deed spells the
+    // address and once as the roll does. Whichever parsed to a zip wins.
+    const score = (givenHit ? 2 : 1) + (r.zip ? 0.5 : 0);
     if (!best || score > best.score) best = { r, score };
   }
   return best?.r ?? null;

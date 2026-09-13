@@ -426,6 +426,19 @@ describe('claimantFromTitle', () => {
     expect(claimantFromTitle('STATE OF CLAIM JANE DOE')).toBe('JANE DOE');
   });
 
+  it('reads the Pinellas form, category first, and falls back to the category when nobody is named', () => {
+    // Verbatim labels from the 2026-09-13 discovery pass.
+    expect(claimantFromTitle('Surplus Claim Government- CITY OF CLEARWATER')).toBe('CITY OF CLEARWATER');
+    expect(claimantFromTitle('Surplus Claim Government CITY OF ST PETERSBURG UTILITY LIEN')).toBe('CITY OF ST PETERSBURG UTILITY LIEN');
+    expect(claimantFromTitle('Surplus Claim Gvernment- CITY OF ST PETERSBURG UTILITY LIEN')).toBe('CITY OF ST PETERSBURG UTILITY LIEN');
+    expect(claimantFromTitle('Surplus Claim Interested Party- ASHER GROUP LLC ON BEHALF OF HARRY A MCGRATH III'))
+      .toBe('ASHER GROUP LLC ON BEHALF OF HARRY A MCGRATH III');
+    expect(claimantFromTitle('Surplus Claim Government')).toBe('Government');
+    expect(claimantFromTitle('Surplus Claim Interested Party')).toBe('Interested Party');
+    expect(claimantFromTitle('Surplus Payout Government')).toBe('Government');
+    expect(claimantFromTitle('Surplus Payout Interested Party')).toBe('Interested Party');
+  });
+
   it('never invents a claimant from a document that is not a claim', () => {
     expect(claimantFromTitle('SURPLUS_LETTER')).toBeNull();
     expect(claimantFromTitle('Returned Mail')).toBeNull();
@@ -466,6 +479,12 @@ describe('Polk owner names', () => {
     // The registered agent line is the entity it stands for (Brevard 240625).
     expect(splitCompoundOwner('REGISTERED AGENT O/B/O FLORIDAIM LLC')).toEqual(['FLORIDAIM LLC']);
     expect(splitCompoundOwner('REGISTERED AGENT OBO FLORIDAIM LLC')).toEqual(['FLORIDAIM LLC']);
+    // A federal department is one owner, however the roll abbreviates it
+    // (Pinellas 2023-08057 made four leads of it).
+    expect(splitCompoundOwner('United States Secretary of Housing and Urban Development'))
+      .toEqual(['United States Secretary of Housing and Urban Development']);
+    expect(splitCompoundOwner('USA HOUSING & URBAN DEV')).toEqual(['USA HOUSING & URBAN DEV']);
+    expect(splitCompoundOwner('SMITH & WESSON HOLDINGS LLC')).toEqual(['SMITH & WESSON HOLDINGS LLC']);
   });
 
   it('collapses Brevard\'s surname-first spelling with the given-first one', () => {
@@ -544,6 +563,19 @@ describe('splitAddressLines', () => {
       splitAddressLines(['EDWARD H POTTER, TRUSTEE', '7935 HILLANDALE DRIVE', 'SAN DIEGO, CA 92120']).attention,
     ).toBe('EDWARD H POTTER, TRUSTEE');
     expect(splitAddressLines(['PO BOX 398', 'FT. MYERS, FL 33902']).street).toBe('PO BOX 398');
+  });
+
+  it('reads a state spelled out, which is how Pinellas copies the deed', () => {
+    // Pinellas 2023-01704 TITLEHOLDER line, verbatim.
+    expect(splitAddressLines(['2000 - 8th Avenue, S.W.', 'Largo, Florida 33770'])).toEqual({
+      street: '2000 - 8th Avenue, S.W.',
+      city: 'Largo',
+      state: 'FL',
+      zip: '33770',
+      attention: null,
+    });
+    expect(splitAddressLines(['451 7th Street S.W.', 'Washington, DC 20410']).state).toBe('DC');
+    expect(splitAddressLines(['1 Main St', 'Albany, New York 12207'])).toMatchObject({ city: 'Albany', state: 'NY', zip: '12207' });
   });
 
   it('keeps a foreign or unparseable address whole rather than guessing parts', () => {
@@ -807,6 +839,114 @@ describe('classifying live Lee dockets', () => {
     expect(v.ledger.find((d) => /NO CLAIM/.test(d.title))?.kind).toBe('other');
     expect(v.ledger.find((d) => /RTS/.test(d.title))?.kind).toBe('mail_undeliverable');
     expect(v.mailVerdict).toBe('undeliverable');
+  });
+
+  it('Pinellas 2023-01704: three disclaimers and nothing else is wide open', () => {
+    const v = classifyCase(
+      [
+        { title: 'Returned Mail', filedAt: '2025-12-09' },
+        { title: 'SURPLUS_LETTER', filedAt: '2026-02-23' },
+        { title: 'Refund to Applicant', filedAt: '2026-02-26' },
+        { title: 'Surplus Disclaimer- ALAN M GROSS PA', filedAt: '2026-03-06' },
+        { title: 'Surplus Disclaimer', filedAt: '2026-03-06' },
+        { title: 'Surplus Disclaimer- CLERK OF COURT/CRIMINAL', filedAt: '2026-03-17' },
+        { title: 'Returned Mail Surplus', filedAt: '2026-03-31' },
+      ],
+      { owners: ['Richard J. Smith', 'RICHARD J SMITH'], payoutsArePartial: true },
+    );
+    expect(v.claimStatus).toBe('open');
+    expect(v.counts.claims).toBe(0);
+    // The December return was the notice of application, before the letter.
+    expect(v.mailVerdict).toBe('undeliverable');
+    expect(v.ledger.filter((d) => d.kind === 'mail_undeliverable')).toHaveLength(2);
+  });
+
+  it('Pinellas 2023-01574: a city paid off the top, a site manager still claiming', () => {
+    const pin = (title: string, filedAt: string) => ({ title, filedAt, claimant: claimantFromTitle(title) });
+    const v = classifyCase(
+      [
+        { title: 'SURPLUS_LETTER', filedAt: '2026-02-24' },
+        { title: 'Returned Mail Surplus', filedAt: '2026-03-06' },
+        pin('Surplus Claim Government- CITY OF CLEARWATER', '2026-03-16'),
+        pin('Surplus Claim Interested Party- T7 ULYSSES STE MANAGEMENT LLC', '2026-06-03'),
+        { title: 'Surplus Disclaimer- DEPARTMENT OF REVENUE', filedAt: '2026-07-01' },
+        { title: 'Surplus Write Up Government', filedAt: '2026-07-17' },
+        pin('Surplus Payout Government', '2026-07-29'),
+      ],
+      { owners: ['South Tampa Trust, LLC', 'SOUTH TAMPA TRUST LLC'], payoutsArePartial: true },
+    );
+    expect(v.claimStatus).toBe('pending');
+    expect(v.counts.claims).toBe(1);
+    expect(v.counts.govLiens).toBe(2);
+    expect(v.counts.distributions).toBe(0);
+    expect(v.ledger.find((d) => /Payout/.test(d.title))?.kind).toBe('payout');
+  });
+
+  it('Pinellas 2022-07634: a recovery shop paid for somebody else is a slice gone, not the owner signed away', () => {
+    const pin = (title: string, filedAt: string) => ({ title, filedAt, claimant: claimantFromTitle(title) });
+    const v = classifyCase(
+      [
+        { title: 'Unclaimed Mail 22-07634.pdf', filedAt: '2025-03-11' },
+        { title: 'SURPLUS_LETTER', filedAt: '2025-04-18' },
+        pin('Surplus Claim Government- CLERK OF COURT CRIMINAL', '2025-04-30'),
+        pin('Surplus Claim Interested Party- PLUTO ASSET RECOVERY INC ON BEHALF OF MAI T PHAM', '2025-05-07'),
+        pin('Surplus Claim Gvernment- CITY OF ST PETERSBURG UTILITY LIEN', '2025-05-07'),
+        pin('Surplus Claim Government- CLERK OF COURT- CHILD SUPPORT', '2025-09-18'),
+        pin('Surplus Payout Government', '2025-09-30'),
+        pin('Surplus Payout Interested Party', '2025-10-08'),
+      ],
+      { owners: ['Marquil Hixon', 'MARQUIL HIXON'], payoutsArePartial: true },
+    );
+    // Still ACTIVE at $57,950 on the county list. Pluto's principal is not the owner.
+    expect(v.claimStatus).toBe('pending');
+    expect(v.counts.payouts).toBe(1);
+    expect(v.counts.distributions).toBe(0);
+    expect(v.counts.govLiens).toBe(4);
+    expect(v.reason).toMatch(/already been paid a slice/);
+    expect(v.ledger.find((d) => /Unclaimed Mail/.test(d.title))?.kind).toBe('mail_undeliverable');
+  });
+
+  it('Pinellas 2023-08645: a law firm claiming on behalf of the owner is the owner signed with somebody', () => {
+    const pin = (title: string, filedAt: string) => ({ title, filedAt, claimant: claimantFromTitle(title) });
+    const v = classifyCase(
+      [
+        { title: 'SURPLUS_LETTER', filedAt: '2025-10-22' },
+        pin('Surplus Claim Interested Party- BILU LAW- BEHALF OF FRANK DENNIS ZAIC', '2026-01-29'),
+        { title: 'Correspondence- FRANK DENNIS ZAIC IDENTIFICATION', filedAt: '2026-03-04' },
+        pin('Surplus Claim Interested Party- LAW OFFICES OF MICHAEL J HEATH ON BEHALF OF ESTATE OF FRANK ZAIC', '2026-07-09'),
+      ],
+      { owners: ['Frank D. Zaic', 'FRANK D ZAIC'], payoutsArePartial: true },
+    );
+    expect(v.claimStatus).toBe('assigned');
+  });
+
+  it('Pinellas 2023-00489: four unnamed government claims are liens, not competition', () => {
+    const pin = (title: string, filedAt: string) => ({ title, filedAt, claimant: claimantFromTitle(title) });
+    const v = classifyCase(
+      [
+        { title: 'SURPLUS_LETTER', filedAt: '2026-04-28' },
+        { title: 'Certified Surplus Mail Slips', filedAt: '2026-05-06' },
+        pin('Surplus Claim Government', '2026-05-11'),
+        pin('Surplus Claim Government', '2026-05-11'),
+        pin('Surplus Claim Government', '2026-05-11'),
+        pin('Surplus Claim Government', '2026-05-11'),
+        { title: 'COPY OF DL', filedAt: '2026-05-12' },
+      ],
+      { owners: ['James R. Bower', 'JAMES R BOWER'], payoutsArePartial: true },
+    );
+    expect(v.claimStatus).toBe('gov_lien');
+    expect(v.counts.govLiens).toBe(4);
+    expect(v.ledger.find((d) => /COPY OF DL/.test(d.title))?.kind).toBe('claim_attachment');
+    expect(v.mailVerdict).toBe('unknown');
+  });
+
+  it('a payout to a private claimant is terminal where the county closes the file with it', () => {
+    const pin = (title: string, filedAt: string) => ({ title, filedAt, claimant: claimantFromTitle(title) });
+    const v = classifyCase(
+      [{ title: 'SURPLUS_LETTER', filedAt: '2026-01-01' }, pin('Surplus Payout Interested Party', '2026-03-01')],
+      { owners: ['JANE DOE'] },
+    );
+    expect(v.claimStatus).toBe('distributed');
   });
 
   it('a named disbursement filed AFTER a claim is the money leaving', () => {

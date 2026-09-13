@@ -73,6 +73,8 @@ export interface RealTdmCountySpec {
    * of 68). Default false, because assuming it inverts the answer elsewhere.
    */
   receiptsImplyClaim?: boolean;
+  /** See SurplusSourceAdapter.payoutsArePartial. Pinellas. */
+  payoutsArePartial?: boolean;
 }
 
 export const REALTDM_USER_AGENT =
@@ -174,6 +176,30 @@ export function formDate(d: Date): string {
 const STREET_LINE = /^\d|^p\.?\s*o\.?\s*box\b|^po\s*box\b/i;
 
 /**
+ * Pinellas prints the deed's own address line under TITLEHOLDER, state spelled
+ * out ("Largo, Florida 33770"), beside the roll's "LARGO, FL 33770". The
+ * spelled-out form failed the CITY, ST 12345 test and left city and zip empty
+ * on the lead, which the skip trace then could not verify against.
+ */
+const STATE_NAMES: Record<string, string> = {
+  ALABAMA: 'AL', ALASKA: 'AK', ARIZONA: 'AZ', ARKANSAS: 'AR', CALIFORNIA: 'CA', COLORADO: 'CO',
+  CONNECTICUT: 'CT', DELAWARE: 'DE', FLORIDA: 'FL', GEORGIA: 'GA', HAWAII: 'HI', IDAHO: 'ID',
+  ILLINOIS: 'IL', INDIANA: 'IN', IOWA: 'IA', KANSAS: 'KS', KENTUCKY: 'KY', LOUISIANA: 'LA',
+  MAINE: 'ME', MARYLAND: 'MD', MASSACHUSETTS: 'MA', MICHIGAN: 'MI', MINNESOTA: 'MN',
+  MISSISSIPPI: 'MS', MISSOURI: 'MO', MONTANA: 'MT', NEBRASKA: 'NE', NEVADA: 'NV',
+  'NEW HAMPSHIRE': 'NH', 'NEW JERSEY': 'NJ', 'NEW MEXICO': 'NM', 'NEW YORK': 'NY',
+  'NORTH CAROLINA': 'NC', 'NORTH DAKOTA': 'ND', OHIO: 'OH', OKLAHOMA: 'OK', OREGON: 'OR',
+  PENNSYLVANIA: 'PA', 'RHODE ISLAND': 'RI', 'SOUTH CAROLINA': 'SC', 'SOUTH DAKOTA': 'SD',
+  TENNESSEE: 'TN', TEXAS: 'TX', UTAH: 'UT', VERMONT: 'VT', VIRGINIA: 'VA', WASHINGTON: 'WA',
+  'WEST VIRGINIA': 'WV', WISCONSIN: 'WI', WYOMING: 'WY', 'DISTRICT OF COLUMBIA': 'DC',
+  'PUERTO RICO': 'PR',
+};
+const STATE_NAME_LINE = new RegExp(
+  `^(.*?),?\\s+(${Object.keys(STATE_NAMES).join('|')})\\s+(\\d{5})(?:-\\d{4})?$`,
+  'i',
+);
+
+/**
  * "BAY SHORE, NY 11706" and the street lines above it into parts.
  *
  * When the clerk prints an attention line above the street ("C/O GLENN BROWN",
@@ -195,8 +221,9 @@ export function splitAddressLines(addr: string[]): {
   const ls = (addr || []).map((l) => l.trim()).filter(Boolean);
   if (!ls.length) return none;
   const last = ls[ls.length - 1];
-  const m = /^(.*?),?\s+([A-Z]{2})\s+(\d{5})(?:-\d{4})?$/i.exec(last);
+  const m = /^(.*?),?\s+([A-Z]{2})\s+(\d{5})(?:-\d{4})?$/i.exec(last) || STATE_NAME_LINE.exec(last);
   if (!m) return { ...none, street: ls.join(', ') };
+  const state = STATE_NAMES[m[2].toUpperCase()] || m[2].toUpperCase();
 
   const above = ls.slice(0, -1);
   const streetIdx = above.findIndex((l) => STREET_LINE.test(l));
@@ -206,7 +233,7 @@ export function splitAddressLines(addr: string[]): {
   return {
     street: street || null,
     city: m[1].trim() || null,
-    state: m[2].toUpperCase(),
+    state,
     zip: m[3],
     attention: attention || null,
   };
@@ -358,13 +385,19 @@ export function claimantFromTitle(title: string): string | null {
   const t = String(title || '').trim();
   // Polk: "Surplus Claims Received- NELSON J FREEMAN". Lee: "Surplus Claim_Kevin Saturno".
   // Brevard: "STATEMENT OF CLAIM ALFRED A SMITH.pdf", also STATMENT, STATEMENT CLAIM, STATE OF CLAIM.
+  // Pinellas: "Surplus Claim Government- CITY OF CLEARWATER", "Surplus Claim
+  // Interested Party- ASHER GROUP LLC ON BEHALF OF HARRY A MCGRATH III",
+  // "Surplus Payout Government". The category is the whole title when the
+  // clerk names nobody, and is then the claimant.
   const m =
     /surplus\s*claims?\s*received\s*[-:]\s*([\s\S]+?)(?:\.pdf)?\s*$/i.exec(t) ||
-    /surplus\s*claim[_\s-]+([\s\S]+?)(?:\.pdf)?\s*$/i.exec(t) ||
+    /surplus\s*(?:claim|payout)[_\s-]+([\s\S]+?)(?:\.pdf)?\s*$/i.exec(t) ||
     /\b(?:statement|statment|state)\s*(?:of\s*)?claim[_\s-]+([\s\S]+?)(?:\.pdf)?\s*$/i.exec(t);
   if (!m) return null;
-  const name = m[1].replace(/^\d{4,}-?\d*\s+/, '').replace(/\s+/g, ' ').trim();
-  return name || null;
+  const raw = m[1].replace(/^\d{4,}-?\d*\s+/, '').replace(/\s+/g, ' ').trim();
+  const category = /^(government|gvernment|interested\s*part(?:y|ies)|owner)\b\s*[-:]?\s*/i.exec(raw);
+  const name = category ? raw.slice(category[0].length).trim() : raw;
+  return name || (category ? category[1].replace(/\s+/g, ' ') : null);
 }
 
 export interface DocumentsPage {
@@ -491,6 +524,9 @@ export function noticeDateFromLetter(letterText: string): string | null {
  */
 /** A comma segment that is a suffix or marker, not a person. */
 const KEEP_SEGMENT = /^(SR|JR|II|III|IV|V|ESQ|TRUSTEE|TR|ET\s*AL|ETAL|ESTATE\s*OF|DECEASED|LLC|INC|CORP|LTD|LP|LLP|PA|PLLC)\.?$/i;
+/** A line with one of these is an organisation, whatever conjunction sits in it. */
+const ENTITY_WORD =
+  /\b(LLC|L\.L\.C|INC|CORP|CORPORATION|COMPANY|CO|LP|LLP|LTD|TRUST|BANK|ASSOCIATION|AUTHORITY|DEPARTMENT|DEPT|SECRETARY|HOUSING|DEVELOPMENT|DEV|UNITED\s+STATES|USA|COUNTY|CITY|STATE\s+OF|MORTGAGE|CREDIT\s+UNION|CHURCH|MINISTR(?:Y|IES)|FOUNDATION)\b/i;
 
 /** Whole name: at least two tokens, and any comma segment after the first is a suffix. */
 function isWholeName(p: string): boolean {
@@ -515,9 +551,12 @@ export function splitCompoundOwner(name: string): string[] {
   }
   // Brevard: "ANITA ZUMSTEG AND/OR BERNHARD F ZUMSTEG", "LOTTIE WILLIAMS AND
   // ESTATE OF WALTER IVORY, DECEASED". Only when every side is a whole name,
-  // so "HOUSING AND NEIGHBORHOOD DEVELOPMENT" stays one entity.
+  // so "HOUSING AND NEIGHBORHOOD DEVELOPMENT" stays one entity. An entity or
+  // an office keeps its AND too: Pinellas 2023-08057 lists "United States
+  // Secretary of Housing and Urban Development" and "USA HOUSING & URBAN DEV",
+  // which became four owners and four leads for one federal department.
   const conj = s.split(/\s+AND\/OR\s+|\s+AND\s+|\s*&\s*/i).map((p) => p.trim()).filter(Boolean);
-  if (conj.length > 1 && conj.every(isWholeName)) return conj;
+  if (conj.length > 1 && conj.every(isWholeName) && !ENTITY_WORD.test(s)) return conj;
 
   // Comma forms. One comma with a single token before it is surname-first
   // ("Smith, Alfred A") and stays whole; a suffix or estate marker after the
@@ -558,6 +597,7 @@ export class RealTdmAdapter implements SurplusSourceAdapter {
   readonly detailDelayMs = DETAIL_DELAY_MS;
   /** Per county, from the discovery pass. See RealTdmCountySpec. */
   readonly receiptsImplyClaim: boolean;
+  readonly payoutsArePartial: boolean;
   readonly baseUrl: string;
 
   private readonly logger: Logger;
@@ -576,6 +616,7 @@ export class RealTdmAdapter implements SurplusSourceAdapter {
     this.key = spec.key;
     this.county = spec.county;
     this.receiptsImplyClaim = !!spec.receiptsImplyClaim;
+    this.payoutsArePartial = !!spec.payoutsArePartial;
     this.logger = new Logger(`RealTdmAdapter:${spec.county}`);
     this.baseUrl = (
       this.config.get<string>(`REALTDM_${spec.subdomain.toUpperCase()}_BASE_URL`) ||
@@ -758,7 +799,8 @@ export class RealTdmAdapter implements SurplusSourceAdapter {
       legalDescription: summary.legalDescription,
       applicantNames:
         parties
-          .filter((p) => p.role === 'APPLICANT')
+          // Pinellas lists the tax deed applicant as CERTIFICATE HOLDER.
+          .filter((p) => /^(APPLICANT|CERTIFICATE\s*HOLDER)$/i.test(p.role))
           .map((p) => p.name)
           .join(', ') || null,
       assessedAs: summary.homestead == null ? null : summary.homestead ? 'Homestead' : 'Non-homestead',
@@ -887,5 +929,26 @@ export class PolkRealTdmAdapter extends RealTdmAdapter {
 export class BrevardRealTdmAdapter extends RealTdmAdapter {
   constructor(config: ConfigService) {
     super(config, { key: 'realtdm_brevard', county: 'Brevard', subdomain: 'brevard' });
+  }
+}
+
+/**
+ * Pinellas County, `pinellas.realtdm.com`. Discovery pass 2026-09-13 on the
+ * ten largest of 18 live cases (403 listed, $1.54M held): owners are
+ * TITLEHOLDER off the deed ("Richard J. Smith", address as typed with the
+ * state spelled out) beside LEGAL TITLE HOLDER off the roll ("RICHARD J
+ * SMITH", "MCGRATH, HARRY A III EST", "L L HEATH TRE"); the applicant is
+ * CERTIFICATE HOLDER. Claims are "Surplus Claim Government- NAME" and
+ * "Surplus Claim Interested Party- FIRM ON BEHALF OF NAME", sometimes with no
+ * name at all; disclaimers are "Surplus Disclaimer- NAME"; payouts are
+ * "Surplus Payout Government" and "Surplus Payout Interested Party" and the
+ * case stays ACTIVE with the balance posted after one, so payouts are partial
+ * here. Mail comes back as "Returned Mail Surplus" and "Unclaimed Mail". No
+ * bare "Receipt".
+ */
+@Injectable()
+export class PinellasRealTdmAdapter extends RealTdmAdapter {
+  constructor(config: ConfigService) {
+    super(config, { key: 'realtdm_pinellas', county: 'Pinellas', subdomain: 'pinellas', payoutsArePartial: true });
   }
 }

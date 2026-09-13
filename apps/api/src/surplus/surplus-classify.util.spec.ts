@@ -103,6 +103,16 @@ describe('classifyClaimant', () => {
     // The shape on Duval 2025-0732TD. The owner has already signed.
     expect(classifyClaimant('GG ELITE SERVICES LLC As ASSIGNEE of SUSAN D WRIGHT', ['SUSAN D WRIGHT']))
       .toBe('assignee');
+    // Pinellas writes it "on behalf of". For the owner it is the same thing.
+    expect(classifyClaimant('ASHER GROUP LLC ON BEHALF OF HARRY A MCGRATH III', ['Harry A. McGrath, III']))
+      .toBe('assignee');
+    expect(classifyClaimant('BILU LAW- BEHALF OF FRANK DENNIS ZAIC', ['FRANK D ZAIC'])).toBe('assignee');
+    // For somebody else it is a competitor for the residual, not the owner gone.
+    expect(classifyClaimant('PLUTO ASSET RECOVERY INC ON BEHALF OF MAI T PHAM', ['MARQUIL HIXON'])).toBe('competitor');
+    // With no owner list there is nothing to check against; the old reading stands.
+    expect(classifyClaimant('ACME LLC as assignee of JOHN DOE')).toBe('assignee');
+    expect(classifyClaimant('Government')).toBe('government');
+    expect(classifyClaimant('CLERK OF COURT- CHILD SUPPORT')).toBe('government');
   });
 
   it('does not mistake a government lien claimant for a competitor', () => {
@@ -291,6 +301,16 @@ describe('collapseClaimants', () => {
   });
 
   it('collapses a name suffix difference', () => {
+    const pin = collapseClaimants(['Harry A. McGrath, III', 'MCGRATH, HARRY A III EST']);
+    expect(pin).toHaveLength(1);
+    expect(pin[0].deceased).toBe(true);
+    expect(pin[0].name).toBe('Harry A. McGrath, III');
+    const tre = collapseClaimants(['L.L. Heath, Trustee', 'L L HEATH TRE']);
+    expect(tre).toHaveLength(1);
+    // A federal department under two spellings is an entity, never a person to trace.
+    for (const c of collapseClaimants(['United States Secretary of Housing and Urban Development', 'USA HOUSING & URBAN DEV'])) {
+      expect(c.isEntity).toBe(true);
+    }
     const r = collapseClaimants(['EDGAR CLOWERS, JR.', 'EDGAR CLOWERS']);
     expect(r).toHaveLength(1);
   });

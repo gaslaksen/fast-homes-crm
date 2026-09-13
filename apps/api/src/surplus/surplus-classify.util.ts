@@ -38,6 +38,15 @@ export type SurplusDocKind =
   /** The surplus actually being paid out. Terminal. */
   | 'distribution'
   /**
+   * A payout to ONE claimant, named in the title. Pinellas files "Surplus
+   * Payout Government" and "Surplus Payout Interested Party" and keeps the
+   * case ACTIVE with the remaining balance posted, so one of these is a slice
+   * leaving, not the end of the case. To a government claimant it is a lien
+   * paid; to anybody else it is a distribution unless the adapter says the
+   * county pays out in parts.
+   */
+  | 'payout'
+  /**
    * Routine payouts off the top to the tax deed applicant and the tax
    * collector. NOT a distribution of the surplus. These appear on wide-open
    * cases: all five Duval reference cases carry an `Applicant Disbursement`,
@@ -117,8 +126,8 @@ const RULES: Rule[] = [
   // is the difference between a dead lead and the best lead on the board.
   {
     kind: 'claim_attachment',
-    re: /photo\s*id|notary\s*verification|^verification$|^communication$|w-?9/i,
-    seenIn: 'Duval',
+    re: /photo\s*id|notary\s*verification|^verification$|^communication$|w-?9|\bdl\b|driver'?s?\s*licen|copy\s*of\s*id/i,
+    seenIn: 'Duval, Pinellas',
   },
   // Payouts off the top to the applicant and the tax collector. Present on
   // every Duval case including ones with no claim at all.
@@ -163,8 +172,9 @@ const RULES: Rule[] = [
     // "Certified Mail Undelivered". Match the mangled stem, not the word.
     // Brevard adds "CERTIFIED MAIL RETURN X2", "REGULAR MAIL RETURNED x 5"
     // and "CERIFIED MAIL RETURNED".
-    re: /undeliver|undelieve|unable\s*to\s*forward|returned\s*(?:certified\s*|regular\s*)?mail|\bmail\s*return(?:ed)?\b|vacant|no\s*such\s*number|attempted\s*-?\s*not\s*known/i,
-    seenIn: 'Duval, Brevard, Polk',
+    // Pinellas files USPS "Unclaimed Mail" beside "Returned Mail Surplus".
+    re: /undeliver|undelieve|unable\s*to\s*forward|returned\s*(?:certified\s*|regular\s*)?mail|\bmail\s*return(?:ed)?\b|unclaimed\s*mail|vacant|no\s*such\s*number|attempted\s*-?\s*not\s*known/i,
+    seenIn: 'Duval, Brevard, Polk, Pinellas',
   },
   {
     kind: 'sheriff_not_served',
@@ -180,6 +190,10 @@ const RULES: Rule[] = [
 
   // ── The money moving. Checked before claims so a distributed case is never
   //    reported as merely contested. ──────────────────────────────────────────
+  // One claimant paid. Pinellas 2023-08057 carries "Surplus Payout Government"
+  // and still lists $58,531 ACTIVE; 2022-07634 carries a payout to an
+  // interested party and still lists $57,950. Neither is the money gone.
+  { kind: 'payout', re: /surplus\s*payout/i, seenIn: 'Pinellas' },
   {
     kind: 'distribution',
     re: /surplus\s*(distribution|breakdown)|distribution\s*of\s*surplus/i,
@@ -253,7 +267,8 @@ function resolveNamedDisbursements(ledger: ClassifiedDoc[], applicants: string[]
 // ─── Claimant reading, where the source gives us one ────────────────────────
 
 /** A claimant that is a unit of government takes a slice, it is not a competitor. */
-const GOVERNMENT = /\b(city|county|state|town|code\s*enforc|utilit|clerk|sheriff|tax\s*collector|dept|department|district|authority)\b/i;
+const GOVERNMENT =
+  /\b(city|county|state|town|code\s*enforc|utilit|clerk|sheriff|tax\s*collector|dept|department|district|authority|government|gvernment|revenue|child\s*support)\b/i;
 /** A claimant that reads like a recovery shop or a law firm is a competitor. */
 const COMPETITOR = /\b(llc|l\.l\.c|inc|law|recovery|group|funding|capital|partners|services|associates)\b/i;
 /**
@@ -262,20 +277,30 @@ const COMPETITOR = /\b(llc|l\.l\.c|inc|law|recovery|group|funding|capital|partne
  * plain competitor claim is not: a lienholder claim leaves the owner residual
  * available, an assignment does not.
  */
-const ASSIGNEE = /\bas\s+assignee\s+of\b|\bassignee\s+of\b/i;
+const ASSIGNEE = /\bas\s+assignee\s+of\b|\bassignee\s+of\b|\b(?:on\s+)?behalf\s+of\b/i;
 
 export type ClaimantClass = 'assignee' | 'government' | 'competitor' | 'owner' | 'unknown';
 
 export function classifyClaimant(claimant?: string | null, owners: string[] = []): ClaimantClass {
   const c = String(claimant || '').trim();
   if (!c) return 'unknown';
-  if (ASSIGNEE.test(c)) return 'assignee';
-  if (GOVERNMENT.test(c)) return 'government';
   const surnames = owners
     .flatMap((o) => String(o || '').toUpperCase().replace(/[.,]/g, ' ').split(/\s+/))
     .filter((t) => t.length > 2 && !/^(JR|SR|II|III|IV|THE|ESTATE|LLC|INC|TRUST)$/.test(t));
-  const tokens = c.toUpperCase().replace(/[.,]/g, ' ').split(/\s+/);
-  if (surnames.length && tokens.some((t) => t.length > 2 && surnames.includes(t))) return 'owner';
+  const namesOwner = (s: string) =>
+    surnames.length &&
+    s.toUpperCase().replace(/[.,]/g, ' ').split(/\s+/).some((t) => t.length > 2 && surnames.includes(t));
+  if (ASSIGNEE.test(c)) {
+    // "PLUTO ASSET RECOVERY INC ON BEHALF OF MAI T PHAM" on a case owned by
+    // Marquil Hixon (Pinellas 2022-07634) is a recovery shop acting for some
+    // OTHER party, which is competition for the residual, not the owner having
+    // signed it away. Terminal only when the principal is the owner. Without an
+    // owner list there is nothing to check against, so the old reading stands.
+    const principal = c.split(ASSIGNEE).pop() || '';
+    return !surnames.length || namesOwner(principal) ? 'assignee' : 'competitor';
+  }
+  if (GOVERNMENT.test(c)) return 'government';
+  if (namesOwner(c)) return 'owner';
   if (COMPETITOR.test(c)) return 'competitor';
   return 'unknown';
 }
@@ -289,7 +314,7 @@ export interface CaseClassification {
   mailVerdict: MailVerdict;
   ledger: ClassifiedDoc[];
   /** Counts behind the verdict, so a card can explain itself instead of asserting. */
-  counts: Record<'claims' | 'denials' | 'distributions' | 'govLiens' | 'notices' | 'receipts', number>;
+  counts: Record<'claims' | 'denials' | 'distributions' | 'govLiens' | 'notices' | 'receipts' | 'payouts', number>;
   /** A death certificate or probate filing is on the docket. */
   probateOnFile: boolean;
   /** A Sunbiz pull is on file, so the owner of record is an entity. */
@@ -329,6 +354,14 @@ export function classifyCase(
      * claimant would be filed the same way, so the name decides.
      */
     applicants?: string[];
+    /**
+     * The county pays claimants one at a time and keeps the case open with
+     * the remaining balance posted, so a payout to a private claimant is a
+     * slice gone, not the end. TRUE on Pinellas, whose list row carries the
+     * live balance and whose COMPLETED status is what retires the case. FALSE
+     * everywhere a distribution filing closes the file.
+     */
+    payoutsArePartial?: boolean;
   } = {},
 ): CaseClassification {
   const ledger = classifyDocuments(docs);
@@ -345,10 +378,17 @@ export function classifyCase(
   const allClaims = of('claim');
   const claims = allClaims.filter((c) => classifyClaimant(c.claimant, owners) !== 'government');
   const denials = of('denial');
-  const distributions = of('distribution');
+  // A payout to a government unit is that lien satisfied, whatever else is
+  // going on. A payout to anybody else is the money leaving, unless the county
+  // pays in parts and keeps the case open.
+  const govPayouts = of('payout').filter((p) => classifyClaimant(p.claimant, owners) === 'government');
+  const otherPayouts = of('payout').filter((p) => !govPayouts.includes(p));
+  const distributions = [...of('distribution'), ...(opts.payoutsArePartial ? [] : otherPayouts)];
+  const partialPayouts = opts.payoutsArePartial ? otherPayouts : [];
   const govLiens = [
     ...of('gov_lien_claim'),
     ...allClaims.filter((c) => classifyClaimant(c.claimant, owners) === 'government'),
+    ...govPayouts,
   ];
   const notices = of('notice_surplus');
   const receipts = of('receipt');
@@ -360,6 +400,7 @@ export function classifyCase(
     govLiens: govLiens.length,
     notices: notices.length,
     receipts: receipts.length,
+    payouts: partialPayouts.length,
   };
 
   const probateOnFile = of('probate').length > 0;
@@ -406,6 +447,9 @@ export function classifyCase(
 
   let claimStatus: SurplusClaimStatus;
   let reason: string;
+  const paidInPart = partialPayouts.length
+    ? ` ${partialPayouts.length} claimant${partialPayouts.length === 1 ? ' has' : 's have'} already been paid a slice; the county still posts a balance.`
+    : '';
 
   if (distributions.length) {
     claimStatus = SurplusClaimStatus.DISTRIBUTED;
@@ -447,17 +491,23 @@ export function classifyCase(
     probateOnFile,
     entityOnFile,
     claimantUnknown,
-    reason,
+    reason: reason + paidInPart,
   };
 }
 
 // ─── Claimants ──────────────────────────────────────────────────────────────
 
 const NAME_SUFFIX = /\b(JR|SR|II|III|IV|V)\b\.?/g;
-const ESTATE_MARK = /\b(ESTATE|DECEASED|DECD)\b/g;
+/** Pinellas's tax roll abbreviates the estate form to "EST" ("MCGRATH, HARRY A III EST"). */
+const ESTATE_MARK = /\b(ESTATE|DECEASED|DECD|EST)\b/g;
+/** "L.L. Heath, Trustee" on the deed is "L L HEATH TRE" on the roll: one person. */
+const TRUSTEE_MARK = /\b(TRUSTEE|TTEE|TRE|TR)\b/g;
 const ESTATE_OF = /^THE\s+ESTATE\s+OF\s+/i;
+// Offices and departments too: Pinellas 2023-08057 lists "USA HOUSING & URBAN
+// DEV" as an owner, and a name search for a person called USA DEV is a credit
+// spent on nobody.
 const ENTITY =
-  /\b(LLC|L\.L\.C|INC|CORP|CORPORATION|COMPANY|CO|LP|LLP|LLLP|LTD|TRUST|ASSOCIATION|CHURCH|BANK|PARTNERS|HOLDINGS)\b/i;
+  /\b(LLC|L\.L\.C|INC|CORP|CORPORATION|COMPANY|CO|LP|LLP|LLLP|LTD|TRUST|ASSOCIATION|CHURCH|BANK|PARTNERS|HOLDINGS|DEPARTMENT|DEPT|SECRETARY|HOUSING|DEVELOPMENT|DEV|UNITED\s+STATES|USA|COUNTY|CITY\s+OF|STATE\s+OF|AUTHORITY|MORTGAGE|CREDIT\s+UNION|MINISTR(?:Y|IES)|FOUNDATION)\b/i;
 /**
  * A company-type suffix at the END of a name only. Stripped before grouping so
  * `HEAVENLY HANDS FUNDING` and `HEAVENLY HANDS FUNDING, LLC` are one claimant.
@@ -538,6 +588,7 @@ export function collapseClaimants(owners: string[]): CollapsedClaimant[] {
       .replace(/\bESTATE\s+OF\b/g, ' ')
       .replace(/[.,\-\/]/g, ' ')
       .replace(ESTATE_MARK, ' ')
+      .replace(TRUSTEE_MARK, ' ')
       .replace(NAME_SUFFIX, ' ')
       .replace(ENTITY_TAIL, ' ')
       .replace(/\s+/g, ' ')
