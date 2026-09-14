@@ -644,6 +644,26 @@ export class SurplusController {
     });
   }
 
+  /**
+   * Search Endato once for each claimant the county itself marked dead and
+   * nobody ever searched, file their relatives, and look the top few up.
+   * `limit` caps the name searches; `dryRun` counts them.
+   */
+  @Post('estate-relatives')
+  async estateRelatives(@Body() body: any, @Headers('authorization') authHeader?: string) {
+    const { organizationId } = this.decodeToken(authHeader);
+    const limit = body?.limit == null ? undefined : Number(body.limit);
+    if (limit != null && (!Number.isFinite(limit) || limit < 1)) {
+      throw new BadRequestException('limit must be a positive number');
+    }
+    return this.skiptrace.estateRelatives({
+      organizationId: body?.organizationId || organizationId || null,
+      county: typeof body?.county === 'string' && body.county ? body.county : undefined,
+      limit,
+      dryRun: body?.dryRun === true,
+    });
+  }
+
   // ─── Heirs of a deceased claimant ─────────────────────────────────────────
 
   /** Heirs on file for a claimant, living first. */

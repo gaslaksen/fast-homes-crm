@@ -34,6 +34,7 @@ import axios from 'axios';
 import { PrismaService } from '../prisma/prisma.service';
 import { DncRegistry, LeadSource, SurplusClaimantType, SurplusTraceChannel } from '@fast-homes/shared';
 import { normalizePhoneDigits } from '../foreclosures/foreclosure-scoring.util';
+import { isWorkable } from './surplus-classify.util';
 import {
   addressCaseCounts,
   addressKeyOf,
@@ -789,6 +790,171 @@ export class SurplusSkiptraceService {
       spent += r.looked;
       out.looked += r.looked;
       out.withContact += r.withContact;
+    }
+    return out;
+  }
+
+  /**
+   * Relatives for claimants the county itself says are dead.
+   *
+   * A claimant marked dead from the docket ("ESTATE OF THERESA MCPARLIN,
+   * DECEASED", "JIMMY DON BERGER ESTATE", a probate filing) goes straight to
+   * Find the heirs, and until now nothing ever searched for them: their death
+   * was already known, so no trace ran and no relatives were filed. Endato
+   * knows their family. The claimant is searched once by name, verified by
+   * address history exactly as the name rung verifies, and on a match the
+   * relatives are filed with their ids and the top few looked up. A death
+   * record Endato holds supplies the date the docket lacked.
+   *
+   * Only claimants in Find the heirs with no Endato relatives and no living
+   * heir on file, each searched once (stamped on deathCheckedAt, hit or miss).
+   * `limit` caps the name searches; the lookups after a match follow the
+   * per-claimant cap. `dryRun` counts the searches.
+   */
+  async estateRelatives(opts: {
+    organizationId?: string | null;
+    county?: string;
+    limit?: number;
+    dryRun?: boolean;
+  }): Promise<{
+    candidates: number;
+    searches: number;
+    searched: number;
+    matched: number;
+    relativesFiled: number;
+    looked: number;
+    withContact: number;
+    errors: number;
+    message?: string;
+  }> {
+    const out = {
+      candidates: 0, searches: 0, searched: 0, matched: 0, relativesFiled: 0, looked: 0, withContact: 0, errors: 0,
+    } as {
+      candidates: number; searches: number; searched: number; matched: number; relativesFiled: number;
+      looked: number; withContact: number; errors: number; message?: string;
+    };
+    if (!this.endato?.available && !opts.dryRun) {
+      out.message = 'ENDATO_AP_NAME / ENDATO_AP_PASSWORD are not set, so nothing was searched.';
+      return out;
+    }
+    const leads = await this.prisma.lead.findMany({
+      where: {
+        source: LeadSource.SURPLUS,
+        ...(opts.organizationId ? { organizationId: opts.organizationId } : {}),
+        surplusDetail: {
+          OR: [{ deceased: true }, { heirsRequired: true }],
+          deathCheckedAt: null,
+          doNotCall: false,
+          ...(opts.county ? { county: opts.county } : {}),
+        },
+      },
+      include: { surplusDetail: { include: { heirs: true } } },
+    });
+    const eligible = leads
+      .filter((l) => l.surplusDetail && isWorkable(l.surplusDetail.claimStatus as any))
+      .filter((l) => {
+        const hs = (l.surplusDetail as any).heirs || [];
+        const hasVendorRelatives = hs.some((h: any) => h.sourceKind === 'endato');
+        const hasLivingHeir = hs.some((h: any) => h.role === 'heir' && !h.deceased);
+        return !hasVendorRelatives && !hasLivingHeir;
+      })
+      .map((l) => ({ lead: l, c: candidateOf(l) }))
+      .filter(({ c }) => !c.isEntity)
+      .sort((a, b) => (b.lead.surplusDetail!.grossSurplus || 0) - (a.lead.surplusDetail!.grossSurplus || 0));
+    out.candidates = eligible.length;
+
+    const groups = new Map<string, { lead: any; c: Candidate }[]>();
+    for (const x of eligible) {
+      const n = splitClaimantName(estateName(x.c.claimant));
+      if (!n.surname || !n.given.length) continue;
+      const key = `${x.c.caseNumber || x.c.propertyStreet || ''}|${n.given[0]} ${n.surname}`;
+      groups.set(key, [...(groups.get(key) || []), x]);
+    }
+    out.searches = opts.limit ? Math.min(opts.limit, groups.size) : groups.size;
+    if (opts.dryRun) return out;
+
+    for (const [, group] of groups) {
+      if (opts.limit && out.searched >= opts.limit) break;
+      const people = group.map((x) => ({ ...x, c: { ...x.c, claimant: estateName(x.c.claimant) } }));
+      const c = people[0].c;
+      const split = splitClaimantName(c.claimant);
+      const hint =
+        c.mailingZip && c.mailingState
+          ? { city: c.mailingCity, state: c.mailingState }
+          : { city: c.propertyCity, state: c.propertyState || 'FL' };
+      out.searched += 1;
+      let found: EndatoPerson[];
+      try {
+        found = await this.endato!.search({
+          first: split.given[0].toUpperCase(),
+          last: split.surname.toUpperCase(),
+          city: hint.city,
+          state: hint.state,
+        });
+        await this.stampDeathChecked(people.map((x) => x.c.detailId));
+      } catch (e: any) {
+        out.errors += 1;
+        if (!out.message) out.message = e.message;
+        this.logger.warn(`Estate search failed for ${c.claimant}: ${e.message}`);
+        if (/auth|out of searches|rate limited/i.test(e.message)) break;
+        continue;
+      }
+      const keys = {
+        property: historyKey(c.propertyStreet, c.propertyCity, c.propertyZip),
+        mailing: historyKey(c.mailingStreet, c.mailingCity, c.mailingZip),
+      };
+      const verified = found
+        .map((p) => ({ p, via: verifiedVia(p, keys) }))
+        .filter((x) => x.via)
+        .map((x) => this.endatoToTraced(x.p, x.via as 'property' | 'mailing'));
+
+      for (const { lead, c: cc } of people) {
+        const best = verified.length ? this.bestPersonFor(cc, verified, new Set()) : null;
+        // The same strict given-name rule as a death: a relative's family is
+        // not the claimant's, and a middle initial is not a first name.
+        const same = !!best && deathIsTheClaimants(cc.claimant, best.person.first, best.person.last);
+        const row = await this.prisma.surplusDetail.findUnique({
+          where: { id: cc.detailId },
+          select: { callNotes: true, dateOfDeath: true },
+        });
+        if (!same) {
+          const text = found.length
+            ? `Estate search (Endato): ${found.length} ${found.length === 1 ? 'person' : 'people'} named ${cc.claimant}, none with the property or the clerk's address in their history, so no relatives were filed.`
+            : `Estate search (Endato): nobody named ${cc.claimant} near ${hint.city || hint.state}.`;
+          await this.prisma.surplusDetail.update({
+            where: { id: cc.detailId },
+            data: { callNotes: [row?.callNotes, text].filter(Boolean).join('\n') },
+          });
+          await this.logAttempt(cc.detailId, null, 'nothing', text, 'endato');
+          continue;
+        }
+        out.matched += 1;
+        const person = best!.person;
+        const rels = adultRelatives(person.relatives || []);
+        const iso = person.dateOfDeath && /^\d{4}-\d{2}-\d{2}$/.test(person.dateOfDeath) ? person.dateOfDeath : null;
+        const text =
+          `Estate search (Endato): matched ${cc.claimant} by address history. ` +
+          (iso ? `Endato dates the death ${longDate(iso)}. ` : person.deceased ? '' : 'Endato holds no death record; the county record is what says they are dead. ') +
+          (rels.length
+            ? `${rels.length} relative${rels.length === 1 ? '' : 's'} filed to start the heir search from.`
+            : 'Endato lists no relatives.');
+        await this.prisma.surplusDetail.update({
+          where: { id: cc.detailId },
+          data: {
+            // The date the docket never gave. The flag was already the county's.
+            ...(iso && !row?.dateOfDeath ? { dateOfDeath: new Date(`${iso}T12:00:00Z`), deathSource: 'endato' } : {}),
+            callNotes: [row?.callNotes, text].filter(Boolean).join('\n'),
+          },
+        });
+        await this.logAttempt(cc.detailId, null, 'found', text, 'endato');
+        const before = await this.prisma.surplusHeir.count({ where: { surplusDetailId: cc.detailId } });
+        await this.fileRelatives(cc.detailId, (lead as any).organizationId || null, cc.claimant, rels, 'endato');
+        out.relativesFiled += (await this.prisma.surplusHeir.count({ where: { surplusDetailId: cc.detailId } })) - before;
+        const r = await this.lookupRelatives(cc.detailId, cc.claimant);
+        out.looked += r.looked;
+        out.withContact += r.withContact;
+      }
+      await this.pause(CALL_DELAY_MS);
     }
     return out;
   }
@@ -1921,4 +2087,21 @@ function adultRelatives(rs: EndatoRelative[]): EndatoRelative[] {
     const age = (now.getTime() - born.getTime()) / (365.25 * 24 * 3600 * 1000);
     return age >= 18;
   });
+}
+
+/**
+ * The person inside an estate's name, for a people search. The docket writes
+ * "ESTATE OF THERESA MCPARLIN, DECEASED", "JIMMY DON BERGER ESTATE" and, on
+ * the Pinellas roll, "MCGRATH, HARRY A III EST"; Endato wants Theresa
+ * McParlin.
+ */
+export function estateName(raw: string): string {
+  const s = String(raw || '')
+    .replace(/^\s*(?:the\s+)?estate\s+of\s+/i, '')
+    .replace(/\(?\b(?:deceased|decd|est|estate)\b\)?\.?/gi, ' ')
+    .replace(/\s*,\s*,/g, ',')
+    .replace(/[\s,]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return displayName(s);
 }
