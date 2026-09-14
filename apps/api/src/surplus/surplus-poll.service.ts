@@ -151,5 +151,6 @@ export function describeTrace(newLeads: number, t: SurplusTraceResult): string {
     `${t.nameSearch.searched} name search${t.nameSearch.searched === 1 ? '' : 'es'}`,
     t.errors ? `${t.errors} error${t.errors === 1 ? '' : 's'}` : null,
   ].filter(Boolean);
-  return `Traced ${t.contacted} of ${newLeads} new to a number (${bits.join(', ')})`;
+  const dead = t.deceased ? `, ${t.deceased} more found deceased` : '';
+  return `Traced ${t.contacted} of ${newLeads} new to a number${dead} (${bits.join(', ')})`;
 }

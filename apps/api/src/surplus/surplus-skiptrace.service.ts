@@ -32,7 +32,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
 import { PrismaService } from '../prisma/prisma.service';
-import { DncRegistry, LeadSource, SurplusTraceChannel } from '@fast-homes/shared';
+import { DncRegistry, LeadSource, SurplusClaimantType, SurplusTraceChannel } from '@fast-homes/shared';
 import { normalizePhoneDigits } from '../foreclosures/foreclosure-scoring.util';
 import {
   addressCaseCounts,
@@ -41,6 +41,7 @@ import {
   traceEligibility,
   verifyTracedName,
   TraceVerdict,
+  deathIsTheClaimants,
 } from './surplus-skiptrace.util';
 import {
   SurplusEndatoService,
@@ -48,6 +49,7 @@ import {
   currentAddress,
   historyKey,
   verifiedVia,
+  endatoDate,
 } from './surplus-endato.service';
 
 /**
@@ -83,6 +85,12 @@ export interface SurplusTraceResult {
    * `namesakes` is people returned and refused for lack of that tie.
    */
   nameSearch: { searched: number; verified: number; namesakes: number };
+  /**
+   * Claimants the trace identified and a vendor holds a death record for.
+   * Marked deceased and moved to the heirs queue; not counted as contacted,
+   * since their numbers cannot reach anyone who can sign.
+   */
+  deceased: number;
   errors: number;
   message?: string;
 }
@@ -165,6 +173,10 @@ interface TracedPerson {
   emails: string[];
   /** The vendor believes this person is deceased. */
   deceased: boolean;
+  /** YYYY-MM-DD, when the vendor dates the death. */
+  dateOfDeath?: string | null;
+  /** Relatives the vendor holds, the starting list for an heir search. */
+  relatives?: { name: string; type: string | null; deceased: boolean; city: string | null; state: string | null }[];
   /**
    * True when this person's address history includes the property that sold.
    * This is the confirmation the surplus course teaches, available here without
@@ -248,6 +260,7 @@ export class SurplusSkiptraceService {
       mismatched: 0,
       skipped: {},
       nameSearch: { searched: 0, verified: 0, namesakes: 0 },
+      deceased: 0,
       errors: 0,
     };
 
@@ -272,62 +285,7 @@ export class SurplusSkiptraceService {
       include: { surplusDetail: true },
     });
 
-    const candidates: Candidate[] = leads
-      .filter((l) => l.surplusDetail)
-      .map((l) => {
-        const d = l.surplusDetail!;
-        const claimant = `${l.sellerFirstName || ''} ${l.sellerLastName || ''}`.trim();
-
-        // The owner's OWN address, read off the Notice of Surplus Funds, is the
-        // target. The property address is a poor substitute and often an
-        // actively wrong one: case 2025-0023TD sold a vacant Jacksonville lot
-        // and noticed Myrtis Griffin at 72 Smith Drive, Hartford, CT. Tracing
-        // the property returned a stranger, as it did on all six of the first
-        // live submissions.
-        const hasMailing = !!d.ownerMailingStreet;
-        const isEntity = ENTITY.test(claimant);
-        const nameKnown = !isEntity && claimant.split(/\s+/).filter(Boolean).length >= 2;
-        // A mailing address the clerk's own letter bounced from is not sent.
-        // Under the v3 query the vendor confirms the NAME against the property
-        // that sold, so a claimant with a dead address and a known name is
-        // traced by name plus property instead of being written off. Polk
-        // carries returned letters on 116 of 141 properties.
-        const mailDead = d.mailVerdict === 'undeliverable';
-        const useMailing = hasMailing && !(mailDead && nameKnown);
-        const c = useMailing
-          ? {
-              street: d.ownerMailingStreet,
-              city: d.ownerMailingCity,
-              state: d.ownerMailingState,
-              zip: d.ownerMailingZip,
-            }
-          : {
-              street: l.propertyAddress,
-              city: l.propertyCity,
-              state: l.propertyState,
-              zip: l.propertyZip,
-            };
-        return {
-          leadId: l.id,
-          detailId: d.id,
-          claimant,
-          caseNumber: d.caseNumber,
-          isEntity,
-          nameKnown,
-          ...c,
-          addressKey: addressKeyOf(c),
-          addressSource: (useMailing ? 'notice' : 'property') as 'notice' | 'property',
-          propertyStreet: l.propertyAddress,
-          propertyCity: l.propertyCity,
-          propertyState: l.propertyState,
-          propertyZip: l.propertyZip,
-          mailingStreet: d.ownerMailingStreet,
-          mailingCity: d.ownerMailingCity,
-          mailingState: d.ownerMailingState,
-          mailingZip: d.ownerMailingZip,
-          nameSearchedAt: d.nameSearchedAt,
-        };
-      });
+    const candidates: Candidate[] = leads.filter((l) => l.surplusDetail).map((l) => candidateOf(l));
 
     // Biggest surplus first, so a capped run spends its credits where the fee is.
     const surplusOf = new Map(leads.map((l) => [l.id, l.surplusDetail?.grossSurplus || 0]));
@@ -525,6 +483,136 @@ export class SurplusSkiptraceService {
     }
   }
 
+  /**
+   * Check claimants already traced for a death record, once.
+   *
+   * Until 2026-09-14 the Endato parser read the death record from a field the
+   * response does not carry, so every claimant traced before then went onto
+   * the board alive whatever the vendor knew. Juliet Abe had a 2021 date of
+   * death on the record that gave the board her number. This re-asks Endato
+   * about the claimants who already have a number, verifies the identity the
+   * same way the name rung does, and on a death record marks them deceased
+   * and files the vendor's relatives. It never writes a phone number: the
+   * numbers already on the row came from a verified trace and may be
+   * BatchData's DNC-scrubbed ones.
+   *
+   * One search per person per case, stamped on `deathCheckedAt` whatever the
+   * answer, so a second run costs nothing. `dryRun` counts the searches it
+   * would buy and spends nothing.
+   */
+  async recheckDeaths(opts: {
+    organizationId?: string | null;
+    county?: string;
+    limit?: number;
+    dryRun?: boolean;
+  }): Promise<{
+    candidates: number;
+    searches: number;
+    searched: number;
+    verified: number;
+    deceased: number;
+    errors: number;
+    message?: string;
+  }> {
+    const out = { candidates: 0, searches: 0, searched: 0, verified: 0, deceased: 0, errors: 0 } as {
+      candidates: number; searches: number; searched: number; verified: number; deceased: number; errors: number; message?: string;
+    };
+    if (!this.endato?.available && !opts.dryRun) {
+      out.message = 'ENDATO_AP_NAME / ENDATO_AP_PASSWORD are not set, so nothing was checked.';
+      return out;
+    }
+    const leads = await this.prisma.lead.findMany({
+      where: {
+        source: LeadSource.SURPLUS,
+        ...(opts.organizationId ? { organizationId: opts.organizationId } : {}),
+        // Only people somebody might dial: a number is on the row.
+        NOT: { sellerPhone: '' },
+        surplusDetail: {
+          deceased: false,
+          heirsRequired: false,
+          deathCheckedAt: null,
+          ...(opts.county ? { county: opts.county } : {}),
+        },
+      },
+      include: { surplusDetail: true },
+    });
+    const cands = leads.filter((l) => l.surplusDetail).map((l) => candidateOf(l)).filter((c) => c.nameKnown);
+    out.candidates = cands.length;
+
+    // One search per person per case, as the name rung groups them.
+    const groups = new Map<string, Candidate[]>();
+    for (const c of cands) {
+      const n = splitClaimantName(displayName(c.claimant));
+      if (!n.surname || !n.given.length) continue;
+      const key = `${c.caseNumber || c.propertyStreet || ''}|${n.given[0]} ${n.surname}`;
+      groups.set(key, [...(groups.get(key) || []), c]);
+    }
+    out.searches = opts.limit ? Math.min(opts.limit, groups.size) : groups.size;
+    if (opts.dryRun) return out;
+
+    for (const [, group] of groups) {
+      if (opts.limit && out.searched >= opts.limit) break;
+      const people = group.map((c) => ({ ...c, claimant: displayName(c.claimant) }));
+      const c = people[0];
+      const split = splitClaimantName(c.claimant);
+      const hint =
+        c.mailingZip && c.mailingState
+          ? { city: c.mailingCity, state: c.mailingState }
+          : { city: c.propertyCity, state: c.propertyState || 'FL' };
+      out.searched += 1;
+      let found: EndatoPerson[];
+      try {
+        found = await this.endato!.search({
+          first: split.given[0].toUpperCase(),
+          last: split.surname.toUpperCase(),
+          city: hint.city,
+          state: hint.state,
+        });
+        await this.stampDeathChecked(people.map((cc) => cc.detailId));
+      } catch (e: any) {
+        out.errors += 1;
+        if (!out.message) out.message = e.message;
+        this.logger.warn(`Death check failed for ${c.claimant}: ${e.message}`);
+        if (/auth|out of searches|rate limited/i.test(e.message)) break;
+        continue;
+      }
+      const keys = {
+        property: historyKey(c.propertyStreet, c.propertyCity, c.propertyZip),
+        mailing: historyKey(c.mailingStreet, c.mailingCity, c.mailingZip),
+      };
+      const verified = found
+        .map((p) => ({ p, via: verifiedVia(p, keys) }))
+        .filter((x) => x.via)
+        .map((x) => this.endatoToTraced(x.p, x.via as 'property' | 'mailing'));
+      out.verified += verified.length ? 1 : 0;
+      for (const cc of people) {
+        const best = verified.length ? this.bestPersonFor(cc, verified, new Set()) : null;
+        const died =
+          !!best &&
+          best.verdict === 'same_person' &&
+          best.person.deceased &&
+          deathIsTheClaimants(cc.claimant, best.person.first, best.person.last);
+        if (died) {
+          await this.markDeceased(cc, best!.person, 'endato');
+        }
+        await this.logAttempt(
+          cc.detailId,
+          null,
+          died ? 'found' : 'nothing',
+          died
+            ? `Death check: Endato holds a death record for ${cc.claimant}${best!.person.dateOfDeath ? ` dated ${best!.person.dateOfDeath}` : ''}.`
+            : verified.length
+              ? `Death check: ${cc.claimant} verified, no death record.`
+              : `Death check: could not re-verify ${cc.claimant} by address history, so no death record was read.`,
+          'endato',
+        );
+        if (died) out.deceased += 1;
+      }
+      await this.pause(CALL_DELAY_MS);
+    }
+    return out;
+  }
+
   /** An Endato person as the matcher sees one, with what else it learned in `extra`. */
   private endatoToTraced(p: EndatoPerson, via: 'property' | 'mailing'): TracedPerson {
     const cur = currentAddress(p);
@@ -545,6 +633,8 @@ export class SurplusSkiptraceService {
       phones,
       emails: p.emails.slice(0, 2),
       deceased: p.deceased,
+      dateOfDeath: p.dateOfDeath,
+      relatives: p.relatives,
       livedAtProperty: via === 'property',
       propertyOwner: false,
       extra: [
@@ -552,7 +642,7 @@ export class SurplusSkiptraceService {
         cur
           ? `Endato's latest address for them is ${cur.street}, ${[cur.city, cur.state, cur.zip].filter(Boolean).join(' ')}${cur.lastSeen ? ` (${cur.lastSeen})` : ''}.`
           : null,
-        p.deceased ? 'Endato holds a death record for this person.' : null,
+        p.deceased ? `Endato holds a death record for this person${p.dateOfDeath ? `, dated ${p.dateOfDeath}` : ''}.` : null,
         rel ? `Relatives on file: ${rel}.` : null,
         'Numbers came from a name search and are not DNC scrubbed.',
       ]
@@ -588,6 +678,7 @@ export class SurplusSkiptraceService {
       mismatched: 0,
       skipped: {},
       nameSearch: { searched: 0, verified: 0, namesakes: 0 },
+      deceased: 0,
       errors: 0,
     };
 
@@ -944,12 +1035,27 @@ export class SurplusSkiptraceService {
         })),
         phones,
         emails,
-        deceased: !!p.deceased,
+        ...batchDeath(p, this.logDeathShape),
         livedAtProperty,
         propertyOwner: !!p.propertyOwner,
       };
     });
   }
+
+  /**
+   * The shape of BatchData's death fields has never been seen live: the
+   * BatchData key is only in Railway, and its CSV export names the column
+   * "Skip Trace Death Deceased", which suggests a nested `death.deceased`
+   * rather than the flat `deceased` this parser used to read. Both are read
+   * now, and the first response carrying any death-like key is logged once so
+   * the real shape can be confirmed from the Railway log.
+   */
+  private deathShapeLogged = false;
+  private logDeathShape = (fields: Record<string, unknown>) => {
+    if (this.deathShapeLogged) return;
+    this.deathShapeLogged = true;
+    this.logger.log(`BatchData death fields seen: ${JSON.stringify(fields).slice(0, 400)}`);
+  };
 
   /**
    * Match each returned person to the claimant they actually are.
@@ -1073,6 +1179,14 @@ export class SurplusSkiptraceService {
         continue;
       }
 
+      // The death record belongs to the claimant only when the vendor
+      // returned the claimant themself. A relative's death is the relative's,
+      // and an unnamed result cannot be pinned on anybody.
+      const died =
+        best.verdict === 'same_person' &&
+        best.person.deceased &&
+        deathIsTheClaimants(c.claimant, best.person.first, best.person.last);
+
       const hasContact = best.person.phones.length > 0 || best.person.emails.length > 0;
       if (!hasContact) {
         await this.note(
@@ -1084,6 +1198,13 @@ export class SurplusSkiptraceService {
           },
           source,
         );
+        if (died) {
+          await this.markDeceased(c, best.person, source);
+          result.deceased += 1;
+          contacted.add(c.detailId);
+        } else if (source === 'endato' && best.verdict === 'same_person') {
+          await this.stampDeathChecked([c.detailId]);
+        }
         continue;
       }
 
@@ -1136,10 +1257,115 @@ export class SurplusSkiptraceService {
         },
       });
       await this.logAttempt(c.detailId, null, 'found', `Returned ${name || 'contacts'} ${where}. ${best.reason}`, source);
-      result.contacted += 1;
       contacted.add(c.detailId);
+      if (died) {
+        // The numbers are kept, and the card files them as the late
+        // claimant's, for the record. They are not a contact: nobody on the
+        // end of them can sign.
+        await this.markDeceased(c, best.person, source);
+        result.deceased += 1;
+        continue;
+      }
+      if (source === 'endato' && best.verdict === 'same_person') await this.stampDeathChecked([c.detailId]);
+      result.contacted += 1;
     }
     return contacted;
+  }
+
+  /**
+   * The person the trace verified has a death record.
+   *
+   * Brevard 250921 is why this exists: Endato returned Juliet Abe, verified by
+   * the Yonkers address the clerk wrote to, with a date of death of 22 March
+   * 2021 and a landline still listed. The parser dropped the date, the board
+   * put her under Call now, and a partner dialled a dead woman's number. The
+   * claimant is marked deceased with the date and the vendor named, which
+   * moves the lead to Find the heirs, and the vendor's living relatives are
+   * filed on it as the people to start the heir search from.
+   *
+   * They are filed as relatives, never as heirs. Only a probate filing or the
+   * family can say who inherited; a people-search list of relatives includes
+   * in-laws and ex-spouses who have no standing at all.
+   */
+  private async markDeceased(c: Candidate, p: TracedPerson, source: TraceSource): Promise<void> {
+    const vendor = source === 'endato' ? 'Endato' : 'BatchData';
+    const iso = p.dateOfDeath && /^\d{4}-\d{2}-\d{2}$/.test(p.dateOfDeath) ? p.dateOfDeath : null;
+    const dod = iso ? new Date(`${iso}T12:00:00Z`) : null;
+    const who = displayName(c.claimant);
+    const living = (p.relatives || []).filter((r) => !r.deceased && r.name);
+    const relList = living
+      .slice(0, 6)
+      .map((r) => (r.type ? `${r.name} (${r.type.toLowerCase()})` : r.name))
+      .join(', ');
+    const line =
+      `Death record (${vendor}): ${who} ${dod ? `died ${longDate(iso!)}` : 'is recorded as deceased, no date given'}. ` +
+      `Marked deceased, so only an heir can sign. ` +
+      (living.length
+        ? `Relatives on file to start the heir search from: ${relList}.`
+        : 'The vendor lists no relatives, so the probate court and an obituary are where the heirs are.');
+
+    const row = await this.prisma.surplusDetail.findUnique({
+      where: { id: c.detailId },
+      select: { organizationId: true, callNotes: true },
+    });
+    await this.prisma.surplusDetail.update({
+      where: { id: c.detailId },
+      data: {
+        deceased: true,
+        heirsRequired: true,
+        claimantType: SurplusClaimantType.HEIR_ESTATE,
+        dateOfDeath: dod,
+        deathSource: source,
+        ...(source === 'endato' ? { deathCheckedAt: new Date() } : {}),
+        // Plain concatenation, not appendNote: that drops earlier trace lines,
+        // and the line just written is the match this death rides on.
+        callNotes: /^Death record \(/m.test(row?.callNotes || '')
+          ? row?.callNotes
+          : [row?.callNotes, line].filter(Boolean).join('\n'),
+      },
+    });
+
+    if (!living.length) return;
+    const key = (n: string) =>
+      String(n || '')
+        .toUpperCase()
+        .replace(/[^A-Z ]/g, ' ')
+        .split(/\s+/)
+        .filter((t) => t.length > 1)
+        .sort()
+        .join(' ');
+    const have = await this.prisma.surplusHeir.findMany({
+      where: { surplusDetailId: c.detailId },
+      select: { name: true },
+    });
+    const seen = new Set(have.map((h) => key(h.name)));
+    for (const r of living.slice(0, 8)) {
+      const k = key(r.name);
+      if (!k || seen.has(k)) continue;
+      seen.add(k);
+      await this.prisma.surplusHeir.create({
+        data: {
+          surplusDetailId: c.detailId,
+          organizationId: row?.organizationId || null,
+          name: r.name,
+          relationship: r.type,
+          city: r.city,
+          state: r.state,
+          role: 'relative',
+          sourceKind: source,
+          callNotes: `${vendor} lists ${r.name} as a relative${r.type ? ` (${r.type.toLowerCase()})` : ''} of ${who}. A route to the heirs, not an heir until a probate filing or the family says so.`,
+        },
+      });
+    }
+  }
+
+  /** A verified identity came back with no death record. */
+  private async stampDeathChecked(detailIds: string[]): Promise<void> {
+    if (!detailIds.length) return;
+    await this.prisma.surplusDetail.updateMany({
+      where: { id: { in: detailIds } },
+      data: { deathCheckedAt: new Date() },
+    });
   }
 
   /**
@@ -1255,4 +1481,90 @@ function displayName(raw: string): string {
   // "JOHNNY LOVE WILLIAMS, SR" is a suffix, not a surname-first form.
   if (/^(SR|JR|II|III|IV|V|ESQ|ET\s*AL|ETAL|ESTATE\s*OF|DECEASED|TRUSTEE|TR)\.?$/i.test(given.trim())) return s;
   return `${given.trim()} ${last.trim()}`;
+}
+
+/** "2021-03-22" as "22 March 2021", for a note a person reads. */
+function longDate(iso: string): string {
+  const [y, m, d] = iso.split('-').map(Number);
+  const month = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December',
+  ][m - 1];
+  return month ? `${d} ${month} ${y}` : iso;
+}
+
+/**
+ * BatchData's death fields, read in every shape they might take: the flat
+ * `deceased` this parser always read, and the nested `death.deceased` its CSV
+ * export's "Skip Trace Death Deceased" column implies. `seen` is told about
+ * any death-like key so the live shape is logged once.
+ */
+export function batchDeath(
+  p: any,
+  seen?: (fields: Record<string, unknown>) => void,
+): { deceased: boolean; dateOfDeath: string | null } {
+  const death = p && typeof p.death === 'object' && p.death ? p.death : {};
+  const fields = Object.fromEntries(
+    Object.entries(p || {}).filter(([k]) => /death|deceas|dod/i.test(k)),
+  );
+  if (seen && Object.keys(fields).length) seen(fields);
+  const deceased = !!(p?.deceased || p?.isDeceased || death.deceased || death.isDeceased);
+  const dateOfDeath = endatoDate(death.date || death.dateOfDeath || death.dod || p?.dateOfDeath || p?.dod);
+  return { deceased: deceased || !!dateOfDeath, dateOfDeath };
+}
+
+/** A surplus lead as the trace sees it: whose name, which address to submit. */
+function candidateOf(l: any): Candidate {
+  const d = l.surplusDetail!;
+  const claimant = `${l.sellerFirstName || ''} ${l.sellerLastName || ''}`.trim();
+
+  // The owner's OWN address, read off the Notice of Surplus Funds, is the
+  // target. The property address is a poor substitute and often an
+  // actively wrong one: case 2025-0023TD sold a vacant Jacksonville lot
+  // and noticed Myrtis Griffin at 72 Smith Drive, Hartford, CT. Tracing
+  // the property returned a stranger, as it did on all six of the first
+  // live submissions.
+  const hasMailing = !!d.ownerMailingStreet;
+  const isEntity = ENTITY.test(claimant);
+  const nameKnown = !isEntity && claimant.split(/\s+/).filter(Boolean).length >= 2;
+  // A mailing address the clerk's own letter bounced from is not sent.
+  // Under the v3 query the vendor confirms the NAME against the property
+  // that sold, so a claimant with a dead address and a known name is
+  // traced by name plus property instead of being written off. Polk
+  // carries returned letters on 116 of 141 properties.
+  const mailDead = d.mailVerdict === 'undeliverable';
+  const useMailing = hasMailing && !(mailDead && nameKnown);
+  const c = useMailing
+    ? {
+        street: d.ownerMailingStreet,
+        city: d.ownerMailingCity,
+        state: d.ownerMailingState,
+        zip: d.ownerMailingZip,
+      }
+    : {
+        street: l.propertyAddress,
+        city: l.propertyCity,
+        state: l.propertyState,
+        zip: l.propertyZip,
+      };
+  return {
+    leadId: l.id,
+    detailId: d.id,
+    claimant,
+    caseNumber: d.caseNumber,
+    isEntity,
+    nameKnown,
+    ...c,
+    addressKey: addressKeyOf(c),
+    addressSource: (useMailing ? 'notice' : 'property') as 'notice' | 'property',
+    propertyStreet: l.propertyAddress,
+    propertyCity: l.propertyCity,
+    propertyState: l.propertyState,
+    propertyZip: l.propertyZip,
+    mailingStreet: d.ownerMailingStreet,
+    mailingCity: d.ownerMailingCity,
+    mailingState: d.ownerMailingState,
+    mailingZip: d.ownerMailingZip,
+    nameSearchedAt: d.nameSearchedAt,
+  };
 }

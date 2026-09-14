@@ -6,6 +6,7 @@ import {
   addressKeyOf,
   addressCaseCounts,
   traceState,
+  deathIsTheClaimants,
 } from './surplus-skiptrace.util';
 import { matchRecipient } from './surplus-name-search.util';
 
@@ -331,5 +332,26 @@ describe('traceState never contradicts the contacts on the row', () => {
   it('leaves an outcome that agrees with the contacts alone', () => {
     expect(traceState({ tracedAt: new Date(), traceOutcome: 'no_person' }, 0).state).toBe('no_person');
     expect(traceState({ tracedAt: new Date(), traceOutcome: 'matched' }, 3).state).toBe('matched');
+  });
+});
+
+describe('deathIsTheClaimants', () => {
+  it('needs the vendor\'s given name to match one the county spelled out', () => {
+    expect(deathIsTheClaimants('JULIET R ABE', 'Juliet', 'Abe')).toBe(true);
+    expect(deathIsTheClaimants('ABE, JULIET R', 'Juliet', 'Abe')).toBe(true);
+    expect(deathIsTheClaimants('CONNOLLY, JAMES W', 'James', 'Connolly')).toBe(true);
+    // One letter of edit distance, as the matcher allows for a long name.
+    expect(deathIsTheClaimants('BERNHARD F ZUMSTEG', 'Bernard', 'Zumsteg')).toBe(true);
+  });
+
+  it('refuses a match made only through an initial', () => {
+    // same_person for a phone number; not the claimant's death.
+    expect(deathIsTheClaimants('JULIET R ABE', 'Robert', 'Abe')).toBe(false);
+    expect(deathIsTheClaimants('J ROBERT ABE', 'Jane', 'Abe')).toBe(false);
+  });
+
+  it('refuses anything short of same_person', () => {
+    expect(deathIsTheClaimants('JULIET R ABE', 'Kenneth', 'Abe')).toBe(false);
+    expect(deathIsTheClaimants('JULIET R ABE', 'Juliet', 'Stranger')).toBe(false);
   });
 });

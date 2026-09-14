@@ -442,8 +442,12 @@ export class DigestService {
       days: c.claimantUpdate?.daysSince ?? null,
       url: this.leadUrl(c.id),
     }));
+    // A deceased claimant's numbers are the late claimant's: the board files
+    // them under Find the heirs, and the brief must not send somebody to dial
+    // them. Phone counts alone put Juliet Abe (Brevard 250921) under Call now
+    // five years after her death.
     const surplusCallable = surplusClaimants.filter(
-      (c) => c.workScore > 0 && c.cleanPhoneCount > 0 && !c.doNotCall,
+      (c) => c.workScore > 0 && c.cleanPhoneCount > 0 && !c.doNotCall && !c.deceased && !c.heirsRequired,
     );
     // Live number, nothing logged against them yet. That is the whole list of
     // who to call this morning, best first. `touches` is the board's touch

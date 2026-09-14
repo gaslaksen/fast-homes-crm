@@ -138,6 +138,10 @@ export interface SurplusPanelLead {
   } | null;
   doNotCall: boolean;
   isDeceased: boolean;
+  /** YYYY-MM-DD, when a people search dated the death. */
+  dateOfDeath?: string | null;
+  /** 'endato' | 'batchdata' when a vendor death record set the flag. */
+  deathSource?: string | null;
   totalTouches: number;
   /** One of us mailed a letter. Date and the address on the envelope. */
   letterMailedAt: string | null;
@@ -2512,11 +2516,13 @@ export default function SurplusWorkPanel({
               <b style={lead.isDeceased ? { textDecoration: 'line-through' } : undefined}>{lead.claimant}</b>
               <span style={{ fontSize: 11.5, color: lead.isDeceased ? (lead.callableHeirCount > 0 ? 'var(--mint)' : 'var(--red)') : TRACE_TONE[lead.trace?.tone || 'idle'] }}>
                 {lead.isDeceased
-                  ? lead.callableHeirCount > 0
-                    ? `deceased, ${lead.callableHeirCount} callable heir${lead.callableHeirCount === 1 ? '' : 's'}`
-                    : lead.livingHeirCount > 0
-                      ? `deceased, ${lead.livingHeirCount} heir${lead.livingHeirCount === 1 ? '' : 's'} on file, no number`
-                      : 'deceased, no heirs on file'
+                  ? `${deathLabel(lead)}, ${
+                      lead.callableHeirCount > 0
+                        ? `${lead.callableHeirCount} callable heir${lead.callableHeirCount === 1 ? '' : 's'}`
+                        : lead.livingHeirCount > 0
+                          ? `${lead.livingHeirCount} heir${lead.livingHeirCount === 1 ? '' : 's'} on file, no number`
+                          : 'no heirs on file'
+                    }`
                   : lead.phones.filter((p) => !p.dnc).length > 0
                     ? `${lead.phones.filter((p) => !p.dnc).length} callable number${lead.phones.filter((p) => !p.dnc).length === 1 ? '' : 's'}`
                     : lead.trace?.label || 'Never skip traced'}
@@ -4598,4 +4604,19 @@ function Row({
       )}
     </div>
   );
+}
+
+/**
+ * "deceased", or "died Mar 2021 per Endato" when a people search set the flag.
+ * A vendor death record can belong to a namesake, so the card names its
+ * source; the flag is unticked in Edit if the family says otherwise.
+ */
+function deathLabel(lead: { dateOfDeath?: string | null; deathSource?: string | null }): string {
+  const vendor = lead.deathSource === 'endato' ? 'Endato' : lead.deathSource === 'batchdata' ? 'BatchData' : null;
+  if (!vendor) return 'deceased';
+  const d = lead.dateOfDeath ? new Date(`${lead.dateOfDeath}T12:00:00Z`) : null;
+  const when = d && !isNaN(d.getTime())
+    ? `died ${d.toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' })}`
+    : 'deceased';
+  return `${when} per ${vendor}`;
 }

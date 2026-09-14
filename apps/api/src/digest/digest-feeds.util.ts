@@ -75,10 +75,12 @@ export function describeCounts(run: FeedRun): string {
   // number" on the run (describeTrace in surplus-poll.service.ts).
   const traced = /Traced (\d+) of (\d+) new to a number/.exec(run.message || '');
   const traceFailed = /Trace (?:failed|skipped) on the \d+ new/.test(run.message || '');
+  const deceased = /(\d+) more found deceased/.exec(run.message || '');
   const bits = [
     `${n(run.scanned)} scanned`,
     `${n(run.created)} new`,
     traced ? `${n(Number(traced[1]))} of those traced to a number` : null,
+    deceased ? `${n(Number(deceased[1]))} found deceased, heirs needed` : null,
     traceFailed ? 'trace did not run' : null,
     run.updated ? `${n(run.updated)} updated` : null,
     retired ? `${n(retired)} retired` : null,

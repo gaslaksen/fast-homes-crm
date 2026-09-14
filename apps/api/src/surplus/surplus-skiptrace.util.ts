@@ -221,6 +221,27 @@ export function verifyTracedName(
   };
 }
 
+/**
+ * Whether a death record on the returned person may be recorded against the
+ * claimant. Stricter than `same_person`, which accepts an initial for a given
+ * name: "Robert Abe" is same_person for "JULIET R ABE" because R is her middle
+ * initial. That leniency is tolerable for a phone number, which reaches the
+ * household either way. It is not tolerable for a death, which would mark a
+ * living widow dead because her husband Robert died. The vendor's own given
+ * name must match one the county spelled out.
+ */
+export function deathIsTheClaimants(
+  claimant?: string | null,
+  tracedFirst?: string | null,
+  tracedLast?: string | null,
+): boolean {
+  if (verifyTracedName(claimant, tracedFirst, tracedLast).verdict !== 'same_person') return false;
+  const traced = splitClaimantName([tracedFirst, tracedLast].filter(Boolean).join(' ') || null);
+  const want = splitClaimantName(claimant);
+  const spelled = [...want.given, want.surname].filter((w) => w.length > 1 && w !== traced.surname);
+  return traced.given.filter((g) => g.length > 1).some((g) => spelled.some((w) => sameGivenName(g, w)));
+}
+
 // ─── Deciding what is worth submitting ──────────────────────────────────────
 
 export interface TraceCandidate {

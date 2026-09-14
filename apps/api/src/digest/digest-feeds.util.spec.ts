@@ -100,6 +100,13 @@ describe('describeFeed', () => {
     expect(text).toBe('400 scanned · 6 new · 4 of those traced to a number · 380 unchanged');
   });
 
+  it('says how many of the new claimants the trace found dead', () => {
+    const text = describeCounts(
+      run({ source: 'realtdm_polk', startedAt: '2026-09-14T08:30:00Z', scanned: 400, created: 6, updated: 0, dead: 0, message: 'Traced 3 of 6 new to a number, 1 more found deceased (5 address lookups, 2 name searches)' }),
+    );
+    expect(text).toBe('400 scanned · 6 new · 3 of those traced to a number · 1 found deceased, heirs needed');
+  });
+
   it('a pull whose trace blew up is amber, and says why, not green', () => {
     // The pull succeeded, so the row is ok and the counts are real. But new
     // leads with no numbers on a Monday morning is exactly what somebody
