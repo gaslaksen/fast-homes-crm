@@ -9,15 +9,29 @@ const mockedAxios = axios as jest.Mocked<typeof axios>;
  * The behaviours worth pinning are the ones that cost money or attach a wrong
  * number to a real person, so the vendor is stubbed and the database is a spy.
  */
-function harness(leads: any[], endato: any = null) {
+function harness(leads: any[], endato: any = null, env: Record<string, string> = {}) {
   const leadUpdates: any[] = [];
   const detailUpdates: any[] = [];
   const attempts: any[] = [];
   const heirCreates: any[] = [];
+  // The heir table as a small store, so a filed relative can be found and
+  // looked up in the same run. Only the where-shapes the service uses.
+  const heirs: any[] = [];
+  const matches = (h: any, where: any = {}) =>
+    Object.entries(where).every(([k, v]: [string, any]) =>
+      v && typeof v === 'object' && 'not' in v ? (v.not === null ? h[k] != null : h[k] !== v.not) : (h[k] ?? null) === v,
+    );
   const prisma: any = {
     surplusHeir: {
-      findMany: jest.fn().mockResolvedValue([]),
-      create: jest.fn(async (a: any) => { heirCreates.push(a.data); return a.data; }),
+      findMany: jest.fn(async (a: any = {}) => heirs.filter((h) => matches(h, a.where))),
+      count: jest.fn(async (a: any = {}) => heirs.filter((h) => matches(h, a.where)).length),
+      create: jest.fn(async (a: any) => {
+        const row = { id: `h${heirs.length + 1}`, tracedAt: null, deceased: false, doNotCall: false, street: null, vendorPersonId: null, ...a.data };
+        heirs.push(row);
+        heirCreates.push(a.data);
+        return row;
+      }),
+      update: jest.fn(async (a: any) => Object.assign(heirs.find((h) => h.id === a.where.id), a.data)),
     },
     lead: {
       findMany: jest.fn().mockResolvedValue(leads),
@@ -32,20 +46,21 @@ function harness(leads: any[], endato: any = null) {
       create: jest.fn(async (a: any) => { attempts.push(a.data); return a.data; }),
     },
   };
-  const config = { get: (k: string) => (k === 'BATCHDATA_API_KEY' ? 'test-key' : undefined) };
+  const config = { get: (k: string) => (k === 'BATCHDATA_API_KEY' ? 'test-key' : env[k]) };
   const svc = new SurplusSkiptraceService(prisma, config as unknown as ConfigService, endato as any);
-  return { svc, prisma, leadUpdates, detailUpdates, attempts, heirCreates };
+  return { svc, prisma, leadUpdates, detailUpdates, attempts, heirCreates, heirs };
 }
 
 /**
  * A stand-in for the Endato rung. `people` is what a search returns, in the
  * parsed shape; absent means the rung is not configured and stays silent.
  */
-function endatoStub(people: any[] | null = null) {
+function endatoStub(people: any[] | null = null, byId: Record<string, any> = {}) {
   return {
     available: people !== null,
     costPerSearch: 0.25,
     search: jest.fn().mockResolvedValue(people || []),
+    lookup: jest.fn(async (id: string) => byId[id] ?? null),
   };
 }
 
@@ -1076,5 +1091,139 @@ describe('rechecking claimants traced before the death fix', () => {
     expect(detailUpdates.some((u) => u.where?.id?.in && u.data?.deathCheckedAt)).toBe(true);
     expect(attempts.at(-1)).toMatchObject({ source: 'endato', result: 'found' });
     expect(attempts.at(-1).summary).toMatch(/^Death check: Endato holds a death record/);
+  });
+});
+
+describe('looking up a dead claimant\'s relatives', () => {
+  const rel = (id: string, name: string, type: string, over: any = {}) => ({ id, name, type, deceased: false, city: null, state: null, dob: null, ...over });
+  const abe = (relatives: any[]) => ({
+    first: 'Juliet', last: 'Abe', age: 82, akas: [],
+    addresses: [{ street: '256 Treu', city: 'Jacksonville', state: 'FL', zip: '32209', lastSeen: '2026-08-01' }],
+    phones: [{ num: '9144233422', type: 'LandLine/Services', connected: true }],
+    emails: [], deceased: true, dateOfDeath: '2021-03-22', relatives,
+  });
+  /** A relative as Endato's lookup by id returns them. */
+  const found = (first: string, last: string, over: any = {}) => ({
+    first, last, age: 55, akas: [],
+    addresses: [{ street: '436 Wildwood', line: '436 Wildwood Ave', city: 'Verona', state: 'PA', zip: '15147', lastSeen: '2026-08-01' }],
+    phones: [
+      { num: '9049556600', type: 'Wireless', connected: true },
+      { num: '9042688459', type: 'LandLine/Services', connected: true },
+      { num: '9040000000', type: 'LandLine/Services', connected: false },
+    ],
+    emails: ['kin@example.com'], deceased: false, dateOfDeath: null, relatives: [], ...over,
+  });
+
+  it('looks up the spouse, then family who share the surname, within the cap, and never a child', async () => {
+    const endato = endatoStub(
+      [abe([
+        rel('R3', 'Ann B Holbrook', 'Family'),
+        rel('R2', 'Thomas Abe', 'Family'),
+        rel('R1', 'Mary Lee Abe', 'Spouse'),
+        rel('R4', 'Kid Abe', 'Family', { dob: '2015-06-01' }),
+      ])],
+      { R1: found('Mary', 'Abe'), R2: null },
+    );
+    const { svc, heirs, attempts } = harness(
+      [lead({ street: '256 TREU TER NW', first: 'JULIET R', last: 'ABE' })],
+      endato,
+      { SURPLUS_RELATIVE_LOOKUPS: '2' },
+    );
+    respond([]);
+
+    const r = await svc.traceLeads({ organizationId: 'org' });
+
+    // A minor is not filed at all: nothing they can tell anybody, and a search spent on nothing.
+    expect(heirs.map((h) => h.name).sort()).toEqual(['Ann B Holbrook', 'Mary Lee Abe', 'Thomas Abe']);
+    expect(heirs.every((h) => h.role === 'relative' && h.vendorPersonId)).toBe(true);
+    expect(endato.lookup.mock.calls.map((c: any[]) => c[0])).toEqual(['R1', 'R2']);
+    expect(r.relatives).toEqual({ looked: 2, withContact: 1 });
+
+    const mary = heirs.find((h) => h.name === 'Mary Lee Abe');
+    expect(mary).toMatchObject({
+      street: '436 Wildwood Ave', city: 'Verona', state: 'PA', zip: '15147',
+      phone1: '9049556600', phone2: '9042688459', phone3: null, phone1Dnc: null,
+      email1: 'kin@example.com', traceOutcome: 'matched',
+    });
+    expect(mary.traceDetail).toMatch(/^Looked up by Endato's id for Mary Lee Abe, so this is exactly that person\. Current address 436 Wildwood Ave, Verona PA 15147/);
+    const thomas = heirs.find((h) => h.name === 'Thomas Abe');
+    expect(thomas.traceOutcome).toBe('no_person');
+    expect(thomas.traceDetail).toMatch(/opted out/);
+    expect(heirs.find((h) => h.name === 'Ann B Holbrook').tracedAt).toBeNull();
+    expect(attempts.filter((a) => a.heirId).map((a) => a.result)).toEqual(['found', 'nothing']);
+  });
+
+  it('marks a relative Endato holds a death record for as dead, with no numbers', async () => {
+    const endato = endatoStub([abe([rel('R1', 'Mary Lee Abe', 'Spouse')])], {
+      R1: found('Mary', 'Abe', { deceased: true, dateOfDeath: '2023-01-05' }),
+    });
+    const { svc, heirs } = harness([lead({ street: '256 TREU TER NW', first: 'JULIET R', last: 'ABE' })], endato);
+    respond([]);
+
+    const r = await svc.traceLeads({ organizationId: 'org' });
+
+    expect(r.relatives).toEqual({ looked: 1, withContact: 0 });
+    expect(heirs[0]).toMatchObject({ deceased: true, traceOutcome: 'no_contact' });
+    expect(heirs[0].phone1).toBeUndefined();
+    expect(heirs[0].dateOfDeath.toISOString().slice(0, 10)).toBe('2023-01-05');
+  });
+
+  it('SURPLUS_RELATIVE_LOOKUPS=0 files the relatives and looks nobody up', async () => {
+    const endato = endatoStub([abe([rel('R1', 'Mary Lee Abe', 'Spouse')])], { R1: found('Mary', 'Abe') });
+    const { svc, heirs } = harness([lead({ street: '256 TREU TER NW', first: 'JULIET R', last: 'ABE' })], endato, { SURPLUS_RELATIVE_LOOKUPS: '0' });
+    respond([]);
+
+    const r = await svc.traceLeads({ organizationId: 'org' });
+
+    expect(heirs).toHaveLength(1);
+    expect(endato.lookup).not.toHaveBeenCalled();
+    expect(r.relatives).toEqual({ looked: 0, withContact: 0 });
+  });
+
+  describe('the backlog of claimants already found dead', () => {
+    const dead = (heirRows: any[]) => ({
+      ...lead({ street: '256 TREU TER NW', first: 'JULIET R', last: 'ABE' }),
+      organizationId: 'org',
+      surplusDetail: {
+        ...lead({ street: '256 TREU TER NW' }).surplusDetail,
+        deceased: true,
+        deathSource: 'endato',
+        heirs: heirRows,
+      },
+    });
+
+    it('a dry run counts one search to recover the ids and the lookups after it', async () => {
+      const endato = endatoStub([]);
+      const filed = [
+        { id: 'x1', name: 'Mary Lee Abe', role: 'relative', sourceKind: 'endato', vendorPersonId: null, tracedAt: null, deceased: false, doNotCall: false },
+        { id: 'x2', name: 'Thomas Abe', role: 'relative', sourceKind: 'endato', vendorPersonId: null, tracedAt: null, deceased: false, doNotCall: false },
+      ];
+      const { svc } = harness([dead(filed)], endato);
+
+      const r = await svc.relativeBacklog({ organizationId: 'org', dryRun: true });
+
+      expect(r).toMatchObject({ deceasedClaimants: 1, recoverSearches: 1, lookups: 2, looked: 0 });
+      expect(endato.search).not.toHaveBeenCalled();
+    });
+
+    it('recovers the ids onto the rows already there, then looks them up', async () => {
+      const endato = endatoStub(
+        [abe([rel('R1', 'Mary Lee Abe', 'Spouse'), rel('R2', 'Thomas Abe', 'Family')])],
+        { R1: found('Mary', 'Abe'), R2: found('Thomas', 'Abe') },
+      );
+      const { svc, heirs } = harness([], endato);
+      // The two rows the 2026-09-14 backfill filed, by name only.
+      for (const name of ['Mary Lee Abe', 'Thomas Abe']) {
+        heirs.push({ id: `x${heirs.length + 1}`, surplusDetailId: 'd1', name, role: 'relative', sourceKind: 'endato', vendorPersonId: null, tracedAt: null, deceased: false, doNotCall: false, street: null });
+      }
+      (svc as any).prisma.lead.findMany.mockResolvedValue([dead(heirs)]);
+
+      const r = await svc.relativeBacklog({ organizationId: 'org' });
+
+      expect(r).toMatchObject({ recovered: 1, looked: 2, withContact: 2, errors: 0 });
+      expect(heirs).toHaveLength(2);
+      expect(heirs.map((h) => h.vendorPersonId)).toEqual(['R1', 'R2']);
+      expect(heirs.every((h) => h.phone1)).toBe(true);
+    });
   });
 });

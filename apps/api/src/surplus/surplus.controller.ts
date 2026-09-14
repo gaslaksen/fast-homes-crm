@@ -624,6 +624,26 @@ export class SurplusController {
     });
   }
 
+  /**
+   * Look up the relatives of claimants already found dead, by Endato's own id
+   * for each. Recovers the ids first where the relatives were filed without
+   * them. `limit` caps the Endato calls; `dryRun` counts them.
+   */
+  @Post('relative-lookup')
+  async relativeLookup(@Body() body: any, @Headers('authorization') authHeader?: string) {
+    const { organizationId } = this.decodeToken(authHeader);
+    const limit = body?.limit == null ? undefined : Number(body.limit);
+    if (limit != null && (!Number.isFinite(limit) || limit < 1)) {
+      throw new BadRequestException('limit must be a positive number');
+    }
+    return this.skiptrace.relativeBacklog({
+      organizationId: body?.organizationId || organizationId || null,
+      county: typeof body?.county === 'string' && body.county ? body.county : undefined,
+      limit,
+      dryRun: body?.dryRun === true,
+    });
+  }
+
   // ─── Heirs of a deceased claimant ─────────────────────────────────────────
 
   /** Heirs on file for a claimant, living first. */

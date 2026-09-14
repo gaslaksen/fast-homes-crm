@@ -445,9 +445,8 @@ export function addressCaseCounts(
  * interpreting anything.
  *
  * The distinction that matters most is the cheapest one to lose: NEVER TRIED is
- * not a failure. The nightly county poll ingests and classifies but never
- * traces, because every submission is billed, so most rows on the board have
- * had nothing attempted on them at all. Shown as "no numbers" that reads as a
+ * not a failure. Rows loaded before the automatic trace (2026-09-12), or by
+ * hand, may have had nothing attempted on them at all. Shown as "no numbers" that reads as a
  * broken trace, and the reasonable response to a broken trace is to run it
  * again, which costs money and changes nothing.
  *
@@ -494,7 +493,7 @@ export function traceState(
       label: 'Never skip traced',
       tone: 'idle',
       detail:
-        'Nothing has been submitted for this claimant. The nightly county poll ingests and classifies but does not trace, since every submission is billed.',
+        'Nothing has been looked up for this person yet. A county pull traces the claimants it creates, and a relative of a claimant found dead is looked up by the vendor\'s id for them; anyone else is traced from the card.',
       at: null,
       actionable: true,
     };

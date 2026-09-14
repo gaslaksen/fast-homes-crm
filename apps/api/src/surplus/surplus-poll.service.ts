@@ -149,6 +149,9 @@ export function describeTrace(newLeads: number, t: SurplusTraceResult): string {
   const bits = [
     `${t.submitted} address lookup${t.submitted === 1 ? '' : 's'}`,
     `${t.nameSearch.searched} name search${t.nameSearch.searched === 1 ? '' : 'es'}`,
+    t.relatives?.looked
+      ? `${t.relatives.looked} relative lookup${t.relatives.looked === 1 ? '' : 's'}, ${t.relatives.withContact} with a number`
+      : null,
     t.errors ? `${t.errors} error${t.errors === 1 ? '' : 's'}` : null,
   ].filter(Boolean);
   const dead = t.deceased ? `, ${t.deceased} more found deceased` : '';
