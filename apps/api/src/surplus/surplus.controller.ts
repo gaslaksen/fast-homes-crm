@@ -603,6 +603,27 @@ export class SurplusController {
     });
   }
 
+  /**
+   * Re-ask Endato about claimants already traced, for the death record the
+   * parser dropped before 2026-09-14. Only rows with a number and no death
+   * check on them; one search per person, stamped whatever the answer.
+   * `dryRun` returns how many searches a run would buy and spends nothing.
+   */
+  @Post('death-check')
+  async deathCheck(@Body() body: any, @Headers('authorization') authHeader?: string) {
+    const { organizationId } = this.decodeToken(authHeader);
+    const limit = body?.limit == null ? undefined : Number(body.limit);
+    if (limit != null && (!Number.isFinite(limit) || limit < 1)) {
+      throw new BadRequestException('limit must be a positive number');
+    }
+    return this.skiptrace.recheckDeaths({
+      organizationId: body?.organizationId || organizationId || null,
+      county: typeof body?.county === 'string' && body.county ? body.county : undefined,
+      limit,
+      dryRun: body?.dryRun === true,
+    });
+  }
+
   // ─── Heirs of a deceased claimant ─────────────────────────────────────────
 
   /** Heirs on file for a claimant, living first. */

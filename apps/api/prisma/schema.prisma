@@ -687,6 +687,14 @@ model SurplusDetail {
   /// before it can be filed at all.
   deceased      Boolean @default(false)
   heirsRequired Boolean @default(false)
+  /// When the claimant died, where a source gives a date. Null when only the
+  /// docket's estate marker says so.
+  dateOfDeath   DateTime?
+  /// What said they are dead: 'endato' or 'batchdata' (a death record on the
+  /// person the trace verified), or null for the docket, a probate filing or
+  /// a person ticking the box. A vendor death record can be wrong, so the card
+  /// names its source and the flag stays editable.
+  deathSource   String?
   /// Informational, not a block: a competing lien does not stop outreach, but
   /// the payout may land under the posted surplus.
   competingLien Boolean @default(false)
@@ -981,6 +989,11 @@ model SurplusDetail {
   /// miss. A miss does not change from one week to the next, so a re-run
   /// skips stamped rows unless asked to include them.
   nameSearchedAt  DateTime?
+  /// When a people search last checked this claimant for a death record on a
+  /// verified identity. Every Endato hit checks it for free; the recheck of
+  /// claimants traced before 2026-09-14, when the death fields were dropped,
+  /// skips anyone stamped here.
+  deathCheckedAt  DateTime?
 
   /// Living people who inherited this claimant's interest. Populated from a
   /// probate filing somebody read; never inferred.

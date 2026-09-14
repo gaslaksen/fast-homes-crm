@@ -82,11 +82,17 @@ describe('SurplusPollService', () => {
 });
 
 describe('describeTrace', () => {
-  const base = { candidates: 3, submitted: 0, contacted: 0, mismatched: 0, skipped: {}, nameSearch: { searched: 0, verified: 0, namesakes: 0 }, errors: 0 };
+  const base = { candidates: 3, submitted: 0, contacted: 0, mismatched: 0, skipped: {}, nameSearch: { searched: 0, verified: 0, namesakes: 0 }, deceased: 0, errors: 0 };
 
   it('says when nothing was attempted and why', () => {
     expect(describeTrace(3, { ...base, message: 'BATCHDATA_API_KEY is not set, so no trace was attempted.' }))
       .toBe('Trace skipped on the 3 new: BATCHDATA_API_KEY is not set, so no trace was attempted.');
+  });
+
+  it('names the deceased apart from the contacted, in a shape the brief still parses', () => {
+    const line = describeTrace(6, { ...base, submitted: 5, contacted: 3, deceased: 1, nameSearch: { searched: 2, verified: 2, namesakes: 0 } });
+    expect(line).toBe('Traced 3 of 6 new to a number, 1 more found deceased (5 address lookups, 2 name searches)');
+    expect(/Traced (\d+) of (\d+) new to a number/.exec(line)?.slice(1)).toEqual(['3', '6']);
   });
 
   it('counts errors on the line', () => {

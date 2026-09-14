@@ -1,4 +1,4 @@
-import { currentAddress, historyKey, parseEndatoPerson, verifiedVia } from './surplus-endato.service';
+import { currentAddress, endatoDate, historyKey, parseEndatoPerson, verifiedVia } from './surplus-endato.service';
 
 /**
  * The name-first rung is only safe because of the verification. These pin
@@ -52,7 +52,7 @@ describe('parseEndatoPerson', () => {
     ]);
     expect(p.emails).toEqual(['b@example.com']);
     expect(p.deceased).toBe(false);
-    expect(p.relatives).toEqual([{ name: 'Anita Zumsteg', type: 'Spouse' }]);
+    expect(p.relatives).toEqual([{ name: 'Anita Zumsteg', type: 'Spouse', deceased: false, city: null, state: null }]);
     expect(p.akas).toEqual([{ first: 'Bernard', last: 'Zumsteg' }]);
 
     // PascalCase keys, as the docs show them, read the same.
@@ -103,5 +103,54 @@ describe('verifiedVia', () => {
 describe('currentAddress', () => {
   it('is the most recently reported one', () => {
     expect(currentAddress(parseEndatoPerson(ZUMSTEG))?.street).toBe('256 Treu Te');
+  });
+});
+
+describe('the death record', () => {
+  it('reads dod and datesOfDeath, the shape the live response carries', () => {
+    // Trimmed from the live PersonSearch for Juliet Abe, Yonkers NY,
+    // 2026-09-14. The old parser read deathRecords.isDeceased, which is not in
+    // the response, and so reported her alive.
+    const p = parseEndatoPerson({
+      name: { firstName: 'Juliet', lastName: 'Abe' },
+      dob: '',
+      age: 82,
+      dod: '3/22/2021',
+      datesOfDeath: [{ dod: '3/22/2021' }],
+      addresses: [],
+      phoneNumbers: [],
+      relativesSummary: [],
+    });
+    expect(p.deceased).toBe(true);
+    expect(p.dateOfDeath).toBe('2021-03-22');
+  });
+
+  it('a person with no death record is alive, and the old key still counts', () => {
+    const alive = parseEndatoPerson({ name: { firstName: 'James', lastName: 'Connolly' }, datesOfDeath: [] });
+    expect(alive.deceased).toBe(false);
+    expect(alive.dateOfDeath).toBeNull();
+    expect(parseEndatoPerson({ deathRecords: { isDeceased: true } }).deceased).toBe(true);
+  });
+
+  it('keeps each relative\'s own death flag, relationship and middle name', () => {
+    // Verbatim keys from the live response for James Connolly, Palm Bay.
+    const p = parseEndatoPerson({
+      relativesSummary: [
+        { firstName: 'Mary', middleName: 'Lee', lastName: 'Connolly', dob: '11/XX/1961', isDeceased: false, relativeType: 'Spouse', city: null, state: null },
+        { firstName: 'Ann', middleName: 'B', lastName: 'Holbrook', isDeceased: true, relativeType: 'Family', city: 'Stuart', state: 'FL' },
+      ],
+    });
+    expect(p.relatives).toEqual([
+      { name: 'Mary Lee Connolly', type: 'Spouse', deceased: false, city: null, state: null },
+      { name: 'Ann B Holbrook', type: 'Family', deceased: true, city: 'Stuart', state: 'FL' },
+    ]);
+  });
+
+  it('turns a masked day into the first of the month rather than no date', () => {
+    expect(endatoDate('3/22/2021')).toBe('2021-03-22');
+    expect(endatoDate('11/XX/1961')).toBe('1961-11-01');
+    expect(endatoDate('2019-05-01T00:00:00')).toBe('2019-05-01');
+    expect(endatoDate('')).toBeNull();
+    expect(endatoDate('unknown')).toBeNull();
   });
 });

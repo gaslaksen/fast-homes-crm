@@ -2133,6 +2133,9 @@ export class SurplusService {
       deceased: d.deceased,
       heirsRequired: d.heirsRequired,
       isDeceased: isDeceased(facts),
+      // Where a people search said so. Null for the docket or a person.
+      dateOfDeath: d.dateOfDeath ? d.dateOfDeath.toISOString().slice(0, 10) : null,
+      deathSource: d.deathSource ?? null,
       competingLien: d.competingLien,
 
       surplusType: d.surplusType,

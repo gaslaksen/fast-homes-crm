@@ -53,7 +53,18 @@ export interface EndatoPerson {
   phones: EndatoPhone[];
   emails: string[];
   deceased: boolean;
-  relatives: { name: string; type: string | null }[];
+  /** YYYY-MM-DD. A day the vendor masks ("3/XX/2021") becomes the first. */
+  dateOfDeath: string | null;
+  relatives: EndatoRelative[];
+}
+
+export interface EndatoRelative {
+  name: string;
+  /** "Spouse", "Family". */
+  type: string | null;
+  deceased: boolean;
+  city: string | null;
+  state: string | null;
 }
 
 export interface EndatoQuery {
@@ -88,6 +99,21 @@ function isoish(v: unknown): string | null {
   return s.slice(0, 10);
 }
 
+/**
+ * A vendor date of death as YYYY-MM-DD. Endato writes M/D/YYYY and masks the
+ * day on some records ("11/XX/1961" is how it prints a relative's birth), so
+ * a masked day becomes the first of the month rather than no date at all.
+ */
+export function endatoDate(v: unknown): string | null {
+  const s = String(v || '').trim();
+  const m = /^(\d{1,2})\/(\d{1,2}|XX)\/(\d{4})/i.exec(s);
+  if (m) {
+    const day = /^\d+$/.test(m[2]) ? m[2].padStart(2, '0') : '01';
+    return `${m[3]}-${m[1].padStart(2, '0')}-${day}`;
+  }
+  return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : null;
+}
+
 /** One vendor person, whichever casing the vendor used for the keys. */
 export function parseEndatoPerson(p: any): EndatoPerson {
   const g = (o: any, ...keys: string[]) => {
@@ -112,7 +138,17 @@ export function parseEndatoPerson(p: any): EndatoPerson {
       lastSeen: isoish(g(a, 'lastReportedDate', 'LastReportedDate')),
     }))
     .filter((a) => a.street);
-  const death = g(p, 'deathRecords', 'DeathRecords') || {};
+  // The death record. The live response carries it as a top-level `dod` and a
+  // `datesOfDeath` list (Juliet Abe, Brevard 250921: dod "3/22/2021"). The
+  // parser used to read `deathRecords.isDeceased`, which the response does not
+  // have, so every death Endato reported was dropped and the claimant was
+  // filed under Call now. The old key is still honoured in case a plan returns
+  // it.
+  const dates = ((g(p, 'datesOfDeath', 'DatesOfDeath') || []) as any[])
+    .map((d) => endatoDate(typeof d === 'string' ? d : g(d, 'dod', 'Dod')))
+    .filter(Boolean) as string[];
+  const dateOfDeath = endatoDate(g(p, 'dod', 'Dod')) || dates.sort().pop() || null;
+  const legacy = g(p, 'deathRecords', 'DeathRecords') || {};
   return {
     first: g(name, 'firstName', 'FirstName') || null,
     last: g(name, 'lastName', 'LastName') || null,
@@ -130,11 +166,17 @@ export function parseEndatoPerson(p: any): EndatoPerson {
           .filter(Boolean),
       ),
     ) as string[],
-    deceased: !!g(death, 'isDeceased', 'IsDeceased'),
+    deceased: !!dateOfDeath || !!g(legacy, 'isDeceased', 'IsDeceased'),
+    dateOfDeath,
     relatives: ((g(p, 'relativesSummary', 'RelativesSummary') || []) as any[])
       .map((r) => ({
-        name: [g(r, 'firstName', 'FirstName'), g(r, 'lastName', 'LastName')].filter(Boolean).join(' '),
+        name: [g(r, 'firstName', 'FirstName'), g(r, 'middleName', 'MiddleName'), g(r, 'lastName', 'LastName')]
+          .filter(Boolean)
+          .join(' '),
         type: g(r, 'relativeType', 'RelativeType') || null,
+        deceased: !!g(r, 'isDeceased', 'IsDeceased'),
+        city: g(r, 'city', 'City') || null,
+        state: g(r, 'state', 'State') || null,
       }))
       .filter((r) => r.name),
   };

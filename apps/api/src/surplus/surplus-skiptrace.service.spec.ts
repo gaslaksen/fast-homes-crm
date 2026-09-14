@@ -1,6 +1,6 @@
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
-import { SurplusSkiptraceService } from './surplus-skiptrace.service';
+import { batchDeath, SurplusSkiptraceService } from './surplus-skiptrace.service';
 
 jest.mock('axios');
 const mockedAxios = axios as jest.Mocked<typeof axios>;
@@ -13,7 +13,12 @@ function harness(leads: any[], endato: any = null) {
   const leadUpdates: any[] = [];
   const detailUpdates: any[] = [];
   const attempts: any[] = [];
+  const heirCreates: any[] = [];
   const prisma: any = {
+    surplusHeir: {
+      findMany: jest.fn().mockResolvedValue([]),
+      create: jest.fn(async (a: any) => { heirCreates.push(a.data); return a.data; }),
+    },
     lead: {
       findMany: jest.fn().mockResolvedValue(leads),
       update: jest.fn(async (a: any) => { leadUpdates.push(a); return {}; }),
@@ -29,7 +34,7 @@ function harness(leads: any[], endato: any = null) {
   };
   const config = { get: (k: string) => (k === 'BATCHDATA_API_KEY' ? 'test-key' : undefined) };
   const svc = new SurplusSkiptraceService(prisma, config as unknown as ConfigService, endato as any);
-  return { svc, prisma, leadUpdates, detailUpdates, attempts };
+  return { svc, prisma, leadUpdates, detailUpdates, attempts, heirCreates };
 }
 
 /**
@@ -646,8 +651,10 @@ describe('the name-first rung (Endato)', () => {
     expect(r.nameSearch).toEqual({ searched: 1, verified: 1, namesakes: 0 });
     expect(r.contacted).toBe(1);
     expect(leadUpdates.at(-1).data.sellerPhone).toBe('+13215550101');
-    const patch = detailUpdates.at(-1).data;
+    // The last write is the death-check stamp; the match is the one before it.
+    const patch = detailUpdates.filter((u) => u.data?.traceOutcome).at(-1).data;
     expect(patch.traceOutcome).toBe('matched');
+    expect(detailUpdates.at(-1).data.deathCheckedAt).toBeInstanceOf(Date);
     expect(patch.dncScrubbedAt).toBeNull();
     expect(patch.callNotes).toMatch(/^Name search matched Bernhard Zumsteg\./);
     expect(patch.callNotes).toContain("Endato's latest address for them is 256 Treu, Jacksonville FL 32209 (2026-08-01)");
@@ -916,5 +923,158 @@ describe('tracing heirs', () => {
     const r = await svc.traceHeirs({ organizationId: 'org', heirIds: [] });
     expect(r.candidates).toBe(0);
     expect(mockedAxios.post).not.toHaveBeenCalled();
+  });
+});
+
+describe('deaths the trace finds', () => {
+  /** Endato's parsed shape: Juliet Abe, verified by the property that sold. */
+  const abe = (over: any = {}) => ({
+    first: 'Juliet',
+    last: 'Abe',
+    age: 82,
+    akas: [],
+    addresses: [{ street: '256 Treu', city: 'Jacksonville', state: 'FL', zip: '32209', lastSeen: '2026-08-01' }],
+    phones: [{ num: '9144233422', type: 'LandLine/Services', connected: true }],
+    emails: [],
+    deceased: true,
+    dateOfDeath: '2021-03-22',
+    relatives: [
+      { name: 'Mary Lee Abe', type: 'Spouse', deceased: false, city: 'Yonkers', state: 'NY' },
+      { name: 'Robert Abe', type: 'Family', deceased: true, city: null, state: null },
+    ],
+    ...over,
+  });
+
+  it('Brevard 250921: a verified person with a death record is marked deceased, not handed out as a contact', async () => {
+    // Endato held a 2021 date of death on the record that gave the board her
+    // landline. The lead goes to Find the heirs with the date and the vendor
+    // named, and the vendor's living relatives are filed as the place to start.
+    const endato = endatoStub([abe()]);
+    const { svc, detailUpdates, heirCreates, attempts } = harness(
+      [lead({ street: '256 TREU TER NW', first: 'JULIET R', last: 'ABE' })],
+      endato,
+    );
+    respond([]);
+
+    const r = await svc.traceLeads({ organizationId: 'org' });
+
+    expect(r.deceased).toBe(1);
+    expect(r.contacted).toBe(0);
+    const death = detailUpdates.find((u) => u.data?.deceased === true)?.data;
+    expect(death).toMatchObject({
+      deceased: true,
+      heirsRequired: true,
+      claimantType: 'heir_estate',
+      deathSource: 'endato',
+    });
+    expect(death.dateOfDeath.toISOString().slice(0, 10)).toBe('2021-03-22');
+    expect(death.deathCheckedAt).toBeInstanceOf(Date);
+    expect(death.callNotes).toMatch(/Death record \(Endato\): JULIET R ABE died 22 March 2021\. Marked deceased/);
+    expect(death.callNotes).toContain('Mary Lee Abe (spouse)');
+    // Living relatives only, filed as relatives and never as heirs.
+    expect(heirCreates).toHaveLength(1);
+    expect(heirCreates[0]).toMatchObject({ name: 'Mary Lee Abe', relationship: 'Spouse', role: 'relative', sourceKind: 'endato', city: 'Yonkers' });
+    expect(attempts.at(-1)).toMatchObject({ source: 'endato', result: 'found' });
+  });
+
+  it('a relative\'s death is theirs, never pinned on the claimant', async () => {
+    // BatchData returned the claimant's husband, deceased. That is a surname
+    // match and a relative verdict: the claimant is still alive as far as
+    // anybody knows.
+    const { svc, detailUpdates } = harness([lead({ first: 'JULIET R', last: 'ABE', mailStreet: '30 POST ST', mailCity: 'YONKERS', mailState: 'NY', mailZip: '10705' })]);
+    // Not Robert: his initial is her middle initial, and the matcher rightly
+    // reads "Juliet R" and "Robert" as possibly one person.
+    respond([person('Kenneth', 'Abe', ['9145550000'], { deceased: true })]);
+
+    const r = await svc.traceLeads({ organizationId: 'org', nameSearch: false });
+
+    expect(r.deceased).toBe(0);
+    expect(detailUpdates.some((u) => u.data?.deceased === true)).toBe(false);
+  });
+
+  it('a death matched only through a middle initial is not recorded against the claimant', async () => {
+    // "Robert Abe" is same_person for "JULIET R ABE" by her middle initial,
+    // which is fine for handing over a household number and wrong for a death:
+    // it would mark a living widow dead because her husband died.
+    const endato = endatoStub([
+      {
+        first: 'Robert', last: 'Abe', age: 84, akas: [],
+        addresses: [{ street: '256 Treu', city: 'Jacksonville', state: 'FL', zip: '32209', lastSeen: '2020-01-01' }],
+        phones: [{ num: '9145550000', type: 'LandLine/Services', connected: true }],
+        emails: [], deceased: true, dateOfDeath: '2019-01-01', relatives: [],
+      },
+    ]);
+    const { svc, detailUpdates } = harness([lead({ street: '256 TREU TER NW', first: 'JULIET R', last: 'ABE' })], endato);
+    respond([]);
+
+    const r = await svc.traceLeads({ organizationId: 'org' });
+
+    expect(r.deceased).toBe(0);
+    expect(detailUpdates.some((u) => u.data?.deceased === true)).toBe(false);
+  });
+
+  it('reads BatchData\'s nested death field as well as the flat one', async () => {
+    expect(batchDeath({ death: { deceased: true, date: '2019-05-01' } })).toEqual({ deceased: true, dateOfDeath: '2019-05-01' });
+    expect(batchDeath({ deceased: true })).toEqual({ deceased: true, dateOfDeath: null });
+    expect(batchDeath({ death: { deceased: false } })).toEqual({ deceased: false, dateOfDeath: null });
+    expect(batchDeath({ name: { first: 'A' } })).toEqual({ deceased: false, dateOfDeath: null });
+
+    const { svc, detailUpdates } = harness([lead({ first: 'MYRTIS', last: 'GRIFFIN', mailStreet: '72 SMITH DR', mailCity: 'HARTFORD', mailState: 'CT', mailZip: '06120' })]);
+    const p: any = person('Myrtis', 'Griffin');
+    delete p.deceased;
+    p.death = { deceased: true, date: '2019-05-01' };
+    respond([p]);
+
+    const r = await svc.traceLeads({ organizationId: 'org', nameSearch: false });
+
+    expect(r.deceased).toBe(1);
+    expect(detailUpdates.find((u) => u.data?.deceased === true)?.data).toMatchObject({ deathSource: 'batchdata' });
+  });
+
+  it('stamps a verified identity with no death record as checked', async () => {
+    const endato = endatoStub([abe({ deceased: false, dateOfDeath: null })]);
+    const { svc, detailUpdates } = harness([lead({ street: '256 TREU TER NW', first: 'JULIET R', last: 'ABE' })], endato);
+    respond([]);
+
+    const r = await svc.traceLeads({ organizationId: 'org' });
+
+    expect(r.contacted).toBe(1);
+    expect(r.deceased).toBe(0);
+    expect(detailUpdates.some((u) => u.data?.deathCheckedAt instanceof Date && u.data?.deceased === undefined)).toBe(true);
+  });
+});
+
+describe('rechecking claimants traced before the death fix', () => {
+  const abe = {
+    first: 'Juliet', last: 'Abe', age: 82, akas: [],
+    addresses: [{ street: '256 Treu', city: 'Jacksonville', state: 'FL', zip: '32209', lastSeen: '2026-08-01' }],
+    phones: [{ num: '9144233422', type: 'LandLine/Services', connected: true }],
+    emails: [], deceased: true, dateOfDeath: '2021-03-22', relatives: [],
+  };
+  const traced = (over: any = {}) => ({ ...lead({ street: '256 TREU TER NW', first: 'JULIET R', last: 'ABE', ...over }), sellerPhone: '+19144233422' });
+
+  it('a dry run counts one search per person and spends nothing', async () => {
+    const endato = endatoStub([abe]);
+    const { svc } = harness([traced({ id: 'a', detailId: 'da' }), traced({ id: 'b', detailId: 'db', first: 'JULIET', last: 'ABE' })], endato);
+
+    const r = await svc.recheckDeaths({ organizationId: 'org', dryRun: true });
+
+    expect(r).toMatchObject({ candidates: 2, searches: 1, searched: 0 });
+    expect(endato.search).not.toHaveBeenCalled();
+  });
+
+  it('marks the dead, stamps everyone searched, and never writes a phone number', async () => {
+    const endato = endatoStub([abe]);
+    const { svc, leadUpdates, detailUpdates, attempts } = harness([traced()], endato);
+
+    const r = await svc.recheckDeaths({ organizationId: 'org' });
+
+    expect(r).toMatchObject({ searched: 1, verified: 1, deceased: 1, errors: 0 });
+    expect(leadUpdates).toHaveLength(0);
+    expect(detailUpdates.some((u) => u.data?.phone2 !== undefined)).toBe(false);
+    expect(detailUpdates.find((u) => u.data?.deceased === true)?.data).toMatchObject({ deathSource: 'endato' });
+    expect(detailUpdates.some((u) => u.where?.id?.in && u.data?.deathCheckedAt)).toBe(true);
+    expect(attempts.at(-1)).toMatchObject({ source: 'endato', result: 'found' });
+    expect(attempts.at(-1).summary).toMatch(/^Death check: Endato holds a death record/);
   });
 });
