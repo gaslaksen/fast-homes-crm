@@ -1,6 +1,6 @@
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
-import { batchDeath, SurplusSkiptraceService } from './surplus-skiptrace.service';
+import { batchDeath, estateName, SurplusSkiptraceService } from './surplus-skiptrace.service';
 
 jest.mock('axios');
 const mockedAxios = axios as jest.Mocked<typeof axios>;
@@ -1225,5 +1225,77 @@ describe('looking up a dead claimant\'s relatives', () => {
       expect(heirs.map((h) => h.vendorPersonId)).toEqual(['R1', 'R2']);
       expect(heirs.every((h) => h.phone1)).toBe(true);
     });
+  });
+});
+
+describe('estate claimants the county marked dead', () => {
+  it('reads the person out of the docket\'s estate forms', () => {
+    expect(estateName('ESTATE OF THERESA MCPARLIN, DECEASED')).toBe('THERESA MCPARLIN');
+    expect(estateName('THE ESTATE OF JOHN DOE')).toBe('JOHN DOE');
+    expect(estateName('JIMMY DON BERGER ESTATE')).toBe('JIMMY DON BERGER');
+    expect(estateName('MCGRATH, HARRY A III EST')).toBe('HARRY A III MCGRATH');
+    expect(estateName('VIVIAN A DOWNEY (DECEASED)')).toBe('VIVIAN A DOWNEY');
+    expect(estateName('DANNIE LESTER STEWART')).toBe('DANNIE LESTER STEWART');
+  });
+
+  const rel = (id: string, name: string, type: string) => ({ id, name, type, deceased: false, city: null, state: null, dob: null });
+  const mcparlin = (over: any = {}) => ({
+    first: 'Theresa', last: 'Mcparlin', age: 88, akas: [],
+    addresses: [{ street: '256 Treu', city: 'Jacksonville', state: 'FL', zip: '32209', lastSeen: '2024-01-01' }],
+    phones: [], emails: [], deceased: true, dateOfDeath: '2025-11-02',
+    relatives: [rel('R1', 'Kevin Mcparlin', 'Family')],
+    ...over,
+  });
+  const estate = (over: any = {}) => {
+    const l: any = lead({ street: '256 TREU TER NW', first: 'ESTATE OF THERESA', last: 'MCPARLIN, DECEASED', ...over });
+    l.organizationId = 'org';
+    l.surplusDetail = { ...l.surplusDetail, deceased: true, heirsRequired: true, claimStatus: 'open', heirs: over.heirs || [] };
+    return l;
+  };
+
+  it('a dry run counts one search per estate and skips any with a living heir or Endato relatives', async () => {
+    const endato = endatoStub([]);
+    const { svc } = harness(
+      [
+        estate({ id: 'a', detailId: 'da' }),
+        estate({ id: 'b', detailId: 'db', caseNumber: 'X2', heirs: [{ role: 'heir', deceased: false }] }),
+        estate({ id: 'c', detailId: 'dc', caseNumber: 'X3', heirs: [{ role: 'relative', sourceKind: 'endato' }] }),
+      ],
+      endato,
+    );
+
+    const r = await svc.estateRelatives({ organizationId: 'org', dryRun: true });
+
+    expect(r).toMatchObject({ candidates: 1, searches: 1, searched: 0 });
+    expect(endato.search).not.toHaveBeenCalled();
+  });
+
+  it('on a verified match files the relatives, looks them up, and takes the date the docket lacked', async () => {
+    const endato = endatoStub([mcparlin()], {
+      R1: { first: 'Kevin', last: 'Mcparlin', age: 60, akas: [], addresses: [{ street: '9 Elm', line: '9 Elm St', city: 'Ocala', state: 'FL', zip: '34470', lastSeen: '2026-08-01' }], phones: [{ num: '3525550101', type: 'Wireless', connected: true }], emails: [], deceased: false, dateOfDeath: null, relatives: [] },
+    });
+    const { svc, heirs, detailUpdates } = harness([estate()], endato);
+
+    const r = await svc.estateRelatives({ organizationId: 'org' });
+
+    expect(endato.search).toHaveBeenCalledWith({ first: 'THERESA', last: 'MCPARLIN', city: 'JACKSONVILLE', state: 'FL' });
+    expect(r).toMatchObject({ searched: 1, matched: 1, relativesFiled: 1, looked: 1, withContact: 1 });
+    expect(heirs[0]).toMatchObject({ name: 'Kevin Mcparlin', role: 'relative', vendorPersonId: 'R1', phone1: '3525550101', street: '9 Elm St' });
+    const dated = detailUpdates.find((u) => u.data?.dateOfDeath)?.data;
+    expect(dated.dateOfDeath.toISOString().slice(0, 10)).toBe('2025-11-02');
+    expect(dated.deathSource).toBe('endato');
+    expect(dated.callNotes).toMatch(/Estate search \(Endato\): matched THERESA MCPARLIN by address history\. Endato dates the death 2 November 2025\. 1 relative filed/);
+    expect(detailUpdates.some((u) => u.where?.id?.in && u.data?.deathCheckedAt)).toBe(true);
+  });
+
+  it('files nothing on a namesake, and says so on the lead', async () => {
+    const endato = endatoStub([mcparlin({ addresses: [{ street: '1 Other', city: 'Tampa', state: 'FL', zip: '33601', lastSeen: '2020-01-01' }] })]);
+    const { svc, heirs, detailUpdates } = harness([estate()], endato);
+
+    const r = await svc.estateRelatives({ organizationId: 'org' });
+
+    expect(r).toMatchObject({ searched: 1, matched: 0, relativesFiled: 0 });
+    expect(heirs).toHaveLength(0);
+    expect(detailUpdates.at(-1).data.callNotes).toMatch(/^Estate search \(Endato\): 1 person named THERESA MCPARLIN, none with the property/);
   });
 });
