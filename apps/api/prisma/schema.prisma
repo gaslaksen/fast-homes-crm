@@ -2294,6 +2294,12 @@ model SurplusHeir {
   contactStatus   String    @default("not_contacted")
   lastContactedAt DateTime?
 
+  /// The people-search vendor's own id for this person (Endato's tahoeId),
+  /// when the vendor listed them as a relative of a deceased claimant. A
+  /// lookup on it returns exactly this person, so their address and numbers
+  /// are fetched with no name matching. Null for anyone off a filing.
+  vendorPersonId String?
+
   // Provenance. Which filing said so, so a disputed heir can be checked against
   // the document rather than argued about.
   sourceCaseNumber String?

@@ -2522,6 +2522,7 @@ export class SurplusService {
         traceState(d, phones.length + emails.length),
         livingHeirs.length,
         callableHeirs.length,
+        associates.filter((h: any) => h.callable).length,
       ),
     };
   }
@@ -2590,6 +2591,7 @@ export class SurplusService {
     trace: { state: string },
     livingHeirCount = 0,
     callableHeirCount = 0,
+    callableAssociateCount = 0,
   ) {
     const f = {
       claimStatus: d.claimStatus,
@@ -2604,6 +2606,7 @@ export class SurplusService {
       isDeceased: !!d.deceased || !!d.heirsRequired,
       livingHeirCount,
       callableHeirCount,
+      callableAssociateCount,
       letterMailed: !!d.letterMailedAt,
     };
     const queue = queueOf(f);

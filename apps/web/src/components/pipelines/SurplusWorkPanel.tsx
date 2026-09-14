@@ -173,7 +173,17 @@ export interface SurplusPanelLead {
   /** Three standard letters unanswered: send the next by Priority or FedEx. */
   escalateMail: boolean;
   /** Heirs on file, for addressing a letter. Same shape the heirs panel uses. */
-  heirs: { id: string; name: string; address: string | null; deceased: boolean }[];
+  heirs: {
+    id: string;
+    name: string;
+    address: string | null;
+    deceased: boolean;
+    /** Only a heir can sign; a relative is who to ask. */
+    isHeir?: boolean;
+    relationship?: string | null;
+    callable?: boolean;
+    phones?: { number: string; type: string | null; dnc: string | null }[];
+  }[];
   /** The document set: one entry per kind, with the file when there is one. */
   documents: PanelDocument[];
   docsRequired: string[];
@@ -3470,20 +3480,37 @@ function NextStepBanner({
           );
         }
         break;
-      case 'heirs':
+      case 'heirs': {
         tone = 'red';
-        text = `${lead.claimant} is deceased and no living heir is on file. Only a living heir can sign, so a phone number for the claimant is worth nothing yet. Find the probate case and read the petition.`;
+        // A relative with a number is the fastest way to the heirs: a spouse
+        // or a child knows who is handling the estate. Spouse first.
+        const reach = (lead.heirs || [])
+          .filter((h) => h.callable && !h.isHeir && !h.deceased)
+          .sort((a, b) => Number(/spouse/i.test(b.relationship || '')) - Number(/spouse/i.test(a.relationship || '')));
+        const first = reach[0];
+        const firstPhone = first?.phones?.find((p) => !p.dnc)?.number || null;
+        text = first
+          ? `${lead.claimant} is deceased and no heir is on file yet. ${reach.length === 1 ? 'One relative has a number' : `${reach.length} relatives have numbers`}. Start with ${first.name}${first.relationship ? ` (${first.relationship.toLowerCase()})` : ''} and ask who is handling the estate.`
+          : `${lead.claimant} is deceased and no living heir is on file. Only a living heir can sign, so a phone number for the claimant is worth nothing yet. Find the probate case and read the petition.`;
         actions = (
-          <a
-            href={lead.courtRecordsUrl || courtRecordsSearch(property.county)}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="dc-wp-btn on"
-          >
-            Open {property.county || 'county'} court records
-          </a>
+          <>
+            {first && firstPhone && (
+              <button type="button" className="dc-wp-btn on" onClick={() => onCall(firstPhone)}>
+                Call {first.name.split(' ')[0]} {phoneDisplay(firstPhone)}
+              </button>
+            )}
+            <a
+              href={lead.courtRecordsUrl || courtRecordsSearch(property.county)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`dc-wp-btn${first && firstPhone ? '' : ' on'}`}
+            >
+              Open {property.county || 'county'} court records
+            </a>
+          </>
         );
         break;
+      }
       case 'trace':
         tone = 'amber';
         actions = (

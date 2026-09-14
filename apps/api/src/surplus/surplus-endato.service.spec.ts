@@ -44,7 +44,7 @@ describe('parseEndatoPerson', () => {
     const p = parseEndatoPerson(ZUMSTEG);
     expect(p.first).toBe('Bernhard');
     expect(p.last).toBe('Zumsteg');
-    expect(p.addresses[0]).toEqual({ street: '256 Treu Te', city: 'Palm Bay', state: 'FL', zip: '32907', lastSeen: '2026-08-01' });
+    expect(p.addresses[0]).toEqual({ street: '256 Treu Te', line: '256 Treu Te', city: 'Palm Bay', state: 'FL', zip: '32907', lastSeen: '2026-08-01' });
     // The two spellings of one number collapse; the disconnected one survives, flagged.
     expect(p.phones).toEqual([
       { num: '3215550101', type: 'Mobile', connected: true },
@@ -52,7 +52,7 @@ describe('parseEndatoPerson', () => {
     ]);
     expect(p.emails).toEqual(['b@example.com']);
     expect(p.deceased).toBe(false);
-    expect(p.relatives).toEqual([{ name: 'Anita Zumsteg', type: 'Spouse', deceased: false, city: null, state: null }]);
+    expect(p.relatives).toEqual([{ id: null, name: 'Anita Zumsteg', type: 'Spouse', deceased: false, city: null, state: null, dob: null }]);
     expect(p.akas).toEqual([{ first: 'Bernard', last: 'Zumsteg' }]);
 
     // PascalCase keys, as the docs show them, read the same.
@@ -141,9 +141,11 @@ describe('the death record', () => {
       ],
     });
     expect(p.relatives).toEqual([
-      { name: 'Mary Lee Connolly', type: 'Spouse', deceased: false, city: null, state: null },
-      { name: 'Ann B Holbrook', type: 'Family', deceased: true, city: 'Stuart', state: 'FL' },
+      { id: null, name: 'Mary Lee Connolly', type: 'Spouse', deceased: false, city: null, state: null, dob: '1961-11-01' },
+      { id: null, name: 'Ann B Holbrook', type: 'Family', deceased: true, city: 'Stuart', state: 'FL', dob: null },
     ]);
+    const withId = parseEndatoPerson({ relativesSummary: [{ tahoeId: 'G3938939893999792270', firstName: 'Christopher', lastName: 'Connolly' }] });
+    expect(withId.relatives[0].id).toBe('G3938939893999792270');
   });
 
   it('turns a masked day into the first of the month rather than no date', () => {
@@ -152,5 +154,19 @@ describe('the death record', () => {
     expect(endatoDate('2019-05-01T00:00:00')).toBe('2019-05-01');
     expect(endatoDate('')).toBeNull();
     expect(endatoDate('unknown')).toBeNull();
+  });
+});
+
+describe('the address line', () => {
+  it('keeps the whole street line for an envelope, from fullAddress or the parts', () => {
+    const p = parseEndatoPerson({
+      addresses: [
+        { houseNumber: '6021', streetName: 'Massey', streetType: 'Rd', city: 'Spotsylvania', state: 'VA', zip: '22551', fullAddress: '6021 Massey Rd; Spotsylvania, VA 22551-6141', lastReportedDate: '8/1/2026' },
+        { houseNumber: '30', streetName: 'Post', streetType: 'St', unitType: 'Apt', unit: '4B', city: 'Yonkers', state: 'NY', zip: '10705' },
+      ],
+    });
+    expect(p.addresses.map((a) => a.line)).toEqual(['6021 Massey Rd', '30 Post St Apt 4B']);
+    // The history key still reads house number and first street word.
+    expect(p.addresses[0].street).toBe('6021 Massey');
   });
 });

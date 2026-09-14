@@ -36,6 +36,8 @@ export interface EndatoAddress {
   zip: string | null;
   /** ISO-ish date string as the vendor gives it, for "current address" ordering. */
   lastSeen: string | null;
+  /** The full street line with suffix and unit, for an envelope. */
+  line?: string | null;
 }
 
 export interface EndatoPhone {
@@ -59,7 +61,15 @@ export interface EndatoPerson {
 }
 
 export interface EndatoRelative {
+  /**
+   * Endato's own id for this relative ("tahoeId"). A Person Search on it
+   * returns exactly this person, so looking a relative up needs no name
+   * matching and cannot land on a namesake.
+   */
+  id: string | null;
   name: string;
+  /** YYYY-MM-DD, the day often masked to the first. */
+  dob: string | null;
   /** "Spouse", "Family". */
   type: string | null;
   deceased: boolean;
@@ -114,6 +124,30 @@ export function endatoDate(v: unknown): string | null {
   return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : null;
 }
 
+/**
+ * "6021 Massey Rd", "30 Post St Apt 4B". Endato's `fullAddress` is
+ * "6021 Massey Rd; Spotsylvania, VA 22551-6141", so the street line is the
+ * part before the semicolon; built from the parts when that is absent.
+ */
+function addressLine(a: any, g: (o: any, ...k: string[]) => any): string | null {
+  const full = String(g(a, 'fullAddress', 'FullAddress') || '');
+  if (full.includes(';')) return full.split(';')[0].trim() || null;
+  const line = [
+    g(a, 'houseNumber', 'HouseNumber'),
+    g(a, 'streetPreDirection', 'StreetPreDirection'),
+    g(a, 'streetName', 'StreetName'),
+    g(a, 'streetType', 'StreetType'),
+    g(a, 'streetPostDirection', 'StreetPostDirection'),
+    g(a, 'unitType', 'UnitType'),
+    g(a, 'unit', 'Unit'),
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return line || null;
+}
+
 /** One vendor person, whichever casing the vendor used for the keys. */
 export function parseEndatoPerson(p: any): EndatoPerson {
   const g = (o: any, ...keys: string[]) => {
@@ -136,6 +170,10 @@ export function parseEndatoPerson(p: any): EndatoPerson {
       state: g(a, 'state', 'State') || null,
       zip: g(a, 'zip', 'Zip') || null,
       lastSeen: isoish(g(a, 'lastReportedDate', 'LastReportedDate')),
+      // The whole street line, suffix and unit included, for an envelope.
+      // "street" stays house number plus name because the address-history
+      // key is built from it.
+      line: addressLine(a, g),
     }))
     .filter((a) => a.street);
   // The death record. The live response carries it as a top-level `dod` and a
@@ -170,9 +208,11 @@ export function parseEndatoPerson(p: any): EndatoPerson {
     dateOfDeath,
     relatives: ((g(p, 'relativesSummary', 'RelativesSummary') || []) as any[])
       .map((r) => ({
+        id: g(r, 'tahoeId', 'TahoeId') || null,
         name: [g(r, 'firstName', 'FirstName'), g(r, 'middleName', 'MiddleName'), g(r, 'lastName', 'LastName')]
           .filter(Boolean)
           .join(' '),
+        dob: endatoDate(g(r, 'dob', 'Dob')),
         type: g(r, 'relativeType', 'RelativeType') || null,
         deceased: !!g(r, 'isDeceased', 'IsDeceased'),
         city: g(r, 'city', 'City') || null,
@@ -229,14 +269,34 @@ export class SurplusEndatoService {
   async search(q: EndatoQuery): Promise<EndatoPerson[]> {
     if (!this.available) return [];
     const hint = q.city && q.state ? `${q.city}, ${q.state}` : q.state || null;
-    const body: Record<string, unknown> = {
+    return this.request({
       FirstName: q.first,
       LastName: q.last,
       Addresses: hint ? [{ AddressLine2: hint }] : [],
       Includes: ['Addresses', 'PhoneNumbers', 'RelativesSummary', 'DeathRecords', 'Akas'],
       Page: 1,
       ResultsPerPage: RESULTS_PER_SEARCH,
-    };
+    });
+  }
+
+  /**
+   * One person by Endato's own id, as a relative's summary carries it. Tested
+   * 2026-09-14 on a relative of James Connolly (Brevard 250054): one result,
+   * the right person, a current Pennsylvania address and two connected
+   * numbers, for one search. Null when Endato returns nobody, which is what a
+   * person who opted out of people-search listings looks like.
+   */
+  async lookup(id: string): Promise<EndatoPerson | null> {
+    if (!this.available || !id) return null;
+    const found = await this.request({
+      TahoeId: id,
+      Includes: ['Addresses', 'PhoneNumbers', 'EmailAddresses', 'DeathRecords'],
+      ResultsPerPage: 1,
+    });
+    return found[0] || null;
+  }
+
+  private async request(body: Record<string, unknown>): Promise<EndatoPerson[]> {
     let resp;
     try {
       resp = await axios.post(ENDATO_URL, body, {

@@ -50,6 +50,7 @@ import {
   historyKey,
   verifiedVia,
   endatoDate,
+  EndatoRelative,
 } from './surplus-endato.service';
 
 /**
@@ -67,6 +68,12 @@ import {
 const BATCHDATA_DEFAULT_BASE_URL = 'https://api.batchdata.com/api/v3';
 /** A courtesy pause between vendor calls. */
 const CALL_DELAY_MS = 250;
+/**
+ * Relatives looked up per deceased claimant. Spouse first, then family who
+ * share the surname. Brevard 250811 lists eight; four reaches the household
+ * without paying for every cousin.
+ */
+const DEFAULT_RELATIVE_LOOKUPS = 4;
 
 export interface SurplusTraceResult {
   /** Leads considered. */
@@ -91,6 +98,11 @@ export interface SurplusTraceResult {
    * since their numbers cannot reach anyone who can sign.
    */
   deceased: number;
+  /**
+   * Relatives of the newly deceased, looked up by the vendor's id for them.
+   * `withContact` came back with a number or an email.
+   */
+  relatives: { looked: number; withContact: number };
   errors: number;
   message?: string;
 }
@@ -176,7 +188,7 @@ interface TracedPerson {
   /** YYYY-MM-DD, when the vendor dates the death. */
   dateOfDeath?: string | null;
   /** Relatives the vendor holds, the starting list for an heir search. */
-  relatives?: { name: string; type: string | null; deceased: boolean; city: string | null; state: string | null }[];
+  relatives?: EndatoRelative[];
   /**
    * True when this person's address history includes the property that sold.
    * This is the confirmation the surplus course teaches, available here without
@@ -217,6 +229,7 @@ export class SurplusSkiptraceService {
   private readonly logger = new Logger(SurplusSkiptraceService.name);
   private readonly batchKey?: string;
   private readonly batchBaseUrl: string;
+  private readonly relativeCap: number;
 
   constructor(
     private prisma: PrismaService,
@@ -224,6 +237,10 @@ export class SurplusSkiptraceService {
     private endato?: SurplusEndatoService,
   ) {
     this.batchKey = this.config.get<string>('BATCHDATA_API_KEY');
+    // Relatives of a claimant found dead are looked up by Endato id, up to
+    // this many per claimant. Each is one Endato search. 0 turns it off.
+    const cap = Number(this.config.get<string>('SURPLUS_RELATIVE_LOOKUPS'));
+    this.relativeCap = Number.isFinite(cap) && cap >= 0 ? cap : DEFAULT_RELATIVE_LOOKUPS;
     this.batchBaseUrl = (
       this.config.get<string>('BATCHDATA_API_BASE_URL') || BATCHDATA_DEFAULT_BASE_URL
     ).replace(/\/+$/, '');
@@ -261,6 +278,7 @@ export class SurplusSkiptraceService {
       skipped: {},
       nameSearch: { searched: 0, verified: 0, namesakes: 0 },
       deceased: 0,
+      relatives: { looked: 0, withContact: 0 },
       errors: 0,
     };
 
@@ -511,11 +529,16 @@ export class SurplusSkiptraceService {
     searched: number;
     verified: number;
     deceased: number;
+    relatives: { looked: number; withContact: number };
     errors: number;
     message?: string;
   }> {
-    const out = { candidates: 0, searches: 0, searched: 0, verified: 0, deceased: 0, errors: 0 } as {
-      candidates: number; searches: number; searched: number; verified: number; deceased: number; errors: number; message?: string;
+    const out = {
+      candidates: 0, searches: 0, searched: 0, verified: 0, deceased: 0,
+      relatives: { looked: 0, withContact: 0 }, errors: 0,
+    } as {
+      candidates: number; searches: number; searched: number; verified: number; deceased: number;
+      relatives: { looked: number; withContact: number }; errors: number; message?: string;
     };
     if (!this.endato?.available && !opts.dryRun) {
       out.message = 'ENDATO_AP_NAME / ENDATO_AP_PASSWORD are not set, so nothing was checked.';
@@ -593,7 +616,9 @@ export class SurplusSkiptraceService {
           best.person.deceased &&
           deathIsTheClaimants(cc.claimant, best.person.first, best.person.last);
         if (died) {
-          await this.markDeceased(cc, best!.person, 'endato');
+          const r = await this.markDeceased(cc, best!.person, 'endato');
+          out.relatives.looked += r.looked;
+          out.relatives.withContact += r.withContact;
         }
         await this.logAttempt(
           cc.detailId,
@@ -609,6 +634,161 @@ export class SurplusSkiptraceService {
         if (died) out.deceased += 1;
       }
       await this.pause(CALL_DELAY_MS);
+    }
+    return out;
+  }
+
+  /**
+   * Relatives for the claimants already found dead, looked up once.
+   *
+   * The death backfill of 2026-09-14 filed 68 claimants' relatives by name
+   * only, since the vendor's id for each was not kept, and a name alone gives
+   * the heir trace nothing to submit. For a claimant whose relatives all lack
+   * the id, the claimant is searched once more by name (verified exactly as
+   * the name rung verifies) and the ids are copied onto the rows already
+   * there. Then every deceased claimant's relatives are looked up by id, up
+   * to the per-claimant cap, biggest surplus first.
+   *
+   * `limit` caps the Endato calls of both kinds together. `dryRun` counts
+   * them and spends nothing.
+   */
+  async relativeBacklog(opts: {
+    organizationId?: string | null;
+    county?: string;
+    limit?: number;
+    dryRun?: boolean;
+  }): Promise<{
+    deceasedClaimants: number;
+    recoverSearches: number;
+    lookups: number;
+    recovered: number;
+    looked: number;
+    withContact: number;
+    errors: number;
+    message?: string;
+  }> {
+    const out = {
+      deceasedClaimants: 0, recoverSearches: 0, lookups: 0, recovered: 0, looked: 0, withContact: 0, errors: 0,
+    } as {
+      deceasedClaimants: number; recoverSearches: number; lookups: number; recovered: number;
+      looked: number; withContact: number; errors: number; message?: string;
+    };
+    if (!this.endato?.available && !opts.dryRun) {
+      out.message = 'ENDATO_AP_NAME / ENDATO_AP_PASSWORD are not set, so nothing was looked up.';
+      return out;
+    }
+    const leads = await this.prisma.lead.findMany({
+      where: {
+        source: LeadSource.SURPLUS,
+        ...(opts.organizationId ? { organizationId: opts.organizationId } : {}),
+        surplusDetail: {
+          deceased: true,
+          deathSource: 'endato',
+          ...(opts.county ? { county: opts.county } : {}),
+        },
+      },
+      include: { surplusDetail: { include: { heirs: true } } },
+    });
+    const rows = leads
+      .filter((l) => l.surplusDetail)
+      .sort((a, b) => (b.surplusDetail!.grossSurplus || 0) - (a.surplusDetail!.grossSurplus || 0));
+    out.deceasedClaimants = rows.length;
+
+    const relativesOf = (l: any) =>
+      (l.surplusDetail.heirs || []).filter((h: any) => h.role === 'relative' && h.sourceKind === 'endato');
+    const needIds = rows.filter((l) => {
+      const rel = relativesOf(l);
+      return rel.length > 0 && rel.every((h: any) => !h.vendorPersonId);
+    });
+    // One search per person per case, as every other name search groups them.
+    const groups = new Map<string, any[]>();
+    for (const l of needIds) {
+      const c = candidateOf(l);
+      const n = splitClaimantName(displayName(c.claimant));
+      if (!n.surname || !n.given.length) continue;
+      const key = `${c.caseNumber || c.propertyStreet || ''}|${n.given[0]} ${n.surname}`;
+      groups.set(key, [...(groups.get(key) || []), l]);
+    }
+    out.recoverSearches = groups.size;
+    for (const l of rows) {
+      const rel = relativesOf(l);
+      const tried = rel.filter((h: any) => h.vendorPersonId && h.tracedAt).length;
+      const open = rel.filter((h: any) => !h.tracedAt && !h.deceased && !h.doNotCall).length;
+      out.lookups += Math.max(0, Math.min(this.relativeCap - tried, open));
+    }
+    if (opts.limit) {
+      out.recoverSearches = Math.min(out.recoverSearches, opts.limit);
+      out.lookups = Math.min(out.lookups, Math.max(0, opts.limit - out.recoverSearches));
+    }
+    if (opts.dryRun) return out;
+
+    let spent = 0;
+    const budgetLeft = () => (opts.limit ? opts.limit - spent : Number.POSITIVE_INFINITY);
+
+    for (const [, group] of groups) {
+      if (budgetLeft() <= 0) break;
+      const people = group.map((l) => ({ ...candidateOf(l), claimant: displayName(candidateOf(l).claimant) }));
+      const c = people[0];
+      const split = splitClaimantName(c.claimant);
+      const hint =
+        c.mailingZip && c.mailingState
+          ? { city: c.mailingCity, state: c.mailingState }
+          : { city: c.propertyCity, state: c.propertyState || 'FL' };
+      spent += 1;
+      let found: EndatoPerson[];
+      try {
+        found = await this.endato!.search({
+          first: split.given[0].toUpperCase(),
+          last: split.surname.toUpperCase(),
+          city: hint.city,
+          state: hint.state,
+        });
+      } catch (e: any) {
+        out.errors += 1;
+        if (!out.message) out.message = e.message;
+        if (/auth|out of searches|rate limited/i.test(e.message)) break;
+        continue;
+      }
+      const keys = {
+        property: historyKey(c.propertyStreet, c.propertyCity, c.propertyZip),
+        mailing: historyKey(c.mailingStreet, c.mailingCity, c.mailingZip),
+      };
+      const verified = found
+        .map((p) => ({ p, via: verifiedVia(p, keys) }))
+        .filter((x) => x.via)
+        .map((x) => this.endatoToTraced(x.p, x.via as 'property' | 'mailing'));
+      for (let i = 0; i < people.length; i += 1) {
+        const cc = people[i];
+        const best = verified.length ? this.bestPersonFor(cc, verified, new Set()) : null;
+        const same =
+          !!best &&
+          best.verdict === 'same_person' &&
+          best.person.deceased &&
+          deathIsTheClaimants(cc.claimant, best.person.first, best.person.last);
+        if (!same) {
+          await this.logAttempt(cc.detailId, null, 'nothing', `Relative ids: could not re-verify ${cc.claimant}, so the relatives stay unlooked-up.`, 'endato');
+          continue;
+        }
+        await this.fileRelatives(
+          cc.detailId,
+          (group[i] as any).organizationId || null,
+          cc.claimant,
+          adultRelatives(best!.person.relatives || []),
+          'endato',
+        );
+        await this.logAttempt(cc.detailId, null, 'found', `Relative ids: recovered Endato's ids for ${cc.claimant}'s relatives.`, 'endato');
+        out.recovered += 1;
+      }
+      await this.pause(CALL_DELAY_MS);
+    }
+
+    for (const l of rows) {
+      if (budgetLeft() <= 0) break;
+      const c = candidateOf(l);
+      const r = await this.lookupRelatives(c.detailId, c.claimant, budgetLeft());
+      spent += r.looked;
+      out.looked += r.looked;
+      out.withContact += r.withContact;
     }
     return out;
   }
@@ -679,6 +859,7 @@ export class SurplusSkiptraceService {
       skipped: {},
       nameSearch: { searched: 0, verified: 0, namesakes: 0 },
       deceased: 0,
+      relatives: { looked: 0, withContact: 0 },
       errors: 0,
     };
 
@@ -1199,7 +1380,7 @@ export class SurplusSkiptraceService {
           source,
         );
         if (died) {
-          await this.markDeceased(c, best.person, source);
+          this.addLookups(result, await this.markDeceased(c, best.person, source));
           result.deceased += 1;
           contacted.add(c.detailId);
         } else if (source === 'endato' && best.verdict === 'same_person') {
@@ -1262,7 +1443,7 @@ export class SurplusSkiptraceService {
         // The numbers are kept, and the card files them as the late
         // claimant's, for the record. They are not a contact: nobody on the
         // end of them can sign.
-        await this.markDeceased(c, best.person, source);
+        this.addLookups(result, await this.markDeceased(c, best.person, source));
         result.deceased += 1;
         continue;
       }
@@ -1287,12 +1468,16 @@ export class SurplusSkiptraceService {
    * family can say who inherited; a people-search list of relatives includes
    * in-laws and ex-spouses who have no standing at all.
    */
-  private async markDeceased(c: Candidate, p: TracedPerson, source: TraceSource): Promise<void> {
+  private async markDeceased(
+    c: Candidate,
+    p: TracedPerson,
+    source: TraceSource,
+  ): Promise<{ looked: number; withContact: number }> {
     const vendor = source === 'endato' ? 'Endato' : 'BatchData';
     const iso = p.dateOfDeath && /^\d{4}-\d{2}-\d{2}$/.test(p.dateOfDeath) ? p.dateOfDeath : null;
     const dod = iso ? new Date(`${iso}T12:00:00Z`) : null;
     const who = displayName(c.claimant);
-    const living = (p.relatives || []).filter((r) => !r.deceased && r.name);
+    const living = adultRelatives(p.relatives || []);
     const relList = living
       .slice(0, 6)
       .map((r) => (r.type ? `${r.name} (${r.type.toLowerCase()})` : r.name))
@@ -1325,38 +1510,179 @@ export class SurplusSkiptraceService {
       },
     });
 
-    if (!living.length) return;
-    const key = (n: string) =>
-      String(n || '')
-        .toUpperCase()
-        .replace(/[^A-Z ]/g, ' ')
-        .split(/\s+/)
-        .filter((t) => t.length > 1)
-        .sort()
-        .join(' ');
+    await this.fileRelatives(c.detailId, row?.organizationId || null, who, living, source);
+    return this.lookupRelatives(c.detailId, who);
+  }
+
+  /**
+   * File a deceased claimant's relatives on the lead, as relatives and never
+   * as heirs. Only a probate filing or the family can say who inherited; a
+   * people-search list includes in-laws and ex-spouses with no standing at
+   * all. A relative already on the lead under the same name gets the vendor's
+   * id if it lacks one, which is how the rows filed before ids were kept are
+   * repaired.
+   */
+  private async fileRelatives(
+    detailId: string,
+    organizationId: string | null,
+    who: string,
+    relatives: EndatoRelative[],
+    source: TraceSource,
+  ): Promise<void> {
+    if (!relatives.length) return;
+    const vendor = source === 'endato' ? 'Endato' : 'BatchData';
     const have = await this.prisma.surplusHeir.findMany({
-      where: { surplusDetailId: c.detailId },
-      select: { name: true },
+      where: { surplusDetailId: detailId },
+      select: { id: true, name: true, vendorPersonId: true },
     });
-    const seen = new Set(have.map((h) => key(h.name)));
-    for (const r of living.slice(0, 8)) {
-      const k = key(r.name);
-      if (!k || seen.has(k)) continue;
-      seen.add(k);
-      await this.prisma.surplusHeir.create({
+    const byKey = new Map(have.map((h) => [personKey(h.name), h]));
+    for (const r of relatives.slice(0, 8)) {
+      const k = personKey(r.name);
+      if (!k) continue;
+      const existing = byKey.get(k);
+      if (existing) {
+        if (!existing.vendorPersonId && r.id) {
+          await this.prisma.surplusHeir.update({ where: { id: existing.id }, data: { vendorPersonId: r.id } });
+        }
+        continue;
+      }
+      const made = await this.prisma.surplusHeir.create({
         data: {
-          surplusDetailId: c.detailId,
-          organizationId: row?.organizationId || null,
+          surplusDetailId: detailId,
+          organizationId,
           name: r.name,
           relationship: r.type,
           city: r.city,
           state: r.state,
           role: 'relative',
           sourceKind: source,
+          vendorPersonId: r.id,
           callNotes: `${vendor} lists ${r.name} as a relative${r.type ? ` (${r.type.toLowerCase()})` : ''} of ${who}. A route to the heirs, not an heir until a probate filing or the family says so.`,
         },
       });
+      byKey.set(k, { id: made?.id, name: r.name, vendorPersonId: r.id });
     }
+  }
+
+  /**
+   * Look up a deceased claimant's relatives by the vendor's own id for each.
+   *
+   * The id names one person, so there is nothing to verify and no namesake to
+   * refuse: Christopher M Connolly, a relative of the Brevard 250054
+   * claimant, came back as himself with a Pennsylvania address and two
+   * connected numbers for one search. Spouse first, then family who share the
+   * claimant's surname, then the rest, up to the configured cap per claimant.
+   * A relative Endato returns nothing for has usually opted out of
+   * people-search listings; one it holds a death record for is marked dead and
+   * never dialled.
+   */
+  async lookupRelatives(
+    detailId: string,
+    claimant: string,
+    max = Number.POSITIVE_INFINITY,
+  ): Promise<{ looked: number; withContact: number }> {
+    const out = { looked: 0, withContact: 0 };
+    if (!this.relativeCap || !this.endato?.available) return out;
+    const tried = await this.prisma.surplusHeir.count({
+      where: { surplusDetailId: detailId, vendorPersonId: { not: null }, tracedAt: { not: null } },
+    });
+    const room = Math.min(this.relativeCap - tried, max);
+    if (room <= 0) return out;
+    const rows = await this.prisma.surplusHeir.findMany({
+      where: {
+        surplusDetailId: detailId,
+        vendorPersonId: { not: null },
+        tracedAt: null,
+        deceased: false,
+        doNotCall: false,
+      },
+    });
+    const surname = splitClaimantName(displayName(claimant)).surname.toUpperCase();
+    const rank = (h: any) =>
+      /spouse/i.test(h.relationship || '') ? 0 : splitClaimantName(h.name).surname.toUpperCase() === surname ? 1 : 2;
+    const queue = [...rows].sort((a, b) => rank(a) - rank(b)).slice(0, room);
+
+    for (const h of queue) {
+      out.looked += 1;
+      let p: EndatoPerson | null;
+      try {
+        p = await this.endato.lookup(h.vendorPersonId!);
+      } catch (e: any) {
+        this.logger.warn(`Relative lookup failed for ${h.name}: ${e.message}`);
+        if (/auth|out of searches|rate limited/i.test(e.message)) break;
+        continue;
+      }
+      if (!p) {
+        const text = `Endato returned nobody for ${h.name}'s id. They have most likely opted out of people-search listings.`;
+        await this.prisma.surplusHeir.update({
+          where: { id: h.id },
+          data: { tracedAt: new Date(), traceOutcome: 'no_person', traceDetail: text },
+        });
+        await this.logAttempt(detailId, h.id, 'nothing', `Relative lookup: ${text}`, 'endato');
+      } else if (p.deceased) {
+        const iso = p.dateOfDeath && /^\d{4}-\d{2}-\d{2}$/.test(p.dateOfDeath) ? p.dateOfDeath : null;
+        const text = `Endato holds a death record for ${h.name}${iso ? `, dated ${iso}` : ''}.`;
+        await this.prisma.surplusHeir.update({
+          where: { id: h.id },
+          data: {
+            deceased: true,
+            dateOfDeath: iso ? new Date(`${iso}T12:00:00Z`) : null,
+            tracedAt: new Date(),
+            traceOutcome: 'no_contact',
+            traceDetail: text,
+          },
+        });
+        await this.logAttempt(detailId, h.id, 'nothing', `Relative lookup: ${text}`, 'endato');
+      } else {
+        const cur = currentAddress(p);
+        const connected = p.phones.filter((x) => x.connected);
+        const ph = (connected.length ? connected : p.phones).slice(0, 4);
+        const emails = p.emails.slice(0, 2);
+        const has = ph.length > 0 || emails.length > 0;
+        const where = cur
+          ? `${cur.line || cur.street}, ${[cur.city, cur.state, cur.zip].filter(Boolean).join(' ')}${cur.lastSeen ? ` (last seen ${cur.lastSeen})` : ''}`
+          : null;
+        const text =
+          `Looked up by Endato's id for ${h.name}, so this is exactly that person. ` +
+          (where ? `Current address ${where}. ` : '') +
+          (has ? 'Numbers came from a people search and are not DNC scrubbed.' : 'Endato holds no phone or email for them.');
+        await this.prisma.surplusHeir.update({
+          where: { id: h.id },
+          data: {
+            ...(cur && !h.street
+              ? { street: cur.line || cur.street, city: cur.city, state: cur.state, zip: cur.zip }
+              : {}),
+            phone1: ph[0]?.num || null,
+            phone2: ph[1]?.num || null,
+            phone3: ph[2]?.num || null,
+            phone4: ph[3]?.num || null,
+            phone1Type: ph[0]?.type || null,
+            phone2Type: ph[1]?.type || null,
+            phone3Type: ph[2]?.type || null,
+            phone4Type: ph[3]?.type || null,
+            // Endato does not flag DNC. Null reads as unscrubbed, not clear.
+            phone1Dnc: null,
+            phone2Dnc: null,
+            phone3Dnc: null,
+            phone4Dnc: null,
+            email1: emails[0] || null,
+            email2: emails[1] || null,
+            tracedAt: new Date(),
+            traceOutcome: has ? 'matched' : 'no_contact',
+            traceDetail: text,
+          },
+        });
+        await this.logAttempt(detailId, h.id, has ? 'found' : 'nothing', `Relative lookup: ${text}`, 'endato');
+        if (has) out.withContact += 1;
+      }
+      await this.pause(CALL_DELAY_MS);
+    }
+    return out;
+  }
+
+  private addLookups(result: SurplusTraceResult, r: { looked: number; withContact: number }): void {
+    result.relatives.looked += r.looked;
+    result.relatives.withContact += r.withContact;
   }
 
   /** A verified identity came back with no death record. */
@@ -1567,4 +1893,32 @@ function candidateOf(l: any): Candidate {
     mailingZip: d.ownerMailingZip,
     nameSearchedAt: d.nameSearchedAt,
   };
+}
+
+/** Sorted name tokens, so "Mary Lee Abe" and "ABE, MARY LEE" are one person. */
+function personKey(n: string | null | undefined): string {
+  return String(n || '')
+    .toUpperCase()
+    .replace(/[^A-Z ]/g, ' ')
+    .split(/\s+/)
+    .filter((t) => t.length > 1)
+    .sort()
+    .join(' ');
+}
+
+/**
+ * Living relatives old enough to be worth a call. Endato lists grandchildren
+ * among a decedent's family; a child cannot tell anybody who is handling an
+ * estate, and a lookup on one is a search spent on nothing.
+ */
+function adultRelatives(rs: EndatoRelative[]): EndatoRelative[] {
+  const now = new Date();
+  return rs.filter((r) => {
+    if (r.deceased || !r.name) return false;
+    if (!r.dob) return true;
+    const born = new Date(`${r.dob}T12:00:00Z`);
+    if (isNaN(born.getTime())) return true;
+    const age = (now.getTime() - born.getTime()) / (365.25 * 24 * 3600 * 1000);
+    return age >= 18;
+  });
 }

@@ -276,6 +276,12 @@ export interface QueueFacts {
   livingHeirCount?: number | null;
   /** Living heirs who have a number that can be dialled. */
   callableHeirCount?: number | null;
+  /**
+   * Relatives and other associates with a number. Not signers, so they never
+   * move a dead claimant out of Find the heirs; they are who to ring to learn
+   * who is handling the estate.
+   */
+  callableAssociateCount?: number | null;
   /** One of us has mailed a letter to the address on file. */
   letterMailed?: boolean | null;
 }
@@ -333,7 +339,9 @@ export function queueReason(f: QueueFacts): string {
     case SurplusQueue.ENTITY:
       return 'Entity claimant, the registered agent on Sunbiz is who can sign';
     case SurplusQueue.HEIRS:
-      return 'Claimant is deceased and no heirs are on file, so nobody can sign yet';
+      return (f.callableAssociateCount || 0) > 0
+        ? `Claimant is deceased and no heir is on file. ${f.callableAssociateCount} relative${f.callableAssociateCount === 1 ? ' has a number' : 's have numbers'}: ask who is handling the estate`
+        : 'Claimant is deceased and no heirs are on file, so nobody can sign yet';
     case SurplusQueue.TRACE:
       return f.ownerMailingStreet
         ? 'Never traced, and the notice address is live'
