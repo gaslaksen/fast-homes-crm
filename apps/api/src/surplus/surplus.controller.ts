@@ -10,6 +10,7 @@ import { SurplusService } from './surplus.service';
 import { SurplusImportService } from './surplus-import.service';
 import { SurplusIngestService } from './surplus-ingest.service';
 import { SurplusSkiptraceService } from './surplus-skiptrace.service';
+import { SurplusEndatoService } from './surplus-endato.service';
 import { SurplusTemplatesService } from './surplus-templates.service';
 import { SurplusCredibilityService, CredibilityChannel } from './surplus-credibility.service';
 import { SurplusCountiesService, ACCEPTED_METHOD_LABEL } from './surplus-counties.service';
@@ -76,6 +77,7 @@ export class SurplusController {
     private documents: SurplusDocumentsService,
     private storage: StorageService,
     private cadence: SurplusCadenceService,
+    private endato: SurplusEndatoService,
   ) {}
 
   private decodeToken(authHeader?: string): { userId?: string; organizationId?: string } {
@@ -662,6 +664,12 @@ export class SurplusController {
       limit,
       dryRun: body?.dryRun === true,
     });
+  }
+
+  /** Endato month to date against its budget. */
+  @Get('endato-usage')
+  async endatoUsage() {
+    return this.endato.usage();
   }
 
   // ─── Heirs of a deceased claimant ─────────────────────────────────────────

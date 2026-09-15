@@ -2618,3 +2618,21 @@ model SurplusPollRun {
   @@index([startedAt])
   @@map("surplus_poll_runs")
 }
+
+/// Paid vendor calls counted per calendar month (America/New_York), so a
+/// vendor is capped by what it has cost rather than by what somebody
+/// remembers running. Endato's Person Search is billed per match; every call
+/// is counted, so the count errs high.
+model VendorUsage {
+  id        String   @id @default(cuid())
+  /// 'endato'
+  vendor    String
+  /// 'YYYY-MM'
+  period    String
+  calls     Int      @default(0)
+  updatedAt DateTime @updatedAt
+
+  @@unique([vendor, period])
+  @@map("vendor_usage")
+}
+
