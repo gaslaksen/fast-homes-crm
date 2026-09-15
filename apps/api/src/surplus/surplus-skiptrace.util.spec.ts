@@ -7,6 +7,8 @@ import {
   addressCaseCounts,
   traceState,
   deathIsTheClaimants,
+  traceCriteria,
+  relativeKind,
 } from './surplus-skiptrace.util';
 import { matchRecipient } from './surplus-name-search.util';
 
@@ -353,5 +355,37 @@ describe('deathIsTheClaimants', () => {
   it('refuses anything short of same_person', () => {
     expect(deathIsTheClaimants('JULIET R ABE', 'Kenneth', 'Abe')).toBe(false);
     expect(deathIsTheClaimants('JULIET R ABE', 'Juliet', 'Stranger')).toBe(false);
+  });
+});
+
+describe('traceCriteria', () => {
+  const now = new Date('2026-09-15T12:00:00Z');
+  it('measures age from the notice, and from the sale only when there is no notice', () => {
+    expect(traceCriteria({ claimStatus: 'open', noticeDate: '2025-09-20', saleDate: '2025-01-01' }, { now }).ok).toBe(true);
+    expect(traceCriteria({ claimStatus: 'open', noticeDate: '2025-09-01' }, { now }).reason).toBe('over_a_year');
+    expect(traceCriteria({ claimStatus: 'open', saleDate: '2025-09-01' }, { now }).detail).toMatch(/the sale was 2025-09-01/);
+    expect(traceCriteria({ claimStatus: 'open' }, { now }).ok).toBe(true);
+  });
+  it('keeps denied and government-lien cases, refuses a pending claim and a closed one', () => {
+    expect(traceCriteria({ claimStatus: 'denied' }, { now }).ok).toBe(true);
+    expect(traceCriteria({ claimStatus: 'gov_lien' }, { now }).ok).toBe(true);
+    expect(traceCriteria({ claimStatus: 'pending' }, { now }).reason).toBe('claim_on_file');
+    expect(traceCriteria({ claimStatus: 'distributed' }, { now }).reason).toBe('closed');
+  });
+  it('refuses a dead claimant unless the path is the estate search', () => {
+    expect(traceCriteria({ claimStatus: 'open', heirsRequired: true }, { now }).reason).toBe('estate');
+    expect(traceCriteria({ claimStatus: 'open', deceased: true }, { now, estate: true }).ok).toBe(true);
+  });
+});
+
+describe('relativeKind', () => {
+  it('dates Endato\'s "Family" against the claimant\'s birth year', () => {
+    expect(relativeKind('Spouse', null, 1944)).toBe('spouse');
+    expect(relativeKind('Family', '1970-05-01', 1944)).toBe('child');
+    expect(relativeKind('Family', '1946-02-01', 1944)).toBe('sibling');
+    expect(relativeKind('Family', '1920-01-01', 1944)).toBe('parent');
+    expect(relativeKind('Family', '2005-01-01', 1944)).toBe('grandchild');
+    expect(relativeKind('Family', null, 1944)).toBe('family');
+    expect(relativeKind('Family', '1970-05-01', null)).toBe('family');
   });
 });

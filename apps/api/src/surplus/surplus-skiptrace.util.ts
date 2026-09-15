@@ -242,6 +242,105 @@ export function deathIsTheClaimants(
   return traced.given.filter((g) => g.length > 1).some((g) => spelled.some((w) => sameGivenName(g, w)));
 }
 
+// ─── Whether a claim is worth paying to reach ───────────────────────────────
+
+/** Days from the surplus notice after which no paid lookup is made. */
+export const TRACE_MAX_AGE_DAYS = 365;
+
+export type CriteriaRefusal = 'claim_on_file' | 'closed' | 'over_a_year' | 'estate';
+
+export interface TraceCriteriaResult {
+  ok: boolean;
+  /** Why not, as a skipped-count key. Null when ok. */
+  reason: CriteriaRefusal | null;
+  /** One sentence for the card. Null when ok. */
+  detail: string | null;
+}
+
+/**
+ * The business's criteria for spending a paid lookup (BatchData or Endato)
+ * on a claim, in one place so every path asks the same question: the county
+ * pull's automatic trace, the Skip trace button, the heir trace and every
+ * bulk run.
+ *
+ *   - A claim by somebody else on file and not yet ruled on: not worth it.
+ *     Denied claims and government-lien-only cases ARE worth it (decided
+ *     2026-09-15): the money is still there, and a lien takes only a slice.
+ *   - Assigned or paid out: closed.
+ *   - The surplus notice over a year old (the sale date when no notice is on
+ *     file): not worth it. No date at all means the clock has not started.
+ *   - The county lists the claimant as dead: never trace the dead person. The
+ *     estate search looks for their family instead, so estate paths pass
+ *     `estate: true`.
+ */
+export function traceCriteria(
+  d: {
+    claimStatus?: string | null;
+    noticeDate?: Date | string | null;
+    saleDate?: Date | string | null;
+    deceased?: boolean | null;
+    heirsRequired?: boolean | null;
+  },
+  opts: { estate?: boolean; now?: Date; maxAgeDays?: number } = {},
+): TraceCriteriaResult {
+  const status = String(d.claimStatus || '').toLowerCase();
+  if (status === 'pending') {
+    return {
+      ok: false,
+      reason: 'claim_on_file',
+      detail: 'Not traced: somebody else has a claim on file that the clerk has not ruled on.',
+    };
+  }
+  if (status === 'assigned' || status === 'distributed') {
+    return { ok: false, reason: 'closed', detail: 'Not traced: the claim is assigned or paid out.' };
+  }
+  const basis = d.noticeDate || d.saleDate;
+  const when = basis ? new Date(basis) : null;
+  const maxAge = opts.maxAgeDays ?? TRACE_MAX_AGE_DAYS;
+  if (when && !isNaN(when.getTime())) {
+    const days = ((opts.now || new Date()).getTime() - when.getTime()) / 86400000;
+    if (days > maxAge) {
+      const label = d.noticeDate ? 'surplus notice' : 'sale';
+      return {
+        ok: false,
+        reason: 'over_a_year',
+        detail: `Not traced: the ${label} was ${when.toISOString().slice(0, 10)}, over ${maxAge} days ago.`,
+      };
+    }
+  }
+  if ((d.deceased || d.heirsRequired) && !opts.estate) {
+    return {
+      ok: false,
+      reason: 'estate',
+      detail: 'Not traced: the claimant is dead. The estate search looks for their spouse and children instead.',
+    };
+  }
+  return { ok: true, reason: null, detail: null };
+}
+
+/**
+ * Whether a vendor-listed relative is a direct inheritor worth a lookup: a
+ * spouse, or a family member born 15 to 55 years after the claimant, which is
+ * a child. Endato labels relatives only "Spouse" or "Family", so the birth
+ * years decide; a sibling, parent, grandchild or anyone undated is filed for
+ * the record and not looked up.
+ */
+export function relativeKind(
+  type: string | null | undefined,
+  relativeDob: string | null | undefined,
+  claimantBirthYear: number | null | undefined,
+): 'spouse' | 'child' | 'sibling' | 'parent' | 'grandchild' | 'family' {
+  if (/spouse/i.test(type || '')) return 'spouse';
+  const y = relativeDob ? Number(String(relativeDob).slice(0, 4)) : NaN;
+  if (!Number.isFinite(y) || !claimantBirthYear) return 'family';
+  const gap = y - claimantBirthYear;
+  if (gap >= 15 && gap <= 55) return 'child';
+  if (gap > 55) return 'grandchild';
+  if (gap <= -15) return 'parent';
+  if (Math.abs(gap) < 15) return 'sibling';
+  return 'family';
+}
+
 // ─── Deciding what is worth submitting ──────────────────────────────────────
 
 export interface TraceCandidate {
