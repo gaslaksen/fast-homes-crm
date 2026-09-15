@@ -23,6 +23,7 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { PrismaService } from '../prisma/prisma.service';
 import axios from 'axios';
 import { normalizePhoneDigits } from '../foreclosures/foreclosure-scoring.util';
 
@@ -148,6 +149,18 @@ function addressLine(a: any, g: (o: any, ...k: string[]) => any): string | null 
   return line || null;
 }
 
+/** Person Search list price per match on the Starter plan, as of 2026-09-15. */
+const DEFAULT_COST_PER_SEARCH = 0.35;
+
+/** "2026-09", in the business's own time zone. */
+function monthNY(d = new Date()): string {
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit' })
+    .formatToParts(d);
+  const y = parts.find((p) => p.type === 'year')?.value;
+  const m = parts.find((p) => p.type === 'month')?.value;
+  return `${y}-${m}`;
+}
+
 /** One vendor person, whichever casing the vendor used for the keys. */
 export function parseEndatoPerson(p: any): EndatoPerson {
   const g = (o: any, ...keys: string[]) => {
@@ -248,18 +261,76 @@ export class SurplusEndatoService {
   private readonly apName?: string;
   private readonly apPassword?: string;
 
-  constructor(private config: ConfigService) {
+  constructor(
+    private config: ConfigService,
+    private prisma?: PrismaService,
+  ) {
     this.apName = this.config.get<string>('ENDATO_AP_NAME');
     this.apPassword = this.config.get<string>('ENDATO_AP_PASSWORD');
   }
 
+  /**
+   * Whether Endato may be called at all: credentials set AND a monthly budget
+   * set. An unset budget is a pause, not unlimited. Endato ran up $534.78 in
+   * four days with nothing in the app counting it, so spend needs a number
+   * somebody chose. Every caller already treats "not available" as silence.
+   */
   get available(): boolean {
-    return !!(this.apName && this.apPassword);
+    return !!(this.apName && this.apPassword) && this.monthlyBudget > 0;
   }
 
-  /** The vendor's per-search price, for the attempt log. Null when unset. */
-  get costPerSearch(): number | null {
-    return Number(this.config.get<string>('ENDATO_COST_PER_SEARCH') || 0) || null;
+  /** Dollars per calendar month. 0 or unset pauses Endato entirely. */
+  get monthlyBudget(): number {
+    const b = Number(this.config.get<string>('ENDATO_MONTHLY_BUDGET'));
+    return Number.isFinite(b) && b > 0 ? b : 0;
+  }
+
+  /**
+   * Per call, for the attempt log and the budget. Person Search is $0.35 per
+   * match on the Starter plan; ENDATO_COST_PER_SEARCH overrides it.
+   */
+  get costPerSearch(): number {
+    return Number(this.config.get<string>('ENDATO_COST_PER_SEARCH') || 0) || DEFAULT_COST_PER_SEARCH;
+  }
+
+  /** Month to date, as the budget sees it. */
+  async usage(): Promise<{ period: string; calls: number; spent: number; budget: number; paused: boolean; left: number }> {
+    const period = monthNY();
+    const row = this.prisma
+      ? await this.prisma.vendorUsage.findUnique({ where: { vendor_period: { vendor: 'endato', period } } })
+      : null;
+    const calls = row?.calls || 0;
+    const spent = Math.round(calls * this.costPerSearch * 100) / 100;
+    const budget = this.monthlyBudget;
+    return { period, calls, spent, budget, paused: !this.available, left: Math.max(0, Math.round((budget - spent) * 100) / 100) };
+  }
+
+  /**
+   * Refuse a call that would take the month past the budget. The message
+   * carries "out of searches", which every loop over Endato already reads as
+   * "stop the run", so one refusal ends a backfill instead of repeating 300
+   * times.
+   */
+  private async guard(): Promise<void> {
+    if (!this.monthlyBudget) {
+      throw new Error('Endato is paused: out of searches until ENDATO_MONTHLY_BUDGET is set.');
+    }
+    const u = await this.usage();
+    if (u.spent + this.costPerSearch > u.budget) {
+      throw new Error(
+        `Endato monthly budget of $${u.budget} reached ($${u.spent} spent in ${u.period}): out of searches until the budget is raised or the month turns.`,
+      );
+    }
+  }
+
+  private async countCall(): Promise<void> {
+    if (!this.prisma) return;
+    const period = monthNY();
+    await this.prisma.vendorUsage.upsert({
+      where: { vendor_period: { vendor: 'endato', period } },
+      create: { vendor: 'endato', period, calls: 1 },
+      update: { calls: { increment: 1 } },
+    });
   }
 
   /**
@@ -297,6 +368,7 @@ export class SurplusEndatoService {
   }
 
   private async request(body: Record<string, unknown>): Promise<EndatoPerson[]> {
+    await this.guard();
     let resp;
     try {
       resp = await axios.post(ENDATO_URL, body, {
@@ -320,6 +392,9 @@ export class SurplusEndatoService {
         `Endato ${status || 'request failed'}: ${typeof data === 'string' ? data.slice(0, 200) : data ? JSON.stringify(data).slice(0, 200) : err.message}`,
       );
     }
+    // Counted once the vendor answered, whether or not it matched anybody:
+    // Endato bills per match, so this errs on the side of the budget.
+    await this.countCall().catch((e) => this.logger.warn(`Could not count an Endato call: ${e?.message || e}`));
     const persons: any[] = resp.data?.persons || resp.data?.Persons || [];
     return persons.map(parseEndatoPerson);
   }
