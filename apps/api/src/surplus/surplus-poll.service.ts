@@ -30,7 +30,9 @@ import { CronLockService } from '../common/cron-lock.service';
  *
  * Each county's pull is followed by the skip trace waterfall on the leads it
  * just created, and only those: BatchData on the address first, then the
- * Endato name search on whoever that could not place. Leads an earlier run
+ * Endato name search on whoever that could not place. Only claims that meet
+ * the criteria in traceCriteria are looked up; a new estate gets the estate
+ * search instead of a trace on the dead claimant. Leads an earlier run
  * already tried are never re-bought here; a deliberate re-trace is the manual
  * call with `includeTraced`. The trace's outcome is appended to the run row so
  * the health strip and the Daily Brief can show it. SURPLUS_AUTO_TRACE=false
@@ -114,7 +116,14 @@ export class SurplusPollService {
         nameSearch: true,
         addressSearch: true,
       });
-      const note = describeTrace(leadIds.length, trace);
+      // The trace refuses a claimant the county lists as dead. Their family
+      // is found by the estate search instead: one name search, then the
+      // spouse and likely children looked up.
+      const estates = await this.skiptrace.estateRelatives({ organizationId: organizationId || null, leadIds });
+      const estateNote = estates.searched
+        ? `. Estate search on ${estates.searched} new estate${estates.searched === 1 ? '' : 's'}: ${estates.matched} matched, ${estates.withContact} relative${estates.withContact === 1 ? '' : 's'} with a number`
+        : '';
+      const note = describeTrace(leadIds.length, trace) + estateNote;
       this.logger.log(`Surplus trace ${source}: ${note}`);
       await this.ingest.noteRun(runId, note);
       return trace;

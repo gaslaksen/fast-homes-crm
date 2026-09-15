@@ -1114,11 +1114,13 @@ describe('looking up a dead claimant\'s relatives', () => {
     emails: ['kin@example.com'], deceased: false, dateOfDeath: null, relatives: [], ...over,
   });
 
-  it('looks up the spouse, then family who share the surname, within the cap, and never a child', async () => {
+  it('looks up only the spouse and the likely children, within the cap, and never a minor', async () => {
+    // Juliet Abe is 82 by Endato, born about 1944. Thomas, born 1970, is a
+    // likely child; Ann, born 1946, a likely sibling: filed, never paid for.
     const endato = endatoStub(
       [abe([
-        rel('R3', 'Ann B Holbrook', 'Family'),
-        rel('R2', 'Thomas Abe', 'Family'),
+        rel('R3', 'Ann B Holbrook', 'Family', { dob: '1946-02-01' }),
+        rel('R2', 'Thomas Abe', 'Family', { dob: '1970-05-01' }),
         rel('R1', 'Mary Lee Abe', 'Spouse'),
         rel('R4', 'Kid Abe', 'Family', { dob: '2015-06-01' }),
       ])],
@@ -1136,6 +1138,11 @@ describe('looking up a dead claimant\'s relatives', () => {
     // A minor is not filed at all: nothing they can tell anybody, and a search spent on nothing.
     expect(heirs.map((h) => h.name).sort()).toEqual(['Ann B Holbrook', 'Mary Lee Abe', 'Thomas Abe']);
     expect(heirs.every((h) => h.role === 'relative' && h.vendorPersonId)).toBe(true);
+    expect(Object.fromEntries(heirs.map((h) => [h.name, h.relationship]))).toEqual({
+      'Ann B Holbrook': 'Likely sibling',
+      'Thomas Abe': 'Likely child',
+      'Mary Lee Abe': 'Spouse',
+    });
     expect(endato.lookup.mock.calls.map((c: any[]) => c[0])).toEqual(['R1', 'R2']);
     expect(r.relatives).toEqual({ looked: 2, withContact: 1 });
 
@@ -1208,7 +1215,7 @@ describe('looking up a dead claimant\'s relatives', () => {
 
     it('recovers the ids onto the rows already there, then looks them up', async () => {
       const endato = endatoStub(
-        [abe([rel('R1', 'Mary Lee Abe', 'Spouse'), rel('R2', 'Thomas Abe', 'Family')])],
+        [abe([rel('R1', 'Mary Lee Abe', 'Spouse'), rel('R2', 'Thomas Abe', 'Family', { dob: '1970-05-01' })])],
         { R1: found('Mary', 'Abe'), R2: found('Thomas', 'Abe') },
       );
       const { svc, heirs } = harness([], endato);
@@ -1238,12 +1245,12 @@ describe('estate claimants the county marked dead', () => {
     expect(estateName('DANNIE LESTER STEWART')).toBe('DANNIE LESTER STEWART');
   });
 
-  const rel = (id: string, name: string, type: string) => ({ id, name, type, deceased: false, city: null, state: null, dob: null });
+  const rel = (id: string, name: string, type: string, over: any = {}) => ({ id, name, type, deceased: false, city: null, state: null, dob: null, ...over });
   const mcparlin = (over: any = {}) => ({
     first: 'Theresa', last: 'Mcparlin', age: 88, akas: [],
     addresses: [{ street: '256 Treu', city: 'Jacksonville', state: 'FL', zip: '32209', lastSeen: '2024-01-01' }],
     phones: [], emails: [], deceased: true, dateOfDeath: '2025-11-02',
-    relatives: [rel('R1', 'Kevin Mcparlin', 'Family')],
+    relatives: [rel('R1', 'Kevin Mcparlin', 'Family', { dob: '1966-01-01' })],
     ...over,
   });
   const estate = (over: any = {}) => {
@@ -1280,7 +1287,7 @@ describe('estate claimants the county marked dead', () => {
 
     expect(endato.search).toHaveBeenCalledWith({ first: 'THERESA', last: 'MCPARLIN', city: 'JACKSONVILLE', state: 'FL' });
     expect(r).toMatchObject({ searched: 1, matched: 1, relativesFiled: 1, looked: 1, withContact: 1 });
-    expect(heirs[0]).toMatchObject({ name: 'Kevin Mcparlin', role: 'relative', vendorPersonId: 'R1', phone1: '3525550101', street: '9 Elm St' });
+    expect(heirs[0]).toMatchObject({ name: 'Kevin Mcparlin', relationship: 'Likely child', role: 'relative', vendorPersonId: 'R1', phone1: '3525550101', street: '9 Elm St' });
     const dated = detailUpdates.find((u) => u.data?.dateOfDeath)?.data;
     expect(dated.dateOfDeath.toISOString().slice(0, 10)).toBe('2025-11-02');
     expect(dated.deathSource).toBe('endato');
@@ -1297,5 +1304,82 @@ describe('estate claimants the county marked dead', () => {
     expect(r).toMatchObject({ searched: 1, matched: 0, relativesFiled: 0 });
     expect(heirs).toHaveLength(0);
     expect(detailUpdates.at(-1).data.callNotes).toMatch(/^Estate search \(Endato\): 1 person named THERESA MCPARLIN, none with the property/);
+  });
+});
+
+describe('the criteria for a paid lookup', () => {
+  const day = 86400000;
+  const ago = (days: number) => new Date(Date.now() - days * day);
+
+  it('refuses a competing claim on file, a notice over a year old, and a dead claimant, and says why', async () => {
+    const make = (id: string, over: any) => {
+      const l: any = lead({ id, detailId: `d${id}`, caseNumber: `C${id}`, street: `${id}00 MAIN ST`, first: 'JANE', last: `DOE${id}` });
+      Object.assign(l.surplusDetail, over);
+      return l;
+    };
+    const { svc } = harness([
+      make('1', { claimStatus: 'pending', noticeDate: ago(30) }),
+      make('2', { claimStatus: 'open', noticeDate: ago(400) }),
+      make('3', { claimStatus: 'open', saleDate: ago(500) }),
+      make('4', { claimStatus: 'open', noticeDate: ago(30), deceased: true }),
+      make('5', { claimStatus: 'assigned' }),
+    ]);
+    respond([]);
+
+    const r = await svc.traceLeads({ organizationId: 'org', nameSearch: false });
+
+    expect(r.candidates).toBe(0);
+    expect(r.skipped).toMatchObject({ claim_on_file: 1, over_a_year: 2, estate: 1, closed: 1 });
+    expect(r.message).toMatch(/^Not traced: somebody else has a claim on file/);
+    expect(mockedAxios.post).not.toHaveBeenCalled();
+  });
+
+  it('still traces a denied claim, a government-lien-only case, and one with no date yet', async () => {
+    const make = (id: string, over: any) => {
+      const l: any = lead({ id, detailId: `d${id}`, caseNumber: `C${id}`, street: `${id}00 MAIN ST`, first: 'JANE', last: `DOE${id}` });
+      Object.assign(l.surplusDetail, over);
+      return l;
+    };
+    const { svc } = harness([
+      make('1', { claimStatus: 'denied', noticeDate: ago(200) }),
+      make('2', { claimStatus: 'gov_lien', noticeDate: ago(364) }),
+      make('3', { claimStatus: 'open' }),
+    ]);
+    respond([]);
+
+    const r = await svc.traceLeads({ organizationId: 'org', nameSearch: false });
+
+    expect(r.candidates).toBe(3);
+    expect(r.skipped.claim_on_file).toBeUndefined();
+    expect(r.skipped.over_a_year).toBeUndefined();
+  });
+
+  it('SURPLUS_TRACE_MAX_AGE_DAYS moves the line', async () => {
+    const l: any = lead({ street: '100 MAIN ST' });
+    Object.assign(l.surplusDetail, { claimStatus: 'open', noticeDate: ago(200) });
+    const { svc } = harness([l], null, { SURPLUS_TRACE_MAX_AGE_DAYS: '180' });
+    respond([]);
+
+    const r = await svc.traceLeads({ organizationId: 'org', nameSearch: false });
+
+    expect(r.skipped.over_a_year).toBe(1);
+  });
+
+  it('the heir trace refuses a claim that no longer meets the criteria', async () => {
+    // Heirs of an estate are exactly who works it, so only the claim's own
+    // state and age are checked.
+    const heirs = [
+      {
+        id: 'h1', name: 'Kevin Mcparlin', street: '9 ELM ST', city: 'OCALA', state: 'FL', zip: '34470', deceased: false, doNotCall: false,
+        surplusDetail: { caseNumber: 'C1', claimStatus: 'open', noticeDate: ago(500), saleDate: null, lead: {} },
+      },
+    ];
+    const { svc, prisma } = harness([]);
+    prisma.surplusHeir.findMany = jest.fn().mockResolvedValue(heirs);
+
+    const r = await svc.traceHeirs({ organizationId: 'org' });
+
+    expect(r.skipped.over_a_year).toBe(1);
+    expect(mockedAxios.post).not.toHaveBeenCalled();
   });
 });

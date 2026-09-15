@@ -34,7 +34,6 @@ import axios from 'axios';
 import { PrismaService } from '../prisma/prisma.service';
 import { DncRegistry, LeadSource, SurplusClaimantType, SurplusTraceChannel } from '@fast-homes/shared';
 import { normalizePhoneDigits } from '../foreclosures/foreclosure-scoring.util';
-import { isWorkable } from './surplus-classify.util';
 import {
   addressCaseCounts,
   addressKeyOf,
@@ -43,6 +42,9 @@ import {
   verifyTracedName,
   TraceVerdict,
   deathIsTheClaimants,
+  traceCriteria,
+  relativeKind,
+  TRACE_MAX_AGE_DAYS,
 } from './surplus-skiptrace.util';
 import {
   SurplusEndatoService,
@@ -75,6 +77,17 @@ const CALL_DELAY_MS = 250;
  * without paying for every cousin.
  */
 const DEFAULT_RELATIVE_LOOKUPS = 4;
+/** How a vendor relative is labelled on the lead, by what their birth year makes them. */
+const RELATIVE_LABEL: Record<string, string> = {
+  spouse: 'Spouse',
+  child: 'Likely child',
+  sibling: 'Likely sibling',
+  parent: 'Likely parent',
+  grandchild: 'Likely grandchild',
+  family: 'Family',
+};
+/** The relatives worth a paid lookup: a spouse or a likely child. */
+const DIRECT_INHERITOR = /^(spouse|likely child)$/i;
 
 export interface SurplusTraceResult {
   /** Leads considered. */
@@ -188,6 +201,8 @@ interface TracedPerson {
   deceased: boolean;
   /** YYYY-MM-DD, when the vendor dates the death. */
   dateOfDeath?: string | null;
+  /** The vendor's age for them, which dates their relatives as children or siblings. */
+  age?: number | null;
   /** Relatives the vendor holds, the starting list for an heir search. */
   relatives?: EndatoRelative[];
   /**
@@ -231,6 +246,8 @@ export class SurplusSkiptraceService {
   private readonly batchKey?: string;
   private readonly batchBaseUrl: string;
   private readonly relativeCap: number;
+  /** Days from the surplus notice after which nothing is looked up. */
+  private readonly maxAgeDays: number;
 
   constructor(
     private prisma: PrismaService,
@@ -242,6 +259,8 @@ export class SurplusSkiptraceService {
     // this many per claimant. Each is one Endato search. 0 turns it off.
     const cap = Number(this.config.get<string>('SURPLUS_RELATIVE_LOOKUPS'));
     this.relativeCap = Number.isFinite(cap) && cap >= 0 ? cap : DEFAULT_RELATIVE_LOOKUPS;
+    const age = Number(this.config.get<string>('SURPLUS_TRACE_MAX_AGE_DAYS'));
+    this.maxAgeDays = Number.isFinite(age) && age > 0 ? age : TRACE_MAX_AGE_DAYS;
     this.batchBaseUrl = (
       this.config.get<string>('BATCHDATA_API_BASE_URL') || BATCHDATA_DEFAULT_BASE_URL
     ).replace(/\/+$/, '');
@@ -304,14 +323,29 @@ export class SurplusSkiptraceService {
       include: { surplusDetail: true },
     });
 
-    const candidates: Candidate[] = leads.filter((l) => l.surplusDetail).map((l) => candidateOf(l));
+    // The business's criteria before anything is paid for: no competing
+    // claim on file, notice under a year old, and never a claimant the county
+    // lists as dead (the estate search covers those).
+    let refusal: string | null = null;
+    const eligible = leads.filter((l) => {
+      if (!l.surplusDetail) return false;
+      const g = traceCriteria(l.surplusDetail, { maxAgeDays: this.maxAgeDays });
+      if (g.ok) return true;
+      result.skipped[g.reason!] = (result.skipped[g.reason!] || 0) + 1;
+      refusal = refusal || g.detail;
+      return false;
+    });
+    const candidates: Candidate[] = eligible.map((l) => candidateOf(l));
 
     // Biggest surplus first, so a capped run spends its credits where the fee is.
     const surplusOf = new Map(leads.map((l) => [l.id, l.surplusDetail?.grossSurplus || 0]));
     candidates.sort((a, b) => (surplusOf.get(b.leadId) || 0) - (surplusOf.get(a.leadId) || 0));
 
     result.candidates = candidates.length;
-    if (!candidates.length) return result;
+    if (!candidates.length) {
+      if (refusal) result.message = refusal;
+      return result;
+    }
 
     if (opts.addressSearch === false) {
       if (opts.nameSearch !== false) {
@@ -560,7 +594,10 @@ export class SurplusSkiptraceService {
       },
       include: { surplusDetail: true },
     });
-    const cands = leads.filter((l) => l.surplusDetail).map((l) => candidateOf(l)).filter((c) => c.nameKnown);
+    const cands = leads
+      .filter((l) => l.surplusDetail && traceCriteria(l.surplusDetail, { maxAgeDays: this.maxAgeDays }).ok)
+      .map((l) => candidateOf(l))
+      .filter((c) => c.nameKnown);
     out.candidates = cands.length;
 
     // One search per person per case, as the name rung groups them.
@@ -691,7 +728,7 @@ export class SurplusSkiptraceService {
       include: { surplusDetail: { include: { heirs: true } } },
     });
     const rows = leads
-      .filter((l) => l.surplusDetail)
+      .filter((l) => l.surplusDetail && traceCriteria(l.surplusDetail, { estate: true, maxAgeDays: this.maxAgeDays }).ok)
       .sort((a, b) => (b.surplusDetail!.grossSurplus || 0) - (a.surplusDetail!.grossSurplus || 0));
     out.deceasedClaimants = rows.length;
 
@@ -714,7 +751,9 @@ export class SurplusSkiptraceService {
     for (const l of rows) {
       const rel = relativesOf(l);
       const tried = rel.filter((h: any) => h.vendorPersonId && h.tracedAt).length;
-      const open = rel.filter((h: any) => !h.tracedAt && !h.deceased && !h.doNotCall).length;
+      const open = rel.filter(
+        (h: any) => !h.tracedAt && !h.deceased && !h.doNotCall && (!h.vendorPersonId || DIRECT_INHERITOR.test(h.relationship || '')),
+      ).length;
       out.lookups += Math.max(0, Math.min(this.relativeCap - tried, open));
     }
     if (opts.limit) {
@@ -776,6 +815,7 @@ export class SurplusSkiptraceService {
           cc.claimant,
           adultRelatives(best!.person.relatives || []),
           'endato',
+          best!.person.age,
         );
         await this.logAttempt(cc.detailId, null, 'found', `Relative ids: recovered Endato's ids for ${cc.claimant}'s relatives.`, 'endato');
         out.recovered += 1;
@@ -813,6 +853,8 @@ export class SurplusSkiptraceService {
    */
   async estateRelatives(opts: {
     organizationId?: string | null;
+    /** Only these leads, as the county pull passes the ones it created. */
+    leadIds?: string[];
     county?: string;
     limit?: number;
     dryRun?: boolean;
@@ -841,6 +883,7 @@ export class SurplusSkiptraceService {
       where: {
         source: LeadSource.SURPLUS,
         ...(opts.organizationId ? { organizationId: opts.organizationId } : {}),
+        ...(opts.leadIds ? { id: { in: opts.leadIds } } : {}),
         surplusDetail: {
           OR: [{ deceased: true }, { heirsRequired: true }],
           deathCheckedAt: null,
@@ -851,7 +894,7 @@ export class SurplusSkiptraceService {
       include: { surplusDetail: { include: { heirs: true } } },
     });
     const eligible = leads
-      .filter((l) => l.surplusDetail && isWorkable(l.surplusDetail.claimStatus as any))
+      .filter((l) => l.surplusDetail && traceCriteria(l.surplusDetail, { estate: true, maxAgeDays: this.maxAgeDays }).ok)
       .filter((l) => {
         const hs = (l.surplusDetail as any).heirs || [];
         const hasVendorRelatives = hs.some((h: any) => h.sourceKind === 'endato');
@@ -948,7 +991,7 @@ export class SurplusSkiptraceService {
         });
         await this.logAttempt(cc.detailId, null, 'found', text, 'endato');
         const before = await this.prisma.surplusHeir.count({ where: { surplusDetailId: cc.detailId } });
-        await this.fileRelatives(cc.detailId, (lead as any).organizationId || null, cc.claimant, rels, 'endato');
+        await this.fileRelatives(cc.detailId, (lead as any).organizationId || null, cc.claimant, rels, 'endato', person.age);
         out.relativesFiled += (await this.prisma.surplusHeir.count({ where: { surplusDetailId: cc.detailId } })) - before;
         const r = await this.lookupRelatives(cc.detailId, cc.claimant);
         out.looked += r.looked;
@@ -980,6 +1023,7 @@ export class SurplusSkiptraceService {
       emails: p.emails.slice(0, 2),
       deceased: p.deceased,
       dateOfDeath: p.dateOfDeath,
+      age: p.age,
       relatives: p.relatives,
       livedAtProperty: via === 'property',
       propertyOwner: false,
@@ -1046,6 +1090,9 @@ export class SurplusSkiptraceService {
         surplusDetail: {
           select: {
             caseNumber: true,
+            claimStatus: true,
+            noticeDate: true,
+            saleDate: true,
             lead: {
               select: {
                 propertyAddress: true,
@@ -1068,6 +1115,17 @@ export class SurplusSkiptraceService {
 
       if (heir.deceased) {
         result.skipped.heir_deceased = (result.skipped.heir_deceased || 0) + 1;
+        continue;
+      }
+      // The claim itself must still be worth reaching: no competing claim on
+      // file, notice under a year old. An heir is who works an estate, so
+      // the estate check does not apply here.
+      const g = heir.surplusDetail
+        ? traceCriteria(heir.surplusDetail, { estate: true, maxAgeDays: this.maxAgeDays })
+        : { ok: true, reason: null, detail: null };
+      if (!g.ok) {
+        result.skipped[g.reason!] = (result.skipped[g.reason!] || 0) + 1;
+        if (!result.message) result.message = g.detail;
         continue;
       }
       if (heir.doNotCall) {
@@ -1676,7 +1734,7 @@ export class SurplusSkiptraceService {
       },
     });
 
-    await this.fileRelatives(c.detailId, row?.organizationId || null, who, living, source);
+    await this.fileRelatives(c.detailId, row?.organizationId || null, who, living, source, p.age);
     return this.lookupRelatives(c.detailId, who);
   }
 
@@ -1694,8 +1752,12 @@ export class SurplusSkiptraceService {
     who: string,
     relatives: EndatoRelative[],
     source: TraceSource,
+    /** The claimant's age per the vendor, to date the relatives by. */
+    claimantAge?: number | null,
   ): Promise<void> {
     if (!relatives.length) return;
+    const birthYear = claimantAge ? new Date().getFullYear() - claimantAge : null;
+    const labelOf = (r: EndatoRelative) => RELATIVE_LABEL[relativeKind(r.type, r.dob, birthYear)] || r.type || 'Family';
     const vendor = source === 'endato' ? 'Endato' : 'BatchData';
     const have = await this.prisma.surplusHeir.findMany({
       where: { surplusDetailId: detailId },
@@ -1708,7 +1770,10 @@ export class SurplusSkiptraceService {
       const existing = byKey.get(k);
       if (existing) {
         if (!existing.vendorPersonId && r.id) {
-          await this.prisma.surplusHeir.update({ where: { id: existing.id }, data: { vendorPersonId: r.id } });
+          await this.prisma.surplusHeir.update({
+            where: { id: existing.id },
+            data: { vendorPersonId: r.id, relationship: labelOf(r) },
+          });
         }
         continue;
       }
@@ -1717,13 +1782,16 @@ export class SurplusSkiptraceService {
           surplusDetailId: detailId,
           organizationId,
           name: r.name,
-          relationship: r.type,
+          // "Spouse", or Endato's "Family" dated against the claimant: a
+          // likely child is a direct inheritor and gets looked up; a likely
+          // sibling or parent is filed for the record only.
+          relationship: labelOf(r),
           city: r.city,
           state: r.state,
           role: 'relative',
           sourceKind: source,
           vendorPersonId: r.id,
-          callNotes: `${vendor} lists ${r.name} as a relative${r.type ? ` (${r.type.toLowerCase()})` : ''} of ${who}. A route to the heirs, not an heir until a probate filing or the family says so.`,
+          callNotes: `${vendor} lists ${r.name} as a relative (${labelOf(r).toLowerCase()}) of ${who}. A route to the heirs, not an heir until a probate filing or the family says so.`,
         },
       });
       byKey.set(k, { id: made?.id, name: r.name, vendorPersonId: r.id });
@@ -1763,10 +1831,16 @@ export class SurplusSkiptraceService {
         doNotCall: false,
       },
     });
+    // Direct inheritors only: the spouse, then the likely children. A
+    // sibling, parent or undated relative is on the lead for the record and
+    // is never paid for.
     const surname = splitClaimantName(displayName(claimant)).surname.toUpperCase();
     const rank = (h: any) =>
       /spouse/i.test(h.relationship || '') ? 0 : splitClaimantName(h.name).surname.toUpperCase() === surname ? 1 : 2;
-    const queue = [...rows].sort((a, b) => rank(a) - rank(b)).slice(0, room);
+    const queue = rows
+      .filter((h) => DIRECT_INHERITOR.test(h.relationship || ''))
+      .sort((a, b) => rank(a) - rank(b))
+      .slice(0, room);
 
     for (const h of queue) {
       out.looked += 1;

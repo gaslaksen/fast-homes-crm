@@ -24,6 +24,7 @@ function harness(env: Record<string, string> = {}) {
   };
   const lock: any = { run: jest.fn((_k: string, fn: () => Promise<unknown>) => fn()) };
   const skiptrace: any = {
+    estateRelatives: jest.fn().mockResolvedValue({ searched: 0, matched: 0, withContact: 0 }),
     traceLeads: jest.fn().mockResolvedValue({
       candidates: 2, submitted: 2, contacted: 1, mismatched: 0, skipped: {},
       nameSearch: { searched: 1, verified: 1, namesakes: 2 }, errors: 0,
@@ -47,6 +48,18 @@ describe('SurplusPollService', () => {
       addressSearch: true,
     });
     expect(notes).toEqual(['Traced 1 of 2 new to a number (2 address lookups, 1 name search)']);
+  });
+
+  it('runs the estate search on the same new leads, and says what it found', async () => {
+    const { svc, skiptrace, notes } = harness({ SURPLUS_DEFAULT_ORG_ID: 'org1' });
+    skiptrace.estateRelatives.mockResolvedValue({ searched: 1, matched: 1, withContact: 2 });
+
+    await svc.pollWeekly();
+
+    expect(skiptrace.estateRelatives).toHaveBeenCalledWith({ organizationId: 'org1', leadIds: ['lead-a', 'lead-b'] });
+    expect(notes).toEqual([
+      'Traced 1 of 2 new to a number (2 address lookups, 1 name search). Estate search on 1 new estate: 1 matched, 2 relatives with a number',
+    ]);
   });
 
   it('does not call the trace at all when the pull created nothing', async () => {
