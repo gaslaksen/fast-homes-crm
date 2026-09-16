@@ -389,6 +389,11 @@ export function claimantFromTitle(title: string): string | null {
   // Interested Party- ASHER GROUP LLC ON BEHALF OF HARRY A MCGRATH III",
   // "Surplus Payout Government". The category is the whole title when the
   // clerk names nobody, and is then the claimant.
+  // Sarasota: "Surplus/Claims Document/City of North Port", "Surplus/Claims
+  // Document - Kenna Mayhew as POA for James Lehan", "Surplus/Claims Document
+  // - Updated - Richard Cooley".
+  const sarasota = /surplus\s*\/\s*claims?\s*document\s*(?:[-\/]\s*)?(?:updated\s*[-\/]\s*)?([\s\S]*?)(?:\.pdf)?\s*$/i.exec(t);
+  if (sarasota) return sarasota[1].replace(/\s+/g, ' ').trim() || null;
   const m =
     /surplus\s*claims?\s*received\s*[-:]\s*([\s\S]+?)(?:\.pdf)?\s*$/i.exec(t) ||
     /surplus\s*(?:claim|payout)[_\s-]+([\s\S]+?)(?:\.pdf)?\s*$/i.exec(t) ||
@@ -532,6 +537,41 @@ const ENTITY_WORD =
 function isWholeName(p: string): boolean {
   const segs = p.split(/\s*,\s*/);
   return segs[0].split(/\s+/).length >= 2 && segs.slice(1).every((g) => KEEP_SEGMENT.test(g));
+}
+
+/**
+ * An owner line with the tax roll's notes taken off, or null when nothing of a
+ * person or company is left. Sarasota's roll appends the holding in brackets,
+ * often cut off at thirty characters: "JOSE LUIS PLANAS (LIFE ESTATE)",
+ * "PLANAS JOSE LUIS (E LIFE EST)", "BRUMLEVE JOSEPH F (TTEE)", "THE KINGDOM
+ * TRUST COMPANY (CUS", "HARVEY STEVENS 669183897 (F/B/". Left on, the two
+ * spellings of Jose Luis Planas never collapse, and "LIFE EST" reads as an
+ * estate and marks a living life tenant dead. It also lists capacities as
+ * their own line ("JOSEPH F. BRUMLEVE, AS SUCCESSOR TRUSTEE") and the estate's
+ * lawyer as an owner ("INGRUM LAW FIRM, L.L.C."), neither of which is a
+ * claimant.
+ */
+export function cleanOwnerLine(raw: string): string | null {
+  // A custodial account names the person it is for: "THE KINGDOM TRUST
+  // COMPANY CUSTODIAN FBO HARVEY STEVENS, 669183897" and "THE KINGDOM TRUST
+  // COMPANY (CUST) HARVEY STEVENS 669183897 (F/B/O)" are Harvey Stevens's IRA,
+  // and he is who can be reached. A custodian line cut off before the name
+  // stays the company.
+  const custodial = /\b(?:CUSTODIAN\s+)?F\/?B\/?O\b\s*(.+)$|\(CUST\)\s*(.+)$/i.exec(String(raw || ''));
+  const base = custodial && (custodial[1] || custodial[2]) ? custodial[1] || custodial[2] : raw;
+  const s = String(base || '')
+    // A bracket, closed or cut off by the roll's field width.
+    .replace(/\s*\([^)]*(?:\)|$)/g, ' ')
+    // Account numbers carried in custodial names.
+    .replace(/\b\d{6,}\b/g, ' ')
+    // Capacities, not people.
+    .replace(/,?\s*\bAS\s+(?:SUCCESSOR\s+|CO-?\s*)?TRUSTEES?\b.*$/i, '')
+    .replace(/\s+/g, ' ')
+    .replace(/[\s,]+$/, '')
+    .trim();
+  if (!s || /^AS\s+(?:SUCCESSOR\s+)?TRUSTEE/i.test(s)) return null;
+  if (/\bLAW\s+(?:FIRM|OFFICES?|GROUP)\b|\bATTORNEYS?\s+AT\s+LAW\b/i.test(s)) return null;
+  return s;
 }
 
 export function splitCompoundOwner(name: string): string[] {
@@ -765,7 +805,9 @@ export class RealTdmAdapter implements SurplusSourceAdapter {
     const owners: string[] = [];
     for (const p of parties) {
       if (!OWNER_ROLES.test(p.role)) continue;
-      for (const name of splitCompoundOwner(p.name)) {
+      const cleaned = cleanOwnerLine(p.name);
+      if (!cleaned) continue;
+      for (const name of splitCompoundOwner(cleaned)) {
         if (!owners.some((o) => o.toUpperCase() === name.toUpperCase())) owners.push(name);
       }
     }
@@ -952,3 +994,23 @@ export class PinellasRealTdmAdapter extends RealTdmAdapter {
     super(config, { key: 'realtdm_pinellas', county: 'Pinellas', subdomain: 'pinellas', payoutsArePartial: true });
   }
 }
+
+/**
+ * Sarasota County, `sarasota.realtdm.com`. Discovery passes 2026-09-13 and
+ * 2026-09-17 on the ten largest live cases (561 listed, 138 live, $1.31M):
+ * owners are OWNER, with bracketed roll notes and capacity lines cleaned by
+ * cleanOwnerLine; claims are "Surplus/Claims Document/NAME" or "Surplus/Claims
+ * Document - NAME as POA for OWNER"; the clerk files a "Request for Legal
+ * Review" (RFLR) for each claim, and one with no claim document beside it is a
+ * claim not yet indexed, which is why receiptsImplyClaim is set (the RFLR is
+ * classed as a receipt). "RFLR - Government Lienholder" is a government lien.
+ * Mail comes back as "Returned Mail"; "USPS Certified Mail Status" printouts
+ * say nothing in their title. The surplus letter prints no certificate number.
+ */
+@Injectable()
+export class SarasotaRealTdmAdapter extends RealTdmAdapter {
+  constructor(config: ConfigService) {
+    super(config, { key: 'realtdm_sarasota', county: 'Sarasota', subdomain: 'sarasota', receiptsImplyClaim: true });
+  }
+}
+
