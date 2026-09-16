@@ -324,6 +324,7 @@ describe('collapseClaimants', () => {
     expect(collapseClaimants(['HUTSON LOUISE', 'HUTSON JOHN PATRICK', 'HUTSON THOMAS EDWARD', 'HUTSON JON', 'HUTSON JOHN P', 'HUDSON THOMAS E']).map((c) => c.name))
       .toEqual(['HUTSON LOUISE', 'HUTSON JOHN PATRICK', 'HUTSON THOMAS EDWARD', 'HUTSON JON', 'HUDSON THOMAS E']);
     expect(collapseClaimants(['POOLE ANNE C', 'D ALESSANDRO VITO', 'DALESSANDRO DOMENICA J', "D'ALESSANDRO VITO", 'D ALESSANDRO DOMENICA', "D'ALESSANDRO DOMENICA"])).toHaveLength(3);
+    expect(collapseClaimants(['VANDERLEE ELMA A', 'VAN DER LEE ELMA A.'])).toHaveLength(1);
     // Different people sharing a surname stay apart, and an initial alone never swallows a name.
     expect(collapseClaimants(['JOHN SMITH', 'MARY SMITH'])).toHaveLength(2);
     expect(collapseClaimants(['J SMITH', 'JANE SMITH'])).toHaveLength(2);

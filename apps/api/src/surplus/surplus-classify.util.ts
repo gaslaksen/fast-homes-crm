@@ -651,6 +651,9 @@ export function collapseClaimants(owners: string[]): CollapsedClaimant[] {
       .toUpperCase()
       .replace(/['\u2019]/g, '')
       .replace(/\b([DO])\s+(?=[A-Z]{3,})/g, '$1')
+      // Surname particles written apart: "VAN DER LEE ELMA A." beside
+      // "VANDERLEE ELMA A" (Sarasota 2026 TD 000057).
+      .replace(/\b(VAN|VON|DER|DEN|DE|DEL|LA|LE|DI|DA|DU)\s+(?=[A-Z])/g, '$1')
       .replace(/&/g, ' AND ')
       .replace(/[.,\-\/]/g, ' ')
       .replace(ESTATE_MARK, ' ')
