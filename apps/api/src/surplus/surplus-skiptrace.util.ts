@@ -276,6 +276,8 @@ export interface TraceCriteriaResult {
 export function traceCriteria(
   d: {
     claimStatus?: string | null;
+    /** The board stage. "Dead" is a person retiring the claim. */
+    stage?: string | null;
     noticeDate?: Date | string | null;
     saleDate?: Date | string | null;
     deceased?: boolean | null;
@@ -293,6 +295,12 @@ export function traceCriteria(
   }
   if (status === 'assigned' || status === 'distributed') {
     return { ok: false, reason: 'closed', detail: 'Not traced: the claim is assigned or paid out.' };
+  }
+  // Somebody on the team retired this claim (unresponsive, below the floor,
+  // competing claim). A paid lookup on it is money spent on a decision
+  // already made.
+  if (String(d.stage || '') === 'Dead') {
+    return { ok: false, reason: 'closed', detail: 'Not traced: the claim is marked Dead on the board.' };
   }
   const basis = d.noticeDate || d.saleDate;
   const when = basis ? new Date(basis) : null;
