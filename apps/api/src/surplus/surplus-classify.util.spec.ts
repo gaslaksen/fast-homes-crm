@@ -318,8 +318,20 @@ describe('collapseClaimants', () => {
     }
     // Sarasota: one spelling adds only a middle initial.
     expect(collapseClaimants(['PURDY RICHARD', 'RICHARD B. PURDY', 'DONNA PURDY']).map((c) => c.name)).toEqual(['RICHARD B. PURDY', 'DONNA PURDY']);
-    // A whole extra name is a different person, or at least not provably the same.
-    expect(collapseClaimants(['PEDULLA CARLO', 'PEDULLA GIANCARLO CARLO'])).toHaveLength(2);
+    // One extra middle name, the rest identical, on one case: one person.
+    expect(collapseClaimants(['PEDULLA CARLO', 'PEDULLA GIANCARLO CARLO'])).toHaveLength(1);
+    // Verbatim from Sarasota 2025 TD 000025 and 000024.
+    expect(collapseClaimants(['HUTSON LOUISE', 'HUTSON JOHN PATRICK', 'HUTSON THOMAS EDWARD', 'HUTSON JON', 'HUTSON JOHN P', 'HUDSON THOMAS E']).map((c) => c.name))
+      .toEqual(['HUTSON LOUISE', 'HUTSON JOHN PATRICK', 'HUTSON THOMAS EDWARD', 'HUTSON JON', 'HUDSON THOMAS E']);
+    expect(collapseClaimants(['POOLE ANNE C', 'D ALESSANDRO VITO', 'DALESSANDRO DOMENICA J', "D'ALESSANDRO VITO", 'D ALESSANDRO DOMENICA', "D'ALESSANDRO DOMENICA"])).toHaveLength(3);
+    // Different people sharing a surname stay apart, and an initial alone never swallows a name.
+    expect(collapseClaimants(['JOHN SMITH', 'MARY SMITH'])).toHaveLength(2);
+    expect(collapseClaimants(['J SMITH', 'JANE SMITH'])).toHaveLength(2);
+    // A custodian with ESTATE in its name is not a dead owner.
+    const amer = collapseClaimants(['AMERICAN ESTATE & TRUST', 'AMERICAN ESTATE AND TRUST']);
+    expect(amer).toHaveLength(1);
+    expect(amer[0].deceased).toBe(false);
+    expect(collapseClaimants(['ESTATE OF JOHN DOE'])[0].deceased).toBe(true);
     const r = collapseClaimants(['EDGAR CLOWERS, JR.', 'EDGAR CLOWERS']);
     expect(r).toHaveLength(1);
   });
