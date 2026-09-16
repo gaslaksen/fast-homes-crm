@@ -152,6 +152,15 @@ const RULES: Rule[] = [
   // Duval's "RealAuction Payment Receipt" is the BIDDER's receipt, sits on
   // every case, and must stay 'other'.
   { kind: 'receipt', re: /^receipt$/i, seenIn: 'Lee' },
+  // Sarasota's clerk files a Request for Legal Review (RFLR) for every claim.
+  // Beside a government lienholder it is that lien; beside a waiver it is the
+  // lienholder stepping back; otherwise it accompanies a claim and, like Lee's
+  // fee receipt, stands for one the docket has not indexed yet. Before the
+  // claim rules, since "RFLR - Additional Claim - Burt Berger" contains
+  // "claim" and would count Burt Berger twice.
+  { kind: 'gov_lien_claim', re: /^(?:rflr|request\s*for\s*legal\s*review)\b.*government/i, seenIn: 'Sarasota' },
+  { kind: 'other', re: /^(?:rflr|request\s*for\s*legal\s*review)\b.*waiver/i, seenIn: 'Sarasota' },
+  { kind: 'receipt', re: /^(?:rflr\b|request\s*for\s*legal\s*review)/i, seenIn: 'Sarasota' },
   // "RETURNED MAIL UNCLAIMED" contains "claim". Mail rules run before claim rules.
   //
   // RTS is "return to sender" in any form, including a green card that came
@@ -210,7 +219,7 @@ const RULES: Rule[] = [
   },
   {
     kind: 'claim',
-    re: /submitted\s*claim|statement\s*of\s*claim|statment\s*of\s*claim|state\s*of\s*claim|statement\s*claim|surplus\s*claims?\s*received|surplus\s*claim|claim\s*to\s*receive/i,
+    re: /submitted\s*claim|statement\s*of\s*claim|statment\s*of\s*claim|state\s*of\s*claim|statement\s*claim|surplus\s*claims?\s*received|surplus\s*claim|surplus\s*\/\s*claims?\s*document|claim\s*to\s*receive/i,
     seenIn: 'Duval, Lee, Brevard, Alachua, Polk',
   },
 
@@ -277,7 +286,11 @@ const COMPETITOR = /\b(llc|l\.l\.c|inc|law|recovery|group|funding|capital|partne
  * plain competitor claim is not: a lienholder claim leaves the owner residual
  * available, an assignment does not.
  */
-const ASSIGNEE = /\bas\s+assignee\s+of\b|\bassignee\s+of\b|\b(?:on\s+)?behalf\s+of\b/i;
+// Sarasota adds the owner's own representatives: "Kenna Mayhew as POA for
+// James Lehan", "Angela DeLong as PR for the Estate of William Everett Lehan",
+// "Ingrum Law Firm LLC Personal Representative Estate of Jimmy Don Berger".
+const ASSIGNEE =
+  /\bas\s+assignee\s+of\b|\bassignee\s+of\b|\b(?:on\s+)?behalf\s+of\b|\bas\s+(?:poa|power\s+of\s+attorney|pr|personal\s+representative|guardian|trustee)\s+(?:for|of)\b|\bpersonal\s+representative\s+(?:of\s+)?(?:the\s+)?estate\s+of\b/i;
 
 export type ClaimantClass = 'assignee' | 'government' | 'competitor' | 'owner' | 'unknown';
 
@@ -471,7 +484,7 @@ export function classifyCase(
     // Lee: 68 of 68 fee receipts sat on claimed cases and none on an unclaimed
     // one. OPEN would rank this at the top of the board; contestable is honest.
     claimStatus = SurplusClaimStatus.PENDING;
-    reason = `A filing-fee receipt is on the docket with no claim document beside it. On this county a receipt accompanies a claim, so somebody not yet named has filed.`;
+    reason = `A ${receipts[receipts.length - 1].title} is on the docket with no claim document beside it. On this county that filing accompanies a claim, so somebody not yet named has filed.`;
   } else if (govLiens.length) {
     claimStatus = SurplusClaimStatus.GOV_LIEN;
     reason = `Only a governmental lien has filed, which takes a slice off the top. The owner residual is still unclaimed.`;
@@ -614,6 +627,27 @@ export function collapseClaimants(owners: string[]): CollapsedClaimant[] {
         isEntity: ENTITY.test(original),
         variants: [original],
       });
+    }
+  }
+
+  // One spelling with a middle initial and one without is one person: the
+  // Sarasota roll writes "PURDY RICHARD" and the deed "RICHARD B. PURDY".
+  // Merged only when the fuller form adds nothing but single letters, so
+  // "PEDULLA CARLO" and "PEDULLA GIANCARLO CARLO" stay apart.
+  for (const [ka, a] of [...groups.entries()]) {
+    const ta = ka.split(' ');
+    if (ta.length < 2 || a.isEntity) continue;
+    for (const [kb, b] of [...groups.entries()]) {
+      if (ka === kb || !groups.has(ka) || !groups.has(kb) || b.isEntity) continue;
+      const tb = kb.split(' ');
+      if (tb.length <= ta.length || !ta.every((t) => tb.includes(t))) continue;
+      const extra = tb.filter((t) => !ta.includes(t));
+      if (!extra.every((t) => t.length === 1)) continue;
+      b.variants.push(...a.variants);
+      b.deceased = b.deceased || a.deceased;
+      b.name = preferredName(b.variants);
+      groups.delete(ka);
+      break;
     }
   }
 

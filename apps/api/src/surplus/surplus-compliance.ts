@@ -172,7 +172,7 @@ export function ruleFor(
  * `candidate` is the expansion list. Adding one is a line here, not a rebuild.
  */
 export const FL_COUNTIES = {
-  active: ['Duval', 'Lee', 'Polk', 'Brevard', 'Pinellas', 'Santa Rosa', 'Marion'],
+  active: ['Duval', 'Lee', 'Polk', 'Brevard', 'Pinellas', 'Sarasota', 'Santa Rosa', 'Marion'],
   candidate: ['Volusia', 'Osceola', 'St. Johns'],
 };
 

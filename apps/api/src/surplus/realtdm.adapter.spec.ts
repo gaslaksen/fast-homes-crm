@@ -13,6 +13,7 @@ import {
   splitAddressLines,
   splitCompoundOwner,
   surplusFromLetter,
+  cleanOwnerLine,
 } from './realtdm.adapter';
 import { classifyCase, collapseClaimants } from './surplus-classify.util';
 
@@ -437,6 +438,15 @@ describe('claimantFromTitle', () => {
     expect(claimantFromTitle('Surplus Claim Interested Party')).toBe('Interested Party');
     expect(claimantFromTitle('Surplus Payout Government')).toBe('Government');
     expect(claimantFromTitle('Surplus Payout Interested Party')).toBe('Interested Party');
+  });
+
+  it('reads the Sarasota form, slash or dash, and skips the Updated marker', () => {
+    // Verbatim labels from the 2026-09-17 discovery pass.
+    expect(claimantFromTitle('Surplus/Claims Document/City of North Port')).toBe('City of North Port');
+    expect(claimantFromTitle('Surplus/Claims Document - Kenna Mayhew as POA for James Lehan')).toBe('Kenna Mayhew as POA for James Lehan');
+    expect(claimantFromTitle('Surplus/Claims Document - Updated - Richard Cooley')).toBe('Richard Cooley');
+    expect(claimantFromTitle('Surplus/Claims Document/Ingrum Law Firm LLC Personal Representative Estate of Jimmy Don Berger'))
+      .toBe('Ingrum Law Firm LLC Personal Representative Estate of Jimmy Don Berger');
   });
 
   it('never invents a claimant from a document that is not a claim', () => {
@@ -969,3 +979,96 @@ describe('classifying live Lee dockets', () => {
     expect(v.claimStatus).toBe('pending');
   });
 });
+
+describe('Sarasota owner lines', () => {
+  it('takes the roll notes off and keeps the person', () => {
+    // Verbatim OWNER lines from the 2026-09-17 discovery pass.
+    expect(cleanOwnerLine('JOSE LUIS PLANAS (LIFE ESTATE)')).toBe('JOSE LUIS PLANAS');
+    expect(cleanOwnerLine('PLANAS JOSE LUIS (E LIFE EST)')).toBe('PLANAS JOSE LUIS');
+    expect(cleanOwnerLine('MARIA CRISTINA PLANAS LERA (REMAINDER)')).toBe('MARIA CRISTINA PLANAS LERA');
+    expect(cleanOwnerLine('BRUMLEVE JOSEPH F (TTEE)')).toBe('BRUMLEVE JOSEPH F');
+    expect(cleanOwnerLine('JOSEPH F. BRUMLEVE, AS SUCCESSOR TRUSTEE')).toBe('JOSEPH F. BRUMLEVE');
+    expect(cleanOwnerLine('THE KINGDOM TRUST COMPANY (CUS')).toBe('THE KINGDOM TRUST COMPANY');
+  });
+
+  it('reduces a custodial account to the person it is for', () => {
+    expect(cleanOwnerLine('THE KINGDOM TRUST COMPANY CUSTODIAN FBO HARVEY STEVENS, 669183897')).toBe('HARVEY STEVENS');
+    expect(cleanOwnerLine('THE KINGDOM TRUST COMPANY (CUST) HARVEY STEVENS 669183897 (F/B/O)')).toBe('HARVEY STEVENS');
+    expect(cleanOwnerLine('HARVEY STEVENS 669183897 (F/B/')).toBe('HARVEY STEVENS');
+  });
+
+  it('drops a capacity on its own and the estate\'s lawyer', () => {
+    expect(cleanOwnerLine('AS SUCCESSOR TRUSTEE')).toBeNull();
+    expect(cleanOwnerLine('INGRUM LAW FIRM, L.L.C.')).toBeNull();
+    expect(cleanOwnerLine('ESTHER LEAVITT-AZULAY')).toBe('ESTHER LEAVITT-AZULAY');
+  });
+
+  it('a life tenant is not read as dead once the note is off', () => {
+    const [c] = collapseClaimants([cleanOwnerLine('JOSE LUIS PLANAS (LIFE ESTATE)')!, cleanOwnerLine('PLANAS JOSE LUIS (E LIFE EST)')!]);
+    expect(c.deceased).toBe(false);
+    expect(collapseClaimants(['JOSE LUIS PLANAS', 'PLANAS JOSE LUIS'])).toHaveLength(1);
+  });
+});
+
+describe('classifying live Sarasota dockets', () => {
+  const pin = (title: string, filedAt: string) => ({ title, filedAt, claimant: claimantFromTitle(title) });
+
+  it('2026 TD 000111: a legal review for a government lienholder is a government lien, $255,187 still open to the owners', () => {
+    const v = classifyCase(
+      [
+        { title: 'SURPLUS_LETTER', filedAt: '2026-06-29' },
+        { title: 'Returned Mail', filedAt: '2026-07-06' },
+        pin('RFLR - Government Lienholder', '2026-07-16'),
+      ],
+      { owners: ['JOSE LUIS PLANAS', 'MARIA CRISTINA PLANAS LERA'], receiptsImplyClaim: true },
+    );
+    expect(v.claimStatus).toBe('gov_lien');
+    expect(v.counts.claims).toBe(0);
+  });
+
+  it('2026 TD 000115: a POA and the estate\'s PR claiming for the owner closes it', () => {
+    const v = classifyCase(
+      [
+        { title: 'SURPLUS_LETTER', filedAt: '2026-06-29' },
+        pin('Surplus/Claims Document - Kenna Mayhew as POA for James Lehan', '2026-07-16'),
+        pin('Surplus/Claims Document - Angela DeLong as PR for the Estate of William Everett Lehan', '2026-07-16'),
+        pin('RFLR (for both titleholder claims)', '2026-07-16'),
+      ],
+      { owners: ['LEHAN WILLIAM E', 'LEHAN WILLIAM E.'], receiptsImplyClaim: true },
+    );
+    expect(v.claimStatus).toBe('assigned');
+  });
+
+  it('2025 TD 000198: a legal review per claim does not count each claim twice', () => {
+    const v = classifyCase(
+      [
+        { title: 'SURPLUS_LETTER', filedAt: '2025-07-23' },
+        pin('Surplus/Claims Document/Robin Younger', '2025-08-12'),
+        pin('Surplus/Claims Document/Richard Cooley', '2025-08-12'),
+        pin('RFLR - Additional Claim - Richard Cooley', '2025-08-22'),
+        pin('RFLR - Lienholder Waiver - Robin Younger', '2025-08-22'),
+      ],
+      { owners: ['JANE DOE'], receiptsImplyClaim: true },
+    );
+    expect(v.counts.claims).toBe(2);
+    expect(v.claimStatus).toBe('pending');
+    expect(v.ledger.find((d) => /Waiver/.test(d.title))?.kind).toBe('other');
+  });
+
+  it('2026 TD 000272: a legal review with no claim document beside it is a claim not yet indexed', () => {
+    const v = classifyCase(
+      [
+        { title: 'SURPLUS_LETTER', filedAt: '2026-08-07' },
+        { title: 'USPS Certified Mail Status', filedAt: '2026-08-28' },
+        pin('Request for Legal Review', '2026-08-28'),
+      ],
+      { owners: ['RICHARD B. PURDY', 'DONNA PURDY'], receiptsImplyClaim: true },
+    );
+    expect(v.claimStatus).toBe('pending');
+    expect(v.claimantUnknown).toBe(true);
+    expect(v.reason).toMatch(/^A Request for Legal Review is on the docket with no claim document beside it/);
+    // A USPS status printout says nothing in its title.
+    expect(v.mailVerdict).toBe('unknown');
+  });
+});
+

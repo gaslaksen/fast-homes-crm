@@ -107,6 +107,11 @@ describe('classifyClaimant', () => {
     expect(classifyClaimant('ASHER GROUP LLC ON BEHALF OF HARRY A MCGRATH III', ['Harry A. McGrath, III']))
       .toBe('assignee');
     expect(classifyClaimant('BILU LAW- BEHALF OF FRANK DENNIS ZAIC', ['FRANK D ZAIC'])).toBe('assignee');
+    // Sarasota: the owner's own representatives.
+    expect(classifyClaimant('Kenna Mayhew as POA for James Lehan', ['LEHAN WILLIAM E', 'JAMES LEHAN'])).toBe('assignee');
+    expect(classifyClaimant('The Northern Trust Company as PR for the Estate of Joseph F Brumleve', ['JOSEPH F. BRUMLEVE'])).toBe('assignee');
+    expect(classifyClaimant('Ingrum Law Firm LLC Personal Representative Estate of Jimmy Don Berger', ['BERGER JIM'])).toBe('assignee');
+    expect(classifyClaimant('Jane Roe as PR for the Estate of John Stranger', ['BERGER JIM'])).toBe('competitor');
     // For somebody else it is a competitor for the residual, not the owner gone.
     expect(classifyClaimant('PLUTO ASSET RECOVERY INC ON BEHALF OF MAI T PHAM', ['MARQUIL HIXON'])).toBe('competitor');
     // With no owner list there is nothing to check against; the old reading stands.
@@ -311,6 +316,10 @@ describe('collapseClaimants', () => {
     for (const c of collapseClaimants(['United States Secretary of Housing and Urban Development', 'USA HOUSING & URBAN DEV'])) {
       expect(c.isEntity).toBe(true);
     }
+    // Sarasota: one spelling adds only a middle initial.
+    expect(collapseClaimants(['PURDY RICHARD', 'RICHARD B. PURDY', 'DONNA PURDY']).map((c) => c.name)).toEqual(['RICHARD B. PURDY', 'DONNA PURDY']);
+    // A whole extra name is a different person, or at least not provably the same.
+    expect(collapseClaimants(['PEDULLA CARLO', 'PEDULLA GIANCARLO CARLO'])).toHaveLength(2);
     const r = collapseClaimants(['EDGAR CLOWERS, JR.', 'EDGAR CLOWERS']);
     expect(r).toHaveLength(1);
   });
