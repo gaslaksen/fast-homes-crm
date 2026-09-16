@@ -125,9 +125,9 @@ export class SurplusPollService {
       const estateNote = estates.searched
         ? `. Estate search on ${estates.searched} new estate${estates.searched === 1 ? '' : 's'}: ${estates.matched} matched, ${estates.withContact} relative${estates.withContact === 1 ? '' : 's'} with a number`
         : '';
-      // Last, the obituary search on the same new leads that meet the
-      // criteria: a death the vendors missed, or the children of one they
-      // found. Paused unless OBITUARY_MONTHLY_BUDGET is set.
+      // Last, the obituary search on the new estates the estate search left
+      // with nobody reachable: the obituary names the children. Paused unless
+      // OBITUARY_MONTHLY_BUDGET is set.
       const obits = this.obituary?.available
         ? await this.obituary.run({ organizationId: organizationId || null, leadIds })
         : null;

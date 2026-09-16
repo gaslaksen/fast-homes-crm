@@ -55,8 +55,9 @@ function lead(over: any = {}) {
       grossSurplus: 39872,
       claimStatus: 'open',
       noticeDate: new Date(Date.now() - 60 * 86400000),
-      deceased: false,
-      heirsRequired: false,
+      // An estate with nobody reachable, the only thing the search runs on.
+      deceased: true,
+      heirsRequired: true,
       deathSource: null,
       dateOfDeath: null,
       callNotes: null,
@@ -139,7 +140,7 @@ describe('SurplusObituaryService', () => {
     expect(create).not.toHaveBeenCalled();
   });
 
-  it('a strong match marks a living claimant dead, files only the spouse and children, looks them up, and records the spend', async () => {
+  it('a strong match takes the date, files only the spouse and children, looks them up, and records the spend', async () => {
     const { svc, create, detailUpdates, heirCreates, skiptrace, spent } = harness([lead()]);
     create.mockResolvedValue(reply(BEAVER));
 
@@ -152,7 +153,9 @@ describe('SurplusObituaryService', () => {
     expect(create.mock.calls[0][0].tools.map((t: any) => t.type)).toEqual(['web_search_20260209', 'web_fetch_20260209']);
 
     const d = detailUpdates[0].data;
-    expect(d).toMatchObject({ deceased: true, heirsRequired: true, claimantType: 'heir_estate', deathSource: 'obituary', obituaryMatch: 'strong' });
+    expect(d).toMatchObject({ deceased: true, heirsRequired: true, claimantType: 'heir_estate', obituaryMatch: 'strong' });
+    // Already dead by the county's say-so; the obituary supplied only the date.
+    expect(d.deathSource).toBeUndefined();
     expect(d.dateOfDeath.toISOString().slice(0, 10)).toBe('2020-10-27');
     expect(d.callNotes).toMatch(/^Obituary \(strong match\): Dewey Raymond Beaver died October 27, 2020/);
 
@@ -165,7 +168,7 @@ describe('SurplusObituaryService', () => {
     expect(spent()).toBeCloseTo(0.265, 3);
   });
 
-  it('a possible match marks nothing dead and files nobody until a person confirms it', async () => {
+  it('a possible match files nobody until a person confirms it', async () => {
     const { svc, create, detailUpdates, heirCreates, skiptrace } = harness([lead()]);
     create.mockResolvedValue(reply({ ...BEAVER, verdict: 'possible' }));
 
@@ -173,7 +176,6 @@ describe('SurplusObituaryService', () => {
 
     expect(r).toMatchObject({ possible: 1, survivorsFiled: 0 });
     const d = detailUpdates[0].data;
-    expect(d.deceased).toBeUndefined();
     expect(d.obituaryMatch).toBe('possible');
     expect(d.obituary.url).toBe(BEAVER.url);
     expect(d.callNotes).toMatch(/^Possible obituary, check before calling/);
@@ -196,19 +198,27 @@ describe('SurplusObituaryService', () => {
     expect(b.heirCreates).toHaveLength(0);
   });
 
-  it('only checks claims that meet the criteria, and never an entity or an estate with an heir on file', async () => {
+  it('only checks estates with nobody reachable that meet the criteria', async () => {
     const { svc } = harness([
       lead({ id: 'a', detail: { id: 'da', claimStatus: 'pending' } }),
       lead({ id: 'b', detail: { id: 'db', noticeDate: new Date(Date.now() - 400 * 86400000) } }),
       lead({ id: 'c', sellerFirstName: 'SUNSHINE', sellerLastName: 'HOLDINGS LLC', detail: { id: 'dc' } }),
-      lead({ id: 'd', detail: { id: 'dd', deceased: true, heirs: [{ role: 'heir', deceased: false }] } }),
-      lead({ id: 'e', detail: { id: 'de', deceased: true } }),
-      lead({ id: 'f', detail: { id: 'df' } }),
+      // A living claimant: Endato's death records cover them.
+      lead({ id: 'd', detail: { id: 'dd', deceased: false, heirsRequired: false } }),
+      // A relative with a clean number: somebody is reachable.
+      lead({ id: 'e', detail: { id: 'de', heirs: [{ role: 'relative', deceased: false, doNotCall: false, phone1: '7405550101', phone1Dnc: null }] } }),
+      // Relatives with no number, a do-not-call number, or dead: nobody reachable.
+      lead({ id: 'f', detail: { id: 'df', heirs: [
+        { role: 'relative', deceased: false, doNotCall: false, phone1: null },
+        { role: 'relative', deceased: false, doNotCall: false, phone1: '7405550102', phone1Dnc: 'federal' },
+        { role: 'heir', deceased: true, doNotCall: false, phone1: '7405550103', phone1Dnc: null },
+      ] } }),
+      lead({ id: 'g', detail: { id: 'dg' } }),
+      lead({ id: 'h', detail: { id: 'dh', stage: 'Dead' } }),
     ]);
 
     const r = await svc.run({ organizationId: 'org', dryRun: true });
 
-    // The estate with no heir (e) and the living claimant (f).
     expect(r.candidates).toBe(2);
     expect(r.estimatedCost).toBe(0.9);
   });
