@@ -6,6 +6,7 @@ import { SurplusIngestService } from './surplus-ingest.service';
 import { SurplusPollService } from './surplus-poll.service';
 import { DuvalTaxDeedAdapter } from './duval-taxdeed.adapter';
 import {
+  AlachuaRealTdmAdapter,
   BrevardRealTdmAdapter,
   LakeRealTdmAdapter,
   LeeRealTdmAdapter,
@@ -50,6 +51,7 @@ import { MessagesModule } from '../messages/messages.module';
     PinellasRealTdmAdapter,
     SarasotaRealTdmAdapter,
     LakeRealTdmAdapter,
+    AlachuaRealTdmAdapter,
     SurplusEndatoService,
     SurplusSkiptraceService,
     SurplusNoticeService,

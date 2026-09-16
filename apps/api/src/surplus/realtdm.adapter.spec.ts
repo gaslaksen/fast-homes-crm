@@ -1165,3 +1165,108 @@ describe('classifying live Lake dockets', () => {
   });
 });
 
+describe('Alachua', () => {
+  it('reads the claimant from the clerk\'s file names, and nobody from paperwork', () => {
+    // Verbatim labels from the 2026-09-17 discovery pass.
+    expect(claimantFromTitle('walker adrian surplus claim')).toBe('walker adrian');
+    expect(claimantFromTitle('Copy of meinert chloe surplus claim')).toBe('meinert chloe');
+    expect(claimantFromTitle('gladden doris surplus claim original')).toBe('gladden doris');
+    expect(claimantFromTitle('City of Gainesville Amended Claim.pdf')).toBe('City of Gainesville');
+    expect(claimantFromTitle('City of Gainesville Claim 3')).toBe('City of Gainesville');
+    expect(claimantFromTitle('Young Rose claim')).toBe('Young Rose');
+    expect(claimantFromTitle('ob.clm disburse.richardson earl check')).toBe('richardson earl');
+    expect(claimantFromTitle('ob.clm disburse.city of gainesville code enforcement.030.docx')).toBe('city of gainesville code enforcement');
+    expect(claimantFromTitle('Surplus Claim')).toBeNull();
+    expect(claimantFromTitle('Fuss Peter Waiver of Claim')).toBeNull();
+  });
+
+  it('owner lines: heirs and deceased are estates, trustees are people, agents and summaries are nobody', () => {
+    expect(cleanOwnerLine('HARMON MARTIN D HEIRS')).toBe('ESTATE OF HARMON MARTIN D');
+    expect(cleanOwnerLine('MILDRED L SEWDASS aka MILDRED GREEN HEIRS')).toBe('ESTATE OF MILDRED L SEWDASS');
+    expect(cleanOwnerLine('MILDRED L SEWDASS, DECEASED, MILDRED GREEN')).toBe('ESTATE OF MILDRED L SEWDASS');
+    expect(cleanOwnerLine('TOMMIE GREEN PR, ESTATE OF MILDRED GREEN aka MILDRED L. SEWDASS')).toBe('ESTATE OF MILDRED GREEN');
+    expect(cleanOwnerLine('ESTATE OF ANNIE MAE GOSTON, AGNES M. ATKINS PR')).toBe('ESTATE OF ANNIE MAE GOSTON');
+    expect(cleanOwnerLine('ESTATE OF ANNIE MAE GASTON, DEC')).toBe('ESTATE OF ANNIE MAE GASTON');
+    expect(cleanOwnerLine('IDA MAE DEWEY DECEASED')).toBe('ESTATE OF IDA MAE DEWEY');
+    expect(cleanOwnerLine('DEWEY DIANE TRUSTEE')).toBe('DEWEY DIANE');
+    expect(cleanOwnerLine('DIANE ELAINE DEWEY CO-TRUSTEE IDA MAE DEWEY REVOCABLE TRUST')).toBe('DIANE ELAINE DEWEY');
+    expect(cleanOwnerLine('NINA FUSS, TRUSTEE OF THE EGOPEE TRUST')).toBe('NINA FUSS');
+    expect(cleanOwnerLine('LAVORIA C WILLIAMS N/K/A LAVORIA REAVES')).toBe('LAVORIA C WILLIAMS');
+    expect(cleanOwnerLine('HARRY TODD LLC DBA TRUTH HURTS ENTERTAINMENT')).toBe('HARRY TODD LLC');
+    expect(cleanOwnerLine('HAROLD E TODD JR REG AGT')).toBeNull();
+    expect(cleanOwnerLine('LYTLE & LYTLE')).toBeNull();
+    expect(cleanOwnerLine('CRIBBS HEIRS & TAYLOR')).toBeNull();
+    expect(cleanOwnerLine('ANGRIN HEIRS & ANGRIN & ANGRIN & ANGRIN & ANGRIN & GOSTON HEIRS ET AL')).toBeNull();
+    // A surname-first joint line is two people.
+    expect(splitCompoundOwner(cleanOwnerLine('FORD NICK & JENNIFER')!)).toEqual(['FORD NICK', 'FORD JENNIFER']);
+  });
+
+  it('only the roll\'s capitals are owners; a claimant the clerk added is not', async () => {
+    const config: any = { get: () => undefined };
+    const { AlachuaRealTdmAdapter } = await import('./realtdm.adapter');
+    const a: any = new AlachuaRealTdmAdapter(config);
+    expect(a.payoutsArePartial).toBe(true);
+    expect(a.ownersFromRollOnly).toBe(true);
+  });
+});
+
+describe('classifying live Alachua dockets', () => {
+  const al = (title: string, filedAt: string) => ({ title, filedAt, claimant: claimantFromTitle(title) });
+
+  it('TD 2025-087: owners paid one at a time and a disbursement memo are not the money gone', () => {
+    const v = classifyCase(
+      [
+        al('SURPLUS_LETTER', '2026-01-13'),
+        al('refund.letter.appl.087.docx', '2026-01-16'),
+        al('bid deposit receipt', '2026-01-16'),
+        al('Email to claimant re unrecorded agreement - advised not basis for surplus claim.pdf', '2026-02-02'),
+        al('2025-087 Disbursement Memo- 3 percentage owners paid, partial dsb.docx', '2026-05-15'),
+        al('ob.clm disburse.richardson earl check', '2026-05-18'),
+        al('ob.clm disburse.richardson earl.087.docx', '2026-05-18'),
+      ],
+      { owners: ['JANE DOE'], payoutsArePartial: true },
+    );
+    expect(v.counts.distributions).toBe(0);
+    expect(v.counts.payouts).toBe(1);
+    expect(v.counts.claims).toBe(0);
+    expect(v.ledger.find((d) => /Memo/.test(d.title))?.kind).toBe('routine_disbursement');
+    expect(v.ledger.find((d) => /Email to claimant/.test(d.title))?.kind).toBe('other');
+    expect(v.claimStatus).toBe('open');
+  });
+
+  it('a claim filed twice is one claim, and a rejection letter is its denial', () => {
+    const v = classifyCase(
+      [
+        al('SURPLUS_LETTER', '2025-08-26'),
+        al('gladden doris surplus claim copy', '2025-12-01'),
+        al('gladden doris surplus claim original', '2025-12-08'),
+        al('rejection letter re surplus claim.036.pdf', '2026-01-12'),
+      ],
+      { owners: ['JANE DOE'] },
+    );
+    expect(v.counts.claims).toBe(1);
+    expect(v.counts.denials).toBe(1);
+    expect(v.claimStatus).toBe('denied');
+  });
+
+  it('a recovery company filing "obo" the owner closes it; a waiver is nothing', () => {
+    const v = classifyCase(
+      [al('SURPLUS_LETTER', '2025-09-01'), al('Master Mind Leaders LLC obo Jennifer Houghkerk Surplus claim', '2025-10-01')],
+      { owners: ['HOUGHKERK DIANNE M'] },
+    );
+    expect(v.claimStatus).toBe('assigned');
+    const w = classifyCase([al('SURPLUS_LETTER', '2025-11-21'), al('Fuss Peter Waiver of Claim', '2026-01-12')], { owners: ['NINA FUSS'] });
+    expect(w.claimStatus).toBe('open');
+  });
+
+  it('returned CM is a bounce and a signature CM is a delivery, after the letter', () => {
+    const v = classifyCase(
+      [al('SURPLUS_LETTER', '2025-11-21'), al('fuss trst nina returned cm', '2026-01-02'), al('fuss nina trst returned reg mail', '2026-01-02')],
+      { owners: ['NINA FUSS'] },
+    );
+    expect(v.mailVerdict).toBe('undeliverable');
+    const w = classifyCase([al('SURPLUS_LETTER', '2025-11-21'), al('harmon josephine signature CM', '2026-01-02')], { owners: ['X Y'] });
+    expect(w.mailVerdict).toBe('delivered');
+  });
+});
+

@@ -75,6 +75,13 @@ export interface RealTdmCountySpec {
   receiptsImplyClaim?: boolean;
   /** See SurplusSourceAdapter.payoutsArePartial. Pinellas. */
   payoutsArePartial?: boolean;
+  /**
+   * Owners are only the names the tax roll printed, in capitals. Alachua's
+   * clerk adds claimants to the parties list with the owner role and types
+   * them in mixed case ("Traci James", "Claims Connect FL LLC", "Peter Fuss
+   * Rock Hall, MD 21661"); taken as owners, each claimant became a lead.
+   */
+  ownersFromRollOnly?: boolean;
 }
 
 export const REALTDM_USER_AGENT =
@@ -392,6 +399,18 @@ export function claimantFromTitle(title: string): string | null {
   // Sarasota: "Surplus/Claims Document/City of North Port", "Surplus/Claims
   // Document - Kenna Mayhew as POA for James Lehan", "Surplus/Claims Document
   // - Updated - Richard Cooley".
+  // Alachua names the claimant first, in the clerk's own file name: "walker
+  // adrian surplus claim", "Copy of meinert chloe surplus claim", "City of
+  // Gainesville Amended Claim.pdf", and pays them as "ob.clm disburse.richardson
+  // earl check".
+  const paid = /ob\.?\s*clm\.?\s*disburse\.?\s*(.+?)(?:\.\d{2,}.*|\s+check.*|\.docx|\.pdf)?\s*$/i.exec(t);
+  if (paid) return paid[1].replace(/\s+/g, ' ').trim() || null;
+  const named = /\bwaiver\b|^review\s+of\b|\bemail\b/i.test(t)
+    ? null
+    : /^(?:copy\s+of\s+)?(.+?)\s+(?:surplus\s+)?(?:amended\s+)?claim(?:\s+(?:copy|original|\d+))?(?:\.pdf)?\s*$/i.exec(t);
+  if (named && !/^(?:surplus|statement|statment|state|no|submitted|the|a|of)$/i.test(named[1].trim()) && !/^surplus\b/i.test(t)) {
+    return named[1].replace(/\s+/g, ' ').trim() || null;
+  }
   const sarasota = /surplus\s*\/\s*claims?\s*document\s*(?:[-\/]\s*)?(?:updated\s*[-\/]\s*)?([\s\S]*?)(?:\.pdf)?\s*$/i.exec(t);
   if (sarasota) return sarasota[1].replace(/\s+/g, ' ').trim() || null;
   const m =
@@ -555,6 +574,16 @@ function isWholeName(p: string): boolean {
  * claimant.
  */
 export function cleanOwnerLine(raw: string): string | null {
+  // A roll summary that lists surnames joined by "&", heirs and all ("LYTLE &
+  // LYTLE", "CRIBBS HEIRS & TAYLOR", "ANGRIN HEIRS & ANGRIN & ANGRIN ... ET
+  // AL"). The people are listed one per line beside it (Alachua).
+  const joined = String(raw || '').split(/\s*&\s*/);
+  if (
+    joined.length > 1 &&
+    joined.every((p) => p.replace(/\b(?:HEIRS|JR|SR|ET\s*AL)\b\.?/gi, '').replace(/[,\s]+/g, ' ').trim().split(' ').filter(Boolean).length === 1)
+  ) {
+    return null;
+  }
   // A custodial account names the person it is for: "THE KINGDOM TRUST
   // COMPANY CUSTODIAN FBO HARVEY STEVENS, 669183897" and "THE KINGDOM TRUST
   // COMPANY (CUST) HARVEY STEVENS 669183897 (F/B/O)" are Harvey Stevens's IRA,
@@ -571,14 +600,33 @@ export function cleanOwnerLine(raw: string): string | null {
   // holds it rather than who owned it.
   const agent = /\bREGISTERED\s+AGENT\s+(?:O\/B\/O|OBO|FOR|ON\s+BEHALF\s+OF)\s+(.+)$/i.exec(String(base0 || ''));
   const pr = /,?\s*PERSONAL\s+REPRESENTATIVE\s+(?:OF\s+)?(?:THE\s+)?ESTATE\s+OF\s+(.+)$/i.exec(String(base0 || ''));
-  const base = agent ? agent[1] : pr ? `ESTATE OF ${pr[1]}` : base0;
+  // Alachua writes the representative in either order: "TOMMIE GREEN PR,
+  // ESTATE OF MILDRED GREEN" and "ESTATE OF ANNIE MAE GOSTON, AGNES M. ATKINS
+  // PR". The estate is the owner either way.
+  const prBefore = /\bPR\s*,\s*(ESTATE\s+OF\s+.+)$/i.exec(String(base0 || ''));
+  const estateFirst = /^(ESTATE\s+OF\s+[^,]+),/i.exec(String(base0 || ''));
+  let base = agent ? agent[1] : pr ? `ESTATE OF ${pr[1]}` : prBefore ? prBefore[1] : estateFirst ? estateFirst[1] : base0;
+  // A dead owner written as "HEIRS" or "DECEASED" anywhere on the line, before
+  // the aka and other tails that would carry the word away: "MILDRED L
+  // SEWDASS aka MILDRED GREEN HEIRS", "MILDRED L SEWDASS, DECEASED, MILDRED
+  // GREEN", "GREEN MILDRED L HEIRS".
+  const dead = /\b(?:HEIRS|DECEASED|DEC'?D)\b|,\s*DEC\.?\s*$/i.test(String(base || ''));
+  base = String(base || '')
+    .replace(/\s+(?:A\/K\/A|AKA|N\/K\/A|NKA|F\/K\/A|FKA)\s+.*$/i, '')
+    .replace(/,\s*(?:DECEASED|DEC'?D|DEC)\b.*$/i, '')
+    .replace(/\b(?:HEIRS|DECEASED|DEC'?D)\b/gi, ' ');
+  if (/\bREG(?:ISTERED)?\.?\s*AG(?:EN)?T\b\.?\s*$/i.test(base.trim())) return null;
+  base = base.replace(/\s+D\/?B\/?A\s+.*$/i, '');
   const s = String(base || '')
     // A bracket, closed or cut off by the roll's field width.
     .replace(/\s*\([^)]*(?:\)|$)/g, ' ')
     // Account numbers carried in custodial names.
     .replace(/\b\d{6,}\b/g, ' ')
     // Capacities, not people.
-    .replace(/,?\s*\bAS\s+(?:SUCCESSOR\s+|CO-?\s*)?TRUSTEES?\b.*$/i, '')
+    // "AS SUCCESSOR TRUSTEE", "DEWEY DIANE TRUSTEE", "DIANE ELAINE DEWEY
+    // CO-TRUSTEE IDA MAE DEWEY REVOCABLE TRUST", "NINA FUSS, TRUSTEE OF THE
+    // EGOPEE TRUST": the trustee is the person, the rest is capacity.
+    .replace(/,?\s*\b(?:AS\s+)?(?:SUCCESSOR\s+|CO-?\s*)?TRUSTEES?\b.*$/i, '')
     // Who the mail goes to and the unnamed rest: "DARA LYNN SCOTT C/O SHANDRA
     // D JONES", "SADIE M BALDWIN ET AL".
     .replace(/\s+C\/O\s+.*$/i, '')
@@ -589,6 +637,7 @@ export function cleanOwnerLine(raw: string): string | null {
     .replace(/[\s,]+$/, '')
     .trim();
   if (!s || !/[A-Z]{2,}/i.test(s) || /^AS\s+(?:SUCCESSOR\s+)?TRUSTEE/i.test(s)) return null;
+  if (dead && !/^ESTATE\s+OF\b/i.test(s)) return `ESTATE OF ${s}`;
   if (/\bLAW\s+(?:FIRM|OFFICES?|GROUP)\b|\bATTORNEYS?\s+AT\s+LAW\b/i.test(s)) return null;
   return s;
 }
@@ -607,6 +656,15 @@ export function splitCompoundOwner(name: string): string[] {
       .split(/,?\s*\d+(?:\.\d+)?\s*%\s*/)
       .map((p) => p.replace(/^[,\s]+|[,\s]+$/g, ''))
       .filter(Boolean);
+  }
+  // Alachua: "FORD NICK & JENNIFER" is Nick Ford and Jennifer Ford.
+  const amp = s.split(/\s*&\s*/).map((p) => p.trim()).filter(Boolean);
+  if (amp.length > 1 && !ENTITY_WORD.test(s)) {
+    const sizes = amp.map((p) => p.split(/\s+/).length);
+    if (sizes[0] === 2 && sizes.slice(1).every((n) => n === 1)) {
+      const surname = amp[0].split(/\s+/)[0];
+      return [amp[0], ...amp.slice(1).map((g) => `${surname} ${g}`)];
+    }
   }
   // Brevard: "ANITA ZUMSTEG AND/OR BERNHARD F ZUMSTEG", "LOTTIE WILLIAMS AND
   // ESTATE OF WALTER IVORY, DECEASED". Only when every side is a whole name,
@@ -657,6 +715,7 @@ export class RealTdmAdapter implements SurplusSourceAdapter {
   /** Per county, from the discovery pass. See RealTdmCountySpec. */
   readonly receiptsImplyClaim: boolean;
   readonly payoutsArePartial: boolean;
+  private readonly ownersFromRollOnly: boolean;
   readonly baseUrl: string;
 
   private readonly logger: Logger;
@@ -676,6 +735,7 @@ export class RealTdmAdapter implements SurplusSourceAdapter {
     this.county = spec.county;
     this.receiptsImplyClaim = !!spec.receiptsImplyClaim;
     this.payoutsArePartial = !!spec.payoutsArePartial;
+    this.ownersFromRollOnly = !!spec.ownersFromRollOnly;
     this.logger = new Logger(`RealTdmAdapter:${spec.county}`);
     this.baseUrl = (
       this.config.get<string>(`REALTDM_${spec.subdomain.toUpperCase()}_BASE_URL`) ||
@@ -824,6 +884,7 @@ export class RealTdmAdapter implements SurplusSourceAdapter {
     const owners: string[] = [];
     for (const p of parties) {
       if (!OWNER_ROLES.test(p.role)) continue;
+      if (this.ownersFromRollOnly && /[a-z]/.test(p.name)) continue;
       const cleaned = cleanOwnerLine(p.name);
       if (!cleaned) continue;
       for (const name of splitCompoundOwner(cleaned)) {
@@ -1047,6 +1108,30 @@ export class SarasotaRealTdmAdapter extends RealTdmAdapter {
 export class LakeRealTdmAdapter extends RealTdmAdapter {
   constructor(config: ConfigService) {
     super(config, { key: 'realtdm_lake', county: 'Lake', subdomain: 'lake' });
+  }
+}
+
+/**
+ * Alachua County, `alachua.realtdm.com`. Discovery 2026-09-17 on all 24 live
+ * cases over the floor (111 listed, 34 live, $797k). The clerk names documents
+ * by hand in lower case: "walker adrian surplus claim", "rejection letter re
+ * surplus claim", "ob.clm disburse.richardson earl check", "lytle pearl
+ * returned CM", "harmon josephine signature CM". Claimants are added to the
+ * parties with the owner role in mixed case, so only the roll's capitals are
+ * owners. The county pays owners and liens one at a time and keeps the case
+ * ACTIVE with the balance posted (2025-087 paid five of 35 fractional owners),
+ * so payouts are partial.
+ */
+@Injectable()
+export class AlachuaRealTdmAdapter extends RealTdmAdapter {
+  constructor(config: ConfigService) {
+    super(config, {
+      key: 'realtdm_alachua',
+      county: 'Alachua',
+      subdomain: 'alachua',
+      payoutsArePartial: true,
+      ownersFromRollOnly: true,
+    });
   }
 }
 

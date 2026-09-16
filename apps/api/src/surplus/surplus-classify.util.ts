@@ -115,6 +115,16 @@ const RULES: Rule[] = [
   // Brevard sample 52 of 96 documents matching the word "claim" were the county
   // filing NO CLAIM. Counting those as competition hid most of the opportunity.
   { kind: 'other', re: /\bno\s*claim\b/i, seenIn: 'Brevard' },
+  // Alachua's clerk files correspondence and reviews under names that contain
+  // "claim": "Email to claimant ...", "Review of Claim filed by Josephine
+  // Belk's Claim", "Fuss Peter Waiver of Claim", "Patriot Cash Recover Email
+  // they intend to file a claim", "In wrong file winter investors llc reg mail
+  // returned". None is a claim, a denial or a mailing.
+  {
+    kind: 'other',
+    re: /^(?:corrected\s+)?email\b|\bemail\s+(?:to|from|exchange)\b|^review\s+of\b|\bwaiver\b|^in\s+wrong\s+file|letter\s+to\s+claimant|intend\s+to\s+file/i,
+    seenIn: 'Alachua',
+  },
   // A disclaimer is a lienholder WAIVING its interest, again the opposite.
   // Pinellas 2023-01704 has three documents on file, all disclaimers, and was
   // initially read as contested. It is $255,189 with nobody claiming.
@@ -183,8 +193,9 @@ const RULES: Rule[] = [
   // "mail return", which the next rule reads as a bounce.
   {
     kind: 'mail_delivered',
-    re: /mail\s*delivered|returned\s*signed|return(?:ed)?\s*receipt|green\s*card|proof\s*of\s*delivery/i,
-    seenIn: 'Duval, Polk, Brevard',
+    // Alachua scans the signed green card as "... signature CM".
+    re: /mail\s*delivered|returned\s*signed|return(?:ed)?\s*receipt|green\s*card|proof\s*of\s*delivery|\bsignature\b/i,
+    seenIn: 'Duval, Polk, Brevard, Alachua',
   },
   {
     kind: 'mail_undeliverable',
@@ -195,7 +206,10 @@ const RULES: Rule[] = [
     // and "CERIFIED MAIL RETURNED".
     // Pinellas files USPS "Unclaimed Mail" beside "Returned Mail Surplus".
     // Lake adds "Returned Surplus Mail" and filenames that name the recipient.
-    re: /undeliver|undelieve|unable\s*to\s*forward|returned\s*(?:certified\s*|regular\s*|surplus\s*)?mail|\bmail\s*return(?:ed)?\b|unclaimed\s*mail|vacant|no\s*such\s*number|attempted\s*-?\s*not\s*known/i,
+    // Alachua: "lytle pearl returned CM", "dewey diane elaine CM returned",
+    // "geraldine platt heirs rtnd CM", "ford nick reg mail returned",
+    // "williams lavoria c reg mail retuned", "Sanders Shirley.reg returned mail".
+    re: /undeliver|undelieve|unable\s*to\s*forward|returned\s*(?:certified\s*|regular\s*|surplus\s*|reg\.?\s*)?mail|\bmail\s*return(?:ed)?\b|unclaimed\s*mail|vacant|no\s*such\s*number|attempted\s*-?\s*not\s*known|\breturned\s*cm\b|\bcm\s*returned\b|\br(?:e)?t(?:u)?r?nd\s*cm\b|\breg\.?\s*mail\s*ret(?:urned|uned)\b|\breg\.?\s*returned\s*mail\b/i,
     seenIn: 'Duval, Brevard, Polk, Pinellas, Lake',
   },
   {
@@ -212,6 +226,17 @@ const RULES: Rule[] = [
 
   // ── The money moving. Checked before claims so a distributed case is never
   //    reported as merely contested. ──────────────────────────────────────────
+  // Alachua's paperwork around money that is not the surplus leaving: the
+  // bid deposit, the applicant's and tax collector's refunds, and the memo
+  // that explains a partial payout. Read as a named disbursement, the memo
+  // marked five live cases paid out.
+  {
+    kind: 'routine_disbursement',
+    re: /disbursement\s*memo|bid\s*deposit|\brefu?n?d\b|refund/i,
+    seenIn: 'Alachua',
+  },
+  // "ob.clm disburse.richardson earl check": one owner's claim paid.
+  { kind: 'payout', re: /ob\.?\s*clm\.?\s*disburse/i, seenIn: 'Alachua' },
   // One claimant paid. Pinellas 2023-08057 carries "Surplus Payout Government"
   // and still lists $58,531 ACTIVE; 2022-07634 carries a payout to an
   // interested party and still lists $57,950. Neither is the money gone.
@@ -221,7 +246,8 @@ const RULES: Rule[] = [
     re: /surplus\s*(distribution|breakdown)|distribution\s*of\s*surplus/i,
     seenIn: 'Duval',
   },
-  { kind: 'denial', re: /denial|denied/i, seenIn: 'Duval' },
+  // Alachua: "rejection letter re surplus claim".
+  { kind: 'denial', re: /denial|denied|\breject(?:ion|ed)?\b/i, seenIn: 'Duval, Alachua' },
 
   // ── Claims. Governmental first, since a city lien is not a competitor: it
   //    takes a slice off the top and the owner can still claim the residual. ──
@@ -232,13 +258,21 @@ const RULES: Rule[] = [
   },
   {
     kind: 'claim',
-    re: /submitted\s*claim|statement\s*of\s*claim|statment\s*of\s*claim|state\s*of\s*claim|statement\s*claim|surplus\s*claims?\s*received|surplus\s*claim|surplus\s*\/\s*claims?\s*document|claim\s*to\s*receive/i,
+    // Alachua ends the title with it: "walker adrian surplus claim", "Young
+    // Rose claim", "City of Gainesville Amended Claim.pdf", "... Claim 3".
+    re: /submitted\s*claim|statement\s*of\s*claim|statment\s*of\s*claim|state\s*of\s*claim|statement\s*claim|surplus\s*claims?\s*received|surplus\s*claim|surplus\s*\/\s*claims?\s*document|claim\s*to\s*receive|\bclaim(?:\s+\d+)?(?:\.pdf)?\s*$/i,
     seenIn: 'Duval, Lee, Brevard, Alachua, Polk',
   },
 
   // ── Context signals ───────────────────────────────────────────────────────
   { kind: 'notice_surplus', re: /notice\s*of\s*surplus|surplus[_\s]*letter/i, seenIn: 'Duval, Lee' },
-  { kind: 'probate', re: /probate|death\s*cert|letters\s*of\s*administration/i, seenIn: 'Duval' },
+  // Alachua: "Pet summ admin - martin harmon estate.pdf", "Est of Diane Dewey
+  // Petition for Administration", "order on petition".
+  {
+    kind: 'probate',
+    re: /probate|death\s*cert|letters\s*of\s*administration|summ(?:ary)?\.?\s*admin|petition\s+for\s+administration|order\s+on\s+petition/i,
+    seenIn: 'Duval, Alachua',
+  },
   { kind: 'entity', re: /sunbiz/i, seenIn: 'Duval' },
 ];
 
@@ -303,7 +337,7 @@ const COMPETITOR = /\b(llc|l\.l\.c|inc|law|recovery|group|funding|capital|partne
 // James Lehan", "Angela DeLong as PR for the Estate of William Everett Lehan",
 // "Ingrum Law Firm LLC Personal Representative Estate of Jimmy Don Berger".
 const ASSIGNEE =
-  /\bas\s+assignee\s+of\b|\bassignee\s+of\b|\b(?:on\s+)?behalf\s+of\b|\bas\s+(?:poa|power\s+of\s+attorney|pr|personal\s+representative|guardian|trustee)\s+(?:for|of)\b|\bpersonal\s+representative\s+(?:of\s+)?(?:the\s+)?estate\s+of\b/i;
+  /\bas\s+assignee\s+of\b|\bassignee\s+of\b|\b(?:on\s+)?behalf\s+of\b|\bo\/?b\/?o\b|\bas\s+(?:poa|power\s+of\s+attorney|pr|personal\s+representative|guardian|trustee)\s+(?:for|of)\b|\bpersonal\s+representative\s+(?:of\s+)?(?:the\s+)?estate\s+of\b/i;
 
 export type ClaimantClass = 'assignee' | 'government' | 'competitor' | 'owner' | 'unknown';
 
@@ -401,14 +435,38 @@ export function classifyCase(
   // take a slice off the top and leave the owner residual open, exactly like
   // Duval's "Surplus - Ad Valorem Homestead Liens". Counting them as competing
   // claims marked those cases contested when nobody is contesting the owner.
-  const allClaims = of('claim');
+  // One claim filed twice is one claim. Alachua scans "gladden doris surplus
+  // claim copy" and "gladden doris surplus claim original", and pays each
+  // owner with a check and a memo, both titled with the owner's name.
+  // Only named documents dedupe; an unnamed claim may be anybody's, and so
+  // may one that carries only its category (Pinellas's four "Surplus Claim
+  // Government" filings on 2023-00489 are four liens).
+  const sameName = (c: ClassifiedDoc) =>
+    /^(?:government|gvernment|interested\s*part(?:y|ies)|owner)$/i.test(String(c.claimant || '').trim())
+      ? ''
+      : String(c.claimant || '')
+      .toUpperCase()
+      .replace(/\b(?:COPY|ORIGINAL|AMENDED|OF|CHECK|REVISED|PDF|DOCX)\b|\d+/g, ' ')
+      .replace(/[^A-Z]/g, '');
+  const dedupeNamed = (docs: ClassifiedDoc[]) => {
+    const seen = new Set<string>();
+    return docs.filter((d) => {
+      const k = sameName(d);
+      if (!k) return true;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+  };
+  const allClaims = dedupeNamed(of('claim'));
   const claims = allClaims.filter((c) => classifyClaimant(c.claimant, owners) !== 'government');
   const denials = of('denial');
   // A payout to a government unit is that lien satisfied, whatever else is
   // going on. A payout to anybody else is the money leaving, unless the county
   // pays in parts and keeps the case open.
-  const govPayouts = of('payout').filter((p) => classifyClaimant(p.claimant, owners) === 'government');
-  const otherPayouts = of('payout').filter((p) => !govPayouts.includes(p));
+  const payouts = dedupeNamed(of('payout'));
+  const govPayouts = payouts.filter((p) => classifyClaimant(p.claimant, owners) === 'government');
+  const otherPayouts = payouts.filter((p) => !govPayouts.includes(p));
   const distributions = [...of('distribution'), ...(opts.payoutsArePartial ? [] : otherPayouts)];
   const partialPayouts = opts.payoutsArePartial ? otherPayouts : [];
   const govLiens = [
