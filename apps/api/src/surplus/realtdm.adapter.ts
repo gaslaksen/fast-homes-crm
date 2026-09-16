@@ -558,7 +558,10 @@ export function cleanOwnerLine(raw: string): string | null {
   // and he is who can be reached. A custodian line cut off before the name
   // stays the company.
   const custodial = /\b(?:CUSTODIAN\s+)?F\/?B\/?O\b\s*(.+)$|\(CUST\)\s*(.+)$/i.exec(String(raw || ''));
-  const base = custodial && (custodial[1] || custodial[2]) ? custodial[1] || custodial[2] : raw;
+  const after = custodial ? custodial[1] || custodial[2] || '' : '';
+  // "DENISE BAGLEY IRA (F/B/O)" puts the marker last; what follows it is a
+  // bracket, not a name, and the name is the line itself.
+  const base = /[A-Z]{2,}/i.test(after.replace(/\([^)]*\)?/g, '')) ? after : raw;
   const s = String(base || '')
     // A bracket, closed or cut off by the roll's field width.
     .replace(/\s*\([^)]*(?:\)|$)/g, ' ')
@@ -566,10 +569,12 @@ export function cleanOwnerLine(raw: string): string | null {
     .replace(/\b\d{6,}\b/g, ' ')
     // Capacities, not people.
     .replace(/,?\s*\bAS\s+(?:SUCCESSOR\s+|CO-?\s*)?TRUSTEES?\b.*$/i, '')
+    // The account type on a custodial line: "DENISE BAGLEY IRA".
+    .replace(/\s+(?:ROTH\s+|SEP\s+)?IRA\b.*$/i, '')
     .replace(/\s+/g, ' ')
     .replace(/[\s,]+$/, '')
     .trim();
-  if (!s || /^AS\s+(?:SUCCESSOR\s+)?TRUSTEE/i.test(s)) return null;
+  if (!s || !/[A-Z]{2,}/i.test(s) || /^AS\s+(?:SUCCESSOR\s+)?TRUSTEE/i.test(s)) return null;
   if (/\bLAW\s+(?:FIRM|OFFICES?|GROUP)\b|\bATTORNEYS?\s+AT\s+LAW\b/i.test(s)) return null;
   return s;
 }

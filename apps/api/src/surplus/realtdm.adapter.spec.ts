@@ -995,6 +995,10 @@ describe('Sarasota owner lines', () => {
     expect(cleanOwnerLine('THE KINGDOM TRUST COMPANY CUSTODIAN FBO HARVEY STEVENS, 669183897')).toBe('HARVEY STEVENS');
     expect(cleanOwnerLine('THE KINGDOM TRUST COMPANY (CUST) HARVEY STEVENS 669183897 (F/B/O)')).toBe('HARVEY STEVENS');
     expect(cleanOwnerLine('HARVEY STEVENS 669183897 (F/B/')).toBe('HARVEY STEVENS');
+    // Sarasota 2025 TD 000018: the marker last, and the account type.
+    expect(cleanOwnerLine('DENISE BAGLEY IRA (F/B/O)')).toBe('DENISE BAGLEY');
+    expect(cleanOwnerLine('FBO DENISE BAGLEY IRA')).toBe('DENISE BAGLEY');
+    expect(cleanOwnerLine(')')).toBeNull();
   });
 
   it('drops a capacity on its own and the estate\'s lawyer', () => {

@@ -599,6 +599,9 @@ export function collapseClaimants(owners: string[]): CollapsedClaimant[] {
       .toUpperCase()
       .replace(ESTATE_OF, '')
       .replace(/\bESTATE\s+OF\b/g, ' ')
+      // "D'ALESSANDRO" and "O'BRIEN" key as one word; "&" and "AND" alike.
+      .replace(/['\u2019]/g, '')
+      .replace(/&/g, ' AND ')
       .replace(/[.,\-\/]/g, ' ')
       .replace(ESTATE_MARK, ' ')
       .replace(TRUSTEE_MARK, ' ')
@@ -611,7 +614,12 @@ export function collapseClaimants(owners: string[]): CollapsedClaimant[] {
       .join(' ');
     if (!core) continue;
 
-    const deceased = ESTATE_MARK.test(original.toUpperCase()) || ESTATE_OF.test(original);
+    // "AMERICAN ESTATE & TRUST" is a custodian with ESTATE in its name, not a
+    // dead owner. An entity is an estate only when it says "ESTATE OF".
+    const deceased =
+      (ESTATE_MARK.test(original.toUpperCase()) && !ENTITY.test(original)) ||
+      ESTATE_OF.test(original) ||
+      /\bESTATE\s+OF\b/i.test(original);
     ESTATE_MARK.lastIndex = 0; // the global flag makes .test stateful
 
     const existing = groups.get(core);
@@ -630,24 +638,68 @@ export function collapseClaimants(owners: string[]): CollapsedClaimant[] {
     }
   }
 
-  // One spelling with a middle initial and one without is one person: the
-  // Sarasota roll writes "PURDY RICHARD" and the deed "RICHARD B. PURDY".
-  // Merged only when the fuller form adds nothing but single letters, so
-  // "PEDULLA CARLO" and "PEDULLA GIANCARLO CARLO" stay apart.
-  for (const [ka, a] of [...groups.entries()]) {
-    const ta = ka.split(' ');
-    if (ta.length < 2 || a.isEntity) continue;
-    for (const [kb, b] of [...groups.entries()]) {
-      if (ka === kb || !groups.has(ka) || !groups.has(kb) || b.isEntity) continue;
-      const tb = kb.split(' ');
-      if (tb.length <= ta.length || !ta.every((t) => tb.includes(t))) continue;
-      const extra = tb.filter((t) => !ta.includes(t));
-      if (!extra.every((t) => t.length === 1)) continue;
-      b.variants.push(...a.variants);
-      b.deceased = b.deceased || a.deceased;
-      b.name = preferredName(b.variants);
-      groups.delete(ka);
-      break;
+  // Spellings of one person the key cannot see, merged pairwise on the same
+  // case: a middle name present in one and absent or an initial in the other
+  // ("PURDY RICHARD", "RICHARD B. PURDY"; "HUTSON JOHN P", "HUTSON JOHN
+  // PATRICK"; "BAGLEY DENISE LYNN", "DENISE BAGLEY"; "PEDULLA CARLO",
+  // "PEDULLA GIANCARLO CARLO"), and a surname prefix written with a space
+  // ("D ALESSANDRO VITO", "D'ALESSANDRO VITO"). At least two names must match
+  // outright, so "J SMITH" never swallows "JANE SMITH" and "JOHN SMITH" never
+  // swallows "MARY SMITH".
+  const joinedKey = (v: string) =>
+    v
+      .toUpperCase()
+      .replace(/['\u2019]/g, '')
+      .replace(/\b([DO])\s+(?=[A-Z]{3,})/g, '$1')
+      .replace(/&/g, ' AND ')
+      .replace(/[.,\-\/]/g, ' ')
+      .replace(ESTATE_MARK, ' ')
+      .replace(NAME_SUFFIX, ' ')
+      .replace(ENTITY_TAIL, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .split(' ')
+      .sort()
+      .join(' ');
+  const samePerson = (ka: string, kb: string): boolean => {
+    const a = ka.split(' ');
+    const b = kb.split(' ');
+    const [short, long] = a.length <= b.length ? [a, b] : [b, a];
+    if (short.length < 2 || long.length - short.length > 1) return false;
+    const pool = [...long];
+    let exact = 0;
+    for (const t of short) {
+      let i = pool.indexOf(t);
+      if (i >= 0) exact += 1;
+      else i = pool.findIndex((p) => (t.length === 1 && p[0] === t) || (p.length === 1 && t[0] === p));
+      if (i < 0) return false;
+      pool.splice(i, 1);
+    }
+    return exact >= 2 && pool.length <= 1;
+  };
+  let merged = true;
+  while (merged) {
+    merged = false;
+    const entries = [...groups.entries()];
+    // The later spelling folds into the earlier, so claimants keep the
+    // county's order.
+    outer: for (let i = 0; i < entries.length; i += 1) {
+      const [ka, a] = entries[i];
+      if (a.isEntity) continue;
+      const aKeys = new Set([ka, ...a.variants.map(joinedKey)]);
+      for (let j = i + 1; j < entries.length; j += 1) {
+        const [kb, b] = entries[j];
+        if (b.isEntity) continue;
+        const bKeys = new Set([kb, ...b.variants.map(joinedKey)]);
+        const hit = [...aKeys].some((x) => [...bKeys].some((y) => x === y || samePerson(x, y)));
+        if (!hit) continue;
+        a.variants.push(...b.variants);
+        a.deceased = a.deceased || b.deceased;
+        a.name = preferredName(a.variants);
+        groups.delete(kb);
+        merged = true;
+        break outer;
+      }
     }
   }
 
