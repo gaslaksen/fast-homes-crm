@@ -140,8 +140,17 @@ export interface SurplusPanelLead {
   isDeceased: boolean;
   /** YYYY-MM-DD, when a people search dated the death. */
   dateOfDeath?: string | null;
-  /** 'endato' | 'batchdata' when a vendor death record set the flag. */
+  /** 'endato' | 'batchdata' | 'obituary' when a vendor record or an obituary set the flag. */
   deathSource?: string | null;
+  /** 'possible' asks for a check on the card before anybody calls. */
+  obituaryMatch?: string | null;
+  obituary?: {
+    url: string | null;
+    nameInObituary: string | null;
+    dateOfDeath: string | null;
+    place: string | null;
+    evidence: string;
+  } | null;
   totalTouches: number;
   /** One of us mailed a letter. Date and the address on the envelope. */
   letterMailedAt: string | null;
@@ -2578,6 +2587,10 @@ export default function SurplusWorkPanel({
             </div>
           )}
 
+          {lead.obituaryMatch === 'possible' && lead.obituary && (
+            <PossibleObituary lead={lead} onChanged={onChanged} />
+          )}
+
           <div style={{ display: 'flex', gap: 6, marginTop: 12 }}>
             {(['case', 'conversation', 'notes'] as Tab[]).map((t) => (
               <button
@@ -4639,11 +4652,69 @@ function Row({
  * source; the flag is unticked in Edit if the family says otherwise.
  */
 function deathLabel(lead: { dateOfDeath?: string | null; deathSource?: string | null }): string {
-  const vendor = lead.deathSource === 'endato' ? 'Endato' : lead.deathSource === 'batchdata' ? 'BatchData' : null;
+  const vendor =
+    lead.deathSource === 'endato'
+      ? 'Endato'
+      : lead.deathSource === 'batchdata'
+        ? 'BatchData'
+        : lead.deathSource === 'obituary'
+          ? 'obituary'
+          : null;
   if (!vendor) return 'deceased';
   const d = lead.dateOfDeath ? new Date(`${lead.dateOfDeath}T12:00:00Z`) : null;
   const when = d && !isNaN(d.getTime())
     ? `died ${d.toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' })}`
     : 'deceased';
   return `${when} per ${vendor}`;
+}
+
+
+/**
+ * The obituary search found an obituary that may be this claimant's. Shown
+ * above the tabs so nobody dials before looking: Confirm marks them dead and
+ * files the spouse and children it names; Not them clears the warning.
+ */
+function PossibleObituary({ lead, onChanged }: { lead: any; onChanged: () => void }) {
+  const [busy, setBusy] = useState<'confirm' | 'reject' | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const o = lead.obituary || {};
+  const answer = async (a: 'confirm' | 'reject') => {
+    setBusy(a);
+    setError(null);
+    try {
+      await surplusAPI.resolveObituary(lead.id, a);
+      onChanged();
+    } catch (e: any) {
+      setError(e?.response?.data?.message || 'Could not save that');
+    } finally {
+      setBusy(null);
+    }
+  };
+  const when = o.dateOfDeath
+    ? new Date(`${o.dateOfDeath}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
+    : null;
+  return (
+    <div className="dc-wp-banner amber" style={{ marginTop: 12 }}>
+      <div className="head">Possible obituary, check before calling</div>
+      <div className="text">
+        {o.nameInObituary || lead.claimant}
+        {when ? `, died ${when}` : ''}
+        {o.place ? `, ${o.place}` : ''}. {o.evidence}
+      </div>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+        {o.url && (
+          <a href={o.url} target="_blank" rel="noopener noreferrer" className="dc-wp-btn on">
+            Read the obituary
+          </a>
+        )}
+        <button type="button" className="dc-wp-btn" disabled={!!busy} onClick={() => answer('confirm')}>
+          {busy === 'confirm' ? 'Saving...' : 'It is them, mark deceased'}
+        </button>
+        <button type="button" className="dc-wp-btn" disabled={!!busy} onClick={() => answer('reject')}>
+          {busy === 'reject' ? 'Saving...' : 'Not them'}
+        </button>
+      </div>
+      {error && <div className="text" style={{ color: 'var(--red)' }}>{error}</div>}
+    </div>
+  );
 }

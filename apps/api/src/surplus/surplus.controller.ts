@@ -11,6 +11,7 @@ import { SurplusImportService } from './surplus-import.service';
 import { SurplusIngestService } from './surplus-ingest.service';
 import { SurplusSkiptraceService } from './surplus-skiptrace.service';
 import { SurplusEndatoService } from './surplus-endato.service';
+import { SurplusObituaryService } from './surplus-obituary.service';
 import { SurplusTemplatesService } from './surplus-templates.service';
 import { SurplusCredibilityService, CredibilityChannel } from './surplus-credibility.service';
 import { SurplusCountiesService, ACCEPTED_METHOD_LABEL } from './surplus-counties.service';
@@ -78,6 +79,7 @@ export class SurplusController {
     private storage: StorageService,
     private cadence: SurplusCadenceService,
     private endato: SurplusEndatoService,
+    private obituary: SurplusObituaryService,
   ) {}
 
   private decodeToken(authHeader?: string): { userId?: string; organizationId?: string } {
@@ -666,6 +668,33 @@ export class SurplusController {
     });
   }
 
+  /**
+   * Search for obituaries of claimants that meet the criteria and have not
+   * been checked. `limit` caps the checks, each 30 to 60 cents; `dryRun`
+   * counts them and estimates the cost.
+   */
+  @Post('obituary-search')
+  async obituarySearch(@Body() body: any, @Headers('authorization') authHeader?: string) {
+    const { organizationId } = this.decodeToken(authHeader);
+    const limit = body?.limit == null ? undefined : Number(body.limit);
+    if (limit != null && (!Number.isFinite(limit) || limit < 1)) {
+      throw new BadRequestException('limit must be a positive number');
+    }
+    return this.obituary.run({
+      organizationId: body?.organizationId || organizationId || null,
+      leadIds: Array.isArray(body?.leadIds) ? body.leadIds : undefined,
+      county: typeof body?.county === 'string' && body.county ? body.county : undefined,
+      limit,
+      dryRun: body?.dryRun === true,
+    });
+  }
+
+  /** The obituary search month to date against its budget. */
+  @Get('obituary-usage')
+  async obituaryUsage() {
+    return this.obituary.usage();
+  }
+
   /** Endato month to date against its budget. */
   @Get('endato-usage')
   async endatoUsage() {
@@ -673,6 +702,25 @@ export class SurplusController {
   }
 
   // ─── Heirs of a deceased claimant ─────────────────────────────────────────
+
+  /** Confirm or reject a possible obituary match from the card. */
+  @Post(':id/obituary')
+  async resolveObituary(
+    @Param('id') id: string,
+    @Body() body: any,
+    @Headers('authorization') authHeader?: string,
+  ) {
+    const { organizationId } = this.decodeToken(authHeader);
+    const answer = body?.answer;
+    if (answer !== 'confirm' && answer !== 'reject') {
+      throw new BadRequestException('answer must be confirm or reject');
+    }
+    try {
+      return await this.obituary.resolve(id, organizationId || null, answer);
+    } catch (e: any) {
+      throw new BadRequestException(e.message);
+    }
+  }
 
   /** Heirs on file for a claimant, living first. */
   @Get(':id/heirs')

@@ -50,6 +50,17 @@ describe('SurplusPollService', () => {
     expect(notes).toEqual(['Traced 1 of 2 new to a number (2 address lookups, 1 name search)']);
   });
 
+  it('runs the obituary search on the same new leads when it has a budget', async () => {
+    const { svc, notes } = harness({ SURPLUS_DEFAULT_ORG_ID: 'org1' });
+    const obituary: any = { available: true, run: jest.fn().mockResolvedValue({ checked: 2, strong: 1, possible: 0, survivorsWithContact: 1 }) };
+    (svc as any).obituary = obituary;
+
+    await svc.pollWeekly();
+
+    expect(obituary.run).toHaveBeenCalledWith({ organizationId: 'org1', leadIds: ['lead-a', 'lead-b'] });
+    expect(notes[0]).toMatch(/\. Obituary search on 2: 1 found dead, 0 to check, 1 survivor with a number$/);
+  });
+
   it('runs the estate search on the same new leads, and says what it found', async () => {
     const { svc, skiptrace, notes } = harness({ SURPLUS_DEFAULT_ORG_ID: 'org1' });
     skiptrace.estateRelatives.mockResolvedValue({ searched: 1, matched: 1, withContact: 2 });

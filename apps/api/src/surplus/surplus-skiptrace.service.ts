@@ -136,7 +136,7 @@ const NAME_SEARCH_AFTER = new Set([
   'shared_address',
 ]);
 
-interface Candidate {
+export interface Candidate {
   leadId: string;
   detailId: string;
   claimant: string;
@@ -1874,46 +1874,145 @@ export class SurplusSkiptraceService {
         });
         await this.logAttempt(detailId, h.id, 'nothing', `Relative lookup: ${text}`, 'endato');
       } else {
-        const cur = currentAddress(p);
-        const connected = p.phones.filter((x) => x.connected);
-        const ph = (connected.length ? connected : p.phones).slice(0, 4);
-        const emails = p.emails.slice(0, 2);
-        const has = ph.length > 0 || emails.length > 0;
-        const where = cur
-          ? `${cur.line || cur.street}, ${[cur.city, cur.state, cur.zip].filter(Boolean).join(' ')}${cur.lastSeen ? ` (last seen ${cur.lastSeen})` : ''}`
-          : null;
-        const text =
-          `Looked up by Endato's id for ${h.name}, so this is exactly that person. ` +
-          (where ? `Current address ${where}. ` : '') +
-          (has ? 'Numbers came from a people search and are not DNC scrubbed.' : 'Endato holds no phone or email for them.');
+        const has = await this.writeRelativeContacts(
+          detailId,
+          h,
+          p,
+          `Looked up by Endato's id for ${h.name}, so this is exactly that person.`,
+          'Relative lookup',
+        );
+        if (has) out.withContact += 1;
+      }
+      await this.pause(CALL_DELAY_MS);
+    }
+    return out;
+  }
+
+  /**
+   * Put a vendor person's current address, numbers and emails on a relative's
+   * row. `how` says how we know it is them, and leads the note.
+   */
+  private async writeRelativeContacts(
+    detailId: string,
+    h: any,
+    p: EndatoPerson,
+    how: string,
+    label: string,
+  ): Promise<boolean> {
+    const cur = currentAddress(p);
+    const connected = p.phones.filter((x) => x.connected);
+    const ph = (connected.length ? connected : p.phones).slice(0, 4);
+    const emails = p.emails.slice(0, 2);
+    const has = ph.length > 0 || emails.length > 0;
+    const where = cur
+      ? `${cur.line || cur.street}, ${[cur.city, cur.state, cur.zip].filter(Boolean).join(' ')}${cur.lastSeen ? ` (last seen ${cur.lastSeen})` : ''}`
+      : null;
+    const text =
+      `${how} ` +
+      (where ? `Current address ${where}. ` : '') +
+      (has ? 'Numbers came from a people search and are not DNC scrubbed.' : 'Endato holds no phone or email for them.');
+    await this.prisma.surplusHeir.update({
+      where: { id: h.id },
+      data: {
+        ...(cur && !h.street ? { street: cur.line || cur.street, city: cur.city, state: cur.state, zip: cur.zip } : {}),
+        phone1: ph[0]?.num || null,
+        phone2: ph[1]?.num || null,
+        phone3: ph[2]?.num || null,
+        phone4: ph[3]?.num || null,
+        phone1Type: ph[0]?.type || null,
+        phone2Type: ph[1]?.type || null,
+        phone3Type: ph[2]?.type || null,
+        phone4Type: ph[3]?.type || null,
+        // Endato does not flag DNC. Null reads as unscrubbed, not clear.
+        phone1Dnc: null,
+        phone2Dnc: null,
+        phone3Dnc: null,
+        phone4Dnc: null,
+        email1: emails[0] || null,
+        email2: emails[1] || null,
+        tracedAt: new Date(),
+        traceOutcome: has ? 'matched' : 'no_contact',
+        traceDetail: text,
+      },
+    });
+    await this.logAttempt(detailId, h.id, has ? 'found' : 'nothing', `${label}: ${text}`, 'endato');
+    return has;
+  }
+
+  /**
+   * Find the spouse and children an obituary named. An obituary gives a name
+   * and usually a city, never an Endato id, so each is a name search, and a
+   * namesake is refused the same way the claimant rung refuses one: the person
+   * is taken only when Endato's own relatives for them include the claimant,
+   * or their address history includes the property or the clerk's address.
+   * Dewey R Beaver's obituary names a son in Lancaster, Ohio; a Scott Beaver
+   * in Lancaster whose relatives list Dewey Beaver is him.
+   */
+  async lookupSurvivors(
+    detailId: string,
+    claimant: string,
+    keys: { property: string | null; mailing: string | null },
+  ): Promise<{ looked: number; withContact: number }> {
+    const out = { looked: 0, withContact: 0 };
+    if (!this.relativeCap || !this.endato?.available) return out;
+    const tried = await this.prisma.surplusHeir.count({
+      where: { surplusDetailId: detailId, sourceKind: 'obituary', tracedAt: { not: null } },
+    });
+    const room = this.relativeCap - tried;
+    if (room <= 0) return out;
+    const rows = await this.prisma.surplusHeir.findMany({
+      where: { surplusDetailId: detailId, sourceKind: 'obituary', tracedAt: null, deceased: false, doNotCall: false },
+    });
+    const want = splitClaimantName(displayName(claimant));
+    const spouseFirst = (h: any) => (/wife|husband|spouse/i.test(h.relationship || '') ? 0 : 1);
+    for (const h of [...rows].sort((a, b) => spouseFirst(a) - spouseFirst(b)).slice(0, room)) {
+      const n = splitClaimantName(h.name);
+      if (!n.surname || !n.given.length) continue;
+      out.looked += 1;
+      let found: EndatoPerson[];
+      try {
+        found = await this.endato.search({
+          first: n.given[0].toUpperCase(),
+          last: n.surname.toUpperCase(),
+          city: h.city,
+          state: h.state,
+        });
+      } catch (e: any) {
+        this.logger.warn(`Survivor lookup failed for ${h.name}: ${e.message}`);
+        if (/auth|out of searches|rate limited/i.test(e.message)) break;
+        continue;
+      }
+      const tied = found.find(
+        (p) =>
+          p.relatives.some((r) => {
+            const rn = splitClaimantName(r.name);
+            return rn.surname === want.surname && rn.given.some((g) => want.given.includes(g));
+          }) || !!verifiedVia(p, keys),
+      );
+      if (!tied) {
+        const text = found.length
+          ? `Name search found ${found.length} ${found.length === 1 ? 'person' : 'people'} named ${h.name}, none listing ${displayName(claimant)} as a relative or sharing an address with them.`
+          : `Name search found nobody named ${h.name}${h.city ? ` near ${h.city}` : ''}.`;
         await this.prisma.surplusHeir.update({
           where: { id: h.id },
-          data: {
-            ...(cur && !h.street
-              ? { street: cur.line || cur.street, city: cur.city, state: cur.state, zip: cur.zip }
-              : {}),
-            phone1: ph[0]?.num || null,
-            phone2: ph[1]?.num || null,
-            phone3: ph[2]?.num || null,
-            phone4: ph[3]?.num || null,
-            phone1Type: ph[0]?.type || null,
-            phone2Type: ph[1]?.type || null,
-            phone3Type: ph[2]?.type || null,
-            phone4Type: ph[3]?.type || null,
-            // Endato does not flag DNC. Null reads as unscrubbed, not clear.
-            phone1Dnc: null,
-            phone2Dnc: null,
-            phone3Dnc: null,
-            phone4Dnc: null,
-            email1: emails[0] || null,
-            email2: emails[1] || null,
-            tracedAt: new Date(),
-            traceOutcome: has ? 'matched' : 'no_contact',
-            traceDetail: text,
-          },
+          data: { tracedAt: new Date(), traceOutcome: 'no_person', traceDetail: text },
         });
-        await this.logAttempt(detailId, h.id, has ? 'found' : 'nothing', `Relative lookup: ${text}`, 'endato');
-        if (has) out.withContact += 1;
+        await this.logAttempt(detailId, h.id, 'nothing', `Survivor lookup: ${text}`, 'endato');
+      } else if (tied.deceased) {
+        await this.prisma.surplusHeir.update({
+          where: { id: h.id },
+          data: { deceased: true, tracedAt: new Date(), traceOutcome: 'no_contact', traceDetail: `Endato holds a death record for ${h.name}.` },
+        });
+      } else if (
+        await this.writeRelativeContacts(
+          detailId,
+          h,
+          tied,
+          `Found by name search and tied to ${displayName(claimant)}: Endato lists them as family or at a shared address.`,
+          'Survivor lookup',
+        )
+      ) {
+        out.withContact += 1;
       }
       await this.pause(CALL_DELAY_MS);
     }
@@ -2039,7 +2138,7 @@ export class SurplusSkiptraceService {
  * so the name matcher and the vendor see the same shape. A name without a
  * comma is returned as is.
  */
-function displayName(raw: string): string {
+export function displayName(raw: string): string {
   const s = String(raw || '').trim();
   const m = /^([^,]+),\s*(.+)$/.exec(s);
   if (!m) return s;
@@ -2080,7 +2179,7 @@ export function batchDeath(
 }
 
 /** A surplus lead as the trace sees it: whose name, which address to submit. */
-function candidateOf(l: any): Candidate {
+export function candidateOf(l: any): Candidate {
   const d = l.surplusDetail!;
   const claimant = `${l.sellerFirstName || ''} ${l.sellerLastName || ''}`.trim();
 

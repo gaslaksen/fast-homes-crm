@@ -1383,3 +1383,42 @@ describe('the criteria for a paid lookup', () => {
     expect(mockedAxios.post).not.toHaveBeenCalled();
   });
 });
+
+describe('looking up the survivors an obituary named', () => {
+  const kin = (id: string, name: string, relationship: string, city: string, state: string) => ({
+    id, surplusDetailId: 'd1', name, relationship, city, state, role: 'relative', sourceKind: 'obituary',
+    tracedAt: null, deceased: false, doNotCall: false, street: null,
+  });
+  const endatoPerson = (first: string, last: string, over: any = {}) => ({
+    first, last, age: 60, akas: [], addresses: [], phones: [{ num: '7405550101', type: 'Wireless', connected: true }],
+    emails: [], deceased: false, dateOfDeath: null, relatives: [], ...over,
+  });
+
+  it('takes a namesake only when Endato lists the claimant among their relatives', async () => {
+    const endato = endatoStub([
+      endatoPerson('Scott', 'Beaver', { relatives: [{ id: null, name: 'Tom Beaver', type: 'Family', deceased: false, city: null, state: null, dob: null }] }),
+      endatoPerson('Scott', 'Beaver', { phones: [{ num: '7405550199', type: 'Wireless', connected: true }], relatives: [{ id: null, name: 'Dewey Raymond Beaver', type: 'Family', deceased: true, city: null, state: null, dob: null }] }),
+    ]);
+    const { svc, heirs } = harness([], endato);
+    heirs.push(kin('h1', 'Scott Beaver', 'Son', 'Lancaster', 'OH'));
+
+    const r = await svc.lookupSurvivors('d1', 'DEWEY R BEAVER', { property: null, mailing: null });
+
+    expect(endato.search).toHaveBeenCalledWith({ first: 'SCOTT', last: 'BEAVER', city: 'Lancaster', state: 'OH' });
+    expect(r).toEqual({ looked: 1, withContact: 1 });
+    expect(heirs[0]).toMatchObject({ phone1: '7405550199', traceOutcome: 'matched' });
+    expect(heirs[0].traceDetail).toMatch(/^Found by name search and tied to DEWEY R BEAVER/);
+  });
+
+  it('refuses every namesake with no tie, and says so', async () => {
+    const endato = endatoStub([endatoPerson('Scott', 'Beaver')]);
+    const { svc, heirs } = harness([], endato);
+    heirs.push(kin('h1', 'Scott Beaver', 'Son', 'Lancaster', 'OH'));
+
+    const r = await svc.lookupSurvivors('d1', 'DEWEY R BEAVER', { property: null, mailing: null });
+
+    expect(r).toEqual({ looked: 1, withContact: 0 });
+    expect(heirs[0].phone1).toBeUndefined();
+    expect(heirs[0]).toMatchObject({ traceOutcome: 'no_person' });
+  });
+});
