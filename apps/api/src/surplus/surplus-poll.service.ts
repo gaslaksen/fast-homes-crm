@@ -3,6 +3,7 @@ import { Cron } from '@nestjs/schedule';
 import { ConfigService } from '@nestjs/config';
 import { SurplusIngestService } from './surplus-ingest.service';
 import { SurplusSkiptraceService, SurplusTraceResult } from './surplus-skiptrace.service';
+import { SurplusObituaryService } from './surplus-obituary.service';
 import { SurplusPollCadence } from './surplus-source.types';
 import { CronLockService } from '../common/cron-lock.service';
 
@@ -50,6 +51,7 @@ export class SurplusPollService {
     private ingest: SurplusIngestService,
     private lock: CronLockService,
     private skiptrace: SurplusSkiptraceService,
+    private obituary?: SurplusObituaryService,
   ) {
     // Default on; set SURPLUS_POLL_ENABLED=false to disable in an env.
     this.enabled = (this.config.get<string>('SURPLUS_POLL_ENABLED') ?? 'true') !== 'false';
@@ -123,7 +125,16 @@ export class SurplusPollService {
       const estateNote = estates.searched
         ? `. Estate search on ${estates.searched} new estate${estates.searched === 1 ? '' : 's'}: ${estates.matched} matched, ${estates.withContact} relative${estates.withContact === 1 ? '' : 's'} with a number`
         : '';
-      const note = describeTrace(leadIds.length, trace) + estateNote;
+      // Last, the obituary search on the same new leads that meet the
+      // criteria: a death the vendors missed, or the children of one they
+      // found. Paused unless OBITUARY_MONTHLY_BUDGET is set.
+      const obits = this.obituary?.available
+        ? await this.obituary.run({ organizationId: organizationId || null, leadIds })
+        : null;
+      const obitNote = obits?.checked
+        ? `. Obituary search on ${obits.checked}: ${obits.strong} found dead, ${obits.possible} to check, ${obits.survivorsWithContact} survivor${obits.survivorsWithContact === 1 ? '' : 's'} with a number`
+        : '';
+      const note = describeTrace(leadIds.length, trace) + estateNote + obitNote;
       this.logger.log(`Surplus trace ${source}: ${note}`);
       await this.ingest.noteRun(runId, note);
       return trace;

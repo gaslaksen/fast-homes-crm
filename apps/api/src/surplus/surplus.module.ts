@@ -15,6 +15,7 @@ import { SurplusSkiptraceService } from './surplus-skiptrace.service';
 import { SurplusNoticeService } from './surplus-notice.service';
 import { SurplusEndatoService } from './surplus-endato.service';
 import { SurplusProbateService } from './surplus-probate.service';
+import { SurplusObituaryService } from './surplus-obituary.service';
 import { SurplusHeirsService } from './surplus-heirs.service';
 import { SurplusTemplatesService } from './surplus-templates.service';
 import { SurplusCredibilityService } from './surplus-credibility.service';
@@ -49,6 +50,7 @@ import { MessagesModule } from '../messages/messages.module';
     SurplusSkiptraceService,
     SurplusNoticeService,
     SurplusProbateService,
+    SurplusObituaryService,
     SurplusHeirsService,
   ],
   exports: [

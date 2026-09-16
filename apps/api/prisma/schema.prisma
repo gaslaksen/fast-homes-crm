@@ -994,6 +994,15 @@ model SurplusDetail {
   /// claimants traced before 2026-09-14, when the death fields were dropped,
   /// skips anyone stamped here.
   deathCheckedAt  DateTime?
+  /// When an obituary search last ran for this claimant, whatever it found.
+  obituaryCheckedAt DateTime?
+  /// 'strong' | 'possible' | 'none' | 'confirmed' | 'rejected'. Strong marks
+  /// the claimant dead; possible waits for a person to confirm or reject.
+  obituaryMatch     String?
+  /// The verdict as the search returned it: url, nameInObituary, dateOfDeath,
+  /// place, evidence, survivors[]. Kept whole so a possible match can be
+  /// confirmed later without searching again.
+  obituary          Json?
 
   /// Living people who inherited this claimant's interest. Populated from a
   /// probate filing somebody read; never inferred.
@@ -2630,6 +2639,9 @@ model VendorUsage {
   /// 'YYYY-MM'
   period    String
   calls     Int      @default(0)
+  /// Dollars, for a vendor billed by usage rather than per call (the obituary
+  /// search: Claude tokens plus web searches). Zero for per-call vendors.
+  spend     Float    @default(0)
   updatedAt DateTime @updatedAt
 
   @@unique([vendor, period])

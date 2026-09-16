@@ -244,6 +244,9 @@ export const surplusAPI = {
   // address rung could not place; `nameSearchLimit` caps those searches.
   skipTrace: (body: { leadIds?: string[]; limit?: number; includeTraced?: boolean; nameSearch?: boolean; nameSearchLimit?: number; addressSearch?: boolean }) =>
     api.post('/surplus/skip-trace', body),
+  /** Confirm or reject a possible obituary match for one claimant. */
+  resolveObituary: (leadId: string, answer: 'confirm' | 'reject') =>
+    api.post(`/surplus/${leadId}/obituary`, { answer }),
   /**
    * Pull the county docket now. This is what actually contacts Duval; the
    * board's own refresh only re-reads our database.

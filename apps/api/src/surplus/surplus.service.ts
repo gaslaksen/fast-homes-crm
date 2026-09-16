@@ -2136,6 +2136,17 @@ export class SurplusService {
       // Where a people search said so. Null for the docket or a person.
       dateOfDeath: d.dateOfDeath ? d.dateOfDeath.toISOString().slice(0, 10) : null,
       deathSource: d.deathSource ?? null,
+      // 'possible' puts a check-before-calling warning on the card.
+      obituaryMatch: d.obituaryMatch ?? null,
+      obituary: d.obituary
+        ? {
+            url: (d.obituary as any).url ?? null,
+            nameInObituary: (d.obituary as any).nameInObituary ?? null,
+            dateOfDeath: (d.obituary as any).dateOfDeath ?? null,
+            place: (d.obituary as any).place ?? null,
+            evidence: (d.obituary as any).evidence ?? '',
+          }
+        : null,
       competingLien: d.competingLien,
 
       surplusType: d.surplusType,
