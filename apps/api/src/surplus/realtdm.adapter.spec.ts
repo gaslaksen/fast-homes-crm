@@ -449,6 +449,15 @@ describe('claimantFromTitle', () => {
       .toBe('Ingrum Law Firm LLC Personal Representative Estate of Jimmy Don Berger');
   });
 
+  it('reads nobody out of Lake\'s claim paperwork, and the city out of its named claim', () => {
+    // Verbatim labels from the 2026-09-17 Lake discovery pass.
+    expect(claimantFromTitle('Surplus Claim')).toBeNull();
+    for (const t of ['Surplus Claim Acknowledgement', 'Surplus Claim Acknowledgment', 'Surplus Claim Acknowlegement', 'Surplus Claim Acknowledgement Email', 'Surplus Claim Determination', 'Surplus Claim Denial', 'Surplus Claim Correspondence', 'Surplus Claim & Attachments']) {
+      expect(claimantFromTitle(t)).toBeNull();
+    }
+    expect(claimantFromTitle('Surplus Claim - City of Eustis')).toBe('City of Eustis');
+  });
+
   it('never invents a claimant from a document that is not a claim', () => {
     expect(claimantFromTitle('SURPLUS_LETTER')).toBeNull();
     expect(claimantFromTitle('Returned Mail')).toBeNull();
@@ -1073,6 +1082,86 @@ describe('classifying live Sarasota dockets', () => {
     expect(v.reason).toMatch(/^A Request for Legal Review is on the docket with no claim document beside it/);
     // A USPS status printout says nothing in its title.
     expect(v.mailVerdict).toBe('unknown');
+  });
+});
+
+describe('Lake owner lines', () => {
+  it('keeps the company behind a registered agent, the owner before care-of and et al, and the estate behind its representative', () => {
+    // Verbatim OWNER lines from the 2026-09-17 discovery pass.
+    expect(cleanOwnerLine('PATRICK L STTRICKLAND, REGISTERED AGENT O/B/O WUNDERTWINS, LLC')).toBe('WUNDERTWINS, LLC');
+    expect(cleanOwnerLine('THE WALLACE LAW GROUP, PL, REGISTERED AGENT O/B/O TLH-48 LOUISA VISTA LLC')).toBe('TLH-48 LOUISA VISTA LLC');
+    expect(cleanOwnerLine('DARA LYNN SCOTT C/O SHANDRA D JONES')).toBe('DARA LYNN SCOTT');
+    expect(cleanOwnerLine('SADIE M BALDWIN ET AL')).toBe('SADIE M BALDWIN');
+    expect(cleanOwnerLine('DOYLE CLAYTON SAUL, PERSONAL REPRESENTATIVE ESTATE OF JUDSON WALTER SAUL')).toBe('ESTATE OF JUDSON WALTER SAUL');
+  });
+
+  it('merges the roll\'s short forms into the owner', () => {
+    expect(collapseClaimants(['SADIE MAE BALDWIN', 'SADIE M BALDWIN'])).toHaveLength(1);
+    const [saul] = collapseClaimants(['J W SAUL', 'J. W. SAUL', 'ESTATE OF JUDSON WALTER SAUL']);
+    expect(saul.deceased).toBe(true);
+    expect(collapseClaimants(['J W SAUL', 'ESTATE OF JUDSON WALTER SAUL'])).toHaveLength(1);
+    const mc = collapseClaimants(['ESTATE OF THERESA MCPARLIN, DECEASED', 'THERESA MC PARLIN']);
+    expect(mc).toHaveLength(1);
+    expect(mc[0].deceased).toBe(true);
+    // One initial is not enough to call two people one.
+    expect(collapseClaimants(['J SAUL', 'JUDSON SAUL', 'JANE SAUL'])).toHaveLength(3);
+  });
+});
+
+describe('classifying live Lake dockets', () => {
+  const lake = (title: string, filedAt: string) => ({ title, filedAt, claimant: claimantFromTitle(title) });
+
+  it('03171-2023: seven claims and five denials is contested, not fourteen claims', () => {
+    const v = classifyCase(
+      [
+        lake('SURPLUS_LETTER', '2025-11-18'),
+        lake('Surplus Claim - City of Eustis', '2025-11-24'),
+        lake('Returned Surplus Mail', '2025-12-22'),
+        lake('Surplus Claim', '2025-12-30'), lake('Surplus Claim Acknowledgement', '2025-12-30'),
+        lake('Surplus Claim Acknowledgement', '2026-01-13'), lake('Surplus Claim', '2026-01-13'),
+        lake('Surplus Claim', '2026-02-10'), lake('Surplus Claim Acknowledgment', '2026-02-10'),
+        lake('Surplus Claim', '2026-03-16'), lake('Surplus Claim Acknowledgement Email', '2026-03-17'),
+        lake('Surplus Claim Acknowledgement', '2026-06-03'), lake('Surplus Claim', '2026-06-03'),
+        lake('Surplus Claim Determination', '2026-06-16'),
+        lake('Surplus Claim Denial', '2026-06-16'), lake('Surplus Claim Denial', '2026-06-16'),
+        lake('Surplus Claim Denial', '2026-06-16'), lake('Surplus Claim Denial', '2026-06-16'),
+        lake('Surplus Claim', '2026-07-01'),
+        lake('Surplus Claim', '2026-09-02'), lake('Surplus Claim Acknowledgement', '2026-09-02'),
+        lake('Surplus Claim Denial', '2026-09-03'),
+      ],
+      { owners: ['JOHNNIE AYERS, JR', 'PHYLLIS AYERS', 'SADIE MAE BALDWIN'] },
+    );
+    expect(v.counts.claims).toBe(7);
+    expect(v.counts.denials).toBe(5);
+    expect(v.counts.govLiens).toBe(1);
+    expect(v.claimStatus).toBe('pending');
+    expect(v.mailVerdict).toBe('undeliverable');
+  });
+
+  it('00395-2023: one claim, one denial and a determination is denied, and the money still there', () => {
+    const v = classifyCase(
+      [
+        lake('Receipts', '2026-01-28'),
+        lake('SURPLUS_LETTER', '2026-01-28'),
+        lake('Surplus Claim', '2026-02-06'),
+        lake('Surplus Claim Acknowledgement', '2026-02-06'),
+        lake('Returned Surplus Mail', '2026-02-11'),
+        lake('Surplus Claim Determination', '2026-08-31'),
+        lake('Surplus Claim Denial', '2026-08-31'),
+      ],
+      { owners: ['ESTATE OF THERESA MCPARLIN, DECEASED', 'THERESA MC PARLIN'] },
+    );
+    expect(v.claimStatus).toBe('denied');
+    expect(v.counts.receipts).toBe(0);
+  });
+
+  it('a returned-mail filename naming the recipient is a bounce', () => {
+    const v = classifyCase(
+      [lake('SURPLUS_LETTER', '2026-07-22'), lake('5291-2023 Nancy C Lundgren Returned Mail OB.pdf', '2026-07-31')],
+      { owners: ['NANCY C LUNDGREN'] },
+    );
+    expect(v.mailVerdict).toBe('undeliverable');
+    expect(v.claimStatus).toBe('open');
   });
 });
 
