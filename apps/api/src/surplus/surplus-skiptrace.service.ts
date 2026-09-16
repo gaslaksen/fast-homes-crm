@@ -1091,6 +1091,7 @@ export class SurplusSkiptraceService {
           select: {
             caseNumber: true,
             claimStatus: true,
+            stage: true,
             noticeDate: true,
             saleDate: true,
             lead: {

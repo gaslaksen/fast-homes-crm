@@ -371,6 +371,8 @@ describe('traceCriteria', () => {
     expect(traceCriteria({ claimStatus: 'gov_lien' }, { now }).ok).toBe(true);
     expect(traceCriteria({ claimStatus: 'pending' }, { now }).reason).toBe('claim_on_file');
     expect(traceCriteria({ claimStatus: 'distributed' }, { now }).reason).toBe('closed');
+    expect(traceCriteria({ claimStatus: 'open', stage: 'Dead' }, { now }).detail).toBe('Not traced: the claim is marked Dead on the board.');
+    expect(traceCriteria({ claimStatus: 'open', stage: 'New' }, { now }).ok).toBe(true);
   });
   it('refuses a dead claimant unless the path is the estate search', () => {
     expect(traceCriteria({ claimStatus: 'open', heirsRequired: true }, { now }).reason).toBe('estate');
