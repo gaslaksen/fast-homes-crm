@@ -669,9 +669,10 @@ export class SurplusController {
   }
 
   /**
-   * Search for obituaries of claimants that meet the criteria and have not
-   * been checked. `limit` caps the checks, each 30 to 60 cents; `dryRun`
-   * counts them and estimates the cost.
+   * Search for obituaries of estates with nobody reachable (no heir or
+   * relative with a callable number), meeting the criteria and not yet
+   * checked. `limit` caps the checks, each 30 to 60 cents; `dryRun` counts
+   * them and estimates the cost.
    */
   @Post('obituary-search')
   async obituarySearch(@Body() body: any, @Headers('authorization') authHeader?: string) {

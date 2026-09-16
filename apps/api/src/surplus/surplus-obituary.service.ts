@@ -26,9 +26,13 @@ import { historyKey } from './surplus-endato.service';
  * date matched Endato's. Each check cost 30 to 56 cents, so it runs behind
  * its own monthly dollar budget.
  *
- * A strong match marks a living claimant dead and files the spouse and
- * children the obituary names, then looks them up. A possible match waits for
- * a person to confirm or reject it on the card. Nothing else is written.
+ * Scope (decided 2026-09-16): ONLY estates with nobody reachable, meaning a
+ * claimant already known dead where no heir or relative on the lead has a
+ * callable number. Living claimants are never searched: Endato's death
+ * records already cover them, and paying to second-guess that was not worth
+ * it. For an estate, a strong match files the spouse and children the
+ * obituary names and looks them up. A possible match waits for a person to
+ * confirm or reject it on the card.
  */
 
 export interface ObituarySurvivor {
@@ -277,10 +281,10 @@ export class SurplusObituaryService {
   }
 
   /**
-   * Search for the obituaries of claimants that meet the criteria and have
-   * not been checked. Living claimants are checked for a death; claimants
-   * already known dead, with no heir on file, are checked for the survivors.
-   * Biggest surplus first. `limit` caps the checks; `dryRun` counts them.
+   * Search for the obituaries of estates with nobody reachable: claimants
+   * known dead, meeting the criteria, not yet checked, where no heir or
+   * relative on the lead has a callable number. Biggest surplus first.
+   * `limit` caps the checks; `dryRun` counts them.
    */
   async run(opts: {
     organizationId?: string | null;
@@ -316,10 +320,16 @@ export class SurplusObituaryService {
       .filter((l: any) => l.surplusDetail && traceCriteria(l.surplusDetail, { estate: true }).ok)
       .filter((l: any) => {
         const d = l.surplusDetail;
-        const dead = d.deceased || d.heirsRequired;
-        // An estate with an heir already on file from a probate filing has
-        // what an obituary would give.
-        return !dead || !(d.heirs || []).some((h: any) => h.role === 'heir' && !h.deceased);
+        // Estates only. A living claimant's death is Endato's job.
+        if (!(d.deceased || d.heirsRequired)) return false;
+        // Nobody reachable: no living heir or relative with a number that is
+        // not on a do-not-call registry. One reachable person is the route.
+        return !(d.heirs || []).some(
+          (h: any) =>
+            !h.deceased &&
+            !h.doNotCall &&
+            [1, 2, 3, 4].some((i) => h[`phone${i}`] && !h[`phone${i}Dnc`]),
+        );
       })
       .map((l: any) => ({ lead: l, c: candidateOf(l) }))
       .filter(({ c }) => !c.isEntity && splitClaimantName(estateName(c.claimant)).given.length > 0)
