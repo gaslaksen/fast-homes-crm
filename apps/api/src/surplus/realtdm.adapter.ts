@@ -399,6 +399,9 @@ export function claimantFromTitle(title: string): string | null {
     /surplus\s*(?:claim|payout)[_\s-]+([\s\S]+?)(?:\.pdf)?\s*$/i.exec(t) ||
     /\b(?:statement|statment|state)\s*(?:of\s*)?claim[_\s-]+([\s\S]+?)(?:\.pdf)?\s*$/i.exec(t);
   if (!m) return null;
+  // Lake's clerk paperwork around a claim is not a claimant:
+  // "Surplus Claim Acknowledgement", "... Determination", "... Denial".
+  if (/^(?:ackno\w*|correspondence|determination|denial|email|&?\s*attachments?)\b/i.test(m[1].trim())) return null;
   const raw = m[1].replace(/^\d{4,}-?\d*\s+/, '').replace(/\s+/g, ' ').trim();
   const category = /^(government|gvernment|interested\s*part(?:y|ies)|owner)\b\s*[-:]?\s*/i.exec(raw);
   const name = category ? raw.slice(category[0].length).trim() : raw;
@@ -561,7 +564,14 @@ export function cleanOwnerLine(raw: string): string | null {
   const after = custodial ? custodial[1] || custodial[2] || '' : '';
   // "DENISE BAGLEY IRA (F/B/O)" puts the marker last; what follows it is a
   // bracket, not a name, and the name is the line itself.
-  const base = /[A-Z]{2,}/i.test(after.replace(/\([^)]*\)?/g, '')) ? after : raw;
+  const base0 = /[A-Z]{2,}/i.test(after.replace(/\([^)]*\)?/g, '')) ? after : raw;
+  // Lake: "PATRICK L STTRICKLAND, REGISTERED AGENT O/B/O WUNDERTWINS, LLC" is
+  // the company; "DOYLE CLAYTON SAUL, PERSONAL REPRESENTATIVE ESTATE OF JUDSON
+  // WALTER SAUL" is the dead owner's estate, the representative being who
+  // holds it rather than who owned it.
+  const agent = /\bREGISTERED\s+AGENT\s+(?:O\/B\/O|OBO|FOR|ON\s+BEHALF\s+OF)\s+(.+)$/i.exec(String(base0 || ''));
+  const pr = /,?\s*PERSONAL\s+REPRESENTATIVE\s+(?:OF\s+)?(?:THE\s+)?ESTATE\s+OF\s+(.+)$/i.exec(String(base0 || ''));
+  const base = agent ? agent[1] : pr ? `ESTATE OF ${pr[1]}` : base0;
   const s = String(base || '')
     // A bracket, closed or cut off by the roll's field width.
     .replace(/\s*\([^)]*(?:\)|$)/g, ' ')
@@ -569,6 +579,10 @@ export function cleanOwnerLine(raw: string): string | null {
     .replace(/\b\d{6,}\b/g, ' ')
     // Capacities, not people.
     .replace(/,?\s*\bAS\s+(?:SUCCESSOR\s+|CO-?\s*)?TRUSTEES?\b.*$/i, '')
+    // Who the mail goes to and the unnamed rest: "DARA LYNN SCOTT C/O SHANDRA
+    // D JONES", "SADIE M BALDWIN ET AL".
+    .replace(/\s+C\/O\s+.*$/i, '')
+    .replace(/,?\s+ET\s*AL\.?\s*$/i, '')
     // The account type on a custodial line: "DENISE BAGLEY IRA".
     .replace(/\s+(?:ROTH\s+|SEP\s+)?IRA\b.*$/i, '')
     .replace(/\s+/g, ' ')
@@ -1016,6 +1030,23 @@ export class PinellasRealTdmAdapter extends RealTdmAdapter {
 export class SarasotaRealTdmAdapter extends RealTdmAdapter {
   constructor(config: ConfigService) {
     super(config, { key: 'realtdm_sarasota', county: 'Sarasota', subdomain: 'sarasota', receiptsImplyClaim: true });
+  }
+}
+
+/**
+ * Lake County, `lake.realtdm.com`. Discovery passes 2026-09-13 and 2026-09-17
+ * on every live case over the floor (187 listed, 56 live): claims are a bare
+ * "Surplus Claim" naming nobody, each followed by an "Acknowledgement" and,
+ * when ruled on, a "Determination" beside a "Denial"; those are claim
+ * paperwork, not claims. "Receipts" are filed at the sale on every case and
+ * say nothing about a claim. Mail comes back as "Returned Surplus Mail" or a
+ * filename naming the recipient. Owner lines carry registered agents, care-of
+ * and "ET AL" tails, and a personal representative in front of the estate.
+ */
+@Injectable()
+export class LakeRealTdmAdapter extends RealTdmAdapter {
+  constructor(config: ConfigService) {
+    super(config, { key: 'realtdm_lake', county: 'Lake', subdomain: 'lake' });
   }
 }
 

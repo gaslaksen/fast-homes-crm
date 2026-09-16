@@ -129,6 +129,18 @@ const RULES: Rule[] = [
     re: /photo\s*id|notary\s*verification|^verification$|^communication$|w-?9|\bdl\b|driver'?s?\s*licen|copy\s*of\s*id/i,
     seenIn: 'Duval, Pinellas',
   },
+  // Lake files the clerk's paperwork around each claim under the claim's own
+  // name: "Surplus Claim Acknowledgement" (also Acknowledgment, Acknowlegement,
+  // and an "... Email"), "Surplus Claim & Attachments", "Surplus Claim
+  // Correspondence". Counted as claims, 03171-2023 read seven claims as
+  // fourteen. The "Determination" filed beside a denial is the letter, not a
+  // second ruling.
+  {
+    kind: 'claim_attachment',
+    re: /^surplus\s*claim\s*(?:ackno\w*|correspondence|email|&\s*attachments|attachments)/i,
+    seenIn: 'Lake',
+  },
+  { kind: 'other', re: /^surplus\s*claim\s*determination/i, seenIn: 'Lake' },
   // Payouts off the top to the applicant and the tax collector. Present on
   // every Duval case including ones with no claim at all.
   {
@@ -182,8 +194,9 @@ const RULES: Rule[] = [
     // Brevard adds "CERTIFIED MAIL RETURN X2", "REGULAR MAIL RETURNED x 5"
     // and "CERIFIED MAIL RETURNED".
     // Pinellas files USPS "Unclaimed Mail" beside "Returned Mail Surplus".
-    re: /undeliver|undelieve|unable\s*to\s*forward|returned\s*(?:certified\s*|regular\s*)?mail|\bmail\s*return(?:ed)?\b|unclaimed\s*mail|vacant|no\s*such\s*number|attempted\s*-?\s*not\s*known/i,
-    seenIn: 'Duval, Brevard, Polk, Pinellas',
+    // Lake adds "Returned Surplus Mail" and filenames that name the recipient.
+    re: /undeliver|undelieve|unable\s*to\s*forward|returned\s*(?:certified\s*|regular\s*|surplus\s*)?mail|\bmail\s*return(?:ed)?\b|unclaimed\s*mail|vacant|no\s*such\s*number|attempted\s*-?\s*not\s*known/i,
+    seenIn: 'Duval, Brevard, Polk, Pinellas, Lake',
   },
   {
     kind: 'sheriff_not_served',
@@ -653,7 +666,7 @@ export function collapseClaimants(owners: string[]): CollapsedClaimant[] {
       .replace(/\b([DO])\s+(?=[A-Z]{3,})/g, '$1')
       // Surname particles written apart: "VAN DER LEE ELMA A." beside
       // "VANDERLEE ELMA A" (Sarasota 2026 TD 000057).
-      .replace(/\b(VAN|VON|DER|DEN|DE|DEL|LA|LE|DI|DA|DU)\s+(?=[A-Z])/g, '$1')
+      .replace(/\b(VAN|VON|DER|DEN|DE|DEL|LA|LE|DI|DA|DU|MC)\s+(?=[A-Z])/g, '$1')
       .replace(/&/g, ' AND ')
       .replace(/[.,\-\/]/g, ' ')
       .replace(ESTATE_MARK, ' ')
@@ -671,14 +684,20 @@ export function collapseClaimants(owners: string[]): CollapsedClaimant[] {
     if (short.length < 2 || long.length - short.length > 1) return false;
     const pool = [...long];
     let exact = 0;
+    let initials = 0;
     for (const t of short) {
       let i = pool.indexOf(t);
       if (i >= 0) exact += 1;
-      else i = pool.findIndex((p) => (t.length === 1 && p[0] === t) || (p.length === 1 && t[0] === p));
+      else {
+        i = pool.findIndex((p) => (t.length === 1 && p[0] === t) || (p.length === 1 && t[0] === p));
+        if (i >= 0) initials += 1;
+      }
       if (i < 0) return false;
       pool.splice(i, 1);
     }
-    return exact >= 2 && pool.length <= 1;
+    // Two names outright, or the surname outright and two given names by
+    // their initials ("J W SAUL", "JUDSON WALTER SAUL" on Lake 04261-2023).
+    return (exact >= 2 || (exact >= 1 && initials >= 2)) && pool.length <= 1;
   };
   let merged = true;
   while (merged) {
