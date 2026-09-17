@@ -70,11 +70,20 @@ describe('facebookSearchUrl', () => {
 describe('socialSearchLinks', () => {
   it('searches every platform, narrowed by the city where one is known', () => {
     const links = socialSearchLinks('ALERIC T. CLARK', 'SAN ANTONIO', 'TX');
+    expect(links.map((l) => l.site)).toEqual(['Facebook', 'Facebook San Antonio', 'Google social', 'Instagram', 'LinkedIn', 'X', 'TikTok']);
+    // By state, spelled out, so every namesake in it is listed to pick from.
+    expect(fb(links[0].url)).toBe('https://www.facebook.com/search/people/?q=Aleric Clark Texas');
+    // His own town, off the clerk's mailing address: what found him by hand.
+    expect(fb(links[1].url)).toBe('https://www.facebook.com/search/people/?q=Aleric Clark San Antonio');
+    expect(decodeURIComponent(links[2].url)).toContain('"Aleric Clark" "Texas" (site:facebook.com');
+  });
+  it('with no town of their own, the state alone: never the town the property sold in', () => {
+    // "Rosemary Clark" "Leesburg" found nobody on 2026-09-17.
+    const links = socialSearchLinks('ROSEMARY CLARK', null, 'FL');
     expect(links.map((l) => l.site)).toEqual(['Facebook', 'Google social', 'Instagram', 'LinkedIn', 'X', 'TikTok']);
-    // The plain name and the city alone: what found him by hand on 2026-09-17.
-    expect(fb(links[0].url)).toBe('https://www.facebook.com/search/people/?q=Aleric Clark San Antonio');
-    expect(decodeURIComponent(links[1].url)).toContain('"Aleric Clark" "San Antonio" (site:facebook.com');
-    expect(fb(socialSearchLinks('Aleric Clark', null, 'TX')[0].url)).toContain('q=Aleric Clark TX');
+    expect(fb(links[0].url)).toBe('https://www.facebook.com/search/people/?q=Rosemary Clark Florida');
+    expect(decodeURIComponent(links[1].url)).toContain('"Rosemary Clark" "Florida" (site:facebook.com');
+    expect(decodeURIComponent(links[3].url)).toContain('keywords=Rosemary Clark Florida');
     expect(links.every((l) => l.free)).toBe(true);
   });
   it('nothing for no name', () => {
@@ -95,6 +104,9 @@ describe('searchName', () => {
 
 describe('leadSearchUrl', () => {
   it('a spouse is searched as themselves in the city, an employer with the claimant', () => {
+    expect(fb(leadSearchUrl({ kind: 'spouse', value: 'Yvette Hinojosa' }, 'ALERIC T. CLARK', 'SAN ANTONIO', 'TX')!)).toBe(
+      'https://www.facebook.com/search/people/?q=Yvette Hinojosa Texas',
+    );
     expect(fb(leadSearchUrl({ kind: 'spouse', value: 'Yvette Hinojosa' }, 'ALERIC T. CLARK', 'SAN ANTONIO')!)).toBe(
       'https://www.facebook.com/search/people/?q=Yvette Hinojosa San Antonio',
     );

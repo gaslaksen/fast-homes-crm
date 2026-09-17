@@ -2534,7 +2534,9 @@ export class SurplusService {
           : socialSearchLinks(
               // The person, not the estate: "Estate of Odessa Rainwater" finds nobody.
               `${lead.sellerFirstName || ''} ${lead.sellerLastName || ''}`.replace(/^\s*(?:the\s+)?estate\s+of\s+/i, '').trim(),
-              d.ownerMailingCity || lead.propertyCity,
+              // The owner's own town only. The property's town is where the
+              // tax sale was, not where they live, and narrowing by it found nobody.
+              d.ownerMailingCity || null,
               d.ownerMailingState || lead.propertyState,
             ),
         searchedAt: d.socialSearchedAt || null,
@@ -2552,7 +2554,8 @@ export class SurplusService {
                 searchUrl: leadSearchUrl(
                   l,
                   `${lead.sellerFirstName || ''} ${lead.sellerLastName || ''}`.trim(),
-                  d.ownerMailingCity || lead.propertyCity,
+                  d.ownerMailingCity || null,
+                  d.ownerMailingState || lead.propertyState,
                 ),
               })),
             }
