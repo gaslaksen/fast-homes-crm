@@ -58,7 +58,7 @@ function lead(over: any = {}) {
   };
 }
 
-function harness(leads: any[], env: Record<string, string> = { SOCIAL_SEARCH_MONTHLY_BUDGET: '50' }, spent = 0) {
+function harness(leads: any[], env: Record<string, string> = {}, spent = 0) {
   const profileCreates: any[] = [];
   const attempts: any[] = [];
   const activities: any[] = [];
@@ -103,12 +103,21 @@ function harness(leads: any[], env: Record<string, string> = { SOCIAL_SEARCH_MON
 }
 
 describe('SurplusSocialService', () => {
-  it('an unset budget pauses it: nothing is sent', async () => {
-    const { svc, create } = harness([lead()], {});
+  it('needs no budget variable: with nothing set it runs, uncapped', async () => {
+    const { svc, create } = harness([lead()], {}, 500);
+    create.mockResolvedValue(reply(CLARK));
+    expect(svc.available).toBe(true);
+    const r = await svc.run({ organizationId: 'org' });
+    expect(r).toMatchObject({ checked: 1, found: 1, errors: 0 });
+    expect(await svc.usage()).toMatchObject({ budget: 0, left: null, paused: false });
+  });
+
+  it('SOCIAL_SEARCH_ENABLED=false turns it off: nothing is sent', async () => {
+    const { svc, create } = harness([lead()], { SOCIAL_SEARCH_ENABLED: 'false' });
     const r = await svc.run({ organizationId: 'org' });
     expect(svc.available).toBe(false);
     expect(create).not.toHaveBeenCalled();
-    expect(r.message).toMatch(/paused/);
+    expect(r.message).toMatch(/turned off/);
   });
 
   it('a dry run counts the living claimants with no number and estimates the cost', async () => {
@@ -185,7 +194,7 @@ describe('SurplusSocialService', () => {
     expect(attempts[0]).toMatchObject({ heirId: 'h1', byUserId: 'u1' });
   });
 
-  it('stops the run when the month cannot cover a check', async () => {
+  it('an optional ceiling still stops the run when the month cannot cover a check', async () => {
     const { svc, create } = harness([lead(), lead({ id: 'lead2' })], { SOCIAL_SEARCH_MONTHLY_BUDGET: '1' }, 0.5);
     create.mockResolvedValue(reply(CLARK));
     const r = await svc.run({ organizationId: 'org' });

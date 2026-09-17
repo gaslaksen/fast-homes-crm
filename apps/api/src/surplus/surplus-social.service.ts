@@ -28,8 +28,10 @@ import {
  * and files what it finds as candidates with the evidence beside each.
  *
  * The search is paid per check (tokens plus web searches, the same shape as
- * the obituary search) and runs behind SOCIAL_SEARCH_MONTHLY_BUDGET. Unset,
- * it is paused and the card says so; the links and the hand-entered
+ * the obituary search) and is ON by default with no cap: the decision
+ * (2026-09-17) is that finding the claimant is worth the fifty cents every
+ * time. SOCIAL_SEARCH_MONTHLY_BUDGET is an optional ceiling in dollars, and
+ * SOCIAL_SEARCH_ENABLED=false turns it off. The links and the hand-entered
  * profiles work regardless.
  */
 
@@ -60,10 +62,15 @@ export class SurplusSocialService {
     if (key) this.anthropic = new Anthropic({ apiKey: key });
   }
 
-  /** Dollars per calendar month. Unset or 0 pauses the search entirely. */
+  /** An optional ceiling, dollars per calendar month. Unset or 0 means no cap. */
   get monthlyBudget(): number {
     const b = Number(this.config.get<string>('SOCIAL_SEARCH_MONTHLY_BUDGET'));
     return Number.isFinite(b) && b > 0 ? b : 0;
+  }
+
+  /** On unless SOCIAL_SEARCH_ENABLED is set to false. */
+  get enabled(): boolean {
+    return (this.config.get<string>('SOCIAL_SEARCH_ENABLED') ?? 'true') !== 'false';
   }
 
   get model(): string {
@@ -71,15 +78,16 @@ export class SurplusSocialService {
   }
 
   get available(): boolean {
-    return !!this.anthropic && this.monthlyBudget > 0;
+    return !!this.anthropic && this.enabled;
   }
 
-  async usage(): Promise<{ period: string; checks: number; spent: number; budget: number; paused: boolean; left: number }> {
+  /** `budget` 0 and `left` null mean no cap is set. */
+  async usage(): Promise<{ period: string; checks: number; spent: number; budget: number; paused: boolean; left: number | null }> {
     const period = monthNY();
     const row = await this.prisma.vendorUsage.findUnique({ where: { vendor_period: { vendor: 'social', period } } });
     const spent = Math.round((row?.spend || 0) * 100) / 100;
     const budget = this.monthlyBudget;
-    return { period, checks: row?.calls || 0, spent, budget, paused: !this.available, left: Math.max(0, Math.round((budget - spent) * 100) / 100) };
+    return { period, checks: row?.calls || 0, spent, budget, paused: !this.available, left: budget ? Math.max(0, Math.round((budget - spent) * 100) / 100) : null };
   }
 
   // ─── The profile list ─────────────────────────────────────────────────────
@@ -258,9 +266,10 @@ export class SurplusSocialService {
    */
   async search(person: Record<string, unknown>): Promise<{ verdict: SocialVerdict; cost: number }> {
     if (!this.anthropic) throw new Error('ANTHROPIC_API_KEY is not set: out of budget.');
-    if (!this.monthlyBudget) throw new Error('The social profile search is paused: out of budget until SOCIAL_SEARCH_MONTHLY_BUDGET is set.');
+    if (!this.enabled) throw new Error('The social profile search is turned off (SOCIAL_SEARCH_ENABLED=false).');
     const u = await this.usage();
-    if (u.spent + WORST_CASE_CHECK > u.budget) {
+    // Only a set ceiling can stop a check. With none, every check runs.
+    if (u.budget && u.spent + WORST_CASE_CHECK > u.budget) {
       throw new Error(`Social search budget of $${u.budget} reached ($${u.spent} spent in ${u.period}): out of budget.`);
     }
 
@@ -359,7 +368,7 @@ export class SurplusSocialService {
     const out: SocialRunResult = { candidates: 0, checked: 0, found: 0, profiles: 0, spent: 0, errors: 0 };
     if (!this.available && !opts.dryRun) {
       out.message = this.anthropic
-        ? 'The social profile search is paused until SOCIAL_SEARCH_MONTHLY_BUDGET is set.'
+        ? 'The social profile search is turned off (SOCIAL_SEARCH_ENABLED=false).'
         : 'ANTHROPIC_API_KEY is not set.';
       return out;
     }

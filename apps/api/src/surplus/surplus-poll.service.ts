@@ -137,8 +137,8 @@ export class SurplusPollService {
         ? `. Obituary search on ${obits.checked}: ${obits.strong} found dead, ${obits.possible} to check, ${obits.survivorsWithContact} survivor${obits.survivorsWithContact === 1 ? '' : 's'} with a number`
         : '';
       // And the social profile search on the living claimants the trace left
-      // with no number at all: a profile is the third route. Paused unless
-      // SOCIAL_SEARCH_MONTHLY_BUDGET is set.
+      // with no number at all: a profile is the third route. On by default;
+      // SOCIAL_SEARCH_ENABLED=false stops it.
       const social = this.social?.available
         ? await this.social.run({ organizationId: organizationId || null, leadIds })
         : null;

@@ -213,9 +213,9 @@ export function AddSocialProfile({
 }
 
 /**
- * The web search for one person's profiles, paid per check. Disabled with
- * the reason while the budget is unset, so nobody wonders why the button
- * does nothing. Shows when it last ran, since a miss does not change from
+ * The web search for one person's profiles, paid per check and on by
+ * default. Disabled with the reason when it has been turned off, so nobody
+ * wonders why the button does nothing. Shows when it last ran, since a miss does not change from
  * one week to the next and running it twice buys the same answer.
  */
 export function FindProfilesButton({
@@ -264,14 +264,14 @@ export function FindProfilesButton({
         disabled={busy || paused !== false}
         title={
           paused
-            ? 'Paused until SOCIAL_SEARCH_MONTHLY_BUDGET is set in the API settings.'
+            ? 'The profile search is turned off in the API settings, or the API has no Anthropic key.'
             : 'Claude searches the public web for their Facebook, Instagram, LinkedIn, X and TikTok, and offers what fits with the evidence. About fifty cents.'
         }
         onClick={find}
       >
         {busy ? 'Searching the web...' : `Search the web for ${who}'s profiles`}
       </button>
-      {paused && <span style={{ fontSize: 11, color: 'var(--faint)' }}>paused: no monthly budget set</span>}
+      {paused && <span style={{ fontSize: 11, color: 'var(--faint)' }}>turned off in the API settings</span>}
       {searchedAt && !busy && <span style={{ fontSize: 11, color: 'var(--faint)' }}>searched {fmtDate(searchedAt)}</span>}
     </span>
   );

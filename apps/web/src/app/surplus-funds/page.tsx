@@ -831,14 +831,14 @@ export default function SurplusFundsPage() {
       }
       const usage = (await surplusAPI.socialUsage()).data;
       if (usage?.paused) {
-        say('The profile search is paused until SOCIAL_SEARCH_MONTHLY_BUDGET is set in the API settings. The search links on each card still work.');
+        say('The profile search is turned off in the API settings. The search links on each card still work.');
         return;
       }
       const limit = Math.min(dry.candidates, 25);
       const est = Math.round(limit * 0.45 * 100) / 100;
       if (
         !window.confirm(
-          `${dry.candidates} living claimant${dry.candidates === 1 ? ' has' : 's have'} no number and no profile search yet. Search the web for the first ${limit} now? About $${est}; $${usage.left} left this month.`,
+          `${dry.candidates} living claimant${dry.candidates === 1 ? ' has' : 's have'} no number and no profile search yet. Search the web for the first ${limit} now? About $${est}${usage.left == null ? '' : `; $${usage.left} left this month`}.`,
         )
       ) {
         return;
