@@ -1,4 +1,4 @@
-import { messageUrl, parseProfileUrl, parseSocialVerdict, socialSearchCost, socialSearchLinks } from './surplus-social.util';
+import { leadSearchUrl, messageUrl, parseProfileUrl, parseSocialVerdict, searchName, socialSearchCost, socialSearchLinks } from './surplus-social.util';
 
 /**
  * Profile links as people paste them and as search results carry them. The
@@ -55,14 +55,39 @@ describe('messageUrl', () => {
 
 describe('socialSearchLinks', () => {
   it('searches every platform, narrowed by the city where one is known', () => {
-    const links = socialSearchLinks('Aleric T Clark', 'San Antonio', 'TX');
+    const links = socialSearchLinks('ALERIC T. CLARK', 'SAN ANTONIO', 'TX');
     expect(links.map((l) => l.site)).toEqual(['Facebook', 'Google social', 'Instagram', 'LinkedIn', 'X', 'TikTok']);
-    expect(links[0].url).toContain(encodeURIComponent('Aleric T Clark San Antonio TX'));
-    expect(decodeURIComponent(links[1].url)).toContain('"Aleric T Clark" "San Antonio" (site:facebook.com');
+    // The plain name and the city alone: what found him by hand on 2026-09-17.
+    expect(decodeURIComponent(links[0].url)).toBe('https://www.facebook.com/search/people/?q=Aleric Clark San Antonio');
+    expect(decodeURIComponent(links[1].url)).toContain('"Aleric Clark" "San Antonio" (site:facebook.com');
+    expect(decodeURIComponent(socialSearchLinks('Aleric Clark', null, 'TX')[0].url)).toContain('q=Aleric Clark TX');
     expect(links.every((l) => l.free)).toBe(true);
   });
   it('nothing for no name', () => {
     expect(socialSearchLinks('')).toEqual([]);
+  });
+});
+
+describe('searchName', () => {
+  it('is the first name and the surname, the way a person types it', () => {
+    expect(searchName('ALERIC T. CLARK')).toBe('Aleric Clark');
+    expect(searchName('CLARK, ALERIC T')).toBe('Aleric Clark');
+    expect(searchName('JOHNNY LOVE WILLIAMS, SR')).toBe('Johnny Williams');
+    expect(searchName('Estate of Odessa Rainwater')).toBe('Odessa Rainwater');
+    expect(searchName('J ROBERT MCDONALD')).toBe('Robert McDonald');
+    expect(searchName('')).toBe('');
+  });
+});
+
+describe('leadSearchUrl', () => {
+  it('a spouse is searched as themselves in the city, an employer with the claimant', () => {
+    expect(decodeURIComponent(leadSearchUrl({ kind: 'spouse', value: 'Yvette Hinojosa' }, 'ALERIC T. CLARK', 'SAN ANTONIO')!)).toBe(
+      'https://www.facebook.com/search/people/?q=Yvette Hinojosa San Antonio',
+    );
+    expect(decodeURIComponent(leadSearchUrl({ kind: 'business', value: 'Devonwood Enterprizes Inc' }, 'ALERIC T. CLARK', 'SAN ANTONIO')!)).toBe(
+      'https://www.facebook.com/search/top/?q=Aleric Clark Devonwood Enterprizes Inc',
+    );
+    expect(leadSearchUrl({ kind: 'other', value: ' ' }, 'X Y')).toBeNull();
   });
 });
 
@@ -75,9 +100,26 @@ describe('parseSocialVerdict', () => {
       { platform: 'facebook', url: 'https://www.facebook.com/search/people/?q=aleric', confidence: 'strong', evidence: 'a search page, not a profile' },
       { platform: 'facebook', url: 'https://www.facebook.com/somebody', confidence: 'maybe', evidence: 'bad confidence' },
     ],
+    leads: [
+      { kind: 'spouse', value: 'Yvette Hinojosa', detail: 'people-search listing' },
+      { kind: 'spouse', value: 'yvette hinojosa', detail: 'duplicate' },
+      { kind: 'business', value: 'Devonwood Enterprizes Inc', detail: 'listed as president' },
+      { kind: 'nonsense', value: 'Texas Wild Hogs', detail: null },
+      { kind: 'other', value: '(210) 371-9175', detail: 'a phone is not a lead' },
+      { kind: 'other', value: '12 Oak Ln', detail: 'nor is an address' },
+    ],
     searched: 'Searched Facebook and Instagram for Aleric Clark in San Antonio.',
     note: null,
   };
+  it('keeps the leads, deduped, and drops a phone or a street address', () => {
+    const v = parseSocialVerdict(JSON.stringify({ ...found, profiles: [] }));
+    expect(v.profiles).toEqual([]);
+    expect(v.leads).toEqual([
+      { kind: 'spouse', value: 'Yvette Hinojosa', detail: 'people-search listing' },
+      { kind: 'business', value: 'Devonwood Enterprizes Inc', detail: 'listed as president' },
+      { kind: 'other', value: 'Texas Wild Hogs', detail: null },
+    ]);
+  });
   it('reads the JSON after the prose, dedupes by canonical URL, drops pages and bad confidence', () => {
     const v = parseSocialVerdict(`I searched.\n${JSON.stringify(found)}`);
     expect(v.profiles.map((p) => p.url)).toEqual(['https://www.facebook.com/aleric.clark', 'https://www.instagram.com/presley.clark/']);
@@ -86,6 +128,7 @@ describe('parseSocialVerdict', () => {
   });
   it('anything unreadable is an empty list, never a guess', () => {
     expect(parseSocialVerdict('no json here').profiles).toEqual([]);
+    expect(parseSocialVerdict('no json here').leads).toEqual([]);
     expect(parseSocialVerdict('{"profiles":"nope"}').profiles).toEqual([]);
     expect(parseSocialVerdict('{"profiles":[]}').searched).toBe('Searched the public web.');
   });

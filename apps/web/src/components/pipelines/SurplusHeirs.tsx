@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { surplusAPI } from '@/lib/api';
 import { DNC_STATE, phoneDisplay, fmtDate } from './format';
 import { SURPLUS_PERSON_ROLES, SURPLUS_CONTACT_STATUSES, personRoleLabel } from '@/lib/surplus-people';
-import { socialSearchLinks, type SocialProfile } from '@/lib/surplus-social';
+import { rememberSocialTarget, socialSearchLinks, type SocialProfile } from '@/lib/surplus-social';
 import { AddSocialProfile, FindProfilesButton, SocialProfileList } from './SurplusSocial';
 
 /**
@@ -548,7 +548,10 @@ function HeirRow({
             {findOpen ? 'Done' : profiles.length ? 'Find more online' : 'Find online'}
           </button>
           {findOpen && (
-            <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div
+              style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 6 }}
+              onClickCapture={() => rememberSocialTarget({ leadId, heirId: h.id, label: h.name, sub: h.relationship || h.roleLabel || null })}
+            >
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                 {socialSearchLinks(h.name, h.city, h.state).map((l) => (
                   <a key={l.site} href={l.url} target="_blank" rel="noopener noreferrer" className="dc-wp-searchlink">
