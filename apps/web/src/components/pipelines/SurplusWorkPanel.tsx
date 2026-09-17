@@ -6,7 +6,7 @@ import MessageComposer, { type EmailAction } from '@/components/communications/M
 import NotesPanel from '@/components/communications/NotesPanel';
 import type { NoteItem, TimelineItem } from '@/components/communications/types';
 import { authAPI, campaignsAPI, leadsAPI, surplusAPI, tasksAPI } from '@/lib/api';
-import { dueLabel, isOverdue, quickDueDates } from '@/lib/dates';
+import { dueLabel, isOverdue, quickDueDates, todayLocal } from '@/lib/dates';
 import { SURPLUS_DEAD_REASONS, deadReasonLabel } from '@/lib/surplus-dead';
 import { SURPLUS_EXPENSE_KINDS, SURPLUS_FEE_SCHEDULE_LABEL, expenseLabel, usd } from '@/lib/surplus-money';
 import { SURPLUS_TRACE_CHANNELS, SURPLUS_TIER1_CHANNELS, TRACE_RESULTS, channelForSite, traceChannelLabel } from '@/lib/surplus-trace';
@@ -3926,7 +3926,7 @@ function LetterHistory({
   const livingHeirs = (lead.heirs || []).filter((h) => !h.deceased);
 
   const [open, setOpen] = useState(false);
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(todayLocal);
   const [recipient, setRecipient] = useState<string>('claimant');
   const [address, setAddress] = useState(onFile);
   const [mailType, setMailType] = useState('standard');
@@ -3946,7 +3946,7 @@ function LetterHistory({
     setMailType(lead.escalateMail ? 'priority' : 'standard');
     setTracking('');
     setNote('');
-    setDate(new Date().toISOString().slice(0, 10));
+    setDate(todayLocal());
     setWriteTo('claimant');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lead.id]);
@@ -4154,7 +4154,7 @@ function LetterHistory({
           <div style={{ fontSize: 12, fontWeight: 700 }}>Record a mailed letter</div>
           <label style={lbl}>
             Date mailed
-            <input type="date" style={field} value={date} max={new Date().toISOString().slice(0, 10)} onChange={(e) => setDate(e.target.value)} />
+            <input type="date" style={field} value={date} max={todayLocal()} onChange={(e) => setDate(e.target.value)} />
           </label>
           {livingHeirs.length > 0 && (
             <label style={lbl}>

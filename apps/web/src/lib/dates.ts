@@ -7,6 +7,15 @@ export function toDatetimeLocal(dt: Date): string {
 }
 
 /**
+ * Today as a date input wants it ("2026-09-17"), in local time. Not
+ * `toISOString().slice(0, 10)`, which is the UTC day and turns into tomorrow
+ * after 8pm Eastern.
+ */
+export function todayLocal(): string {
+  return toDatetimeLocal(new Date()).slice(0, 10);
+}
+
+/**
  * The quick follow-up picks. The same four everywhere a follow-up is set (the
  * call summary, the surplus panel, the follow-up modal) so the team learns one
  * set of buttons.
