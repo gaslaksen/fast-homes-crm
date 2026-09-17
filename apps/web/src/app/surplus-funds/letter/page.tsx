@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { surplusAPI } from '@/lib/api';
+import { todayLocal } from '@/lib/dates';
 
 /**
  * A letter, ready to print.
@@ -65,7 +66,7 @@ function LetterPage() {
     setBusy(true);
     try {
       await surplusAPI.letterMailed([leadId], {
-        mailedAt: new Date().toISOString().slice(0, 10),
+        mailedAt: todayLocal(),
         address: letter.recipient.address,
         recipientName: letter.recipient.name,
         heirId: letter.recipient.heirId,

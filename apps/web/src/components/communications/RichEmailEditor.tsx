@@ -31,11 +31,18 @@ export default function RichEmailEditor({
   onChange,
   placeholder,
   minHeight = 160,
+  maxHeight = 'min(35vh, 360px)',
 }: {
   value: string;
   onChange: (html: string) => void;
   placeholder?: string;
   minHeight?: number;
+  /**
+   * Past this the body scrolls inside the editor. Without it a long email
+   * grows the composer until Send and Discard are pushed off screen, which
+   * the lead panel's footer made unreachable.
+   */
+  maxHeight?: string;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   // Remember the caret so emoji insertion lands where the user was typing,
@@ -133,6 +140,8 @@ export default function RichEmailEditor({
         }
         .rich-email-editor .ql-editor {
           min-height: ${minHeight}px;
+          max-height: ${maxHeight};
+          overflow-y: auto;
         }
         /* Dark mode: keep the editor readable */
         .dark .rich-email-editor .ql-toolbar,

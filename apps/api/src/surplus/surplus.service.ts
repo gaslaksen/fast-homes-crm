@@ -75,6 +75,7 @@ import {
   StageGateContext,
   complianceGate,
   SurplusLien,
+  calendarDayToDate,
 } from './surplus.util';
 import {
   SURPLUS_FLOOR,
@@ -540,10 +541,14 @@ export class SurplusService {
       detailPatch.letterCadenceDays = n;
     }
 
-    for (const k of ['saleDate', 'noticeDate', 'certOfDisbursements', 'letterMailedAt']) {
+    for (const k of ['saleDate', 'noticeDate', 'certOfDisbursements']) {
       if (patch[k] !== undefined) {
         detailPatch[k] = patch[k] ? isoToDate(String(patch[k]).slice(0, 10)) : null;
       }
+    }
+    // Stored at noon UTC like the letter history, so it shows the day it went out.
+    if (patch.letterMailedAt !== undefined) {
+      detailPatch.letterMailedAt = patch.letterMailedAt ? calendarDayToDate(String(patch.letterMailedAt)) : null;
     }
 
     // The notary's dates keep their time of day: an appointment is at 2pm,
@@ -1412,14 +1417,13 @@ export class SurplusService {
       ? String(opts.mailType)
       : 'standard';
 
-    const mailedAt = opts.mailedAt
-      ? isoToDate(String(opts.mailedAt).slice(0, 10))
-      : new Date();
+    const mailedAt = (opts.mailedAt && calendarDayToDate(String(opts.mailedAt))) || new Date();
+    // Eastern, where the team is: a bulk mark at 9pm is today's letter, not tomorrow's.
     const dateLabel = mailedAt.toLocaleDateString('en-US', {
       month: 'short',
       day: 'numeric',
       year: 'numeric',
-      timeZone: 'UTC',
+      timeZone: 'America/New_York',
     });
 
     let updated = 0;

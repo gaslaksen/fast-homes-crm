@@ -34,6 +34,7 @@ import {
   SurplusFacts,
   queueOf,
   queueReason,
+  calendarDayToDate,
 } from './surplus.util';
 import {
   SurplusClaimantType,
@@ -902,5 +903,29 @@ describe('queueOf with a deceased claimant', () => {
   it('leaves a living claimant unaffected', () => {
     expect(queueOf({ claimStatus: 'open', cleanPhoneCount: 2 })).toBe(SurplusQueue.CALL);
     expect(queueOf({ claimStatus: 'open', cleanPhoneCount: 0, traceState: 'never' })).toBe(SurplusQueue.TRACE);
+  });
+});
+
+describe('calendarDayToDate', () => {
+  it('stores a picked day at noon UTC', () => {
+    expect(calendarDayToDate('2026-09-17')?.toISOString()).toBe('2026-09-17T12:00:00.000Z');
+  });
+
+  it('reads as the same day in Eastern and Pacific time', () => {
+    const d = calendarDayToDate('2026-09-17')!;
+    const day = (timeZone: string) => d.toLocaleDateString('en-US', { timeZone });
+    expect(day('America/New_York')).toBe('9/17/2026');
+    expect(day('America/Los_Angeles')).toBe('9/17/2026');
+  });
+
+  it('takes the day off a full timestamp', () => {
+    expect(calendarDayToDate('2026-09-17T23:30:00.000Z')?.toISOString()).toBe('2026-09-17T12:00:00.000Z');
+  });
+
+  it('is null for junk and impossible days', () => {
+    expect(calendarDayToDate('')).toBeNull();
+    expect(calendarDayToDate(null)).toBeNull();
+    expect(calendarDayToDate('not a date')).toBeNull();
+    expect(calendarDayToDate('2026-02-30')).toBeNull();
   });
 });

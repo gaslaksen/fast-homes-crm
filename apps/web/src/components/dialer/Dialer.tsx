@@ -65,9 +65,12 @@ export default function Dialer() {
   // stays through the summary, so the words and the outcome are one screen.
   const withScript = !!d.script && ['connecting', 'oncall', 'summary'].includes(d.view);
 
+  // Above the pipeline work panel (z-index 91) and its scrim, so a call placed
+  // from a lead panel shows in front of it. The closed button above stays
+  // lower on purpose, so it never covers the panel's footer.
   return (
     <div
-      className={`fixed bottom-5 right-5 z-[60] max-w-[calc(100vw-2rem)] rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-2xl overflow-hidden ${
+      className={`fixed bottom-5 right-5 z-[95] max-w-[calc(100vw-2rem)] rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-2xl overflow-hidden ${
         withScript ? 'w-[780px]' : 'w-[360px]'
       }`}
     >

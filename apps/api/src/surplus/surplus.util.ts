@@ -853,3 +853,17 @@ export function stageFromText(raw?: string | null): SurplusStage {
   if (s.includes('contact')) return SurplusStage.CONTACTED;
   return SurplusStage.NEW;
 }
+
+/**
+ * A calendar day picked in the browser ("2026-09-17") as the timestamp we
+ * store. Noon UTC, not midnight: midnight UTC is 8pm the evening before in
+ * Eastern time, so a letter mailed today read as mailed yesterday on every
+ * screen. Noon UTC lands on the same calendar day from Hawaii to Maine. Null
+ * when the value is not a date.
+ */
+export function calendarDayToDate(raw?: string | null): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(raw || '').trim());
+  if (!m) return null;
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12));
+  return d.getUTCDate() === Number(m[3]) ? d : null;
+}
