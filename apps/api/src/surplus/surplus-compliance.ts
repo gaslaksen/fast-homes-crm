@@ -278,3 +278,15 @@ export function courtRecordsUrl(county?: string | null): string | null {
  * 15k.
  */
 export const SURPLUS_FLOOR = 5000;
+
+/**
+ * Days from the surplus notice before a claim is worth putting in front of
+ * anybody.
+ *
+ * The claim window is 120 days from the mailed notice (FS 197.582(3)), and
+ * the claimant cannot be approached until it is nearly up. Ten days of
+ * shoulder: at 110 there is time to trace, prepare and be ready to talk the
+ * day the window closes. The board hides anything younger by default, and the
+ * paid lookups wait for the same mark (TRACE_MIN_AGE_DAYS).
+ */
+export const SURPLUS_EARLY_DAYS = 110;

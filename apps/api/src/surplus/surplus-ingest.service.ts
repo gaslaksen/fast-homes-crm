@@ -109,6 +109,34 @@ const MACHINE_ADDRESS_SOURCES = new Set<string>(Object.values(ADDRESS_SOURCE));
 const RETIRED_BY_COUNTY = 'retired_by_county';
 
 /**
+ * How much surplus history a county pull brings in.
+ *
+ * Past a year the money can only be requested through an attorney, so a case
+ * that old is not a lead: it is somebody else's file. The board's Under a year
+ * toggle was hiding these one screen at a time; this keeps them out of the
+ * database instead. The same 365 days gate the paid lookups in
+ * `traceCriteria`, which is where the number comes from.
+ */
+const PULL_MAX_AGE_DAYS = 365;
+
+/**
+ * Whether a list row is older than the pull window. The sale date is the one
+ * date every county publishes on the list; the notice comes later and off a
+ * scanned letter. No date at all is not too old, the same way it is not too
+ * old for a trace.
+ */
+export function tooOldToPull(
+  row: { saleDate?: string | null },
+  now = new Date(),
+  maxAgeDays = PULL_MAX_AGE_DAYS,
+): boolean {
+  if (!row.saleDate) return false;
+  const when = new Date(`${String(row.saleDate).slice(0, 10)}T00:00:00Z`);
+  if (isNaN(when.getTime())) return false;
+  return (now.getTime() - when.getTime()) / 86400000 > maxAgeDays;
+}
+
+/**
  * Fallback for when the notice cannot be read.
  *
  * Duval publishes no filing dates on the docket, so with no notice extraction
@@ -304,8 +332,6 @@ export class SurplusIngestService {
       candidates = candidates.filter((s) => (s.surplus || 0) >= SURPLUS_FLOOR);
       result.belowFloor = beforeFloor - candidates.length;
 
-      if (opts.limit) candidates = candidates.slice(0, opts.limit);
-
       // What we already hold for this county, by the county's own case id.
       // A weekly refresh mostly asks "did anything change?", and the list row
       // plus one probe request answer that for almost every case without the
@@ -313,6 +339,24 @@ export class SurplusIngestService {
       // tiered refresh is a few hundred.
       const known = await this.knownCases(adapter, organizationId);
       const retired = await this.retiredCases(adapter, organizationId);
+
+      // Only what we can still work. A sale over a year old is left on the
+      // county's list rather than fetched and created. A case already on the
+      // board stays in the run whatever its age, because a status change on it
+      // still matters: the money being gone is worth knowing.
+      const beforeAge = candidates.length;
+      candidates = candidates.filter(
+        (s) => !tooOldToPull(s) || (known.get(s.sourceCaseId) || []).length > 0,
+      );
+      const tooOld = beforeAge - candidates.length;
+      result.skipped += tooOld;
+      // Says why a busy list produced nothing, so a quiet run does not read as
+      // a broken parser.
+      if (tooOld) result.message = `${tooOld} over ${PULL_MAX_AGE_DAYS} days old, left on the county list`;
+
+      // The cap is on detail fetches, so it is spent after the age filter and
+      // not on rows that are only going to be dropped.
+      if (opts.limit) candidates = candidates.slice(0, opts.limit);
       const tiered = !opts.full && !opts.reread && !!adapter.probeDocket;
 
       // Cases the county closed since we last looked. The list status says so:

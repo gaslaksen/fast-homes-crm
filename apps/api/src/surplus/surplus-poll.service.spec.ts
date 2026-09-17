@@ -25,6 +25,9 @@ function harness(env: Record<string, string> = {}) {
   const lock: any = { run: jest.fn((_k: string, fn: () => Promise<unknown>) => fn()) };
   const skiptrace: any = {
     estateRelatives: jest.fn().mockResolvedValue({ searched: 0, matched: 0, withContact: 0 }),
+    // Claims that crossed the 110 day mark since the last pull. Empty unless
+    // a test says otherwise.
+    maturedLeadIds: jest.fn().mockResolvedValue([]),
     traceLeads: jest.fn().mockResolvedValue({
       candidates: 2, submitted: 2, contacted: 1, mismatched: 0, skipped: {},
       nameSearch: { searched: 1, verified: 1, namesakes: 2 }, errors: 0,
@@ -48,6 +51,30 @@ describe('SurplusPollService', () => {
       addressSearch: true,
     });
     expect(notes).toEqual(['Traced 1 of 2 new to a number (2 address lookups, 1 name search)']);
+  });
+
+  it('also traces the claims that have just become workable, and says which batch is which', async () => {
+    const { svc, skiptrace, notes } = harness({ SURPLUS_DEFAULT_ORG_ID: 'org1' });
+    skiptrace.maturedLeadIds.mockResolvedValue(['lead-old']);
+
+    await svc.pollWeekly();
+
+    expect(skiptrace.traceLeads).toHaveBeenCalledTimes(2);
+    expect(skiptrace.traceLeads).toHaveBeenLastCalledWith({
+      organizationId: 'org1',
+      leadIds: ['lead-old'],
+      nameSearch: true,
+      addressSearch: true,
+    });
+    expect(notes[1]).toBe('Traced 1 of 1 now workable to a number (2 address lookups, 1 name search)');
+  });
+
+  it('leaves the pull alone when nothing has matured', async () => {
+    const { svc, skiptrace } = harness({ SURPLUS_DEFAULT_ORG_ID: 'org1' });
+
+    await svc.pollWeekly();
+
+    expect(skiptrace.traceLeads).toHaveBeenCalledTimes(1);
   });
 
   it('runs the obituary search on the same new leads when it has a budget', async () => {

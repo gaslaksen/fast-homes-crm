@@ -1,4 +1,4 @@
-import { SurplusIngestService } from './surplus-ingest.service';
+import { SurplusIngestService, tooOldToPull } from './surplus-ingest.service';
 
 /**
  * The re-read path, which is the only part of ingestion that OVERWRITES an
@@ -390,5 +390,24 @@ describe('what a run created', () => {
     expect(res.createdLeadIds).toHaveLength(1);
     expect(res.createdLeadIds[0]).toMatch(/^lead-/);
     expect(res.createdLeadIds).not.toContain('lead-old');
+  });
+});
+
+describe('the pull window', () => {
+  const now = new Date('2026-09-17T12:00:00Z');
+
+  it('leaves a sale over a year old on the county list', () => {
+    expect(tooOldToPull({ saleDate: '2025-06-01' }, now)).toBe(true);
+  });
+
+  it('brings in a sale inside the year', () => {
+    expect(tooOldToPull({ saleDate: '2025-09-20' }, now)).toBe(false);
+    expect(tooOldToPull({ saleDate: '2026-08-01' }, now)).toBe(false);
+  });
+
+  it('treats an unknown or unreadable sale date as not too old', () => {
+    expect(tooOldToPull({ saleDate: null }, now)).toBe(false);
+    expect(tooOldToPull({}, now)).toBe(false);
+    expect(tooOldToPull({ saleDate: 'no sale' }, now)).toBe(false);
   });
 });

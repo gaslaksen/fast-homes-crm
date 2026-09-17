@@ -595,13 +595,31 @@ export default function SurplusFundsPage() {
    * sale date stays visible, because "unknown" is not "too old".
    */
   const [underYear, setUnderYear] = useState(false);
+  /**
+   * Hide claims that are not workable yet. The claim window is 120 days from
+   * the mailed notice and nobody can be approached until it is nearly up, so
+   * the board opens on the ones that are ready. On by default, and remembered
+   * once turned off. A claim with no notice and no sale date stays visible,
+   * because unknown is not early.
+   */
+  const [hideEarly, setHideEarly] = useState(true);
   useEffect(() => {
     try {
       setUnderYear(localStorage.getItem('dc-surplus-under-year') === '1');
+      setHideEarly(localStorage.getItem('dc-surplus-hide-early') !== '0');
     } catch {
       /* defaults are fine */
     }
   }, []);
+  const toggleHideEarly = () => {
+    const next = !hideEarly;
+    setHideEarly(next);
+    try {
+      localStorage.setItem('dc-surplus-hide-early', next ? '1' : '0');
+    } catch {
+      /* defaults are fine */
+    }
+  };
   const toggleUnderYear = () => {
     const next = !underYear;
     setUnderYear(next);
@@ -671,6 +689,9 @@ export default function SurplusFundsPage() {
         // "New, 7 days" is the same window as the 0-7 notice-age filter, so the
         // quick chip drives the same query rather than a second one.
         noticeAge: chipQ === 'new' ? '0-7' : ageQ === 'all' ? undefined : ageQ,
+        // "New, 7 days" is a deliberate look at what just landed, so it shows
+        // the early ones whatever this toggle says.
+        hideEarly: hideEarly && chipQ !== 'new' ? true : undefined,
         lienWindow: lienWin === 'all' ? undefined : lienWin,
         hideDead: hideDead || undefined,
         hideDnc: hideDnc || undefined,
@@ -700,7 +721,7 @@ export default function SurplusFundsPage() {
     } finally {
       setLoading(false);
     }
-  }, [q, queueQ, tierQ, stageQ, ctype, county, band, chipQ, ageQ, lienWin, hideDead, hideDnc, sort, underYear]);
+  }, [q, queueQ, tierQ, stageQ, ctype, county, band, chipQ, ageQ, lienWin, hideDead, hideDnc, sort, underYear, hideEarly]);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -1205,6 +1226,13 @@ export default function SurplusFundsPage() {
               ]}
             />
             <button
+              className={`dc-tab${hideEarly ? ' on' : ''}`}
+              onClick={toggleHideEarly}
+              title="Hide claims whose notice is under 110 days old. The 120 day claim window has to be nearly up before anybody can be approached. Stays as you leave it."
+            >
+              Ready to work
+            </button>
+            <button
               className={`dc-tab${underYear ? ' on' : ''}`}
               onClick={toggleUnderYear}
               title="Hide sales older than a year. Past that, only an attorney can request the money. Stays on until you turn it off."
@@ -1439,6 +1467,14 @@ export default function SurplusFundsPage() {
                   Nothing in {QUEUE_LABEL[queueQ] || queueQ} right now.{' '}
                   <button className="dc-btn sm" onClick={() => setQueueQ(null)}>
                     Show all {stats.openClaims} open
+                  </button>
+                </span>
+              ) : hideEarly ? (
+                <span>
+                  Nothing matches those filters. Claims under 110 days old are hidden until the
+                  claim window is nearly up.{' '}
+                  <button className="dc-btn sm" onClick={toggleHideEarly}>
+                    Show the early ones
                   </button>
                 </span>
               ) : (
