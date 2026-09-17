@@ -17,7 +17,7 @@ import SurplusHeirs, { courtRecordsSearch } from './SurplusHeirs';
 import { AddSocialProfile, FindProfilesButton, SocialProfileList } from './SurplusSocial';
 import { SOCIAL_LEAD_LABEL, rememberSocialTarget, saveToDealcoreBookmarklet, socialOpener, type SocialProfile } from '@/lib/surplus-social';
 import { Fold, useFolds } from './PanelFold';
-import { fmtDate, money, phoneDisplay } from './format';
+import { fmtDate, fmtDay, money, phoneDisplay } from './format';
 
 /**
  * The work panel: everything needed to assess and contact one surplus claimant,
@@ -2918,7 +2918,7 @@ function CaseTab({
     .join(' · ');
   const caseStatus = [
     money(property.grossSurplus),
-    property.saleDate ? `sold ${fmtDate(property.saleDate)}` : 'sale date unknown',
+    property.saleDate ? `sold ${fmtDay(property.saleDate)}` : 'sale date unknown',
     property.noticeConfirmed ? 'notice confirmed' : 'notice date estimated',
   ].join(' · ');
   const checksDone = [lead.entitlementVerified, lead.noticeConfirmed, lead.titleSearchComplete].filter(Boolean).length;
@@ -3022,13 +3022,13 @@ function CaseTab({
             k="Sale"
             v={
               property.saleDate
-                ? `${fmtDate(property.saleDate)}${property.daysSinceSale != null ? ` (${property.daysSinceSale} days ago)` : ''}`
+                ? `${fmtDay(property.saleDate)}${property.daysSinceSale != null ? ` (${property.daysSinceSale} days ago)` : ''}`
                 : 'unknown'
             }
           />
           <Row
             k="Notice mailed"
-            v={property.noticeDate ? fmtDate(property.noticeDate) : 'unknown'}
+            v={property.noticeDate ? fmtDay(property.noticeDate) : 'unknown'}
             note={
               property.noticeConfirmed
                 ? undefined
