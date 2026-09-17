@@ -1311,7 +1311,7 @@ describe('the criteria for a paid lookup', () => {
   const day = 86400000;
   const ago = (days: number) => new Date(Date.now() - days * day);
 
-  it('refuses a competing claim on file, a notice over a year old, and a dead claimant, and says why', async () => {
+  it('refuses a competing claim, a notice over a year old, one too fresh to work, and a dead claimant, and says why', async () => {
     const make = (id: string, over: any) => {
       const l: any = lead({ id, detailId: `d${id}`, caseNumber: `C${id}`, street: `${id}00 MAIN ST`, first: 'JANE', last: `DOE${id}` });
       Object.assign(l.surplusDetail, over);
@@ -1321,15 +1321,18 @@ describe('the criteria for a paid lookup', () => {
       make('1', { claimStatus: 'pending', noticeDate: ago(30) }),
       make('2', { claimStatus: 'open', noticeDate: ago(400) }),
       make('3', { claimStatus: 'open', saleDate: ago(500) }),
-      make('4', { claimStatus: 'open', noticeDate: ago(30), deceased: true }),
+      make('4', { claimStatus: 'open', noticeDate: ago(200), deceased: true }),
       make('5', { claimStatus: 'assigned' }),
+      // Inside the 120 day claim window: nobody can be approached yet, so no
+      // credit is spent on finding them.
+      make('6', { claimStatus: 'open', noticeDate: ago(30) }),
     ]);
     respond([]);
 
     const r = await svc.traceLeads({ organizationId: 'org', nameSearch: false });
 
     expect(r.candidates).toBe(0);
-    expect(r.skipped).toMatchObject({ claim_on_file: 1, over_a_year: 2, estate: 1, closed: 1 });
+    expect(r.skipped).toMatchObject({ claim_on_file: 1, over_a_year: 2, estate: 1, closed: 1, too_early: 1 });
     expect(r.message).toMatch(/^Not traced: somebody else has a claim on file/);
     expect(mockedAxios.post).not.toHaveBeenCalled();
   });

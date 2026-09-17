@@ -79,6 +79,7 @@ import {
 } from './surplus.util';
 import {
   SURPLUS_FLOOR,
+  SURPLUS_EARLY_DAYS,
   DISCLOSURE_LABELS,
   courtRecordsUrl,
   ruleFor,
@@ -1784,13 +1785,33 @@ export class SurplusService {
 
     if (filters.hideDnc) detailWhere.doNotCall = false;
 
+    const now = new Date();
+    const back = (days: number) => {
+      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      d.setDate(d.getDate() - days);
+      return d;
+    };
+
+    // Too early to work. Nobody can be approached until the 120 day claim
+    // window is nearly up, so the board opens on the claims that are ready and
+    // these are one toggle away. The notice is the clock; the sale stands in
+    // where no notice has been read, the same fallback the trace gate uses, and
+    // a claim with neither date stays visible because unknown is not early.
+    if (filters.hideEarly) {
+      const opensAt = back(SURPLUS_EARLY_DAYS);
+      detailWhere.AND = [
+        ...(detailWhere.AND || []),
+        {
+          OR: [
+            { noticeDate: { lte: opensAt } },
+            { noticeDate: null, saleDate: { lte: opensAt } },
+            { noticeDate: null, saleDate: null },
+          ],
+        },
+      ];
+    }
+
     if (filters.noticeAge) {
-      const now = new Date();
-      const back = (days: number) => {
-        const d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        d.setDate(d.getDate() - days);
-        return d;
-      };
       if (filters.noticeAge === '0-7') detailWhere.noticeDate = { gte: back(7) };
       if (filters.noticeAge === '8-30') detailWhere.noticeDate = { gte: back(30), lt: back(7) };
       if (filters.noticeAge === '31-120') detailWhere.noticeDate = { gte: back(120), lt: back(30) };

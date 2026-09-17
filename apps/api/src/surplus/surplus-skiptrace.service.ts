@@ -43,6 +43,7 @@ import {
   TraceVerdict,
   deathIsTheClaimants,
   traceCriteria,
+  TRACE_MIN_AGE_DAYS,
   relativeKind,
   TRACE_MAX_AGE_DAYS,
   displayName,
@@ -81,6 +82,13 @@ const CALL_DELAY_MS = 250;
  * without paying for every cousin.
  */
 const DEFAULT_RELATIVE_LOOKUPS = 4;
+
+/**
+ * How far back the matured sweep looks. A county pulls weekly, so two weeks
+ * covers every claim that crossed the floor since the last run with room for
+ * a missed pull, without reopening the whole back catalogue.
+ */
+const MATURED_WINDOW_DAYS = 14;
 /** How a vendor relative is labelled on the lead, by what their birth year makes them. */
 const RELATIVE_LABEL: Record<string, string> = {
   spouse: 'Spouse',
@@ -252,6 +260,7 @@ export class SurplusSkiptraceService {
   private readonly relativeCap: number;
   /** Days from the surplus notice after which nothing is looked up. */
   private readonly maxAgeDays: number;
+  private readonly minAgeDays: number;
 
   constructor(
     private prisma: PrismaService,
@@ -265,9 +274,55 @@ export class SurplusSkiptraceService {
     this.relativeCap = Number.isFinite(cap) && cap >= 0 ? cap : DEFAULT_RELATIVE_LOOKUPS;
     const age = Number(this.config.get<string>('SURPLUS_TRACE_MAX_AGE_DAYS'));
     this.maxAgeDays = Number.isFinite(age) && age > 0 ? age : TRACE_MAX_AGE_DAYS;
+    // The floor: nothing is bought before the claim window is nearly up. 0
+    // turns the floor off and traces from the day the case lands.
+    const young = Number(this.config.get<string>('SURPLUS_TRACE_MIN_AGE_DAYS'));
+    this.minAgeDays = Number.isFinite(young) && young >= 0 ? young : TRACE_MIN_AGE_DAYS;
     this.batchBaseUrl = (
       this.config.get<string>('BATCHDATA_API_BASE_URL') || BATCHDATA_DEFAULT_BASE_URL
     ).replace(/\/+$/, '');
+  }
+
+  /**
+   * Claims that have just become workable.
+   *
+   * A claim pulled inside its 120 day window is refused a lookup, and the
+   * pull only traces what it created, so without this nobody would ever go
+   * back for it. This is that second look: claims in one county that crossed
+   * the floor recently, still have no number, and have never been traced.
+   *
+   * Bounded on purpose. Only the ones that crossed in the last `windowDays`
+   * are returned, so a run costs about a week of new claims rather than every
+   * untraced lead on the board.
+   */
+  async maturedLeadIds(opts: {
+    organizationId?: string | null;
+    county?: string;
+    windowDays?: number;
+    now?: Date;
+  }): Promise<string[]> {
+    if (!this.minAgeDays) return [];
+    const now = opts.now || new Date();
+    const at = (days: number) => new Date(now.getTime() - days * 86400000);
+    const opensAt = at(this.minAgeDays);
+    const justOpened = at(this.minAgeDays + (opts.windowDays ?? MATURED_WINDOW_DAYS));
+    const between = { lte: opensAt, gte: justOpened };
+    const leads = await this.prisma.lead.findMany({
+      where: {
+        source: LeadSource.SURPLUS,
+        ...(opts.organizationId ? { organizationId: opts.organizationId } : {}),
+        sellerPhone: '',
+        surplusDetail: {
+          is: {
+            ...(opts.county ? { county: opts.county } : {}),
+            tracedAt: null,
+            OR: [{ noticeDate: between }, { noticeDate: null, saleDate: between }],
+          },
+        },
+      },
+      select: { id: true },
+    });
+    return leads.map((l) => l.id);
   }
 
   /**
@@ -333,7 +388,7 @@ export class SurplusSkiptraceService {
     let refusal: string | null = null;
     const eligible = leads.filter((l) => {
       if (!l.surplusDetail) return false;
-      const g = traceCriteria(l.surplusDetail, { maxAgeDays: this.maxAgeDays });
+      const g = traceCriteria(l.surplusDetail, { maxAgeDays: this.maxAgeDays, minAgeDays: this.minAgeDays });
       if (g.ok) return true;
       result.skipped[g.reason!] = (result.skipped[g.reason!] || 0) + 1;
       refusal = refusal || g.detail;
@@ -599,7 +654,7 @@ export class SurplusSkiptraceService {
       include: { surplusDetail: true },
     });
     const cands = leads
-      .filter((l) => l.surplusDetail && traceCriteria(l.surplusDetail, { maxAgeDays: this.maxAgeDays }).ok)
+      .filter((l) => l.surplusDetail && traceCriteria(l.surplusDetail, { maxAgeDays: this.maxAgeDays, minAgeDays: this.minAgeDays }).ok)
       .map((l) => candidateOf(l))
       .filter((c) => c.nameKnown);
     out.candidates = cands.length;
@@ -732,7 +787,7 @@ export class SurplusSkiptraceService {
       include: { surplusDetail: { include: { heirs: true } } },
     });
     const rows = leads
-      .filter((l) => l.surplusDetail && traceCriteria(l.surplusDetail, { estate: true, maxAgeDays: this.maxAgeDays }).ok)
+      .filter((l) => l.surplusDetail && traceCriteria(l.surplusDetail, { estate: true, maxAgeDays: this.maxAgeDays, minAgeDays: this.minAgeDays }).ok)
       .sort((a, b) => (b.surplusDetail!.grossSurplus || 0) - (a.surplusDetail!.grossSurplus || 0));
     out.deceasedClaimants = rows.length;
 
@@ -898,7 +953,7 @@ export class SurplusSkiptraceService {
       include: { surplusDetail: { include: { heirs: true } } },
     });
     const eligible = leads
-      .filter((l) => l.surplusDetail && traceCriteria(l.surplusDetail, { estate: true, maxAgeDays: this.maxAgeDays }).ok)
+      .filter((l) => l.surplusDetail && traceCriteria(l.surplusDetail, { estate: true, maxAgeDays: this.maxAgeDays, minAgeDays: this.minAgeDays }).ok)
       .filter((l) => {
         const hs = (l.surplusDetail as any).heirs || [];
         const hasVendorRelatives = hs.some((h: any) => h.sourceKind === 'endato');
@@ -1126,7 +1181,7 @@ export class SurplusSkiptraceService {
       // file, notice under a year old. An heir is who works an estate, so
       // the estate check does not apply here.
       const g = heir.surplusDetail
-        ? traceCriteria(heir.surplusDetail, { estate: true, maxAgeDays: this.maxAgeDays })
+        ? traceCriteria(heir.surplusDetail, { estate: true, maxAgeDays: this.maxAgeDays, minAgeDays: this.minAgeDays })
         : { ok: true, reason: null, detail: null };
       if (!g.ok) {
         result.skipped[g.reason!] = (result.skipped[g.reason!] || 0) + 1;

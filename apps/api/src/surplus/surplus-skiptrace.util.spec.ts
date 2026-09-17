@@ -366,6 +366,21 @@ describe('traceCriteria', () => {
     expect(traceCriteria({ claimStatus: 'open', saleDate: '2025-09-01' }, { now }).detail).toMatch(/the sale was 2025-09-01/);
     expect(traceCriteria({ claimStatus: 'open' }, { now }).ok).toBe(true);
   });
+  it('waits until the claim window is nearly up before spending on a lookup', () => {
+    // The claimant cannot be approached until the 120 day window is nearly
+    // gone, so a fresh notice is not traced yet.
+    const fresh = traceCriteria({ claimStatus: 'open', noticeDate: '2026-08-20' }, { now, minAgeDays: 110 });
+    expect(fresh.reason).toBe('too_early');
+    expect(fresh.detail).toMatch(/open up at 110 days/);
+    // 110 days exactly is open, and so is anything older.
+    expect(traceCriteria({ claimStatus: 'open', noticeDate: '2026-05-28' }, { now, minAgeDays: 110 }).ok).toBe(true);
+    expect(traceCriteria({ claimStatus: 'open', noticeDate: '2026-01-01' }, { now, minAgeDays: 110 }).ok).toBe(true);
+    // The sale stands in where no notice has been read.
+    expect(traceCriteria({ claimStatus: 'open', saleDate: '2026-09-01' }, { now, minAgeDays: 110 }).reason).toBe('too_early');
+    // Nothing is held back unless a caller asks for the floor: that is the
+    // paid trace, not the social or obituary search.
+    expect(traceCriteria({ claimStatus: 'open', noticeDate: '2026-08-20' }, { now }).ok).toBe(true);
+  });
   it('keeps denied and government-lien cases, refuses a pending claim and a closed one', () => {
     expect(traceCriteria({ claimStatus: 'denied' }, { now }).ok).toBe(true);
     expect(traceCriteria({ claimStatus: 'gov_lien' }, { now }).ok).toBe(true);

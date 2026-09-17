@@ -247,7 +247,20 @@ export function deathIsTheClaimants(
 /** Days from the surplus notice after which no paid lookup is made. */
 export const TRACE_MAX_AGE_DAYS = 365;
 
-export type CriteriaRefusal = 'claim_on_file' | 'closed' | 'over_a_year' | 'estate';
+/**
+ * Days from the surplus notice before which no skip trace is bought.
+ *
+ * Passed by SurplusSkiptraceService, which spends the BatchData and Endato
+ * credits. `traceCriteria` itself defaults to no floor.
+ *
+ * The claim window is 120 days from the mailed notice, and the claimant
+ * cannot be approached until it is nearly up. A lookup bought before then is
+ * bought early: the claim may be settled by the owner in the meantime, and
+ * the numbers go stale while it waits. 110 leaves time to prepare.
+ */
+export const TRACE_MIN_AGE_DAYS = 110;
+
+export type CriteriaRefusal = 'claim_on_file' | 'closed' | 'over_a_year' | 'too_early' | 'estate';
 
 export interface TraceCriteriaResult {
   ok: boolean;
@@ -269,6 +282,12 @@ export interface TraceCriteriaResult {
  *   - Assigned or paid out: closed.
  *   - The surplus notice over a year old (the sale date when no notice is on
  *     file): not worth it. No date at all means the clock has not started.
+ *   - The notice under `minAgeDays` old: too early. The claimant cannot be
+ *     approached until the 120 day claim window is nearly up, so a paid
+ *     lookup waits rather than being bought and going stale. The floor is
+ *     off unless a caller passes it, because it belongs to the BatchData and
+ *     Endato paths; the social and obituary searches read what is already
+ *     published and are not held back by it.
  *   - The county lists the claimant as dead: never trace the dead person. The
  *     estate search looks for their family instead, so estate paths pass
  *     `estate: true`.
@@ -283,7 +302,7 @@ export function traceCriteria(
     deceased?: boolean | null;
     heirsRequired?: boolean | null;
   },
-  opts: { estate?: boolean; now?: Date; maxAgeDays?: number } = {},
+  opts: { estate?: boolean; now?: Date; maxAgeDays?: number; minAgeDays?: number } = {},
 ): TraceCriteriaResult {
   const status = String(d.claimStatus || '').toLowerCase();
   if (status === 'pending') {
@@ -305,14 +324,24 @@ export function traceCriteria(
   const basis = d.noticeDate || d.saleDate;
   const when = basis ? new Date(basis) : null;
   const maxAge = opts.maxAgeDays ?? TRACE_MAX_AGE_DAYS;
+  const minAge = opts.minAgeDays ?? 0;
   if (when && !isNaN(when.getTime())) {
     const days = ((opts.now || new Date()).getTime() - when.getTime()) / 86400000;
+    const label = d.noticeDate ? 'surplus notice' : 'sale';
     if (days > maxAge) {
-      const label = d.noticeDate ? 'surplus notice' : 'sale';
       return {
         ok: false,
         reason: 'over_a_year',
         detail: `Not traced: the ${label} was ${when.toISOString().slice(0, 10)}, over ${maxAge} days ago.`,
+      };
+    }
+    // Too early. The claim window has to be nearly up before the claimant can
+    // be approached, so the lookup waits rather than going stale.
+    if (days < minAge) {
+      return {
+        ok: false,
+        reason: 'too_early',
+        detail: `Not traced yet: the ${label} was ${Math.floor(days)} days ago and these open up at ${minAge} days.`,
       };
     }
   }

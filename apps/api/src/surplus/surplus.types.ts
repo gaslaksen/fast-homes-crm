@@ -95,6 +95,11 @@ export interface SurplusListFilters {
   band?: string;
   /** '0-7' | '8-30' | '31-120' | '120+' */
   noticeAge?: string;
+  /**
+   * Hide claims whose notice (or sale, where no notice has been read) is
+   * younger than SURPLUS_EARLY_DAYS. The board sends this on by default.
+   */
+  hideEarly?: boolean;
   /** 'open' | 'closed' */
   lienWindow?: string;
   /** 'property' (default) groups claimants by subject property; 'lead' does not. */

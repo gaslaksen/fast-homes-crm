@@ -89,6 +89,13 @@ export class SurplusPollService {
             });
             this.logger.log(`Surplus poll ${adapter.key} done: ${JSON.stringify(result)}`);
             await this.traceNew(adapter.key, result.runId, createdLeadIds, organizationId);
+            // And the claims that were too fresh to look up when they landed
+            // and have now crossed the 110 day mark. Without this the floor
+            // would strand them: the pull only traces what it created.
+            const matured = await this.skiptrace
+              .maturedLeadIds({ organizationId: organizationId || null, county: adapter.county })
+              .catch(() => [] as string[]);
+            await this.traceNew(adapter.key, result.runId, matured, organizationId, 'now workable');
           } catch (e: any) {
             this.logger.error(`Surplus poll ${adapter.key} failed: ${e.message}`);
           } finally {
@@ -111,6 +118,8 @@ export class SurplusPollService {
     runId: string,
     leadIds: string[],
     organizationId: string | undefined,
+    /** What this batch is, for the run note. The pull's own leads are "new". */
+    label = 'new',
   ): Promise<SurplusTraceResult | null> {
     if (!this.autoTrace || !leadIds.length) return null;
     try {
@@ -125,7 +134,7 @@ export class SurplusPollService {
       // spouse and likely children looked up.
       const estates = await this.skiptrace.estateRelatives({ organizationId: organizationId || null, leadIds });
       const estateNote = estates.searched
-        ? `. Estate search on ${estates.searched} new estate${estates.searched === 1 ? '' : 's'}: ${estates.matched} matched, ${estates.withContact} relative${estates.withContact === 1 ? '' : 's'} with a number`
+        ? `. Estate search on ${estates.searched} ${label} estate${estates.searched === 1 ? '' : 's'}: ${estates.matched} matched, ${estates.withContact} relative${estates.withContact === 1 ? '' : 's'} with a number`
         : '';
       // Last, the obituary search on the new estates the estate search left
       // with nobody reachable: the obituary names the children. Paused unless
@@ -145,14 +154,14 @@ export class SurplusPollService {
       const socialNote = social?.checked
         ? `. Social search on ${social.checked}: ${social.found} with a profile to check`
         : '';
-      const note = describeTrace(leadIds.length, trace) + estateNote + obitNote + socialNote;
+      const note = describeTrace(leadIds.length, trace, label) + estateNote + obitNote + socialNote;
       this.logger.log(`Surplus trace ${source}: ${note}`);
       await this.ingest.noteRun(runId, note);
       return trace;
     } catch (e: any) {
       this.logger.error(`Surplus trace ${source} failed: ${e.message}`);
       await this.ingest
-        .noteRun(runId, `Trace failed on the ${leadIds.length} new: ${e.message}`)
+        .noteRun(runId, `Trace failed on the ${leadIds.length} ${label}: ${e.message}`)
         .catch(() => undefined);
       return null;
     }
@@ -173,9 +182,9 @@ export class SurplusPollService {
  * (`describeCounts` reads the "X of Y new" pair). Keep the shape if you
  * reword it.
  */
-export function describeTrace(newLeads: number, t: SurplusTraceResult): string {
+export function describeTrace(newLeads: number, t: SurplusTraceResult, label = 'new'): string {
   if (t.message && !t.submitted && !t.nameSearch.searched) {
-    return `Trace skipped on the ${newLeads} new: ${t.message}`;
+    return `Trace skipped on the ${newLeads} ${label}: ${t.message}`;
   }
   const bits = [
     `${t.submitted} address lookup${t.submitted === 1 ? '' : 's'}`,
@@ -186,5 +195,5 @@ export function describeTrace(newLeads: number, t: SurplusTraceResult): string {
     t.errors ? `${t.errors} error${t.errors === 1 ? '' : 's'}` : null,
   ].filter(Boolean);
   const dead = t.deceased ? `, ${t.deceased} more found deceased` : '';
-  return `Traced ${t.contacted} of ${newLeads} new to a number${dead} (${bits.join(', ')})`;
+  return `Traced ${t.contacted} of ${newLeads} ${label} to a number${dead} (${bits.join(', ')})`;
 }
