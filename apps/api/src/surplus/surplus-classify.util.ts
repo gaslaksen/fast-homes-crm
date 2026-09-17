@@ -151,6 +151,9 @@ const RULES: Rule[] = [
     seenIn: 'Lake',
   },
   { kind: 'other', re: /^surplus\s*claim\s*determination/i, seenIn: 'Lake' },
+  // Santa Rosa: "2025202 UPDATED CLAIM TO SURPLUS.pdf" re-files a claim
+  // already on the docket and names nobody.
+  { kind: 'claim_attachment', re: /^\d*\s*updated\s+claim\b/i, seenIn: 'Santa Rosa' },
   // Payouts off the top to the applicant and the tax collector. Present on
   // every Duval case including ones with no claim at all.
   {
@@ -209,7 +212,7 @@ const RULES: Rule[] = [
     // Alachua: "lytle pearl returned CM", "dewey diane elaine CM returned",
     // "geraldine platt heirs rtnd CM", "ford nick reg mail returned",
     // "williams lavoria c reg mail retuned", "Sanders Shirley.reg returned mail".
-    re: /undeliver|undelieve|unable\s*to\s*forward|returned\s*(?:certified\s*|regular\s*|surplus\s*|reg\.?\s*)?mail|\bmail\s*return(?:ed)?\b|unclaimed\s*mail|vacant|no\s*such\s*number|attempted\s*-?\s*not\s*known|\breturned\s*cm\b|\bcm\s*returned\b|\br(?:e)?t(?:u)?r?nd\s*cm\b|\breg\.?\s*mail\s*ret(?:urned|uned)\b|\breg\.?\s*returned\s*mail\b/i,
+    re: /undeliver|undelieve|unable\s*to\s*forward|returned\s*(?:certified\s*|regular\s*|surplus\s*|reg\.?\s*)?mail|\bmail\s*return(?:ed)?\b|unclaimed\s*mail|vacant|no\s*such\s*number|attempted\s*-?\s*not\s*known|\breturned\s*cm\b|\bcm\s*returned\b|\br(?:e)?t(?:u)?r?nd\s*cm\b|\breg\.?\s*mail\s*ret(?:urned|uned)\b|\breg\.?\s*returned\s*mail\b|\b(?:returned|rtn)\b(?:\s+[a-z]+){0,3}?\s+mail\b/i,
     seenIn: 'Duval, Brevard, Polk, Pinellas, Lake',
   },
   {
@@ -260,7 +263,8 @@ const RULES: Rule[] = [
     kind: 'claim',
     // Alachua ends the title with it: "walker adrian surplus claim", "Young
     // Rose claim", "City of Gainesville Amended Claim.pdf", "... Claim 3".
-    re: /submitted\s*claim|statement\s*of\s*claim|statment\s*of\s*claim|state\s*of\s*claim|statement\s*claim|surplus\s*claims?\s*received|surplus\s*claim|surplus\s*\/\s*claims?\s*document|claim\s*to\s*receive|\bclaim(?:\s+\d+)?(?:\.pdf)?\s*$/i,
+    // Santa Rosa: "CLAIM TO SURPLUS - NAME", misspelt SUPLUS and SUPRLUS.
+    re: /claim\s*to\s*su[a-z]{3,5}\b|submitted\s*claim|statement\s*of\s*claim|statment\s*of\s*claim|state\s*of\s*claim|statement\s*claim|surplus\s*claims?\s*received|surplus\s*claim|surplus\s*\/\s*claims?\s*document|claim\s*to\s*receive|\bclaim(?:\s+\d+)?(?:\.pdf)?\s*$/i,
     seenIn: 'Duval, Lee, Brevard, Alachua, Polk',
   },
 
@@ -591,7 +595,7 @@ const ESTATE_OF = /^THE\s+ESTATE\s+OF\s+/i;
 // DEV" as an owner, and a name search for a person called USA DEV is a credit
 // spent on nobody.
 const ENTITY =
-  /\b(LLC|L\.L\.C|INC|CORP|CORPORATION|COMPANY|CO|LP|LLP|LLLP|LTD|TRUST|ASSOCIATION|CHURCH|BANK|PARTNERS|HOLDINGS|DEPARTMENT|DEPT|SECRETARY|HOUSING|DEVELOPMENT|DEV|UNITED\s+STATES|USA|COUNTY|CITY\s+OF|STATE\s+OF|AUTHORITY|MORTGAGE|CREDIT\s+UNION|MINISTR(?:Y|IES)|FOUNDATION)\b/i;
+  /\b(LLC|L\.L\.C|INC|CORP|CORPORATION|COMPANY|CO|LP|LLP|LLLP|LTD|TRUST|ASSOCIATION|ASSOC|HOMEOWNERS|HOA|CONDOMINIUM|CONDO|INVESTMENTS|ENTERPRISES|PROPERTIES|REALTY|CHURCH|BANK|PARTNERS|HOLDINGS|DEPARTMENT|DEPT|SECRETARY|HOUSING|DEVELOPMENT|DEV|UNITED\s+STATES|USA|COUNTY|CITY\s+OF|STATE\s+OF|AUTHORITY|MORTGAGE|CREDIT\s+UNION|MINISTR(?:Y|IES)|FOUNDATION)\b/i;
 /**
  * A company-type suffix at the END of a name only. Stripped before grouping so
  * `HEAVENLY HANDS FUNDING` and `HEAVENLY HANDS FUNDING, LLC` are one claimant.

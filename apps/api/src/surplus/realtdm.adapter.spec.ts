@@ -1270,3 +1270,66 @@ describe('classifying live Alachua dockets', () => {
   });
 });
 
+describe('Santa Rosa', () => {
+  it('reads the claimant out of CLAIM TO SURPLUS in all its spellings, and a company files for the person after it', () => {
+    // Verbatim labels from the 2026-09-17 discovery pass.
+    expect(claimantFromTitle('2025127 CLAIM TO SURPLUS - GAVIN SHUCK.pdf')).toBe('GAVIN SHUCK');
+    expect(claimantFromTitle('2025236 CLAIM TO SUPLUS - THERESE RUIZ RITCHIE.pdf')).toBe('THERESE RUIZ RITCHIE');
+    expect(claimantFromTitle('2026013 CLAIM TO SUPRLUS - LAURA DUNN.pdf')).toBe('LAURA DUNN');
+    expect(claimantFromTitle('2025233 CLAIM TO SURPLUS GG ELITE SERVICES LLC - AYELET GOLDBERG.pdf')).toBe('GG ELITE SERVICES LLC obo AYELET GOLDBERG');
+    expect(claimantFromTitle('2025084 CLAIM TO SURPLUS 0 GET LIQUID FUNDING LLC - MICHELE HUSBAND.pdf')).toBe('GET LIQUID FUNDING LLC obo MICHELE HUSBAND');
+    expect(claimantFromTitle('2026015 CLAIM TO SURPLUS - GET LIQUID FUNDING - JASON ROBERT FAGAN.pdf')).toBe('GET LIQUID FUNDING obo JASON ROBERT FAGAN');
+    expect(claimantFromTitle('2025052 CLAIM TO SURPLUS - THE RECOVERY AGENTS LLC - DEBRA TYLER & LELAND VANDERPOOL (3).pdf'))
+      .toBe('THE RECOVERY AGENTS LLC obo DEBRA TYLER & LELAND VANDERPOOL');
+    expect(claimantFromTitle('2025061 NO CLAIM TO SURPLUS - FREDDY WAYNE BROWN.pdf')).toBeNull();
+    expect(claimantFromTitle('2025202 UPDATED CLAIM TO SURPLUS.pdf')).toBeNull();
+  });
+
+  it('owner lines and company words', () => {
+    expect(cleanOwnerLine('SR ANDRES CORRAL & ET AL')).toBe('SR ANDRES CORRAL');
+    expect(collapseClaimants(['CAMELLIAS HOMEOWNERS ASSOC'])[0].isEntity).toBe(true);
+  });
+});
+
+describe('classifying live Santa Rosa dockets', () => {
+  const sr = (title: string, filedAt: string) => ({ title, filedAt, claimant: claimantFromTitle(title) });
+
+  it('2025052: eight copies of one recovery company\'s claim are one claim, and the wire at the sale is not a payout', () => {
+    const v = classifyCase(
+      [
+        sr('SURPLUS_LETTER', '2025-08-06'),
+        sr('2025052 WIRE PMT.pdf', '2025-08-07'),
+        sr('2025052 REFUND LTR.pdf', '2025-08-07'),
+        ...[1, 2, 3, 4, 5, 6, 7, 8].map((n) => sr(`2025052 CLAIM TO SURPLUS - THE RECOVERY AGENTS LLC - DEBRA TYLER & LELAND VANDERPOOL (${n}).pdf`, '2025-09-29')),
+      ],
+      { owners: ['RICHARD E DAVISON', 'CHERYL R DAVISON'] },
+    );
+    expect(v.counts.claims).toBe(1);
+    expect(v.counts.distributions).toBe(0);
+    expect(v.claimStatus).toBe('pending');
+  });
+
+  it('2025233: a recovery company filing for the owner closes it; 2026075: the county alone is a lien', () => {
+    expect(classifyCase([sr('SURPLUS_LETTER', '2026-03-04'), sr('2025233 CLAIM TO SURPLUS GG ELITE SERVICES LLC - AYELET GOLDBERG.pdf', '2026-07-13')], { owners: ['AYELET GOLDBERG'] }).claimStatus)
+      .toBe('assigned');
+    expect(classifyCase([sr('SURPLUS_LETTER', '2026-08-12'), sr('2026075 CLAIM TO SURPLUS - SANTA ROSA COUNTY.pdf', '2026-08-24')], { owners: ['RHONDA CASTLEBERRY'] }).claimStatus)
+      .toBe('gov_lien');
+  });
+
+  it('2026005: returned certified surplus mail after the letter is a dead address; an attorney memo is nothing', () => {
+    const v = classifyCase(
+      [
+        sr('SURPLUS_LETTER', '2026-03-11'),
+        sr('2026005 RETURNED CERTIFIED SURPLUS MAIL (1).pdf', '2026-04-13'),
+        sr('2025165 SURPLUS RTN REG MAIL.pdf', '2026-04-13'),
+        sr('2025185 RTN CERT MAIL.pdf', '2026-04-13'),
+        sr('2026005 ATTY MEMO.pdf', '2026-09-14'),
+      ],
+      { owners: ['JANE DOE'] },
+    );
+    expect(v.mailVerdict).toBe('undeliverable');
+    expect(v.ledger.filter((d) => d.kind === 'mail_undeliverable')).toHaveLength(3);
+    expect(v.claimStatus).toBe('open');
+  });
+});
+

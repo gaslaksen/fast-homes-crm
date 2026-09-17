@@ -403,6 +403,19 @@ export function claimantFromTitle(title: string): string | null {
   // adrian surplus claim", "Copy of meinert chloe surplus claim", "City of
   // Gainesville Amended Claim.pdf", and pays them as "ob.clm disburse.richardson
   // earl check".
+  // Santa Rosa: "2025127 CLAIM TO SURPLUS - GAVIN SHUCK.pdf", "CLAIM TO SURPLUS
+  // GG ELITE SERVICES LLC - AYELET GOLDBERG", "CLAIM TO SURPLUS 0 GET LIQUID
+  // FUNDING LLC - MICHELE HUSBAND", copies numbered "(1)" to "(8)". A company
+  // in front of a person files for that person, which the claimant reader
+  // takes as "obo". "NO CLAIM TO SURPLUS" withdraws one and names nobody.
+  const toSurplus = /claim\s*to\s*su[a-z]{3,5}\b\s*[-0]?\s*(.*?)(?:\s*\(\d+\))?(?:\.pdf)?\s*$/i.exec(t);
+  if (toSurplus) {
+    if (/^\s*(?:\d+\s+)?no\s+claim/i.test(t)) return null;
+    const who = toSurplus[1].replace(/\s+/g, ' ').trim();
+    if (!who) return null;
+    const agent = /^(.+?\b(?:LLC|L\.L\.C\.?|INC\.?|FUNDING|RECOVERY|SERVICES|GROUP|CAPITAL|AGENTS))\s*-\s*(.+)$/i.exec(who);
+    return agent ? `${agent[1]} obo ${agent[2]}` : who;
+  }
   const paid = /ob\.?\s*clm\.?\s*disburse\.?\s*(.+?)(?:\.\d{2,}.*|\s+check.*|\.docx|\.pdf)?\s*$/i.exec(t);
   if (paid) return paid[1].replace(/\s+/g, ' ').trim() || null;
   const named = /\bwaiver\b|^review\s+of\b|\bemail\b/i.test(t)
@@ -553,7 +566,7 @@ export function noticeDateFromLetter(letterText: string): string | null {
 const KEEP_SEGMENT = /^(SR|JR|II|III|IV|V|ESQ|TRUSTEE|TR|ET\s*AL|ETAL|ESTATE\s*OF|DECEASED|LLC|INC|CORP|LTD|LP|LLP|PA|PLLC)\.?$/i;
 /** A line with one of these is an organisation, whatever conjunction sits in it. */
 const ENTITY_WORD =
-  /\b(LLC|L\.L\.C|INC|CORP|CORPORATION|COMPANY|CO|LP|LLP|LTD|TRUST|BANK|ASSOCIATION|AUTHORITY|DEPARTMENT|DEPT|SECRETARY|HOUSING|DEVELOPMENT|DEV|UNITED\s+STATES|USA|COUNTY|CITY|STATE\s+OF|MORTGAGE|CREDIT\s+UNION|CHURCH|MINISTR(?:Y|IES)|FOUNDATION)\b/i;
+  /\b(LLC|L\.L\.C|INC|CORP|CORPORATION|COMPANY|CO|LP|LLP|LTD|TRUST|BANK|ASSOCIATION|ASSOC|HOMEOWNERS|HOA|CONDOMINIUM|CONDO|INVESTMENTS|ENTERPRISES|PROPERTIES|REALTY|AUTHORITY|DEPARTMENT|DEPT|SECRETARY|HOUSING|DEVELOPMENT|DEV|UNITED\s+STATES|USA|COUNTY|CITY|STATE\s+OF|MORTGAGE|CREDIT\s+UNION|CHURCH|MINISTR(?:Y|IES)|FOUNDATION)\b/i;
 
 /** Whole name: at least two tokens, and any comma segment after the first is a suffix. */
 function isWholeName(p: string): boolean {
@@ -631,6 +644,8 @@ export function cleanOwnerLine(raw: string): string | null {
     // D JONES", "SADIE M BALDWIN ET AL".
     .replace(/\s+C\/O\s+.*$/i, '')
     .replace(/,?\s+ET\s*AL\.?\s*$/i, '')
+    // "SR ANDRES CORRAL & ET AL" leaves a dangling ampersand.
+    .replace(/\s*&\s*$/, '')
     // The account type on a custodial line: "DENISE BAGLEY IRA".
     .replace(/\s+(?:ROTH\s+|SEP\s+)?IRA\b.*$/i, '')
     .replace(/\s+/g, ' ')
@@ -1132,6 +1147,25 @@ export class AlachuaRealTdmAdapter extends RealTdmAdapter {
       payoutsArePartial: true,
       ownersFromRollOnly: true,
     });
+  }
+}
+
+/**
+ * Santa Rosa County, `santarosa.realtdm.com`. Discovery 2026-09-17 on all 39
+ * live cases over the floor (427 listed, $1.65M). Claims are "NNNNNNN CLAIM TO
+ * SURPLUS - NAME.pdf" (also SUPLUS, SUPRLUS, a missing dash, a "0" for the
+ * dash, numbered copies), often with a recovery company in front of the
+ * person it files for. "NO CLAIM TO SURPLUS" withdraws one; "UPDATED CLAIM TO
+ * SURPLUS" re-files one. Mail comes back as "RTN CERT MAIL", "RETURNED
+ * CERTIFIED SURPLUS MAIL", "SURPLUS RTN REG MAIL". "WIRE PMT" and "EFT PMT"
+ * are the purchaser's payment at the sale, not a payout. "ATTY EMAIL", "ATTY
+ * LETTER", "ATTY INVOICE" and "ATTY MEMO" are the clerk's attorney reviewing
+ * the claims, not a ruling.
+ */
+@Injectable()
+export class SantaRosaRealTdmAdapter extends RealTdmAdapter {
+  constructor(config: ConfigService) {
+    super(config, { key: 'realtdm_santarosa', county: 'Santa Rosa', subdomain: 'santarosa' });
   }
 }
 
