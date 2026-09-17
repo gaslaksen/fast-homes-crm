@@ -1,4 +1,4 @@
-import { leadSearchUrl, messageUrl, parseProfileUrl, parseSocialVerdict, searchName, socialSearchCost, socialSearchLinks } from './surplus-social.util';
+import { facebookSearchUrl, leadSearchUrl, messageUrl, parseProfileUrl, parseSocialVerdict, searchName, socialSearchCost, socialSearchLinks } from './surplus-social.util';
 
 /**
  * Profile links as people paste them and as search results carry them. The
@@ -53,14 +53,28 @@ describe('messageUrl', () => {
   });
 });
 
+/** The search a Facebook link lands on, out of the sign-in address that carries it. */
+function fb(url: string): string {
+  const next = new URL(url).searchParams.get('next');
+  return decodeURIComponent(next || '');
+}
+
+describe('facebookSearchUrl', () => {
+  it('goes through the sign-in page, because a signed-out search is a bare Not Found', () => {
+    const u = facebookSearchUrl('people', ' Aleric Clark San Antonio ');
+    expect(u.startsWith('https://www.facebook.com/login/?next=https%3A%2F%2Fwww.facebook.com%2Fsearch%2Fpeople%2F')).toBe(true);
+    expect(fb(u)).toBe('https://www.facebook.com/search/people/?q=Aleric Clark San Antonio');
+  });
+});
+
 describe('socialSearchLinks', () => {
   it('searches every platform, narrowed by the city where one is known', () => {
     const links = socialSearchLinks('ALERIC T. CLARK', 'SAN ANTONIO', 'TX');
     expect(links.map((l) => l.site)).toEqual(['Facebook', 'Google social', 'Instagram', 'LinkedIn', 'X', 'TikTok']);
     // The plain name and the city alone: what found him by hand on 2026-09-17.
-    expect(decodeURIComponent(links[0].url)).toBe('https://www.facebook.com/search/people/?q=Aleric Clark San Antonio');
+    expect(fb(links[0].url)).toBe('https://www.facebook.com/search/people/?q=Aleric Clark San Antonio');
     expect(decodeURIComponent(links[1].url)).toContain('"Aleric Clark" "San Antonio" (site:facebook.com');
-    expect(decodeURIComponent(socialSearchLinks('Aleric Clark', null, 'TX')[0].url)).toContain('q=Aleric Clark TX');
+    expect(fb(socialSearchLinks('Aleric Clark', null, 'TX')[0].url)).toContain('q=Aleric Clark TX');
     expect(links.every((l) => l.free)).toBe(true);
   });
   it('nothing for no name', () => {
@@ -81,13 +95,24 @@ describe('searchName', () => {
 
 describe('leadSearchUrl', () => {
   it('a spouse is searched as themselves in the city, an employer with the claimant', () => {
-    expect(decodeURIComponent(leadSearchUrl({ kind: 'spouse', value: 'Yvette Hinojosa' }, 'ALERIC T. CLARK', 'SAN ANTONIO')!)).toBe(
+    expect(fb(leadSearchUrl({ kind: 'spouse', value: 'Yvette Hinojosa' }, 'ALERIC T. CLARK', 'SAN ANTONIO')!)).toBe(
       'https://www.facebook.com/search/people/?q=Yvette Hinojosa San Antonio',
     );
-    expect(decodeURIComponent(leadSearchUrl({ kind: 'business', value: 'Devonwood Enterprizes Inc' }, 'ALERIC T. CLARK', 'SAN ANTONIO')!)).toBe(
+    expect(fb(leadSearchUrl({ kind: 'business', value: 'Devonwood Enterprizes Inc' }, 'ALERIC T. CLARK', 'SAN ANTONIO')!)).toBe(
       'https://www.facebook.com/search/top/?q=Aleric Clark Devonwood Enterprizes Inc',
     );
     expect(leadSearchUrl({ kind: 'other', value: ' ' }, 'X Y')).toBeNull();
+  });
+  it('the leads from the first live search: no button for a birth date, a repeat of his own name, or his own city', () => {
+    const me = 'ALERIC T. CLARK';
+    expect(leadSearchUrl({ kind: 'other', value: 'Born 02/12/1980 (age ~45)' }, me, 'SAN ANTONIO')).toBeNull();
+    expect(leadSearchUrl({ kind: 'age', value: 'about 45' }, me, 'SAN ANTONIO')).toBeNull();
+    expect(leadSearchUrl({ kind: 'alias', value: 'Aleric T Clark' }, me, 'SAN ANTONIO')).toBeNull();
+    expect(leadSearchUrl({ kind: 'city', value: 'San Antonio, TX (78253, far west side / Sweetwater Way)' }, me, 'SAN ANTONIO')).toBeNull();
+    expect(fb(leadSearchUrl({ kind: 'city', value: 'Brevard County, FL' }, me, 'SAN ANTONIO')!)).toBe(
+      'https://www.facebook.com/search/people/?q=Aleric Clark Brevard County',
+    );
+    expect(fb(leadSearchUrl({ kind: 'alias', value: 'Al Clark' }, me, 'SAN ANTONIO')!)).toContain('q=Al Clark San Antonio');
   });
 });
 
@@ -105,6 +130,7 @@ describe('parseSocialVerdict', () => {
       { kind: 'spouse', value: 'yvette hinojosa', detail: 'duplicate' },
       { kind: 'business', value: 'Devonwood Enterprizes Inc', detail: 'listed as president' },
       { kind: 'nonsense', value: 'Texas Wild Hogs', detail: null },
+      { kind: 'relative', value: 'Charina Clark / Charito Clark', detail: 'family' },
       { kind: 'other', value: '(210) 371-9175', detail: 'a phone is not a lead' },
       { kind: 'other', value: '12 Oak Ln', detail: 'nor is an address' },
     ],
@@ -118,6 +144,8 @@ describe('parseSocialVerdict', () => {
       { kind: 'spouse', value: 'Yvette Hinojosa', detail: 'people-search listing' },
       { kind: 'business', value: 'Devonwood Enterprizes Inc', detail: 'listed as president' },
       { kind: 'other', value: 'Texas Wild Hogs', detail: null },
+      { kind: 'relative', value: 'Charina Clark', detail: 'family' },
+      { kind: 'relative', value: 'Charito Clark', detail: 'family' },
     ]);
   });
   it('reads the JSON after the prose, dedupes by canonical URL, drops pages and bad confidence', () => {

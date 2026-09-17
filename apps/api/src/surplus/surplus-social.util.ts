@@ -166,13 +166,28 @@ export function socialSearchLinks(name: string, city?: string | null, state?: st
     (town ? ` "${town}"` : state ? ` ${String(state).trim()}` : '') +
     ' (site:facebook.com OR site:instagram.com OR site:linkedin.com OR site:x.com OR site:tiktok.com)';
   return [
-    { site: 'Facebook', free: true, url: `https://www.facebook.com/search/people/?q=${encodeURIComponent(withPlace)}` },
+    { site: 'Facebook', free: true, url: facebookSearchUrl('people', withPlace) },
     { site: 'Google social', free: true, url: `https://www.google.com/search?q=${encodeURIComponent(google)}` },
     { site: 'Instagram', free: true, url: `https://www.instagram.com/explore/search/keyword/?q=${encodeURIComponent(n)}` },
     { site: 'LinkedIn', free: true, url: `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(withPlace)}` },
     { site: 'X', free: true, url: `https://x.com/search?q=${encodeURIComponent(`"${n}"`)}&f=user` },
     { site: 'TikTok', free: true, url: `https://www.tiktok.com/search/user?q=${encodeURIComponent(n)}` },
   ];
+}
+
+/**
+ * A Facebook search that survives a browser that is not signed in.
+ *
+ * Signed out, Facebook answers every /search/ address with a bare nine-byte
+ * "Not Found" page and no way forward, which is what the team saw on every
+ * button on 2026-09-17. Its sign-in page takes the search as `next`: signed
+ * in, it passes straight through to the results; signed out, it asks for the
+ * sign-in and then shows them. Measured the same day: the search address
+ * alone returned 404, and the sign-in address carrying it returned the page.
+ */
+export function facebookSearchUrl(scope: 'people' | 'top', q: string): string {
+  const search = `https://www.facebook.com/search/${scope}/?q=${encodeURIComponent(q.trim())}`;
+  return `https://www.facebook.com/login/?next=${encodeURIComponent(search)}`;
 }
 
 /**
@@ -209,12 +224,26 @@ function titleCase(v: string): string {
  * apart from its namesakes.
  */
 export function leadSearchUrl(lead: { kind: string; value: string }, claimant: string, city?: string | null): string | null {
-  const v = String(lead.value || '').trim();
+  // A parenthetical is commentary, not something to type into a search box.
+  const v = String(lead.value || '').replace(/\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim();
   if (!v) return null;
+  // An age, a birth date or a loose note tells a person which profile is
+  // theirs. It is not a search: "Aleric Clark Born 02/12/1980" finds nothing.
+  if (lead.kind === 'age' || lead.kind === 'other' || /\d{2}/.test(v)) return null;
+  const me = searchName(claimant);
   const town = titleCase(String(city || '').trim());
-  const person = ['spouse', 'relative', 'alias'].includes(lead.kind);
-  const q = person ? [searchName(v) || v, town].filter(Boolean).join(' ') : `${searchName(claimant)} ${v}`;
-  return `https://www.facebook.com/search/${person || lead.kind === 'city' ? 'people' : 'top'}/?q=${encodeURIComponent(q.trim())}`;
+  if (lead.kind === 'city') {
+    // The town alone: "San Antonio, TX" and "Brevard County, FL" lose the state.
+    const place = titleCase(v.split(',')[0].trim());
+    return place && place.toLowerCase() !== town.toLowerCase() ? facebookSearchUrl('people', `${me} ${place}`) : null;
+  }
+  if (['spouse', 'relative', 'alias'].includes(lead.kind)) {
+    const them = searchName(v) || v;
+    // Another spelling that comes out as the same search is the button above.
+    if (lead.kind === 'alias' && them === me) return null;
+    return facebookSearchUrl('people', [them, town].filter(Boolean).join(' '));
+  }
+  return facebookSearchUrl('top', `${me} ${v}`);
 }
 
 // ─── The search itself ──────────────────────────────────────────────────────
@@ -230,14 +259,14 @@ export interface SocialCandidate {
 
 /** Something about the person that is not a profile but leads to one. */
 export interface SocialLead {
-  /** 'spouse' | 'relative' | 'alias' | 'employer' | 'business' | 'school' | 'team' | 'city' | 'other' */
+  /** 'spouse' | 'relative' | 'alias' | 'employer' | 'business' | 'school' | 'team' | 'city' | 'age' | 'other' */
   kind: string;
   value: string;
   /** Where it came from and what it says, in a few words. */
   detail: string | null;
 }
 
-export const SOCIAL_LEAD_KINDS = ['spouse', 'relative', 'alias', 'employer', 'business', 'school', 'team', 'city', 'other'];
+export const SOCIAL_LEAD_KINDS = ['spouse', 'relative', 'alias', 'employer', 'business', 'school', 'team', 'city', 'age', 'other'];
 
 export interface SocialVerdict {
   profiles: SocialCandidate[];
@@ -276,8 +305,8 @@ Confidence:
 Common names produce many profiles for other people. Offer at most five, best first. When in doubt between strong and possible, choose possible. Never invent a URL: every URL must come from a search result or a page you opened.
 
 Finish with ONLY a JSON object, no prose after it:
-{"profiles":[{"platform":"facebook|instagram|linkedin|x|tiktok|other","url":string,"displayName":string|null,"confidence":"strong|possible","evidence":"one or two sentences on what ties it to this person"}],"leads":[{"kind":"spouse|relative|alias|employer|business|school|team|city|other","value":"the name alone, for example Yvette Hinojosa or Devonwood Enterprizes Inc","detail":"a few words on where it came from and how sure it is"}],"searched":"one sentence on what was searched","note":string|null}
-An empty profiles list is a good answer when nothing fits, as long as the leads are there. Give at most eight leads, the most identifying first. Never put a phone number, an email or a street address in a lead: those come from a verified trace, not from a listing.`;
+{"profiles":[{"platform":"facebook|instagram|linkedin|x|tiktok|other","url":string,"displayName":string|null,"confidence":"strong|possible","evidence":"one or two sentences on what ties it to this person"}],"leads":[{"kind":"spouse|relative|alias|employer|business|school|team|city|age|other","value":"the name alone, for example Yvette Hinojosa or Devonwood Enterprizes Inc","detail":"a few words on where it came from and how sure it is"}],"searched":"one sentence on what was searched","note":string|null}
+An empty profiles list is a good answer when nothing fits, as long as the leads are there. Give at most eight leads, the most identifying first. The value is what a person would type into a search box: one name per lead, never two people joined by a slash, no parentheses, no commentary (that belongs in detail). A city is the town alone, for example San Antonio. An age or a year of birth is kind "age", for example "about 45, born 1980". Do not repeat the person's own name as an alias unless it is genuinely a different name (a nickname, a maiden name). Never put a phone number, an email or a street address in a lead: those come from a verified trace, not from a listing.`;
 
 /** Per million tokens. Cache reads are charged at the input price here, which errs high. */
 const PRICES: Record<string, { in: number; out: number }> = {
@@ -333,15 +362,19 @@ export function parseSocialVerdict(text: string): SocialVerdict {
   const leads: SocialLead[] = [];
   const seenLead = new Set<string>();
   for (const l of Array.isArray(o?.leads) ? o.leads : []) {
-    const value = str(l?.value);
-    if (!value || value.length > 120) continue;
+    const raw = str(l?.value);
+    if (!raw || raw.length > 120) continue;
     // A listing's phone, email or street address is not a lead. The trace verifies those.
-    if (/@|\d{3}[\s.)-]*\d{3}[\s.-]*\d{4}|^\d+\s+\w+/.test(value)) continue;
+    if (/@|\d{3}[\s.)-]*\d{3}[\s.-]*\d{4}|^\d+\s+\w+/.test(raw)) continue;
     const kind = SOCIAL_LEAD_KINDS.includes(l?.kind) ? l.kind : 'other';
-    const key = `${kind}|${value.toLowerCase()}`;
-    if (seenLead.has(key)) continue;
-    seenLead.add(key);
-    leads.push({ kind, value, detail: str(l?.detail) });
+    // "Charina Clark / Charito Clark" is two people, and each is its own search.
+    const values = ['spouse', 'relative', 'alias'].includes(kind) ? raw.split(/\s+(?:\/|or)\s+/i) : [raw];
+    for (const value of values.map((x: string) => x.trim()).filter(Boolean)) {
+      const key = `${kind}|${value.toLowerCase()}`;
+      if (seenLead.has(key) || leads.length >= 8) continue;
+      seenLead.add(key);
+      leads.push({ kind, value, detail: str(l?.detail) });
+    }
     if (leads.length >= 8) break;
   }
   return { profiles, leads, searched: str(o?.searched) || 'Searched the public web.', note: str(o?.note) };

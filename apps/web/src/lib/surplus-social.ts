@@ -73,7 +73,12 @@ export function socialSearchLinks(name: string, city?: string | null, state?: st
     (town ? ` "${town}"` : state ? ` ${String(state).trim()}` : '') +
     ' (site:facebook.com OR site:instagram.com OR site:linkedin.com OR site:x.com OR site:tiktok.com)';
   return [
-    { site: 'Facebook', url: `https://www.facebook.com/search/people/?q=${encodeURIComponent(withPlace)}` },
+    // Through the sign-in page: signed out, Facebook answers a search address
+    // with a bare "Not Found". Mirrors facebookSearchUrl in the API.
+    {
+      site: 'Facebook',
+      url: `https://www.facebook.com/login/?next=${encodeURIComponent(`https://www.facebook.com/search/people/?q=${encodeURIComponent(withPlace)}`)}`,
+    },
     { site: 'Google social', url: `https://www.google.com/search?q=${encodeURIComponent(google)}` },
     { site: 'Instagram', url: `https://www.instagram.com/explore/search/keyword/?q=${encodeURIComponent(n)}` },
     { site: 'LinkedIn', url: `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(withPlace)}` },
@@ -120,6 +125,7 @@ export const SOCIAL_LEAD_LABEL: Record<string, string> = {
   school: 'School',
   team: 'Team',
   city: 'City',
+  age: 'Age',
   other: 'Lead',
 };
 
