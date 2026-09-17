@@ -2532,7 +2532,8 @@ export class SurplusService {
         links: ENTITY_NAME.test(`${lead.sellerFirstName || ''} ${lead.sellerLastName || ''}`)
           ? []
           : socialSearchLinks(
-              `${lead.sellerFirstName || ''} ${lead.sellerLastName || ''}`.trim(),
+              // The person, not the estate: "Estate of Odessa Rainwater" finds nobody.
+              `${lead.sellerFirstName || ''} ${lead.sellerLastName || ''}`.replace(/^\s*(?:the\s+)?estate\s+of\s+/i, '').trim(),
               d.ownerMailingCity || lead.propertyCity,
               d.ownerMailingState || lead.propertyState,
             ),

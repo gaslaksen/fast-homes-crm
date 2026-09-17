@@ -3379,12 +3379,14 @@ function SocialBlock({
 }) {
   const social = lead.social!;
   const [findOpen, setFindOpen] = useState(false);
+  // The person, not the estate: the profile was Odessa Rainwater's, never "Estate of".
+  const who = lead.claimant.replace(/^(the\s+)?estate\s+of\s+/i, '').trim() || lead.claimant;
   const mine = social.profiles.filter((p) => !p.heirId);
   const candidates = mine.filter((p) => p.status === 'candidate').length;
   const confirmed = mine.filter((p) => p.status === 'confirmed').length;
   const sender = [currentUser?.firstName, currentUser?.lastName].filter(Boolean).join(' ') || 'the team';
   const copyOpener = async () => {
-    const text = socialOpener(lead.claimant, sender, 'D.I.G. Deeper LLC', null);
+    const text = socialOpener(who, sender, 'D.I.G. Deeper LLC', null);
     try {
       await navigator.clipboard.writeText(text);
       say('Opener copied. Paste it into the message.');
@@ -3403,14 +3405,14 @@ function SocialBlock({
           : undefined;
   return (
     <div style={{ marginTop: 10 }}>
-      <SubHead title={`${lead.claimant} online`} note={note} />
+      <SubHead title={`${who} online`} note={note} />
       {mine.length === 0 && !findOpen && (
         <div style={{ fontSize: 12, color: 'var(--faint)' }}>No profile on file yet.</div>
       )}
       <SocialProfileList profiles={mine} say={say} onChanged={onChanged} />
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginTop: 6 }}>
         <button type="button" className="dc-wp-btn" onClick={() => setFindOpen((v) => !v)}>
-          {findOpen ? 'Done' : mine.length ? 'Find more' : `Find ${lead.claimant} online`}
+          {findOpen ? 'Done' : mine.length ? 'Find more' : `Find ${who} online`}
         </button>
         {confirmed > 0 && (
           <button type="button" className="dc-wp-btn" onClick={copyOpener} title="A short first message: who is writing and why, no amount, no county.">
@@ -3436,7 +3438,7 @@ function SocialBlock({
             <div>
               <FindProfilesButton
                 leadId={lead.id}
-                who={lead.claimant}
+                who={who}
                 searchedAt={social.searchedAt}
                 paused={paused}
                 say={say}
