@@ -1811,11 +1811,24 @@ export class SurplusService {
       ];
     }
 
+    // The age of a claim, in the three bands the work actually splits into:
+    // still inside the 120 day claim window, open and workable, and past a
+    // year where only an attorney can ask for the money. The notice is the
+    // clock and the sale stands in where no notice has been read, the same
+    // fallback the early filter and the trace gate use. A claim with neither
+    // date has no age and is in none of the bands.
     if (filters.noticeAge) {
-      if (filters.noticeAge === '0-7') detailWhere.noticeDate = { gte: back(7) };
-      if (filters.noticeAge === '8-30') detailWhere.noticeDate = { gte: back(30), lt: back(7) };
-      if (filters.noticeAge === '31-120') detailWhere.noticeDate = { gte: back(120), lt: back(30) };
-      if (filters.noticeAge === '120+') detailWhere.noticeDate = { lt: back(120) };
+      const aged = (range: { gte?: Date; lte?: Date; lt?: Date; gt?: Date }) => {
+        detailWhere.AND = [
+          ...(detailWhere.AND || []),
+          { OR: [{ noticeDate: range }, { noticeDate: null, saleDate: range }] },
+        ];
+      };
+      // The board's "New, 7 days" chip. Not offered in the age menu itself.
+      if (filters.noticeAge === '0-7') aged({ gte: back(7) });
+      if (filters.noticeAge === 'under-120') aged({ gt: back(120) });
+      if (filters.noticeAge === '120-365') aged({ gte: back(365), lte: back(120) });
+      if (filters.noticeAge === '365+') aged({ lt: back(365) });
     }
 
     const where: any = {

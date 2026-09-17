@@ -93,7 +93,11 @@ export interface SurplusListFilters {
   county?: string;
   /** '15-25' | '25-50' | '50+' */
   band?: string;
-  /** '0-7' | '8-30' | '31-120' | '120+' */
+  /**
+   * How old the claim is, off the notice or the sale where no notice has been
+   * read: 'under-120' (still inside the claim window), '120-365' (workable),
+   * '365+' (attorney only). '0-7' backs the board's "New, 7 days" chip.
+   */
   noticeAge?: string;
   /**
    * Hide claims whose notice (or sale, where no notice has been read) is
