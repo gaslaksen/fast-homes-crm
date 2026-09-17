@@ -326,6 +326,23 @@ export const surplusAPI = {
   ) => api.post(`/surplus/${id}/trace-attempts`, data),
   removeTraceAttempt: (attemptId: string) => api.post(`/surplus/trace-attempts/${attemptId}/delete`),
 
+  // ── Social profiles: the third route when no phone or address is live ──
+  socialProfiles: (id: string) => api.get(`/surplus/${id}/social`),
+  /** A profile somebody found by hand. Confirmed on arrival. */
+  addSocialProfile: (id: string, data: { url: string; heirId?: string | null; displayName?: string | null; evidence?: string | null }) =>
+    api.post(`/surplus/${id}/social`, data),
+  /** Search the public web for one person's profiles: the claimant, or `heirId`. Paid per check. */
+  findSocialProfiles: (id: string, heirId?: string | null) => api.post(`/surplus/${id}/social/find`, { heirId: heirId || null }),
+  setSocialProfileStatus: (profileId: string, status: 'candidate' | 'confirmed' | 'rejected') =>
+    api.patch(`/surplus/social/${profileId}`, { status }),
+  /** A message went out through the profile. Logged as a touch. */
+  socialMessaged: (profileId: string, note?: string | null) => api.post(`/surplus/social/${profileId}/messaged`, { note: note || null }),
+  removeSocialProfile: (profileId: string) => api.post(`/surplus/social/${profileId}/delete`),
+  /** The batch: living claimants with no number, not yet searched. `dryRun` counts and prices them. */
+  socialSearch: (body: { leadIds?: string[]; county?: string; limit?: number; dryRun?: boolean }) =>
+    api.post('/surplus/social-search', body),
+  socialUsage: () => api.get('/surplus/social-usage'),
+
   // ── References ──
   references: (county?: string | null) => api.get('/surplus/references', { params: { county: county || undefined } }),
   saveReference: (

@@ -56,6 +56,8 @@ export function heirRow(h: any) {
     callNotes: h.callNotes || '',
     sourceCaseNumber: h.sourceCaseNumber,
     sourceDocument: h.sourceDocument,
+    /** When the web was last searched for this person's profiles. */
+    socialSearchedAt: h.socialSearchedAt || null,
     /**
      * Reachable AND allowed to be contacted.
      *

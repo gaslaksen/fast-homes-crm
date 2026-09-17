@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from 'react';
 import { surplusAPI } from '@/lib/api';
 import { DNC_STATE, phoneDisplay, fmtDate } from './format';
 import { SURPLUS_PERSON_ROLES, SURPLUS_CONTACT_STATUSES, personRoleLabel } from '@/lib/surplus-people';
+import { socialSearchLinks, type SocialProfile } from '@/lib/surplus-social';
+import { AddSocialProfile, FindProfilesButton, SocialProfileList } from './SurplusSocial';
 
 /**
  * Who inherited a deceased claimant's interest, and who is safe to ring.
@@ -70,6 +72,7 @@ export interface Heir {
   sourceDocument: string | null;
   callable: boolean;
   traceable: boolean;
+  socialSearchedAt?: string | null;
 }
 
 const TONE: Record<string, string> = {
@@ -91,6 +94,8 @@ export default function SurplusHeirs({
   onEmail,
   onChanged,
   say,
+  social,
+  socialPaused,
 }: {
   leadId: string;
   claimant: string;
@@ -100,6 +105,10 @@ export default function SurplusHeirs({
   county: string | null;
   /** The county's public-access court records, from the API, or null. */
   courtRecordsUrl?: string | null;
+  /** Every social profile on the claim; each row shows its own person's. */
+  social?: SocialProfile[];
+  /** Whether the paid web search is paused. Null while unknown. */
+  socialPaused?: boolean | null;
   onCall: (n: string) => void;
   onText: (n: string) => void;
   onEmail: (a: string) => void;
@@ -351,6 +360,14 @@ export default function SurplusHeirs({
               onDnc={() => setDnc(h)}
               onRemove={() => remove(h)}
               onStatus={(v) => setStatus(h, v)}
+              leadId={leadId}
+              profiles={(social || []).filter((p) => p.heirId === h.id)}
+              socialPaused={socialPaused ?? null}
+              say={say}
+              onChanged={() => {
+                load();
+                onChanged();
+              }}
             />
           ))}
         </div>
@@ -373,6 +390,14 @@ export default function SurplusHeirs({
               onDnc={() => setDnc(h)}
               onRemove={() => remove(h)}
               onStatus={(v) => setStatus(h, v)}
+              leadId={leadId}
+              profiles={(social || []).filter((p) => p.heirId === h.id)}
+              socialPaused={socialPaused ?? null}
+              say={say}
+              onChanged={() => {
+                load();
+                onChanged();
+              }}
             />
           ))}
         </div>
@@ -426,6 +451,11 @@ function HeirRow({
   onDnc,
   onRemove,
   onStatus,
+  leadId,
+  profiles,
+  socialPaused,
+  say,
+  onChanged,
 }: {
   h: Heir;
   busy: boolean;
@@ -436,7 +466,13 @@ function HeirRow({
   onDnc: () => void;
   onRemove: () => void;
   onStatus: (status: string) => void;
+  leadId: string;
+  profiles: SocialProfile[];
+  socialPaused: boolean | null;
+  say: (msg: string) => void;
+  onChanged: () => void;
 }) {
+  const [findOpen, setFindOpen] = useState(false);
   const statusTone =
     h.contactStatus === 'message_passed' ? 'var(--mint)' : h.contactStatus === 'dead_end' ? 'var(--red)' : h.contactStatus === 'contacted' ? 'var(--amber)' : 'var(--faint)';
   return (
@@ -502,6 +538,38 @@ function HeirRow({
           </div>
         </div>
       ))}
+
+      {/* Their profiles: the route when the numbers are dead or there were
+          none. A candidate the search offered waits for the identification. */}
+      {!h.deceased && <SocialProfileList profiles={profiles} say={say} onChanged={onChanged} />}
+      {!h.deceased && (
+        <div style={{ marginTop: 4 }}>
+          <button type="button" className="dc-wp-btn" style={{ padding: '2px 8px', fontSize: 11 }} onClick={() => setFindOpen((v) => !v)}>
+            {findOpen ? 'Done' : profiles.length ? 'Find more online' : 'Find online'}
+          </button>
+          {findOpen && (
+            <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {socialSearchLinks(h.name, h.city, h.state).map((l) => (
+                  <a key={l.site} href={l.url} target="_blank" rel="noopener noreferrer" className="dc-wp-searchlink">
+                    {l.site}
+                  </a>
+                ))}
+              </div>
+              <FindProfilesButton
+                leadId={leadId}
+                heirId={h.id}
+                who={h.name}
+                searchedAt={h.socialSearchedAt || null}
+                paused={socialPaused}
+                say={say}
+                onChanged={onChanged}
+              />
+              <AddSocialProfile leadId={leadId} heirId={h.id} say={say} onChanged={onChanged} />
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Where the outreach to this person stands. "Passed a message on" is
           the win with a neighbor or a relative: the claimant now knows to call. */}

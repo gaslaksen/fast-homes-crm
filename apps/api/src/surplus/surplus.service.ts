@@ -27,6 +27,7 @@ import {
 } from '@fast-homes/shared';
 import { CLAIM_STATUS_LABEL } from './surplus-classify.util';
 import { nameSearchPlan } from './surplus-name-search.util';
+import { messageUrl, platformLabel, socialSearchLinks } from './surplus-social.util';
 import { traceState } from './surplus-skiptrace.util';
 import { heirRow } from './surplus-heirs.util';
 import {
@@ -114,6 +115,7 @@ const LEAD_INCLUDE = {
       expenses: { orderBy: { incurredAt: 'asc' as const } },
       reference: true,
       traceAttempts: { orderBy: { ranAt: 'desc' as const }, take: 50 },
+      socialProfiles: { orderBy: { createdAt: 'asc' as const }, include: { heir: { select: { id: true, name: true } } } },
     },
   },
   tasks: {
@@ -2501,6 +2503,43 @@ export class SurplusService {
         texted: (lead._count?.messages || 0) > 0,
         emailed: (lead._count?.emails || 0) > 0,
         lettered: !!d.letterMailedAt,
+        // A message through a profile, logged by the person who sent it.
+        messaged: (d.socialProfiles || []).some((p: any) => !p.heirId && (p.messageCount || 0) > 0),
+      },
+
+      // Social profiles: the third route when no phone or address is live.
+      // Every profile on the claim, the search links for the claimant, and
+      // whether the search has run. Confirmed profiles are contacts; a
+      // candidate is offered for a person to check first.
+      social: {
+        profiles: (d.socialProfiles || []).map((p: any) => ({
+          id: p.id,
+          heirId: p.heirId || null,
+          personName: p.heir?.name || null,
+          platform: p.platform,
+          platformLabel: platformLabel(p.platform),
+          url: p.url,
+          handle: p.handle || null,
+          displayName: p.displayName || null,
+          status: p.status,
+          confidence: p.confidence || null,
+          evidence: p.evidence || null,
+          foundBy: p.foundBy,
+          messageCount: p.messageCount || 0,
+          lastMessagedAt: p.lastMessagedAt || null,
+          messageUrl: messageUrl(p),
+        })),
+        links: ENTITY_NAME.test(`${lead.sellerFirstName || ''} ${lead.sellerLastName || ''}`)
+          ? []
+          : socialSearchLinks(
+              `${lead.sellerFirstName || ''} ${lead.sellerLastName || ''}`.trim(),
+              d.ownerMailingCity || lead.propertyCity,
+              d.ownerMailingState || lead.propertyState,
+            ),
+        searchedAt: d.socialSearchedAt || null,
+        lastSearch: d.socialSearch
+          ? { searched: (d.socialSearch as any).searched || null, note: (d.socialSearch as any).note || null, found: ((d.socialSearch as any).profiles || []).length }
+          : null,
       },
       channelsMissing: CHANNELS.filter((c) => {
         const tried = {

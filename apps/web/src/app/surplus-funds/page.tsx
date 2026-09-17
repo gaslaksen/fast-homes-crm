@@ -816,6 +816,47 @@ export default function SurplusFundsPage() {
     }
   };
 
+  /**
+   * The batch profile search: living claimants nobody can reach, not yet
+   * searched. Counts and prices them first, then asks, because every check
+   * is paid. The per-card button is for one person; this is the backlog.
+   */
+  const socialBatch = async () => {
+    setPolling(true);
+    try {
+      const dry = (await surplusAPI.socialSearch({ dryRun: true })).data;
+      if (!dry.candidates) {
+        say('Nobody to search: every living claimant without a number has been searched already.');
+        return;
+      }
+      const usage = (await surplusAPI.socialUsage()).data;
+      if (usage?.paused) {
+        say('The profile search is paused until SOCIAL_SEARCH_MONTHLY_BUDGET is set in the API settings. The search links on each card still work.');
+        return;
+      }
+      const limit = Math.min(dry.candidates, 25);
+      const est = Math.round(limit * 0.45 * 100) / 100;
+      if (
+        !window.confirm(
+          `${dry.candidates} living claimant${dry.candidates === 1 ? ' has' : 's have'} no number and no profile search yet. Search the web for the first ${limit} now? About $${est}; $${usage.left} left this month.`,
+        )
+      ) {
+        return;
+      }
+      say(`Searching the web for ${limit} claimant${limit === 1 ? '' : 's'}...`);
+      const r = (await surplusAPI.socialSearch({ limit })).data;
+      say(
+        `Profile search: ${r.checked} searched, ${r.found} with a profile to check, ${r.profiles} profile${r.profiles === 1 ? '' : 's'} filed, $${r.spent} spent` +
+          (r.errors ? `. ${r.message || `${r.errors} failed`}` : '.'),
+      );
+      fetchRows();
+    } catch (err: any) {
+      say(err?.response?.data?.message || 'The profile search failed.');
+    } finally {
+      setPolling(false);
+    }
+  };
+
   const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     e.target.value = '';
@@ -1078,6 +1119,15 @@ export default function SurplusFundsPage() {
                   </button>
                   <button type="button" className="dc-menu-item" onClick={() => fileRef.current?.click()} disabled={busy}>
                     {busy ? 'Importing...' : 'Import county list'}
+                  </button>
+                  <button
+                    type="button"
+                    className="dc-menu-item"
+                    onClick={socialBatch}
+                    disabled={polling || busy}
+                    title="Search the web for the profiles of living claimants nobody can reach. Paid per check; asks first."
+                  >
+                    Find profiles for the unreachable
                   </button>
                   <a className="dc-menu-item" href="/surplus-funds/references">
                     References{stats.recoveries ? ` (${stats.recoveries} paid)` : ''}

@@ -21,6 +21,7 @@ import { SurplusNoticeService } from './surplus-notice.service';
 import { SurplusEndatoService } from './surplus-endato.service';
 import { SurplusProbateService } from './surplus-probate.service';
 import { SurplusObituaryService } from './surplus-obituary.service';
+import { SurplusSocialService } from './surplus-social.service';
 import { SurplusHeirsService } from './surplus-heirs.service';
 import { SurplusTemplatesService } from './surplus-templates.service';
 import { SurplusCredibilityService } from './surplus-credibility.service';
@@ -61,6 +62,7 @@ import { MessagesModule } from '../messages/messages.module';
     SurplusNoticeService,
     SurplusProbateService,
     SurplusObituaryService,
+    SurplusSocialService,
     SurplusHeirsService,
   ],
   exports: [
