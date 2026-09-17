@@ -14,6 +14,8 @@ import { useDialer } from '@/components/dialer/DialerContext';
 import { DNC_STATE, SURPLUS_STAGES } from './format';
 import ContactEditor from './ContactEditor';
 import SurplusHeirs, { courtRecordsSearch } from './SurplusHeirs';
+import { AddSocialProfile, FindProfilesButton, SocialProfileList } from './SurplusSocial';
+import { socialOpener, type SocialProfile } from '@/lib/surplus-social';
 import { Fold, useFolds } from './PanelFold';
 import { fmtDate, money, phoneDisplay } from './format';
 
@@ -159,8 +161,16 @@ export interface SurplusPanelLead {
   contactStatus: string;
   tappedAt: string | null;
   /** Which of the four channels have been tried, off the records themselves. */
-  channels: { called: boolean; texted: boolean; emailed: boolean; lettered: boolean };
+  channels: { called: boolean; texted: boolean; emailed: boolean; lettered: boolean; messaged: boolean };
   channelsMissing: string[];
+  /** Social profiles: the third route when no phone or address is live. */
+  social: {
+    profiles: SocialProfile[];
+    /** One-click searches for the claimant on each platform. Empty for an entity. */
+    links: { site: string; url: string; free: boolean }[];
+    searchedAt: string | null;
+    lastSearch: { searched: string | null; note: string | null; found: number } | null;
+  } | null;
   credibilitySentAt: string | null;
   credibilityChannels: string[];
   /** Every envelope on this claim, newest first. */
@@ -2172,6 +2182,7 @@ const CHANNEL_GLYPH: [keyof SurplusPanelLead['channels'], string, string][] = [
   ['texted', '\u{1F4AC}', 'Texted'],
   ['emailed', '@', 'Emailed'],
   ['lettered', '✉', 'Lettered'],
+  ['messaged', '\u{1F464}', 'Messaged'],
 ];
 
 /** Colour per trace tone. Bad is red because a wrong-person result is a
@@ -2827,6 +2838,15 @@ function CaseTab({
   // Which tool belongs in Next step. Whatever is not the next step renders in
   // Reach, so every tool is on the panel exactly once.
   const front = !back && !dead;
+  // Whether the paid profile search is paused, asked once per panel. Null
+  // until answered; the button reads null as "do not know yet".
+  const [socialPaused, setSocialPaused] = useState<boolean | null>(null);
+  useEffect(() => {
+    surplusAPI
+      .socialUsage()
+      .then((r) => setSocialPaused(!!r.data?.paused))
+      .catch(() => setSocialPaused(true));
+  }, []);
   const inNext = {
     contacts: front && queue === 'call',
     heirs: front && queue === 'heirs',
@@ -2856,6 +2876,8 @@ function CaseTab({
         propertyAddress={property.address}
         county={property.county}
         courtRecordsUrl={lead.courtRecordsUrl}
+        social={lead.social?.profiles || []}
+        socialPaused={socialPaused}
         onCall={onCall}
         onText={onText}
         onEmail={onEmail}
@@ -2866,6 +2888,9 @@ function CaseTab({
   );
   const contactsBlock = (
     <ContactsBlock lead={lead} onCall={onCall} onText={onText} onEmail={onEmail} onChanged={onChanged} say={say} />
+  );
+  const socialBlock = lead.social && (
+    <SocialBlock lead={lead} currentUser={currentUser} paused={socialPaused} say={say} onChanged={onChanged} />
   );
   const traceBlock = lead.phones.length === 0 && <TraceBlock lead={lead} tracing={tracing} onTrace={onTrace} />;
   const searchBlock = lead.nameSearch && <NameSearchBlock lead={lead} property={property} say={say} onChanged={onChanged} />;
@@ -2940,6 +2965,7 @@ function CaseTab({
             />
             {!inNext.trace && traceBlock}
             {contactsBlock}
+            {socialBlock}
           </div>
         )}
         {inNext.contacts && !inNext.trace && traceBlock}
@@ -3132,6 +3158,7 @@ function CaseTab({
           <div>
             <SubHead title={`Reaching ${lead.claimant}`} />
             {contactsBlock}
+            {socialBlock}
             <div style={{ marginTop: 8 }}>
               <CredibilityBlock lead={lead} say={say} onChanged={onChanged} />
             </div>
@@ -3322,6 +3349,112 @@ function TraceBlock({ lead, tracing, onTrace }: { lead: SurplusPanelLead; tracin
             : `No owner address recovered for ${lead.claimant}, so this would trace the property at ${lead.address}, which is usually not where the owner is.`}
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * The claimant's social profiles, and how to find them.
+ *
+ * Nobody publishes an API for finding a person on Facebook, so this is the
+ * shortcut for what the team already does by hand: the searches open
+ * pre-filled on each platform, a found link is pasted in and kept, and the
+ * paid web search does the looking and offers what fits with the evidence.
+ * A profile on file gets an Open, a Message into the platform's own app,
+ * and a Log so the message counts as a touch. The opener is one click to
+ * copy and never names the amount or the county.
+ */
+function SocialBlock({
+  lead,
+  currentUser,
+  paused,
+  say,
+  onChanged,
+}: {
+  lead: SurplusPanelLead;
+  currentUser: any;
+  paused: boolean | null;
+  say: (msg: string) => void;
+  onChanged: () => void;
+}) {
+  const social = lead.social!;
+  const [findOpen, setFindOpen] = useState(false);
+  // The person, not the estate: the profile was Odessa Rainwater's, never "Estate of".
+  const who = lead.claimant.replace(/^(the\s+)?estate\s+of\s+/i, '').trim() || lead.claimant;
+  const mine = social.profiles.filter((p) => !p.heirId);
+  const candidates = mine.filter((p) => p.status === 'candidate').length;
+  const confirmed = mine.filter((p) => p.status === 'confirmed').length;
+  const sender = [currentUser?.firstName, currentUser?.lastName].filter(Boolean).join(' ') || 'the team';
+  const copyOpener = async () => {
+    const text = socialOpener(who, sender, 'D.I.G. Deeper LLC', null);
+    try {
+      await navigator.clipboard.writeText(text);
+      say('Opener copied. Paste it into the message.');
+    } catch {
+      window.prompt('Copy the opener:', text);
+    }
+  };
+  const note = lead.isDeceased
+    ? 'Deceased. Their profile can still name the family; message the heirs, not this account.'
+    : candidates
+      ? `${candidates} to check before messaging`
+      : confirmed
+        ? `${confirmed} confirmed`
+        : lead.phones.length === 0
+          ? 'No number on file, so a profile may be the only way to reach them'
+          : undefined;
+  return (
+    <div style={{ marginTop: 10 }}>
+      <SubHead title={`${who} online`} note={note} />
+      {mine.length === 0 && !findOpen && (
+        <div style={{ fontSize: 12, color: 'var(--faint)' }}>No profile on file yet.</div>
+      )}
+      <SocialProfileList profiles={mine} say={say} onChanged={onChanged} />
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginTop: 6 }}>
+        <button type="button" className="dc-wp-btn" onClick={() => setFindOpen((v) => !v)}>
+          {findOpen ? 'Done' : mine.length ? 'Find more' : `Find ${who} online`}
+        </button>
+        {confirmed > 0 && (
+          <button type="button" className="dc-wp-btn" onClick={copyOpener} title="A short first message: who is writing and why, no amount, no county.">
+            Copy the opener
+          </button>
+        )}
+      </div>
+      {findOpen && (
+        <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {social.links.length > 0 && (
+            <div>
+              <div style={{ fontSize: 11, color: 'var(--faint)', marginBottom: 4 }}>
+                Each opens the search on that site, filled in. Log what you find afterwards; a logged social search is what the escalation rule reads.
+              </div>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {social.links.map((l) => (
+                  <SearchLink key={l.site} lead={lead} link={l} say={say} onChanged={onChanged} />
+                ))}
+              </div>
+            </div>
+          )}
+          {!lead.isDeceased && (
+            <div>
+              <FindProfilesButton
+                leadId={lead.id}
+                who={who}
+                searchedAt={social.searchedAt}
+                paused={paused}
+                say={say}
+                onChanged={onChanged}
+              />
+              {social.lastSearch && (
+                <div style={{ fontSize: 11, color: 'var(--faint)', marginTop: 3 }}>
+                  Last search: {social.lastSearch.found ? `${social.lastSearch.found} offered.` : 'nothing fit.'} {social.lastSearch.searched || ''}
+                  {social.lastSearch.note ? ` ${social.lastSearch.note}` : ''}
+                </div>
+              )}
+            </div>
+          )}
+          <AddSocialProfile leadId={lead.id} say={say} onChanged={onChanged} />
+        </div>
+      )}
     </div>
   );
 }
@@ -4470,7 +4603,7 @@ function ContactLine({ lead }: { lead: SurplusPanelLead }) {
         {CONTACT_LABEL[status]}
         {lead.tappedAt ? ` ${fmtDate(lead.tappedAt)}` : ''}
       </span>
-      <span style={{ display: 'inline-flex', gap: 6 }} title="Called, texted, emailed, lettered">
+      <span style={{ display: 'inline-flex', gap: 6 }} title="Called, texted, emailed, lettered, messaged on social">
         {CHANNEL_GLYPH.map(([k, glyph, label]) => {
           const on = !!lead.channels?.[k];
           return (

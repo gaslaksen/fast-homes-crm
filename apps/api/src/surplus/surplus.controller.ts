@@ -12,6 +12,7 @@ import { SurplusIngestService } from './surplus-ingest.service';
 import { SurplusSkiptraceService } from './surplus-skiptrace.service';
 import { SurplusEndatoService } from './surplus-endato.service';
 import { SurplusObituaryService } from './surplus-obituary.service';
+import { SurplusSocialService } from './surplus-social.service';
 import { SurplusTemplatesService } from './surplus-templates.service';
 import { SurplusCredibilityService, CredibilityChannel } from './surplus-credibility.service';
 import { SurplusCountiesService, ACCEPTED_METHOD_LABEL } from './surplus-counties.service';
@@ -80,6 +81,7 @@ export class SurplusController {
     private cadence: SurplusCadenceService,
     private endato: SurplusEndatoService,
     private obituary: SurplusObituaryService,
+    private social: SurplusSocialService,
   ) {}
 
   private decodeToken(authHeader?: string): { userId?: string; organizationId?: string } {
@@ -700,6 +702,84 @@ export class SurplusController {
   @Get('endato-usage')
   async endatoUsage() {
     return this.endato.usage();
+  }
+
+  // ── Social profiles: a third route when no phone or address is live ──────
+
+  /**
+   * Search for the public profiles of living claimants nobody can reach:
+   * meeting the criteria, not yet searched, no callable number. `limit`
+   * caps the checks, each 30 to 60 cents; `dryRun` counts them.
+   */
+  @Post('social-search')
+  async socialSearch(@Body() body: any, @Headers('authorization') authHeader?: string) {
+    const { organizationId } = this.decodeToken(authHeader);
+    const limit = body?.limit == null ? undefined : Number(body.limit);
+    if (limit != null && (!Number.isFinite(limit) || limit < 1)) {
+      throw new BadRequestException('limit must be a positive number');
+    }
+    return this.social.run({
+      organizationId: body?.organizationId || organizationId || null,
+      leadIds: Array.isArray(body?.leadIds) ? body.leadIds : undefined,
+      county: typeof body?.county === 'string' && body.county ? body.county : undefined,
+      limit,
+      dryRun: body?.dryRun === true,
+    });
+  }
+
+  /** The social profile search month to date against its budget. */
+  @Get('social-usage')
+  async socialUsage() {
+    return this.social.usage();
+  }
+
+  /** Every profile on the claim: the claimant's and the people around them. */
+  @Get(':id/social')
+  async listSocial(@Param('id') id: string, @Headers('authorization') authHeader?: string) {
+    const { organizationId } = this.decodeToken(authHeader);
+    return { profiles: await this.social.list(id, organizationId) };
+  }
+
+  /** A profile somebody found by hand. Confirmed on arrival. */
+  @Post(':id/social')
+  async addSocial(@Param('id') id: string, @Body() body: any, @Headers('authorization') authHeader?: string) {
+    const { organizationId, userId } = this.decodeToken(authHeader);
+    return this.social.add(id, body || {}, organizationId, userId);
+  }
+
+  /** Search for one person's profiles from the card: the claimant, or `heirId`. */
+  @Post(':id/social/find')
+  async findSocial(@Param('id') id: string, @Body() body: any, @Headers('authorization') authHeader?: string) {
+    const { organizationId, userId } = this.decodeToken(authHeader);
+    return this.social.findFor(id, { heirId: body?.heirId || null, organizationId, userId });
+  }
+
+  /** Confirm or reject a candidate, or reopen one. */
+  @Patch('social/:profileId')
+  async setSocialStatus(
+    @Param('profileId') profileId: string,
+    @Body() body: any,
+    @Headers('authorization') authHeader?: string,
+  ) {
+    const { organizationId, userId } = this.decodeToken(authHeader);
+    return this.social.setStatus(profileId, String(body?.status || ''), organizationId, userId);
+  }
+
+  /** A message went out through the profile, from the platform's own app. Logged as a touch. */
+  @Post('social/:profileId/messaged')
+  async socialMessaged(
+    @Param('profileId') profileId: string,
+    @Body() body: any,
+    @Headers('authorization') authHeader?: string,
+  ) {
+    const { organizationId, userId } = this.decodeToken(authHeader);
+    return this.social.messaged(profileId, body?.note || null, organizationId, userId);
+  }
+
+  @Post('social/:profileId/delete')
+  async removeSocial(@Param('profileId') profileId: string, @Headers('authorization') authHeader?: string) {
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.social.remove(profileId, organizationId);
   }
 
   // ─── Heirs of a deceased claimant ─────────────────────────────────────────

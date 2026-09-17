@@ -343,6 +343,36 @@ export const SURPLUS_TIER1_CHANNELS: SurplusTraceChannel[] = [
   SurplusTraceChannel.GOV_RECORDS,
 ];
 
+/**
+ * Where a public profile lives. A profile is a third route to a claimant
+ * when no phone or address is live, and each platform has its own way of
+ * being messaged, so the platform travels with the URL.
+ */
+export enum SurplusSocialPlatform {
+  FACEBOOK = 'facebook',
+  INSTAGRAM = 'instagram',
+  LINKEDIN = 'linkedin',
+  X = 'x',
+  TIKTOK = 'tiktok',
+  OTHER = 'other',
+}
+
+export const SURPLUS_SOCIAL_PLATFORM_LABEL: Record<SurplusSocialPlatform, string> = {
+  [SurplusSocialPlatform.FACEBOOK]: 'Facebook',
+  [SurplusSocialPlatform.INSTAGRAM]: 'Instagram',
+  [SurplusSocialPlatform.LINKEDIN]: 'LinkedIn',
+  [SurplusSocialPlatform.X]: 'X',
+  [SurplusSocialPlatform.TIKTOK]: 'TikTok',
+  [SurplusSocialPlatform.OTHER]: 'Other',
+};
+
+/** 'candidate' until a person confirms it is them; 'rejected' is remembered so a search never offers it again. */
+export enum SurplusSocialProfileStatus {
+  CANDIDATE = 'candidate',
+  CONFIRMED = 'confirmed',
+  REJECTED = 'rejected',
+}
+
 /** What money gets spent on a surplus claim, itemized on the disbursement report. */
 export const SURPLUS_EXPENSE_KINDS: [string, string][] = [
   ['title_search', 'Title search'],

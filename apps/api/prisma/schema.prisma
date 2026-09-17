@@ -1003,10 +1003,19 @@ model SurplusDetail {
   /// place, evidence, survivors[]. Kept whole so a possible match can be
   /// confirmed later without searching again.
   obituary          Json?
+  /// When the social profile search (Claude with web search) last ran for
+  /// this claimant, hit or miss. A miss does not change week to week.
+  socialSearchedAt  DateTime?
+  /// The last verdict as the search returned it: profiles[], evidence,
+  /// searched. Kept whole so the card can show why a candidate was offered.
+  socialSearch      Json?
 
   /// Living people who inherited this claimant's interest. Populated from a
   /// probate filing somebody read; never inferred.
   heirs SurplusHeir[]
+  /// Facebook, Instagram, LinkedIn and the rest: every public profile found
+  /// for the claimant or somebody around them, by hand or by the search.
+  socialProfiles SurplusSocialProfile[]
   /// Every search run for this claimant, by channel, so nothing is run
   /// twice and the free routes are provably exhausted before a paid one.
   traceAttempts SurplusTraceAttempt[]
@@ -2321,6 +2330,10 @@ model SurplusHeir {
   letters SurplusLetter[]
   /// Searches run for this heir or associate rather than the claimant.
   traceAttempts SurplusTraceAttempt[]
+  /// Public profiles found for this person rather than the claimant.
+  socialProfiles SurplusSocialProfile[]
+  /// When the social profile search last ran for this person.
+  socialSearchedAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2415,6 +2428,56 @@ model SurplusTraceAttempt {
   @@index([surplusDetailId, ranAt])
   @@index([organizationId, channel])
   @@map("surplus_trace_attempts")
+}
+
+/// A public social media profile that may belong to a claimant or to somebody
+/// around them. Nobody's phone or address is on a card unless the name search
+/// found it, and half the claimants have neither, but most living adults have
+/// a Facebook. The profile is a third route: open it, read it, message them.
+///
+/// A row is a CANDIDATE until a person confirms it. The search returns
+/// namesakes as readily as it returns the claimant, and messaging the wrong
+/// Aleric Clark about money he is not owed is the failure this guards.
+model SurplusSocialProfile {
+  id              String        @id @default(cuid())
+  surplusDetailId String
+  surplusDetail   SurplusDetail @relation(fields: [surplusDetailId], references: [id], onDelete: Cascade)
+  /// Set when the profile is an heir's or an associate's rather than the claimant's.
+  heirId          String?
+  heir            SurplusHeir?  @relation(fields: [heirId], references: [id], onDelete: Cascade)
+  organizationId  String?
+
+  /// 'facebook' | 'instagram' | 'linkedin' | 'x' | 'tiktok' | 'other'
+  platform    String
+  /// The profile URL as it should be opened.
+  url         String
+  /// The vanity name or numeric id in the URL, for the message deep link.
+  handle      String?
+  /// The name as the profile shows it, which is often not the docket's spelling.
+  displayName String?
+  /// 'candidate' | 'confirmed' | 'rejected'. Only confirmed profiles count as
+  /// a contact; a candidate is offered for a person to check first.
+  status      String  @default("candidate")
+  /// 'strong' | 'possible' when the search offered it; null when added by hand.
+  confidence  String?
+  /// Why the search thinks it is them: the city on the profile, a relative
+  /// in the friends list, an employer. The person checks this, not the URL.
+  evidence    String?
+  /// 'manual' | 'search'
+  foundBy     String  @default("manual")
+
+  /// Outreach through the profile. Each message sent is a touch on the lead.
+  messageCount   Int       @default(0)
+  lastMessagedAt DateTime?
+
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([surplusDetailId, url])
+  @@index([surplusDetailId, status])
+  @@index([heirId])
+  @@map("surplus_social_profiles")
 }
 
 /// A paid claimant who may be named to the next one. The course's strongest
