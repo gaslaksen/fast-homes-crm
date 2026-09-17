@@ -6,7 +6,7 @@ import {
   OCCUPANCY_LABEL,
   TAX_STAGE_LABEL,
   WORK_STATUS_LABEL,
-  fmtDate,
+  fmtDay,
   money,
   pct,
 } from './format';
@@ -47,7 +47,7 @@ export default function TaxSaleDetail({ r }: { r: any }) {
       <PanelSection title="The sale">
         <PanelRow k="Track" v={`${METHOD_LABEL[r.method] || r.method} · ${r.statute}`} note={`Ends in a ${r.deedType}.`} />
         <PanelRow k="Stage" v={TAX_STAGE_LABEL[r.stage] || r.stage} />
-        <PanelRow k="Sale date" v={r.saleDate ? fmtDate(r.saleDate) : 'not set'} />
+        <PanelRow k="Sale date" v={r.saleDate ? fmtDay(r.saleDate) : 'not set'} />
         {r.daysToSale != null && (
           <PanelRow
             k="Days to sale"
@@ -57,7 +57,7 @@ export default function TaxSaleDetail({ r }: { r: any }) {
         )}
         <PanelRow
           k="Upset bid deadline"
-          v={r.upsetDeadline ? fmtDate(r.upsetDeadline) : 'not set'}
+          v={r.upsetDeadline ? fmtDay(r.upsetDeadline) : 'not set'}
           note="Any upset bid restarts this window, so a sale is not final on the sale date."
         />
         {r.daysToUpset != null && (

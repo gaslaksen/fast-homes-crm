@@ -60,6 +60,19 @@ export function fmtDate(v?: string | Date | null): string {
   return isNaN(d.getTime()) ? '-' : d.toLocaleDateString('en-US');
 }
 
+/**
+ * A calendar day with no time of day: a sale, a notice, a hearing, a
+ * deadline. The API stores these at midnight UTC (and sends some as a bare
+ * "2026-09-17", which also parses as midnight UTC), so read them in UTC.
+ * `fmtDate` reads in local time, and midnight UTC is 8pm the evening before
+ * in Eastern, which showed every one of them a day early.
+ */
+export function fmtDay(v?: string | Date | null): string {
+  if (!v) return '-';
+  const d = v instanceof Date ? v : new Date(v);
+  return isNaN(d.getTime()) ? '-' : d.toLocaleDateString('en-US', { timeZone: 'UTC' });
+}
+
 export function pct(n: number): string {
   return `${n.toFixed(1)}%`;
 }

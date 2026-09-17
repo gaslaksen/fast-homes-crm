@@ -19,6 +19,7 @@ import {
   TIER,
   downloadCsv,
   fmtDate,
+  fmtDay,
   money,
   pct,
   phoneDisplay,
@@ -287,9 +288,9 @@ const SURPLUS_COLUMNS: PipelineColumn<any>[] = [
           }}
           title={
             r.daysSinceSale > 365
-              ? `Sold ${fmtDate(r.saleDate)}. Over a year: only an attorney can request this one.`
+              ? `Sold ${fmtDay(r.saleDate)}. Over a year: only an attorney can request this one.`
               : r.saleDate
-                ? `Sold ${fmtDate(r.saleDate)}`
+                ? `Sold ${fmtDay(r.saleDate)}`
                 : undefined
           }
         >
@@ -1038,15 +1039,15 @@ export default function SurplusFundsPage() {
         CLAIMANT_TYPE_LABEL[r.claimantType] || r.claimantType,
         r.surplusType === 'tax_deed' ? 'Tax deed' : 'Mortgage FC',
         r.fundLocation === 'clerk' ? 'Held by clerk' : 'Escheated to DFS',
-        fmtDate(r.saleDate), r.salePrice, fmtDate(r.noticeDate), r.noticeConfirmed ? 'Yes' : 'No',
-        fmtDate(r.claimDeadline), r.daysRemaining, r.grossSurplus, r.totalLiens, r.netToClaimant,
+        fmtDay(r.saleDate), r.salePrice, fmtDay(r.noticeDate), r.noticeConfirmed ? 'Yes' : 'No',
+        fmtDay(r.claimDeadline), r.daysRemaining, r.grossSurplus, r.totalLiens, r.netToClaimant,
         r.tier, r.dripTrack, r.stage,
         r.arrangement === 'assignment' ? 'Assignment of rights' : 'Limited power of attorney',
         r.totalConsideration, pct(r.pctOfGross), pct(r.pctOfNet),
         r.compliance.rule ? (r.compliance.rule.feeCap == null ? 'none' : `${r.compliance.rule.feeCap}%`) : 'no rule',
         r.compliance.rule?.capConfidence || '-',
         r.compliance.clear ? 'Clear' : 'Blocked', r.compliance.blocks.join(' | '),
-        fmtDate(r.certOfDisbursements), fmtDate(r.assignmentDeadline),
+        fmtDay(r.certOfDisbursements), fmtDay(r.assignmentDeadline),
         r.phones.map((p: any) => phoneDisplay(p.number)).join(' | '), r.emails.join(' | '),
         r.totalTouches, r.callNotes,
         fmtDate(r.letterMailedAt), r.letterMailedTo,

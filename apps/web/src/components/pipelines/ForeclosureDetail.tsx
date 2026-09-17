@@ -1,7 +1,7 @@
 'use client';
 
 import { PanelRow, PanelSection } from './PipelineWorkPanel';
-import { fmtDate, money, pct } from './format';
+import { fmtDay, money, pct } from './format';
 
 /**
  * What is unique about a foreclosure lead, for the work panel.
@@ -27,7 +27,7 @@ export default function ForeclosureDetail({ l }: { l: any }) {
       <PanelSection title="The deadline">
         <PanelRow
           k="Sale date"
-          v={l.saleDate ? fmtDate(l.saleDate) : 'not set'}
+          v={l.saleDate ? fmtDay(l.saleDate) : 'not set'}
           tone={l.daysToSale != null && l.daysToSale >= 0 && l.daysToSale <= 14 ? 'var(--red)' : undefined}
         />
         {l.daysToSale != null && (
@@ -38,7 +38,7 @@ export default function ForeclosureDetail({ l }: { l: any }) {
             note={l.daysToSale < 0 ? 'The sale has happened. There is nothing left to buy here.' : undefined}
           />
         )}
-        {l.hearingDate && <PanelRow k="Hearing" v={fmtDate(l.hearingDate)} />}
+        {l.hearingDate && <PanelRow k="Hearing" v={fmtDay(l.hearingDate)} />}
         <PanelRow k="Notice type" v={l.noticeType || 'unknown'} />
         {l.noticeUrl && (
           <PanelRow
@@ -72,7 +72,7 @@ export default function ForeclosureDetail({ l }: { l: any }) {
         )}
         <PanelRow k="Loan type" v={l.loanType || 'unknown'} />
         <PanelRow k="Lender" v={l.lenderName || 'unknown'} />
-        {l.loanDate && <PanelRow k="Loan dated" v={fmtDate(l.loanDate)} />}
+        {l.loanDate && <PanelRow k="Loan dated" v={fmtDay(l.loanDate)} />}
       </PanelSection>
 
       <PanelSection title="The property">

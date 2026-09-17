@@ -92,6 +92,16 @@ export class DigestService {
     }).format(d).replace(',', '');
   }
 
+  /**
+   * "Mon 7/27" for a calendar day stored at midnight UTC, like a sale date.
+   * Read in Eastern, midnight UTC is 8pm the evening before, a day early.
+   */
+  private fmtShortDay(d: Date): string {
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone: 'UTC', weekday: 'short', month: 'numeric', day: 'numeric',
+    }).format(d).replace(',', '');
+  }
+
   /** "$18,000" */
   private money(n: number | null | undefined): string {
     if (n == null || !isFinite(n)) return '-';
@@ -683,7 +693,7 @@ export class DigestService {
       const facts = [
         owner,
         f.noticeType ? f.noticeType.replace(/_/g, ' ') : null,
-        f.saleDate ? `sale ${this.fmtShortDate(f.saleDate)}` : null,
+        f.saleDate ? `sale ${this.fmtShortDay(f.saleDate)}` : null,
         f.priority || null,
         f.leadScore != null ? `score ${f.leadScore}` : null,
         f.equitySpread != null ? `equity ${this.moneyCompact(f.equitySpread)}` : null,
@@ -1255,7 +1265,7 @@ export class DigestService {
             propertyAddress: imminent.lead?.propertyAddress,
             propertyCity: imminent.lead?.propertyCity,
           })} has ${days} days left to work, and nobody has called.`,
-          detail: `${(imminent.noticeType || 'foreclosure').replace(/_/g, ' ')} · sale ${this.fmtShortDate(imminent.saleDate)} · priority ${imminent.priority || 'unset'} · score ${imminent.leadScore ?? 0}${
+          detail: `${(imminent.noticeType || 'foreclosure').replace(/_/g, ' ')} · sale ${this.fmtShortDay(imminent.saleDate)} · priority ${imminent.priority || 'unset'} · score ${imminent.leadScore ?? 0}${
             imminent.equitySpread != null ? ` · ${this.money(imminent.equitySpread)} equity spread` : ''
           }`,
           whyItMatters: `Reaching the owner, agreeing a number, and closing takes two to three weeks. ${days} days is enough to do that, and it will not be in a week. This is the last useful window, not the sale date.`,
