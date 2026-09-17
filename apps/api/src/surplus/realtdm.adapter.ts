@@ -1207,6 +1207,7 @@ export class SantaRosaRealTdmAdapter extends RealTdmAdapter {
  * CLAIMANT party, and attorney invoices, memos and cover letters are the
  * clerk's counsel reviewing claims, not a ruling.
  */
+@Injectable()
 export class FlaglerRealTdmAdapter extends RealTdmAdapter {
   constructor(config: ConfigService) {
     super(config, { key: 'realtdm_flagler', county: 'Flagler', subdomain: 'flagler' });
