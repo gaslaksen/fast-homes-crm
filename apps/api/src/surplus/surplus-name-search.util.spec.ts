@@ -47,6 +47,24 @@ describe('nameSearchPlan', () => {
     mailVerdict: 'undeliverable',
   };
 
+  it('an estate searches for the person, in every form the docket writes it', () => {
+    // No people-search site files anybody under "estate of". Seen on the
+    // Rainwater card: all five links searched for those words.
+    for (const claimant of ['Estate of Odessa Rainwater', 'ODESSA RAINWATER ESTATE', 'ESTATE OF ODESSA RAINWATER, DECEASED', 'RAINWATER, ODESSA EST']) {
+      const p = nameSearchPlan({ ...griffin, claimant, ownerState: 'FL' })!;
+      expect(p.query.toUpperCase()).toBe('ODESSA RAINWATER');
+      expect(p.links).toHaveLength(5);
+      for (const l of p.links) expect(decodeURIComponent(l.url).toLowerCase()).not.toMatch(/estate|deceased|\best\b/);
+      expect(p.links.find((l) => l.site === 'FastPeopleSearch')!.url).toBe('https://www.fastpeoplesearch.com/name/odessa-rainwater_fl');
+    }
+  });
+
+  it('a living claimant is searched exactly as before', () => {
+    const p = nameSearchPlan(griffin)!;
+    expect(p.query).toBe('MYRTIS GRIFFIN');
+    expect(p.links[0].url).toContain('name=MYRTIS%20GRIFFIN');
+  });
+
   it('searches the OWNER state, not the property state', () => {
     // Griffin lost a Florida parcel and lives in Connecticut. Searching Florida
     // finds nothing at all.

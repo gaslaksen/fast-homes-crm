@@ -40,7 +40,7 @@
  * identification.
  */
 
-import { splitClaimantName } from './surplus-skiptrace.util';
+import { estateName, splitClaimantName } from './surplus-skiptrace.util';
 
 export interface NameSearchLink {
   site: string;
@@ -155,15 +155,22 @@ export function nameSearchPlan(input: {
     };
   }
 
+  // The person, not the estate. The docket writes "Estate of Odessa
+  // Rainwater" and no people-search site has anybody filed under "estate
+  // of": every link on an estate's card searched for those words and found
+  // nothing. The dead person's own record is still the right search, because
+  // its relatives list is where the heirs come from.
+  const person = estateName(claimant) || claimant;
+
   return {
-    query: claimant,
+    query: person,
     state: input.ownerState || null,
     verifyAgainst: [input.propertyAddress, input.propertyCity].filter(Boolean).join(', ') || null,
     reason:
       input.mailVerdict === 'undeliverable'
         ? "The clerk's mail to this claimant was returned, so no address we hold is live. Name search is the route."
         : undefined,
-    links: nameSearchLinks(claimant, input.ownerState),
+    links: nameSearchLinks(person, input.ownerState),
   };
 }
 
