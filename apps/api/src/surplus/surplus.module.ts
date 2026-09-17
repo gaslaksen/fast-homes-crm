@@ -12,6 +12,7 @@ import {
   LeeRealTdmAdapter,
   PinellasRealTdmAdapter,
   PolkRealTdmAdapter,
+  SantaRosaRealTdmAdapter,
   SarasotaRealTdmAdapter,
 } from './realtdm.adapter';
 import { SurplusSkiptraceService } from './surplus-skiptrace.service';
@@ -52,6 +53,7 @@ import { MessagesModule } from '../messages/messages.module';
     SarasotaRealTdmAdapter,
     LakeRealTdmAdapter,
     AlachuaRealTdmAdapter,
+    SantaRosaRealTdmAdapter,
     SurplusEndatoService,
     SurplusSkiptraceService,
     SurplusNoticeService,

@@ -28,6 +28,7 @@ import {
   LeeRealTdmAdapter,
   PinellasRealTdmAdapter,
   PolkRealTdmAdapter,
+  SantaRosaRealTdmAdapter,
   SarasotaRealTdmAdapter,
   OWNER_ROLES,
 } from './realtdm.adapter';
@@ -219,9 +220,10 @@ export class SurplusIngestService {
     private sarasota?: SarasotaRealTdmAdapter,
     private lake?: LakeRealTdmAdapter,
     private alachua?: AlachuaRealTdmAdapter,
+    private santaRosa?: SantaRosaRealTdmAdapter,
   ) {}
 
-  /** Every adapter wired up: Duval daily; Lee, Polk, Brevard, Pinellas, Sarasota, Lake and Alachua (RealTDM) weekly. */
+  /** Every adapter wired up: Duval daily; Lee, Polk, Brevard, Pinellas, Sarasota, Lake, Alachua and Santa Rosa (RealTDM) weekly. */
   adapters(): SurplusSourceAdapter[] {
     const all: (SurplusSourceAdapter | undefined)[] = [
       this.duval,
@@ -232,6 +234,7 @@ export class SurplusIngestService {
       this.sarasota,
       this.lake,
       this.alachua,
+      this.santaRosa,
     ];
     return all.filter((a): a is SurplusSourceAdapter => !!a);
   }
