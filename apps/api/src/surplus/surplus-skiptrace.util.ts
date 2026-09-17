@@ -636,3 +636,35 @@ export function traceState(
     actionable: false,
   };
 }
+
+/**
+ * "ZUMSTEG, ANITA" as the county writes it, turned round to "ANITA ZUMSTEG"
+ * so the name matcher and the vendor see the same shape. A name without a
+ * comma is returned as is.
+ */
+export function displayName(raw: string): string {
+  const s = String(raw || '').trim();
+  const m = /^([^,]+),\s*(.+)$/.exec(s);
+  if (!m) return s;
+  const [, last, given] = m;
+  // "JOHNNY LOVE WILLIAMS, SR" is a suffix, not a surname-first form.
+  if (/^(SR|JR|II|III|IV|V|ESQ|ET\s*AL|ETAL|ESTATE\s*OF|DECEASED|TRUSTEE|TR)\.?$/i.test(given.trim())) return s;
+  return `${given.trim()} ${last.trim()}`;
+}
+
+/**
+ * The person inside an estate's name, for a people search. The docket writes
+ * "ESTATE OF THERESA MCPARLIN, DECEASED", "JIMMY DON BERGER ESTATE" and, on
+ * the Pinellas roll, "MCGRATH, HARRY A III EST"; Endato wants Theresa
+ * McParlin.
+ */
+export function estateName(raw: string): string {
+  const s = String(raw || '')
+    .replace(/^\s*(?:the\s+)?estate\s+of\s+/i, '')
+    .replace(/\(?\b(?:deceased|decd|est|estate)\b\)?\.?/gi, ' ')
+    .replace(/\s*,\s*,/g, ',')
+    .replace(/[\s,]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return displayName(s);
+}
