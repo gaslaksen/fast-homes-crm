@@ -431,6 +431,14 @@ export function claimantFromTitle(title: string): string | null {
     /surplus\s*(?:claim|payout)[_\s-]+([\s\S]+?)(?:\.pdf)?\s*$/i.exec(t) ||
     /\b(?:statement|statment|state)\s*(?:of\s*)?claim[_\s-]+([\s\S]+?)(?:\.pdf)?\s*$/i.exec(t);
   if (!m) return null;
+  // Flagler's clerk names the lien claim with the property and the review
+  // status: "SURPLUS CLAIM _CITY OF PALM COAST 47 RADCLIFFE DR LTR IN REVIEW",
+  // "SURPLUS CLAIM_CITY OF PC 5 RYBELL PL IN REVIEW". Neither is the claimant.
+  m[1] = m[1]
+    .replace(/\s+(?:ltr\s+)?in\s+review\s*$/i, '')
+    .replace(/[_\s]+\d+\s+[a-z][a-z ]*?\b(?:dr|drive|pl|place|path|st|street|ave|avenue|rd|road|ln|lane|ct|court|way|blvd|cir|circle|ter|terrace|trl|trail|pkwy|hwy)\.?\s*$/i, '')
+    .replace(/^_+|_+$/g, '')
+    .replace(/\bcity\s+of\s+pc\b/i, 'CITY OF PALM COAST');
   // Lake's clerk paperwork around a claim is not a claimant:
   // "Surplus Claim Acknowledgement", "... Determination", "... Denial".
   if (/^(?:ackno\w*|correspondence|determination|denial|email|&?\s*attachments?)\b/i.test(m[1].trim())) return null;
@@ -438,6 +446,28 @@ export function claimantFromTitle(title: string): string | null {
   const category = /^(government|gvernment|interested\s*part(?:y|ies)|owner)\b\s*[-:]?\s*/i.exec(raw);
   const name = category ? raw.slice(category[0].length).trim() : raw;
   return name || (category ? category[1].replace(/\s+/g, ' ') : null);
+}
+
+/**
+ * Flagler records some claims only as a party: "Dein P Spriggs Profit Sharing
+ * Trust" with the role 3RD PARTY CLAIMANT and no claim on the docket. Each one
+ * becomes a claim at the end of the ledger, named by the county. The clerk's
+ * own counsel is listed the same way on every case in legal review ("The Law
+ * Offices of Travis R. Walker, P.A.", who represents about half of Florida's
+ * clerks, beside an attorney invoice and a memo) and is not a claimant.
+ */
+export const CLAIMANT_ROLES = /^(?:3RD|THIRD)\s*PARTY\s*CLAIMANT$|^CLAIMANT$/i;
+const CLERK_COUNSEL = /\btravis\s+r\.?\s*walker\b/i;
+
+export function partyClaims(parties: SurplusCaseParty[] = []): SurplusCaseDocument[] {
+  const out: SurplusCaseDocument[] = [];
+  for (const p of parties) {
+    const name = String(p?.name || '').replace(/\s+/g, ' ').trim();
+    if (!name || !CLAIMANT_ROLES.test(p.role || '') || CLERK_COUNSEL.test(name)) continue;
+    if (out.some((d) => d.claimant?.toUpperCase() === name.toUpperCase())) continue;
+    out.push({ title: `Surplus Claim_${name}`, docId: null, url: null, claimant: name, filedAt: null, fileName: null, docType: 'PARTY' });
+  }
+  return out;
 }
 
 export interface DocumentsPage {
@@ -888,7 +918,7 @@ export class RealTdmAdapter implements SurplusSourceAdapter {
     const summary = parseSummary(summaryHtml);
 
     const parties = parseParties(await this.post(http, 'dspCaseParties', { caseID: id }));
-    const documents = await this.fetchDocuments(http, id);
+    const documents = [...(await this.fetchDocuments(http, id)), ...partyClaims(parties)];
     const recipients = parseNotifications(
       await this.post(http, 'dspNotifications', { caseID: id, pagenum: '1', control: 'SURPLUS_LETTER' }),
     );
@@ -1166,6 +1196,20 @@ export class AlachuaRealTdmAdapter extends RealTdmAdapter {
 export class SantaRosaRealTdmAdapter extends RealTdmAdapter {
   constructor(config: ConfigService) {
     super(config, { key: 'realtdm_santarosa', county: 'Santa Rosa', subdomain: 'santarosa' });
+  }
+}
+
+/**
+ * Flagler (discovery 2026-09-16). Posts almost no claim paperwork: 18 of 21
+ * live cases over the floor were sold in 2026 with nothing but the notice.
+ * The City of Palm Coast's lien claims read "SURPLUS CLAIM _CITY OF PALM COAST
+ * <address> LTR IN REVIEW", an owner's claim can appear only as a 3RD PARTY
+ * CLAIMANT party, and attorney invoices, memos and cover letters are the
+ * clerk's counsel reviewing claims, not a ruling.
+ */
+export class FlaglerRealTdmAdapter extends RealTdmAdapter {
+  constructor(config: ConfigService) {
+    super(config, { key: 'realtdm_flagler', county: 'Flagler', subdomain: 'flagler' });
   }
 }
 

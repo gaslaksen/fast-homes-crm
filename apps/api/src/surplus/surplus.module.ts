@@ -8,6 +8,7 @@ import { DuvalTaxDeedAdapter } from './duval-taxdeed.adapter';
 import {
   AlachuaRealTdmAdapter,
   BrevardRealTdmAdapter,
+  FlaglerRealTdmAdapter,
   LakeRealTdmAdapter,
   LeeRealTdmAdapter,
   PinellasRealTdmAdapter,
@@ -54,6 +55,7 @@ import { MessagesModule } from '../messages/messages.module';
     LakeRealTdmAdapter,
     AlachuaRealTdmAdapter,
     SantaRosaRealTdmAdapter,
+    FlaglerRealTdmAdapter,
     SurplusEndatoService,
     SurplusSkiptraceService,
     SurplusNoticeService,

@@ -9,6 +9,7 @@ import {
   parseNotifications,
   parseParties,
   parseSummary,
+  partyClaims,
   realTdmDate,
   splitAddressLines,
   splitCompoundOwner,
@@ -1333,3 +1334,63 @@ describe('classifying live Santa Rosa dockets', () => {
   });
 });
 
+
+describe('Flagler', () => {
+  const fl = (title: string, filedAt: string | null) => ({ title, filedAt, claimant: claimantFromTitle(title) });
+  // Verbatim from the 2026-09-16 discovery pass.
+  const walker = { name: 'The Law Offices of Travis R. Walker, P.A.', role: '3RD PARTY CLAIMANT' };
+  const trust = { name: 'Dein P Spriggs Profit Sharing Trust', role: '3RD PARTY CLAIMANT' };
+
+  it('reads the City of Palm Coast out of a claim title that carries the address and the review status', () => {
+    expect(claimantFromTitle('25-016 TDC TDC SURPLUS CLAIM _CITY OF PALM COAST 47 RADCLIFFE DR LTR IN REVIEW.pdf')).toBe('CITY OF PALM COAST');
+    expect(claimantFromTitle('25-027 TDC_ SURPLUS CLAIM CITY OF PALM COAST_ 30 UNDERWICK PATH LTR IN REVIEW.pdf')).toBe('CITY OF PALM COAST');
+    expect(claimantFromTitle('25-038 TDC_ SURPLUS CLAIM_CITY OF PC 5 RYBELL PL IN REVIEW.pdf')).toBe('CITY OF PALM COAST');
+    // Lee's shape is untouched.
+    expect(claimantFromTitle('Surplus Claim_Kevin Saturno')).toBe('Kevin Saturno');
+  });
+
+  it('files a 3RD PARTY CLAIMANT party as a claim, but never the clerk\'s own counsel', () => {
+    const claims = partyClaims([
+      { name: 'Dean P Spriggs, Trustee', role: 'OWNER' },
+      trust,
+      walker,
+      { name: 'City of Palm Coast', role: 'LIEN HOLDER' },
+    ] as any);
+    expect(claims).toHaveLength(1);
+    expect(claims[0]).toMatchObject({ claimant: 'Dein P Spriggs Profit Sharing Trust', docId: null, docType: 'PARTY' });
+    expect(partyClaims([walker] as any)).toEqual([]);
+  });
+
+  it('25-016: the city in legal review is a lien, and the attorney invoices and memos are nothing', () => {
+    const v = classifyCase(
+      [
+        fl('SURPLUS_LETTER', '2025-08-14'),
+        fl('25-016 TDC TDC SURPLUS CLAIM _CITY OF PALM COAST 47 RADCLIFFE DR LTR IN REVIEW.pdf', '2025-09-24'),
+        fl('25-016 TDC Attorney invoice_20125888425.pdf', '2025-12-17'),
+        fl('25-016 TDC _Memo[91].pdf', '2025-12-17'),
+        fl('25-016 TDC_CoverLetter.pdf', '2025-12-17'),
+        fl('25-016 TDC_invoice_20125890366.pdf', '2026-02-05'),
+        fl('25-016 TDC_Supplemental memo.pdf', '2026-02-05'),
+        ...partyClaims([walker] as any),
+      ],
+      { owners: ['BARBARA SELIGA', 'STANISLAW SELIGA'] },
+    );
+    expect(v.claimStatus).toBe('gov_lien');
+    expect(v.ledger.filter((d) => d.kind !== 'other' && d.kind !== 'notice_surplus').map((d) => d.claimant)).toEqual(['CITY OF PALM COAST']);
+  });
+
+  it('25-038: the owner\'s trust on the parties list has claimed, beside the city', () => {
+    const v = classifyCase(
+      [
+        fl('SURPLUS_LETTER', '2025-09-10'),
+        fl('25-038 TDC_ SURPLUS CLAIM_CITY OF PC 5 RYBELL PL IN REVIEW.pdf', '2025-09-24'),
+        fl('25-038 tdc invoice_20125891332.pdf', '2026-02-27'),
+        fl('25-038 tdc Memo.pdf', '2026-02-27'),
+        fl('25-038 tdc Cover Letter.pdf', '2026-02-27'),
+        ...partyClaims([trust, walker] as any),
+      ],
+      { owners: ['Dean P Spriggs', 'Dein P Spriggs'] },
+    );
+    expect(v.claimStatus).toBe('assigned');
+  });
+});
