@@ -27,7 +27,7 @@ import {
 } from '@fast-homes/shared';
 import { CLAIM_STATUS_LABEL } from './surplus-classify.util';
 import { nameSearchPlan } from './surplus-name-search.util';
-import { messageUrl, platformLabel, socialSearchLinks } from './surplus-social.util';
+import { leadSearchUrl, messageUrl, platformLabel, socialSearchLinks } from './surplus-social.util';
 import { traceState } from './surplus-skiptrace.util';
 import { heirRow } from './surplus-heirs.util';
 import {
@@ -2539,7 +2539,23 @@ export class SurplusService {
             ),
         searchedAt: d.socialSearchedAt || null,
         lastSearch: d.socialSearch
-          ? { searched: (d.socialSearch as any).searched || null, note: (d.socialSearch as any).note || null, found: ((d.socialSearch as any).profiles || []).length }
+          ? {
+              searched: (d.socialSearch as any).searched || null,
+              note: (d.socialSearch as any).note || null,
+              found: ((d.socialSearch as any).profiles || []).length,
+              // What tells this person from a namesake, each with the
+              // Facebook search it suggests.
+              leads: (((d.socialSearch as any).leads || []) as any[]).map((l) => ({
+                kind: l.kind,
+                value: l.value,
+                detail: l.detail || null,
+                searchUrl: leadSearchUrl(
+                  l,
+                  `${lead.sellerFirstName || ''} ${lead.sellerLastName || ''}`.trim(),
+                  d.ownerMailingCity || lead.propertyCity,
+                ),
+              })),
+            }
           : null,
       },
       channelsMissing: CHANNELS.filter((c) => {

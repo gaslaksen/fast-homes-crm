@@ -32,6 +32,7 @@
 
 import { SurplusSocialPlatform, SURPLUS_SOCIAL_PLATFORM_LABEL } from '@fast-homes/shared';
 import type { NameSearchLink } from './surplus-name-search.util';
+import { splitClaimantName } from './surplus-skiptrace.util';
 
 export interface ParsedProfile {
   platform: SurplusSocialPlatform;
@@ -154,13 +155,15 @@ export function platformLabel(platform: string): string {
  * sites, which is what the sites' own search often does worst.
  */
 export function socialSearchLinks(name: string, city?: string | null, state?: string | null): NameSearchLink[] {
-  const n = String(name || '').replace(/\s+/g, ' ').trim();
+  const n = searchName(name);
   if (!n) return [];
-  const where = [city, state].map((v) => String(v || '').trim()).filter(Boolean).join(' ');
-  const withPlace = where ? `${n} ${where}` : n;
+  // The city alone. Facebook's people search reads "San Antonio TX" as three
+  // words to match and ranks the state abbreviation against names.
+  const town = titleCase(String(city || '').trim());
+  const withPlace = town ? `${n} ${town}` : state ? `${n} ${String(state).trim()}` : n;
   const google =
     `"${n}"` +
-    (city ? ` "${String(city).trim()}"` : state ? ` ${String(state).trim()}` : '') +
+    (town ? ` "${town}"` : state ? ` ${String(state).trim()}` : '') +
     ' (site:facebook.com OR site:instagram.com OR site:linkedin.com OR site:x.com OR site:tiktok.com)';
   return [
     { site: 'Facebook', free: true, url: `https://www.facebook.com/search/people/?q=${encodeURIComponent(withPlace)}` },
@@ -170,6 +173,48 @@ export function socialSearchLinks(name: string, city?: string | null, state?: st
     { site: 'X', free: true, url: `https://x.com/search?q=${encodeURIComponent(`"${n}"`)}&f=user` },
     { site: 'TikTok', free: true, url: `https://www.tiktok.com/search/user?q=${encodeURIComponent(n)}` },
   ];
+}
+
+/**
+ * A name the way a person types it into a social site: first name and
+ * surname, in that order, in ordinary case. The docket's "CLARK, ALERIC T."
+ * or "ALERIC T. CLARK JR" matches almost nothing on Facebook, whose people
+ * search wants "Aleric Clark". Measured 2026-09-17 on that very claimant:
+ * the docket spelling found nobody and the plain one found him first.
+ */
+export function searchName(raw: string): string {
+  let s = String(raw || '').replace(/\s+/g, ' ').trim();
+  // "CLARK, ALERIC T" is surname first. "WILLIAMS, SR" is a suffix, not that.
+  const m = /^([^,]+),\s*(.+)$/.exec(s);
+  if (m && !/^(SR|JR|II|III|IV|V|ESQ|ET\s*AL|ETAL|DECEASED|TRUSTEE|TR)\.?$/i.test(m[2].trim())) s = `${m[2]} ${m[1]}`;
+  const { given, surname } = splitClaimantName(s);
+  if (!surname) return '';
+  // The first given name that is more than an initial, else whatever is there.
+  const first = given.find((g) => g.length > 1) || given[0] || '';
+  return titleCase([first, surname].filter(Boolean).join(' '));
+}
+
+function titleCase(v: string): string {
+  return v
+    .toLowerCase()
+    .replace(/(^|[\s'-])([a-z])/g, (_, a, b) => `${a}${b.toUpperCase()}`)
+    .replace(/\bMc([a-z])/g, (_, c) => `Mc${c.toUpperCase()}`);
+}
+
+/**
+ * A search link for one lead the research turned up. A person (a spouse, a
+ * relative, another name they go by) is searched for as themselves in the
+ * claimant's city; an employer, a business, a school or a team is searched
+ * together with the claimant's name, which is how a common name is told
+ * apart from its namesakes.
+ */
+export function leadSearchUrl(lead: { kind: string; value: string }, claimant: string, city?: string | null): string | null {
+  const v = String(lead.value || '').trim();
+  if (!v) return null;
+  const town = titleCase(String(city || '').trim());
+  const person = ['spouse', 'relative', 'alias'].includes(lead.kind);
+  const q = person ? [searchName(v) || v, town].filter(Boolean).join(' ') : `${searchName(claimant)} ${v}`;
+  return `https://www.facebook.com/search/${person || lead.kind === 'city' ? 'people' : 'top'}/?q=${encodeURIComponent(q.trim())}`;
 }
 
 // ─── The search itself ──────────────────────────────────────────────────────
@@ -183,8 +228,21 @@ export interface SocialCandidate {
   evidence: string;
 }
 
+/** Something about the person that is not a profile but leads to one. */
+export interface SocialLead {
+  /** 'spouse' | 'relative' | 'alias' | 'employer' | 'business' | 'school' | 'team' | 'city' | 'other' */
+  kind: string;
+  value: string;
+  /** Where it came from and what it says, in a few words. */
+  detail: string | null;
+}
+
+export const SOCIAL_LEAD_KINDS = ['spouse', 'relative', 'alias', 'employer', 'business', 'school', 'team', 'city', 'other'];
+
 export interface SocialVerdict {
   profiles: SocialCandidate[];
+  /** Spouse, employer, business, school: what tells this person from a namesake. */
+  leads: SocialLead[];
   /** What was searched, in a sentence, so a miss says what it looked for. */
   searched: string;
   note: string | null;
@@ -193,6 +251,8 @@ export interface SocialVerdict {
 export const SOCIAL_SYSTEM = `You find a person's public social media profiles by searching the web, and you judge whether each one is THIS person and not a namesake.
 
 You are given a person's name, the places they are known to be tied to, sometimes their age and known relatives, and sometimes an employer. Search the public web for their profiles on Facebook, Instagram, LinkedIn, X (Twitter) and TikTok, and return the ones that are plausibly them, with the evidence.
+
+Know the limit before you start. Facebook keeps most personal profiles out of search engines, so a person with an active Facebook often cannot be found this way at all. A colleague who is logged in to Facebook will search there by hand afterwards, and what they need from you is whatever tells THIS person from the namesakes: a spouse's name, an employer, a business they own, a school, a team they played for or coach, a nickname, the city they live in now. People-search listings, business registrations, news stories, team rosters, LinkedIn and obituaries of relatives carry these. Collect them as leads whether or not you find a profile. A search that finds no profile and three good leads is a good search.
 
 How to search:
 1. Search the full name with the word facebook and each listed city or state, for example "Aleric Clark" facebook "San Antonio". Search result snippets for Facebook profiles usually carry a "Lives in", "From" or "Works at" line and the friend count; read those.
@@ -216,8 +276,8 @@ Confidence:
 Common names produce many profiles for other people. Offer at most five, best first. When in doubt between strong and possible, choose possible. Never invent a URL: every URL must come from a search result or a page you opened.
 
 Finish with ONLY a JSON object, no prose after it:
-{"profiles":[{"platform":"facebook|instagram|linkedin|x|tiktok|other","url":string,"displayName":string|null,"confidence":"strong|possible","evidence":"one or two sentences on what ties it to this person"}],"searched":"one sentence on what was searched","note":string|null}
-An empty profiles list with a searched sentence is a good answer when nothing fits.`;
+{"profiles":[{"platform":"facebook|instagram|linkedin|x|tiktok|other","url":string,"displayName":string|null,"confidence":"strong|possible","evidence":"one or two sentences on what ties it to this person"}],"leads":[{"kind":"spouse|relative|alias|employer|business|school|team|city|other","value":"the name alone, for example Yvette Hinojosa or Devonwood Enterprizes Inc","detail":"a few words on where it came from and how sure it is"}],"searched":"one sentence on what was searched","note":string|null}
+An empty profiles list is a good answer when nothing fits, as long as the leads are there. Give at most eight leads, the most identifying first. Never put a phone number, an email or a street address in a lead: those come from a verified trace, not from a listing.`;
 
 /** Per million tokens. Cache reads are charged at the input price here, which errs high. */
 const PRICES: Record<string, { in: number; out: number }> = {
@@ -240,7 +300,7 @@ export function socialSearchCost(
  * is told never to invent one, and this is the check on that.
  */
 export function parseSocialVerdict(text: string): SocialVerdict {
-  const none: SocialVerdict = { profiles: [], searched: 'The search returned nothing readable.', note: null };
+  const none: SocialVerdict = { profiles: [], leads: [], searched: 'The search returned nothing readable.', note: null };
   const raw = String(text || '');
   const start = raw.lastIndexOf('{"profiles"') >= 0 ? raw.lastIndexOf('{"profiles"') : raw.indexOf('{');
   const end = raw.lastIndexOf('}');
@@ -270,5 +330,19 @@ export function parseSocialVerdict(text: string): SocialVerdict {
     });
     if (profiles.length >= 5) break;
   }
-  return { profiles, searched: str(o?.searched) || 'Searched the public web.', note: str(o?.note) };
+  const leads: SocialLead[] = [];
+  const seenLead = new Set<string>();
+  for (const l of Array.isArray(o?.leads) ? o.leads : []) {
+    const value = str(l?.value);
+    if (!value || value.length > 120) continue;
+    // A listing's phone, email or street address is not a lead. The trace verifies those.
+    if (/@|\d{3}[\s.)-]*\d{3}[\s.-]*\d{4}|^\d+\s+\w+/.test(value)) continue;
+    const kind = SOCIAL_LEAD_KINDS.includes(l?.kind) ? l.kind : 'other';
+    const key = `${kind}|${value.toLowerCase()}`;
+    if (seenLead.has(key)) continue;
+    seenLead.add(key);
+    leads.push({ kind, value, detail: str(l?.detail) });
+    if (leads.length >= 8) break;
+  }
+  return { profiles, leads, searched: str(o?.searched) || 'Searched the public web.', note: str(o?.note) };
 }

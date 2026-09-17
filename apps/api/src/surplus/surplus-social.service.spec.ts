@@ -158,6 +158,21 @@ describe('SurplusSocialService', () => {
     expect(attempts[0].cost).toBeGreaterThan(0);
   });
 
+  it('a miss with leads saves them on the card and in the notes, for the hand search on Facebook', async () => {
+    const { svc, create, attempts, detailUpdates } = harness([lead()]);
+    create.mockResolvedValue(reply({
+      profiles: [],
+      leads: [{ kind: 'spouse', value: 'Yvette Hinojosa', detail: 'people-search listing' }, { kind: 'business', value: 'Devonwood Enterprizes Inc', detail: null }],
+      searched: 'Searched.',
+      note: null,
+    }));
+    await svc.run({ organizationId: 'org' });
+    expect(detailUpdates[0].data.socialSearch.leads).toHaveLength(2);
+    expect(detailUpdates[0].data.callNotes).toContain('Relatives on file');
+    expect(detailUpdates[0].data.callNotes).toMatch(/Web research on ALERIC T CLARK \(\d{4}-\d{2}-\d{2}\): spouse Yvette Hinojosa \(people-search listing\); business Devonwood Enterprizes Inc\. Unverified/);
+    expect(attempts[0].summary).toContain('2 leads to search Facebook with');
+  });
+
   it('a miss is stamped and logged as nothing, so the search is not bought twice', async () => {
     const { svc, create, profileCreates, attempts, detailUpdates } = harness([lead()]);
     create.mockResolvedValue(reply({ profiles: [], searched: 'Searched Facebook for Aleric Clark in Texas and Florida.', note: 'Only namesakes in Georgia.' }));

@@ -307,7 +307,7 @@ export class SurplusSocialService {
       .catch((e) => this.logger.warn(`Could not record social search spend: ${e?.message || e}`));
 
     if (response?.stop_reason === 'refusal') {
-      return { verdict: { profiles: [], searched: 'The search was declined.', note: null }, cost };
+      return { verdict: { profiles: [], leads: [], searched: 'The search was declined.', note: null }, cost };
     }
     const text = (response?.content || [])
       .filter((b: any) => b.type === 'text')
@@ -499,17 +499,32 @@ export class SurplusSocialService {
       added += 1;
     }
     const now = new Date();
+    // The leads go into the notes as well as the saved verdict: the notes are
+    // what the next search (obituary, trace, a person on the phone) reads.
+    const leadLine = v.leads.length
+      ? `Web research on ${who} (${now.toISOString().slice(0, 10)}): ${v.leads.map((l) => `${l.kind} ${l.value}${l.detail ? ` (${l.detail})` : ''}`).join('; ')}. Unverified; use it to tell them from a namesake.`
+      : null;
     if (heir) {
-      await this.prisma.surplusHeir.update({ where: { id: heir.id }, data: { socialSearchedAt: now } });
+      await this.prisma.surplusHeir.update({
+        where: { id: heir.id },
+        data: {
+          socialSearchedAt: now,
+          ...(leadLine ? { callNotes: [heir.callNotes, leadLine].filter(Boolean).join('\n') } : {}),
+        },
+      });
     } else {
       await this.prisma.surplusDetail.update({
         where: { id: d.id },
-        data: { socialSearchedAt: now, socialSearch: { ...v, cost, at: now.toISOString() } as any },
+        data: {
+          socialSearchedAt: now,
+          socialSearch: { ...v, cost, at: now.toISOString() } as any,
+          ...(leadLine ? { callNotes: [d.callNotes, leadLine].filter(Boolean).join('\n') } : {}),
+        },
       });
     }
     const summary = v.profiles.length
       ? `${v.profiles.length} profile${v.profiles.length === 1 ? '' : 's'} to check for ${who}: ${v.profiles.map((p) => `${platformLabel(p.platform)} (${p.confidence})`).join(', ')}. ${v.searched}`
-      : `No profile found for ${who}. ${v.searched}${v.note ? ` ${v.note}` : ''}`;
+      : `No profile found for ${who}${v.leads.length ? `, ${v.leads.length} lead${v.leads.length === 1 ? '' : 's'} to search Facebook with` : ''}. ${v.searched}${v.note ? ` ${v.note}` : ''}`;
     await this.prisma.surplusTraceAttempt.create({
       data: {
         surplusDetailId: d.id,

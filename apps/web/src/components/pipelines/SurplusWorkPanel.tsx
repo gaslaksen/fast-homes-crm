@@ -15,7 +15,7 @@ import { DNC_STATE, SURPLUS_STAGES } from './format';
 import ContactEditor from './ContactEditor';
 import SurplusHeirs, { courtRecordsSearch } from './SurplusHeirs';
 import { AddSocialProfile, FindProfilesButton, SocialProfileList } from './SurplusSocial';
-import { socialOpener, type SocialProfile } from '@/lib/surplus-social';
+import { SOCIAL_LEAD_LABEL, rememberSocialTarget, saveToDealcoreBookmarklet, socialOpener, type SocialProfile } from '@/lib/surplus-social';
 import { Fold, useFolds } from './PanelFold';
 import { fmtDate, money, phoneDisplay } from './format';
 
@@ -169,7 +169,13 @@ export interface SurplusPanelLead {
     /** One-click searches for the claimant on each platform. Empty for an entity. */
     links: { site: string; url: string; free: boolean }[];
     searchedAt: string | null;
-    lastSearch: { searched: string | null; note: string | null; found: number } | null;
+    lastSearch: {
+      searched: string | null;
+      note: string | null;
+      found: number;
+      /** What tells this person from a namesake, each with the Facebook search it suggests. */
+      leads?: { kind: string; value: string; detail: string | null; searchUrl: string | null }[];
+    } | null;
   } | null;
   credibilitySentAt: string | null;
   credibilityChannels: string[];
@@ -3382,6 +3388,30 @@ function SocialBlock({
   // The person, not the estate: the profile was Odessa Rainwater's, never "Estate of".
   const who = lead.claimant.replace(/^(the\s+)?estate\s+of\s+/i, '').trim() || lead.claimant;
   const mine = social.profiles.filter((p) => !p.heirId);
+  const leads = social.lastSearch?.leads || [];
+  // The card a profile found in another tab belongs to. Any click in this
+  // block means this is the person being looked for.
+  const remember = () =>
+    rememberSocialTarget({
+      leadId: lead.id,
+      heirId: null,
+      label: who,
+      sub: [lead.county ? `${lead.county} County` : null, lead.caseNumber ? `case ${lead.caseNumber}` : null].filter(Boolean).join(', ') || null,
+    });
+  const addRelative = async (l: { kind: string; value: string; detail: string | null }) => {
+    try {
+      await surplusAPI.addHeir(lead.id, {
+        name: l.value,
+        role: 'relative',
+        relationship: l.kind === 'spouse' ? 'Spouse' : null,
+        callNotes: `From web research${l.detail ? `: ${l.detail}` : ''}. Unverified.`,
+      });
+      say(`${l.value} added to the people around ${who}.`);
+      onChanged();
+    } catch (err: any) {
+      say(err?.response?.data?.message || 'That could not be added.');
+    }
+  };
   const candidates = mine.filter((p) => p.status === 'candidate').length;
   const confirmed = mine.filter((p) => p.status === 'confirmed').length;
   const sender = [currentUser?.firstName, currentUser?.lastName].filter(Boolean).join(' ') || 'the team';
@@ -3404,12 +3434,13 @@ function SocialBlock({
           ? 'No number on file, so a profile may be the only way to reach them'
           : undefined;
   return (
-    <div style={{ marginTop: 10 }}>
+    <div style={{ marginTop: 10 }} onClickCapture={remember}>
       <SubHead title={`${who} online`} note={note} />
       {mine.length === 0 && !findOpen && (
         <div style={{ fontSize: 12, color: 'var(--faint)' }}>No profile on file yet.</div>
       )}
       <SocialProfileList profiles={mine} say={say} onChanged={onChanged} />
+      {leads.length > 0 && <SocialLeads leads={leads} who={who} onAddRelative={addRelative} />}
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginTop: 6 }}>
         <button type="button" className="dc-wp-btn" onClick={() => setFindOpen((v) => !v)}>
           {findOpen ? 'Done' : mine.length ? 'Find more' : `Find ${who} online`}
@@ -3453,9 +3484,100 @@ function SocialBlock({
             </div>
           )}
           <AddSocialProfile leadId={lead.id} say={say} onChanged={onChanged} />
+          <SaveToDealcore />
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * What the web research found that is not a profile: a spouse, an employer,
+ * a business, a team. Facebook keeps most personal profiles out of search
+ * engines, so the paid search usually cannot see the profile itself, but it
+ * can see what tells this person from the namesakes. Each lead is one click
+ * into Facebook's own search, run from the person's logged-in browser.
+ */
+function SocialLeads({
+  leads,
+  who,
+  onAddRelative,
+}: {
+  leads: { kind: string; value: string; detail: string | null; searchUrl: string | null }[];
+  who: string;
+  onAddRelative: (l: { kind: string; value: string; detail: string | null }) => void;
+}) {
+  return (
+    <div style={{ marginTop: 6, padding: '7px 10px', borderRadius: 6, background: 'var(--bg2)' }}>
+      <div style={{ fontSize: 11, color: 'var(--faint)', marginBottom: 4 }}>
+        From the web search. Unverified: use these to tell {who} from a namesake, not as facts.
+      </div>
+      {leads.map((l) => {
+        const person = l.kind === 'spouse' || l.kind === 'relative';
+        return (
+          <div key={`${l.kind}-${l.value}`} className="dc-wp-contact" style={{ padding: '4px 0' }}>
+            <div className="dc-wp-contact-main">
+              <span className="meta" style={{ minWidth: 62 }}>{SOCIAL_LEAD_LABEL[l.kind] || 'Lead'}</span>
+              <span className="num" style={{ fontSize: 12.5 }}>{l.value}</span>
+              {l.detail && <span className="meta">{l.detail}</span>}
+            </div>
+            <div className="dc-wp-contact-actions">
+              {l.searchUrl && (
+                <a
+                  href={l.searchUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="dc-wp-btn"
+                  style={{ padding: '4px 10px', fontSize: 11.5 }}
+                  title={person ? `Searches Facebook for ${l.value}` : `Searches Facebook for ${who} together with ${l.value}`}
+                >
+                  Facebook
+                </a>
+              )}
+              {person && (
+                <button type="button" className="dc-wp-btn" onClick={() => onAddRelative(l)} title="Adds them to the people around the claimant, so they can be traced and contacted">
+                  Add as relative
+                </button>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * The Save to Dealcore bookmarklet. Dragged to the bookmarks bar once; then
+ * on anybody's profile page one click attaches that profile to the card
+ * being worked, with no copying and pasting. The href is set after mount
+ * because React refuses a javascript: address written in JSX.
+ */
+function SaveToDealcore() {
+  const ref = useRef<HTMLAnchorElement>(null);
+  useEffect(() => {
+    if (ref.current) ref.current.setAttribute('href', saveToDealcoreBookmarklet(window.location.origin));
+  }, []);
+  return (
+    <details>
+      <summary style={{ fontSize: 11.5, color: 'var(--dim)', cursor: 'pointer' }}>Skip the copy and paste: the Save to Dealcore button</summary>
+      <div style={{ fontSize: 11.5, color: 'var(--dim)', marginTop: 6, lineHeight: 1.5 }}>
+        Drag this to your bookmarks bar, once:{' '}
+        <a
+          ref={ref}
+          className="dc-wp-searchlink"
+          onClick={(e) => e.preventDefault()}
+          title="Drag me to the bookmarks bar. Clicking here does nothing."
+          style={{ cursor: 'grab' }}
+        >
+          Save to Dealcore
+        </a>
+        <div style={{ marginTop: 4, color: 'var(--faint)' }}>
+          Then, on the person&apos;s Facebook, Instagram or LinkedIn page, click it. A small window asks which card to
+          save the profile to, already set to the last card you searched from.
+        </div>
+      </div>
+    </details>
   );
 }
 
