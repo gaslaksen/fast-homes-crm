@@ -154,19 +154,90 @@ export function platformLabel(platform: string): string {
  * beside it log the result. The Google one is restricted to the social
  * sites, which is what the sites' own search often does worst.
  */
+const STATE_NAMES: Record<string, string> = {
+  AL: 'Alabama',
+  AK: 'Alaska',
+  AZ: 'Arizona',
+  AR: 'Arkansas',
+  CA: 'California',
+  CO: 'Colorado',
+  CT: 'Connecticut',
+  DE: 'Delaware',
+  DC: 'Washington DC',
+  FL: 'Florida',
+  GA: 'Georgia',
+  HI: 'Hawaii',
+  ID: 'Idaho',
+  IL: 'Illinois',
+  IN: 'Indiana',
+  IA: 'Iowa',
+  KS: 'Kansas',
+  KY: 'Kentucky',
+  LA: 'Louisiana',
+  ME: 'Maine',
+  MD: 'Maryland',
+  MA: 'Massachusetts',
+  MI: 'Michigan',
+  MN: 'Minnesota',
+  MS: 'Mississippi',
+  MO: 'Missouri',
+  MT: 'Montana',
+  NE: 'Nebraska',
+  NV: 'Nevada',
+  NH: 'New Hampshire',
+  NJ: 'New Jersey',
+  NM: 'New Mexico',
+  NY: 'New York',
+  NC: 'North Carolina',
+  ND: 'North Dakota',
+  OH: 'Ohio',
+  OK: 'Oklahoma',
+  OR: 'Oregon',
+  PA: 'Pennsylvania',
+  PR: 'Puerto Rico',
+  RI: 'Rhode Island',
+  SC: 'South Carolina',
+  SD: 'South Dakota',
+  TN: 'Tennessee',
+  TX: 'Texas',
+  UT: 'Utah',
+  VT: 'Vermont',
+  VA: 'Virginia',
+  WA: 'Washington',
+  WV: 'West Virginia',
+  WI: 'Wisconsin',
+  WY: 'Wyoming',
+};
+
+/** "FL" as "Florida", the way a person types it. Anything unknown is returned as it came. */
+export function stateName(code?: string | null): string {
+  const c = String(code || '').trim();
+  return STATE_NAMES[c.toUpperCase()] || c;
+}
+
+/**
+ * `city` is the person's OWN town (the clerk's mailing address, an heir's
+ * address on a filing) and never the town the property sold in: people leave,
+ * which is how the property came to be sold for taxes. The searches narrow by
+ * STATE, spelled out. Narrowing by town returned nothing at all for most
+ * claimants (2026-09-17: "Rosemary Clark" "Leesburg" found nobody), while
+ * "Rosemary Clark Florida" lists every one of them to pick from. Where the
+ * person's own town is known it gets a second Facebook button, because that
+ * is what found Aleric Clark in San Antonio.
+ */
 export function socialSearchLinks(name: string, city?: string | null, state?: string | null): NameSearchLink[] {
   const n = searchName(name);
   if (!n) return [];
-  // The city alone. Facebook's people search reads "San Antonio TX" as three
-  // words to match and ranks the state abbreviation against names.
   const town = titleCase(String(city || '').trim());
-  const withPlace = town ? `${n} ${town}` : state ? `${n} ${String(state).trim()}` : n;
+  const st = stateName(state);
+  const withPlace = st ? `${n} ${st}` : n;
   const google =
     `"${n}"` +
-    (town ? ` "${town}"` : state ? ` ${String(state).trim()}` : '') +
+    (st ? ` "${st}"` : '') +
     ' (site:facebook.com OR site:instagram.com OR site:linkedin.com OR site:x.com OR site:tiktok.com)';
   return [
     { site: 'Facebook', free: true, url: facebookSearchUrl('people', withPlace) },
+    ...(town ? [{ site: `Facebook ${town}`, free: true, url: facebookSearchUrl('people', `${n} ${town}`) }] : []),
     { site: 'Google social', free: true, url: `https://www.google.com/search?q=${encodeURIComponent(google)}` },
     { site: 'Instagram', free: true, url: `https://www.instagram.com/explore/search/keyword/?q=${encodeURIComponent(n)}` },
     { site: 'LinkedIn', free: true, url: `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(withPlace)}` },
@@ -223,7 +294,12 @@ function titleCase(v: string): string {
  * together with the claimant's name, which is how a common name is told
  * apart from its namesakes.
  */
-export function leadSearchUrl(lead: { kind: string; value: string }, claimant: string, city?: string | null): string | null {
+export function leadSearchUrl(
+  lead: { kind: string; value: string },
+  claimant: string,
+  city?: string | null,
+  state?: string | null,
+): string | null {
   // A parenthetical is commentary, not something to type into a search box.
   const v = String(lead.value || '').replace(/\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim();
   if (!v) return null;
@@ -241,7 +317,8 @@ export function leadSearchUrl(lead: { kind: string; value: string }, claimant: s
     const them = searchName(v) || v;
     // Another spelling that comes out as the same search is the button above.
     if (lead.kind === 'alias' && them === me) return null;
-    return facebookSearchUrl('people', [them, town].filter(Boolean).join(' '));
+    // By state, as the main search is: a spouse may not live where the claimant does.
+    return facebookSearchUrl('people', [them, stateName(state) || town].filter(Boolean).join(' '));
   }
   return facebookSearchUrl('top', `${me} ${v}`);
 }

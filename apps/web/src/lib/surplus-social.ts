@@ -65,20 +65,23 @@ export function socialOpener(claimant: string, sender: string, company: string, 
 export function socialSearchLinks(name: string, city?: string | null, state?: string | null): { site: string; url: string }[] {
   const n = searchName(name);
   if (!n) return [];
-  // The city alone: Facebook ranks a state abbreviation against names.
+  // By state, spelled out: narrowing by town found nobody for most people.
+  // The person's own town, where known, gets a second Facebook button.
+  // Mirrors socialSearchLinks in the API's surplus-social.util.ts.
   const town = titleCase(String(city || '').trim());
-  const withPlace = town ? `${n} ${town}` : state ? `${n} ${String(state).trim()}` : n;
+  const st = stateName(state);
+  const withPlace = st ? `${n} ${st}` : n;
+  const fb = (q: string) =>
+    `https://www.facebook.com/login/?next=${encodeURIComponent(`https://www.facebook.com/search/people/?q=${encodeURIComponent(q)}`)}`;
   const google =
     `"${n}"` +
-    (town ? ` "${town}"` : state ? ` ${String(state).trim()}` : '') +
+    (st ? ` "${st}"` : '') +
     ' (site:facebook.com OR site:instagram.com OR site:linkedin.com OR site:x.com OR site:tiktok.com)';
   return [
     // Through the sign-in page: signed out, Facebook answers a search address
-    // with a bare "Not Found". Mirrors facebookSearchUrl in the API.
-    {
-      site: 'Facebook',
-      url: `https://www.facebook.com/login/?next=${encodeURIComponent(`https://www.facebook.com/search/people/?q=${encodeURIComponent(withPlace)}`)}`,
-    },
+    // with a bare "Not Found".
+    { site: 'Facebook', url: fb(withPlace) },
+    ...(town ? [{ site: `Facebook ${town}`, url: fb(`${n} ${town}`) }] : []),
     { site: 'Google social', url: `https://www.google.com/search?q=${encodeURIComponent(google)}` },
     { site: 'Instagram', url: `https://www.instagram.com/explore/search/keyword/?q=${encodeURIComponent(n)}` },
     { site: 'LinkedIn', url: `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(withPlace)}` },
@@ -191,4 +194,64 @@ export function nameFromPageTitle(title: string): string | null {
     .replace(/\s*\(@[^)]+\).*$/, '')
     .trim();
   return t && t.length <= 80 && !/^(facebook|instagram|linkedin|log in|sign up)/i.test(t) ? t : null;
+}
+
+const STATE_NAMES: Record<string, string> = {
+  AL: 'Alabama',
+  AK: 'Alaska',
+  AZ: 'Arizona',
+  AR: 'Arkansas',
+  CA: 'California',
+  CO: 'Colorado',
+  CT: 'Connecticut',
+  DE: 'Delaware',
+  DC: 'Washington DC',
+  FL: 'Florida',
+  GA: 'Georgia',
+  HI: 'Hawaii',
+  ID: 'Idaho',
+  IL: 'Illinois',
+  IN: 'Indiana',
+  IA: 'Iowa',
+  KS: 'Kansas',
+  KY: 'Kentucky',
+  LA: 'Louisiana',
+  ME: 'Maine',
+  MD: 'Maryland',
+  MA: 'Massachusetts',
+  MI: 'Michigan',
+  MN: 'Minnesota',
+  MS: 'Mississippi',
+  MO: 'Missouri',
+  MT: 'Montana',
+  NE: 'Nebraska',
+  NV: 'Nevada',
+  NH: 'New Hampshire',
+  NJ: 'New Jersey',
+  NM: 'New Mexico',
+  NY: 'New York',
+  NC: 'North Carolina',
+  ND: 'North Dakota',
+  OH: 'Ohio',
+  OK: 'Oklahoma',
+  OR: 'Oregon',
+  PA: 'Pennsylvania',
+  PR: 'Puerto Rico',
+  RI: 'Rhode Island',
+  SC: 'South Carolina',
+  SD: 'South Dakota',
+  TN: 'Tennessee',
+  TX: 'Texas',
+  UT: 'Utah',
+  VT: 'Vermont',
+  VA: 'Virginia',
+  WA: 'Washington',
+  WV: 'West Virginia',
+  WI: 'Wisconsin',
+  WY: 'Wyoming',
+};
+
+function stateName(code?: string | null): string {
+  const c = String(code || '').trim();
+  return STATE_NAMES[c.toUpperCase()] || c;
 }
