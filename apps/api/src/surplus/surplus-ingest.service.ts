@@ -20,7 +20,7 @@ import {
   SurplusFundLocation,
 } from '@fast-homes/shared';
 import { SurplusService } from './surplus.service';
-import { DuvalTaxDeedAdapter } from './duval-taxdeed.adapter';
+import { CitrusTaxSmartAdapter, DuvalTaxDeedAdapter, HernandoTaxSmartAdapter } from './pioneer-taxsmart.adapter';
 import {
   AlachuaRealTdmAdapter,
   BrevardRealTdmAdapter,
@@ -251,9 +251,11 @@ export class SurplusIngestService {
     private alachua?: AlachuaRealTdmAdapter,
     private santaRosa?: SantaRosaRealTdmAdapter,
     private flagler?: FlaglerRealTdmAdapter,
+    private citrus?: CitrusTaxSmartAdapter,
+    private hernando?: HernandoTaxSmartAdapter,
   ) {}
 
-  /** Every adapter wired up: Duval daily; Lee, Polk, Brevard, Pinellas, Sarasota, Lake, Alachua, Santa Rosa and Flagler (RealTDM) weekly. */
+  /** Every adapter wired up: Duval daily; Lee, Polk, Brevard, Pinellas, Sarasota, Lake, Alachua, Santa Rosa and Flagler (RealTDM) weekly; Citrus and Hernando (Pioneer TaxSmart) weekly. */
   adapters(): SurplusSourceAdapter[] {
     const all: (SurplusSourceAdapter | undefined)[] = [
       this.duval,
@@ -266,6 +268,8 @@ export class SurplusIngestService {
       this.alachua,
       this.santaRosa,
       this.flagler,
+      this.citrus,
+      this.hernando,
     ];
     return all.filter((a): a is SurplusSourceAdapter => !!a);
   }
@@ -468,6 +472,8 @@ export class SurplusIngestService {
       owners: detail.owners,
       receiptsImplyClaim: !!adapter.receiptsImplyClaim,
       payoutsArePartial: !!adapter.payoutsArePartial,
+      categoryFolders: adapter.categoryFolders,
+      claimsNotPublished: !!adapter.claimsNotPublished,
       applicants: String(detail.applicantNames || '')
         .split(/\s*,\s*/)
         .filter(Boolean),

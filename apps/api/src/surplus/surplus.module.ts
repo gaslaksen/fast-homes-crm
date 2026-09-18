@@ -4,7 +4,7 @@ import { SurplusService } from './surplus.service';
 import { SurplusImportService } from './surplus-import.service';
 import { SurplusIngestService } from './surplus-ingest.service';
 import { SurplusPollService } from './surplus-poll.service';
-import { DuvalTaxDeedAdapter } from './duval-taxdeed.adapter';
+import { CitrusTaxSmartAdapter, DuvalTaxDeedAdapter, HernandoTaxSmartAdapter } from './pioneer-taxsmart.adapter';
 import {
   AlachuaRealTdmAdapter,
   BrevardRealTdmAdapter,
@@ -57,6 +57,8 @@ import { MessagesModule } from '../messages/messages.module';
     AlachuaRealTdmAdapter,
     SantaRosaRealTdmAdapter,
     FlaglerRealTdmAdapter,
+    CitrusTaxSmartAdapter,
+    HernandoTaxSmartAdapter,
     SurplusEndatoService,
     SurplusSkiptraceService,
     SurplusNoticeService,

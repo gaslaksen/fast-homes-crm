@@ -1,20 +1,15 @@
 /**
- * Duval County tax deed surplus, from taxdeed.duvalclerk.com.
+ * Pioneer TaxSmart tax deed surplus, the app Duval, Citrus and Hernando all run.
  *
- * ── Why Duval and not RealTDM first ─────────────────────────────────────────
+ * ── One product, three counties ─────────────────────────────────────────────
  *
- * The RealTDM spec covers seven counties, but Duval is not one of them: it runs
- * its own ASP.NET app with a completely separate document vocabulary. It is
- * also the better first target on three counts.
- *
- *   1. It publishes a dedicated Surplus Funds search, so we ask for exactly the
- *      cases we want instead of scraping a sale-date window and filtering.
- *      RealTDM has no such filter and its status filter toggles itself OFF when
- *      re-selected, which silently widens a search.
- *   2. Its results come back as JSON from a jqGrid endpoint, not HTML fragments.
- *   3. RealTDM's robots.txt disallows automated fetching. Duval serves no
- *      robots.txt at all (404 as of 2026-08-27), so the objection that stalls a
- *      nightly RealTDM scraper does not apply here.
+ * Duval was built first, as `taxdeed.duvalclerk.com`. Citrus
+ * (`search.citrusclerk.org/TaxSmartWeb`) and Hernando
+ * (`or.hernandoclerk.com/TaxSmart`) turned out to be the same vendor product
+ * behind a different host and path: the same `buttonSubmitSurplus` POST, the
+ * same jqGrid colModel in the same order, the same `/Home/Details?id=N` page
+ * and the same `/Home/Image/N` documents. So this is one adapter with a spec
+ * per county rather than three parsers.
  *
  * ── Shape of the source ─────────────────────────────────────────────────────
  *
@@ -26,7 +21,20 @@
  * Rows arrive as a positional `cell` array in colModel order. That order is
  * declared in a script tag on the results page and is asserted below rather
  * than trusted, because a column reordering upstream would otherwise write
- * parcel numbers into the sale date without failing.
+ * parcel numbers into the sale date without failing. Hernando names the
+ * seventh column BaseBid where Duval and Citrus name it OpeningBid, which is
+ * the only difference between the three.
+ *
+ * ── What each county's docket is worth ──────────────────────────────────────
+ *
+ * The document list is titles only: no filing dates and no claimant names, so
+ * the ledger reads kinds and never who filed. Hernando labels a claim
+ * "Claims Filed", which is the claim signal for that county. Citrus publishes
+ * no claim document at all, and files "Returned Mail", "Additional Taxes" and
+ * "APPLICATION" as empty category folders on EVERY case (147 of 147 in the
+ * 2026-09-18 discovery pass), so reading its "Returned Mail" as a dead address
+ * would mark every Citrus claimant undeliverable. Both facts are spec flags,
+ * not rules in the classifier.
  */
 
 import { Injectable, Logger } from '@nestjs/common';
@@ -37,9 +45,9 @@ import {
   SurplusCaseSummary,
   SurplusCaseDetail,
   SurplusCaseDocument,
+  SurplusPollCadence,
 } from './surplus-source.types';
 
-const DEFAULT_BASE_URL = 'https://taxdeed.duvalclerk.com';
 const PAGE_SIZE = 100;
 /** A courtesy pause between detail fetches. The docket is small; be polite. */
 const DETAIL_DELAY_MS = 400;
@@ -49,17 +57,19 @@ const DETAIL_DELAY_MS = 400;
  * every run, never assumed.
  */
 const GRID_COLUMNS = [
-  'Applicant',
-  'CaseNumber',
-  'CertificateNumber',
-  'ParcelID',
-  'SaleDate',
-  'Status',
-  'OpeningBid',
-  'HighBid',
-  'Surplus',
-  'PropertyOwners',
+  ['Applicant'],
+  ['CaseNumber'],
+  ['CertificateNumber'],
+  ['ParcelID'],
+  ['SaleDate'],
+  ['Status'],
+  // Hernando calls the opening bid BaseBid, on the grid and on the detail page.
+  ['OpeningBid', 'BaseBid'],
+  ['HighBid'],
+  ['Surplus'],
+  ['PropertyOwners'],
 ] as const;
+const GRID_COLUMN_NAMES: string[] = GRID_COLUMNS.flatMap((c) => [...c]);
 
 /** Only SOLD cases carry a live surplus. 207 of 208 ESCHEATED rows post $0.00. */
 const LIVE_STATUS = /^SOLD$/i;
@@ -70,8 +80,8 @@ function money(v?: string | null): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-/** Duval ships M/D/YYYY. Returns an ISO date, or null rather than an epoch. */
-export function duvalDate(v?: string | null): string | null {
+/** The grid ships M/D/YYYY. Returns an ISO date, or null rather than an epoch. */
+export function taxSmartDate(v?: string | null): string | null {
   const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(String(v || '').trim());
   if (!m) return null;
   const [, mm, dd, yyyy] = m;
@@ -160,7 +170,9 @@ export function parseDocuments(html: string): SurplusCaseDocument[] {
   const body = html.slice(Math.max(0, html.indexOf('Documents')));
   const docs: SurplusCaseDocument[] = [];
 
-  const anchor = /<a[^>]+href="(\/Home\/Image\/(\d+))"[^>]*>\s*([^<]{2,80}?)\s*<\/a>/gi;
+  // Citrus and Hernando serve the app under a path prefix
+  // (`/TaxSmartWeb/Home/Image/145437`), Duval at the root.
+  const anchor = /<a[^>]+href="((?:\/[A-Za-z]+)?\/Home\/Image\/(\d+))"[^>]*>\s*([^<]{2,80}?)\s*<\/a>/gi;
   for (let m = anchor.exec(body); m; m = anchor.exec(body)) {
     docs.push({ title: decode(m[3]), docId: m[2], url: m[1] });
   }
@@ -173,22 +185,55 @@ export function parseDocuments(html: string): SurplusCaseDocument[] {
   return docs;
 }
 
-@Injectable()
-export class DuvalTaxDeedAdapter implements SurplusSourceAdapter {
-  readonly key = 'duval_taxdeed';
-  readonly county = 'Duval';
-  /** Daily: the county serves no robots.txt and the docket is a few hundred JSON rows. */
-  readonly cadence = 'daily' as const;
-  readonly detailDelayMs = DETAIL_DELAY_MS;
+export interface PioneerCountySpec {
+  /** Written to SurplusDetail.sourceSystem, eg 'duval_taxdeed'. */
+  key: string;
+  /** Matches FL_COUNTIES. */
+  county: string;
+  /** Host plus any path prefix, eg 'https://or.hernandoclerk.com/TaxSmart'. */
+  defaultBaseUrl: string;
+  /** Env var that overrides the base URL, where one exists. */
+  baseUrlEnv?: string;
+  cadence?: SurplusPollCadence;
+  /**
+   * Titles the county files as an empty category folder on every case. They
+   * carry no signal and must not be read as evidence: Citrus files "Returned
+   * Mail" on all 147 live cases, and the mail rules would otherwise call every
+   * Citrus claimant's address dead.
+   */
+  categoryFolders?: string[];
+  /**
+   * The county publishes no claim document, so an empty docket is not evidence
+   * nobody has filed. Citrus. The verdict stays open and says so.
+   */
+  claimsNotPublished?: boolean;
+}
 
-  private readonly logger = new Logger(DuvalTaxDeedAdapter.name);
+@Injectable()
+export class PioneerTaxSmartAdapter implements SurplusSourceAdapter {
+  readonly key: string;
+  readonly county: string;
+  readonly cadence: SurplusPollCadence;
+  readonly detailDelayMs = DETAIL_DELAY_MS;
+  readonly categoryFolders?: string[];
+  readonly claimsNotPublished?: boolean;
+
+  protected readonly logger: Logger;
   /** Public so the ingest can absolutize a document's relative URL. */
   readonly baseUrl: string;
 
-  constructor(private config: ConfigService) {
-    this.baseUrl = (
-      this.config.get<string>('DUVAL_TAXDEED_BASE_URL') || DEFAULT_BASE_URL
-    ).replace(/\/+$/, '');
+  constructor(
+    protected config: ConfigService,
+    spec: PioneerCountySpec,
+  ) {
+    this.key = spec.key;
+    this.county = spec.county;
+    this.cadence = spec.cadence || 'weekly';
+    this.categoryFolders = spec.categoryFolders;
+    this.claimsNotPublished = spec.claimsNotPublished;
+    this.logger = new Logger(`${PioneerTaxSmartAdapter.name}:${spec.county}`);
+    const override = spec.baseUrlEnv ? this.config.get<string>(spec.baseUrlEnv) : null;
+    this.baseUrl = (override || spec.defaultBaseUrl).replace(/\/+$/, '');
   }
 
   /** A client with its own cookie jar, since the search type lives in session. */
@@ -233,7 +278,7 @@ export class DuvalTaxDeedAdapter implements SurplusSourceAdapter {
     try {
       return await this.fetchList(http);
     } catch (e: any) {
-      this.logger.warn(`Duval list failed (${e.message}), retrying once`);
+      this.logger.warn(`${this.county} list failed (${e.message}), retrying once`);
       await new Promise((r) => setTimeout(r, 5000));
       return this.fetchList(this.client());
     }
@@ -284,13 +329,13 @@ export class DuvalTaxDeedAdapter implements SurplusSourceAdapter {
    */
   private assertColumnOrder(html: string): void {
     const names = [...html.matchAll(/name:\s*'([A-Za-z]+)'/g)].map((m) => m[1]);
-    const seen = GRID_COLUMNS.filter((c) => names.includes(c));
+    const seen = GRID_COLUMNS.filter((aliases) => aliases.some((a) => names.includes(a)));
     if (seen.length !== GRID_COLUMNS.length) return; // page shape changed entirely; the grid call will surface it
-    const ordered = names.filter((n) => (GRID_COLUMNS as readonly string[]).includes(n));
-    const matches = GRID_COLUMNS.every((c, i) => ordered[i] === c);
+    const ordered = names.filter((n) => GRID_COLUMN_NAMES.includes(n));
+    const matches = GRID_COLUMNS.every((aliases, i) => (aliases as readonly string[]).includes(ordered[i]));
     if (!matches) {
       throw new Error(
-        `Duval grid column order changed: expected ${GRID_COLUMNS.join(',')} but page declares ${ordered.join(',')}`,
+        `${this.county} grid column order changed: expected ${GRID_COLUMNS.map((c) => c[0]).join(',')} but page declares ${ordered.join(',')}`,
       );
     }
   }
@@ -307,7 +352,7 @@ export class DuvalTaxDeedAdapter implements SurplusSourceAdapter {
       caseNumber: String(caseNumber).trim(),
       certificateNumber: String(certificateNumber || '').trim() || null,
       parcelId: String(parcelId || '').trim() || null,
-      saleDate: duvalDate(saleDate),
+      saleDate: taxSmartDate(saleDate),
       status: String(status || '').trim() || null,
       surplus: money(surplus),
       openingBid: money(openingBid),
@@ -333,10 +378,10 @@ export class DuvalTaxDeedAdapter implements SurplusSourceAdapter {
       caseNumber,
       certificateNumber: detailField(html, 'Certificate'),
       parcelId: detailField(html, 'Parcel ID'),
-      saleDate: duvalDate(detailField(html, 'Auction Date')),
+      saleDate: taxSmartDate(detailField(html, 'Auction Date')),
       status: detailField(html, 'Status'),
       surplus: money(detailField(html, 'Surplus')),
-      openingBid: money(detailField(html, 'Opening Bid')),
+      openingBid: money(detailField(html, 'Opening Bid') ?? detailField(html, 'Base Bid')),
       highBid: money(detailField(html, 'High Bid')),
       owners: parseOwners(detailField(html, 'Property Owners')),
       propertyAddress: addr.street,
@@ -354,5 +399,57 @@ export class DuvalTaxDeedAdapter implements SurplusSourceAdapter {
   /** Whether a list row is worth opening the detail page for. */
   isLive(summary: SurplusCaseSummary): boolean {
     return LIVE_STATUS.test(summary.status || '');
+  }
+}
+
+/**
+ * Duval. Daily: the county serves no robots.txt and the docket is a few
+ * hundred JSON rows. Its docket names claimants in the title, so it needs
+ * neither spec flag.
+ */
+@Injectable()
+export class DuvalTaxDeedAdapter extends PioneerTaxSmartAdapter {
+  constructor(config: ConfigService) {
+    super(config, {
+      key: 'duval_taxdeed',
+      county: 'Duval',
+      defaultBaseUrl: 'https://taxdeed.duvalclerk.com',
+      baseUrlEnv: 'DUVAL_TAXDEED_BASE_URL',
+      cadence: 'daily',
+    });
+  }
+}
+
+/**
+ * Citrus (discovery 2026-09-18). 147 live cases over the floor, $1.97M. The
+ * richest list of the three and the blindest docket: no claim document exists,
+ * and three titles are empty folders filed on every case.
+ */
+@Injectable()
+export class CitrusTaxSmartAdapter extends PioneerTaxSmartAdapter {
+  constructor(config: ConfigService) {
+    super(config, {
+      key: 'citrus_taxsmart',
+      county: 'Citrus',
+      defaultBaseUrl: 'https://search.citrusclerk.org/TaxSmartWeb',
+      categoryFolders: ['Returned Mail', 'Additional Taxes', 'APPLICATION'],
+      claimsNotPublished: true,
+    });
+  }
+}
+
+/**
+ * Hernando (discovery 2026-09-18). 43 live cases over the floor, of which 22
+ * already carry a "Claims Filed" document. Smaller than Citrus and far better
+ * evidenced.
+ */
+@Injectable()
+export class HernandoTaxSmartAdapter extends PioneerTaxSmartAdapter {
+  constructor(config: ConfigService) {
+    super(config, {
+      key: 'hernando_taxsmart',
+      county: 'Hernando',
+      defaultBaseUrl: 'https://or.hernandoclerk.com/TaxSmart',
+    });
   }
 }
