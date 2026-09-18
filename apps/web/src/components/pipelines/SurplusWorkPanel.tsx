@@ -3835,7 +3835,9 @@ function DocLink({ doc, source }: { doc: LedgerDoc; source?: string | null }) {
     return (
       <div style={{ fontSize: 12 }}>
         <a
-          href={`https://taxdeed.duvalclerk.com${doc.url}`}
+          // Absolute since the Pioneer counties landed; older Duval ledgers
+          // hold a path, and Duval is the only county that ever stored one.
+          href={doc.url.startsWith('http') ? doc.url : `https://taxdeed.duvalclerk.com${doc.url}`}
           target="_blank"
           rel="noopener noreferrer"
           className="dc-wp-doc"

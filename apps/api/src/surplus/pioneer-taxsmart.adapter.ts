@@ -391,9 +391,24 @@ export class PioneerTaxSmartAdapter implements SurplusSourceAdapter {
       legalDescription: detailField(html, 'Legal Description'),
       applicantNames: detailField(html, 'Applicant Names'),
       assessedAs: detailField(html, 'Assessed As'),
-      documents: parseDocuments(html),
+      documents: this.absoluteDocuments(parseDocuments(html)),
       sourceUrl: `${this.baseUrl}${path}`,
     };
+  }
+
+  /**
+   * Document links, absolute against the ORIGIN.
+   *
+   * Citrus and Hernando serve the app under a path prefix and their anchors
+   * already carry it (`/TaxSmartWeb/Home/Image/145437`), so joining the stored
+   * path onto a base URL that also carries the prefix produced
+   * `.../TaxSmart/TaxSmart/Home/Image/70088`. That 404s, and the notice reader
+   * treats a fetch failure as "no notice", so the first Hernando pull created
+   * seven leads with no mailing address and nothing in the log to say why.
+   */
+  private absoluteDocuments(docs: SurplusCaseDocument[]): SurplusCaseDocument[] {
+    const origin = new URL(this.baseUrl).origin;
+    return docs.map((d) => (d.url && !d.url.startsWith('http') ? { ...d, url: `${origin}${d.url}` } : d));
   }
 
   /** Whether a list row is worth opening the detail page for. */
