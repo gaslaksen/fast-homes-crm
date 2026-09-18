@@ -1,5 +1,7 @@
 import { classifyCase, classifyDocument } from './surplus-classify.util';
 import {
+  DuvalTaxDeedAdapter,
+  HernandoTaxSmartAdapter,
   taxSmartDate,
   parseOwners,
   parseAddress,
@@ -241,6 +243,21 @@ describe('Pioneer counties beyond Duval', () => {
   it('Citrus without the flags would call every claimant undeliverable, which is why they exist', () => {
     const v = classifyCase([doc('Returned Mail'), doc('QUADIENT: Surplus PDF (161)')], { owners: ['BARBARA CHAMNESS'] });
     expect(v.mailVerdict).toBe('undeliverable');
+  });
+
+  it('absolutizes document links against the origin, not the prefixed base URL', () => {
+    // The prefix is already in the anchor, so joining it onto a base URL that
+    // also carries it gave /TaxSmart/TaxSmart/Home/Image/70088 and a 404.
+    const hernando = new HernandoTaxSmartAdapter({ get: () => undefined } as any);
+    const docs = (hernando as any).absoluteDocuments([
+      { title: 'Surplus', docId: '70088', url: '/TaxSmart/Home/Image/70088' },
+      { title: 'Already absolute', docId: '1', url: 'https://example.test/x' },
+    ]);
+    expect(docs[0].url).toBe('https://or.hernandoclerk.com/TaxSmart/Home/Image/70088');
+    expect(docs[1].url).toBe('https://example.test/x');
+    const duval = new DuvalTaxDeedAdapter({ get: () => undefined } as any);
+    expect((duval as any).absoluteDocuments([{ title: 'x', docId: '1', url: '/Home/Image/1' }])[0].url)
+      .toBe('https://taxdeed.duvalclerk.com/Home/Image/1');
   });
 
   it('Hernando keeps its returned mail, because it files no such folder', () => {
