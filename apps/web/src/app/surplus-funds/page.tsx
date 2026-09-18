@@ -689,9 +689,10 @@ export default function SurplusFundsPage() {
         // "New, 7 days" is the same window as the 0-7 notice-age filter, so the
         // quick chip drives the same query rather than a second one.
         noticeAge: chipQ === 'new' ? '0-7' : ageQ === 'all' ? undefined : ageQ,
-        // "New, 7 days" is a deliberate look at what just landed, so it shows
+        // "New, 7 days" is a deliberate look at what just landed, and asking
+        // for the claims under 120 days is the same deliberate look. Both show
         // the early ones whatever this toggle says.
-        hideEarly: hideEarly && chipQ !== 'new' ? true : undefined,
+        hideEarly: hideEarly && chipQ !== 'new' && ageQ !== 'under-120' ? true : undefined,
         lienWindow: lienWin === 'all' ? undefined : lienWin,
         hideDead: hideDead || undefined,
         hideDnc: hideDnc || undefined,
@@ -1243,7 +1244,7 @@ export default function SurplusFundsPage() {
               className={`dc-btn${filtersOpen ? ' on' : ''}`}
               onClick={() => setFiltersOpen((v) => !v)}
               aria-expanded={filtersOpen}
-              title="Tier, contact status, stage, county, amount, notice age and the lienholder window"
+              title="Tier, contact status, stage, county, amount, claim age and the lienholder window"
             >
               Filters
               {activeFilters > 0 && <span className="dc-count">{activeFilters}</span>}
@@ -1373,7 +1374,12 @@ export default function SurplusFundsPage() {
                 <Sel
                   v={ageQ}
                   set={setAgeQ}
-                  opts={[['all', 'Any notice age'], ['0-7', '0 to 7 days'], ['8-30', '8 to 30 days'], ['31-120', '31 to 120 days'], ['120+', '120+ days']]}
+                  opts={[
+                    ['all', 'Any claim age'],
+                    ['under-120', 'Under 120 days'],
+                    ['120-365', '120 to 365 days'],
+                    ['365+', 'Over 365 days'],
+                  ]}
                 />
                 <Sel
                   v={lienWin}
