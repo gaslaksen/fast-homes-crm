@@ -349,9 +349,11 @@ function CallerIdBar() {
                   <span className="block text-xs text-gray-400">{prettyPhone(c.number)}</span>
                 )}
               </span>
-              <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400">
-                Local
-              </span>
+              {c.isDefault && (
+                <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300">
+                  Default
+                </span>
+              )}
             </button>
           ))}
         </div>

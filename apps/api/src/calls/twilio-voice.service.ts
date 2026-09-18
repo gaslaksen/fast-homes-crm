@@ -489,9 +489,14 @@ export class TwilioVoiceService {
    * Outbound caller IDs the dialer may present. Delegates to PhoneNumbersService
    * so voice and SMS share one list, managed in Settings > Phone Numbers.
    */
-  async listCallerIds(): Promise<{ number: string; label: string }[]> {
+  async listCallerIds(): Promise<{ number: string; label: string; isDefault: boolean }[]> {
     const list = await this.phoneNumbers.list({ channel: 'voice' });
-    return list.map((n) => ({ number: n.number, label: n.label }));
+    // The default first, and flagged, because the dialer opens on whatever
+    // comes back first. Without this the picker ignored Settings > Phone
+    // Numbers and every call went out from the oldest number on the list.
+    return list
+      .map((n) => ({ number: n.number, label: n.label, isDefault: !!n.isDefault }))
+      .sort((a, b) => Number(b.isDefault) - Number(a.isDefault));
   }
 
   /**

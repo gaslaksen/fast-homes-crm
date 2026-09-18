@@ -33,6 +33,8 @@ export interface CallContact {
 export interface CallerId {
   number: string;
   label: string;
+  /** The number Settings > Phone Numbers marks as the default to call from. */
+  isDefault?: boolean;
 }
 
 /** Where a warm transfer has got to. 'idle' means no transfer in progress. */
@@ -340,7 +342,9 @@ export function DialerProvider({ children }: { children: ReactNode }) {
         if (cancelled) return;
         const nums: CallerId[] = res.data?.numbers || [];
         setCallerIds(nums);
-        setCallerId((current) => current ?? nums[0] ?? null);
+        // The one Settings marks as default, not whichever was added first.
+        // A number the user picked by hand during this session stays picked.
+        setCallerId((current) => current ?? nums.find((n) => n.isDefault) ?? nums[0] ?? null);
       })
       .catch(() => {
         /* picker just stays empty; the server falls back to the default number */
