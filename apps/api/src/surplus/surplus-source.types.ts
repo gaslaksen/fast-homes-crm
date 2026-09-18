@@ -154,6 +154,8 @@ export interface SurplusSourceAdapter {
   readonly categoryFolders?: string[];
   /** The county publishes no claim document at all. Citrus. */
   readonly claimsNotPublished?: boolean;
+  /** An image-less filing is an empty folder, not a filing. Hernando. */
+  readonly unlinkedDocsAreFolders?: boolean;
   /**
    * Every case the county currently flags as carrying a surplus. Adapters
    * return everything and let the ingest apply the floor, so a run can report
