@@ -148,6 +148,13 @@ export interface SurplusSourceAdapter {
   readonly payoutsArePartial?: boolean;
   readonly receiptsImplyClaim?: boolean;
   /**
+   * Titles this county files as an empty category folder on every case, which
+   * therefore carry no evidence. Citrus. Passed straight to classifyCase.
+   */
+  readonly categoryFolders?: string[];
+  /** The county publishes no claim document at all. Citrus. */
+  readonly claimsNotPublished?: boolean;
+  /**
    * Every case the county currently flags as carrying a surplus. Adapters
    * return everything and let the ingest apply the floor, so a run can report
    * how many it dropped rather than silently narrowing.

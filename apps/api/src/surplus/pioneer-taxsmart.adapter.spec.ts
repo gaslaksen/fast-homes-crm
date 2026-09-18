@@ -1,27 +1,28 @@
+import { classifyCase, classifyDocument } from './surplus-classify.util';
 import {
-  duvalDate,
+  taxSmartDate,
   parseOwners,
   parseAddress,
   detailField,
   parseDocuments,
-} from './duval-taxdeed.adapter';
+} from './pioneer-taxsmart.adapter';
 
-describe('duvalDate', () => {
+describe('taxSmartDate', () => {
   it('reads the M/D/YYYY the grid ships', () => {
-    expect(duvalDate('1/14/2026')).toBe('2026-01-14');
-    expect(duvalDate('12/3/2025')).toBe('2025-12-03');
+    expect(taxSmartDate('1/14/2026')).toBe('2026-01-14');
+    expect(taxSmartDate('12/3/2025')).toBe('2025-12-03');
   });
 
   it('tolerates the time the detail page sometimes appends', () => {
-    expect(duvalDate('4/15/2026 9:00 AM')).toBe('2026-04-15');
+    expect(taxSmartDate('4/15/2026 9:00 AM')).toBe('2026-04-15');
   });
 
   it('returns null rather than an epoch date on junk', () => {
     // A null sale date leaves the clock unset and visibly unknown. A 1970 date
     // would render as a 20,000 day old notice and sort to the top.
-    expect(duvalDate('')).toBeNull();
-    expect(duvalDate(null)).toBeNull();
-    expect(duvalDate('not a date')).toBeNull();
+    expect(taxSmartDate('')).toBeNull();
+    expect(taxSmartDate(null)).toBeNull();
+    expect(taxSmartDate('not a date')).toBeNull();
   });
 });
 
@@ -167,5 +168,83 @@ describe('parseDocuments', () => {
 
   it('returns an empty list for a page with no documents', () => {
     expect(parseDocuments('<h3>Documents</h3>')).toEqual([]);
+  });
+});
+
+/**
+ * Citrus and Hernando, from the 2026-09-18 discovery pass over every live case
+ * over the floor: 147 in Citrus, 43 in Hernando. Titles are verbatim.
+ */
+describe('Pioneer counties beyond Duval', () => {
+  const doc = (title: string) => ({ title });
+
+  it('reads documents through the path prefix Citrus and Hernando serve under', () => {
+    const html = `<h3>Documents</h3>
+      <a href="/TaxSmartWeb/Home/Image/145437" target="_blank">Returned Mail</a>
+      <a href="/TaxSmart/Home/Image/68376" target="_blank">Claims Filed</a>`;
+    expect(parseDocuments(html)).toEqual([
+      { title: 'Returned Mail', docId: '145437', url: '/TaxSmartWeb/Home/Image/145437' },
+      { title: 'Claims Filed', docId: '68376', url: '/TaxSmart/Home/Image/68376' },
+    ]);
+  });
+
+  it('knows the two counties\' notice titles and Hernando\'s claim folder', () => {
+    expect(classifyDocument('Surplus')).toBe('notice_surplus');
+    expect(classifyDocument('QUADIENT: Surplus PDF (161)')).toBe('notice_surplus');
+    expect(classifyDocument('Claims Filed')).toBe('claim');
+    // The deed going back from the BIDDER's address, not the clerk's notice
+    // coming back from the owner's.
+    expect(classifyDocument('Tax Deed Returned Undeliverable')).toBe('other');
+    expect(classifyDocument('Recorded Tax Deed Returned Undeliverable')).toBe('other');
+    // Still a real bounce everywhere it means one.
+    expect(classifyDocument('Returned Mail')).toBe('mail_undeliverable');
+  });
+
+  it('Hernando 2026-033TD: the claim folder makes it pending, and a check request does not close it', () => {
+    const v = classifyCase(
+      ['APPLICANT', 'ADVERTISING', 'Certificate of Mailing', 'Claims Filed', 'Notice of Mailing',
+       'Report of Sale', 'Tax Deed', 'Surplus', 'Check Request'].map(doc),
+      { owners: ['LISA THOMPSON, LIFE ESTATE'] },
+    );
+    expect(v.claimStatus).toBe('pending');
+    expect(v.counts.distributions).toBe(0);
+  });
+
+  it('Hernando 2025-038TD: a check request with no claim beside it leaves the case open', () => {
+    // 7 of the 18 check requests sat on cases with no claim at all, and the
+    // county still posts the full surplus on every one.
+    const v = classifyCase(
+      ['APPLICANT', 'Recorded Notice of Application for Tax Deed', '2024 Taxes', 'Surplus', 'Check Request'].map(doc),
+      { owners: ['THOMAS L HENRY', 'ROSARIO A SCLAFANI'] },
+    );
+    expect(v.claimStatus).toBe('open');
+  });
+
+  it('Citrus: the folders it files on every case say nothing, and the verdict admits claims are invisible', () => {
+    const citrus = {
+      categoryFolders: ['Returned Mail', 'Additional Taxes', 'APPLICATION'],
+      claimsNotPublished: true,
+      owners: ['BARBARA CHAMNESS'],
+    };
+    const v = classifyCase(
+      ['APPLICATION', 'Returned Mail', 'Additional Taxes', 'LETTERS: Notice of Application for Case (#40861B)',
+       'Bid Log', 'Tax Deed (#43227)', 'QUADIENT: Surplus PDF (161)'].map(doc),
+      citrus,
+    );
+    expect(v.claimStatus).toBe('open');
+    // Read literally, the folder would mark all 147 Citrus claimants unreachable.
+    expect(v.mailVerdict).toBe('unknown');
+    expect(v.ledger.some((d) => d.kind === 'mail_undeliverable')).toBe(false);
+    expect(v.reason).toContain('does not publish claims');
+  });
+
+  it('Citrus without the flags would call every claimant undeliverable, which is why they exist', () => {
+    const v = classifyCase([doc('Returned Mail'), doc('QUADIENT: Surplus PDF (161)')], { owners: ['BARBARA CHAMNESS'] });
+    expect(v.mailVerdict).toBe('undeliverable');
+  });
+
+  it('Hernando keeps its returned mail, because it files no such folder', () => {
+    const v = classifyCase([doc('Surplus'), doc('Returned Mail')], { owners: ['X Y'] });
+    expect(v.mailVerdict).toBe('undeliverable');
   });
 });

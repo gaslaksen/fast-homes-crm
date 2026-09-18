@@ -161,6 +161,13 @@ const RULES: Rule[] = [
     re: /\b(applicant|tax\s*collector)\s*disbursement\b/i,
     seenIn: 'Duval',
   },
+  // Hernando's "Check Request" is the clerk raising a check. It sits on 18
+  // cases, 11 of them beside "Claims Filed" and 7 with no claim at all, and
+  // the county keeps posting the full surplus either way. Read as a
+  // distribution it would retire those 7 live cases on no evidence, so it is
+  // the routine kind: it never closes a case, and the claim beside it is what
+  // speaks.
+  { kind: 'routine_disbursement', re: /^check\s*request$/i, seenIn: 'Hernando' },
   // A "labels" sheet is the page of mailing labels the clerk prints beside a
   // letter. Lee's SURPLUS_LETTER_LABELS is one page, 1 KB, and draws nothing,
   // but it contains "SURPLUS_LETTER" and is filed seconds after the real
@@ -186,6 +193,12 @@ const RULES: Rule[] = [
   { kind: 'gov_lien_claim', re: /^(?:rflr|request\s*for\s*legal\s*review)\b.*government/i, seenIn: 'Sarasota' },
   { kind: 'other', re: /^(?:rflr|request\s*for\s*legal\s*review)\b.*waiver/i, seenIn: 'Sarasota' },
   { kind: 'receipt', re: /^(?:rflr\b|request\s*for\s*legal\s*review)/i, seenIn: 'Sarasota' },
+  // Citrus files "Tax Deed Returned Undeliverable" and "Recorded Tax Deed
+  // Returned Undeliverable". That is the recorded DEED coming back from the
+  // winning bidder's address, not the clerk's notice coming back from the
+  // owner's, and reading it as a dead owner address would send a claimant we
+  // can reach to the skip trace instead of the phone.
+  { kind: 'other', re: /tax\s*deed\s*returned/i, seenIn: 'Citrus' },
   // "RETURNED MAIL UNCLAIMED" contains "claim". Mail rules run before claim rules.
   //
   // RTS is "return to sender" in any form, including a green card that came
@@ -268,7 +281,16 @@ const RULES: Rule[] = [
     seenIn: 'Duval, Lee, Brevard, Alachua, Polk',
   },
 
+  // Hernando files every claim into one folder titled exactly "Claims Filed",
+  // on 22 of its 43 live cases. It names nobody, so the case reads as claimed
+  // by somebody unnamed, which is enough to keep us off it.
+  { kind: 'claim', re: /^claims?\s*filed$/i, seenIn: 'Hernando' },
+
   // ── Context signals ───────────────────────────────────────────────────────
+  // Hernando titles the notice exactly "Surplus" (42 of 43 cases) and Citrus
+  // files it through its mail house as "QUADIENT: Surplus PDF (161)". Both are
+  // the scanned Notice of Surplus Funds the vision reader then reads.
+  { kind: 'notice_surplus', re: /^surplus$|^quadient:\s*surplus\b/i, seenIn: 'Hernando, Citrus' },
   { kind: 'notice_surplus', re: /notice\s*of\s*surplus|surplus[_\s]*letter/i, seenIn: 'Duval, Lee' },
   // Alachua: "Pet summ admin - martin harmon estate.pdf", "Est of Diane Dewey
   // Petition for Administration", "order on petition".
@@ -426,9 +448,27 @@ export function classifyCase(
      * everywhere a distribution filing closes the file.
      */
     payoutsArePartial?: boolean;
+    /**
+     * Titles the county files as an empty category folder on every case, which
+     * therefore say nothing. Citrus files "Returned Mail", "Additional Taxes"
+     * and "APPLICATION" on all 147 of its live cases; read literally, its
+     * returned mail folder marks every Citrus claimant unreachable.
+     */
+    categoryFolders?: string[];
+    /**
+     * The county publishes no claim document at all, so a bare docket is not
+     * evidence that nobody has filed. Citrus. The verdict stays open, because
+     * an unworked case is the likeliest reading and a pending one would hide
+     * every Citrus lead, but the reason says plainly that a competing claim
+     * would be invisible here.
+     */
+    claimsNotPublished?: boolean;
   } = {},
 ): CaseClassification {
-  const ledger = classifyDocuments(docs);
+  const folders = (opts.categoryFolders || []).map((f) => f.trim().toUpperCase());
+  const ledger = classifyDocuments(
+    folders.length ? docs.filter((d) => !folders.includes(String(d.title || '').trim().toUpperCase())) : docs,
+  );
   const owners = opts.owners || [];
   resolveNamedDisbursements(ledger, opts.applicants || []);
   const of = (k: SurplusDocKind) => ledger.filter((d) => d.kind === k);
@@ -565,7 +605,9 @@ export function classifyCase(
     reason = `Only a governmental lien has filed, which takes a slice off the top. The owner residual is still unclaimed.`;
   } else if (notices.length) {
     claimStatus = SurplusClaimStatus.OPEN;
-    reason = 'Notice of surplus mailed and nothing filed against it.';
+    reason = opts.claimsNotPublished
+      ? 'Notice of surplus mailed. This county does not publish claims, so a competing claim would not show here.'
+      : 'Notice of surplus mailed and nothing filed against it.';
   } else {
     claimStatus = SurplusClaimStatus.UNKNOWN;
     reason = 'No notice of surplus on the docket yet, so the claim clock has not started.';
