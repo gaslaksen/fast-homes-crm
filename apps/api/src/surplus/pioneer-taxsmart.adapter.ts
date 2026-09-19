@@ -29,7 +29,9 @@
  *
  * The document list is titles only: no filing dates and no claimant names, so
  * the ledger reads kinds and never who filed. Hernando labels a claim
- * "Claims Filed", which is the claim signal for that county. Citrus publishes
+ * "Claims Filed", but it lists that folder on all 82 of its cases and 47 of
+ * them are empty, marked "(Image Not Available)". Only a folder with a
+ * document behind it is a claim, which is what unlinkedDocsAreFolders means. Citrus publishes
  * no claim document at all, and files "Returned Mail", "Additional Taxes" and
  * "APPLICATION" as empty category folders on EVERY case (147 of 147 in the
  * 2026-09-18 discovery pass), so reading its "Returned Mail" as a dead address
@@ -207,6 +209,18 @@ export interface PioneerCountySpec {
    * nobody has filed. Citrus. The verdict stays open and says so.
    */
   claimsNotPublished?: boolean;
+  /**
+   * The county lists its whole folder structure on every case, whether or not
+   * anything was filed into it, and an empty folder carries "(Image Not
+   * Available)" instead of a link. TRUE on Hernando, where all 82 cases list
+   * "Claims Filed" and 47 of them are empty: read literally, every case in the
+   * county has a claim against it and nothing is ever workable.
+   *
+   * FALSE on Duval, where an image-less filing is a real one the clerk has
+   * indexed but not scanned. "Applicant Disbursement" is almost always
+   * image-less there, and dropping it would lose the distribution evidence.
+   */
+  unlinkedDocsAreFolders?: boolean;
 }
 
 @Injectable()
@@ -217,6 +231,7 @@ export class PioneerTaxSmartAdapter implements SurplusSourceAdapter {
   readonly detailDelayMs = DETAIL_DELAY_MS;
   readonly categoryFolders?: string[];
   readonly claimsNotPublished?: boolean;
+  readonly unlinkedDocsAreFolders?: boolean;
 
   protected readonly logger: Logger;
   /** Public so the ingest can absolutize a document's relative URL. */
@@ -231,6 +246,7 @@ export class PioneerTaxSmartAdapter implements SurplusSourceAdapter {
     this.cadence = spec.cadence || 'weekly';
     this.categoryFolders = spec.categoryFolders;
     this.claimsNotPublished = spec.claimsNotPublished;
+    this.unlinkedDocsAreFolders = spec.unlinkedDocsAreFolders;
     this.logger = new Logger(`${PioneerTaxSmartAdapter.name}:${spec.county}`);
     const override = spec.baseUrlEnv ? this.config.get<string>(spec.baseUrlEnv) : null;
     this.baseUrl = (override || spec.defaultBaseUrl).replace(/\/+$/, '');
@@ -391,7 +407,9 @@ export class PioneerTaxSmartAdapter implements SurplusSourceAdapter {
       legalDescription: detailField(html, 'Legal Description'),
       applicantNames: detailField(html, 'Applicant Names'),
       assessedAs: detailField(html, 'Assessed As'),
-      documents: this.absoluteDocuments(parseDocuments(html)),
+      documents: this.absoluteDocuments(
+        this.unlinkedDocsAreFolders ? parseDocuments(html).filter((d) => d.docId) : parseDocuments(html),
+      ),
       sourceUrl: `${this.baseUrl}${path}`,
     };
   }
@@ -465,6 +483,7 @@ export class HernandoTaxSmartAdapter extends PioneerTaxSmartAdapter {
       key: 'hernando_taxsmart',
       county: 'Hernando',
       defaultBaseUrl: 'https://or.hernandoclerk.com/TaxSmart',
+      unlinkedDocsAreFolders: true,
     });
   }
 }

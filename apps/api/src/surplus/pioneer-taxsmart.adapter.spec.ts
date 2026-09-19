@@ -245,6 +245,26 @@ describe('Pioneer counties beyond Duval', () => {
     expect(v.mailVerdict).toBe('undeliverable');
   });
 
+  it('Hernando: an empty Claims Filed folder is not a claim', () => {
+    // All 82 Hernando cases list "Claims Filed"; 47 carry no image. Counting
+    // the folder itself made all 31 workable cases read as claimed, and the
+    // county's real number is 14.
+    const html = `<h3>Documents</h3>
+      <a href="/TaxSmart/Home/Image/1" target="_blank">Surplus</a>
+      Claims Filed (Image Not Available)`;
+    const hernando = new HernandoTaxSmartAdapter({ get: () => undefined } as any);
+    const kept = (hernando as any).unlinkedDocsAreFolders
+      ? parseDocuments(html).filter((d: any) => d.docId)
+      : parseDocuments(html);
+    expect(kept.map((d: any) => d.title)).toEqual(['Surplus']);
+    expect(classifyCase(kept, { owners: ['X Y'] }).claimStatus).toBe('open');
+    // Duval keeps its image-less filings: that is where its distributions live.
+    const duval = new DuvalTaxDeedAdapter({ get: () => undefined } as any);
+    expect(duval.unlinkedDocsAreFolders).toBeFalsy();
+    expect(parseDocuments('<h3>Documents</h3>Applicant Disbursement (Image Not Available)').map((d) => d.title))
+      .toEqual(['Applicant Disbursement']);
+  });
+
   it('absolutizes document links against the origin, not the prefixed base URL', () => {
     // The prefix is already in the anchor, so joining it onto a base URL that
     // also carries it gave /TaxSmart/TaxSmart/Home/Image/70088 and a 404.
