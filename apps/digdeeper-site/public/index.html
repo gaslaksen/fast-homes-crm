@@ -30,19 +30,76 @@
 
   <main>
     <section class="hero">
-      <div class="wrap">
-        <p class="eyebrow">Unclaimed funds recovery</p>
-        <h1>Money that belongs to you may be sitting unclaimed. We find it and bring it home.</h1>
-        <p class="lede">D.I.G. Deeper LLC locates unclaimed funds held by government agencies and institutions, identifies the rightful owners, and handles the recovery from start to finish. We are paid only when you are paid.</p>
-        <div class="hero-actions">
-          <a class="btn btn-primary" href="tel:+19045959620">Call (904) 595-9620</a>
-          <a class="btn btn-secondary" href="#what">How it works</a>
+      <div class="wrap hero-grid">
+        <div class="hero-copy">
+          <p class="eyebrow">Unclaimed funds recovery</p>
+          <h1>Money that belongs to you may be sitting unclaimed. We find it and bring it home.</h1>
+          <p class="lede">D.I.G. Deeper LLC locates unclaimed funds held by government agencies and institutions, identifies the rightful owners, and handles the recovery from start to finish. We are paid only when you are paid.</p>
+          <div class="hero-actions">
+            <a class="btn btn-primary" href="tel:+19045959620">Call (904) 595-9620</a>
+            <a class="btn btn-secondary" href="#what">How it works</a>
+          </div>
+          <ul class="hero-facts" aria-label="Key facts">
+            <li>Contingency only, no upfront cost</li>
+            <li>Fee set in writing before we start</li>
+            <li>Based in Florida, recovering nationwide</li>
+          </ul>
         </div>
-        <ul class="hero-facts" aria-label="Key facts">
-          <li>Contingency only, no upfront cost</li>
-          <li>Fee set in writing before we start</li>
-          <li>Based in Florida, recovering nationwide</li>
-        </ul>
+
+        <div class="form-card" id="request">
+          <h2>Request a call back</h2>
+          <p class="form-intro">Tell us how to reach you and a member of our team will be in touch within one business day.</p>
+          <form id="inquiry-form" action="/api/inquiry" method="post" novalidate>
+            <div class="form-grid">
+              <div class="field">
+                <label for="f-name">Full Name *</label>
+                <input id="f-name" name="fullName" type="text" autocomplete="name" placeholder="Full Name" maxlength="120" required>
+              </div>
+              <div class="field">
+                <label for="f-phone">Phone</label>
+                <input id="f-phone" name="phone" type="tel" autocomplete="tel" inputmode="tel" placeholder="Phone" maxlength="40">
+              </div>
+              <div class="field">
+                <label for="f-email">Email</label>
+                <input id="f-email" name="email" type="email" autocomplete="email" placeholder="Email" maxlength="200">
+              </div>
+              <div class="field field-split">
+                <div>
+                  <label for="f-city">City</label>
+                  <input id="f-city" name="city" type="text" autocomplete="address-level2" placeholder="City" maxlength="80">
+                </div>
+                <div>
+                  <label for="f-state">State</label>
+                  <input id="f-state" name="state" type="text" autocomplete="address-level1" placeholder="State" maxlength="40">
+                </div>
+              </div>
+              <div class="field field-wide">
+                <label for="f-message">How can we help?</label>
+                <textarea id="f-message" name="message" rows="3" maxlength="2000" placeholder="If you received a call or letter from us, tell us the name it was addressed to."></textarea>
+              </div>
+            </div>
+
+            <div class="hp" aria-hidden="true">
+              <label for="f-website">Website</label>
+              <input id="f-website" name="website" type="text" tabindex="-1" autocomplete="off">
+            </div>
+
+            <label class="consent">
+              <input type="checkbox" name="smsMarketingConsent" value="yes">
+              <span>I consent to receive marketing text messages from <strong>D.I.G. Deeper LLC</strong> at the phone number provided. Frequency may vary. Message &amp; data rates may apply. Text HELP to <strong>(904) 595-9620</strong> for assistance. You can reply STOP to unsubscribe at any time.</span>
+            </label>
+            <label class="consent">
+              <input type="checkbox" name="smsServiceConsent" value="yes">
+              <span>I consent to receive non-marketing text messages from <strong>D.I.G. Deeper LLC</strong> about my inquiry, appointment confirmations and updates on my file. Frequency may vary. Message &amp; data rates may apply. Text HELP to <strong>(904) 595-9620</strong> for assistance. You can reply STOP to unsubscribe at any time.</span>
+            </label>
+            <p class="consent-note">Consent to text messages is optional and is not a condition of any service. A phone number or an email address is required so we can reach you.</p>
+
+            <p class="form-links"><a href="/privacy-policy">Privacy Policy</a> <span aria-hidden="true">|</span> <a href="/terms-of-service">Terms of Service</a></p>
+
+            <p class="form-status" id="form-status" role="status" aria-live="polite"></p>
+            <button class="btn btn-submit" type="submit">Submit</button>
+          </form>
+        </div>
       </div>
     </section>
 
@@ -178,7 +235,9 @@
       <p><strong>D.I.G. Deeper LLC</strong> is a Florida limited liability company providing asset recovery services to individuals, families and businesses.</p>
       <p>We are not a law firm and do not give legal advice. Recovery of any particular funds is not guaranteed. Our fees are set by written agreement and comply with applicable state law.</p>
       <p class="footer-links"><a href="tel:+19045959620">(904) 595-9620</a> <span aria-hidden="true">&middot;</span> <a href="mailto:deals@digdeeperllc.com">deals@digdeeperllc.com</a> <span aria-hidden="true">&middot;</span> <a href="/overview.pdf">Overview PDF</a></p>
+      <p class="footer-links"><a href="/privacy-policy">Privacy Policy</a> <span aria-hidden="true">&middot;</span> <a href="/terms-of-service">Terms of Service</a></p>
     </div>
   </footer>
+  <script src="/form.js" defer></script>
 </body>
 </html>

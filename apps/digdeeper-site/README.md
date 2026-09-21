@@ -4,18 +4,52 @@ The public site at https://digdeeperllc.com and the one-page overview PDF at
 https://digdeeperllc.com/overview.pdf. Both are links in the CRM's surplus
 credibility packet (see `apps/api/src/surplus/surplus-credibility.service.ts`).
 
-Plain HTML and CSS. No build step, no framework, no tracking, no forms. This
-folder is excluded from the pnpm workspace and is deployed as its own Vercel
-project with `apps/digdeeper-site` as the Root Directory. The Dealcore web app
-(`apps/web`) has its own Vercel project and is not affected.
+Plain HTML, CSS and one small script. No build step, no framework, no
+tracking. This folder is excluded from the pnpm workspace and is deployed as
+its own Vercel project with `apps/digdeeper-site` as the Root Directory. The
+Dealcore web app (`apps/web`) has its own Vercel project and is not affected.
 
 ## Files
 
 - `public/` everything that is served, and nothing else
-  - `index.html` the one-page site
+  - `index.html` the one-page site, with the call-back form in the hero
+  - `form.js` validates the form and posts it to `/api/inquiry`
+  - `privacy-policy.html` and `terms-of-service.html` served at
+    `/privacy-policy` and `/terms-of-service`
   - `styles.css` the stylesheet, mobile first
   - `overview.pdf` the one-pager, rendered from `onepager/overview.html`
-- `vercel.json` static build settings, clean URLs, the www redirect, headers
+- `vercel.json` static build settings, clean URLs, the www redirect, the
+  `/api/inquiry` rewrite, headers
+
+## The call-back form and text message consent
+
+The form exists for two reasons: people we have contacted can ask for a call
+back, and A2P 10DLC registration needs a public page showing how a person opts
+in to our texts. A carrier reviewer looks for these things, so keep them:
+
+- Two separate consent checkboxes, marketing and non-marketing, both
+  unchecked by default and neither required to submit.
+- Each consent names D.I.G. Deeper LLC and states that frequency varies, that
+  message and data rates may apply, HELP for help and STOP to unsubscribe.
+- Links to the Privacy Policy and Terms of Service next to the submit button.
+- The Privacy Policy says opt-in data and consent are not shared with third
+  parties or affiliates. The Terms describe the messaging program.
+
+`/api/inquiry` is rewritten by Vercel to
+`POST https://api.mydealcore.com/public/web-inquiries/digdeeper`
+(`apps/api/src/web-inquiries/`), so the browser request is same-origin. The
+API stores the inquiry in `web_inquiries` with the consent record (boxes
+ticked, wording, time, network address) and emails the team. It does NOT
+create a lead and nothing automated is sent to the person.
+
+The consent wording lives in two places that must change together:
+`public/index.html` and `DIGDEEPER_CONSENT_TEXT` in
+`apps/api/src/web-inquiries/web-inquiries.constants.ts`. Add a new version key
+there and bump `CONSENT_VERSION` in `public/form.js`. Never edit an old
+version in place, because stored rows point at it.
+
+The legal pages were drafted in house on 2026-09-21 and should be read by
+counsel.
 - `onepager/overview.html` source for the PDF
 - `onepager/build.sh` renders the PDF with headless Chrome into `public/`
 
