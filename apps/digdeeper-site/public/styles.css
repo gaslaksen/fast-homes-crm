@@ -102,14 +102,34 @@ p {
 }
 
 .brand-mark {
-  width: 2rem;
-  height: 2rem;
+  width: 2.1rem;
+  height: 2.1rem;
   flex: none;
 }
 
-.brand-llc {
+.brand-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+}
+
+.brand-name {
+  font-size: 1.2rem;
+  letter-spacing: 0;
+}
+
+.brand-deeper {
   font-weight: 500;
+}
+
+.brand-tag {
+  margin-top: 0.2rem;
+  font-size: 0.55rem;
+  font-weight: 600;
+  letter-spacing: 0.17em;
+  text-transform: uppercase;
   color: var(--ink-soft);
+  white-space: nowrap;
 }
 
 .header-phone {

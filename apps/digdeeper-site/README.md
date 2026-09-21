@@ -21,6 +21,21 @@ Dealcore web app (`apps/web`) has its own Vercel project and is not affected.
 - `vercel.json` static build settings, clean URLs, the www redirect, the
   `/api/inquiry` rewrite, headers
 
+## Logo
+
+The mark is "Rightful Match" (chosen 2026-09-21): two offset corner brackets
+closing on a gold square, drawn as inline SVG on a 32 unit grid. The wordmark
+is "D.I.G." bold, "Deeper" medium, with "Asset Recovery Services" in spaced
+capitals beneath. There is no image file; the same three shapes are repeated
+inline in the header of each page in `public/`, in each page's favicon data
+URI, and in `onepager/overview.html`, so change them everywhere together.
+
+- On a light ground: brackets `#0f3d3e` (the site teal), square `#c9a24a`.
+- On the teal ground (favicon, PDF band): brackets white, square `#e8c46a`.
+
+The legal name D.I.G. Deeper LLC still appears in the body copy, the consent
+wording, Company details and the footer. Only the header lockup drops "LLC".
+
 ## The call-back form and text message consent
 
 The form exists for two reasons: people we have contacted can ask for a call
