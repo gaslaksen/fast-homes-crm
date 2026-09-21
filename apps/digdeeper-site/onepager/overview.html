@@ -82,6 +82,20 @@
 
     .brand-name span {
       font-weight: 500;
+    }
+
+    .brand-text {
+      display: flex;
+      flex-direction: column;
+      line-height: 1.1;
+    }
+
+    .brand-tag {
+      margin-top: 3pt;
+      font-size: 6.6pt;
+      font-weight: 600;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
       color: #c6d6d4;
     }
 
@@ -295,8 +309,11 @@
     <header class="band">
       <div class="band-row">
         <div class="brand">
-          <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="6" fill="#0a2c2d"/><path d="M9 12l7 8 7-8" fill="none" stroke="#e8c46a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          <div class="brand-name">D.I.G. Deeper <span>LLC</span></div>
+          <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M0 0H15.5V5H5V22.5H0Z" fill="#fff"/><path d="M21 4H32V31H12.5V26H27V9H21Z" fill="#fff"/><rect x="10.5" y="10.5" width="11" height="11" fill="#e8c46a"/></svg>
+          <div class="brand-text">
+            <div class="brand-name">D.I.G. <span>Deeper</span></div>
+            <div class="brand-tag">Asset Recovery Services</div>
+          </div>
         </div>
         <div class="band-contact">
           <strong>(904) 595-9620</strong><br>
