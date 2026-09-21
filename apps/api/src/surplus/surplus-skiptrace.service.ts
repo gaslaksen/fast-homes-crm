@@ -117,7 +117,7 @@ export interface SurplusTraceResult {
    * not place. `verified` is people tied to the case by address history;
    * `namesakes` is people returned and refused for lack of that tie.
    */
-  nameSearch: { searched: number; verified: number; namesakes: number };
+  nameSearch: { searched: number; verified: number; namesakes: number; likely?: number };
   /**
    * Claimants the trace identified and a vendor holds a death record for.
    * Marked deceased and moved to the heirs queue; not counted as contacted,
@@ -566,6 +566,33 @@ export class SurplusSkiptraceService {
       for (const p of found) {
         const via = verifiedVia(p, keys);
         if (via) verified.push(this.endatoToTraced(p, via));
+      }
+
+      // One person, exactly the claimant's name, in the state the clerk wrote
+      // to, with nothing in their history tying them to the case. Refusing it
+      // cost Citrus 19 claimants worth $334,471 on 2026-09-21: most of its
+      // owners held a vacant lot from out of town, so no address trail ever
+      // leads back. Filed as a likely match, never as a confirmed one.
+      const only = found.length === 1 ? found[0] : null;
+      if (
+        !verified.length &&
+        only &&
+        !only.deceased &&
+        only.phones.length > 0 &&
+        String(only.first || '').toUpperCase() === n.given[0] &&
+        String(only.last || '').toUpperCase() === n.surname
+      ) {
+        const place = [hint.city, hint.state].filter(Boolean).join(', ');
+        const note =
+          `Likely match, not confirmed: the only person named ${n.given[0]} ${n.surname} Endato holds in ${place || 'the state'}, ` +
+          `${c.mailingZip && c.mailingState ? 'where the clerk wrote' : 'where the property is'}, but their address history does not include ` +
+          `the property or the clerk's address. That is common when the owner held a vacant lot or lived out of town. ` +
+          `Confirm who you are speaking to before discussing the claim.`;
+        const traced = this.endatoToTraced(only, null, note);
+        result.nameSearch.likely = (result.nameSearch.likely || 0) + 1;
+        for (const cc of people) await this.applyToGroup([cc], [traced], result, 'endato', true);
+        await this.pause(CALL_DELAY_MS);
+        continue;
       }
 
       if (!verified.length) {
@@ -1062,7 +1089,7 @@ export class SurplusSkiptraceService {
   }
 
   /** An Endato person as the matcher sees one, with what else it learned in `extra`. */
-  private endatoToTraced(p: EndatoPerson, via: 'property' | 'mailing'): TracedPerson {
+  private endatoToTraced(p: EndatoPerson, via: 'property' | 'mailing' | null, likelyNote?: string): TracedPerson {
     const cur = currentAddress(p);
     const connected = p.phones.filter((x) => x.connected);
     const phones: TracedPhone[] = (connected.length ? connected : p.phones)
@@ -1087,6 +1114,7 @@ export class SurplusSkiptraceService {
       livedAtProperty: via === 'property',
       propertyOwner: false,
       extra: [
+        likelyNote || null,
         via === 'mailing' ? "Their address history includes the address the clerk wrote to." : null,
         cur
           ? `Endato's latest address for them is ${cur.street}, ${[cur.city, cur.state, cur.zip].filter(Boolean).join(' ')}${cur.lastSeen ? ` (${cur.lastSeen})` : ''}.`
@@ -1576,6 +1604,8 @@ export class SurplusSkiptraceService {
     persons: TracedPerson[],
     result: SurplusTraceResult,
     source: TraceSource = 'batchdata',
+    /** A likely, unconfirmed name match: filed under its own outcome, never marked dead. */
+    likely = false,
   ): Promise<Set<string>> {
     /** Detail ids that came away with a contact, so the caller knows who is left. */
     const contacted = new Set<string>();
@@ -1648,6 +1678,7 @@ export class SurplusSkiptraceService {
       // returned the claimant themself. A relative's death is the relative's,
       // and an unnamed result cannot be pinned on anybody.
       const died =
+        !likely &&
         best.verdict === 'same_person' &&
         best.person.deceased &&
         deathIsTheClaimants(c.claimant, best.person.first, best.person.last);
@@ -1705,11 +1736,19 @@ export class SurplusSkiptraceService {
           contactMismatch: false,
           mismatchedName: null,
           tracedAt: new Date(),
-          traceOutcome: best.verdict === 'relative' ? 'relative' : best.verdict === 'unverified' ? 'unverified' : 'matched',
+          traceOutcome: likely
+            ? 'likely'
+            : best.verdict === 'relative'
+              ? 'relative'
+              : best.verdict === 'unverified'
+                ? 'unverified'
+                : 'matched',
           traceDetail: `Returned ${name || 'contacts'} ${where}. ${best.reason}`,
           callNotes: this.appendNote(
             null,
-            best.verdict === 'relative'
+            likely
+              ? `${verb} found a likely match, ${name}. ${best.reason}`
+              : best.verdict === 'relative'
               ? `${verb} returned ${name}, not the claimant. ${best.reason}`
               : best.verdict === 'unverified'
                 ? `${verb} returned ${name || 'contacts'} ${where}. ${best.reason}`
@@ -1731,7 +1770,7 @@ export class SurplusSkiptraceService {
         result.deceased += 1;
         continue;
       }
-      if (source === 'endato' && best.verdict === 'same_person') await this.stampDeathChecked([c.detailId]);
+      if (source === 'endato' && best.verdict === 'same_person' && !likely) await this.stampDeathChecked([c.detailId]);
       result.contacted += 1;
     }
     return contacted;

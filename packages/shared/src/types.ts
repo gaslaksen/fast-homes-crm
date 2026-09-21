@@ -219,6 +219,14 @@ export enum SurplusClaimantType {
 export enum SurplusQueue {
   /** Reachable now: a callable number and a claim still open. */
   CALL = 'call',
+  /**
+   * A number from a likely but unconfirmed match: the only person with the
+   * claimant's full name in the state the clerk wrote to, with nothing in
+   * their address history tying them to the case. Common where the owner held
+   * a vacant lot or lived out of town (Citrus, 2026-09-21: 19 such claimants,
+   * $334k). Call, but confirm who you are speaking to first.
+   */
+  LIKELY = 'likely',
   /** No consumer record exists. The registered agent on Sunbiz can sign. */
   ENTITY = 'entity',
   /**
@@ -255,7 +263,8 @@ export enum SurplusQueue {
  * a one-click submission, then finding a court filing, then open-ended research.
  */
 export const SURPLUS_QUEUE_RANK: Record<SurplusQueue, number> = {
-  [SurplusQueue.CALL]: 6,
+  [SurplusQueue.CALL]: 7,
+  [SurplusQueue.LIKELY]: 6,
   [SurplusQueue.TRACE]: 5,
   [SurplusQueue.HEIRS]: 4,
   [SurplusQueue.NAME_SEARCH]: 3,
@@ -268,6 +277,7 @@ export const SURPLUS_QUEUE_RANK: Record<SurplusQueue, number> = {
 
 export const SURPLUS_QUEUE_LABEL: Record<SurplusQueue, string> = {
   [SurplusQueue.CALL]: 'Call now',
+  [SurplusQueue.LIKELY]: 'Likely match',
   [SurplusQueue.ENTITY]: 'Entity, find the agent',
   [SurplusQueue.HEIRS]: 'Find the heirs',
   [SurplusQueue.TRACE]: 'Skip trace',

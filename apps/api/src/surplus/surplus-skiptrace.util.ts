@@ -590,7 +590,7 @@ export function addressCaseCounts(
  * is true only for a row nothing has been submitted for.
  */
 export interface TraceState {
-  state: 'never' | 'matched' | 'relative' | 'unverified' | 'mismatch' | 'no_person' | 'no_contact' | 'skipped';
+  state: 'never' | 'matched' | 'likely' | 'relative' | 'unverified' | 'mismatch' | 'no_person' | 'no_contact' | 'skipped';
   label: string;
   /** 'good' | 'warn' | 'bad' | 'idle', for the panel to colour from. */
   tone: 'good' | 'warn' | 'bad' | 'idle';
@@ -601,6 +601,7 @@ export interface TraceState {
 
 const TRACE_LABEL: Record<string, { label: string; tone: TraceState['tone'] }> = {
   matched: { label: 'Traced, matched', tone: 'good' },
+  likely: { label: 'Traced, likely match', tone: 'warn' },
   relative: { label: 'Traced, relative only', tone: 'warn' },
   unverified: { label: 'Traced, name unconfirmed', tone: 'warn' },
   mismatch: { label: 'Traced, wrong person', tone: 'bad' },

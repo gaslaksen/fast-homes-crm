@@ -678,11 +678,36 @@ describe('the name-first rung (Endato)', () => {
     expect(attempts.at(-1)).toMatchObject({ source: 'endato', result: 'found', cost: 0.25 });
   });
 
-  it('refuses namesakes and says both vendors have been tried', async () => {
-    // Five James Simses, none of whom ever lived at 630 S Kentucky Ave.
+  it('files the only exact-name person in the state as a likely match, never as confirmed', async () => {
+    // One James Sims in Florida, who never lived at 630 S Kentucky Ave. Until
+    // 2026-09-21 he was refused; Citrus showed that is most out-of-town owners
+    // of vacant lots. His numbers go on the lead under their own outcome.
     const endato = endatoStub([
       zumsteg({ first: 'James', last: 'Sims', addresses: [{ street: '529 20th', city: 'Bradenton', state: 'FL', zip: '34205', lastSeen: '2004-09-07' }] }),
     ]);
+    const { svc, leadUpdates, detailUpdates } = harness(
+      [lead({ street: '630 S KENTUCKY AVE', first: 'JAMES MICHAEL', last: 'SIMS' })],
+      endato,
+    );
+    respond([]);
+
+    const r = await svc.traceLeads({ organizationId: 'org' });
+
+    expect(r.nameSearch).toMatchObject({ searched: 1, verified: 0, namesakes: 0, likely: 1 });
+    expect(leadUpdates.at(-1).data.sellerPhone).toBe('+13215550101');
+    const patch = detailUpdates.filter((u) => u.data?.traceOutcome).at(-1).data;
+    expect(patch.traceOutcome).toBe('likely');
+    expect(patch.callNotes).toMatch(/^Name search found a likely match, James Sims\./);
+    expect(patch.callNotes).toContain('vacant lot or lived out of town');
+    expect(patch.callNotes).toContain('Confirm who you are speaking to');
+    // An unconfirmed identity is never asked about death and never marked dead.
+    expect(detailUpdates.some((u) => u.data?.deathCheckedAt)).toBe(false);
+  });
+
+  it('still refuses namesakes when there is more than one, and says both vendors have been tried', async () => {
+    const sims = (street: string) =>
+      zumsteg({ first: 'James', last: 'Sims', addresses: [{ street, city: 'Bradenton', state: 'FL', zip: '34205', lastSeen: '2004-09-07' }] });
+    const endato = endatoStub([sims('529 20th'), sims('11 Oak')]);
     const { svc, detailUpdates, attempts } = harness(
       [lead({ street: '630 S KENTUCKY AVE', first: 'JAMES MICHAEL', last: 'SIMS' })],
       endato,
@@ -691,12 +716,25 @@ describe('the name-first rung (Endato)', () => {
 
     const r = await svc.traceLeads({ organizationId: 'org' });
 
-    expect(r.nameSearch).toEqual({ searched: 1, verified: 0, namesakes: 1 });
+    expect(r.nameSearch).toEqual({ searched: 1, verified: 0, namesakes: 2 });
     expect(r.contacted).toBe(0);
     const patch = detailUpdates.at(-1).data;
     expect(patch.traceOutcome).toBe('no_person');
-    expect(patch.callNotes).toMatch(/^Name search found 1 person named JAMES SIMS, none with the property/);
+    expect(patch.callNotes).toMatch(/^Name search found 2 people named JAMES SIMS, none with the property/);
     expect(attempts.at(-1)).toMatchObject({ source: 'endato', result: 'nothing' });
+  });
+
+  it('refuses a lone result whose name is not exactly the claimant\'s, or who is dead', async () => {
+    for (const other of [{ first: 'Jim' }, { deceased: true }]) {
+      const endato = endatoStub([
+        zumsteg({ first: 'James', last: 'Sims', ...other, addresses: [{ street: '529 20th', city: 'Bradenton', state: 'FL', zip: '34205', lastSeen: '2004-09-07' }] }),
+      ]);
+      const { svc, detailUpdates } = harness([lead({ street: '630 S KENTUCKY AVE', first: 'JAMES', last: 'SIMS' })], endato);
+      respond([]);
+      const r = await svc.traceLeads({ organizationId: 'org' });
+      expect(r.nameSearch.likely).toBeUndefined();
+      expect(detailUpdates.at(-1).data.traceOutcome).toBe('no_person');
+    }
   });
 
   it('runs on a lot the address rung refused, once per person however many spellings', async () => {
