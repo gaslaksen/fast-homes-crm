@@ -4,7 +4,6 @@ import { ConfigService } from '@nestjs/config';
 import { SurplusIngestService } from './surplus-ingest.service';
 import { SurplusSkiptraceService, SurplusTraceResult } from './surplus-skiptrace.service';
 import { SurplusObituaryService } from './surplus-obituary.service';
-import { SurplusSocialService } from './surplus-social.service';
 import { SurplusPollCadence } from './surplus-source.types';
 import { CronLockService } from '../common/cron-lock.service';
 
@@ -53,7 +52,6 @@ export class SurplusPollService {
     private lock: CronLockService,
     private skiptrace: SurplusSkiptraceService,
     private obituary?: SurplusObituaryService,
-    private social?: SurplusSocialService,
   ) {
     // Default on; set SURPLUS_POLL_ENABLED=false to disable in an env.
     this.enabled = (this.config.get<string>('SURPLUS_POLL_ENABLED') ?? 'true') !== 'false';
@@ -145,16 +143,12 @@ export class SurplusPollService {
       const obitNote = obits?.checked
         ? `. Obituary search on ${obits.checked}: ${obits.strong} found dead, ${obits.possible} to check, ${obits.survivorsWithContact} survivor${obits.survivorsWithContact === 1 ? '' : 's'} with a number`
         : '';
-      // And the social profile search on the living claimants the trace left
-      // with no number at all: a profile is the third route. On by default;
-      // SOCIAL_SEARCH_ENABLED=false stops it.
-      const social = this.social?.available
-        ? await this.social.run({ organizationId: organizationId || null, leadIds })
-        : null;
-      const socialNote = social?.checked
-        ? `. Social search on ${social.checked}: ${social.found} with a profile to check`
-        : '';
-      const note = describeTrace(leadIds.length, trace, label) + estateNote + obitNote + socialNote;
+      // The social profile search is NOT run here. It is manual only, from the
+      // card or POST /surplus/social-search. Run automatically it searched
+      // every claimant a trace left without a number, including ones never
+      // traced because the Endato budget was spent: the 2026-09-21 Citrus pull
+      // sent 148 Opus web-search checks, about $61, with nobody asking.
+      const note = describeTrace(leadIds.length, trace, label) + estateNote + obitNote;
       this.logger.log(`Surplus trace ${source}: ${note}`);
       await this.ingest.noteRun(runId, note);
       return trace;
