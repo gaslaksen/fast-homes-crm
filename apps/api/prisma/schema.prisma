@@ -2711,3 +2711,37 @@ model VendorUsage {
   @@map("vendor_usage")
 }
 
+/// A call-back request typed into a public brand website (today only
+/// digdeeperllc.com). NOT a Lead on purpose: creating a Lead schedules
+/// outreach, and a public form must never be able to start automated
+/// messaging. The row doubles as the A2P opt-in record: which consent boxes
+/// were ticked, the exact wording for that version of the form, when, and
+/// from what network address.
+model WebInquiry {
+  id                  String    @id @default(cuid())
+  /// 'digdeeper'
+  site                String
+  fullName            String
+  /// E.164. Null when only an email was given.
+  phone               String?
+  email               String?
+  city                String?
+  state               String?
+  message             String?
+  smsMarketingConsent Boolean   @default(false)
+  smsServiceConsent   Boolean   @default(false)
+  /// Key into DIGDEEPER_CONSENT_TEXT. Null when no box was ticked.
+  consentVersion      String?
+  /// The wording agreed to, copied in so the record stands on its own.
+  consentText         String?
+  consentedAt         DateTime?
+  ipAddress           String?
+  userAgent           String?
+  pageUrl             String?
+  createdAt           DateTime  @default(now())
+
+  @@index([site, createdAt])
+  @@index([phone])
+  @@map("web_inquiries")
+}
+

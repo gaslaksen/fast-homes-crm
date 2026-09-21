@@ -36,6 +36,7 @@ import { ProbateModule } from './probate/probate.module';
 import { TaxSalesModule } from './tax-sales/tax-sales.module';
 import { SurplusModule } from './surplus/surplus.module';
 import { DigestModule } from './digest/digest.module';
+import { WebInquiriesModule } from './web-inquiries/web-inquiries.module';
 
 @Module({
   imports: [
@@ -78,6 +79,7 @@ import { DigestModule } from './digest/digest.module';
     TaxSalesModule,
     SurplusModule,
     DigestModule,
+    WebInquiriesModule,
   ],
 })
 export class AppModule {}

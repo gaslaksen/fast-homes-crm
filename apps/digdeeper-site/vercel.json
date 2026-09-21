@@ -19,6 +19,12 @@
       "permanent": true
     }
   ],
+  "rewrites": [
+    {
+      "source": "/api/inquiry",
+      "destination": "https://api.mydealcore.com/public/web-inquiries/digdeeper"
+    }
+  ],
   "headers": [
     {
       "source": "/overview.pdf",
