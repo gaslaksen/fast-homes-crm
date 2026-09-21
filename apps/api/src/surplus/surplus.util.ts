@@ -302,7 +302,9 @@ export function queueOf(f: QueueFacts): SurplusQueue {
     // work again: trace them, then search by name.
   }
 
-  if ((f.cleanPhoneCount || 0) > 0) return SurplusQueue.CALL;
+  // A number from a likely but unconfirmed match is still a number, and gets
+  // its own queue so the caller knows to confirm identity before the claim.
+  if ((f.cleanPhoneCount || 0) > 0) return f.traceState === 'likely' ? SurplusQueue.LIKELY : SurplusQueue.CALL;
 
   // A letter is out and nobody can be phoned, so the lead is waiting on the
   // post, not on us. Tested AFTER the call check on purpose: a number that
@@ -334,6 +336,8 @@ export function queueReason(f: QueueFacts): string {
         return `${f.callableHeirCount} callable heir${f.callableHeirCount === 1 ? '' : 's'}`;
       }
       return `${f.cleanPhoneCount} callable number${f.cleanPhoneCount === 1 ? '' : 's'}`;
+    case SurplusQueue.LIKELY:
+      return `${f.cleanPhoneCount} number${f.cleanPhoneCount === 1 ? '' : 's'} from a likely match. Confirm who you are speaking to before the claim`;
     case SurplusQueue.MAILED:
       return 'Letter mailed, waiting on a reply';
     case SurplusQueue.ENTITY:

@@ -785,6 +785,14 @@ describe('queueOf', () => {
     expect(queueOf({ ...base, cleanPhoneCount: 2 })).toBe(SurplusQueue.CALL);
   });
 
+  it('keeps numbers from a likely match in their own queue, and a dead claimant\'s callable heirs in Call now', () => {
+    expect(queueOf({ ...base, cleanPhoneCount: 3, traceState: 'likely' })).toBe(SurplusQueue.LIKELY);
+    expect(queueReason({ ...base, cleanPhoneCount: 3, traceState: 'likely' })).toMatch(/likely match\. Confirm who you are speaking to/);
+    expect(queueOf({ ...base, cleanPhoneCount: 3, traceState: 'likely', isDeceased: true, callableHeirCount: 1 })).toBe(SurplusQueue.CALL);
+    // A likely match with no number is not callable at all.
+    expect(queueOf({ ...base, cleanPhoneCount: 0, traceState: 'likely' })).toBe(SurplusQueue.NAME_SEARCH);
+  });
+
   it('closes a claim whose money is gone, however good its number is', () => {
     // The trap. Resolved claims carry the best contact data on the board
     // precisely because somebody already worked them, so testing contactability

@@ -433,6 +433,7 @@ const SURPLUS_KANBAN: PipelineStage[] = SURPLUS_STAGES.map((st) => ({
  */
 const QUEUES: [string, string][] = [
   ['call', 'Call now'],
+  ['likely', 'Likely match'],
   ['heirs', 'Find the heirs'],
   ['trace', 'Skip trace'],
   ['name_search', 'Name search'],
@@ -444,6 +445,8 @@ const QUEUE_LABEL: Record<string, string> = Object.fromEntries(QUEUES);
 
 const QUEUE_HELP: Record<string, string> = {
   call: 'A callable number and a claim still open. Pick up the phone.',
+  likely:
+    'Numbers from a likely but unconfirmed match: the only person with that name in the state the clerk wrote to, with no address tie to the case. Usual for out-of-town owners of vacant lots. Call, but confirm who you are speaking to before discussing the claim.',
   heirs:
     'The claimant is deceased and no living heir is on file. Only a person with standing can file, so no amount of skip tracing helps: find the probate case and add the filing.',
   trace: 'Nothing submitted yet and the notice address still looks live. Costs a credit.',

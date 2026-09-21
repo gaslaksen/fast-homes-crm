@@ -2854,7 +2854,7 @@ function CaseTab({
       .catch(() => setSocialPaused(true));
   }, []);
   const inNext = {
-    contacts: front && queue === 'call',
+    contacts: front && (queue === 'call' || queue === 'likely'),
     heirs: front && queue === 'heirs',
     trace: front && queue === 'trace',
     search: front && (queue === 'name_search' || queue === 'entity'),
@@ -3736,6 +3736,22 @@ function NextStepBanner({
           text = `${reason}. Work the heirs below; ${lead.claimant} cannot sign.`;
         } else if (phone) {
           text = `${reason}${lead.tappedAt ? '' : '. Nobody has heard back yet'}.`;
+          actions = (
+            <>
+              <button type="button" className="dc-wp-btn on" onClick={() => onCall(phone)}>
+                Call {phoneDisplay(phone)}
+              </button>
+              <button type="button" className="dc-wp-btn" onClick={() => onText(phone)}>
+                Text
+              </button>
+            </>
+          );
+        }
+        break;
+      case 'likely':
+        tone = 'amber';
+        text = `${reason}.`;
+        if (phone) {
           actions = (
             <>
               <button type="button" className="dc-wp-btn on" onClick={() => onCall(phone)}>

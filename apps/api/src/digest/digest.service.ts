@@ -483,7 +483,11 @@ export class DigestService {
         `${this.money(c.grossSurplus)} surplus`,
         c.claimStatusLabel,
       ].filter(Boolean).join(' · '),
-      status: `Never contacted. ${c.workReason}`,
+      // A likely match's numbers are unconfirmed: say so before somebody dials.
+      status:
+        c.queue === 'likely'
+          ? `Never contacted. Likely match, not confirmed: confirm who you are speaking to first. ${c.workReason}`
+          : `Never contacted. ${c.workReason}`,
       url: this.leadUrl(c.id),
       urgency: c.claimStatus === 'denied' || (c.netToClaimant || 0) >= 25000 ? 'critical' : 'warn',
     }));
