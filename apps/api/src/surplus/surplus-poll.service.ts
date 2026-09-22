@@ -14,7 +14,9 @@ import { CronLockService } from '../common/cron-lock.service';
  *
  *   daily   5:45am America/New_York, ahead of the foreclosure poll at 6:30 and
  *           the Daily Brief at 7:00, so a case that changed overnight is
- *           already classified by the time the brief queries it. Duval.
+ *           already classified by the time the brief queries it. No county
+ *           runs daily since Duval moved to weekly on 2026-09-22; the run
+ *           finds no adapter and returns.
  *   weekly  Monday 4:30am, so it is done before the daily run starts. RealTDM
  *           counties, which asked in robots.txt not to be crawled and whose
  *           dockets do not move by the hour. Lee alone is a few hundred paced

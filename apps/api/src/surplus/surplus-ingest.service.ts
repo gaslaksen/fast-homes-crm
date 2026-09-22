@@ -255,7 +255,7 @@ export class SurplusIngestService {
     private hernando?: HernandoTaxSmartAdapter,
   ) {}
 
-  /** Every adapter wired up: Duval daily; Lee, Polk, Brevard, Pinellas, Sarasota, Lake, Alachua, Santa Rosa and Flagler (RealTDM) weekly; Citrus and Hernando (Pioneer TaxSmart) weekly. */
+  /** Every adapter wired up, all weekly: Lee, Polk, Brevard, Pinellas, Sarasota, Lake, Alachua, Santa Rosa and Flagler (RealTDM); Duval, Citrus and Hernando (Pioneer TaxSmart). */
   adapters(): SurplusSourceAdapter[] {
     const all: (SurplusSourceAdapter | undefined)[] = [
       this.duval,

@@ -492,7 +492,7 @@ function FeedLine({ runs, sources }: { runs: any[]; sources: FeedSource[] }) {
   // amber six days out of seven, which taught everyone to ignore the line.
   const feeds: FeedSource[] = sources.length
     ? sources
-    : [{ key: 'duval_taxdeed', county: 'Duval', cadence: 'daily' }];
+    : [{ key: 'duval_taxdeed', county: 'Duval', cadence: 'weekly' }];
 
   const items = feeds.map((f) => {
     const lastCron = runs.find((r) => r.trigger === 'cron' && r.ok && (!r.source || r.source === f.key));
