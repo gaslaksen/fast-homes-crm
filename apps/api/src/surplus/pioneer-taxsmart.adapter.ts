@@ -436,9 +436,11 @@ export class PioneerTaxSmartAdapter implements SurplusSourceAdapter {
 }
 
 /**
- * Duval. Daily: the county serves no robots.txt and the docket is a few
- * hundred JSON rows. Its docket names claimants in the title, so it needs
- * neither spec flag.
+ * Duval. Weekly since 2026-09-22, with every other county, at Geoff's call:
+ * it ran daily from launch because the county serves no robots.txt and the
+ * docket is a few hundred JSON rows, but a claim is only worked from day 110
+ * so a day's delay costs nothing. Its docket names claimants in the title, so
+ * it needs neither spec flag.
  */
 @Injectable()
 export class DuvalTaxDeedAdapter extends PioneerTaxSmartAdapter {
@@ -448,7 +450,7 @@ export class DuvalTaxDeedAdapter extends PioneerTaxSmartAdapter {
       county: 'Duval',
       defaultBaseUrl: 'https://taxdeed.duvalclerk.com',
       baseUrlEnv: 'DUVAL_TAXDEED_BASE_URL',
-      cadence: 'daily',
+      cadence: 'weekly',
     });
   }
 }
