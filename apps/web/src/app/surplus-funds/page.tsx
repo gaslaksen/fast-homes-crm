@@ -220,25 +220,29 @@ const SURPLUS_COLUMNS: PipelineColumn<any>[] = [
     },
   },
   {
-    // The house and the people owed on it, one cell. The claimant used to
-    // have a column of its own, which cost a row of height for every
-    // property with a long name.
+    // The people owed and the house they are owed on, one cell. The claimant
+    // used to have a column of its own, which cost a row of height for every
+    // property with a long name. The NAME leads: the team finds a file by
+    // who is owed, not by where the house was, so the name is the bold line
+    // and the address sits under it, smaller and unbolded. Sorts by name for
+    // the same reason.
     key: 'property',
-    label: 'Property and claimant',
-    sortValue: (r) => r.address || '',
+    label: 'Claimant and property',
+    sortValue: (r) => r.claimantNames?.[0] || r.address || '',
     render: (r) => (
       <div style={{ minWidth: 0 }}>
-        <div style={{ fontWeight: 600, overflowWrap: 'anywhere' }}>
-          {r.address}
-          <span style={{ fontWeight: 400, color: 'var(--faint)' }}>, {r.city}</span>
-        </div>
-        <div style={{ fontSize: 11.5, color: 'var(--dim)', overflowWrap: 'anywhere' }}>
+        <div style={{ fontSize: 14, fontWeight: 700, lineHeight: 1.25, overflowWrap: 'anywhere' }}>
           <span style={r.allDeceased ? { textDecoration: 'line-through' } : undefined}>
-            {r.claimantNames.slice(0, 2).join(', ')}
+            {r.claimantNames.slice(0, 2).join(', ') || 'Unknown claimant'}
           </span>
-          {r.claimantCount > 2 && ` +${r.claimantCount - 2} more`}
+          {r.claimantCount > 2 && (
+            <span style={{ fontWeight: 400, color: 'var(--faint)' }}> +{r.claimantCount - 2} more</span>
+          )}
+        </div>
+        <div style={{ fontSize: 11.5, color: 'var(--dim)', overflowWrap: 'anywhere', marginTop: 1 }}>
+          {r.address}
           <span style={{ color: 'var(--faint)' }}>
-            {' '}· {r.county}
+            , {r.city} · {r.county}
             {r.caseNumber ? ` · ${r.caseNumber}` : ''}
           </span>
         </div>

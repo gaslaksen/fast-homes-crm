@@ -464,6 +464,15 @@ select.dc-wp-sel:disabled { opacity: 0.45; cursor: not-allowed; }
 /* The address the surplus notice was actually mailed to. */
 .dc-pcard-owner { font-size: 12px; color: var(--mint); margin-top: 1px; overflow-wrap: anywhere; }
 .dc-pcard-names { font-size: 12.5px; color: var(--dim); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; overflow-wrap: anywhere; }
+/* Surplus card: the claimant is the headline and the property is the
+   subtitle. The team looks a file up by the person, so the name gets the
+   size and weight the address had, and the address drops two sizes. */
+.dc-pcard-name {
+  font-size: 15px; font-weight: 700; line-height: 1.25;
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap; overflow-wrap: anywhere;
+}
+.dc-pcard-more { font-size: 12px; font-weight: 400; color: var(--faint); }
+.dc-pcard-where { font-size: 12px; font-weight: 400; color: var(--dim); margin-top: 1px; overflow-wrap: anywhere; }
 .dc-pcard-count {
   font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px;
   background: var(--surface3); color: var(--dim); border-radius: 4px; padding: 1px 5px;
