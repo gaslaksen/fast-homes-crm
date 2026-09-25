@@ -97,6 +97,12 @@ describe('nameSearchPlan', () => {
     })!;
     expect(p.links).toHaveLength(1);
     expect(p.links[0].site).toMatch(/sunbiz/i);
+    // The name must travel as `searchTerm`, which is what the results page
+    // searches on. `searchNameOrder` alone landed on the wrong entity.
+    const url = new URL(p.links[0].url);
+    expect(url.searchParams.get('inquiryType')).toBe('EntityName');
+    expect(url.searchParams.get('searchTerm')).toBe('HEAVENLY HANDS FUNDING, LLC');
+    expect(url.searchParams.has('searchNameOrder')).toBe(false);
     expect(p.reason).toMatch(/registered agent/i);
     // No point verifying an entity against a property address.
     expect(p.verifyAgainst).toBeNull();
