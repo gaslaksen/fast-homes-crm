@@ -136,6 +136,13 @@ export function nameSearchPlan(input: {
 
   // An entity has no consumer record to find. Sunbiz holds the registered
   // agent, who is the person who can actually sign.
+  //
+  // The results page reads the query from `searchTerm`, the same field its
+  // own By Name form posts. The old link sent only `searchNameOrder`, which
+  // Sunbiz treats as a position in the alphabetical list, not a query, so
+  // the search box came up with something else in it and the team retyped
+  // the name by hand. The name goes over exactly as the docket wrote it;
+  // Sunbiz strips punctuation and case itself.
   if (input.isEntity) {
     return {
       query: claimant,
@@ -147,8 +154,8 @@ export function nameSearchPlan(input: {
         {
           site: 'Sunbiz (FL Division of Corporations)',
           free: true,
-          url: `https://search.sunbiz.org/Inquiry/CorporationSearch/SearchResults?inquiretype=EntityName&searchNameOrder=${encodeURIComponent(
-            claimant.toUpperCase().replace(/[^A-Z0-9]/g, ''),
+          url: `https://search.sunbiz.org/Inquiry/CorporationSearch/SearchResults?inquiryType=EntityName&searchTerm=${encodeURIComponent(
+            claimant,
           )}`,
         },
       ],
