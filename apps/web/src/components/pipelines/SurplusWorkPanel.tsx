@@ -2446,8 +2446,21 @@ export default function SurplusWorkPanel({
         <div className="dc-wp-head">
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
             <div style={{ flex: 1, minWidth: 0 }}>
+              {/* The claimant's name is the headline, not the house. The team
+                  finds a file by who is owed, so the name carries the size
+                  and weight and the property address sits under it, plain. */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 17, fontWeight: 700 }}>{property.address}</span>
+                <span
+                  style={{
+                    fontSize: 18,
+                    fontWeight: 700,
+                    lineHeight: 1.2,
+                    overflowWrap: 'anywhere',
+                    ...(lead.isDeceased ? { textDecoration: 'line-through' } : {}),
+                  }}
+                >
+                  {lead.claimant}
+                </span>
                 <span
                   style={{
                     fontSize: 11,
@@ -2471,8 +2484,15 @@ export default function SurplusWorkPanel({
                   <span style={{ fontSize: 11, color: 'var(--red)' }}>Do not call</span>
                 )}
               </div>
+              <div style={{ fontSize: 13, fontWeight: 400, color: 'var(--text)', marginTop: 4, overflowWrap: 'anywhere' }}>
+                {property.address}
+                <span style={{ color: 'var(--dim)' }}>
+                  {[property.city, property.zip].filter(Boolean).length > 0
+                    ? `, ${[property.city, property.zip].filter(Boolean).join(' ')}`
+                    : ''}
+                </span>
+              </div>
               <div style={{ fontSize: 12, color: 'var(--dim)', marginTop: 3 }}>
-                {[property.city, property.zip].filter(Boolean).join(' ')} ·{' '}
                 {money(property.grossSurplus)} surplus ·{' '}
                 {property.claimantCount === 1
                   ? '1 claimant'

@@ -16,7 +16,8 @@ import { CHIP, money , moneyShort } from './format';
  *
  *   1. Is anyone else on this money?   claim status, the loudest element
  *   2. How much is it?                 the surplus
- *   3. Whose is it and where are they? owners plus the address the notice went to
+ *   3. Whose is it and where are they? owners first, in bold, then the house
+                                      and the address the notice went to
  *   4. Can we reach them?              one contact line
  *
  * Everything else moved into the work panel, which is where a lead is actually
@@ -188,7 +189,21 @@ export default function SurplusPropertyCard({ p, picked, onPick, onOpen }: Props
         </span>
       </div>
 
-      <div className="dc-pcard-addr">{p.address}</div>
+      {/* The name is the loudest text on the card. The team finds a file by
+          who is owed, not by the house, so the owners lead in bold and the
+          property address follows, smaller and unbolded. */}
+      <div className="dc-pcard-name">
+        <span>
+          {p.claimantNames.slice(0, 3).join(', ') || 'Unknown claimant'}
+          {p.claimantCount > 3 && (
+            <span className="dc-pcard-more"> +{p.claimantCount - 3} more</span>
+          )}
+        </span>
+        {p.claimantCount > 1 && (
+          <span className="dc-pcard-count">{p.claimantCount} owners</span>
+        )}
+      </div>
+      <div className="dc-pcard-where">{p.address}</div>
       <div className="dc-pcard-sub">
         {[p.city, p.zip].filter(Boolean).join(' ')} · {p.county} County
         {p.caseNumber ? ` · ${p.caseNumber}` : ''}
@@ -197,14 +212,6 @@ export default function SurplusPropertyCard({ p, picked, onPick, onOpen }: Props
       {/* The address the notice was mailed to, which is usually NOT the
           property and is where the owner actually is. */}
       {ownerLine && <div className="dc-pcard-owner">✉ {ownerLine}</div>}
-
-      <div className="dc-pcard-names">
-        {p.claimantNames.slice(0, 3).join(', ')}
-        {p.claimantCount > 3 && ` +${p.claimantCount - 3} more`}
-        {p.claimantCount > 1 && (
-          <span className="dc-pcard-count">{p.claimantCount} owners</span>
-        )}
-      </div>
 
       <div className="dc-pcard-foot">
         <span style={{ color: contact.tone }}>
