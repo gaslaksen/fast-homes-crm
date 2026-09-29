@@ -32,6 +32,17 @@ function withPrefix(subject: string, prefix: 'Re' | 'Fwd'): string {
   return re.test(s.trim()) ? s : `${prefix}: ${s}`;
 }
 
+/**
+ * "Anita Zumsteg <anita@example.com>" or a comma list down to the first plain
+ * address, so it can go straight into the composer's To field.
+ */
+function bareAddress(raw: string | null | undefined): string | undefined {
+  const first = String(raw || '').split(',')[0].trim();
+  const angled = first.match(/<([^>]+)>/);
+  const addr = (angled ? angled[1] : first).trim();
+  return addr.includes('@') ? addr : undefined;
+}
+
 // Strip the "email_" timeline-id prefix back to the raw Email row id.
 function rawEmailId(timelineId: string): string {
   return timelineId.replace(/^email_/, '');
@@ -166,12 +177,16 @@ export default function CommunicationsTimeline({
     (i): i is Extract<TimelineItem, { kind: 'email' }> => i.kind === 'email',
   );
 
+  // Reply goes back to whoever is on the other end of THIS email: the sender
+  // of an inbound one, the recipient of one we sent. Without it a reply to a
+  // relative's email went to the lead's primary address instead.
   const replyTo = (item: Extract<TimelineItem, { kind: 'email' }>) =>
     onEmailAction?.({
       nonce: Date.now(),
       mode: 'reply',
       subject: withPrefix(item.payload.subject, 'Re'),
       bodyHtml: `<p><br></p><p><br></p>${quoteEmail(item)}`,
+      to: bareAddress(item.direction === 'OUTBOUND' ? item.payload.toAddress : item.payload.fromAddress),
       inReplyToEmailId: rawEmailId(item.id),
     });
 

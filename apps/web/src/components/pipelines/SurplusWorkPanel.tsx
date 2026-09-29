@@ -2702,6 +2702,7 @@ export default function SurplusWorkPanel({
                 doNotContact={fullLead.doNotContact}
                 emailAction={emailAction}
                 composeIntent={composeIntent}
+                knownEmails={lead.emails}
                 onSent={() => {
                   loadComms();
                   onChanged();
