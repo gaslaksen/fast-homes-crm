@@ -408,6 +408,7 @@ export default function PipelineWorkPanel({
                 doNotContact={fullLead.doNotContact}
                 emailAction={emailAction}
                 composeIntent={composeIntent}
+                knownEmails={subject.emails}
                 onSent={() => {
                   loadComms();
                   onChanged();

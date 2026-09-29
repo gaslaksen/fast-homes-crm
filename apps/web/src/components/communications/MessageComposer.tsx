@@ -98,6 +98,7 @@ export default function MessageComposer({
   seedBody,
   emailAction,
   composeIntent,
+  knownEmails,
   onSent,
 }: {
   leadId: string;
@@ -115,6 +116,12 @@ export default function MessageComposer({
    * request so clicking the same number twice re-applies.
    */
   composeIntent?: { nonce: number; channel: Channel; to?: string } | null;
+  /**
+   * Every address on file for this lead, primary first. Offered as
+   * suggestions in the To field so a second address (a relative, a new
+   * address from research) can be picked without retyping it.
+   */
+  knownEmails?: string[];
   onSent: () => void | Promise<void>;
 }) {
   const [channel, setChannel] = useState<Channel>('sms');
@@ -126,10 +133,15 @@ export default function MessageComposer({
   const [body, setBody] = useState('');
   const [draftLoading, setDraftLoading] = useState(false);
 
-  // Email fields. Reply → recipient is the lead's sellerEmail (read-only);
-  // forward → recipient is editable.
+  // Email fields. The To field is always editable. On a reply it starts on
+  // the lead's primary email, or on whatever address was clicked to open the
+  // composer. It used to be read-only on a reply and the clicked address was
+  // dropped, so clicking Email beside a daughter's address added from
+  // research still wrote to the claimant.
   const [emailMode, setEmailMode] = useState<'reply' | 'forward'>('reply');
-  const [emailTo, setEmailTo] = useState('');
+  const [emailTo, setEmailTo] = useState(sellerEmail || '');
+  /** Set once somebody picks or types a recipient, so a late sellerEmail load does not overwrite it. */
+  const emailToChosenRef = useRef(false);
   const [emailSubject, setEmailSubject] = useState('');
   const [emailBodyHtml, setEmailBodyHtml] = useState('');
   const [emailInReplyToId, setEmailInReplyToId] = useState<string | undefined>(undefined);
@@ -229,10 +241,18 @@ export default function MessageComposer({
     setEmailSubject(emailAction.subject);
     setEmailBodyHtml(emailAction.bodyHtml);
     setEmailInReplyToId(emailAction.inReplyToEmailId);
-    setEmailTo(emailAction.mode === 'forward' ? emailAction.to ?? '' : sellerEmail || '');
+    const asked = emailAction.to?.trim();
+    emailToChosenRef.current = emailAction.mode === 'forward' || !!asked;
+    setEmailTo(emailAction.mode === 'forward' ? emailAction.to ?? '' : asked || sellerEmail || '');
     setError(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [emailAction?.nonce]);
+
+  // The lead loads after the composer mounts, so follow the primary email
+  // until somebody has chosen a recipient of their own.
+  useEffect(() => {
+    if (!emailToChosenRef.current) setEmailTo(sellerEmail || '');
+  }, [sellerEmail]);
 
   const reset = () => {
     setBody('');
@@ -240,6 +260,7 @@ export default function MessageComposer({
     setEmailBodyHtml('');
     setEmailInReplyToId(undefined);
     setEmailMode('reply');
+    emailToChosenRef.current = false;
     setEmailTo(sellerEmail || '');
     setMentions([]);
     setMentionQuery(null);
@@ -303,15 +324,20 @@ export default function MessageComposer({
           toNumber || undefined,
         );
       } else if (channel === 'email') {
-        const recipient = emailMode === 'forward' ? emailTo.trim() : sellerEmail || '';
+        const recipient = emailTo.trim();
         if (!emailSubject.trim() || htmlIsEmpty(emailBodyHtml) || !recipient || !currentUser?.id) return;
-        // Sends from the logged-in user via Mailgun. Reply → seller;
-        // forward → the entered recipient.
+        if (!/^[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+$/.test(recipient)) {
+          setError('The To field needs one valid email address.');
+          return;
+        }
+        // Sends from the logged-in user via Mailgun, in the lead's brand, to
+        // whatever the To field says. The server falls back to the lead's
+        // primary email only when no address is sent.
         await messagesAPI.sendEmail(leadId, {
           userId: currentUser.id,
           subject: emailSubject,
           bodyHtml: emailBodyHtml,
-          to: emailMode === 'forward' ? recipient : undefined,
+          to: recipient,
           inReplyToEmailId: emailInReplyToId,
         });
       } else {
@@ -339,6 +365,10 @@ export default function MessageComposer({
     if (composeIntent.channel === 'sms' && composeIntent.to) {
       chosenRef.current = composeIntent.to;
       setToNumber(resolveTo(composeIntent.to, toOptions));
+    }
+    if (composeIntent.channel === 'email' && composeIntent.to) {
+      emailToChosenRef.current = true;
+      setEmailTo(composeIntent.to);
     }
   }, [composeIntent?.nonce]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -539,12 +569,8 @@ export default function MessageComposer({
         </div>
       )}
 
-      {/* Email channel — sends from the logged-in user via Mailgun */}
-      {channel === 'email' && emailMode === 'reply' && !sellerEmail ? (
-        <div className="text-xs text-gray-500 dark:text-gray-400">
-          This lead has no email address on file. Add one to send email.
-        </div>
-      ) : channel === 'email' ? (
+      {/* Email channel - sends from the logged-in user via Mailgun */}
+      {channel === 'email' ? (
         <div className="space-y-2">
           {/* Not a picker: the brand follows the lead, so this states what the
               recipient will see rather than offering a choice. */}
@@ -557,23 +583,39 @@ export default function MessageComposer({
               ({emailIdentity.brandName})
             </div>
           )}
-          {emailMode === 'forward' ? (
+          <div className="flex items-center gap-2">
+            <label
+              htmlFor={`email-to-${leadId}`}
+              className="text-xs font-medium text-gray-500 dark:text-gray-400 shrink-0"
+            >
+              {emailMode === 'forward' ? 'Forward to' : 'To'}
+            </label>
             <input
+              id={`email-to-${leadId}`}
               type="email"
               value={emailTo}
-              onChange={(e) => setEmailTo(e.target.value)}
+              onChange={(e) => {
+                emailToChosenRef.current = true;
+                setEmailTo(e.target.value);
+              }}
+              list={knownEmails && knownEmails.length > 1 ? `email-to-options-${leadId}` : undefined}
               className="input w-full text-sm"
-              placeholder="Forward to (email address)"
+              placeholder={
+                emailMode === 'forward'
+                  ? 'Forward to (email address)'
+                  : sellerEmail
+                    ? 'To (email address)'
+                    : 'No email on file. Type an address to send to.'
+              }
             />
-          ) : (
-            <input
-              type="email"
-              value={sellerEmail || ''}
-              readOnly
-              className="input w-full text-sm bg-gray-50 dark:bg-gray-800 text-gray-500"
-              placeholder="To"
-            />
-          )}
+            {knownEmails && knownEmails.length > 1 && (
+              <datalist id={`email-to-options-${leadId}`}>
+                {knownEmails.map((e) => (
+                  <option key={e} value={e} />
+                ))}
+              </datalist>
+            )}
+          </div>
           <input
             type="text"
             value={emailSubject}
@@ -641,11 +683,8 @@ export default function MessageComposer({
           disabled={
             sending ||
             blockedBySms ||
-            (channel === 'email' && emailMode === 'reply' && !sellerEmail) ||
             (channel === 'email'
-              ? !emailSubject.trim() ||
-                htmlIsEmpty(emailBodyHtml) ||
-                (emailMode === 'forward' && !emailTo.trim())
+              ? !emailSubject.trim() || htmlIsEmpty(emailBodyHtml) || !emailTo.trim()
               : !body.trim())
           }
           className={`btn btn-sm ${isComment ? 'btn-secondary' : 'btn-primary'} disabled:opacity-50`}
