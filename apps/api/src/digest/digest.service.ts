@@ -45,6 +45,9 @@ const FORECLOSURE_MIN_WORKABLE_DAYS = 14;
 const FORECLOSURE_IDEAL_DAYS = 35;
 const FORECLOSURE_MAX_WATCH_DAYS = 75;
 
+/** Surplus claimants show in the brief only once the lien window has closed. */
+const SURPLUS_LIEN_WINDOW_DAYS = 120;
+
 const TZ = 'America/New_York';
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -115,6 +118,17 @@ export class DigestService {
     if (abs >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
     if (abs >= 1_000) return `$${(n / 1_000).toFixed(1)}K`;
     return `$${Math.round(n)}`;
+  }
+
+  /**
+   * "3 more surplus claimants open up in the next 30 days, $212.4K between
+   * them. Next: TINA FORTNER in 4 days." Rows arrive soonest first.
+   */
+  private openingSoonNote(rows: any[]): string {
+    const total = rows.reduce((s, c) => s + (c.grossSurplus || 0), 0);
+    const next = rows[0];
+    const days = Math.max(1, SURPLUS_LIEN_WINDOW_DAYS + 1 - next.noticeAge);
+    return `${rows.length} more surplus claimant${rows.length === 1 ? '' : 's'} open${rows.length === 1 ? 's' : ''} up in the next 30 days, ${this.moneyCompact(total)} between them. Next: ${next.claimant} in ${days} day${days === 1 ? '' : 's'}.`;
   }
 
   /** "10h 16m", "3d 4h", "22m" */
@@ -434,10 +448,36 @@ export class DigestService {
         return null;
       });
     const surplusClaimants: any[] = (surplusBoard?.data || []).flatMap((p: any) => p.claimants || [p]);
-    const surplusOpenTotal = surplusBoard?.leadCount ?? 0;
+    // Prospects the team can actually work today: the lien window (120 days
+    // from the mailed notice) has closed. Inside it another lienholder can
+    // still appear and move the figure, so those files are left off the brief
+    // until they age out. A claimant with no notice date is held back too,
+    // since its age is unknown.
+    const surplusWorkable = surplusClaimants.filter(
+      (c) => c.noticeAge != null && c.noticeAge > SURPLUS_LIEN_WINDOW_DAYS,
+    );
+    const surplusOpenTotal = surplusBoard ? surplusWorkable.length : 0;
+    // Claimants whose window closes within the next 30 days, so the team can
+    // prepare before they become callable. Live files only: not retired,
+    // deceased, or marked do not call.
+    const surplusOpeningSoonRows = surplusClaimants
+      .filter(
+        (c) =>
+          c.noticeAge != null &&
+          c.noticeAge > SURPLUS_LIEN_WINDOW_DAYS - 30 &&
+          c.noticeAge <= SURPLUS_LIEN_WINDOW_DAYS &&
+          c.workScore > 0 &&
+          !c.doNotCall &&
+          !c.deceased &&
+          !c.heirsRequired,
+      )
+      .sort((a, b) => b.noticeAge - a.noticeAge);
+    const surplusOpeningSoonNote = surplusOpeningSoonRows.length
+      ? this.openingSoonNote(surplusOpeningSoonRows)
+      : null;
     // The course's two working lists, as counts: people we have never heard
     // from, and files with a channel nobody has tried.
-    const surplusLive = surplusClaimants.filter((c) => c.workScore > 0);
+    const surplusLive = surplusWorkable.filter((c) => c.workScore > 0);
     const surplusNotTapped = surplusLive.filter((c) => c.contactStatus === 'not_tapped').length;
     const surplusMissingChannel = surplusLive.filter((c) => (c.channelsMissing || []).length > 0).length;
     // Signed claimants nobody has spoken to in a month. The course's rule
@@ -456,7 +496,7 @@ export class DigestService {
     // them under Find the heirs, and the brief must not send somebody to dial
     // them. Phone counts alone put Juliet Abe (Brevard 250921) under Call now
     // five years after her death.
-    const surplusCallable = surplusClaimants.filter(
+    const surplusCallable = surplusWorkable.filter(
       (c) =>
         c.workScore > 0 &&
         c.cleanPhoneCount > 0 &&
@@ -785,6 +825,7 @@ export class DigestService {
       surplusOpenTotal,
       surplusCallableTotal: surplusCallable.length,
       surplusIngestNote,
+      surplusOpeningSoonNote,
       surplusOverdue,
       surplusOverdueTotal: surplusOverdueTasks.length,
       surplusNotTapped,

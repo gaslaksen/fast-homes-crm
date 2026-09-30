@@ -264,7 +264,7 @@ export class DigestRenderService {
   private renderSurplus(b: DigestBrief): string {
     // Present whenever the board holds open claimants, even on a day with
     // nobody new to call: a section that vanishes reads as "no surplus work".
-    if (!b.surplus.length && !b.surplusIngestNote && !b.surplusOpenTotal && !b.surplusOverdue?.length) return '';
+    if (!b.surplus.length && !b.surplusIngestNote && !b.surplusOpeningSoonNote && !b.surplusOpenTotal && !b.surplusOverdue?.length) return '';
     const cards = b.surplus.map((s, i) => {
       const p = PALETTE[s.urgency];
       return `
@@ -311,6 +311,7 @@ export class DigestRenderService {
 
     const footer = `${overdue}${silent}<div style="padding-top:12px;font-size:13px;color:${MUTED};line-height:1.55;">
         ${b.surplusIngestNote ? `<b style="color:${INK};">Overnight:</b> ${this.esc(b.surplusIngestNote)} ` : ''}
+        ${b.surplusOpeningSoonNote ? `<b style="color:${INK};">Coming up:</b> ${this.esc(b.surplusOpeningSoonNote)} ` : ''}
         ${b.surplusCallableTotal} of ${b.surplusOpenTotal} open claimants have a live number.
         ${this.surplusWorkingLine(b)}
         <a href="${this.esc(b.appUrl)}/surplus-funds" style="color:${TEAL};font-weight:600;text-decoration:none;">Open the board &rarr;</a>
@@ -554,7 +555,7 @@ export class DigestRenderService {
       out.push('');
     }
 
-    if (b.surplus.length || b.surplusIngestNote || b.surplusOpenTotal) {
+    if (b.surplus.length || b.surplusIngestNote || b.surplusOpeningSoonNote || b.surplusOpenTotal) {
       out.push('SURPLUS FUNDS');
       for (const s of b.surplus) {
         out.push(`  ${s.claimant} - ${s.property}`);
@@ -577,6 +578,7 @@ export class DigestRenderService {
         }
       }
       if (b.surplusIngestNote) out.push(`  Overnight: ${b.surplusIngestNote}`);
+      if (b.surplusOpeningSoonNote) out.push(`  Coming up: ${b.surplusOpeningSoonNote}`);
       out.push(`  ${b.surplusCallableTotal} of ${b.surplusOpenTotal} open claimants have a live number.`);
       if (b.surplusNotTapped || b.surplusMissingChannel || b.surplusRechecksDue) {
         out.push(`  ${this.surplusWorkingLine(b)}`);

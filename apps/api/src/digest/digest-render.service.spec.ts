@@ -34,6 +34,7 @@ function brief(over: Partial<DigestBrief> = {}): DigestBrief {
     surplusOpenTotal: 0,
     surplusCallableTotal: 0,
     surplusIngestNote: null,
+    surplusOpeningSoonNote: null,
     surplusOverdue: [],
     surplusOverdueTotal: 0,
     surplusNotTapped: 0,
@@ -107,6 +108,14 @@ describe('DigestRenderService, surplus and county feeds', () => {
     const html = render.renderHtml(brief({ surplusOpenTotal: 238, surplusCallableTotal: 57 }));
     expect(html).toContain('Surplus funds');
     expect(html).toContain('57 of 238 open claimants have a live number');
+  });
+
+  it('shows the claimants about to clear the lien window', () => {
+    const note = '2 more surplus claimants open up in the next 30 days, $120.0K between them. Next: TINA FORTNER in 4 days.';
+    const b = brief({ surplusOpeningSoonNote: note });
+    expect(render.renderHtml(b)).toContain('Coming up:');
+    expect(render.renderHtml(b)).toContain('Next: TINA FORTNER in 4 days.');
+    expect(render.renderText(b)).toContain(`Coming up: ${note}`);
   });
 
   it('drops both sections when there is nothing to say', () => {
