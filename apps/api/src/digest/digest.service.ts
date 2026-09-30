@@ -45,6 +45,9 @@ const FORECLOSURE_MIN_WORKABLE_DAYS = 14;
 const FORECLOSURE_IDEAL_DAYS = 35;
 const FORECLOSURE_MAX_WATCH_DAYS = 75;
 
+/** Surplus claimants show in the brief only once the lien window has closed. */
+const SURPLUS_LIEN_WINDOW_DAYS = 120;
+
 const TZ = 'America/New_York';
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -434,10 +437,18 @@ export class DigestService {
         return null;
       });
     const surplusClaimants: any[] = (surplusBoard?.data || []).flatMap((p: any) => p.claimants || [p]);
-    const surplusOpenTotal = surplusBoard?.leadCount ?? 0;
+    // Prospects the team can actually work today: the lien window (120 days
+    // from the mailed notice) has closed. Inside it another lienholder can
+    // still appear and move the figure, so those files are left off the brief
+    // until they age out. A claimant with no notice date is held back too,
+    // since its age is unknown.
+    const surplusWorkable = surplusClaimants.filter(
+      (c) => c.noticeAge != null && c.noticeAge > SURPLUS_LIEN_WINDOW_DAYS,
+    );
+    const surplusOpenTotal = surplusBoard ? surplusWorkable.length : 0;
     // The course's two working lists, as counts: people we have never heard
     // from, and files with a channel nobody has tried.
-    const surplusLive = surplusClaimants.filter((c) => c.workScore > 0);
+    const surplusLive = surplusWorkable.filter((c) => c.workScore > 0);
     const surplusNotTapped = surplusLive.filter((c) => c.contactStatus === 'not_tapped').length;
     const surplusMissingChannel = surplusLive.filter((c) => (c.channelsMissing || []).length > 0).length;
     // Signed claimants nobody has spoken to in a month. The course's rule
@@ -456,7 +467,7 @@ export class DigestService {
     // them under Find the heirs, and the brief must not send somebody to dial
     // them. Phone counts alone put Juliet Abe (Brevard 250921) under Call now
     // five years after her death.
-    const surplusCallable = surplusClaimants.filter(
+    const surplusCallable = surplusWorkable.filter(
       (c) =>
         c.workScore > 0 &&
         c.cleanPhoneCount > 0 &&
