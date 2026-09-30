@@ -170,6 +170,8 @@ export interface DigestBrief {
   surplusCallableTotal: number;
   /** "24 claimants landed from Lee overnight, $312K between them." */
   surplusIngestNote: string | null;
+  /** Claimants whose lien window closes within 30 days, so they become callable soon. */
+  surplusOpeningSoonNote: string | null;
   /** Follow-ups on surplus claimants that are past due, oldest first. */
   surplusOverdue: SurplusTaskRow[];
   surplusOverdueTotal: number;
