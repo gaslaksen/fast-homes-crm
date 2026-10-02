@@ -292,10 +292,13 @@ export class MailerService {
    * A reply/message sent by a logged-in user, appearing from their own
    * root-domain address (e.g. Ian@quickcashhomebuyers.com).
    *
-   * On a non-default brand the user has no mailbox to send from, so the From
-   * address becomes that brand's deals@ while the display name stays the
-   * user's. A seller on a Dig Deeper thread sees "Ian" from Dig Deeper, not
-   * the same person suddenly writing from another company.
+   * On another brand the user keeps their mailbox name and takes that brand's
+   * domain: Ian on a Dig Deeper thread writes as ian@digdeeperllc.com, with
+   * replies routed back through ian@crm.digdeeperllc.com. The team asked for
+   * this so a claimant sees the person they spoke to, not a shared deals@
+   * box. Set EMAIL_DIGDEEPER_USER_FROM="deals" to put everyone back on the
+   * brand's deals@ address (display name still the user's), for instance if
+   * the per-user mailboxes do not exist and a direct reply would bounce.
    */
   /**
    * How a user-sent email will actually appear, without sending anything.
@@ -310,10 +313,23 @@ export class MailerService {
   ): { fromAddress: string; replyTo: string; brandName: string } {
     const identity = this.brandConfig(brand);
     const ownBrand = identity.brand.key === DEFAULT_BRAND.key;
-    // On another brand the user has no mailbox, so the brand's deals@ stands
-    // in and only the display name stays theirs.
-    const fromAddress = ownBrand ? userEmail : identity.dealsAddress;
-    const replyLocalPart = ownBrand ? userEmail.split('@')[0] : 'deals';
+    const localPart = (userEmail.split('@')[0] || '').trim().toLowerCase();
+    let fromAddress: string;
+    let replyLocalPart: string;
+    if (ownBrand) {
+      fromAddress = userEmail;
+      replyLocalPart = localPart;
+    } else {
+      // The user's name on the brand's root domain, which is where the
+      // brand's deals@ already lives (deals@digdeeperllc.com, so
+      // ian@digdeeperllc.com). Falls back to deals@ when switched off or
+      // when the user's address has no usable name in front of the @.
+      const mode = (this.config.get<string>('EMAIL_DIGDEEPER_USER_FROM') || 'user').trim().toLowerCase();
+      const rootDomain = identity.dealsAddress.split('@')[1] || '';
+      const asSelf = mode !== 'deals' && /^[a-z0-9._-]+$/.test(localPart) && !!rootDomain;
+      fromAddress = asSelf ? `${localPart}@${rootDomain}` : identity.dealsAddress;
+      replyLocalPart = asSelf ? localPart : 'deals';
+    }
     return {
       fromAddress,
       replyTo: this.inboundReplyTo(replyLocalPart, identity.domain),

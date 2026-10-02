@@ -99,13 +99,33 @@ describe('userSendIdentity', () => {
     expect(out.brandName).toBe(QCHB_BRAND.companyName);
   });
 
-  it("substitutes the brand's deals address where the user has no mailbox", () => {
+  it("moves the user onto the other brand's domain under their own name", () => {
+    // Ian on a surplus thread writes as ian@digdeeperllc.com, and a reply
+    // comes back through ian@ on that brand's inbound subdomain.
     const svc = makeService(configured);
+    const out = svc.userSendIdentity(DIG_DEEPER_BRAND, 'Ian@quickcashhomebuyers.com');
+
+    expect(out.fromAddress).toBe('ian@digdeeperllc.com');
+    expect(out.replyTo).toBe('ian@crm.digdeeperllc.com');
+    expect(out.brandName).toBe('D.I.G. Deeper LLC');
+  });
+
+  it("falls back to the brand's deals address when told to", () => {
+    // The switch for when the per-user mailboxes are not set up and a direct
+    // reply to ian@ would bounce.
+    const svc = makeService({ ...configured, EMAIL_DIGDEEPER_USER_FROM: 'deals' });
     const out = svc.userSendIdentity(DIG_DEEPER_BRAND, 'ian@quickcashhomebuyers.com');
 
     expect(out.fromAddress).toBe('deals@digdeeperllc.com');
     expect(out.replyTo).toBe('deals@crm.digdeeperllc.com');
-    expect(out.brandName).toBe('D.I.G. Deeper LLC');
+  });
+
+  it("falls back to deals@ for a user address with nothing usable before the @", () => {
+    const svc = makeService(configured);
+    const out = svc.userSendIdentity(DIG_DEEPER_BRAND, '@quickcashhomebuyers.com');
+
+    expect(out.fromAddress).toBe('deals@digdeeperllc.com');
+    expect(out.replyTo).toBe('deals@crm.digdeeperllc.com');
   });
 
   it('previews the fallback, not the brand, when the domain is not live', () => {
