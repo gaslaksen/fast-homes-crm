@@ -39,6 +39,7 @@ function buildService(lead: any, opts: { lastInboundFrom?: string } = {}) {
     foreclosureDetail: { update: foreclosureUpdate },
     probateDetail: { update: probateUpdate },
     $transaction: jest.fn().mockResolvedValue([]),
+    $queryRaw: jest.fn().mockResolvedValue([]),
   } as unknown as PrismaService;
   return {
     service: new LeadPhonesService(prisma),
@@ -182,6 +183,42 @@ describe('LeadPhonesService.findLeadByPhone', () => {
     const { service, prisma } = buildService(foreclosureLead());
     await expect(service.findLeadByPhone('12345')).resolves.toBeNull();
     expect(prisma.lead.findFirst).not.toHaveBeenCalled();
+  });
+
+  it('matches a primary stored with formatting, before the skip-traced numbers', async () => {
+    // A lead edited by hand kept "(704) 681-2994", the exact match missed it,
+    // and the seller rang in as a bare number with no name.
+    const { service, prisma } = buildService(foreclosureLead());
+    prisma.$queryRaw.mockResolvedValueOnce([{ id: 'lead-formatted' }]);
+
+    await expect(service.findLeadByPhone('+17046812994')).resolves.toEqual({
+      leadId: 'lead-formatted',
+      isPrimary: true,
+    });
+    expect(prisma.lead.findFirst).toHaveBeenCalledTimes(1);
+    expect(prisma.$queryRaw.mock.calls[0]).toContain('7046812994');
+  });
+
+  it('skips the digits-only scan when the exact match hits', async () => {
+    const { service, prisma } = buildService(foreclosureLead());
+    prisma.lead.findFirst.mockResolvedValueOnce({ id: 'lead-primary' });
+
+    await service.findLeadByPhone('+17046082100');
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
+  });
+});
+
+describe('LeadPhonesService.findLeadIdsByPhone', () => {
+  it('includes leads whose primary is stored with formatting, so STOP reaches them', async () => {
+    const { service, prisma } = buildService(foreclosureLead());
+    prisma.lead.findMany.mockResolvedValueOnce([{ id: 'lead-exact' }]);
+    prisma.surplusHeir = { findMany: jest.fn().mockResolvedValue([]) };
+    prisma.$queryRaw.mockResolvedValueOnce([{ id: 'lead-formatted' }, { id: 'lead-exact' }]);
+
+    await expect(service.findLeadIdsByPhone('7046812994')).resolves.toEqual([
+      'lead-exact',
+      'lead-formatted',
+    ]);
   });
 });
 

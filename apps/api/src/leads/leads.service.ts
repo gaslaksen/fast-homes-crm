@@ -831,6 +831,12 @@ export class LeadsService {
     const lead = await this.prisma.lead.findUnique({ where: { id } });
     if (!lead) throw new Error('Lead not found');
 
+    // Same E.164 rule as createLead. An edit used to save whatever was typed,
+    // and inbound calls and texts from that number then matched no lead.
+    if (typeof data.sellerPhone === 'string' && data.sellerPhone.trim()) {
+      data.sellerPhone = formatPhoneNumber(data.sellerPhone);
+    }
+
     // Track status change
     if (data.status && data.status !== lead.status) {
       await this.prisma.activity.create({

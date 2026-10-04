@@ -57,7 +57,7 @@ function followUpTitle(outcome: SurplusCallOutcome | null, name: string): string
       return `Follow up with ${name}`;
   }
 }
-import { PhoneNumbersService } from '../phone-numbers/phone-numbers.service';
+import { PhoneNumbersService, numberKey } from '../phone-numbers/phone-numbers.service';
 import { LeadPhonesService } from '../phone-numbers/lead-phones.service';
 import { TouchService } from '../leads/touch.service';
 
@@ -677,9 +677,23 @@ export class TwilioVoiceService {
     const callSid = params.CallSid || '';
 
     const lead = await this.findLeadByPhone(from);
+    // Not a lead: a teammate or a buyer still gets a name on the ring screen,
+    // but is never attached to a lead.
+    const other = lead ? null : await this.findNonLeadCaller(from);
     const callerName = lead
       ? `${lead.sellerFirstName || ''} ${lead.sellerLastName || ''}`.trim()
-      : '';
+      : other?.name || '';
+
+    // Without this line a caller showing up as a bare number left nothing in
+    // the logs to say whether the lookup ran or what it found.
+    this.logger.log(
+      `📞 Inbound call ${callSid || '(no sid)'} from ${from || '(no number)'}: ` +
+        (lead
+          ? `matched lead ${lead.id} (${callerName || 'no name on file'})`
+          : other
+            ? `matched ${other.kind} ${other.id} (${other.name})`
+            : 'no lead, user or partner on file for this number'),
+    );
 
     // Log the inbound call
     if (callSid) {
@@ -791,6 +805,49 @@ export class TwilioVoiceService {
       select: { id: true, sellerFirstName: true, sellerLastName: true, source: true },
     });
     return lead ? { ...lead, heirId: match.heirId || null, heirRole: match.heirRole || null } : null;
+  }
+
+  /**
+   * A caller who is not a lead but is on file: a teammate (User.phone) or a
+   * buyer, title company or other partner (Partner.phone). Used only for the
+   * name on the ring screen. Both tables are small and their phones are
+   * stored however they were typed, so this compares the last ten digits.
+   */
+  private async findNonLeadCaller(
+    phone: string,
+  ): Promise<{ kind: 'user' | 'partner'; id: string; name: string } | null> {
+    const ten = numberKey(phone);
+    if (ten.length !== 10) return null;
+    try {
+      const [user] = await this.prisma.$queryRaw<
+        { id: string; firstName: string; lastName: string }[]
+      >`
+        SELECT id, "firstName", "lastName" FROM "users"
+        WHERE right(regexp_replace("phone", '[^0-9]', '', 'g'), 10) = ${ten}
+        ORDER BY "createdAt" ASC
+        LIMIT 1`;
+      if (user) {
+        const name = `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Teammate';
+        return { kind: 'user', id: user.id, name: `${name} (team)` };
+      }
+
+      const [partner] = await this.prisma.$queryRaw<
+        { id: string; name: string; company: string | null; type: string | null }[]
+      >`
+        SELECT id, name, company, type FROM "partners"
+        WHERE "isActive" = true
+          AND right(regexp_replace("phone", '[^0-9]', '', 'g'), 10) = ${ten}
+        ORDER BY "updatedAt" DESC
+        LIMIT 1`;
+      if (partner) {
+        const tag = partner.company || partner.type || 'partner';
+        return { kind: 'partner', id: partner.id, name: `${partner.name} (${tag})` };
+      }
+    } catch (err: any) {
+      // A name on the ring screen is a nicety; the call must still ring.
+      this.logger.warn(`Caller lookup for ${phone} failed: ${err.message}`);
+    }
+    return null;
   }
 
   /** Status callback (Dial action + per-call status). Updates CallLog by CallSid. */
