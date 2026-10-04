@@ -408,6 +408,12 @@ export class LeadPhonesService {
     });
     if (primary) return { leadId: primary.id, isPrimary: true };
 
+    // The same number spelled some other way, like "(704) 681-2994". A lead
+    // edited by hand used to keep whatever was typed, and those leads rang in
+    // as an unknown caller.
+    const [loose] = await this.primaryIdsByDigits(ten);
+    if (loose) return { leadId: loose, isPrimary: true };
+
     // Every pipeline's extra slots, off the same table the writes use. The
     // surplus and tax sale slots were missing here, which is how a claimant
     // ringing back from a skip-traced second number arrived as "unknown
@@ -488,7 +494,29 @@ export class LeadPhonesService {
       where: { OR: [{ phone1: ten }, { phone2: ten }, { phone3: ten }, { phone4: ten }] },
       select: { surplusDetail: { select: { leadId: true } } },
     });
-    return Array.from(new Set([...leads.map((l) => l.id), ...heirs.map((h) => h.surplusDetail?.leadId).filter(Boolean) as string[]]));
+    // A STOP has to reach a lead whose primary is stored formatted too.
+    const loose = await this.primaryIdsByDigits(ten);
+    return Array.from(new Set([
+      ...leads.map((l) => l.id),
+      ...loose,
+      ...heirs.map((h) => h.surplusDetail?.leadId).filter(Boolean) as string[],
+    ]));
+  }
+
+  /**
+   * Leads whose sellerPhone holds this number in any spelling, newest first.
+   *
+   * Lead creation and import store E.164, but older rows and some integrations
+   * hold "(704) 681-2994" or "704-681-2994", which the exact match misses.
+   * This compares digits only, so it cannot use an index: callers try the
+   * exact match first and come here when it misses.
+   */
+  private async primaryIdsByDigits(ten: string): Promise<string[]> {
+    const rows = await this.prisma.$queryRaw<{ id: string }[]>`
+      SELECT id FROM "leads"
+      WHERE right(regexp_replace("sellerPhone", '[^0-9]', '', 'g'), 10) = ${ten}
+      ORDER BY "createdAt" DESC`;
+    return rows.map((r) => r.id);
   }
   // ─── Editing what we hold ─────────────────────────────────────────────────
 
