@@ -160,11 +160,22 @@ export default function PipelineWorkPanel({
 
   useEffect(() => {
     if (!subject) return;
+    let cancelled = false;
     setComms({ timeline: [], notes: [] });
     sigRef.current = '';
     setFullLead(null);
-    leadsAPI.get(subject.leadId).then((r) => setFullLead(r.data)).catch(() => {});
+    // An address or number clicked on the last lead belongs to that lead, not
+    // the next one the arrows land on.
+    setEmailAction(null);
+    setComposeIntent(null);
+    leadsAPI
+      .get(subject.leadId)
+      .then((r) => !cancelled && setFullLead(r.data))
+      .catch(() => {});
     loadComms();
+    return () => {
+      cancelled = true;
+    };
   }, [subject?.leadId, loadComms]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Poll only while the conversation is open and the window is visible, so an
@@ -398,8 +409,10 @@ export default function PipelineWorkPanel({
 
         <div className="dc-wp-foot">
           {tab === 'conversation' ? (
-            fullLead ? (
+            // Only once the Lead row is this subject's, never the previous one's.
+            fullLead?.id === subject.leadId ? (
               <MessageComposer
+                key={subject.leadId}
                 leadId={subject.leadId}
                 sellerPhone={fullLead.sellerPhone}
                 sellerEmail={fullLead.sellerEmail}
