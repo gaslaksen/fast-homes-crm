@@ -233,6 +233,29 @@ export default function MessageComposer({
     };
   }, [leadId]);
 
+  // A different lead starts with a clean composer. Where this stays mounted
+  // across leads (the inbox, the arrows on a pipeline panel), a recipient or a
+  // draft chosen for the last lead used to carry over, and an email could go
+  // to the previous lead's address under this lead's name. Declared before
+  // the intent effects so an intent raised for the new lead still applies.
+  const lastLeadRef = useRef(leadId);
+  useEffect(() => {
+    if (lastLeadRef.current === leadId) return;
+    lastLeadRef.current = leadId;
+    setBody('');
+    setEmailSubject('');
+    setEmailBodyHtml('');
+    setEmailInReplyToId(undefined);
+    setEmailMode('reply');
+    emailToChosenRef.current = false;
+    setEmailTo(sellerEmail || '');
+    setToNumber('');
+    setMentions([]);
+    setMentionQuery(null);
+    setError(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leadId]);
+
   // Apply a Reply / Forward intent raised from a thread email.
   useEffect(() => {
     if (!emailAction) return;

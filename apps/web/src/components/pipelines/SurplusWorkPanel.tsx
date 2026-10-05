@@ -2291,6 +2291,11 @@ export default function SurplusWorkPanel({
     setComms({ timeline: [], notes: [] });
     sigRef.current = '';
     setFullLead(null);
+    // An address or number clicked on the last lead belongs to that lead. Left
+    // set, the composer replayed it when it mounted for the next one, so the
+    // To field kept the previous claimant's email after the arrow keys.
+    setEmailAction(null);
+    setComposeIntent(null);
     leadsAPI
       .get(lead.id)
       .then((r) => !cancelled && setFullLead(r.data))
@@ -2692,8 +2697,12 @@ export default function SurplusWorkPanel({
         {/* The composer on the conversation tab, actions everywhere else. */}
         <div className="dc-wp-foot">
           {tab === 'conversation' ? (
-            fullLead ? (
+            // Only once the Lead row is THIS lead's. Right after the arrows the
+            // row on hand is still the previous lead's, and its email, phone
+            // and do-not-contact flag must never reach this lead's composer.
+            fullLead?.id === lead.id ? (
               <MessageComposer
+                key={lead.id}
                 leadId={lead.id}
                 sellerPhone={fullLead.sellerPhone}
                 sellerEmail={fullLead.sellerEmail}
