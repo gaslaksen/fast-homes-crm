@@ -389,6 +389,8 @@ An empty profiles list is a good answer when nothing fits, as long as the leads 
 const PRICES: Record<string, { in: number; out: number }> = {
   'claude-opus-5': { in: 5, out: 25 },
   'claude-sonnet-5': { in: 2, out: 10 },
+  'claude-sonnet-5-5': { in: 2, out: 10 },
+  'claude-opus-5-5': { in: 4, out: 20 },
 };
 const WEB_SEARCH_PRICE = 0.01;
 

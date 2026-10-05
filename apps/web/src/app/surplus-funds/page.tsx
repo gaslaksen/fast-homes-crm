@@ -490,6 +490,16 @@ function scheduleLabel(cadence?: string): string {
   return cadence === 'weekly' ? 'every Monday at 4:30' : 'every morning at 5:45';
 }
 
+/**
+ * Whether a run actually pulled the county's list. A run with a few cases
+ * that failed still pulled; only one that never got the list, or never
+ * finished, did not. Judging by `ok` alone, one bad case out of Lee's few
+ * hundred read as "never run".
+ */
+function pulled(r: any): boolean {
+  return !!r.ok || (!!r.finishedAt && (r.scanned || 0) > 0);
+}
+
 function FeedLine({ runs, sources }: { runs: any[]; sources: FeedSource[] }) {
   if (!runs.length && !sources.length) return null;
   // One entry per registered feed. A weekly feed judged by the daily rule was
@@ -499,21 +509,30 @@ function FeedLine({ runs, sources }: { runs: any[]; sources: FeedSource[] }) {
     : [{ key: 'duval_taxdeed', county: 'Duval', cadence: 'weekly' }];
 
   const items = feeds.map((f) => {
-    const lastCron = runs.find((r) => r.trigger === 'cron' && r.ok && (!r.source || r.source === f.key));
+    const mine = (r: any) => r.trigger === 'cron' && (!r.source || r.source === f.key);
+    const lastCron = runs.find((r) => mine(r) && pulled(r));
+    // The newest attempt, pulled or not, so a feed that has started failing
+    // says so rather than "never run".
+    const lastTry = runs.find(mine);
     const ageHours = lastCron ? (Date.now() - new Date(lastCron.startedAt).getTime()) / 3600000 : Infinity;
     const late = !lastCron || ageHours > staleAfterHours(f.cadence);
+    const errs = lastCron?.errors ? `, ${lastCron.errors} case${lastCron.errors === 1 ? '' : 's'} failed` : '';
     // The short form is what sits under the title. The sentence, which used
     // to sit there in full on every visit, is the tooltip.
     const short = !lastCron
-      ? `${f.county} pull has never run`
+      ? lastTry
+        ? `${f.county} pull failing`
+        : `${f.county} pull has never run`
       : late
         ? `${f.county} pull late, last ${agoLabel(lastCron.startedAt)}`
-        : `${f.county} pulled ${agoLabel(lastCron.startedAt)}`;
+        : `${f.county} pulled ${agoLabel(lastCron.startedAt)}${errs}`;
     const detail = !lastCron
-      ? `The ${f.county} pull (${scheduleLabel(f.cadence)}) has never succeeded. Cases only arrive when somebody chooses Refresh feed.`
+      ? lastTry
+        ? `The ${f.county} pull (${scheduleLabel(f.cadence)}) has not got the county list yet. Last try ${agoLabel(lastTry.startedAt)}${lastTry.message ? `: ${lastTry.message}` : '.'}`
+        : `The ${f.county} pull (${scheduleLabel(f.cadence)}) has never succeeded. Cases only arrive when somebody chooses Refresh feed.`
       : late
         ? `The ${f.county} pull last succeeded ${agoLabel(lastCron.startedAt)}. It should run ${scheduleLabel(f.cadence)}.`
-        : `${f.county}, ${scheduleLabel(f.cadence)}: ${lastCron.scanned} scanned, ${lastCron.created} new, ${lastCron.updated} updated, ${lastCron.belowFloor} under the floor.`;
+        : `${f.county}, ${scheduleLabel(f.cadence)}: ${lastCron.scanned} scanned, ${lastCron.created} new, ${lastCron.updated} updated, ${lastCron.belowFloor} under the floor${errs}.`;
     return { key: f.key, late, short, detail };
   });
   const bad = items.some((i) => i.late);

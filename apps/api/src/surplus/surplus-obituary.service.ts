@@ -83,6 +83,8 @@ List survivors only for a strong or possible verdict, as the obituary names them
 const PRICES: Record<string, { in: number; out: number }> = {
   'claude-opus-5': { in: 5, out: 25 },
   'claude-sonnet-5': { in: 2, out: 10 },
+  'claude-sonnet-5-5': { in: 2, out: 10 },
+  'claude-opus-5-5': { in: 4, out: 20 },
 };
 const WEB_SEARCH_PRICE = 0.01;
 /** Refuse a check the budget cannot cover at the most one has cost so far. */
@@ -206,7 +208,7 @@ export class SurplusObituaryService {
   }
 
   get model(): string {
-    return this.config.get<string>('OBITUARY_MODEL') || 'claude-opus-5';
+    return this.config.get<string>('OBITUARY_MODEL') || 'claude-sonnet-5-5';
   }
 
   get available(): boolean {

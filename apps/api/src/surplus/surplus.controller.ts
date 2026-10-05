@@ -178,8 +178,15 @@ export class SurplusController {
   @Get('poll-runs')
   async pollRuns(@Headers('authorization') authHeader?: string) {
     const { organizationId } = this.decodeToken(authHeader);
+    // The last few runs, plus each county's latest cron run and latest
+    // successful pull, so no feed falls out of the window on a busy Monday.
+    const [recent, latest] = await Promise.all([
+      this.ingest.recentRuns(organizationId),
+      this.ingest.latestCronRuns(organizationId),
+    ]);
+    const byId = new Map([...recent, ...latest].map((r) => [r.id, r]));
     return {
-      runs: await this.ingest.recentRuns(organizationId),
+      runs: [...byId.values()].sort((a, b) => b.startedAt.getTime() - a.startedAt.getTime()),
       // Cadence travels with the source so the board can judge staleness per
       // feed: a weekly pull is not late after thirty hours.
       sources: this.ingest
