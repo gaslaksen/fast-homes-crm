@@ -960,4 +960,35 @@ export class SurplusIngestService {
       take,
     });
   }
+
+  /**
+   * The newest cron run for every registered county, and the newest one that
+   * actually pulled the list, whatever their age.
+   *
+   * The board used to judge each feed off the last ten runs overall. With
+   * twelve counties pulled back to back on a Monday, the first two in the
+   * order (Duval and Lee) were always pushed out of those ten, so the strip
+   * said they had never run when they had pulled minutes earlier.
+   */
+  async latestCronRuns(organizationId?: string | null) {
+    const scope = organizationId ? { organizationId } : {};
+    const rows = await Promise.all(
+      this.adapters().flatMap((a) => [
+        this.prisma.surplusPollRun.findFirst({
+          where: { ...scope, source: a.key, trigger: 'cron' },
+          orderBy: { startedAt: 'desc' },
+        }),
+        this.prisma.surplusPollRun.findFirst({
+          where: {
+            ...scope,
+            source: a.key,
+            trigger: 'cron',
+            OR: [{ ok: true }, { finishedAt: { not: null }, scanned: { gt: 0 } }],
+          },
+          orderBy: { startedAt: 'desc' },
+        }),
+      ]),
+    );
+    return rows.filter((r): r is NonNullable<typeof r> => !!r);
+  }
 }

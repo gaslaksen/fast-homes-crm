@@ -95,7 +95,9 @@ function harness(leads: any[], env: Record<string, string> = {}, spent = 0) {
     surplusTraceAttempt: { create: jest.fn(async (a: any) => { attempts.push(a.data); return a.data; }) },
     activity: { create: jest.fn(async (a: any) => { activities.push(a.data); return a.data; }) },
   };
-  const config: any = { get: (k: string) => ({ ANTHROPIC_API_KEY: 'k', ...env } as any)[k] };
+  // Turned on here because most cases are about what the search does; the
+  // off-by-default case passes SOCIAL_SEARCH_ENABLED explicitly.
+  const config: any = { get: (k: string) => ({ ANTHROPIC_API_KEY: 'k', SOCIAL_SEARCH_ENABLED: 'true', ...env } as any)[k] };
   const svc = new SurplusSocialService(config, prisma);
   const create = jest.fn();
   (svc as any).anthropic = { beta: { messages: { create } } };
@@ -103,7 +105,20 @@ function harness(leads: any[], env: Record<string, string> = {}, spent = 0) {
 }
 
 describe('SurplusSocialService', () => {
-  it('needs no budget variable: with nothing set it runs, uncapped', async () => {
+  it('is off unless SOCIAL_SEARCH_ENABLED=true: nothing is sent', async () => {
+    const { svc, create } = harness([lead()], { SOCIAL_SEARCH_ENABLED: undefined as any });
+    const r = await svc.run({ organizationId: 'org' });
+    expect(svc.available).toBe(false);
+    expect(create).not.toHaveBeenCalled();
+    expect(r.message).toMatch(/SOCIAL_SEARCH_ENABLED=true/);
+    expect((await svc.usage()).paused).toBe(true);
+  });
+
+  it('defaults to Sonnet 5.5 when no model is set', () => {
+    expect(harness([]).svc.model).toBe('claude-sonnet-5-5');
+  });
+
+  it('needs no budget variable: turned on, it runs uncapped', async () => {
     const { svc, create } = harness([lead()], {}, 500);
     create.mockResolvedValue(reply(CLARK));
     expect(svc.available).toBe(true);
@@ -139,7 +154,7 @@ describe('SurplusSocialService', () => {
     create.mockResolvedValue(reply(CLARK));
     const r = await svc.run({ organizationId: 'org' });
     expect(r).toMatchObject({ checked: 1, found: 1, profiles: 2, errors: 0 });
-    expect(r.spent).toBeGreaterThan(0.2);
+    expect(r.spent).toBeGreaterThan(0.1); // Sonnet 5.5 prices, the default model
 
     // The person the search was told about: name, both places, the relatives.
     const sent = JSON.parse(create.mock.calls[0][0].messages[0].content);

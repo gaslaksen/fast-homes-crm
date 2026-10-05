@@ -28,11 +28,11 @@ import {
  * and files what it finds as candidates with the evidence beside each.
  *
  * The search is paid per check (tokens plus web searches, the same shape as
- * the obituary search) and is ON by default with no cap: the decision
- * (2026-09-17) is that finding the claimant is worth the fifty cents every
- * time. SOCIAL_SEARCH_MONTHLY_BUDGET is an optional ceiling in dollars, and
- * SOCIAL_SEARCH_ENABLED=false turns it off. The links and the hand-entered
- * profiles work regardless.
+ * the obituary search). It is OFF by default since 2026-10-05: it was most of
+ * the Claude bill and was not turning into numbers to call.
+ * SOCIAL_SEARCH_ENABLED=true turns it back on, and
+ * SOCIAL_SEARCH_MONTHLY_BUDGET is an optional ceiling in dollars. The links
+ * and the hand-entered profiles work regardless.
  */
 
 /** Refuse a check the budget cannot cover at the most one is expected to cost. */
@@ -68,13 +68,13 @@ export class SurplusSocialService {
     return Number.isFinite(b) && b > 0 ? b : 0;
   }
 
-  /** On unless SOCIAL_SEARCH_ENABLED is set to false. */
+  /** Off unless SOCIAL_SEARCH_ENABLED is set to true. */
   get enabled(): boolean {
-    return (this.config.get<string>('SOCIAL_SEARCH_ENABLED') ?? 'true') !== 'false';
+    return this.config.get<string>('SOCIAL_SEARCH_ENABLED') === 'true';
   }
 
   get model(): string {
-    return this.config.get<string>('SOCIAL_SEARCH_MODEL') || 'claude-opus-5';
+    return this.config.get<string>('SOCIAL_SEARCH_MODEL') || 'claude-sonnet-5-5';
   }
 
   get available(): boolean {
@@ -266,7 +266,7 @@ export class SurplusSocialService {
    */
   async search(person: Record<string, unknown>): Promise<{ verdict: SocialVerdict; cost: number }> {
     if (!this.anthropic) throw new Error('ANTHROPIC_API_KEY is not set: out of budget.');
-    if (!this.enabled) throw new Error('The social profile search is turned off (SOCIAL_SEARCH_ENABLED=false).');
+    if (!this.enabled) throw new Error('The social profile search is turned off. Set SOCIAL_SEARCH_ENABLED=true to turn it on.');
     const u = await this.usage();
     // Only a set ceiling can stop a check. With none, every check runs.
     if (u.budget && u.spent + WORST_CASE_CHECK > u.budget) {
@@ -368,7 +368,7 @@ export class SurplusSocialService {
     const out: SocialRunResult = { candidates: 0, checked: 0, found: 0, profiles: 0, spent: 0, errors: 0 };
     if (!this.available && !opts.dryRun) {
       out.message = this.anthropic
-        ? 'The social profile search is turned off (SOCIAL_SEARCH_ENABLED=false).'
+        ? 'The social profile search is turned off. Set SOCIAL_SEARCH_ENABLED=true to turn it on.'
         : 'ANTHROPIC_API_KEY is not set.';
       return out;
     }

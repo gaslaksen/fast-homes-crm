@@ -165,7 +165,7 @@ describe('SurplusObituaryService', () => {
     ]);
     expect(heirCreates.every((h) => h.role === 'relative' && h.sourceKind === 'obituary' && h.sourceDocument === BEAVER.url)).toBe(true);
     expect(skiptrace.lookupSurvivors).toHaveBeenCalledWith('d1', 'DEWEY R BEAVER', { property: '517 HINES|33936', mailing: '417 REESE|43130' });
-    expect(spent()).toBeCloseTo(0.265, 3);
+    expect(spent()).toBeCloseTo(0.13, 3); // Sonnet 5.5 prices, the default model
   });
 
   it('a possible match files nobody until a person confirms it', async () => {
