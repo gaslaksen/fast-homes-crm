@@ -35,6 +35,7 @@ function harness(leads: any[], endato: any = null, env: Record<string, string> =
     },
     lead: {
       findMany: jest.fn().mockResolvedValue(leads),
+      findFirst: jest.fn(async (a: any) => leads.find((l) => l.id === a.where.id) || null),
       update: jest.fn(async (a: any) => { leadUpdates.push(a); return {}; }),
     },
     surplusDetail: {
@@ -1461,5 +1462,111 @@ describe('looking up the survivors an obituary named', () => {
     expect(r).toEqual({ looked: 1, withContact: 0 });
     expect(heirs[0].phone1).toBeUndefined();
     expect(heirs[0]).toMatchObject({ traceOutcome: 'no_person' });
+  });
+});
+
+describe('EnformionGo from the card', () => {
+  /** Endato's parsed shape, tied to the property by address history. */
+  const griffin = (over: any = {}) => ({
+    first: 'Myrtis', last: 'Griffin', age: 70, akas: [],
+    addresses: [{ street: '2817 Eaverson', city: 'Jacksonville', state: 'FL', zip: '32209', lastSeen: '2026-08-01' }],
+    phones: [{ num: '9045550101', type: 'Wireless', connected: true }],
+    emails: [], deceased: false, dateOfDeath: null, relatives: [], ...over,
+  });
+
+  it('searches a living claimant by name only, never BatchData, even when searched before', async () => {
+    const endato = endatoStub([griffin()]);
+    const { svc, leadUpdates } = harness([lead({ nameSearchedAt: new Date('2026-09-12') })], endato);
+
+    const r = await svc.enformionSearch({ leadId: 'lead1', organizationId: 'org' });
+
+    expect(mockedAxios.post).not.toHaveBeenCalled();
+    expect(endato.search).toHaveBeenCalledTimes(1);
+    expect(r).toMatchObject({ estate: false, searched: 1, contacted: 1 });
+    expect(r.summary).toBe('EnformionGo found contacts for Myrtis Griffin.');
+    expect(leadUpdates[0].data.sellerPhone).toBe('+19045550101');
+  });
+
+  it('runs without a BatchData key', async () => {
+    const endato = endatoStub([griffin()]);
+    const { svc } = harness([lead()], endato);
+    (svc as any).batchKey = undefined;
+
+    const r = await svc.enformionSearch({ leadId: 'lead1', organizationId: 'org' });
+
+    expect(r.searched).toBe(1);
+  });
+
+  it('looks up the relatives in the same click when the search finds the claimant dead', async () => {
+    const endato = endatoStub(
+      [griffin({ deceased: true, dateOfDeath: '2022-04-01', relatives: [{ id: 'R1', name: 'Paul Griffin', type: 'Spouse', deceased: false, city: null, state: null, dob: null }] })],
+      { R1: griffin({ first: 'Paul', phones: [{ num: '9045550202', type: 'Wireless', connected: true }] }) },
+    );
+    const { svc, heirs } = harness([lead()], endato);
+
+    const r = await svc.enformionSearch({ leadId: 'lead1', organizationId: 'org' });
+
+    expect(endato.lookup).toHaveBeenCalledWith('R1');
+    expect(r).toMatchObject({ deceased: 1, looked: 1, withContact: 1 });
+    expect(heirs[0]).toMatchObject({ name: 'Paul Griffin', phone1: '9045550202' });
+    expect(r.summary).toMatch(/^EnformionGo holds a death record for Myrtis Griffin\. Moved to Find the heirs; 1 relative looked up, 1 with a number\.$/);
+  });
+
+  it('runs the estate search on a claimant already known dead, even one searched before', async () => {
+    const dead: any = lead();
+    dead.organizationId = 'org';
+    dead.surplusDetail = {
+      ...dead.surplusDetail, deceased: true, heirsRequired: true, claimStatus: 'open', deathCheckedAt: new Date('2026-09-14'),
+      heirs: [{ role: 'relative', sourceKind: 'endato' }],
+    };
+    const endato = endatoStub(
+      [griffin({ deceased: true, relatives: [{ id: 'R1', name: 'Paul Griffin', type: 'Spouse', deceased: false, city: null, state: null, dob: null }] })],
+      { R1: griffin({ first: 'Paul' }) },
+    );
+    const { svc } = harness([dead], endato);
+
+    const r = await svc.enformionSearch({ leadId: 'lead1', organizationId: 'org' });
+
+    expect(mockedAxios.post).not.toHaveBeenCalled();
+    expect(endato.search).toHaveBeenCalledTimes(1);
+    expect(endato.lookup).toHaveBeenCalledWith('R1');
+    expect(r).toMatchObject({ estate: true, searched: 1, relativesFiled: 1, looked: 1, withContact: 1 });
+    expect(r.summary).toBe('EnformionGo matched Myrtis Griffin: 1 relative filed, 1 looked up, 1 with a number.');
+  });
+
+  it('says EnformionGo is off and spends nothing when it is not configured', async () => {
+    const endato = endatoStub(null);
+    const { svc } = harness([lead()], endato);
+
+    const r = await svc.enformionSearch({ leadId: 'lead1', organizationId: 'org' });
+
+    expect(endato.search).not.toHaveBeenCalled();
+    expect(r.summary).toMatch(/^EnformionGo is off/);
+  });
+});
+
+describe('the county pull keeps EnformionGo out', () => {
+  it('relativeLookups: false files a BatchData death without looking anybody up', async () => {
+    const endato = endatoStub([], { R1: { first: 'Paul', last: 'Griffin', akas: [], addresses: [], phones: [], emails: [], deceased: false, relatives: [] } });
+    const { svc, heirs } = harness([lead()], endato);
+    heirs.push({ id: 'h1', surplusDetailId: 'd1', name: 'Paul Griffin', relationship: 'Spouse', vendorPersonId: 'R1', tracedAt: null, deceased: false, doNotCall: false });
+    respond([person('Myrtis', 'Griffin', ['9045551234'], { deceased: true })]);
+
+    const r = await svc.traceLeads({ organizationId: 'org', nameSearch: false, relativeLookups: false });
+
+    expect(r.deceased).toBe(1);
+    expect(endato.lookup).not.toHaveBeenCalled();
+    expect(endato.search).not.toHaveBeenCalled();
+  });
+
+  it('without the switch the same death does look the spouse up', async () => {
+    const endato = endatoStub([], { R1: { first: 'Paul', last: 'Griffin', akas: [], addresses: [], phones: [], emails: [], deceased: false, relatives: [] } });
+    const { svc, heirs } = harness([lead()], endato);
+    heirs.push({ id: 'h1', surplusDetailId: 'd1', name: 'Paul Griffin', relationship: 'Spouse', vendorPersonId: 'R1', tracedAt: null, deceased: false, doNotCall: false });
+    respond([person('Myrtis', 'Griffin', ['9045551234'], { deceased: true })]);
+
+    await svc.traceLeads({ organizationId: 'org', nameSearch: false });
+
+    expect(endato.lookup).toHaveBeenCalledWith('R1');
   });
 });

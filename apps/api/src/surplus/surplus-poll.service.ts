@@ -32,10 +32,9 @@ import { CronLockService } from '../common/cron-lock.service';
  * and is the cheap check against a slow run stacking on the next one.
  *
  * Each county's pull is followed by the skip trace waterfall on the leads it
- * just created, and only those: BatchData on the address first, then the
- * Endato name search on whoever that could not place. Only claims that meet
- * the criteria in traceCriteria are looked up; a new estate gets the estate
- * search instead of a trace on the dead claimant. Leads an earlier run
+ * just created, and only those: BatchData on the address. EnformionGo
+ * (Endato) is not part of it; that is a button on the card. Only claims that
+ * meet the criteria in traceCriteria are looked up. Leads an earlier run
  * already tried are never re-bought here; a deliberate re-trace is the manual
  * call with `includeTraced`. The trace's outcome is appended to the run row so
  * the health strip and the Daily Brief can show it. SURPLUS_AUTO_TRACE=false
@@ -123,34 +122,33 @@ export class SurplusPollService {
   ): Promise<SurplusTraceResult | null> {
     if (!this.autoTrace || !leadIds.length) return null;
     try {
+      // BatchData only. EnformionGo (Endato) is never called from here: not
+      // the name search, not the relative lookups after a death, not the
+      // estate search. Its answers were not worth paying for on every new
+      // lead, so it runs only from the card, one claimant at a time.
       const trace = await this.skiptrace.traceLeads({
         organizationId: organizationId || null,
         leadIds,
-        nameSearch: true,
+        nameSearch: false,
         addressSearch: true,
+        relativeLookups: false,
       });
-      // The trace refuses a claimant the county lists as dead. Their family
-      // is found by the estate search instead: one name search, then the
-      // spouse and likely children looked up.
-      const estates = await this.skiptrace.estateRelatives({ organizationId: organizationId || null, leadIds });
-      const estateNote = estates.searched
-        ? `. Estate search on ${estates.searched} ${label} estate${estates.searched === 1 ? '' : 's'}: ${estates.matched} matched, ${estates.withContact} relative${estates.withContact === 1 ? '' : 's'} with a number`
-        : '';
-      // Last, the obituary search on the new estates the estate search left
-      // with nobody reachable: the obituary names the children. Paused unless
-      // OBITUARY_MONTHLY_BUDGET is set.
+      // Then the obituary search on the new estates with nobody reachable:
+      // the obituary names the children. Paused unless OBITUARY_MONTHLY_BUDGET
+      // is set. The survivors it names are filed, not looked up, since that
+      // lookup is an EnformionGo search.
       const obits = this.obituary?.available
-        ? await this.obituary.run({ organizationId: organizationId || null, leadIds })
+        ? await this.obituary.run({ organizationId: organizationId || null, leadIds, survivorLookups: false })
         : null;
       const obitNote = obits?.checked
-        ? `. Obituary search on ${obits.checked}: ${obits.strong} found dead, ${obits.possible} to check, ${obits.survivorsWithContact} survivor${obits.survivorsWithContact === 1 ? '' : 's'} with a number`
+        ? `. Obituary search on ${obits.checked}: ${obits.strong} found dead, ${obits.possible} to check, ${obits.survivorsFiled} survivor${obits.survivorsFiled === 1 ? '' : 's'} filed`
         : '';
       // The social profile search is NOT run here. It is manual only, from the
       // card or POST /surplus/social-search. Run automatically it searched
       // every claimant a trace left without a number, including ones never
       // traced because the Endato budget was spent: the 2026-09-21 Citrus pull
       // sent 148 Opus web-search checks, about $61, with nobody asking.
-      const note = describeTrace(leadIds.length, trace, label) + estateNote + obitNote;
+      const note = describeTrace(leadIds.length, trace, label) + obitNote;
       this.logger.log(`Surplus trace ${source}: ${note}`);
       await this.ingest.noteRun(runId, note);
       return trace;
@@ -184,7 +182,8 @@ export function describeTrace(newLeads: number, t: SurplusTraceResult, label = '
   }
   const bits = [
     `${t.submitted} address lookup${t.submitted === 1 ? '' : 's'}`,
-    `${t.nameSearch.searched} name search${t.nameSearch.searched === 1 ? '' : 'es'}`,
+    // Only a manual run searches by name now; the pull's note leaves it out.
+    t.nameSearch.searched ? `${t.nameSearch.searched} name search${t.nameSearch.searched === 1 ? '' : 'es'}` : null,
     t.relatives?.looked
       ? `${t.relatives.looked} relative lookup${t.relatives.looked === 1 ? '' : 's'}, ${t.relatives.withContact} with a number`
       : null,

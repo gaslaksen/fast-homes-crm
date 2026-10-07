@@ -244,6 +244,12 @@ export const surplusAPI = {
   // address rung could not place; `nameSearchLimit` caps those searches.
   skipTrace: (body: { leadIds?: string[]; limit?: number; includeTraced?: boolean; nameSearch?: boolean; nameSearchLimit?: number; addressSearch?: boolean }) =>
     api.post('/surplus/skip-trace', body),
+  /**
+   * EnformionGo on one claimant: the card's Skip trace button. A name search
+   * for a living claimant, the estate search for a dead one, and their
+   * relatives looked up. Paid per search; the county pull never runs it.
+   */
+  enformionSearch: (id: string) => api.post(`/surplus/${id}/enformion-search`),
   /** Confirm or reject a possible obituary match for one claimant. */
   resolveObituary: (leadId: string, answer: 'confirm' | 'reject') =>
     api.post(`/surplus/${leadId}/obituary`, { answer }),

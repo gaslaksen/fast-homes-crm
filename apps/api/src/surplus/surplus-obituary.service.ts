@@ -294,6 +294,12 @@ export class SurplusObituaryService {
     county?: string;
     limit?: number;
     dryRun?: boolean;
+    /**
+     * Look up the spouse and children an obituary names, an EnformionGo
+     * search each. Default on. The county pull turns it off and only files
+     * them.
+     */
+    survivorLookups?: boolean;
   }): Promise<ObituaryRunResult> {
     const out: ObituaryRunResult = {
       candidates: 0, checked: 0, strong: 0, possible: 0, none: 0,
@@ -359,7 +365,7 @@ export class SurplusObituaryService {
       }
       out.checked += 1;
       out[verdict.verdict] += 1;
-      const applied = await this.apply(lead, c, verdict);
+      const applied = await this.apply(lead, c, verdict, opts.survivorLookups !== false);
       out.survivorsFiled += applied.filed;
       out.survivorsLooked += applied.looked;
       out.survivorsWithContact += applied.withContact;
@@ -411,9 +417,14 @@ export class SurplusObituaryService {
     };
   }
 
-  private async apply(lead: any, c: any, v: ObituaryVerdict): Promise<{ filed: number; looked: number; withContact: number }> {
+  private async apply(
+    lead: any,
+    c: any,
+    v: ObituaryVerdict,
+    lookups = true,
+  ): Promise<{ filed: number; looked: number; withContact: number }> {
     const d = lead.surplusDetail;
-    if (v.verdict === 'strong') return this.applyStrong(lead, c, v, 'strong');
+    if (v.verdict === 'strong') return this.applyStrong(lead, c, v, 'strong', lookups);
     const line =
       v.verdict === 'possible'
         ? `Possible obituary, check before calling: ${v.nameInObituary || 'a namesake'}${v.dateOfDeath ? `, died ${longDate(v.dateOfDeath)}` : ''}${v.place ? `, ${v.place}` : ''}. ${v.url || ''} ${v.evidence}`.replace(/\s+/g, ' ').trim()
@@ -439,6 +450,8 @@ export class SurplusObituaryService {
     c: any,
     v: ObituaryVerdict,
     match: 'strong' | 'confirmed',
+    /** Look the survivors up on EnformionGo as well as filing them. */
+    lookups = true,
   ): Promise<{ filed: number; looked: number; withContact: number }> {
     const d = lead.surplusDetail;
     const who = displayName(estateName(c.claimant));
@@ -494,7 +507,7 @@ export class SurplusObituaryService {
       property: historyKey(c.propertyStreet, c.propertyCity, c.propertyZip),
       mailing: historyKey(c.mailingStreet, c.mailingCity, c.mailingZip),
     };
-    const r = filed ? await this.skiptrace.lookupSurvivors(d.id, who, keys) : { looked: 0, withContact: 0 };
+    const r = filed && lookups ? await this.skiptrace.lookupSurvivors(d.id, who, keys) : { looked: 0, withContact: 0 };
     return { filed, looked: r.looked, withContact: r.withContact };
   }
 }

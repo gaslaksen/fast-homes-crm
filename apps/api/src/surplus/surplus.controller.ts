@@ -587,9 +587,11 @@ export class SurplusController {
    * not the number of leads touched: co-owners at one property share a single
    * submission because BatchData matches on address and ignores names.
    *
-   * The cron polls run this same waterfall on the leads they create (see
-   * SurplusPollService), so the manual call is for the rest: a re-trace with
-   * `includeTraced`, a capped name-only pass, or a board imported by hand.
+   * The cron polls run the address rung on the leads they create (see
+   * SurplusPollService), never the Endato name rung. The card's button goes to
+   * POST /surplus/:id/enformion-search instead of here. This call is for a
+   * batch run by hand: a re-trace with `includeTraced`, a capped name-only
+   * pass, or a board imported by hand.
    */
   @Post('skip-trace')
   async skipTrace(@Body() body: any, @Headers('authorization') authHeader?: string) {
@@ -705,6 +707,22 @@ export class SurplusController {
   @Get('obituary-usage')
   async obituaryUsage() {
     return this.obituary.usage();
+  }
+
+  /**
+   * EnformionGo (Endato) on one claimant, from the card's Skip trace button.
+   * A living claimant gets the name search; one known to be dead gets the
+   * estate search. Relatives of either are looked up in the same call. The
+   * county pull never calls Endato, so this is the only way it runs on a lead.
+   */
+  @Post(':id/enformion-search')
+  async enformionSearch(@Param('id') id: string, @Headers('authorization') authHeader?: string) {
+    const { organizationId } = this.decodeToken(authHeader);
+    try {
+      return await this.skiptrace.enformionSearch({ leadId: id, organizationId: organizationId || null });
+    } catch (e: any) {
+      throw new BadRequestException(e.message);
+    }
   }
 
   /** Endato month to date against its budget. */

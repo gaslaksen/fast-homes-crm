@@ -2325,6 +2325,9 @@ export class SurplusService {
       // address get one submission and routinely end differently, so this is
       // per person and never rolled up to the property.
       trace: traceState(d, phones.length + emails.length),
+      // When EnformionGo (Endato) last searched this claimant, by name or as
+      // an estate. The card asks before buying the same search twice.
+      enformionSearchedAt: d.nameSearchedAt || d.deathCheckedAt || null,
 
       // Who inherited, living first. The counts are what the queue and the card
       // key on; heirs is what the panel renders.
