@@ -97,6 +97,7 @@ export class CallsService {
       data: {
         leadId,
         vapiCallId: call.id,
+        toNumber: customerPhone,
         status: call.status ?? 'queued',
         type: 'ai_outbound',
       },
