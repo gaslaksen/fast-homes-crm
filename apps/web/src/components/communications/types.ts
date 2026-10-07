@@ -45,6 +45,10 @@ export type TimelineItem =
         type: string;
         duration: number | null;
         recordingUrl: string | null;
+        /** The seller's end of the call: `toNumber` outbound, `fromNumber` inbound. */
+        sellerNumber?: string | null;
+        /** "Primary", "Phone 2", "Heir: ..." when the number is still on the lead. */
+        numberLabel?: string | null;
       };
     }
   | {

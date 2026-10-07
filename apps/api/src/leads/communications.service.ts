@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { LeadPhonesService, type LeadPhone } from '../phone-numbers/lead-phones.service';
 
 // Activity types that surface as inline timeline events. Excludes noisy types
 // (field/score updates, photo fetches) and message activities (rendered as SMS).
@@ -30,7 +31,10 @@ type Actor =
 
 @Injectable()
 export class CommunicationsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private leadPhones: LeadPhonesService,
+  ) {}
 
   async getCommunications(leadId: string) {
     const lead = await this.prisma.lead.findUnique({
@@ -42,12 +46,15 @@ export class CommunicationsService {
     const sellerName =
       [lead.sellerFirstName, lead.sellerLastName].filter(Boolean).join(' ').trim() || 'Seller';
 
-    const [messages, emails, callLogs, activities, notes] = await Promise.all([
+    const [messages, emails, callLogs, activities, notes, leadPhones] = await Promise.all([
       this.prisma.message.findMany({ where: { leadId }, orderBy: { createdAt: 'asc' } }),
       this.prisma.email.findMany({ where: { leadId }, orderBy: { sentAt: 'asc' } }),
       this.prisma.callLog.findMany({ where: { leadId }, orderBy: { createdAt: 'asc' } }),
       this.prisma.activity.findMany({ where: { leadId }, orderBy: { createdAt: 'asc' } }),
       this.prisma.note.findMany({ where: { leadId }, orderBy: { createdAt: 'desc' } }),
+      // Labels for the seller's numbers ("Phone 2", "Heir: ..."), so a call
+      // card can say which one was dialled. A failure here only costs labels.
+      this.leadPhones.listForLead(leadId).catch((): LeadPhone[] => []),
     ]);
 
     // Resolve every referenced user in one query for actor avatars/names.
@@ -131,9 +138,15 @@ export class CommunicationsService {
       });
     }
 
+    const phoneLabels = new Map(leadPhones.map((p) => [phoneKey(p.number), p.label]));
+
     for (const c of callLogs as any[]) {
       // AI/provider calls are effectively outbound from us unless flagged inbound.
       const direction = String(c.type).includes('inbound') ? 'INBOUND' : 'OUTBOUND';
+      // The seller's end of the call. With several numbers on a lead, a call
+      // card that does not say which one was dialled cannot tell a voicemail
+      // on the primary from a wrong number on Phone 3.
+      const sellerNumber = (direction === 'INBOUND' ? c.fromNumber : c.toNumber) || null;
       timeline.push({
         id: `call_${c.id}`,
         kind: 'call',
@@ -145,6 +158,8 @@ export class CommunicationsService {
           type: c.type,
           duration: c.duration ?? null,
           recordingUrl: c.recordingUrl ?? null,
+          sellerNumber,
+          numberLabel: sellerNumber ? phoneLabels.get(phoneKey(sellerNumber)) ?? null : null,
         },
       });
     }

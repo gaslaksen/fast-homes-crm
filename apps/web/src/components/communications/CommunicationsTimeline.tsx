@@ -400,6 +400,20 @@ export default function CommunicationsTimeline({
                   {format(new Date(item.at), 'MMM d, h:mm a')}
                 </span>
               </div>
+              {/* Always shown, unlike the texts' alternate-number badge: with
+                  several numbers on a lead, "which one did we dial" is the
+                  first question about any call. */}
+              {item.payload.sellerNumber && (
+                <div className="text-xs text-gray-600 dark:text-gray-300 mb-1.5">
+                  {outbound ? 'To' : 'From'}{' '}
+                  <span className="font-medium text-gray-900 dark:text-gray-100">
+                    {formatPhoneDisplay(item.payload.sellerNumber)}
+                  </span>
+                  {item.payload.numberLabel && (
+                    <span className="text-gray-500 dark:text-gray-400"> · {item.payload.numberLabel}</span>
+                  )}
+                </div>
+              )}
               {item.payload.recordingUrl ? (
                 <audio controls preload="none" src={recordingSrc(item.payload.recordingUrl)} className="w-full h-8" />
               ) : (
