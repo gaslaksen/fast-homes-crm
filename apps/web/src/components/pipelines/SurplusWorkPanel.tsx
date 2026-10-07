@@ -138,6 +138,8 @@ export interface SurplusPanelLead {
     /** True only when nothing has been submitted yet. */
     actionable: boolean;
   } | null;
+  /** When EnformionGo last searched this claimant, by name or as an estate. */
+  enformionSearchedAt?: string | null;
   doNotCall: boolean;
   isDeceased: boolean;
   /** YYYY-MM-DD, when a people search dated the death. */
@@ -2376,34 +2378,41 @@ export default function SurplusWorkPanel({
   };
 
   /**
-   * Trace the PROPERTY address, which is where the clerk mailed the Notice of
-   * Surplus Funds. The property has since sold at auction, so this often
-   * returns the current occupant instead; the name check on the server
-   * discards those rather than attaching a stranger's number to the claimant.
+   * EnformionGo on this one claimant. A name search for a living claimant,
+   * verified on the server by address history; the estate search for one
+   * known to be dead. Either way the relatives are looked up in the same
+   * call. BatchData is not part of this button: it runs on the county pull.
    */
   const trace = async () => {
     if (tracing) return;
     setTracing(true);
     try {
-      const res = await surplusAPI.skipTrace({ leadIds: [lead.id] });
-      const d = res.data || {};
-      if (d.contacted) say('Skip trace found contacts');
-      else if (d.mismatched) say('Skip trace returned somebody else, so nothing was attached');
-      else say(d.message || 'Skip trace found nothing at that address');
+      const res = await surplusAPI.enformionSearch(lead.id);
+      say(res.data?.summary || 'EnformionGo search done');
       onChanged();
     } catch (e: any) {
-      say(e?.response?.data?.message || 'Skip trace failed');
+      say(e?.response?.data?.message || 'EnformionGo search failed');
     } finally {
       setTracing(false);
     }
   };
 
   /**
-   * Cheapest first. A paid credit before any free route is logged is the
+   * Cheapest first. A paid search before any free route is logged is the
    * thing the course's escalation rule exists to stop, so the button asks.
+   * It asks again before buying a search this claimant already had.
    */
   const traceGated = () => {
     if (
+      lead.enformionSearchedAt &&
+      !window.confirm(
+        `EnformionGo already searched ${lead.claimant} on ${fmtDate(lead.enformionSearchedAt)}. The same search usually returns the same answer. Search again?`,
+      )
+    ) {
+      return;
+    }
+    if (
+      !lead.enformionSearchedAt &&
       !lead.tracing?.tier1Done &&
       !window.confirm(
         `No free search has been logged for ${lead.claimant} yet. The course says Google, social and the county records come before a paid database. Spend the credit anyway?`,
@@ -3360,29 +3369,18 @@ function TraceBlock({ lead, tracing, onTrace }: { lead: SurplusPanelLead; tracin
         </div>
       )}
       <div style={{ fontSize: 12, color: 'var(--faint)' }}>
-        {/* Offered only when a submission could still tell us something.
-            Re-running an address that already answered spends a credit to
-            hear the same answer. */}
-        <button
-          type="button"
-          className="dc-wp-btn"
-          onClick={onTrace}
-          disabled={tracing || lead.trace?.actionable === false}
-          title={
-            lead.trace?.actionable === false
-              ? 'Already submitted. The same address returns the same answer; use the name search.'
-              : undefined
-          }
-        >
-          {tracing ? 'Tracing...' : `Skip trace ${lead.claimant}`}
+        {/* EnformionGo, on this claimant only. The button asks before a
+            repeat, since the same search usually returns the same answer. */}
+        <button type="button" className="dc-wp-btn" onClick={onTrace} disabled={tracing}>
+          {tracing ? 'Searching EnformionGo...' : `Skip trace ${lead.claimant}`}
         </button>
-        {lead.trace?.actionable === false && (
-          <span style={{ marginLeft: 8, fontSize: 11 }}>Already submitted, so this is spent. The route now is the name search.</span>
+        {lead.enformionSearchedAt && (
+          <span style={{ marginLeft: 8, fontSize: 11 }}>EnformionGo searched {fmtDate(lead.enformionSearchedAt)}.</span>
         )}
         <div style={{ marginTop: 4, fontSize: 11 }}>
-          {lead.ownerMailingStreet
-            ? `Traces ${lead.ownerMailingStreet}, ${lead.ownerMailingCity || ''} ${lead.ownerMailingState || ''}, the address the surplus notice was mailed to ${lead.noticeRecipient || lead.claimant}.`
-            : `No owner address recovered for ${lead.claimant}, so this would trace the property at ${lead.address}, which is usually not where the owner is.`}
+          {lead.isDeceased
+            ? `Searches EnformionGo for ${lead.claimant} by name, files the relatives it lists and looks up the spouse and likely children. Paid per search.`
+            : `Searches EnformionGo for ${lead.claimant} by name and keeps a result only when their address history includes the property or ${lead.ownerMailingStreet ? `${lead.ownerMailingStreet}, where the clerk wrote to them` : "the clerk's address"}. Paid per search.`}
         </div>
       </div>
     </div>
@@ -3813,6 +3811,13 @@ function NextStepBanner({
                 Call {first.name.split(' ')[0]} {phoneDisplay(firstPhone)}
               </button>
             )}
+            {/* Nobody to ring yet. EnformionGo lists the family and looks up
+                the spouse and likely children, when somebody asks for it. */}
+            {!first && !lead.enformionSearchedAt && (
+              <button type="button" className="dc-wp-btn" onClick={onTrace} disabled={tracing}>
+                {tracing ? 'Searching EnformionGo...' : 'Find relatives on EnformionGo'}
+              </button>
+            )}
             <a
               href={lead.courtRecordsUrl || courtRecordsSearch(property.county)}
               target="_blank"
@@ -3828,8 +3833,8 @@ function NextStepBanner({
       case 'trace':
         tone = 'amber';
         actions = (
-          <button type="button" className="dc-wp-btn on" onClick={onTrace} disabled={tracing || lead.trace?.actionable === false}>
-            {tracing ? 'Tracing...' : `Skip trace ${lead.claimant}`}
+          <button type="button" className="dc-wp-btn on" onClick={onTrace} disabled={tracing}>
+            {tracing ? 'Searching EnformionGo...' : `Skip trace ${lead.claimant}`}
           </button>
         );
         break;
@@ -3837,13 +3842,24 @@ function NextStepBanner({
       case 'entity': {
         tone = 'amber';
         const first = lead.nameSearch?.links?.[0];
-        if (first) {
-          actions = (
-            <a href={first.url} target="_blank" rel="noopener noreferrer" className="dc-wp-btn on">
-              Search {first.site}
-            </a>
-          );
-        }
+        // The address route came up empty. EnformionGo is the paid name
+        // search, offered first until it has been tried on this claimant.
+        const offerEnformion = queue === 'name_search' && !lead.enformionSearchedAt;
+        if (!offerEnformion && !first) break;
+        actions = (
+          <>
+            {offerEnformion && (
+              <button type="button" className="dc-wp-btn on" onClick={onTrace} disabled={tracing}>
+                {tracing ? 'Searching EnformionGo...' : `Skip trace ${lead.claimant}`}
+              </button>
+            )}
+            {first && (
+              <a href={first.url} target="_blank" rel="noopener noreferrer" className={`dc-wp-btn${offerEnformion ? '' : ' on'}`}>
+                Search {first.site}
+              </a>
+            )}
+          </>
+        );
         break;
       }
       case 'mailed':

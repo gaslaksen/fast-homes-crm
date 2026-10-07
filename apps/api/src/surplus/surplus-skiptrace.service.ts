@@ -348,6 +348,12 @@ export class SurplusSkiptraceService {
      * nothing again is 90 credits for no information.
      */
     addressSearch?: boolean;
+    /**
+     * Look up a claimant's relatives by Endato id when the trace finds them
+     * dead. Default on. The county pull turns it off: Endato runs only when
+     * somebody asks for it on a card.
+     */
+    relativeLookups?: boolean;
   }): Promise<SurplusTraceResult> {
     const result: SurplusTraceResult = {
       candidates: 0,
@@ -361,7 +367,8 @@ export class SurplusSkiptraceService {
       errors: 0,
     };
 
-    if (!this.batchKey) {
+    // The name-only run never touches BatchData, so it does not need its key.
+    if (!this.batchKey && opts.addressSearch !== false) {
       result.message = 'BATCHDATA_API_KEY is not set, so no trace was attempted.';
       return result;
     }
@@ -408,7 +415,12 @@ export class SurplusSkiptraceService {
 
     if (opts.addressSearch === false) {
       if (opts.nameSearch !== false) {
-        await this.nameSearchRung(candidates.filter((c) => c.nameKnown), result, opts.nameSearchLimit, opts.includeTraced);
+        const named = candidates.filter((c) => c.nameKnown);
+        if (!named.length) {
+          result.message = 'No person\'s name on file to search for. An entity needs its registered agent instead.';
+          return result;
+        }
+        await this.nameSearchRung(named, result, opts.nameSearchLimit, opts.includeTraced);
       }
       return result;
     }
@@ -456,7 +468,7 @@ export class SurplusSkiptraceService {
       submitted += 1;
       try {
         const persons = await this.lookup(group[0]);
-        const contacted = await this.applyToGroup(group, persons, result);
+        const contacted = await this.applyToGroup(group, persons, result, 'batchdata', false, opts.relativeLookups !== false);
         for (const c of group) if (!contacted.has(c.detailId) && c.nameKnown) secondRung.push(c);
       } catch (e: any) {
         result.errors += 1;
@@ -481,6 +493,106 @@ export class SurplusSkiptraceService {
   }
 
   /**
+   * EnformionGo (Endato) on ONE claimant, because somebody pressed the button
+   * on their card. The only way Endato runs on a claimant now: the county
+   * pull stopped calling it on 2026-10-07, since its answers were not worth
+   * paying for on every lead.
+   *
+   * A living claimant gets the name search, verified by address history as
+   * always. If that finds them dead, their relatives are filed and the spouse
+   * and likely children looked up in the same click. A claimant already known
+   * to be dead gets the estate search: the claimant searched by name, their
+   * relatives filed and the top few looked up. Either way a search done
+   * before is done again, since a person asked for it.
+   */
+  async enformionSearch(opts: { leadId: string; organizationId?: string | null }): Promise<{
+    estate: boolean;
+    searched: number;
+    contacted: number;
+    deceased: number;
+    relativesFiled: number;
+    looked: number;
+    withContact: number;
+    errors: number;
+    summary: string;
+  }> {
+    const lead = await this.prisma.lead.findFirst({
+      where: {
+        id: opts.leadId,
+        source: LeadSource.SURPLUS,
+        ...(opts.organizationId ? { organizationId: opts.organizationId } : {}),
+      },
+      include: { surplusDetail: true },
+    });
+    if (!lead?.surplusDetail) throw new Error('No surplus lead with that id.');
+    const d = lead.surplusDetail;
+    const who = displayName(`${lead.sellerFirstName || ''} ${lead.sellerLastName || ''}`.trim()) || 'this claimant';
+    const out = { estate: !!(d.deceased || d.heirsRequired), searched: 0, contacted: 0, deceased: 0, relativesFiled: 0, looked: 0, withContact: 0, errors: 0, summary: '' };
+
+    if (!this.endato?.available) {
+      out.summary = 'EnformionGo is off: ENDATO_AP_NAME / ENDATO_AP_PASSWORD are not set, or ENDATO_MONTHLY_BUDGET is 0.';
+      return out;
+    }
+
+    if (out.estate) {
+      const r = await this.estateRelatives({
+        organizationId: opts.organizationId,
+        leadIds: [lead.id],
+        includeSearched: true,
+      });
+      Object.assign(out, {
+        searched: r.searched,
+        relativesFiled: r.relativesFiled,
+        looked: r.looked,
+        withContact: r.withContact,
+        errors: r.errors,
+      });
+      out.summary =
+        !r.searched
+          ? r.message || `EnformionGo was not run: ${who} is not eligible for a lookup.`
+          : r.errors
+            ? `EnformionGo failed: ${r.message || 'the request did not go through'}`
+            : r.matched
+              ? `EnformionGo matched ${who}: ${r.relativesFiled} relative${r.relativesFiled === 1 ? '' : 's'} filed, ` +
+                `${r.looked} looked up, ${r.withContact} with a number.`
+              : `EnformionGo found nobody named ${who} tied to the property or the clerk's address.`;
+      return out;
+    }
+
+    const t = await this.traceLeads({
+      organizationId: opts.organizationId,
+      leadIds: [lead.id],
+      includeTraced: true,
+      addressSearch: false,
+      nameSearch: true,
+    });
+    Object.assign(out, {
+      searched: t.nameSearch.searched,
+      contacted: t.contacted,
+      deceased: t.deceased,
+      looked: t.relatives.looked,
+      withContact: t.relatives.withContact,
+      errors: t.errors,
+    });
+    out.summary =
+      !t.nameSearch.searched
+        ? t.message || `EnformionGo was not run: ${who} is not eligible for a lookup.`
+        : t.errors
+          ? `EnformionGo failed: ${t.message || 'the request did not go through'}`
+          : t.deceased
+            ? `EnformionGo holds a death record for ${who}. Moved to Find the heirs; ` +
+              `${t.relatives.looked} relative${t.relatives.looked === 1 ? '' : 's'} looked up, ${t.relatives.withContact} with a number.`
+            : t.nameSearch.likely
+              ? `EnformionGo found a likely match for ${who}. Confirm who you are speaking to before discussing the claim.`
+              : t.contacted
+                ? `EnformionGo found contacts for ${who}.`
+                : t.nameSearch.verified
+                  ? `EnformionGo matched ${who} but holds no phone or email for them.`
+                  : `EnformionGo found nobody named ${who} tied to the property or the clerk's address.`;
+    return out;
+  }
+
+  /**
    * Rung two: the name-first search, for every claimant the address rung could
    * not place.
    *
@@ -502,7 +614,13 @@ export class SurplusSkiptraceService {
     limit?: number,
     includeSearched = false,
   ): Promise<void> {
-    if (!cands.length || !this.endato?.available) return;
+    if (!cands.length) return;
+    if (!this.endato?.available) {
+      if (!result.message) {
+        result.message = 'EnformionGo is not available: ENDATO_AP_NAME / ENDATO_AP_PASSWORD are not set or ENDATO_MONTHLY_BUDGET is 0.';
+      }
+      return;
+    }
 
     const groups = new Map<string, Candidate[]>();
     for (const c of cands) {
@@ -605,7 +723,7 @@ export class SurplusSkiptraceService {
           await this.note(
             cc.detailId,
             text,
-            { outcome: 'no_person', detail: `${text} Both vendors have now been tried. The free name-search links and a professional tracer are what is left.` },
+            { outcome: 'no_person', detail: `${text} The free name-search links and a professional tracer are what is left.` },
             'endato',
           );
         }
@@ -944,6 +1062,11 @@ export class SurplusSkiptraceService {
     county?: string;
     limit?: number;
     dryRun?: boolean;
+    /**
+     * Search even a claimant searched before or with relatives already on
+     * file. For the card, where somebody asked for this one lead by name.
+     */
+    includeSearched?: boolean;
   }): Promise<{
     candidates: number;
     searches: number;
@@ -972,16 +1095,23 @@ export class SurplusSkiptraceService {
         ...(opts.leadIds ? { id: { in: opts.leadIds } } : {}),
         surplusDetail: {
           OR: [{ deceased: true }, { heirsRequired: true }],
-          deathCheckedAt: null,
+          ...(opts.includeSearched ? {} : { deathCheckedAt: null }),
           doNotCall: false,
           ...(opts.county ? { county: opts.county } : {}),
         },
       },
       include: { surplusDetail: { include: { heirs: true } } },
     });
+    let refusal: string | null = null;
     const eligible = leads
-      .filter((l) => l.surplusDetail && traceCriteria(l.surplusDetail, { estate: true, maxAgeDays: this.maxAgeDays, minAgeDays: this.minAgeDays }).ok)
       .filter((l) => {
+        if (!l.surplusDetail) return false;
+        const g = traceCriteria(l.surplusDetail, { estate: true, maxAgeDays: this.maxAgeDays, minAgeDays: this.minAgeDays });
+        if (!g.ok) refusal = refusal || g.detail;
+        return g.ok;
+      })
+      .filter((l) => {
+        if (opts.includeSearched) return true;
         const hs = (l.surplusDetail as any).heirs || [];
         const hasVendorRelatives = hs.some((h: any) => h.sourceKind === 'endato');
         const hasLivingHeir = hs.some((h: any) => h.role === 'heir' && !h.deceased);
@@ -991,6 +1121,7 @@ export class SurplusSkiptraceService {
       .filter(({ c }) => !c.isEntity)
       .sort((a, b) => (b.lead.surplusDetail!.grossSurplus || 0) - (a.lead.surplusDetail!.grossSurplus || 0));
     out.candidates = eligible.length;
+    if (!eligible.length && refusal) out.message = refusal;
 
     const groups = new Map<string, { lead: any; c: Candidate }[]>();
     for (const x of eligible) {
@@ -1606,6 +1737,8 @@ export class SurplusSkiptraceService {
     source: TraceSource = 'batchdata',
     /** A likely, unconfirmed name match: filed under its own outcome, never marked dead. */
     likely = false,
+    /** Look up the relatives of a claimant found dead. Off on the county pull. */
+    lookups = true,
   ): Promise<Set<string>> {
     /** Detail ids that came away with a contact, so the caller knows who is left. */
     const contacted = new Set<string>();
@@ -1695,7 +1828,7 @@ export class SurplusSkiptraceService {
           source,
         );
         if (died) {
-          this.addLookups(result, await this.markDeceased(c, best.person, source));
+          this.addLookups(result, await this.markDeceased(c, best.person, source, lookups));
           result.deceased += 1;
           contacted.add(c.detailId);
         } else if (source === 'endato' && best.verdict === 'same_person') {
@@ -1766,7 +1899,7 @@ export class SurplusSkiptraceService {
         // The numbers are kept, and the card files them as the late
         // claimant's, for the record. They are not a contact: nobody on the
         // end of them can sign.
-        this.addLookups(result, await this.markDeceased(c, best.person, source));
+        this.addLookups(result, await this.markDeceased(c, best.person, source, lookups));
         result.deceased += 1;
         continue;
       }
@@ -1795,6 +1928,8 @@ export class SurplusSkiptraceService {
     c: Candidate,
     p: TracedPerson,
     source: TraceSource,
+    /** Look the relatives up as well as filing them. Off on the county pull. */
+    lookups = true,
   ): Promise<{ looked: number; withContact: number }> {
     const vendor = source === 'endato' ? 'Endato' : 'BatchData';
     const iso = p.dateOfDeath && /^\d{4}-\d{2}-\d{2}$/.test(p.dateOfDeath) ? p.dateOfDeath : null;
@@ -1834,7 +1969,7 @@ export class SurplusSkiptraceService {
     });
 
     await this.fileRelatives(c.detailId, row?.organizationId || null, who, living, source, p.age);
-    return this.lookupRelatives(c.detailId, who);
+    return lookups ? this.lookupRelatives(c.detailId, who) : { looked: 0, withContact: 0 };
   }
 
   /**

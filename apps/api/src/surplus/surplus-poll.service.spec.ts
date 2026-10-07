@@ -1,8 +1,8 @@
 import { SurplusPollService, describeTrace } from './surplus-poll.service';
 
 /**
- * The cron poll's one job after the pull: run the skip trace waterfall on the
- * leads the pull just created, and only those. Pinned because the manual
+ * The cron poll's one job after the pull: run the BatchData trace on the
+ * leads the pull just created, and only those. EnformionGo never runs here. Pinned because the manual
  * trace without leadIds works the whole board, and a Monday refresh that did
  * that would re-buy every miss on it.
  */
@@ -30,7 +30,7 @@ function harness(env: Record<string, string> = {}) {
     maturedLeadIds: jest.fn().mockResolvedValue([]),
     traceLeads: jest.fn().mockResolvedValue({
       candidates: 2, submitted: 2, contacted: 1, mismatched: 0, skipped: {},
-      nameSearch: { searched: 1, verified: 1, namesakes: 2 }, errors: 0,
+      nameSearch: { searched: 0, verified: 0, namesakes: 0 }, errors: 0,
     }),
   };
   const svc = new SurplusPollService(config, ingest, lock, skiptrace);
@@ -38,7 +38,7 @@ function harness(env: Record<string, string> = {}) {
 }
 
 describe('SurplusPollService', () => {
-  it('traces exactly the leads the pull created, both rungs on', async () => {
+  it('traces exactly the leads the pull created, BatchData only, never EnformionGo', async () => {
     const { svc, skiptrace, notes } = harness({ SURPLUS_DEFAULT_ORG_ID: 'org1' });
 
     await svc.pollWeekly();
@@ -47,10 +47,11 @@ describe('SurplusPollService', () => {
     expect(skiptrace.traceLeads).toHaveBeenCalledWith({
       organizationId: 'org1',
       leadIds: ['lead-a', 'lead-b'],
-      nameSearch: true,
+      nameSearch: false,
       addressSearch: true,
+      relativeLookups: false,
     });
-    expect(notes).toEqual(['Traced 1 of 2 new to a number (2 address lookups, 1 name search)']);
+    expect(notes).toEqual(['Traced 1 of 2 new to a number (2 address lookups)']);
   });
 
   it('also traces the claims that have just become workable, and says which batch is which', async () => {
@@ -63,10 +64,11 @@ describe('SurplusPollService', () => {
     expect(skiptrace.traceLeads).toHaveBeenLastCalledWith({
       organizationId: 'org1',
       leadIds: ['lead-old'],
-      nameSearch: true,
+      nameSearch: false,
       addressSearch: true,
+      relativeLookups: false,
     });
-    expect(notes[1]).toBe('Traced 1 of 1 now workable to a number (2 address lookups, 1 name search)');
+    expect(notes[1]).toBe('Traced 1 of 1 now workable to a number (2 address lookups)');
   });
 
   it('leaves the pull alone when nothing has matured', async () => {
@@ -77,27 +79,23 @@ describe('SurplusPollService', () => {
     expect(skiptrace.traceLeads).toHaveBeenCalledTimes(1);
   });
 
-  it('runs the obituary search on the same new leads when it has a budget', async () => {
+  it('runs the obituary search on the same new leads, filing the survivors without looking them up', async () => {
     const { svc, notes } = harness({ SURPLUS_DEFAULT_ORG_ID: 'org1' });
-    const obituary: any = { available: true, run: jest.fn().mockResolvedValue({ checked: 2, strong: 1, possible: 0, survivorsWithContact: 1 }) };
+    const obituary: any = { available: true, run: jest.fn().mockResolvedValue({ checked: 2, strong: 1, possible: 0, survivorsFiled: 2 }) };
     (svc as any).obituary = obituary;
 
     await svc.pollWeekly();
 
-    expect(obituary.run).toHaveBeenCalledWith({ organizationId: 'org1', leadIds: ['lead-a', 'lead-b'] });
-    expect(notes[0]).toMatch(/\. Obituary search on 2: 1 found dead, 0 to check, 1 survivor with a number$/);
+    expect(obituary.run).toHaveBeenCalledWith({ organizationId: 'org1', leadIds: ['lead-a', 'lead-b'], survivorLookups: false });
+    expect(notes[0]).toMatch(/\. Obituary search on 2: 1 found dead, 0 to check, 2 survivors filed$/);
   });
 
-  it('runs the estate search on the same new leads, and says what it found', async () => {
-    const { svc, skiptrace, notes } = harness({ SURPLUS_DEFAULT_ORG_ID: 'org1' });
-    skiptrace.estateRelatives.mockResolvedValue({ searched: 1, matched: 1, withContact: 2 });
+  it('never runs the EnformionGo estate search on a pull', async () => {
+    const { svc, skiptrace } = harness({ SURPLUS_DEFAULT_ORG_ID: 'org1' });
 
     await svc.pollWeekly();
 
-    expect(skiptrace.estateRelatives).toHaveBeenCalledWith({ organizationId: 'org1', leadIds: ['lead-a', 'lead-b'] });
-    expect(notes).toEqual([
-      'Traced 1 of 2 new to a number (2 address lookups, 1 name search). Estate search on 1 new estate: 1 matched, 2 relatives with a number',
-    ]);
+    expect(skiptrace.estateRelatives).not.toHaveBeenCalled();
   });
 
   it('does not call the trace at all when the pull created nothing', async () => {

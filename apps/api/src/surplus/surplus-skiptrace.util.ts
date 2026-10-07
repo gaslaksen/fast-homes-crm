@@ -630,7 +630,7 @@ export function traceState(
       label: 'Never skip traced',
       tone: 'idle',
       detail:
-        'Nothing has been looked up for this person yet. A county pull traces the claimants it creates, and a relative of a claimant found dead is looked up by the vendor\'s id for them; anyone else is traced from the card.',
+        'Nothing has been looked up for this person yet. A county pull runs BatchData on the claimants it creates; EnformionGo runs only when somebody asks for it from the card.',
       at: null,
       actionable: true,
     };
