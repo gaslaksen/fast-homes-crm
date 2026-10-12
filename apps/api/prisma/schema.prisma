@@ -1849,6 +1849,12 @@ model CampaignEnrollment {
   nextSendAt       DateTime?
   lastContactAt    DateTime?
   completedAt      DateTime?
+  /// The address EMAIL steps go to, picked at enrollment when the lead has
+  /// more than one (a claimant's daughter rather than the claimant). Used only
+  /// while it is still one of the lead's emails; once removed from the lead,
+  /// sends fall back to sellerEmail, so a deleted address is never mailed.
+  /// Null means sellerEmail.
+  toEmail          String?
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
 

@@ -701,8 +701,8 @@ export const pipelineAPI = {
 // Campaigns API (drip)
 export const campaignsAPI = {
   list: () => api.get('/campaigns'),
-  enroll: (campaignId: string, leadId: string) =>
-    api.post(`/campaigns/${campaignId}/enroll/${leadId}`),
+  enroll: (campaignId: string, leadId: string, toEmail?: string) =>
+    api.post(`/campaigns/${campaignId}/enroll/${leadId}`, toEmail ? { toEmail } : {}),
   pauseEnrollment: (enrollmentId: string) =>
     api.patch(`/campaigns/enrollments/${enrollmentId}/pause`),
   leadEnrollments: (leadId: string) =>
