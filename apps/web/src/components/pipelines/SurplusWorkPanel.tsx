@@ -3093,35 +3093,12 @@ function CaseTab({
         <div>
           <SubHead title="Addresses" />
           <Row k="Property that sold" v={[property.address, property.city, property.zip].filter(Boolean).join(', ')} />
-          {lead.ownerMailingStreet ? (
-            <Row
-              k={`Where the clerk wrote to ${lead.noticeRecipient || lead.claimant}`}
-              v={[
-                lead.ownerMailingStreet,
-                lead.ownerMailingCity,
-                [lead.ownerMailingState, lead.ownerMailingZip].filter(Boolean).join(', ').replace(', ', ' '),
-              ]
-                .filter(Boolean)
-                .join(', ')}
-              tone="var(--mint)"
-              note={
-                lead.noticeRecipient && lead.noticeRecipient !== lead.claimant
-                  ? `The notice names ${lead.noticeRecipient}, matched to this claimant. This is the address that gets skip traced.`
-                  : 'This is the address that gets skip traced.'
-              }
-            />
-          ) : (
-            <Row
-              k={`Where the clerk wrote to ${lead.claimant}`}
-              v="not recovered"
-              tone="var(--amber)"
-              note={
-                property.claimants.some((c: any) => c.ownerMailingStreet)
-                  ? 'The notice was read for this case but no page was addressed to this claimant, so a trace here would fall back to the property address, which is usually not where they are.'
-                  : 'The Notice of Surplus Funds has not been read for this case, so any trace falls back to the property address, which is usually not where the owner is.'
-              }
-            />
-          )}
+          <MailingAddress
+            lead={lead}
+            noticeReadForCase={property.claimants.some((c: any) => c.ownerMailingStreet)}
+            onChanged={onChanged}
+            say={say}
+          />
         </div>
         <CountySection lead={lead} />
         <DocketBlock property={property} ledger={ledger} />
@@ -3241,6 +3218,183 @@ function CaseTab({
 }
 
 /** A heading inside a fold. Smaller than the fold's own title on purpose. */
+/**
+ * The claimant's mailing address, and the one place to correct it.
+ *
+ * Off the county it is where the clerk wrote to them. Once somebody confirms
+ * a current address it replaces that one: letters default to it, the skip
+ * trace targets it, and the county poll leaves it alone. The address it
+ * replaced is written to Notes by the API so nothing is lost.
+ */
+function MailingAddress({
+  lead,
+  noticeReadForCase,
+  onChanged,
+  say,
+}: {
+  lead: SurplusPanelLead;
+  noticeReadForCase: boolean;
+  onChanged: () => void;
+  say: (msg: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [street, setStreet] = useState(lead.ownerMailingStreet || '');
+  const [city, setCity] = useState(lead.ownerMailingCity || '');
+  const [state, setState] = useState(lead.ownerMailingState || '');
+  const [zip, setZip] = useState(lead.ownerMailingZip || '');
+
+  const reset = () => {
+    setStreet(lead.ownerMailingStreet || '');
+    setCity(lead.ownerMailingCity || '');
+    setState(lead.ownerMailingState || '');
+    setZip(lead.ownerMailingZip || '');
+  };
+
+  // Another claimant's address must never sit in this form.
+  useEffect(() => {
+    setEditing(false);
+    reset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lead.id]);
+
+  const manual = lead.ownerAddressSource === 'manual';
+  const who = lead.noticeRecipient || lead.claimant;
+  const onFile = [
+    lead.ownerMailingStreet,
+    lead.ownerMailingCity,
+    [lead.ownerMailingState, lead.ownerMailingZip].filter(Boolean).join(' '),
+  ]
+    .filter(Boolean)
+    .join(', ');
+
+  const save = async () => {
+    if (!street.trim()) {
+      say('The mailing address needs a street.');
+      return;
+    }
+    setBusy(true);
+    try {
+      await surplusAPI.update(lead.id, {
+        ownerMailing: { street: street.trim(), city: city.trim(), state: state.trim(), zip: zip.trim() },
+      });
+      say(lead.ownerMailingStreet ? 'Mailing address updated. The old one is in Notes.' : 'Mailing address saved');
+      setEditing(false);
+      onChanged();
+    } catch (err: any) {
+      say(err?.response?.data?.message || 'That could not be saved.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const field: React.CSSProperties = {
+    width: '100%',
+    boxSizing: 'border-box',
+    fontSize: 12.5,
+    padding: '6px 8px',
+    border: '1px solid var(--border)',
+    borderRadius: 6,
+    background: 'var(--surface2)',
+    color: 'inherit',
+  };
+  const lbl: React.CSSProperties = { fontSize: 11, color: 'var(--dim)' };
+
+  if (editing) {
+    return (
+      <div style={{ display: 'grid', gap: 6, padding: 8, marginTop: 4, border: '1px solid var(--border)', borderRadius: 8 }}>
+        <div style={{ fontSize: 12, fontWeight: 600 }}>Current mailing address for {lead.claimant}</div>
+        <label style={lbl}>
+          Street
+          <input style={field} value={street} onChange={(e) => setStreet(e.target.value)} autoFocus />
+        </label>
+        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 6 }}>
+          <label style={lbl}>
+            City
+            <input style={field} value={city} onChange={(e) => setCity(e.target.value)} />
+          </label>
+          <label style={lbl}>
+            State
+            <input style={field} value={state} maxLength={2} onChange={(e) => setState(e.target.value.toUpperCase())} />
+          </label>
+          <label style={lbl}>
+            ZIP
+            <input style={field} value={zip} onChange={(e) => setZip(e.target.value)} />
+          </label>
+        </div>
+        {lead.ownerMailingStreet && (
+          <div style={{ fontSize: 11, color: 'var(--faint)' }}>
+            Replaces {onFile}. The old address is saved to Notes.
+          </div>
+        )}
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button
+            type="button"
+            className="dc-wp-btn"
+            disabled={busy}
+            onClick={() => {
+              reset();
+              setEditing(false);
+            }}
+          >
+            Cancel
+          </button>
+          <button type="button" className="dc-wp-btn on" disabled={busy} onClick={save}>
+            Save
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const editButton = (
+    <button
+      type="button"
+      className="dc-wp-btn"
+      style={{ padding: '3px 8px', fontSize: 11, marginTop: 4 }}
+      onClick={() => setEditing(true)}
+    >
+      {lead.ownerMailingStreet ? 'Edit address' : 'Add current address'}
+    </button>
+  );
+
+  if (!lead.ownerMailingStreet) {
+    return (
+      <div>
+        <Row
+          k={`Where the clerk wrote to ${lead.claimant}`}
+          v="not recovered"
+          tone="var(--amber)"
+          note={
+            noticeReadForCase
+              ? 'The notice was read for this case but no page was addressed to this claimant, so a trace here would fall back to the property address, which is usually not where they are.'
+              : 'The Notice of Surplus Funds has not been read for this case, so any trace falls back to the property address, which is usually not where the owner is.'
+          }
+        />
+        {editButton}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <Row
+        k={manual ? `Current address for ${lead.claimant}` : `Where the clerk wrote to ${who}`}
+        v={onFile}
+        tone="var(--mint)"
+        note={
+          manual
+            ? 'Confirmed by the team. Letters default to it and it is the address that gets skip traced.'
+            : lead.noticeRecipient && lead.noticeRecipient !== lead.claimant
+              ? `The notice names ${lead.noticeRecipient}, matched to this claimant. This is the address that gets skip traced.`
+              : 'This is the address that gets skip traced.'
+        }
+      />
+      {editButton}
+    </div>
+  );
+}
+
 function SubHead({ title, note }: { title: string; note?: string }) {
   return (
     <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6 }}>
@@ -4016,7 +4170,8 @@ function LetterHistory({
   }, [lead.id]);
 
   // The recipient picks the envelope address: an heir's is their own, off the
-  // filing, and must never default to the dead claimant's.
+  // filing, and must never default to the dead claimant's. A corrected
+  // mailing address re-seeds the claimant's envelope too.
   useEffect(() => {
     if (recipient === 'claimant') setAddress(onFile);
     else {
@@ -4024,7 +4179,7 @@ function LetterHistory({
       setAddress(h?.address || '');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [recipient]);
+  }, [recipient, onFile]);
 
   const save = async () => {
     if (busy) return;
