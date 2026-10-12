@@ -7,6 +7,12 @@ import AppShell from '@/components/AppShell';
 import { campaignAPI, leadsAPI } from '@/lib/api';
 import { format } from 'date-fns';
 
+/** +13525551234 as (352) 555-1234; anything else as stored. */
+function phoneLabel(raw?: string | null): string {
+  const d = (raw || '').replace(/\D/g, '').replace(/^1(?=\d{10}$)/, '');
+  return d.length === 10 ? `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}` : raw || '';
+}
+
 function StepFunnel({ steps, stepSentMap }: { steps: any[]; stepSentMap: Record<string, number> }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -273,6 +279,9 @@ export default function CampaignDetailPage() {
   const filteredEnrollments = statusFilter
     ? enrollments.filter((e) => e.status === statusFilter)
     : enrollments;
+  // Sends to lists only the channels this campaign actually uses.
+  const usesEmail = (campaign.steps || []).some((st: any) => st.channel === 'EMAIL');
+  const usesText = (campaign.steps || []).some((st: any) => st.channel === 'TEXT');
 
   const matchingLeads = enrollLeadSearch.trim()
     ? allLeads.filter(
@@ -433,6 +442,7 @@ export default function CampaignDetailPage() {
                 <thead>
                   <tr className="text-xs text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-950 border-b border-gray-100 dark:border-gray-800">
                     <th className="text-left px-5 py-3 font-medium">Lead</th>
+                    <th className="text-left px-4 py-3 font-medium">Sends to</th>
                     <th className="text-left px-4 py-3 font-medium">Address</th>
                     <th className="text-left px-4 py-3 font-medium">Stage</th>
                     <th className="text-left px-4 py-3 font-medium">Step</th>
@@ -452,6 +462,20 @@ export default function CampaignDetailPage() {
                         >
                           {enrollment.lead?.sellerFirstName} {enrollment.lead?.sellerLastName}
                         </Link>
+                      </td>
+                      {/* Where the next message goes, resolved by the API the same
+                          way the sender resolves it. */}
+                      <td className="px-4 py-3 text-xs text-gray-700 dark:text-gray-300">
+                        {usesEmail && (
+                          <div className="truncate max-w-[220px]" title={enrollment.sendsToEmail || ''}>
+                            {enrollment.sendsToEmail || <span className="text-red-500">no email</span>}
+                          </div>
+                        )}
+                        {usesText && (
+                          <div>
+                            {enrollment.sendsToPhone ? phoneLabel(enrollment.sendsToPhone) : <span className="text-red-500">no phone</span>}
+                          </div>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-gray-500 dark:text-gray-400 truncate max-w-[200px]">
                         {enrollment.lead?.propertyAddress}

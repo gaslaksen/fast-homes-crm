@@ -2253,7 +2253,14 @@ export default function SurplusWorkPanel({
     notes: [],
   });
   const [emailAction, setEmailAction] = useState<EmailAction | null>(null);
-  const [campaigns, setCampaigns] = useState<{ id: string; name: string }[]>([]);
+  const [campaigns, setCampaigns] = useState<{ id: string; name: string; steps?: { channel: string }[] }[]>([]);
+  // A campaign picked for a claimant with more than one email waits here
+  // while somebody chooses which address it goes to.
+  const [pickEmailFor, setPickEmailFor] = useState<string | null>(null);
+  const [pickedEmail, setPickedEmail] = useState('');
+  useEffect(() => {
+    setPickEmailFor(null);
+  }, [lead.id]);
   const [enrolling, setEnrolling] = useState(false);
   const [tracing, setTracing] = useState(false);
   /** Raised by clicking a number or an email, consumed by the composer. */
@@ -2363,12 +2370,20 @@ export default function SurplusWorkPanel({
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose, onPrev, onNext]);
 
-  const enroll = async (campaignId: string) => {
+  const enroll = async (campaignId: string, toEmail?: string) => {
     if (!campaignId || enrolling) return;
+    const campaign = campaigns.find((c) => c.id === campaignId);
+    const emails = campaign?.steps?.some((st) => st.channel === 'EMAIL');
+    if (emails && toEmail === undefined && lead.emails.length > 1) {
+      setPickEmailFor(campaignId);
+      setPickedEmail(lead.emails[0]);
+      return;
+    }
     setEnrolling(true);
     try {
-      await campaignsAPI.enroll(campaignId, lead.id);
-      say('Enrolled in campaign');
+      await campaignsAPI.enroll(campaignId, lead.id, toEmail);
+      say(toEmail ? `Enrolled in campaign, emailing ${toEmail}` : 'Enrolled in campaign');
+      setPickEmailFor(null);
       onChanged();
     } catch (e: any) {
       say(e?.response?.data?.message || 'Could not enrol this lead');
@@ -2729,6 +2744,36 @@ export default function SurplusWorkPanel({
             ) : (
               <div style={{ fontSize: 12, color: 'var(--faint)' }}>Loading composer...</div>
             )
+          ) : pickEmailFor ? (
+            <div style={{ display: 'grid', gap: 6 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 600 }}>
+                Which email should &quot;{campaigns.find((c) => c.id === pickEmailFor)?.name || 'this campaign'}&quot; go to?
+              </div>
+              {lead.emails.map((e) => (
+                <label key={e} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13 }}>
+                  <input
+                    type="radio"
+                    name="campaign-email"
+                    checked={pickedEmail === e}
+                    onChange={() => setPickedEmail(e)}
+                  />
+                  {e}
+                </label>
+              ))}
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <button type="button" className="dc-wp-btn" disabled={enrolling} onClick={() => setPickEmailFor(null)}>
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="dc-wp-btn on"
+                  disabled={enrolling || !pickedEmail}
+                  onClick={() => enroll(pickEmailFor, pickedEmail)}
+                >
+                  Enroll
+                </button>
+              </div>
+            </div>
           ) : (
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
               <button

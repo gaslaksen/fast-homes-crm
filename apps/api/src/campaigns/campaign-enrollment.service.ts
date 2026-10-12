@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CampaignExecutionService } from './campaign-execution.service';
+import { LEAD_EMAILS_SELECT, campaignEmailFor, knownEmails } from './campaign-recipient';
 
 @Injectable()
 export class CampaignEnrollmentService {
@@ -26,7 +27,13 @@ export class CampaignEnrollmentService {
     }
   }
 
-  async enrollLead(leadId: string, campaignId: string) {
+  /**
+   * opts.toEmail names which of the lead's emails EMAIL steps go to. It must
+   * already be on the lead. Omitted keeps whatever the enrollment had (the
+   * lead's first email for a new one); passing it to an existing enrollment
+   * changes the recipient without restarting the sequence.
+   */
+  async enrollLead(leadId: string, campaignId: string, opts: { toEmail?: string | null } = {}) {
     // Get campaign with its first step
     const campaign = await this.prisma.campaign.findUnique({
       where: { id: campaignId },
@@ -42,9 +49,9 @@ export class CampaignEnrollmentService {
       where: { id: leadId },
       select: {
         id: true,
-        sellerEmail: true,
         sellerPhone: true,
         doNotContact: true,
+        ...LEAD_EMAILS_SELECT,
       },
     });
     if (!lead) throw new NotFoundException('Lead not found');
@@ -56,7 +63,21 @@ export class CampaignEnrollmentService {
     const channels = new Set<string>(
       (campaign.steps ?? []).map((s: any) => s.channel),
     );
-    if (channels.has('EMAIL') && !lead.sellerEmail) {
+    const emails = knownEmails(lead);
+    let toEmail: string | null | undefined = undefined;
+    if (opts.toEmail !== undefined) {
+      const wanted = (opts.toEmail || '').trim().toLowerCase();
+      if (wanted) {
+        const match = emails.find((e) => e.toLowerCase() === wanted);
+        if (!match) {
+          throw new BadRequestException(`${opts.toEmail} is not one of this lead's email addresses.`);
+        }
+        toEmail = match;
+      } else {
+        toEmail = null;
+      }
+    }
+    if (channels.has('EMAIL') && emails.length === 0) {
       throw new BadRequestException(
         'Lead has no email address — cannot enroll in an email campaign',
       );
@@ -77,7 +98,17 @@ export class CampaignEnrollmentService {
       where: { campaignId_leadId: { campaignId, leadId } },
     });
     if (existing && existing.status !== 'REMOVED') {
-      return existing;
+      if (toEmail === undefined || toEmail === existing.toEmail) return existing;
+      const updated = await this.prisma.campaignEnrollment.update({
+        where: { id: existing.id },
+        data: { toEmail },
+      });
+      await this.logActivity(
+        leadId,
+        'CAMPAIGN_RECIPIENT_CHANGED',
+        `Drip campaign "${campaign.name}" now emails ${toEmail || emails[0] || 'the lead'}`,
+      );
+      return updated;
     }
 
     // Calculate first nextSendAt. delayDays/delayHours are cumulative offsets
@@ -111,9 +142,10 @@ export class CampaignEnrollmentService {
           nextSendAt,
           enrolledAt,
           completedAt: null,
+          ...(toEmail !== undefined ? { toEmail } : {}),
         },
       });
-      await this.logActivity(leadId, 'CAMPAIGN_ENROLLED', `Enrolled in drip campaign "${campaign.name}"`);
+      await this.logActivity(leadId, 'CAMPAIGN_ENROLLED', `Enrolled in drip campaign "${campaign.name}"${toEmail ? `, emailing ${toEmail}` : ''}`);
       return reEnrolled;
     }
 
@@ -125,9 +157,10 @@ export class CampaignEnrollmentService {
         status: 'ACTIVE',
         enrolledAt,
         nextSendAt,
+        toEmail: toEmail ?? null,
       },
     });
-    await this.logActivity(leadId, 'CAMPAIGN_ENROLLED', `Enrolled in drip campaign "${campaign.name}"`);
+    await this.logActivity(leadId, 'CAMPAIGN_ENROLLED', `Enrolled in drip campaign "${campaign.name}"${toEmail ? `, emailing ${toEmail}` : ''}`);
     return enrollment;
   }
 
@@ -386,8 +419,13 @@ export class CampaignEnrollmentService {
     });
   }
 
+  /**
+   * The campaign's roster. Each row carries sendsToEmail and sendsToPhone,
+   * resolved the same way the sender resolves them, so the screen shows where
+   * the next message will actually go rather than what was picked once.
+   */
   async getEnrollmentsForCampaign(campaignId: string, status?: string) {
-    return this.prisma.campaignEnrollment.findMany({
+    const rows = await this.prisma.campaignEnrollment.findMany({
       where: {
         campaignId,
         ...(status
@@ -405,6 +443,7 @@ export class CampaignEnrollmentService {
             propertyState: true,
             sellerPhone: true,
             status: true,
+            ...LEAD_EMAILS_SELECT,
           },
         },
         messageLogs: {
@@ -413,6 +452,15 @@ export class CampaignEnrollmentService {
         },
       },
       orderBy: { enrolledAt: 'desc' },
+    });
+    return rows.map((r) => {
+      const { surplusDetail, probateDetail, taxSaleDetail, foreclosureDetail, ...lead } = r.lead as any;
+      return {
+        ...r,
+        lead,
+        sendsToEmail: campaignEmailFor(r.toEmail, knownEmails(r.lead as any)),
+        sendsToPhone: lead.sellerPhone || null,
+      };
     });
   }
 }

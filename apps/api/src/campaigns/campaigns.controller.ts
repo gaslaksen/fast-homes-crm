@@ -116,12 +116,14 @@ export class CampaignsController {
 
   // ─── Enrollments ─────────────────────────────────────────────────────────
 
+  /** Body { toEmail } picks which of the lead's emails the campaign uses. */
   @Post('campaigns/:id/enroll/:leadId')
   async enrollLead(
     @Param('id') campaignId: string,
     @Param('leadId') leadId: string,
+    @Body() body?: { toEmail?: string | null },
   ) {
-    return this.enrollmentService.enrollLead(leadId, campaignId);
+    return this.enrollmentService.enrollLead(leadId, campaignId, { toEmail: body?.toEmail });
   }
 
   /** Bulk enroll. Reports per-lead skips rather than failing the whole batch. */

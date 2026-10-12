@@ -18,6 +18,7 @@ import {
   parseMailgunRetryAfter,
 } from '../mailer/mailer.service';
 import { brandForLeadSource } from '../common/company.constants';
+import { LEAD_EMAILS_SELECT, campaignEmailFor, knownEmails } from './campaign-recipient';
 
 // Instance tag for distinguishing Railway replicas in logs.
 const INSTANCE_TAG = `${os.hostname()}/${process.pid}`;
@@ -457,8 +458,16 @@ export class CampaignExecutionService implements OnModuleInit {
     }
 
     if (currentStep.channel === 'EMAIL') {
-      if (!lead.sellerEmail) {
-        return { kind: 'SKIPPED', reason: `lead ${lead.id} has no sellerEmail` };
+      // The address picked at enrollment while it is still on the lead, else
+      // the lead's first email. Read fresh, so an address deleted from the
+      // lead since enrollment is never mailed.
+      const emailSource = await this.prisma.lead.findUnique({
+        where: { id: lead.id },
+        select: LEAD_EMAILS_SELECT,
+      });
+      const to = campaignEmailFor(enrollment.toEmail, knownEmails(emailSource));
+      if (!to) {
+        return { kind: 'SKIPPED', reason: `lead ${lead.id} has no email` };
       }
       const orgId = lead.organizationId;
       if (!orgId) {
@@ -488,7 +497,7 @@ export class CampaignExecutionService implements OnModuleInit {
       return this.sendWithRetry(enrollment, currentStep, async () => {
         const email = await this.mailerService.sendAsDeals({
           orgId,
-          to: lead.sellerEmail,
+          to,
           subject: renderedSubject || 'Following up on your property',
           bodyText: renderedBody,
           leadId: lead.id,
@@ -498,7 +507,7 @@ export class CampaignExecutionService implements OnModuleInit {
         // MailerService persists the Email row but does not touch the lead;
         // record the EMAIL_SENT touch here to keep pipeline tracking accurate.
         await this.leadsService.recordTouch(lead.id, 'EMAIL_SENT', {
-          description: `Email sent to ${lead.sellerEmail} from ${dealsFrom}`,
+          description: `Email sent to ${to} from ${dealsFrom}`,
           metadata: { subject: renderedSubject, mailgunId: email.mailgunId },
         });
         return email.mailgunId || `${lead.id}-${Date.now()}`;
