@@ -678,6 +678,27 @@ export class SurplusService {
       leadPatch.sellerEmail = emails[0] || null;
       detailPatch.email2 = emails[1] || null;
     }
+    // A current address somebody confirmed by hand. It becomes the address
+    // letters default to and the skip trace targets, and the 'manual' source
+    // keeps the county poll from overwriting it (only machine sources are
+    // ever corrected). The address it replaces goes to Notes below.
+    let replacedAddress: string | null = null;
+    if (patch.ownerMailing !== undefined) {
+      const m = patch.ownerMailing || {};
+      const street = cellText(m.street);
+      if (!street) throw new BadRequestException('The mailing address needs a street.');
+      detailPatch.ownerMailingStreet = street;
+      detailPatch.ownerMailingCity = cellText(m.city) || null;
+      detailPatch.ownerMailingState = (cellText(m.state) || '').toUpperCase() || null;
+      detailPatch.ownerMailingZip = cellText(m.zip) || null;
+      detailPatch.ownerAddressSource = 'manual';
+      const label = (s: any) =>
+        [s.ownerMailingStreet, s.ownerMailingCity, [s.ownerMailingState, s.ownerMailingZip].filter(Boolean).join(' ')]
+          .filter(Boolean)
+          .join(', ');
+      const before = d.ownerMailingStreet ? label(d) : '';
+      if (before && before !== label(detailPatch)) replacedAddress = before;
+    }
     if (patch.claimant !== undefined) {
       const { firstName, lastName } = splitOwnerName(patch.claimant);
       leadPatch.sellerFirstName = firstName;
@@ -704,6 +725,17 @@ export class SurplusService {
       where: { id },
       data: { ...leadPatch, surplusDetail: { update: detailPatch } },
     });
+
+    if (replacedAddress) {
+      const content = `Mailing address changed. Previous address: ${replacedAddress}`;
+      if (userId) {
+        await this.prisma.note.create({ data: { leadId: id, userId, content } });
+      } else {
+        await this.prisma.activity.create({
+          data: { leadId: id, type: 'ADDRESS_CHANGED', description: content },
+        });
+      }
+    }
 
     if (detailPatch.stage && detailPatch.stage !== d.stage) {
       await this.scheduleStageTask(id, detailPatch.stage, userId);

@@ -42,22 +42,16 @@ export class CampaignEnrollmentService {
       where: { id: leadId },
       select: {
         id: true,
-        source: true,
         sellerEmail: true,
         sellerPhone: true,
         doNotContact: true,
       },
     });
     if (!lead) throw new NotFoundException('Lead not found');
-    // Surplus outreach is regulated speech: the fee agreement gate enforces
-    // FS 45.033's disclosures, and a wholesaling drip pointed at a claimant
-    // would text around it. Nothing automated goes to a claimant until a
-    // surplus campaign exists and counsel has seen its wording.
-    if (lead.source === 'SURPLUS') {
-      throw new BadRequestException(
-        'Surplus claimants cannot be enrolled in a drip campaign. Outreach to them is regulated and goes out by hand.',
-      );
-    }
+    // Surplus claimants are enrolled like any other lead when a person picks
+    // the campaign. Nothing enrolls them automatically: ingestion skips the
+    // outreach scheduler and autoEnrollInDefaults leaves them out, so the
+    // person who adds a claimant owns the wording under FS 45.033.
 
     const channels = new Set<string>(
       (campaign.steps ?? []).map((s: any) => s.channel),
@@ -336,8 +330,18 @@ export class CampaignEnrollmentService {
 
   /**
    * Auto-enroll a lead in all active default campaigns.
+   *
+   * Surplus claimants are left out. The default campaigns are written for
+   * sellers, and a claimant joins a drip only when a person picks one for
+   * them (enrollLead from the work panel), never off a first reply.
    */
   async autoEnrollInDefaults(leadId: string) {
+    const lead = await this.prisma.lead.findUnique({
+      where: { id: leadId },
+      select: { source: true },
+    });
+    if (lead?.source === 'SURPLUS') return;
+
     const campaigns = await this.prisma.campaign.findMany({
       where: { isActive: true, enrollmentMode: 'auto' },
     });
