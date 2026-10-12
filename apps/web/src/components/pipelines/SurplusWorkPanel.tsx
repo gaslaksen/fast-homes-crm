@@ -3095,6 +3095,7 @@ function CaseTab({
           <Row k="Property that sold" v={[property.address, property.city, property.zip].filter(Boolean).join(', ')} />
           <MailingAddress
             lead={lead}
+            variant="row"
             noticeReadForCase={property.claimants.some((c: any) => c.ownerMailingStreet)}
             onChanged={onChanged}
             say={say}
@@ -3217,23 +3218,28 @@ function CaseTab({
   );
 }
 
-/** A heading inside a fold. Smaller than the fold's own title on purpose. */
 /**
- * The claimant's mailing address, and the one place to correct it.
+ * The claimant's mailing address, and where to correct it.
  *
  * Off the county it is where the clerk wrote to them. Once somebody confirms
  * a current address it replaces that one: letters default to it, the skip
  * trace targets it, and the county poll leaves it alone. The address it
  * replaced is written to Notes by the API so nothing is lost.
+ *
+ * 'contact' renders it as a line in the claimant's contacts, next to the
+ * phones and emails, which is where people look to change it. 'row' is the
+ * read-only line under Addresses in The case, beside the property that sold.
  */
 function MailingAddress({
   lead,
-  noticeReadForCase,
+  noticeReadForCase = false,
+  variant,
   onChanged,
   say,
 }: {
   lead: SurplusPanelLead;
-  noticeReadForCase: boolean;
+  noticeReadForCase?: boolean;
+  variant: 'contact' | 'row';
   onChanged: () => void;
   say: (msg: string) => void;
 }) {
@@ -3347,16 +3353,23 @@ function MailingAddress({
     );
   }
 
-  const editButton = (
-    <button
-      type="button"
-      className="dc-wp-btn"
-      style={{ padding: '3px 8px', fontSize: 11, marginTop: 4 }}
-      onClick={() => setEditing(true)}
-    >
-      {lead.ownerMailingStreet ? 'Edit address' : 'Add current address'}
-    </button>
-  );
+  if (variant === 'contact') {
+    return (
+      <div className="dc-wp-contact">
+        <div className="dc-wp-contact-main">
+          <span className="num" style={lead.ownerMailingStreet ? undefined : { color: 'var(--faint)', fontWeight: 400 }}>
+            {onFile || 'No mailing address'}
+          </span>
+          <span className="meta">{manual ? 'Mailing, confirmed' : lead.ownerMailingStreet ? 'Mailing, from the clerk' : 'Mailing'}</span>
+        </div>
+        <div className="dc-wp-contact-actions">
+          <button type="button" className="dc-wp-btn" onClick={() => setEditing(true)}>
+            {lead.ownerMailingStreet ? 'Edit address' : 'Add address'}
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (!lead.ownerMailingStreet) {
     return (
@@ -3371,7 +3384,6 @@ function MailingAddress({
               : 'The Notice of Surplus Funds has not been read for this case, so any trace falls back to the property address, which is usually not where the owner is.'
           }
         />
-        {editButton}
       </div>
     );
   }
@@ -3390,11 +3402,11 @@ function MailingAddress({
               : 'This is the address that gets skip traced.'
         }
       />
-      {editButton}
     </div>
   );
 }
 
+/** A heading inside a fold. Smaller than the fold's own title on purpose. */
 function SubHead({ title, note }: { title: string; note?: string }) {
   return (
     <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6 }}>
@@ -3469,6 +3481,7 @@ function ContactsBlock({
           </div>
         </div>
       ))}
+      <MailingAddress lead={lead} variant="contact" onChanged={onChanged} say={say} />
       {/* Research turns up numbers the vendor never had. This is where they
           go, and where a number that turned out to be somebody else gets
           marked rather than deleted. */}
