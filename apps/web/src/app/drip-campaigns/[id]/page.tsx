@@ -456,8 +456,13 @@ export default function CampaignDetailPage() {
                   {filteredEnrollments.map((enrollment) => (
                     <tr key={enrollment.id} className="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
                       <td className="px-5 py-3 font-medium text-gray-900 dark:text-gray-100">
+                        {/* A surplus claimant opens on its surplus card, not the generic lead page. */}
                         <Link
-                          href={`/leads/${enrollment.lead?.id}`}
+                          href={
+                            enrollment.lead?.source === 'SURPLUS'
+                              ? `/surplus-funds?lead=${encodeURIComponent(enrollment.lead.id)}`
+                              : `/leads/${enrollment.lead?.id}`
+                          }
                           className="hover:text-blue-600 transition-colors"
                         >
                           {enrollment.lead?.sellerFirstName} {enrollment.lead?.sellerLastName}

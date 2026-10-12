@@ -2220,10 +2220,13 @@ interface Props {
   /** Refresh the board row after something changes here. */
   onChanged: () => void;
   say: (msg: string) => void;
+  /** The claimant to open on, when a link named one. Else the first. */
+  initialClaimantId?: string | null;
 }
 
 export default function SurplusWorkPanel({
   property,
+  initialClaimantId,
   currentUser,
   onPrev,
   onNext,
@@ -2238,7 +2241,11 @@ export default function SurplusWorkPanel({
    * money, the docket) belong to the case; the conversation, the notes and the
    * contacts belong to one person, because each claimant files their own claim.
    */
-  const [claimantId, setClaimantId] = useState<string>(property.claimants[0]?.id);
+  const [claimantId, setClaimantId] = useState<string>(
+    initialClaimantId && property.claimants.some((c: any) => c.id === initialClaimantId)
+      ? initialClaimantId
+      : property.claimants[0]?.id,
+  );
   const lead: SurplusPanelLead =
     property.claimants.find((c: any) => c.id === claimantId) || property.claimants[0];
 
