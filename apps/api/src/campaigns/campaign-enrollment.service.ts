@@ -443,6 +443,7 @@ export class CampaignEnrollmentService {
             propertyState: true,
             sellerPhone: true,
             status: true,
+            source: true,
             ...LEAD_EMAILS_SELECT,
           },
         },

@@ -700,6 +700,46 @@ export default function SurplusFundsPage() {
     setTimeout(() => setToast(null), 6000);
   }, []);
 
+  /**
+   * /surplus-funds?lead=<id> opens that claimant's panel, so a link from
+   * anywhere else (a drip campaign's roster) lands on the surplus card rather
+   * than the generic lead page. The board is narrowed to the claimant's case
+   * with every hiding filter off, so the saved filters cannot keep the lead
+   * off screen. Nothing here is written to localStorage.
+   */
+  const [linkedLead, setLinkedLead] = useState<string | null>(null);
+  const [linkedClaimant, setLinkedClaimant] = useState<string | null>(null);
+  useEffect(() => {
+    let id: string | null = null;
+    try {
+      id = new URLSearchParams(window.location.search).get('lead');
+    } catch {
+      /* no link to follow */
+    }
+    if (!id) return;
+    surplusAPI
+      .get(id)
+      .then((res) => {
+        const row = res.data || {};
+        setQueueQ(null);
+        setChipQ(null);
+        setTierQ(null);
+        setStageQ(null);
+        setCounty('all');
+        setBand('all');
+        setAgeQ('all');
+        setLienWin('all');
+        setUnderYear(false);
+        setHideEarly(false);
+        setHideDead(false);
+        setHideDnc(false);
+        if (row.claimantType === 'lienholder') setCtype('lienholder');
+        setQ(row.caseNumber || row.claimant || '');
+        setLinkedLead(id);
+      })
+      .catch(() => say('That surplus lead could not be found.'));
+  }, [say]);
+
   const fetchRows = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -788,6 +828,16 @@ export default function SurplusFundsPage() {
    */
   const openIndex = rows.findIndex((r) => r.key === openId);
   const goTo = (i: number) => setOpenId(rows[i] ? (rows[i] as any).key : null);
+
+  // Open the linked claimant once the board carries their property.
+  useEffect(() => {
+    if (!linkedLead || loading) return;
+    const row: any = rows.find((r: any) => (r.claimants || []).some((c: any) => c.id === linkedLead));
+    if (!row) return;
+    setLinkedClaimant(linkedLead);
+    setOpenId(row.key);
+    setLinkedLead(null);
+  }, [linkedLead, rows, loading]);
 
 
   // A lead that drops out of the current filter while its panel is open would
@@ -1628,6 +1678,7 @@ export default function SurplusFundsPage() {
             onNext={openIndex >= 0 && openIndex < rows.length - 1 ? () => goTo(openIndex + 1) : null}
             position={openIndex >= 0 ? { index: openIndex, total: rows.length } : null}
             property={openProperty}
+            initialClaimantId={linkedClaimant}
             currentUser={currentUser}
             onClose={() => setOpenId(null)}
             onChanged={() => {
