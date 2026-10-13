@@ -118,12 +118,11 @@ export class DigestController {
       isEmpty: brief.isEmpty,
       sections: {
         bigThing: !!brief.bigThing,
-        actions: brief.actions.length,
-        waiting: brief.waiting.length,
-        dealsInMotion: brief.dealsInMotion.length,
-        foreclosures: brief.foreclosures.length,
-        newOvernight: brief.newOvernight.length,
-        yesterday: brief.yesterday.length,
+        calls: brief.calls.length,
+        promises: brief.promises.length,
+        needsTrace: brief.needsTrace?.total ?? 0,
+        inFlight: brief.inFlight.length,
+        feedProblems: brief.feedProblems.length,
       },
     };
   }

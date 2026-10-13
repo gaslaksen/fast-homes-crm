@@ -9,10 +9,14 @@ import { COMPANY_NAME, COMPANY_PHONE } from '../common/company.constants';
  * deterministic output, which is the whole point of splitting it from
  * DigestService.
  *
- * Email-client constraints drive every structural choice here: 600px table
- * layout, inline styles only, no flex or grid, no external assets. The <style>
- * block carries mobile stacking and is progressive enhancement only - the mail
- * reads correctly in clients that strip it.
+ * Email-client constraints drive every structural choice here: table layout,
+ * inline styles only, no flex or grid, no external assets. The <style> block
+ * carries mobile stacking and is progressive enhancement only; the mail reads
+ * correctly in clients that strip it.
+ *
+ * Section order is the order of the work: the one call, the scorecard, the
+ * rest of the calls, the promises owed, the files that cannot be called yet,
+ * the claims already signed, what is coming, and a line for wholesaling.
  */
 
 interface Palette {
@@ -41,20 +45,6 @@ const FONT = `-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-s
 
 @Injectable()
 export class DigestRenderService {
-  /**
-   * The course's working lists as one line: people never heard from, files
-   * with a channel nobody has tried, and the rechecks the cadence has queued.
-   * Empty when there is nothing to say, so the brief does not print "0".
-   */
-  private surplusWorkingLine(b: Pick<DigestBrief, 'surplusNotTapped' | 'surplusMissingChannel' | 'surplusRechecksDue'>): string {
-    const parts = [
-      b.surplusNotTapped ? `${b.surplusNotTapped} not yet reached` : null,
-      b.surplusMissingChannel ? `${b.surplusMissingChannel} missing a channel` : null,
-      b.surplusRechecksDue ? `${b.surplusRechecksDue} recheck${b.surplusRechecksDue === 1 ? '' : 's'} due` : null,
-    ].filter(Boolean);
-    return parts.length ? `${parts.join(', ')}. ` : '';
-  }
-
   /** Escape anything that came out of the database before it hits the HTML. */
   private esc(s: string | null | undefined): string {
     return String(s ?? '')
@@ -64,9 +54,8 @@ export class DigestRenderService {
       .replace(/"/g, '&quot;');
   }
 
-  /** Escape, then promote **segments** to bold. Used by the yesterday stats. */
-  private escBold(s: string): string {
-    return this.esc(s).replace(/\*\*(.+?)\*\*/g, `<b style="color:${INK};">$1</b>`);
+  private tel(phone: string): string {
+    return `tel:${this.esc(phone.replace(/[^0-9+]/g, ''))}`;
   }
 
   private sectionLabel(title: string, trailing?: string, trailingColor = FAINT): string {
@@ -82,6 +71,12 @@ export class DigestRenderService {
     return `<tr><td class="px" style="padding:14px 36px 0 36px;"><div style="border-top:1px solid ${HAIRLINE};"></div></td></tr>`;
   }
 
+  private flagLine(flag: string | null | undefined, size = 13): string {
+    return flag
+      ? `<div style="font-size:${size}px;font-weight:700;color:#b91c1c;line-height:1.5;padding-top:6px;">${this.esc(flag)}</div>`
+      : '';
+  }
+
   // ── Sections ─────────────────────────────────────────────────────────────
 
   private renderBigThing(b: DigestBrief): string {
@@ -89,7 +84,7 @@ export class DigestRenderService {
     const t = b.bigThing;
     const phoneBtn = t.phone
       ? `<td style="padding-left:12px;">
-           <a href="tel:${this.esc(t.phone.replace(/[^0-9+]/g, ''))}" style="display:inline-block;padding:12px 18px;font-size:14px;font-weight:600;color:${TEAL_DARK};border:1px solid #99f6e4;border-radius:8px;text-decoration:none;">
+           <a href="${this.tel(t.phone)}" style="display:inline-block;padding:12px 18px;font-size:14px;font-weight:600;color:${TEAL_DARK};border:1px solid #99f6e4;border-radius:8px;text-decoration:none;">
              Call ${this.esc(t.phone)}
            </a>
          </td>`
@@ -99,10 +94,9 @@ export class DigestRenderService {
       <tr><td class="px" style="padding:26px 36px 4px 36px;">
         <div style="font-size:11px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:${TEAL};padding-bottom:8px;">1 big thing</div>
         <div style="font-size:22px;font-weight:700;color:${INK};line-height:1.28;letter-spacing:-0.4px;">${this.esc(t.headline)}</div>
-        <div style="font-size:15px;color:${BODY};line-height:1.62;padding-top:10px;">${this.esc(t.detail)}</div>
-        <div style="font-size:15px;color:${BODY};line-height:1.62;padding-top:12px;">
-          <b style="color:${INK};">Why it matters:</b> ${this.esc(t.whyItMatters)}
-        </div>
+        ${t.lines.length ? `<div style="font-size:15px;color:${BODY};line-height:1.62;padding-top:10px;">${t.lines.map((l) => this.esc(l)).join('<br>')}</div>` : ''}
+        ${this.flagLine(t.flag, 14)}
+        ${t.repeatNote ? `<div style="font-size:13px;font-weight:600;color:#b45309;padding-top:8px;">${this.esc(t.repeatNote)}</div>` : ''}
       </td></tr>
       <tr><td class="px" style="padding:18px 36px 24px 36px;">
         <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
@@ -114,9 +108,9 @@ export class DigestRenderService {
       </td></tr>`;
   }
 
-  private renderBoard(b: DigestBrief): string {
-    if (!b.board.length) return '';
-    const tile = (t: (typeof b.board)[number]) => {
+  private renderScorecard(b: DigestBrief): string {
+    if (!b.scorecard.length) return '';
+    const tile = (t: (typeof b.scorecard)[number]) => {
       const p = PALETTE[t.urgency];
       return `
         <td class="tile" width="33.33%" valign="top" style="padding:0 6px 12px 6px;">
@@ -131,280 +125,152 @@ export class DigestRenderService {
     };
 
     const rows: string[] = [];
-    for (let i = 0; i < b.board.length; i += 3) {
-      rows.push(`<tr>${b.board.slice(i, i + 3).map(tile).join('')}</tr>`);
+    for (let i = 0; i < b.scorecard.length; i += 3) {
+      rows.push(`<tr>${b.scorecard.slice(i, i + 3).map(tile).join('')}</tr>`);
     }
 
     return `
       ${this.divider()}
       <tr><td class="px" style="padding:22px 36px 4px 36px;">
-        <div style="font-size:11px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:${MUTED};padding-bottom:14px;">The board</div>
+        <div style="font-size:11px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:${MUTED};padding-bottom:14px;">Surplus scorecard</div>
       </td></tr>
       <tr><td class="px" style="padding:0 30px 8px 30px;">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">${rows.join('')}</table>
       </td></tr>`;
   }
 
-  private renderActions(b: DigestBrief): string {
-    if (!b.actions.length) return '';
+  private renderCalls(b: DigestBrief): string {
+    if (!b.calls.length) return '';
     const rail = (u: DigestUrgency) =>
       u === 'critical' ? '#dc2626' : u === 'warn' ? '#f59e0b' : '#cbd5e1';
 
-    const items = b.actions.map((a, i) => `
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-left:3px solid ${rail(a.urgency)};">
+    const items = b.calls.map((c, i) => `
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-left:3px solid ${rail(c.urgency)};">
         <tr><td style="padding:2px 0 16px 14px;">
-          <div style="font-size:15px;font-weight:700;color:${INK};line-height:1.4;">${i + 1}. ${this.esc(a.title)}</div>
-          <div style="font-size:14px;color:${BODY};line-height:1.55;padding-top:3px;">${this.esc(a.detail)}</div>
-          <a href="${this.esc(a.ctaUrl)}" style="font-size:13px;font-weight:600;color:${TEAL};display:inline-block;padding-top:5px;text-decoration:none;">${this.esc(a.ctaLabel)} &rarr;</a>
+          <div style="font-size:15px;font-weight:700;color:${INK};line-height:1.4;">${i + 1}. ${this.esc(c.name)} &middot; ${this.esc(c.amount)}</div>
+          <div style="font-size:14px;color:${BODY};line-height:1.55;padding-top:3px;">${this.esc(c.detail)}</div>
+          ${this.flagLine(c.flag)}
+          <div style="padding-top:5px;font-size:13px;font-weight:600;">
+            ${c.phone ? `<a href="${this.tel(c.phone)}" style="color:${TEAL};text-decoration:none;">Call ${this.esc(c.phone)}</a> <span style="color:#cbd5e1;">&middot;</span> ` : ''}<a href="${this.esc(c.url)}" style="color:${TEAL};text-decoration:none;">Open &rarr;</a>
+          </div>
         </td></tr>
       </table>`).join('');
 
     return `
       ${this.divider()}
       <tr><td class="px" style="padding:22px 36px 6px 36px;">
-        <div style="font-size:11px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:${MUTED};">Do this first</div>
-        <div style="font-size:13px;color:${FAINT};padding-top:4px;">Ranked by dollars at risk today.</div>
+        <div style="font-size:11px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:${MUTED};">${b.bigThing?.key.startsWith('surplus-person:') ? 'Then call these' : 'Call these'}</div>
+        <div style="font-size:13px;color:${FAINT};padding-top:4px;">One row per person, most money first. Live number, nobody has called.</div>
       </td></tr>
-      <tr><td class="px" style="padding:12px 36px 6px 36px;">${items}</td></tr>`;
-  }
-
-  private renderWaiting(b: DigestBrief): string {
-    if (!b.waiting.length) return '';
-    const rows = b.waiting.map((w, i) => `
-      <tr><td style="padding:13px 15px;${i < b.waiting.length - 1 ? 'border-bottom:1px solid #eef1f4;' : ''}">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-          <td style="font-size:14px;font-weight:700;color:${INK};">${this.esc(w.name)}</td>
-          <td align="right" style="font-size:12px;font-weight:700;color:${PALETTE[w.urgency].accent};white-space:nowrap;">${this.esc(w.waitedLabel)}</td>
-        </tr></table>
-        <div style="font-size:13px;color:${MUTED};padding-top:2px;">${this.esc(w.property)} &middot; ${this.esc(w.tierLabel)}</div>
-        ${w.preview ? `<div style="font-size:13px;color:#334155;padding-top:6px;font-style:italic;line-height:1.5;">"${this.esc(w.preview)}"</div>` : ''}
-        <a href="${this.esc(w.url)}" style="font-size:12px;font-weight:600;color:${TEAL};display:inline-block;padding-top:6px;text-decoration:none;">Open thread &rarr;</a>
-      </td></tr>`).join('');
-
-    return `
-      ${this.divider()}
-      ${this.sectionLabel('Waiting on you', `${b.waitingTotal} unanswered ${b.waitingTotal === 1 ? 'reply' : 'replies'}`, '#b45309')}
-      <tr><td class="px" style="padding:0 36px 6px 36px;">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid ${HAIRLINE};border-radius:10px;">${rows}</table>
-        <div style="padding-top:10px;">
-          <a href="${this.esc(b.appUrl)}/inbox?filter=unread" style="font-size:13px;font-weight:600;color:${TEAL};text-decoration:none;">Open the unified inbox &rarr;</a>
-        </div>
+      <tr><td class="px" style="padding:12px 36px 6px 36px;">${items}
+        <div style="font-size:13px;"><a href="${this.esc(b.appUrl)}/surplus-funds" style="color:${TEAL};font-weight:600;text-decoration:none;">Open the full call list (${b.callsTotal}) &rarr;</a></div>
       </td></tr>`;
   }
 
-  private renderDeals(b: DigestBrief): string {
-    if (!b.dealsInMotion.length) return '';
-    const rows = b.dealsInMotion.map((d, i) => {
-      const last = i === b.dealsInMotion.length - 1;
-      const edge = last ? '' : 'border-bottom:1px solid #eef1f4;';
-      return `
-        <tr>
-          <td style="padding:11px 10px;${edge}">
-            <div style="font-weight:600;color:${INK};"><a href="${this.esc(d.url)}" style="color:${INK};text-decoration:none;">${this.esc(d.property)}</a></div>
-            <div style="color:${PALETTE[d.noteUrgency].accent};font-size:12px;font-weight:${d.noteUrgency === 'neutral' ? '400' : '600'};padding-top:2px;">${this.esc(d.note)}</div>
-          </td>
-          <td class="hide-sm" style="padding:11px 10px;${edge}color:#334155;">
-            ${this.esc(d.closeLabel)}<br>
-            <span style="color:${PALETTE[d.daysUrgency].accent};font-size:12px;font-weight:${d.daysUrgency === 'neutral' ? '400' : '600'};">${this.esc(d.daysLabel)}</span>
-          </td>
-          <td align="right" style="padding:11px 10px;${edge}font-weight:700;color:${INK};">${this.esc(d.fee)}</td>
-        </tr>`;
-    }).join('');
+  private renderPromises(b: DigestBrief): string {
+    if (!b.promises.length) return '';
+    const rows = b.promises.map((p, i) => `
+      <tr><td style="padding:12px 15px;${i < b.promises.length - 1 ? 'border-bottom:1px solid #eef1f4;' : ''}">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+          <td style="font-size:14px;font-weight:700;color:${INK};line-height:1.4;"><a href="${this.esc(p.url)}" style="color:${INK};text-decoration:none;">${this.esc(p.title)}</a></td>
+          <td align="right" valign="top" style="font-size:12px;font-weight:700;color:${PALETTE[p.urgency].accent};white-space:nowrap;padding-left:10px;">${this.esc(p.when)}</td>
+        </tr></table>
+        ${p.detail ? `<div style="font-size:13px;color:${BODY};padding-top:3px;line-height:1.5;">${this.esc(p.detail)}</div>` : ''}
+      </td></tr>`).join('');
+    const more = b.promisesTotal - b.promises.length;
 
     return `
       ${this.divider()}
-      ${this.sectionLabel('Deals in motion', `${b.dealsInMotion.length} open · ${b.dealsTotalFee} expected`)}
+      ${this.sectionLabel('Promises due', `${b.promisesTotal} owed to claimants`, '#b91c1c')}
+      <tr><td class="px" style="padding:0 36px 6px 36px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid ${HAIRLINE};border-radius:10px;">${rows}</table>
+        ${more > 0 ? `<div style="padding-top:10px;font-size:13px;color:${MUTED};">${more} more on the board.</div>` : ''}
+      </td></tr>`;
+  }
+
+  private renderNeedsTrace(b: DigestBrief): string {
+    if (!b.needsTrace) return '';
+    const t = b.needsTrace;
+    return `
+      ${this.divider()}
+      ${this.sectionLabel('Needs a skip trace')}
+      <tr><td class="px" style="padding:0 36px 6px 36px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${PALETTE.warn.bg};border:1px solid ${PALETTE.warn.border};border-radius:10px;"><tr><td style="padding:13px 15px;">
+          <div style="font-size:14px;font-weight:700;color:${INK};">${t.total} live claimant${t.total === 1 ? ' has' : 's have'} never been traced</div>
+          <div style="font-size:13px;color:${BODY};padding-top:4px;line-height:1.5;">${this.esc(t.byCounty)}. Until they are traced they cannot reach the call list.</div>
+          <a href="${this.esc(b.appUrl)}/surplus-funds" style="font-size:13px;font-weight:600;color:${TEAL};display:inline-block;padding-top:6px;text-decoration:none;">Trace them on the board &rarr;</a>
+        </td></tr></table>
+      </td></tr>`;
+  }
+
+  private renderInFlight(b: DigestBrief): string {
+    if (!b.inFlightTotal) return '';
+    const header = `${b.inFlightTotal} claim${b.inFlightTotal === 1 ? '' : 's'} · ${b.inFlightFees} in fees`;
+    if (!b.inFlight.length) {
+      return `
+        ${this.divider()}
+        ${this.sectionLabel('Claims in flight', header)}
+        <tr><td class="px" style="padding:0 36px 6px 36px;font-size:14px;color:${BODY};">Nothing stuck. Every signed claim is moving.</td></tr>`;
+    }
+    const rows = b.inFlight.map((r, i) => {
+      const edge = i === b.inFlight.length - 1 ? '' : 'border-bottom:1px solid #eef1f4;';
+      return `
+        <tr>
+          <td style="padding:11px 10px;${edge}">
+            <div style="font-weight:600;color:${INK};"><a href="${this.esc(r.url)}" style="color:${INK};text-decoration:none;">${this.esc(r.claimant)}</a></div>
+            <div style="color:${PALETTE[r.urgency].accent};font-size:12px;font-weight:600;padding-top:2px;">${this.esc(r.note)}</div>
+          </td>
+          <td class="hide-sm" style="padding:11px 10px;${edge}color:#334155;">${this.esc(r.stage)}</td>
+          <td align="right" style="padding:11px 10px;${edge}font-weight:700;color:${INK};">${this.esc(r.fee)}</td>
+        </tr>`;
+    }).join('');
+    const th = (label: string, align: string, cls = '') =>
+      `<th align="${align}"${cls ? ` class="${cls}"` : ''} style="padding:9px 10px;font-size:11px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid ${HAIRLINE};">${label}</th>`;
+
+    return `
+      ${this.divider()}
+      ${this.sectionLabel('Claims in flight', `${header} · ${b.inFlight.length} stuck`)}
       <tr><td class="px" style="padding:0 36px 6px 36px;">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;font-size:13px;">
-          <tr style="background:#f8fafc;">
-            <th align="left" style="padding:9px 10px;font-size:11px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid ${HAIRLINE};">Property</th>
-            <th align="left" class="hide-sm" style="padding:9px 10px;font-size:11px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid ${HAIRLINE};">Closes</th>
-            <th align="right" style="padding:9px 10px;font-size:11px;font-weight:700;color:${MUTED};text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid ${HAIRLINE};">Fee</th>
-          </tr>
+          <tr style="background:#f8fafc;">${th('Claimant', 'left')}${th('Stage', 'left', 'hide-sm')}${th('Our fee', 'right')}</tr>
           ${rows}
         </table>
       </td></tr>`;
   }
 
-  private renderForeclosures(b: DigestBrief): string {
-    if (!b.foreclosures.length) return '';
-    const cards = b.foreclosures.map((f, i) => {
-      const p = PALETTE[f.urgency];
-      return `
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid ${p.border};border-radius:10px;background:${p.bg};${i ? 'margin-top:10px;' : ''}">
-          <tr><td style="padding:13px 15px;">
-            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-              <td style="font-size:14px;font-weight:700;color:${INK};"><a href="${this.esc(f.url)}" style="color:${INK};text-decoration:none;">${this.esc(f.property)}</a></td>
-              <td align="right" style="font-size:12px;font-weight:700;color:${p.accent};white-space:nowrap;">${this.esc(f.daysLabel)}</td>
-            </tr></table>
-            <div style="font-size:13px;color:${BODY};padding-top:4px;line-height:1.5;">${this.esc(f.facts)}</div>
-            <div style="font-size:12px;font-weight:600;color:${p.accent};padding-top:4px;">${this.esc(f.status)}</div>
-          </td></tr>
-        </table>`;
-    }).join('');
-
-    const footer = (b.foreclosureIngestNote || b.foreclosureTooLateNote || b.foreclosureOpenTotal)
-      ? `<div style="padding-top:12px;font-size:13px;color:${MUTED};line-height:1.55;">
-           ${b.foreclosureIngestNote ? `<b style="color:${INK};">Overnight ingest:</b> ${this.esc(b.foreclosureIngestNote)} ` : ''}
-           ${b.foreclosureTooLateNote ? `${this.esc(b.foreclosureTooLateNote)} ` : ''}
-           <a href="${this.esc(b.appUrl)}/foreclosures" style="color:${TEAL};font-weight:600;text-decoration:none;">See all ${b.foreclosureOpenTotal} open &rarr;</a>
-         </div>`
-      : '';
-
-    return `
-      ${this.divider()}
-      ${this.sectionLabel('Foreclosure watch', 'far enough out to still work')}
-      <tr><td class="px" style="padding:0 36px 6px 36px;">${cards}${footer}</td></tr>`;
-  }
-
   /**
-   * Surplus claimants worth calling. Same card shape as the foreclosure watch
-   * so the eye reads the two pipelines the same way.
+   * What is coming and whether the pulls ran. A failed or flagged feed keeps
+   * its own red or amber line; the healthy ones are a single count.
    */
-  private renderSurplus(b: DigestBrief): string {
-    // Present whenever the board holds open claimants, even on a day with
-    // nobody new to call: a section that vanishes reads as "no surplus work".
-    if (!b.surplus.length && !b.surplusIngestNote && !b.surplusOpeningSoonNote && !b.surplusOpenTotal && !b.surplusOverdue?.length) return '';
-    const cards = b.surplus.map((s, i) => {
-      const p = PALETTE[s.urgency];
-      return `
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid ${p.border};border-radius:10px;background:${p.bg};${i ? 'margin-top:10px;' : ''}">
-          <tr><td style="padding:13px 15px;">
-            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-              <td style="font-size:14px;font-weight:700;color:${INK};"><a href="${this.esc(s.url)}" style="color:${INK};text-decoration:none;">${this.esc(s.claimant)}</a></td>
-              <td align="right" style="font-size:12px;font-weight:600;color:${MUTED};white-space:nowrap;">${this.esc(s.property)}</td>
-            </tr></table>
-            <div style="font-size:13px;color:${BODY};padding-top:4px;line-height:1.5;">${this.esc(s.facts)}</div>
-            <div style="font-size:12px;font-weight:600;color:${p.accent};padding-top:4px;">${this.esc(s.status)}</div>
-          </td></tr>
-        </table>`;
-    }).join('');
-
-    // Slipped follow-ups, in red, because a promise to call back that went
-    // unkept is the thing that loses a claimant's trust.
-    const overdue = b.surplusOverdue?.length
-      ? `<div style="padding-top:12px;font-size:13px;color:${BODY};line-height:1.6;">
-          <b style="color:#b91c1c;">${b.surplusOverdueTotal} overdue follow-up${b.surplusOverdueTotal === 1 ? '' : 's'}</b>
-          ${b.surplusOverdue
-            .map(
-              (t) =>
-                `<div><a href="${this.esc(t.url)}" style="color:${INK};font-weight:600;text-decoration:none;">${this.esc(t.title)}</a> <span style="color:${MUTED};">${this.esc(t.due)}${t.owner ? `, ${this.esc(t.owner)}` : ''}</span></div>`,
-            )
-            .join('')}
-        </div>`
-      : '';
-
-    // Signed claimants owed a word. Red for the same reason as the tasks:
-    // a month of silence after a signature is how a claimant starts to
-    // wonder whether they were had.
-    const silent = b.surplusUpdateOverdue?.length
-      ? `<div style="padding-top:12px;font-size:13px;color:${BODY};line-height:1.6;">
-          <b style="color:#b91c1c;">${b.surplusUpdateOverdueTotal} signed claimant${b.surplusUpdateOverdueTotal === 1 ? '' : 's'} owed a monthly update</b>
-          ${b.surplusUpdateOverdue
-            .map(
-              (u) =>
-                `<div><a href="${this.esc(u.url)}" style="color:${INK};font-weight:600;text-decoration:none;">${this.esc(u.claimant)}</a> <span style="color:${MUTED};">${this.esc(u.stage)}${u.days != null ? `, ${u.days} days since we last said anything` : ', never updated'}</span></div>`,
-            )
-            .join('')}
-        </div>`
-      : '';
-
-    const footer = `${overdue}${silent}<div style="padding-top:12px;font-size:13px;color:${MUTED};line-height:1.55;">
-        ${b.surplusIngestNote ? `<b style="color:${INK};">Overnight:</b> ${this.esc(b.surplusIngestNote)} ` : ''}
-        ${b.surplusOpeningSoonNote ? `<b style="color:${INK};">Coming up:</b> ${this.esc(b.surplusOpeningSoonNote)} ` : ''}
-        ${b.surplusCallableTotal} of ${b.surplusOpenTotal} open claimants have a live number.
-        ${this.surplusWorkingLine(b)}
-        <a href="${this.esc(b.appUrl)}/surplus-funds" style="color:${TEAL};font-weight:600;text-decoration:none;">Open the board &rarr;</a>
-      </div>`;
+  private renderComingUp(b: DigestBrief): string {
+    if (!b.surplusIngestNote && !b.surplusOpeningSoonNote && !b.feedProblems.length && !b.feedSummary) return '';
+    const para = (html: string) => `<div style="font-size:14px;color:${BODY};line-height:1.6;padding-bottom:8px;">${html}</div>`;
+    const dot = (u: DigestUrgency) =>
+      `<span style="display:inline-block;width:8px;height:8px;border-radius:4px;background:${PALETTE[u].accent};margin-right:8px;"></span>`;
+    const problems = b.feedProblems.map((f) =>
+      para(`${dot(f.urgency)}<b style="color:${INK};">${this.esc(f.label)}</b> <span style="color:${f.urgency === 'critical' ? PALETTE.critical.accent : BODY};">${this.esc(f.detail)}</span>`),
+    ).join('');
 
     return `
       ${this.divider()}
-      ${this.sectionLabel('Surplus funds', 'live number, nobody has called')}
-      <tr><td class="px" style="padding:0 36px 6px 36px;">${cards}${footer}</td></tr>`;
-  }
-
-  /**
-   * The automated county pulls, one line each. A failed or missing pull is
-   * red; there is no version of this section that goes quiet on failure.
-   */
-  private renderFeeds(b: DigestBrief): string {
-    if (!b.feeds.length) return '';
-    const rows = b.feeds.map((f) => {
-      const p = PALETTE[f.urgency];
-      return `
-        <tr>
-          <td valign="top" style="padding:8px 10px 8px 0;white-space:nowrap;">
-            <span style="display:inline-block;width:8px;height:8px;border-radius:4px;background:${p.accent};margin-right:8px;"></span><b style="color:${INK};font-size:13px;">${this.esc(f.label)}</b>
-            <div style="font-size:11px;color:${FAINT};padding-left:16px;">${this.esc(f.schedule)}</div>
-          </td>
-          <td valign="top" style="padding:8px 0;font-size:13px;color:${f.urgency === 'critical' ? p.accent : BODY};line-height:1.5;">${this.esc(f.detail)}</td>
-        </tr>`;
-    }).join('');
-
-    return `
-      ${this.divider()}
-      ${this.sectionLabel('County feeds', 'what the automated pulls did')}
+      ${this.sectionLabel('Coming up')}
       <tr><td class="px" style="padding:0 36px 6px 36px;">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">${rows}</table>
+        ${b.surplusOpeningSoonNote ? para(this.esc(b.surplusOpeningSoonNote)) : ''}
+        ${b.surplusIngestNote ? para(`<b style="color:${INK};">Overnight:</b> ${this.esc(b.surplusIngestNote)}`) : ''}
+        ${problems}
+        ${b.feedSummary ? para(`${dot('good')}${this.esc(b.feedSummary)}`) : ''}
       </td></tr>`;
   }
 
-  private renderNewLeads(b: DigestBrief): string {
-    if (!b.newOvernight.length) return '';
-    const rows = b.newOvernight.map((n, i) => `
-      <tr><td style="padding:7px 0;${i < b.newOvernight.length - 1 ? 'border-bottom:1px solid #eef1f4;' : ''}">
-        <a href="${this.esc(n.url)}" style="font-weight:600;color:${INK};text-decoration:none;">${this.esc(n.property)}</a>
-        <span style="color:${MUTED};"> &middot; ${this.esc(n.meta)}</span>
-        <div style="color:${PALETTE[n.noteUrgency].accent};font-size:12px;font-weight:${n.noteUrgency === 'neutral' ? '400' : '600'};padding-top:2px;">${this.esc(n.note)}</div>
-      </td></tr>`).join('');
-
-    const remainder = b.newOvernightTotal - b.newOvernight.length;
+  private renderWholesale(b: DigestBrief): string {
+    if (!b.wholesale) return '';
     return `
       ${this.divider()}
-      ${this.sectionLabel('Came in overnight', `${b.newOvernightTotal} lead${b.newOvernightTotal === 1 ? '' : 's'}`)}
-      <tr><td class="px" style="padding:0 36px 6px 36px;">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size:13px;">${rows}</table>
-        ${remainder > 0
-          ? `<div style="padding-top:10px;"><a href="${this.esc(b.appUrl)}/leads" style="font-size:13px;font-weight:600;color:${TEAL};text-decoration:none;">See the other ${remainder} &rarr;</a></div>`
-          : ''}
-      </td></tr>`;
-  }
-
-  private renderNews(b: DigestBrief): string {
-    if (!b.news.length) return '';
-    const items = b.news.map((n, i) => `
-      <div style="${i ? `border-top:1px solid #eef1f4;padding-top:16px;` : ''}padding-bottom:${i === b.news.length - 1 ? '0' : '16px'};">
-        <div style="font-size:15px;font-weight:700;color:${INK};line-height:1.4;">
-          <a href="${this.esc(n.url)}" style="color:${INK};text-decoration:none;">${this.esc(n.headline)}</a>
+      <tr><td class="px" style="padding:18px 36px 22px 36px;">
+        <div style="font-size:13px;color:${MUTED};line-height:1.6;">
+          <b style="color:${INK};">Wholesale, parked:</b> ${this.esc(b.wholesale)}.
+          <a href="${this.esc(b.appUrl)}" style="color:${TEAL};font-weight:600;text-decoration:none;">Open Dealcore &rarr;</a>
         </div>
-        ${n.oneLiner ? `<div style="font-size:14px;color:${BODY};line-height:1.6;padding-top:3px;">${this.esc(n.oneLiner)}</div>` : ''}
-        <div style="font-size:14px;color:${BODY};line-height:1.6;padding-top:6px;">
-          <b style="color:${INK};">Why it matters:</b> ${this.esc(n.whyItMatters)}
-        </div>
-        <div style="font-size:12px;color:${FAINT};padding-top:5px;">${this.esc(n.source)} &middot; ${this.esc(n.publishedLabel)}</div>
-      </div>`).join('');
-
-    return `
-      ${this.divider()}
-      ${this.sectionLabel('Market and news', `${b.news.length} thing${b.news.length === 1 ? '' : 's'}, 40 seconds`)}
-      <tr><td class="px" style="padding:0 36px 8px 36px;">${items}</td></tr>`;
-  }
-
-  private renderYesterday(b: DigestBrief): string {
-    if (!b.yesterday.length) return '';
-    const cells: string[] = [];
-    for (let i = 0; i < b.yesterday.length; i += 2) {
-      const pair = b.yesterday.slice(i, i + 2);
-      cells.push(`<tr>${pair.map((s) =>
-        `<td class="stack" width="50%" style="padding:4px 0;">${this.escBold(s.text)}</td>`,
-      ).join('')}${pair.length === 1 ? '<td class="stack" width="50%"></td>' : ''}</tr>`);
-    }
-
-    return `
-      ${this.divider()}
-      <tr><td class="px" style="padding:20px 36px 24px 36px;">
-        <div style="font-size:11px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:${MUTED};padding-bottom:10px;">Yesterday, by the numbers</div>
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size:13px;color:${BODY};">${cells.join('')}</table>
       </td></tr>`;
   }
 
@@ -414,9 +280,6 @@ export class DigestRenderService {
     const greeting = b.greetingName
       ? ` &middot; ${this.esc(b.greetingPrefix)}, ${this.esc(b.greetingName)}`
       : '';
-    const market = b.marketLabel
-      ? `<td align="right" class="hide-sm" style="font-size:12px;color:#99f6e4;font-weight:600;letter-spacing:0.4px;text-transform:uppercase;">${this.esc(b.marketLabel)}</td>`
-      : '<td></td>';
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -433,7 +296,6 @@ export class DigestRenderService {
     .container { width:100% !important; }
     .px { padding-left:18px !important; padding-right:18px !important; }
     .tile { display:block !important; width:100% !important; box-sizing:border-box !important; }
-    .stack { display:block !important; width:100% !important; }
     .hide-sm { display:none !important; }
     .num { font-size:26px !important; }
   }
@@ -446,35 +308,27 @@ export class DigestRenderService {
 <table role="presentation" class="container" width="680" cellpadding="0" cellspacing="0" border="0" style="width:680px;max-width:680px;background:#ffffff;border-radius:14px;overflow:hidden;font-family:${FONT};">
 
   <tr><td class="px" style="background:${TEAL_DARK};padding:22px 36px 20px 36px;">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-      <tr>
-        <td style="font-size:19px;font-weight:700;color:#ffffff;letter-spacing:-0.3px;line-height:1.2;">Dealcore Daily Brief</td>
-        ${market}
-      </tr>
-      <tr><td colspan="2" style="padding-top:5px;font-size:13px;color:#a7f3ec;line-height:1.4;">
-        ${this.esc(b.dateLabel)} &middot; ${this.esc(b.timeLabel)}${greeting}
-      </td></tr>
-    </table>
+    <div style="font-size:19px;font-weight:700;color:#ffffff;letter-spacing:-0.3px;line-height:1.2;">Dealcore Daily Brief</div>
+    <div style="padding-top:5px;font-size:13px;color:#a7f3ec;line-height:1.4;">
+      ${this.esc(b.dateLabel)} &middot; ${this.esc(b.timeLabel)}${greeting}
+    </div>
   </td></tr>
 
   ${this.renderBigThing(b)}
-  ${this.renderBoard(b)}
-  ${this.renderActions(b)}
-  ${this.renderWaiting(b)}
-  ${this.renderDeals(b)}
-  ${this.renderForeclosures(b)}
-  ${this.renderSurplus(b)}
-  ${this.renderNewLeads(b)}
-  ${this.renderFeeds(b)}
-  ${this.renderNews(b)}
-  ${this.renderYesterday(b)}
+  ${this.renderScorecard(b)}
+  ${this.renderCalls(b)}
+  ${this.renderPromises(b)}
+  ${this.renderNeedsTrace(b)}
+  ${this.renderInFlight(b)}
+  ${this.renderComingUp(b)}
+  ${this.renderWholesale(b)}
 
   <tr><td class="px" style="background:#f8fafc;border-top:1px solid ${HAIRLINE};padding:20px 36px 24px 36px;">
     <div style="font-size:13px;color:${MUTED};line-height:1.6;">
       Generated by <b style="color:${INK};">Dealcore</b> at ${this.esc(b.timeLabel)} from your live pipeline.
     </div>
     <div style="font-size:13px;padding-top:8px;">
-      <a href="${this.esc(b.appUrl)}" style="color:${TEAL};font-weight:600;text-decoration:none;">Open Dealcore</a>
+      <a href="${this.esc(b.appUrl)}/surplus-funds" style="color:${TEAL};font-weight:600;text-decoration:none;">Open the surplus board</a>
     </div>
     <div style="font-size:12px;color:${FAINT};padding-top:12px;line-height:1.5;">
       ${COMPANY_NAME} &middot; ${COMPANY_PHONE} &middot; Charlotte, NC
@@ -493,132 +347,83 @@ export class DigestRenderService {
     const out: string[] = [];
     out.push('DEALCORE DAILY BRIEF');
     out.push(`${b.dateLabel} - ${b.timeLabel}`);
-    if (b.greetingName) out.push(`Good morning, ${b.greetingName}`);
+    if (b.greetingName) out.push(`${b.greetingPrefix}, ${b.greetingName}`);
     out.push('');
 
     if (b.bigThing) {
+      const t = b.bigThing;
       out.push('1 BIG THING');
-      out.push(b.bigThing.headline);
-      out.push(b.bigThing.detail);
-      out.push(`Why it matters: ${b.bigThing.whyItMatters}`);
-      out.push(b.bigThing.ctaUrl);
+      out.push(t.headline);
+      for (const l of t.lines) out.push(`  ${l}`);
+      if (t.flag) out.push(`  ${t.flag}`);
+      if (t.repeatNote) out.push(`  ${t.repeatNote}`);
+      if (t.phone) out.push(`  Call ${t.phone}`);
+      out.push(`  ${t.ctaUrl}`);
       out.push('');
     }
 
-    if (b.board.length) {
-      out.push('THE BOARD');
-      for (const t of b.board) out.push(`  ${t.label}: ${t.value} (${t.subtext})`);
+    if (b.scorecard.length) {
+      out.push('SURPLUS SCORECARD');
+      for (const t of b.scorecard) out.push(`  ${t.label}: ${t.value} (${t.subtext})`);
       out.push('');
     }
 
-    if (b.actions.length) {
-      out.push('DO THIS FIRST');
-      b.actions.forEach((a, i) => {
-        out.push(`  ${i + 1}. ${a.title}`);
-        out.push(`     ${a.detail}`);
-        out.push(`     ${a.ctaUrl}`);
+    if (b.calls.length) {
+      out.push(b.bigThing?.key.startsWith('surplus-person:') ? 'THEN CALL THESE' : 'CALL THESE');
+      b.calls.forEach((c, i) => {
+        out.push(`  ${i + 1}. ${c.name} - ${c.amount}`);
+        out.push(`     ${c.detail}`);
+        if (c.flag) out.push(`     ${c.flag}`);
+        out.push(`     ${c.phone ? `Call ${c.phone} - ` : ''}${c.url}`);
       });
+      out.push(`  Full call list (${b.callsTotal}): ${b.appUrl}/surplus-funds`);
       out.push('');
     }
 
-    if (b.waiting.length) {
-      out.push(`WAITING ON YOU (${b.waitingTotal})`);
-      for (const w of b.waiting) {
-        out.push(`  ${w.name} - ${w.property} - waiting ${w.waitedLabel}`);
-        if (w.preview) out.push(`     "${w.preview}"`);
-        out.push(`     ${w.url}`);
+    if (b.promises.length) {
+      out.push(`PROMISES DUE (${b.promisesTotal})`);
+      for (const p of b.promises) {
+        out.push(`  ${p.title} - ${p.when}`);
+        if (p.detail) out.push(`     ${p.detail}`);
+        out.push(`     ${p.url}`);
+      }
+      const more = b.promisesTotal - b.promises.length;
+      if (more > 0) out.push(`  ${more} more on the board.`);
+      out.push('');
+    }
+
+    if (b.needsTrace) {
+      out.push('NEEDS A SKIP TRACE');
+      out.push(`  ${b.needsTrace.total} live claimant${b.needsTrace.total === 1 ? ' has' : 's have'} never been traced: ${b.needsTrace.byCounty}.`);
+      out.push('');
+    }
+
+    if (b.inFlightTotal) {
+      out.push(`CLAIMS IN FLIGHT (${b.inFlightTotal}, ${b.inFlightFees} in fees)`);
+      if (!b.inFlight.length) out.push('  Nothing stuck. Every signed claim is moving.');
+      for (const r of b.inFlight) {
+        out.push(`  ${r.claimant} - ${r.stage} - ${r.fee}`);
+        out.push(`     ${r.note}`);
+        out.push(`     ${r.url}`);
       }
       out.push('');
     }
 
-    if (b.dealsInMotion.length) {
-      out.push(`DEALS IN MOTION (${b.dealsTotalFee} expected)`);
-      for (const d of b.dealsInMotion) {
-        out.push(`  ${d.property} - closes ${d.closeLabel} (${d.daysLabel}) - ${d.fee}`);
-        out.push(`     ${d.note}`);
-      }
-      out.push('');
-    }
-
-    if (b.foreclosures.length) {
-      out.push('FORECLOSURE WATCH');
-      for (const f of b.foreclosures) {
-        out.push(`  ${f.property} - ${f.daysLabel}`);
-        out.push(`     ${f.facts}`);
-        out.push(`     ${f.status}`);
-      }
-      out.push('');
-    }
-
-    if (b.foreclosureTooLateNote) {
-      out.push(`  ${b.foreclosureTooLateNote}`);
-      out.push('');
-    }
-
-    if (b.surplus.length || b.surplusIngestNote || b.surplusOpeningSoonNote || b.surplusOpenTotal) {
-      out.push('SURPLUS FUNDS');
-      for (const s of b.surplus) {
-        out.push(`  ${s.claimant} - ${s.property}`);
-        out.push(`     ${s.facts}`);
-        out.push(`     ${s.status}`);
-        out.push(`     ${s.url}`);
-      }
-      if (b.surplusOverdue?.length) {
-        out.push(`  ${b.surplusOverdueTotal} overdue follow-up${b.surplusOverdueTotal === 1 ? '' : 's'}:`);
-        for (const t of b.surplusOverdue) {
-          out.push(`     ${t.title}, ${t.due}${t.owner ? `, ${t.owner}` : ''}`);
-          out.push(`     ${t.url}`);
-        }
-      }
-      if (b.surplusUpdateOverdue?.length) {
-        out.push(`  ${b.surplusUpdateOverdueTotal} signed claimant${b.surplusUpdateOverdueTotal === 1 ? '' : 's'} owed a monthly update:`);
-        for (const u of b.surplusUpdateOverdue) {
-          out.push(`     ${u.claimant}, ${u.stage}${u.days != null ? `, ${u.days} days` : ', never updated'}`);
-          out.push(`     ${u.url}`);
-        }
-      }
+    if (b.surplusIngestNote || b.surplusOpeningSoonNote || b.feedProblems.length || b.feedSummary) {
+      out.push('COMING UP');
+      if (b.surplusOpeningSoonNote) out.push(`  ${b.surplusOpeningSoonNote}`);
       if (b.surplusIngestNote) out.push(`  Overnight: ${b.surplusIngestNote}`);
-      if (b.surplusOpeningSoonNote) out.push(`  Coming up: ${b.surplusOpeningSoonNote}`);
-      out.push(`  ${b.surplusCallableTotal} of ${b.surplusOpenTotal} open claimants have a live number.`);
-      if (b.surplusNotTapped || b.surplusMissingChannel || b.surplusRechecksDue) {
-        out.push(`  ${this.surplusWorkingLine(b)}`);
-      }
+      for (const f of b.feedProblems) out.push(`  ${f.label} (${f.schedule}): ${f.detail}`);
+      if (b.feedSummary) out.push(`  ${b.feedSummary}`);
       out.push('');
     }
 
-    if (b.newOvernight.length) {
-      out.push(`CAME IN OVERNIGHT (${b.newOvernightTotal})`);
-      for (const n of b.newOvernight) {
-        out.push(`  ${n.property} - ${n.meta}`);
-        out.push(`     ${n.note}`);
-      }
+    if (b.wholesale) {
+      out.push(`Wholesale, parked: ${b.wholesale}.`);
       out.push('');
     }
 
-    if (b.feeds.length) {
-      out.push('COUNTY FEEDS');
-      for (const f of b.feeds) out.push(`  ${f.label} (${f.schedule}): ${f.detail}`);
-      out.push('');
-    }
-
-    if (b.news.length) {
-      out.push('MARKET AND NEWS');
-      for (const n of b.news) {
-        out.push(`  ${n.headline}`);
-        if (n.oneLiner) out.push(`     ${n.oneLiner}`);
-        out.push(`     Why it matters: ${n.whyItMatters}`);
-        out.push(`     ${n.source} - ${n.publishedLabel} - ${n.url}`);
-      }
-      out.push('');
-    }
-
-    if (b.yesterday.length) {
-      out.push('YESTERDAY, BY THE NUMBERS');
-      for (const s of b.yesterday) out.push(`  ${s.text.replace(/\*\*/g, '')}`);
-      out.push('');
-    }
-
-    out.push(`Open Dealcore: ${b.appUrl}`);
+    out.push(`Open the surplus board: ${b.appUrl}/surplus-funds`);
     return out.join('\n');
   }
 }

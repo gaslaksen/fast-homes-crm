@@ -37,6 +37,9 @@ export interface FeedRow {
   /** What happened, one line. */
   detail: string;
   urgency: DigestUrgency;
+  /** Counts off the run the line describes, for the one-line healthy summary. */
+  scanned?: number;
+  created?: number;
 }
 
 const TZ = 'America/New_York';
@@ -142,12 +145,14 @@ export function describeFeed(source: FeedSource, runs: FeedRun[], now: Date): Fe
       return {
         label, schedule, urgency: 'warn',
         detail: `Ran ${at}${dur ? ` in ${dur}` : ''}: ${describeCounts(latest)}. ${trace}.`,
+        scanned: latest.scanned, created: latest.created,
       };
     }
     return {
       label, schedule,
       urgency: latest.created ? 'good' : 'neutral',
       detail: `Ran ${at}${dur ? ` in ${dur}` : ''}: ${describeCounts(latest)}.`,
+      scanned: latest.scanned, created: latest.created,
     };
   }
 
@@ -169,5 +174,22 @@ export function describeFeed(source: FeedSource, runs: FeedRun[], now: Date): Fe
     label, schedule,
     urgency: stale ? 'critical' : 'neutral',
     detail: `${stale ? 'Overdue. ' : ''}Last ran ${shortDateInTz(latest.startedAt)}: ${describeCounts(latest)}.`,
+    scanned: latest.scanned, created: latest.created,
   };
+}
+
+/**
+ * The healthy feeds as one line. Twelve lines of "ran fine" every morning
+ * trained the eye to skip the section, which is the one place a failed pull
+ * would show. Problems keep their own lines; everything else is a count.
+ */
+export function summarizeHealthyFeeds(rows: FeedRow[]): string | null {
+  const healthy = rows.filter((r) => r.urgency === 'good' || r.urgency === 'neutral');
+  if (!healthy.length) return null;
+  const scanned = healthy.reduce((s, r) => s + (r.scanned || 0), 0);
+  const created = healthy.reduce((s, r) => s + (r.created || 0), 0);
+  const lead = healthy.length === rows.length
+    ? `All ${rows.length} county feed${rows.length === 1 ? '' : 's'} healthy`
+    : `${healthy.length} other county feed${healthy.length === 1 ? '' : 's'} healthy`;
+  return `${lead}: ${n(scanned)} scanned, ${n(created)} new on their last pulls.`;
 }

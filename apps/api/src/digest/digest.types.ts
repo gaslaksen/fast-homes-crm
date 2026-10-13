@@ -1,33 +1,38 @@
-import { NewsItem } from './digest-news.service';
-export { NewsItem };
-
 /**
  * Shape of an assembled Daily Brief. `DigestService` builds this from the live
  * pipeline; `DigestRenderService` turns it into HTML and plain text. Nothing in
  * here touches Prisma, so the render step is pure and testable against a
  * hand-written fixture.
  *
+ * The brief is a surplus funds action email. Every section answers "who do I
+ * call or chase today" on the surplus board; wholesaling gets one line of
+ * counts at the bottom so it is not forgotten, and nothing more.
+ *
  * Every section is allowed to be empty. The renderer drops empty sections
  * (divider included) rather than printing a "nothing here" placeholder, and
  * `isEmpty` tells the cron to skip the send entirely on a genuinely quiet day.
  */
 
-/** Urgency band. Drives the accent color on tiles, action rails, and cards. */
+/** Urgency band. Drives the accent color on tiles, rails, and cards. */
 export type DigestUrgency = 'critical' | 'warn' | 'neutral' | 'good';
 
 export interface BigThing {
   /**
-   * Stable identity of whatever this story is about, e.g. "lead:abc123".
-   * Persisted to DigestRun so the next few briefs can avoid opening with the
-   * same story on consecutive mornings.
+   * Stable identity of whatever this story is about, e.g.
+   * "surplus-person:brevard|douglas garcia". Persisted to DigestRun so the
+   * brief can say how many mornings in a row it has led with the same one.
    */
   key: string;
   /** One-sentence headline. Doubles as the email preheader. */
   headline: string;
-  /** Supporting facts: address, tier, how long it has been waiting. */
-  detail: string;
-  /** The "so what" line. Always rendered after a bold "Why it matters:". */
-  whyItMatters: string;
+  /** Short form for the subject line, "Call Douglas Garcia ($16.4K, 2 cases)". */
+  short: string;
+  /** Supporting facts, one per line: each case, the claim status, the numbers. */
+  lines: string[];
+  /** A warning that must be read before acting, e.g. an unconfirmed match. */
+  flag: string | null;
+  /** "Led yesterday's brief too and still has not been called." */
+  repeatNote: string | null;
   ctaLabel: string;
   ctaUrl: string;
   /** Optional tel: link when the record has a usable phone. */
@@ -43,88 +48,41 @@ export interface BoardTile {
   urgency: DigestUrgency;
 }
 
-export interface DigestAction {
-  title: string;
-  detail: string;
-  ctaLabel: string;
-  ctaUrl: string;
-  /** Ranking score. Higher sorts first; also picks the rail color. */
-  score: number;
-  urgency: DigestUrgency;
-  /**
-   * Action family. Used to cap how many slots one category can take, so a
-   * heavy foreclosure ingest cannot crowd out every closing and offer.
-   */
-  category: 'photos' | 'reply' | 'foreclosure' | 'surplus' | 'closing' | 'signature' | 'offer' | 'task' | 'cleanup';
-}
-
-export interface WaitingRow {
+/** One person to call today. Several cases for one person are one row. */
+export interface CallRow {
+  /** "Janet Acuna" */
   name: string;
-  property: string;
-  tierLabel: string;
-  /** "10h 16m" */
-  waitedLabel: string;
-  preview: string;
+  /** Surplus across all of this person's cases, "$8,738". */
+  amount: string;
+  /** "Brevard County case 250809, 2480 Keegan Cir SW, Palm Bay. Open, nothing filed. 4 clean numbers." */
+  detail: string;
+  /** A warning to read before dialing, e.g. an unconfirmed match. */
+  flag: string | null;
+  phone: string | null;
   url: string;
   urgency: DigestUrgency;
 }
 
-export interface DealRow {
-  property: string;
-  /** First matching blocker, or a neutral status line. */
+/** Something owed to a claimant: a reply, a follow-up, a monthly update. */
+export interface PromiseRow {
+  title: string;
+  /** Quoted reply, the stage, or who owns the task. */
+  detail: string | null;
+  /** "5 days late", "waiting 3h 10m" */
+  when: string;
+  url: string;
+  urgency: DigestUrgency;
+}
+
+/** A signed claim that has stopped moving. */
+export interface InFlightRow {
+  claimant: string;
+  stage: string;
+  /** What is stuck, e.g. "Filed 38 days ago, the county has not acknowledged it". */
   note: string;
-  noteUrgency: DigestUrgency;
-  /** "Mon 7/27" */
-  closeLabel: string;
-  /** "3 days" */
-  daysLabel: string;
-  daysUrgency: DigestUrgency;
   fee: string;
   url: string;
-}
-
-export interface ForeclosureRow {
-  property: string;
-  daysLabel: string;
-  facts: string;
-  status: string;
-  url: string;
   urgency: DigestUrgency;
-}
-
-export interface NewLeadRow {
-  property: string;
-  meta: string;
-  note: string;
-  noteUrgency: DigestUrgency;
-  url: string;
-}
-
-export interface YesterdayStat {
-  text: string;
-}
-
-/** One surplus claimant worth calling today. */
-export interface SurplusRow {
-  claimant: string;
-  /** "2502 34th St SW, Lehigh Acres" */
-  property: string;
-  /** "Lee County · case 2025002173 · $32,054 surplus · Open, nothing filed" */
-  facts: string;
-  /** Contactability and clock, from the board's own work reason. */
-  status: string;
-  url: string;
-  urgency: DigestUrgency;
-}
-
-/** One overdue follow-up on a surplus claimant. */
-export interface SurplusTaskRow {
-  title: string;
-  claimant: string;
-  /** "due 3 days ago" */
-  due: string;
-  owner: string | null;
-  url: string;
 }
 
 /** One automated county pull, one line. */
@@ -133,6 +91,9 @@ export interface FeedRow {
   schedule: string;
   detail: string;
   urgency: DigestUrgency;
+  /** Counts off the run the line describes, for the one-line healthy summary. */
+  scanned?: number;
+  created?: number;
 }
 
 export interface DigestBrief {
@@ -144,50 +105,36 @@ export interface DigestBrief {
   greetingName: string | null;
   /** "Good morning" / "Good afternoon" / "Good evening" in the org timezone. */
   greetingPrefix: string;
-  /** "Charlotte metro", derived from the most common active-lead city. */
-  marketLabel: string | null;
 
   subject: string;
   preheader: string;
 
   bigThing: BigThing | null;
-  board: BoardTile[];
-  actions: DigestAction[];
-  waiting: WaitingRow[];
-  waitingTotal: number;
-  dealsInMotion: DealRow[];
-  dealsTotalFee: string;
-  foreclosures: ForeclosureRow[];
-  foreclosureIngestNote: string | null;
-  /** Notices selling too soon to work. Counted, not listed. */
-  foreclosureTooLateNote: string | null;
-  foreclosureOpenTotal: number;
-  newOvernight: NewLeadRow[];
-  newOvernightTotal: number;
-  /** Surplus claimants with a live number nobody has called, best first. */
-  surplus: SurplusRow[];
-  surplusOpenTotal: number;
-  surplusCallableTotal: number;
+  scorecard: BoardTile[];
+  /** People to call after the big thing, best first. */
+  calls: CallRow[];
+  /** Everybody on the call list, the big thing and the rows not shown included. */
+  callsTotal: number;
+  /** Replies, overdue follow-ups, and monthly updates owed, most urgent first. */
+  promises: PromiseRow[];
+  promisesTotal: number;
+  /** Live claimants nothing has been looked up for, so they cannot reach the call list. */
+  needsTrace: { total: number; byCounty: string } | null;
+  /** Signed claims that have stopped moving. */
+  inFlight: InFlightRow[];
+  inFlightTotal: number;
+  /** "$12.4K" of fees across every claim in flight. */
+  inFlightFees: string;
   /** "24 claimants landed from Lee overnight, $312K between them." */
   surplusIngestNote: string | null;
   /** Claimants whose lien window closes within 30 days, so they become callable soon. */
   surplusOpeningSoonNote: string | null;
-  /** Follow-ups on surplus claimants that are past due, oldest first. */
-  surplusOverdue: SurplusTaskRow[];
-  surplusOverdueTotal: number;
-  /** Live claimants nobody has heard back from yet. */
-  surplusNotTapped: number;
-  /** Live claimants with at least one of call, text, email, letter untried. */
-  surplusMissingChannel: number;
-  /** Signed claimants owed their monthly update, longest silence first. */
-  surplusUpdateOverdue: { claimant: string; stage: string; days: number | null; url: string }[];
-  surplusUpdateOverdueTotal: number;
-  /** Unreached claimants due the free searches again or another letter, as open tasks. */
-  surplusRechecksDue: number;
-  /** What each automated county pull did, or failed to do. */
-  feeds: FeedRow[];
-  yesterday: YesterdayStat[];
-  news: NewsItem[];
+  /** Feeds that failed or need a look. Healthy ones are summarized in one line. */
+  feedProblems: FeedRow[];
+  /** "All 12 county feeds healthy: 6,907 scanned, 42 new on their last pulls." */
+  feedSummary: string | null;
+  /** One line of wholesaling counts, or null when there is nothing to say. */
+  wholesale: string | null;
 
   appUrl: string;
   /** True when every actionable section came back empty. Cron skips the send. */
