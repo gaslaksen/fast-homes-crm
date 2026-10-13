@@ -1,6 +1,7 @@
 import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
+import { Brand, brandForLeadSource, brandForNumber } from '../common/company.constants';
 
 export interface SendingNumber {
   id: string;
@@ -125,21 +126,85 @@ export class PhoneNumbersService {
   /**
    * Which number to text a given lead from.
    *
-   * Threads are sticky: a seller who has been texting (888) keeps seeing (888),
-   * because switching mid-conversation splits the thread on their phone and
-   * reads like a different company. Order of preference:
-   *   1. an explicit choice from the composer, if allowlisted
-   *   2. the number we last texted this lead from
-   *   3. the number this lead last texted us on (seller-initiated threads)
-   *   4. the default sending number
+   * A lead is only ever texted from its own brand's numbers. Each brand has
+   * its own A2P 10DLC campaign and carriers register a text under the
+   * campaign of the number it goes out on, so a surplus claimant texted from
+   * a Quick Cash number (or a seller from the D.I.G. Deeper number) is a text
+   * under the wrong company's registration.
+   *
+   * Within the brand, threads are sticky: a seller who has been texting (888)
+   * keeps seeing (888), because switching mid-conversation splits the thread
+   * on their phone and reads like a different company. Order of preference,
+   * each only if it is one of the lead's brand numbers:
+   *   1. an explicit choice from the composer
+   *   2. the number we last texted this lead from, else the one they last
+   *      texted us on (skipped when an explicit choice was rejected)
+   *   3. the default sending number
+   *   4. the brand's own published number
+   *   5. any other active number of the brand
+   * A thread that started on the other brand's number moves to this one.
    */
   async resolveForLead(leadId: string, requested?: string): Promise<string> {
+    const { brand, numbers } = await this.smsNumbersForLead(leadId);
+    const ours = (n?: string | null) =>
+      n ? numbers.find((o) => numberKey(o.number) === numberKey(n))?.number : undefined;
+
+    if (numbers.length) {
+      // A rejected explicit choice goes to the default, not the thread's
+      // number: same as before brands, when it went through resolve().
+      const rejected = !!requested && !ours(requested);
+      if (rejected) {
+        this.logger.warn(
+          `Rejected sms from-number ${requested} for lead ${leadId}: not an active ${brand.companyName} number`,
+        );
+      }
+      const sticky = await this.stickyNumberFor(leadId);
+      const chosen =
+        ours(requested) ||
+        (rejected ? undefined : ours(sticky)) ||
+        numbers.find((n) => n.isDefault)?.number ||
+        ours(brand.phoneE164) ||
+        numbers[0].number;
+      if (sticky && numberKey(sticky) !== numberKey(chosen) && !ours(sticky)) {
+        this.logger.log(
+          `Lead ${leadId} thread was on ${sticky}, moving to ${chosen} (${brand.companyName})`,
+        );
+      }
+      return chosen;
+    }
+
+    // No active SMS number for this brand: Settings is misconfigured. Keep
+    // texting working the way it did before brands, loudly.
+    this.logger.error(
+      `No active SMS number for ${brand.companyName}; lead ${leadId} falls back to the default`,
+    );
     if (requested) return this.resolve(requested, 'sms');
+    return (await this.stickyNumberFor(leadId)) || this.defaultFor('sms');
+  }
 
-    const sticky = await this.stickyNumberFor(leadId);
-    if (sticky) return sticky;
+  /**
+   * The lead's brand and the active SMS numbers that belong to it. Drives the
+   * composer's "From" picker as well as resolveForLead, so the picker never
+   * offers a number the send would refuse.
+   */
+  async smsNumbersForLead(leadId: string): Promise<{ brand: Brand; numbers: SendingNumber[] }> {
+    const [source, list] = await Promise.all([
+      this.leadSource(leadId),
+      this.list({ channel: 'sms' }),
+    ]);
+    const brand = brandForLeadSource(source);
+    return { brand, numbers: list.filter((n) => brandForNumber(n.number).key === brand.key) };
+  }
 
-    return this.defaultFor('sms');
+  /** Never throws, like list(): a failed lookup reads as a Quick Cash lead. */
+  private async leadSource(leadId: string): Promise<string | null> {
+    try {
+      const lead = await this.prisma.lead.findUnique({ where: { id: leadId }, select: { source: true } });
+      return lead?.source ?? null;
+    } catch (err: any) {
+      this.logger.error(`Lead source lookup for ${leadId} failed: ${err.message}`);
+      return null;
+    }
   }
 
   /**

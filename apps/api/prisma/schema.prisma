@@ -2017,7 +2017,11 @@ model MessagingCompliance {
   optOutText      String   @default("Reply STOP to stop texting")
 
   senderIdEnabled Boolean  @default(true)
+  /// Sender name on texts to Quick Cash leads (everything but surplus).
   senderIdText    String   @default("Quick Cash Home Buyers")
+  /// Sender name on texts to surplus leads, which go out under D.I.G.
+  /// Deeper's own A2P campaign.
+  senderIdTextDigDeeper String @default("D.I.G. Deeper LLC")
 
   // When on, the footer is re-sent every `periodicDays` days instead of only
   // on the first message to a lead.

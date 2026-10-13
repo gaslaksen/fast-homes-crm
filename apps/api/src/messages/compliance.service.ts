@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { BrandKey } from '../common/company.constants';
 
 const SINGLETON_ID = 'default';
 
@@ -7,7 +8,10 @@ export interface ComplianceSettings {
   optOutEnabled: boolean;
   optOutText: string;
   senderIdEnabled: boolean;
+  /** Quick Cash leads. */
   senderIdText: string;
+  /** Surplus leads, texted under D.I.G. Deeper's campaign. */
+  senderIdTextDigDeeper: string;
   periodicEnabled: boolean;
   periodicDays: number;
 }
@@ -41,6 +45,7 @@ export class ComplianceService {
       optOutText: row.optOutText,
       senderIdEnabled: row.senderIdEnabled,
       senderIdText: row.senderIdText,
+      senderIdTextDigDeeper: row.senderIdTextDigDeeper,
       periodicEnabled: row.periodicEnabled,
       periodicDays: row.periodicDays,
     };
@@ -53,6 +58,9 @@ export class ComplianceService {
     if (patch.periodicEnabled !== undefined) data.periodicEnabled = !!patch.periodicEnabled;
     if (patch.optOutText !== undefined) data.optOutText = String(patch.optOutText).trim().slice(0, 160);
     if (patch.senderIdText !== undefined) data.senderIdText = String(patch.senderIdText).trim().slice(0, 160);
+    if (patch.senderIdTextDigDeeper !== undefined) {
+      data.senderIdTextDigDeeper = String(patch.senderIdTextDigDeeper).trim().slice(0, 160);
+    }
     if (patch.periodicDays !== undefined) {
       const n = Number(patch.periodicDays);
       // 1 to 365 days. Anything outside that is a typo, not an intent.
@@ -69,11 +77,14 @@ export class ComplianceService {
 
   /**
    * The footer as it would appear, or '' when both parts are disabled.
-   * Sender ID first, then opt-out, each on its own line.
+   * Sender ID first, then opt-out, each on its own line. The sender name is
+   * the lead's brand's: carriers check it against the campaign the text goes
+   * out under.
    */
-  buildFooter(settings: ComplianceSettings): string {
+  buildFooter(settings: ComplianceSettings, brand: BrandKey = 'qchb'): string {
+    const senderId = brand === 'digdeeper' ? settings.senderIdTextDigDeeper : settings.senderIdText;
     const parts: string[] = [];
-    if (settings.senderIdEnabled && settings.senderIdText) parts.push(settings.senderIdText);
+    if (settings.senderIdEnabled && senderId) parts.push(senderId);
     if (settings.optOutEnabled && settings.optOutText) parts.push(settings.optOutText);
     return parts.join('\n');
   }
@@ -87,8 +98,9 @@ export class ComplianceService {
   async shouldAttachFooter(
     settings: ComplianceSettings,
     lastSentAt: Date | null | undefined,
+    brand: BrandKey = 'qchb',
   ): Promise<boolean> {
-    if (!this.buildFooter(settings)) return false;
+    if (!this.buildFooter(settings, brand)) return false;
     if (!lastSentAt) return true;
     if (!settings.periodicEnabled) return false;
 

@@ -33,7 +33,8 @@ export class MessagesController {
   }
 
   /**
-   * Numbers the composer may send this lead from, plus which one is preselected.
+   * Numbers the composer may send this lead from (only its own brand's, see
+   * PhoneNumbersService.resolveForLead), plus which one is preselected.
    * `lastUsed` marks the number already on this thread, `isDefault` the org
    * fallback, mirroring the badges in the picker.
    *
@@ -47,8 +48,9 @@ export class MessagesController {
     @Param('leadId') leadId: string,
     @Query('userId') userId?: string,
   ) {
-    const [numbers, sticky, selected, email] = await Promise.all([
-      this.phoneNumbers.list({ channel: 'sms' }),
+    const [{ numbers }, sticky, selected, email] = await Promise.all([
+      // Only the lead's own brand's numbers: the send would refuse the others.
+      this.phoneNumbers.smsNumbersForLead(leadId),
       this.phoneNumbers.stickyNumberFor(leadId),
       this.phoneNumbers.resolveForLead(leadId),
       this.messagesService.getEmailSendIdentity(leadId, userId),
