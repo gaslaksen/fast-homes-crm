@@ -1,4 +1,4 @@
-import { describeCounts, describeFeed, FeedRun, FeedSource } from './digest-feeds.util';
+import { describeCounts, describeFeed, FeedRun, FeedSource, summarizeHealthyFeeds } from './digest-feeds.util';
 
 /**
  * The county feed lines in the Daily Brief. The point of these is the failure
@@ -118,5 +118,23 @@ describe('describeFeed', () => {
     );
     expect(row.urgency).toBe('warn');
     expect(row.detail).toBe('Ran 4:30am in 1 min: 441 scanned · 9 new · trace did not run · 71 updated · 21 retired. Trace failed on the 9 new: Endato rejected the credentials.');
+  });
+});
+
+describe('summarizeHealthyFeeds', () => {
+  const row = (urgency: any, scanned: number, created: number) =>
+    ({ label: 'X County', schedule: '', detail: '', urgency, scanned, created });
+
+  it('folds every healthy feed into one line of counts', () => {
+    expect(summarizeHealthyFeeds([row('neutral', 465, 0), row('good', 1758, 2)])).toBe(
+      'All 2 county feeds healthy: 2,223 scanned, 2 new on their last pulls.',
+    );
+  });
+
+  it('leaves problems out of the count and says the rest are "other"', () => {
+    expect(summarizeHealthyFeeds([row('critical', 0, 0), row('neutral', 105, 10)])).toBe(
+      '1 other county feed healthy: 105 scanned, 10 new on their last pulls.',
+    );
+    expect(summarizeHealthyFeeds([row('critical', 0, 0)])).toBeNull();
   });
 });

@@ -2,125 +2,165 @@ import { DigestRenderService } from './digest-render.service';
 import { DigestBrief } from './digest.types';
 
 /**
- * The renderer is pure, so a hand-written brief pins what the new sections
- * put in front of the reader. These exist because the Daily Brief had no
- * surplus content at all and no way to tell whether a county pull ran.
+ * The renderer is pure, so a hand-written brief pins what each section puts
+ * in front of the reader. The brief is a surplus action email: these pin the
+ * sections that carry it and the wholesale line that replaced four sections.
  */
 function brief(over: Partial<DigestBrief> = {}): DigestBrief {
   return {
     organizationId: 'org1',
-    generatedAt: new Date('2026-09-07T11:00:00Z'),
-    dateLabel: 'Monday, September 7, 2026',
+    generatedAt: new Date('2026-10-13T11:00:00Z'),
+    dateLabel: 'Tuesday, October 13, 2026',
     timeLabel: '7:00 AM ET',
     greetingName: 'Geoff',
     greetingPrefix: 'Good morning',
-    marketLabel: null,
     subject: 'Dealcore Daily: test',
     preheader: '',
     bigThing: null,
-    board: [],
-    actions: [],
-    waiting: [],
-    waitingTotal: 0,
-    dealsInMotion: [],
-    dealsTotalFee: '$0',
-    foreclosures: [],
-    foreclosureIngestNote: null,
-    foreclosureTooLateNote: null,
-    foreclosureOpenTotal: 0,
-    newOvernight: [],
-    newOvernightTotal: 0,
-    surplus: [],
-    surplusOpenTotal: 0,
-    surplusCallableTotal: 0,
+    scorecard: [],
+    calls: [],
+    callsTotal: 0,
+    promises: [],
+    promisesTotal: 0,
+    needsTrace: null,
+    inFlight: [],
+    inFlightTotal: 0,
+    inFlightFees: '$0',
     surplusIngestNote: null,
     surplusOpeningSoonNote: null,
-    surplusOverdue: [],
-    surplusOverdueTotal: 0,
-    surplusNotTapped: 0,
-    surplusMissingChannel: 0,
-    surplusUpdateOverdue: [],
-    surplusUpdateOverdueTotal: 0,
-    surplusRechecksDue: 0,
-    feeds: [],
-    yesterday: [],
-    news: [],
+    feedProblems: [],
+    feedSummary: null,
+    wholesale: null,
     appUrl: 'https://mydealcore.com',
     isEmpty: false,
     ...over,
   };
 }
 
-describe('DigestRenderService, surplus and county feeds', () => {
+describe('DigestRenderService', () => {
   const render = new DigestRenderService();
 
-  it('lists surplus claimants worth calling, with the board link', () => {
+  it('leads with the big thing and never prints "Why it matters"', () => {
     const b = brief({
-      surplus: [
-        {
-          claimant: 'ROBERT E PITTARD',
-          property: '2502 34TH ST SW, LEHIGH ACRES',
-          facts: 'Lee County · case 2025002173 · $32,054 surplus · Open, nothing filed',
-          status: 'Never contacted. Open, nothing filed, 3 callable numbers',
-          url: 'https://mydealcore.com/leads/abc',
-          urgency: 'critical',
-        },
-      ],
-      surplusOpenTotal: 238,
-      surplusCallableTotal: 57,
-      surplusIngestNote: '24 claimants landed from Lee, $312.4K of surplus between them.',
+      bigThing: {
+        key: 'surplus-person:brevard|douglas garcia',
+        short: 'Call Douglas Garcia ($16.4K, 2 cases)',
+        headline: 'Douglas Garcia is owed $16,414 across 2 Brevard County cases and nobody has called.',
+        lines: ['2480 KEEGAN CIR SW, PALM BAY · case 250809 · $8,738', 'Open, nothing filed on either. 2 clean numbers.'],
+        flag: null,
+        repeatNote: 'Led the previous brief too and still has not been called.',
+        ctaLabel: 'Open claimant',
+        ctaUrl: 'https://mydealcore.com/leads/a',
+        phone: '(321) 555-0142',
+      },
     });
     const html = render.renderHtml(b);
-    expect(html).toContain('Surplus funds');
-    expect(html).toContain('ROBERT E PITTARD');
-    expect(html).toContain('3 callable numbers');
-    expect(html).toContain('57 of 238 open claimants have a live number');
-    expect(html).toContain('24 claimants landed from Lee');
-    expect(html).toContain('https://mydealcore.com/surplus-funds');
+    expect(html).toContain('1 big thing');
+    expect(html).toContain('Douglas Garcia is owed $16,414');
+    expect(html).toContain('case 250809');
+    expect(html).toContain('Led the previous brief too');
+    expect(html).toContain('tel:3215550142');
+    expect(html).not.toContain('Why it matters');
 
     const text = render.renderText(b);
-    expect(text).toContain('SURPLUS FUNDS');
-    expect(text).toContain('ROBERT E PITTARD - 2502 34TH ST SW, LEHIGH ACRES');
-    expect(text).toContain('Overnight: 24 claimants landed from Lee');
+    expect(text).toContain('1 BIG THING');
+    expect(text).toContain('Call (321) 555-0142');
+    expect(text).not.toContain('Why it matters');
   });
 
-  it('reports every county feed, and a failed one in red', () => {
+  it('flags an unconfirmed match on the big thing and the call list', () => {
+    const flag = 'Likely match, not confirmed: confirm who you are speaking to first.';
     const b = brief({
-      feeds: [
-        { label: 'Duval County', schedule: 'daily, 5:45am ET', detail: 'Ran 5:45am in under a minute: 441 scanned · 0 new · 71 updated · 21 retired.', urgency: 'neutral' },
-        { label: 'Lee County', schedule: 'weekly, Monday 4:30am ET', detail: 'Did not run this morning. Last ran Mon 8/31 at 4:30am.', urgency: 'critical' },
+      bigThing: {
+        key: 'surplus-person:citrus|a burpee priscilla',
+        short: 'Call Priscilla A Burpee ($36.2K)',
+        headline: 'Priscilla A Burpee is owed $36,194 by Citrus County and nobody has called.',
+        lines: [],
+        flag,
+        repeatNote: null,
+        ctaLabel: 'Open claimant',
+        ctaUrl: 'https://mydealcore.com/leads/p',
+      },
+      calls: [
+        { name: 'Janet Acuna', amount: '$8,738', detail: 'Brevard County case 250809.', flag, phone: null, url: 'https://mydealcore.com/leads/j', urgency: 'warn' },
+      ],
+      callsTotal: 3,
+    });
+    const html = render.renderHtml(b);
+    expect(html.split(flag).length - 1).toBe(2);
+    expect(html).toContain('Then call these');
+    expect(html).toContain('1. Janet Acuna &middot; $8,738');
+    expect(html).toContain('Open the full call list (3)');
+  });
+
+  it('lists promises owed with how late each one is', () => {
+    const b = brief({
+      promises: [
+        { title: 'Check for a reply to the letter to DAVID G KELLY', detail: null, when: '5 days late · Ian', url: 'https://mydealcore.com/leads/k', urgency: 'critical' },
+      ],
+      promisesTotal: 11,
+    });
+    const html = render.renderHtml(b);
+    expect(html).toContain('Promises due');
+    expect(html).toContain('11 owed to claimants');
+    expect(html).toContain('5 days late · Ian');
+    expect(html).toContain('10 more on the board.');
+    expect(render.renderText(b)).toContain('PROMISES DUE (11)');
+  });
+
+  it('surfaces the claimants nobody has traced', () => {
+    const b = brief({ needsTrace: { total: 42, byCounty: 'Citrus 28 · Alachua 10 · Lee 2 · Santa Rosa 2' } });
+    const html = render.renderHtml(b);
+    expect(html).toContain('42 live claimants have never been traced');
+    expect(html).toContain('Citrus 28');
+    expect(render.renderText(b)).toContain('NEEDS A SKIP TRACE');
+  });
+
+  it('shows stuck claims in flight, or one line when nothing is stuck', () => {
+    const stuck = render.renderHtml(brief({
+      inFlightTotal: 3,
+      inFlightFees: '$12.4K',
+      inFlight: [
+        { claimant: 'Mary Surdi', stage: 'Claim Filed', note: 'Filed 38 days ago, the county has not acknowledged it', fee: '$4,100', url: 'https://mydealcore.com/leads/m', urgency: 'warn' },
+      ],
+    }));
+    expect(stuck).toContain('Claims in flight');
+    expect(stuck).toContain('3 claims · $12.4K in fees · 1 stuck');
+    expect(stuck).toContain('Filed 38 days ago');
+
+    const moving = render.renderHtml(brief({ inFlightTotal: 2, inFlightFees: '$8.0K' }));
+    expect(moving).toContain('Nothing stuck. Every signed claim is moving.');
+  });
+
+  it('collapses healthy feeds to one line and keeps a failed one in red', () => {
+    const b = brief({
+      feedSummary: '11 other county feeds healthy: 6,442 scanned, 42 new on their last pulls.',
+      feedProblems: [
+        { label: 'Lee County', schedule: 'weekly, Monday 4:30am ET', detail: 'Did not run this morning. Last ran Mon 10/5 at 4:30am.', urgency: 'critical' },
       ],
     });
     const html = render.renderHtml(b);
-    expect(html).toContain('County feeds');
-    expect(html).toContain('Duval County');
-    expect(html).toContain('Did not run this morning');
-    // The failed line takes the critical accent colour so it cannot be skimmed past.
-    expect(html).toMatch(/color:#dc2626;line-height:1\.5;">Did not run this morning/);
+    expect(html).toContain('Coming up');
+    expect(html).toContain('11 other county feeds healthy');
+    expect(html).toMatch(/color:#dc2626;">Did not run this morning/);
+    expect(html).not.toContain('Duval County');
 
     const text = render.renderText(b);
-    expect(text).toContain('COUNTY FEEDS');
     expect(text).toContain('Lee County (weekly, Monday 4:30am ET): Did not run this morning.');
   });
 
-  it('keeps the surplus totals on a day with nobody new to call', () => {
-    // The board still holds work; a section that vanishes reads as none.
-    const html = render.renderHtml(brief({ surplusOpenTotal: 238, surplusCallableTotal: 57 }));
-    expect(html).toContain('Surplus funds');
-    expect(html).toContain('57 of 238 open claimants have a live number');
+  it('puts wholesaling on one line at the bottom', () => {
+    const b = brief({ wholesale: '1 reply waiting (oldest 7d 16h) · 4 contracts past close date' });
+    const html = render.renderHtml(b);
+    expect(html).toContain('Wholesale, parked:');
+    expect(html).toContain('4 contracts past close date');
+    expect(render.renderText(b)).toContain('Wholesale, parked: 1 reply waiting (oldest 7d 16h) · 4 contracts past close date.');
   });
 
-  it('shows the claimants about to clear the lien window', () => {
-    const note = '2 more surplus claimants open up in the next 30 days, $120.0K between them. Next: TINA FORTNER in 4 days.';
-    const b = brief({ surplusOpeningSoonNote: note });
-    expect(render.renderHtml(b)).toContain('Coming up:');
-    expect(render.renderHtml(b)).toContain('Next: TINA FORTNER in 4 days.');
-    expect(render.renderText(b)).toContain(`Coming up: ${note}`);
-  });
-
-  it('drops both sections when there is nothing to say', () => {
+  it('drops every section when there is nothing to say', () => {
     const html = render.renderHtml(brief());
-    expect(html).not.toContain('Surplus funds');
-    expect(html).not.toContain('County feeds');
+    for (const label of ['1 big thing', 'Surplus scorecard', 'Call these', 'Promises due', 'Needs a skip trace', 'Claims in flight', 'Coming up', 'Wholesale, parked']) {
+      expect(html).not.toContain(label);
+    }
   });
 });
