@@ -85,7 +85,10 @@ export default function DialerScreen() {
           renderItem={({ item }) => (
             <TouchableOpacity
               style={styles.row}
-              onPress={() => item.sellerPhone && startCall(item.sellerPhone, fullName(item))}
+              onPress={() =>
+                item.sellerPhone &&
+                startCall(item.sellerPhone, fullName(item), { id: item.id, source: item.source ?? undefined })
+              }
               disabled={!item.sellerPhone}
             >
               <View style={styles.rowBody}>
@@ -111,7 +114,7 @@ export default function DialerScreen() {
             return (
               <TouchableOpacity
                 style={styles.row}
-                onPress={() => num && startCall(num, name)}
+                onPress={() => num && startCall(num, name, item.lead ? { id: item.lead.id } : undefined)}
                 disabled={!num}
               >
                 <View style={styles.rowBody}>

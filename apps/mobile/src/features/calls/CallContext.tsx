@@ -1,13 +1,21 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
+import { useQueryClient } from '@tanstack/react-query';
 import { Voice, Call, CallInvite } from '@twilio/voice-react-native-sdk';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { CALLER_ID_KEY } from '@/lib/config';
 import { useCallerIds, type CallerId } from './hooks';
 import { ActiveCallScreen } from './ActiveCallScreen';
-import { CallContext, useCall, type CallState, type CallStatus } from './callState';
+import {
+  CallContext,
+  useCall,
+  type CallLead,
+  type CallOutcomeInput,
+  type CallState,
+  type CallStatus,
+} from './callState';
 
 // Re-exported so existing imports from '@/features/calls/CallContext' keep working.
 export { useCall };
@@ -22,6 +30,17 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const [peerName, setPeerName] = useState('');
   const [connectedAt, setConnectedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // The outgoing call in flight and the lead it is for, resolved before the
+  // dial so nothing about it can change underneath the call.
+  const qc = useQueryClient();
+  const currentRef = useRef<{ leadId: string; surplus: boolean; name: string } | null>(null);
+  const startingRef = useRef(false);
+  // A finished surplus call still owed an outcome. Kept apart from the live
+  // call state so a callback ringing in mid-form cannot wipe it: only saving
+  // or closing the form clears it. The API keys the CallLog on our leg's
+  // CallSid, so that is what the outcome is saved against.
+  const [pending, setPending] = useState<{ sid: string; leadId: string; name: string } | null>(null);
 
   const { token: authToken } = useAuth();
   const { data: callerIds = [] } = useCallerIds(!!authToken);
@@ -44,19 +63,35 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     else SecureStore.deleteItemAsync(CALLER_ID_KEY).catch(() => {});
   }, []);
 
-  const attach = useCallback((call: Call) => {
+  const attach = useCallback((call: Call, outgoing: boolean) => {
     callRef.current = call;
-    call.on(Call.Event.Ringing, () => setStatus('ringing'));
+    // The sid is only known once Twilio has the call, so read it as soon as
+    // any later event fires rather than at connect().
+    let sid: string | undefined;
+    const readSid = () => {
+      sid = call.getSid() || sid;
+    };
+    call.on(Call.Event.Ringing, () => {
+      readSid();
+      setStatus('ringing');
+    });
     call.on(Call.Event.Connected, () => {
+      readSid();
       setStatus('connected');
       setConnectedAt(Date.now());
     });
     call.on(Call.Event.Reconnecting, () => setStatus('reconnecting'));
     call.on(Call.Event.Disconnected, () => {
+      readSid();
+      const cur = outgoing ? currentRef.current : null;
+      if (cur?.surplus && sid) setPending({ sid, leadId: cur.leadId, name: cur.name });
+      if (outgoing) currentRef.current = null;
       setStatus('ended');
       callRef.current = null;
     });
     call.on(Call.Event.ConnectFailure, (e: any) => {
+      // Never reached the carrier, so there is no call to say anything about.
+      if (outgoing) currentRef.current = null;
       setError(e?.message || 'Call failed to connect');
       setStatus('ended');
       callRef.current = null;
@@ -82,12 +117,13 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         setError(null);
         setMuted(false);
         setPeerName(name);
-        attach(call);
+        attach(call, false);
         setStatus('connected');
         setConnectedAt(Date.now());
       });
       invite.on(CallInvite.Event.Cancelled, () => {
-        if (!callRef.current) setStatus('idle');
+        // Leave an ended screen alone: it may be an outcome form mid-entry.
+        if (!callRef.current) setStatus((st) => (st === 'ended' ? st : 'idle'));
       });
     };
 
@@ -130,13 +166,38 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   }, [authToken]);
 
   const startCall = useCallback(
-    async (toNumber: string, name?: string) => {
+    async (toNumber: string, name?: string, lead?: CallLead) => {
       if (status !== 'idle' && status !== 'ended') return; // a call is already up
+      if (startingRef.current) return; // a second tap while the first resolves
+      startingRef.current = true;
       setError(null);
       setMuted(false);
       setConnectedAt(null);
       setPeerName(name || toNumber);
       setStatus('connecting');
+      currentRef.current = null;
+
+      // Whether the lead is a surplus claim decides if the call ends on the
+      // outcome form. Settled before the dial, so a slow answer cannot land on
+      // a later call. From Recents the source is not known; it is normally
+      // already cached by the screen the call came from.
+      if (lead?.id) {
+        let surplus = lead.source === 'SURPLUS';
+        if (lead.source === undefined) {
+          try {
+            const l: any = await qc.fetchQuery({
+              queryKey: ['lead', lead.id, 'detail'],
+              queryFn: async () => (await api.get(`/leads/${lead.id}`)).data,
+              staleTime: 30_000,
+            });
+            surplus = l?.source === 'SURPLUS';
+          } catch {
+            // Unknown source: the call still goes, without the outcome form.
+          }
+        }
+        currentRef.current = { leadId: lead.id, surplus, name: name || toNumber };
+      }
+
       try {
         const { data } = await api.post('/calls/twilio/token');
         if (!data?.configured || !data?.token) {
@@ -145,18 +206,24 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         const call = await voiceRef.current!.connect(data.token, {
           // callerId reaches the TwiML voice webhook, which re-checks it
           // against the org's numbers before dialling. Omitted = API default.
+          // leadId lets the voice webhook log the call on the lead's
+          // timeline and key the CallLog to it.
           params: {
             To: toNumber,
             ...(callerId ? { callerId: callerId.number } : {}),
+            ...(lead?.id ? { leadId: lead.id } : {}),
           },
         });
-        attach(call);
+        attach(call, true);
       } catch (e: any) {
+        currentRef.current = null;
         setError(e?.response?.data?.error || e?.message || 'Could not start the call.');
         setStatus('ended');
+      } finally {
+        startingRef.current = false;
       }
     },
-    [status, attach, callerId],
+    [status, attach, callerId, qc],
   );
 
   const toggleMute = useCallback(async () => {
@@ -184,7 +251,23 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     setConnectedAt(null);
     setError(null);
     setPeerName('');
+    setPending(null);
   }, []);
+
+  const needsOutcome = status === 'ended' && !!pending;
+  const outcomeName = pending?.name ?? null;
+
+  const saveOutcome = useCallback(
+    async (input: CallOutcomeInput) => {
+      if (!pending) return;
+      await api.post('/calls/twilio/disposition', { callSid: pending.sid, ...input });
+      // The outcome can move the stage, stamp Tapped, set DNC and add a task.
+      qc.invalidateQueries({ queryKey: ['surplus'] });
+      qc.invalidateQueries({ queryKey: ['lead', pending.leadId] });
+      qc.invalidateQueries({ queryKey: ['calls', 'recents'] });
+    },
+    [pending, qc],
+  );
 
   const value = useMemo<CallState>(
     () => ({
@@ -200,6 +283,9 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       toggleMute,
       hangUp,
       dismiss,
+      needsOutcome,
+      outcomeName,
+      saveOutcome,
     }),
     [
       status,
@@ -214,6 +300,9 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       toggleMute,
       hangUp,
       dismiss,
+      needsOutcome,
+      outcomeName,
+      saveOutcome,
     ],
   );
 

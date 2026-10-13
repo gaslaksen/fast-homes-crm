@@ -11,6 +11,10 @@ export interface DealNumbers {
 
 export interface LeadDetail {
   id: string;
+  /** LeadSource. SURPLUS switches the lead screen to the claim view. */
+  source: string | null;
+  /** Set on a surplus claim marked do-not-call, among others. */
+  doNotContact: boolean;
   sellerFirstName: string | null;
   sellerLastName: string | null;
   sellerPhone: string | null;

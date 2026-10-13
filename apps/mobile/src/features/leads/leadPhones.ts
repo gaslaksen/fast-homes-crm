@@ -1,4 +1,4 @@
-import { ActionSheetIOS } from 'react-native';
+import { ActionSheetIOS, Alert } from 'react-native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { prettyPhone } from '@/features/calls/hooks';
@@ -16,6 +16,14 @@ export interface LeadPhone {
   /** 'Mobile' | 'Landline' | null, as the skip trace reported it. */
   type: string | null;
   isPrimary: boolean;
+  /**
+   * The registry ('federal', 'state', 'litigator', 'tcpa') the number is on.
+   * Only surplus numbers carry it today. Shown beside the number; calling it
+   * is the caller's decision, and the API refuses a text to it.
+   */
+  dnc?: string | null;
+  /** Tried, and it does not reach this person. */
+  bad?: boolean;
 }
 
 export interface LeadPhonesResponse {
@@ -64,15 +72,38 @@ export function useSetPrimaryPhone(leadId: string) {
 
 /** "Phone 2 · Mobile", the part of a row that says which number this is. */
 export function phoneSubtitle(p: LeadPhone): string {
-  return [p.label, p.type].filter(Boolean).join(' · ');
+  return [p.label, p.type, p.dnc ? dncLabel(p.dnc) : null, p.bad ? 'Bad number' : null]
+    .filter(Boolean)
+    .join(' · ');
 }
 
-/** Action sheet listing the seller's numbers. Used by both texting and calling. */
+/** "DNC (federal)" from the registry the number is on. */
+export function dncLabel(registry: string): string {
+  return `DNC (${registry})`;
+}
+
+/**
+ * Why a flagged number cannot be texted. The API refuses a text to a DNC
+ * number; calls are left to the person dialling, so this is texting only.
+ */
+export function alertDncText(p: { number: string; dnc?: string | null }) {
+  Alert.alert(
+    'Do not text',
+    `${prettyPhone(p.number)} is on the ${p.dnc} do-not-call list, so Dealcore will not text it.`,
+  );
+}
+
+/**
+ * Action sheet listing the seller's numbers. Used by both texting and calling.
+ * Every number shows with its DNC flag in the label. A flagged number can be
+ * called; with `forText` set, picking one explains why it cannot be texted.
+ */
 export function showPhoneSheet(opts: {
   title: string;
   message?: string;
   numbers: LeadPhone[];
   onSelect: (p: LeadPhone) => void;
+  forText?: boolean;
 }) {
   const labels = opts.numbers.map((n) => `${prettyPhone(n.number)} · ${phoneSubtitle(n)}`);
   ActionSheetIOS.showActionSheetWithOptions(
@@ -83,7 +114,13 @@ export function showPhoneSheet(opts: {
       cancelButtonIndex: labels.length,
     },
     (i) => {
-      if (i != null && i < opts.numbers.length) opts.onSelect(opts.numbers[i]);
+      if (i == null || i >= opts.numbers.length) return;
+      const picked = opts.numbers[i];
+      if (opts.forText && picked.dnc) {
+        alertDncText(picked);
+        return;
+      }
+      opts.onSelect(picked);
     },
   );
 }

@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Image,
   Linking,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Switch,
@@ -30,6 +31,8 @@ import {
   phoneSubtitle,
 } from '@/features/leads/leadPhones';
 import { useDismissHotLead } from '@/features/dashboard/dashboard';
+import { SurplusLeadView } from '@/features/surplus/SurplusLeadView';
+import { useQueryClient } from '@tanstack/react-query';
 import { Card, SectionLabel, Chip, Stat } from '@/components/ui';
 import { PhoneIcon, MessageIcon, MailIcon, ZapIcon, PencilIcon, ChevronRight } from '@/components/icons';
 import { money, timelineLabel } from '@/lib/format';
@@ -110,7 +113,8 @@ export default function LeadDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const leadId = String(id);
   const router = useRouter();
-  const { data: lead, isLoading } = useLeadDetail(leadId);
+  const { data: lead, isLoading, isRefetching, refetch } = useLeadDetail(leadId);
+  const qc = useQueryClient();
   const update = useUpdateLead(leadId);
   const dismissHot = useDismissHotLead();
   const { startCall } = useCall();
@@ -127,7 +131,35 @@ export default function LeadDetailScreen() {
   }
 
   const name = fullName(lead);
+
+  // A surplus lead is a claim, not a property deal: no ARV, no CAMP, no
+  // comps. It gets its own view, fed by the surplus API. Editing contacts
+  // stays on the web, where each number keeps its do-not-call flag.
+  if (lead.source === 'SURPLUS') {
+    return (
+      <View style={styles.root}>
+        <Stack.Screen options={{ title: name, headerRight: () => null }} />
+        <ScrollView
+          contentContainerStyle={styles.content}
+          refreshControl={
+            <RefreshControl
+              refreshing={isRefetching}
+              onRefresh={() => {
+                refetch();
+                qc.invalidateQueries({ queryKey: ['surplus', leadId] });
+                qc.invalidateQueries({ queryKey: ['lead', leadId, 'phones'] });
+              }}
+            />
+          }
+        >
+          <SurplusLeadView lead={lead} />
+        </ScrollView>
+      </View>
+    );
+  }
+
   const band = bandStyle(lead.scoreBand);
+  const callLead = { id: leadId, source: lead.source };
   const deal = dealHeadline(lead.currentDealNumbers);
   const hasDeal = !!deal && (deal.offer != null || deal.profit != null);
   const address = [
@@ -224,9 +256,9 @@ export default function LeadDetailScreen() {
                     title: 'Call',
                     message: `Which number should we dial for ${name}?`,
                     numbers,
-                    onSelect: (p) => startCall(p.number, name),
+                    onSelect: (p) => startCall(p.number, name, callLead),
                   })
-                : lead.sellerPhone && startCall(lead.sellerPhone, name)
+                : lead.sellerPhone && startCall(lead.sellerPhone, name, callLead)
             }
             disabled={!lead.sellerPhone && numbers.length === 0}
           />
@@ -257,7 +289,7 @@ export default function LeadDetailScreen() {
                 <View key={p.number} style={styles.phoneRow}>
                   <TouchableOpacity
                     style={styles.phoneMain}
-                    onPress={() => startCall(p.number, name)}
+                    onPress={() => startCall(p.number, name, callLead)}
                     activeOpacity={0.7}
                   >
                     <PhoneIcon size={15} color={colors.primary} />

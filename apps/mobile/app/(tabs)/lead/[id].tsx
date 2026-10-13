@@ -67,26 +67,31 @@ function ThreadCallButton({
   phone,
   name,
   numbers,
+  leadId,
+  source,
 }: {
   phone: string | null;
   name: string;
   numbers: LeadPhone[];
+  leadId: string;
+  source?: string | null;
 }) {
   const { colors, styles } = useThemed(makeStyles);
   const { startCall } = useCall();
   if (!phone && !numbers.length) return null;
 
   function onPress() {
+    const lead = { id: leadId, source };
     if (numbers.length < 2) {
       const only = numbers[0]?.number ?? phone;
-      if (only) startCall(only, name);
+      if (only) startCall(only, name, lead);
       return;
     }
     showPhoneSheet({
       title: 'Call',
       message: `Which number should we dial for ${name}?`,
       numbers,
-      onSelect: (p) => startCall(p.number, name),
+      onSelect: (p) => startCall(p.number, name, lead),
     });
   }
 
@@ -189,7 +194,13 @@ export default function ThreadScreen() {
             </TouchableOpacity>
           ),
           headerRight: () => (
-            <ThreadCallButton phone={lead?.sellerPhone ?? null} name={name} numbers={numbers} />
+            <ThreadCallButton
+              phone={lead?.sellerPhone ?? null}
+              name={name}
+              numbers={numbers}
+              leadId={leadId}
+              source={lead?.source}
+            />
           ),
         }}
       />
@@ -253,6 +264,7 @@ export default function ThreadScreen() {
                   message: 'Which of their numbers should this text go to?',
                   numbers,
                   onSelect: (p) => setTo(p.number),
+                  forText: true,
                 })
               }
             >

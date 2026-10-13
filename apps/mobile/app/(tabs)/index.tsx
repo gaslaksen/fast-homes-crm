@@ -14,15 +14,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import {
   useActionQueue,
-  useDashboardStats,
   useDismissHotLead,
   useHotLeads,
-  useInboxCounts,
   actionMeta,
   type ActionItem,
   type HotLead,
 } from '@/features/dashboard/dashboard';
-import { useDealsSummary } from '@/features/deals/deals';
+import { useSurplusStats } from '@/features/surplus/surplus';
 import { bandStyle, fullName, useSetScoreBand, BAND_OPTIONS } from '@/features/leads/leads';
 import { useAuth } from '@/lib/auth';
 import { Logo } from '@/components/Logo';
@@ -34,6 +32,7 @@ import {
   ZapIcon,
   TrendingUpIcon,
   MessageIcon,
+  PhoneIcon,
 } from '@/components/icons';
 import { moneyShort } from '@/lib/format';
 import { useThemed, type Colors } from '@/theme';
@@ -121,28 +120,41 @@ export default function HomeScreen() {
   const { colors, styles } = useThemed(makeStyles);
   const router = useRouter();
   const { user } = useAuth();
-  const stats = useDashboardStats();
+  const surplus = useSurplusStats();
   const actions = useActionQueue(6);
   const hot = useHotLeads(5);
-  const counts = useInboxCounts();
-  const summary = useDealsSummary();
   const dismissHot = useDismissHotLead();
   const setBand = useSetScoreBand();
 
-  const refreshing =
-    stats.isRefetching || actions.isRefetching || hot.isRefetching || counts.isRefetching;
+  const refreshing = surplus.isRefetching || actions.isRefetching || hot.isRefetching;
   const onRefresh = () => {
-    stats.refetch();
+    surplus.refetch();
     actions.refetch();
     hot.refetch();
-    counts.refetch();
-    summary.refetch();
   };
 
-  const needAction = stats.data?.needsFollowUp ?? actions.data?.length ?? 0;
-  const hotCount = stats.data?.leadsByBand?.HOT ?? hot.data?.length ?? 0;
-  const dealsValue = summary.data?.expected.sum ?? 0;
-  const unread = counts.data?.unread ?? 0;
+  // Surplus funds is the main pipeline, so its working lists lead. Counts are
+  // properties, as on the web board; the list they open shows each claimant.
+  const s = surplus.data;
+  const count = (n?: number) => (n == null ? '-' : String(n));
+
+  /** Open the surplus list on one filter, clearing any left from an earlier link. */
+  const openSurplus = (filter: { queue?: string; contact?: string; letterDue?: string }) =>
+    router.push({
+      pathname: '/leads',
+      params: {
+        mode: 'surplus',
+        queue: filter.queue ?? '',
+        contact: filter.contact ?? '',
+        letterDue: filter.letterDue ?? '',
+        band: '',
+        needsReply: '',
+        source: '',
+        // Changes every tap, so tapping the same card again re-applies its
+        // filter even after it was cleared on the list.
+        t: String(Date.now()),
+      },
+    });
 
   /**
    * Long-press a hot lead to re-rank it or clear it off this card. Dismissing
@@ -209,38 +221,39 @@ export default function HomeScreen() {
       >
         <Text style={styles.welcome}>Welcome, {user?.firstName || 'there'}</Text>
 
+        <SectionLabel>Surplus funds</SectionLabel>
         <View style={styles.statGrid}>
           <StatCard
-            label="Need action"
-            value={String(needAction)}
+            label="Call now"
+            value={count(s?.queues?.call)}
+            Icon={PhoneIcon}
+            iconColor="#047857"
+            iconBg="#D1FAE5"
+            onPress={() => openSurplus({ queue: 'call' })}
+          />
+          <StatCard
+            label="Not tapped"
+            value={count(s?.notTapped)}
             Icon={ZapIcon}
             iconColor="#A16207"
             iconBg="#FEF9C3"
-            onPress={() => router.push({ pathname: '/leads', params: { needsReply: 'true' } })}
+            onPress={() => openSurplus({ contact: 'not_tapped' })}
           />
           <StatCard
-            label="Deals"
-            value={moneyShort(dealsValue)}
-            Icon={TrendingUpIcon}
-            iconColor="#15803D"
-            iconBg="#DCFCE7"
-            onPress={() => router.push('/deals')}
-          />
-          <StatCard
-            label="Unread"
-            value={String(unread)}
+            label="Letters due"
+            value={count(s?.letterDue)}
             Icon={MessageIcon}
             iconColor={colors.primary}
             iconBg={colors.primarySoft}
-            onPress={() => router.push('/inbox')}
+            onPress={() => openSurplus({ letterDue: 'true' })}
           />
           <StatCard
-            label="Hot leads"
-            value={String(hotCount)}
-            Icon={ZapIcon}
-            iconColor="#B91C1C"
-            iconBg="#FEE2E2"
-            onPress={() => router.push({ pathname: '/leads', params: { band: 'HOT' } })}
+            label="Net in pipeline"
+            value={s ? moneyShort(s.netInPipeline) : '-'}
+            Icon={TrendingUpIcon}
+            iconColor="#15803D"
+            iconBg="#DCFCE7"
+            onPress={() => openSurplus({})}
           />
         </View>
 
