@@ -21,6 +21,7 @@ import {
   type LeadListItem,
 } from '@/features/leads/leads';
 import { Chip } from '@/components/ui';
+import { SurplusList } from '@/features/surplus/SurplusList';
 import { SearchIcon, ChevronRight } from '@/components/icons';
 import { useThemed, type Colors } from '@/theme';
 
@@ -43,10 +44,71 @@ const FILTER_OPTIONS: { label: string; band?: string; needsReply?: boolean }[] =
   { label: 'Needs reply', needsReply: true },
 ];
 
+type Mode = 'surplus' | 'property';
+
+type LeadsParams = {
+  mode?: string;
+  band?: string;
+  needsReply?: string;
+  source?: string;
+  queue?: string;
+  contact?: string;
+  letterDue?: string;
+};
+
+/**
+ * Surplus claims are the main work now, so the tab opens on them. Property
+ * leads (PPL, PPC, foreclosure, probate) are one tap away and unchanged.
+ */
 export default function LeadsScreen() {
+  const { styles } = useThemed(makeStyles);
+  const params = useLocalSearchParams<LeadsParams>();
+  const [mode, setMode] = useState<Mode>('surplus');
+
+  // A link from Home says which list it means. Property filters imply the
+  // property list even without an explicit mode.
+  useEffect(() => {
+    if (params.mode === 'property' || params.band || params.needsReply || params.source) {
+      setMode('property');
+    } else if (params.mode === 'surplus') {
+      setMode('surplus');
+    }
+  }, [params.mode, params.band, params.needsReply, params.source, params.queue, params.contact, params.letterDue]);
+
+  return (
+    <SafeAreaView style={styles.safe} edges={['bottom']}>
+      <View style={styles.segment}>
+        {(['surplus', 'property'] as Mode[]).map((m) => (
+          <TouchableOpacity
+            key={m}
+            style={[styles.segmentBtn, mode === m && styles.segmentOn]}
+            onPress={() => setMode(m)}
+            activeOpacity={0.8}
+          >
+            <Text style={[styles.segmentText, mode === m && styles.segmentTextOn]}>
+              {m === 'surplus' ? 'Surplus funds' : 'Property leads'}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+      {mode === 'surplus' ? (
+        <>
+          {/* New leads are property leads; surplus claims come from the county poll. */}
+          <Stack.Screen options={{ headerRight: () => null }} />
+          <SurplusList
+            initial={{ queue: params.queue, contact: params.contact, letterDue: params.letterDue }}
+          />
+        </>
+      ) : (
+        <PropertyLeads params={params} />
+      )}
+    </SafeAreaView>
+  );
+}
+
+function PropertyLeads({ params }: { params: LeadsParams }) {
   const { colors, styles } = useThemed(makeStyles);
   const router = useRouter();
-  const params = useLocalSearchParams<{ band?: string; needsReply?: string; source?: string }>();
   const [q, setQ] = useState('');
   const [band, setBand] = useState<string | undefined>(undefined);
   const [needsReply, setNeedsReply] = useState<string | undefined>(undefined);
@@ -113,7 +175,7 @@ export default function LeadsScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safe} edges={['bottom']}>
+    <View style={styles.flex}>
       <Stack.Screen
         options={{
           headerRight: () => (
@@ -223,17 +285,30 @@ export default function LeadsScreen() {
           </Text>
         }
       />
-    </SafeAreaView>
+    </View>
   );
 }
 
 const makeStyles = (colors: Colors) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
+  flex: { flex: 1 },
+  segment: {
+    flexDirection: 'row',
+    margin: 14,
+    padding: 3,
+    borderRadius: 10,
+    backgroundColor: colors.bubbleIn,
+  },
+  segmentBtn: { flex: 1, paddingVertical: 8, borderRadius: 8, alignItems: 'center' },
+  segmentOn: { backgroundColor: colors.surface },
+  segmentText: { fontSize: 14, fontWeight: '600', color: colors.textSecondary },
+  segmentTextOn: { color: colors.text },
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    margin: 14,
+    marginHorizontal: 14,
+    marginBottom: 14,
     paddingHorizontal: 14,
     paddingVertical: 10,
     backgroundColor: colors.surface,

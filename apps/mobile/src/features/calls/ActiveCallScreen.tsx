@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { KeyboardAvoidingView, Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useCall } from './callState';
+import { SurplusOutcomeForm } from './SurplusOutcomeForm';
 
 function useDuration(connectedAt: number | null): string {
   const [, tick] = useState(0);
@@ -27,10 +28,30 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 export function ActiveCallScreen() {
-  const { status, muted, peerName, connectedAt, error, toggleMute, hangUp, dismiss } = useCall();
+  const { status, muted, peerName, connectedAt, error, toggleMute, hangUp, dismiss, needsOutcome } =
+    useCall();
   const duration = useDuration(connectedAt);
   const active = status === 'connected' || status === 'reconnecting';
   const ended = status === 'ended';
+
+  // A surplus call ends on the outcome form instead of a bare Close, the
+  // same as the web dialer, so the file moves and a follow-up gets a date.
+  if (needsOutcome) {
+    return (
+      <Modal visible animationType="slide" presentationStyle="fullScreen">
+        <KeyboardAvoidingView style={styles.outcomeContainer} behavior="padding">
+          <View style={styles.outcomeHeader}>
+            <Text style={styles.outcomeName} numberOfLines={1}>
+              {peerName || 'Call'}
+            </Text>
+            <Text style={styles.status}>Call ended</Text>
+            {error ? <Text style={styles.error}>{error}</Text> : null}
+          </View>
+          <SurplusOutcomeForm />
+        </KeyboardAvoidingView>
+      </Modal>
+    );
+  }
 
   return (
     <Modal visible animationType="slide" presentationStyle="fullScreen">
@@ -80,6 +101,9 @@ const styles = StyleSheet.create({
     paddingVertical: 80,
   },
   header: { alignItems: 'center', paddingHorizontal: 24 },
+  outcomeContainer: { flex: 1, backgroundColor: '#0F172A', paddingTop: 64 },
+  outcomeHeader: { alignItems: 'center', paddingHorizontal: 24, paddingBottom: 12 },
+  outcomeName: { color: '#fff', fontSize: 24, fontWeight: '600', textAlign: 'center' },
   name: { color: '#fff', fontSize: 30, fontWeight: '600', textAlign: 'center' },
   status: { color: '#9CA3AF', fontSize: 18, marginTop: 12 },
   error: { color: '#F87171', fontSize: 14, marginTop: 16, textAlign: 'center' },

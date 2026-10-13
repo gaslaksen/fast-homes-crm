@@ -1,4 +1,4 @@
-import { ActionSheetIOS } from 'react-native';
+import { ActionSheetIOS, Alert } from 'react-native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { prettyPhone } from '@/features/calls/hooks';
@@ -16,6 +16,14 @@ export interface LeadPhone {
   /** 'Mobile' | 'Landline' | null, as the skip trace reported it. */
   type: string | null;
   isPrimary: boolean;
+  /**
+   * The registry ('federal', 'state', 'litigator', 'tcpa') when the number may
+   * not be dialled or texted. Only surplus numbers carry it today. The API
+   * refuses the call or text either way; this says so before anyone tries.
+   */
+  dnc?: string | null;
+  /** Tried, and it does not reach this person. */
+  bad?: boolean;
 }
 
 export interface LeadPhonesResponse {
@@ -64,10 +72,29 @@ export function useSetPrimaryPhone(leadId: string) {
 
 /** "Phone 2 · Mobile", the part of a row that says which number this is. */
 export function phoneSubtitle(p: LeadPhone): string {
-  return [p.label, p.type].filter(Boolean).join(' · ');
+  return [p.label, p.type, p.dnc ? dncLabel(p.dnc) : null, p.bad ? 'Bad number' : null]
+    .filter(Boolean)
+    .join(' · ');
 }
 
-/** Action sheet listing the seller's numbers. Used by both texting and calling. */
+/** "DNC (federal)" from the registry the number is on. */
+export function dncLabel(registry: string): string {
+  return `DNC (${registry})`;
+}
+
+/** Tell the user why a flagged number cannot be used, instead of letting the API refuse it. */
+export function alertDnc(p: { number: string; dnc?: string | null }) {
+  Alert.alert(
+    'Do not contact',
+    `${prettyPhone(p.number)} is on the ${p.dnc} do-not-call list, so Dealcore will not call or text it.`,
+  );
+}
+
+/**
+ * Action sheet listing the seller's numbers. Used by both texting and calling.
+ * A DNC number stays on the list, labelled, so nobody wonders where it went,
+ * but picking it explains the flag rather than dialling.
+ */
 export function showPhoneSheet(opts: {
   title: string;
   message?: string;
@@ -83,7 +110,13 @@ export function showPhoneSheet(opts: {
       cancelButtonIndex: labels.length,
     },
     (i) => {
-      if (i != null && i < opts.numbers.length) opts.onSelect(opts.numbers[i]);
+      if (i == null || i >= opts.numbers.length) return;
+      const picked = opts.numbers[i];
+      if (picked.dnc) {
+        alertDnc(picked);
+        return;
+      }
+      opts.onSelect(picked);
     },
   );
 }

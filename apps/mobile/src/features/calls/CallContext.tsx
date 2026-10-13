@@ -1,13 +1,21 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
+import { useQueryClient } from '@tanstack/react-query';
 import { Voice, Call, CallInvite } from '@twilio/voice-react-native-sdk';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { CALLER_ID_KEY } from '@/lib/config';
 import { useCallerIds, type CallerId } from './hooks';
 import { ActiveCallScreen } from './ActiveCallScreen';
-import { CallContext, useCall, type CallState, type CallStatus } from './callState';
+import {
+  CallContext,
+  useCall,
+  type CallLead,
+  type CallOutcomeInput,
+  type CallState,
+  type CallStatus,
+} from './callState';
 
 // Re-exported so existing imports from '@/features/calls/CallContext' keep working.
 export { useCall };
@@ -22,6 +30,13 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const [peerName, setPeerName] = useState('');
   const [connectedAt, setConnectedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Which lead this call is for, and the CallSid of our leg. The API keys the
+  // CallLog on that sid, so it is what a post-call outcome is saved against.
+  const qc = useQueryClient();
+  const [callSid, setCallSid] = useState<string | null>(null);
+  const [callLeadId, setCallLeadId] = useState<string | null>(null);
+  const [callIsSurplus, setCallIsSurplus] = useState(false);
 
   const { token: authToken } = useAuth();
   const { data: callerIds = [] } = useCallerIds(!!authToken);
@@ -46,17 +61,30 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
 
   const attach = useCallback((call: Call) => {
     callRef.current = call;
-    call.on(Call.Event.Ringing, () => setStatus('ringing'));
+    // The sid is only known once Twilio has the call, so read it as soon as
+    // any later event fires rather than at connect().
+    const readSid = () => {
+      const sid = call.getSid();
+      if (sid) setCallSid(sid);
+    };
+    call.on(Call.Event.Ringing, () => {
+      readSid();
+      setStatus('ringing');
+    });
     call.on(Call.Event.Connected, () => {
+      readSid();
       setStatus('connected');
       setConnectedAt(Date.now());
     });
     call.on(Call.Event.Reconnecting, () => setStatus('reconnecting'));
     call.on(Call.Event.Disconnected, () => {
+      readSid();
       setStatus('ended');
       callRef.current = null;
     });
     call.on(Call.Event.ConnectFailure, (e: any) => {
+      // Never reached the carrier, so there is no call to say anything about.
+      setCallSid(null);
       setError(e?.message || 'Call failed to connect');
       setStatus('ended');
       callRef.current = null;
@@ -82,6 +110,10 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         setError(null);
         setMuted(false);
         setPeerName(name);
+        // An inbound call is not one this app placed for a lead.
+        setCallSid(null);
+        setCallLeadId(null);
+        setCallIsSurplus(false);
         attach(call);
         setStatus('connected');
         setConnectedAt(Date.now());
@@ -130,12 +162,25 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   }, [authToken]);
 
   const startCall = useCallback(
-    async (toNumber: string, name?: string) => {
+    async (toNumber: string, name?: string, lead?: CallLead) => {
       if (status !== 'idle' && status !== 'ended') return; // a call is already up
       setError(null);
       setMuted(false);
       setConnectedAt(null);
       setPeerName(name || toNumber);
+      setCallSid(null);
+      setCallLeadId(lead?.id ?? null);
+      setCallIsSurplus(lead?.source === 'SURPLUS');
+      // From Recents the caller does not know the lead's source. Look it up
+      // while the call rings, so a surplus call still asks for its outcome.
+      if (lead?.id && lead.source === undefined) {
+        qc.fetchQuery({
+          queryKey: ['lead', lead.id, 'detail'],
+          queryFn: async () => (await api.get(`/leads/${lead.id}`)).data,
+        })
+          .then((l: any) => setCallIsSurplus(l?.source === 'SURPLUS'))
+          .catch(() => {});
+      }
       setStatus('connecting');
       try {
         const { data } = await api.post('/calls/twilio/token');
@@ -145,9 +190,12 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         const call = await voiceRef.current!.connect(data.token, {
           // callerId reaches the TwiML voice webhook, which re-checks it
           // against the org's numbers before dialling. Omitted = API default.
+          // leadId lets the voice webhook refuse a DNC number, log the call
+          // on the lead's timeline and key the CallLog to it.
           params: {
             To: toNumber,
             ...(callerId ? { callerId: callerId.number } : {}),
+            ...(lead?.id ? { leadId: lead.id } : {}),
           },
         });
         attach(call);
@@ -156,7 +204,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         setStatus('ended');
       }
     },
-    [status, attach, callerId],
+    [status, attach, callerId, qc],
   );
 
   const toggleMute = useCallback(async () => {
@@ -184,7 +232,26 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     setConnectedAt(null);
     setError(null);
     setPeerName('');
+    setCallSid(null);
+    setCallLeadId(null);
+    setCallIsSurplus(false);
   }, []);
+
+  const needsOutcome = status === 'ended' && !!callSid && !!callLeadId && callIsSurplus;
+
+  const saveOutcome = useCallback(
+    async (input: CallOutcomeInput) => {
+      if (!callSid) return;
+      await api.post('/calls/twilio/disposition', { callSid, ...input });
+      // The outcome can move the stage, stamp Tapped, set DNC and add a task.
+      if (callLeadId) {
+        qc.invalidateQueries({ queryKey: ['surplus'] });
+        qc.invalidateQueries({ queryKey: ['lead', callLeadId] });
+      }
+      qc.invalidateQueries({ queryKey: ['calls', 'recents'] });
+    },
+    [callSid, callLeadId, qc],
+  );
 
   const value = useMemo<CallState>(
     () => ({
@@ -200,6 +267,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       toggleMute,
       hangUp,
       dismiss,
+      needsOutcome,
+      saveOutcome,
     }),
     [
       status,
@@ -214,6 +283,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       toggleMute,
       hangUp,
       dismiss,
+      needsOutcome,
+      saveOutcome,
     ],
   );
 

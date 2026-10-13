@@ -48,6 +48,25 @@ notification registration will no-op there.
   Settings hits `POST /push/test`.
 - **Dialer** — placeholder; real Twilio Voice + CallKit is Phases 4-5.
 
+## Surplus funds
+
+Surplus claims are the main pipeline, so the app treats them as their own kind of lead.
+
+- **Lead screen.** A lead with `source = SURPLUS` shows the claim instead of the
+  property sections. It covers the next step, the money, the clock, how to reach
+  the claimant (DNC flags included), heirs, the qualification checklist, the stage
+  and the case. The data comes from `GET /surplus/:id`. Stage moves go through
+  `PATCH /surplus/:id`, so the server's gates apply, including the reason that
+  Dead requires.
+- **Leads tab.** Opens on a ranked surplus work list (`GET /surplus?group=lead`)
+  with queue filters. Property leads are behind the switch at the top, unchanged.
+- **Home.** The stat cards are surplus counts from `GET /surplus/stats`.
+- **Calls.** Every call placed from a lead sends `leadId`, so the API can refuse
+  a DNC number and log the call on the lead. A surplus call ends on an outcome
+  form that posts to `POST /calls/twilio/disposition`, the same as the web dialer.
+
+Documents, notary, filing, disbursement and contact edits stay on the web.
+
 ## Shipping a change (OTA vs a new build)
 
 The app uses **EAS Update**, so a JS-only change does not need a 25-minute build.
