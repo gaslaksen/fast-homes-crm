@@ -98,14 +98,14 @@ export const TimelineRow = memo(function TimelineRow({
   }
 
   if (item.kind === 'call') {
-    const { recordingUrl, duration, status } = item.payload;
+    const { recordingUrl, duration, status, voicemail, transcript } = item.payload;
     const dur = durationLabel(duration);
     return (
       <View style={wrap}>
         <Meta name={item.actor.name} channel="Call" at={item.at} right={outbound} />
         <View style={styles.callCard}>
           <Text style={styles.callTitle}>
-            {outbound ? 'Outgoing call' : 'Incoming call'}
+            {voicemail ? 'Voicemail' : outbound ? 'Outgoing call' : 'Incoming call'}
             {dur ? ` · ${dur}` : ''}
             {status && status !== 'completed' ? ` · ${status}` : ''}
           </Text>
@@ -114,6 +114,11 @@ export const TimelineRow = memo(function TimelineRow({
           ) : (
             <Text style={styles.muted}>No recording</Text>
           )}
+          {voicemail ? (
+            <Text style={transcript ? styles.voicemailText : styles.muted}>
+              {transcript || 'No transcript'}
+            </Text>
+          ) : null}
         </View>
       </View>
     );
@@ -189,6 +194,7 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
     minWidth: 220,
   },
   callTitle: { fontSize: 13, fontWeight: '600', color: colors.text },
+  voicemailText: { fontSize: 13, color: colors.text, marginTop: 6 },
   emailSubject: { fontSize: 14, color: colors.textSecondary },
   emailCard: {
     alignSelf: 'stretch',

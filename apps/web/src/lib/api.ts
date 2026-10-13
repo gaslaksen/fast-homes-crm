@@ -506,6 +506,11 @@ export const inboxAPI = {
   markRead: (leadId: string) => api.post(`/inbox/threads/${leadId}/read`),
   star: (leadId: string, starred: boolean) =>
     api.post(`/inbox/threads/${leadId}/star`, { starred }),
+  // Voicemails from numbers that matched no lead.
+  voicemails: () => api.get('/inbox/voicemails'),
+  dismissVoicemail: (id: string) => api.post(`/inbox/voicemails/${id}/dismiss`),
+  attachVoicemail: (id: string, leadId: string) =>
+    api.post(`/inbox/voicemails/${id}/attach`, { leadId }),
 };
 
 // Comps API

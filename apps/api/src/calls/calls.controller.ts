@@ -19,6 +19,8 @@ import { TwilioVoiceService, CallDispositionInput } from './twilio-voice.service
 import { InitiateCallDto } from './dto/initiate-call.dto';
 import { isTwilioRequestValid } from '../webhooks/twilio-signature.util';
 import { RINGBACK_WAV } from './ringback.util';
+import { VoicemailService } from './voicemail.service';
+import { voicemailAudioPath } from './voicemail.util';
 
 @Controller('calls')
 export class CallsController {
@@ -27,6 +29,7 @@ export class CallsController {
   constructor(
     private callsService: CallsService,
     private twilioVoiceService: TwilioVoiceService,
+    private voicemailService: VoicemailService,
   ) {}
 
   @Post('ai-initiate')
@@ -91,6 +94,58 @@ export class CallsController {
     const twiml = await this.twilioVoiceService.generateIncomingTwiml(body);
     res.set('Content-Type', 'text/xml');
     res.send(twiml);
+  }
+
+  /**
+   * <Dial> action for inbound calls on a number with a voicemail greeting.
+   * Does the /status bookkeeping, then plays the greeting and records when
+   * nobody picked up.
+   */
+  @Post('twilio/voicemail')
+  @HttpCode(200)
+  async twilioVoicemail(@Body() body: any, @Req() req: Request, @Res() res: Response) {
+    if (!this.verifyTwilioSignature(req, body)) {
+      res.status(403).send('Invalid Twilio signature');
+      return;
+    }
+    const twiml = await this.voicemailService.afterDialTwiml(body);
+    res.set('Content-Type', 'text/xml');
+    res.send(twiml);
+  }
+
+  /** <Record> action: the caller is done, hang up. */
+  @Post('twilio/voicemail/done')
+  @HttpCode(200)
+  twilioVoicemailDone(@Res() res: Response) {
+    // Unsigned on purpose: it only ever answers "hang up" and reads nothing.
+    res.set('Content-Type', 'text/xml');
+    res.send(this.voicemailService.doneTwiml());
+  }
+
+  /** Recording status callback for a voicemail. */
+  @Post('twilio/voicemail/recording')
+  @HttpCode(200)
+  async twilioVoicemailRecording(@Body() body: any, @Req() req: Request) {
+    if (this.verifyTwilioSignature(req, body)) {
+      await this.voicemailService.handleRecording(body);
+    }
+    return { received: true };
+  }
+
+  /**
+   * The recorded greeting Twilio plays. Unauthenticated for the same reason
+   * as the ringback tone: Twilio does not sign media fetches, and the file is
+   * what every caller hears anyway. Only files a greeting names are served.
+   */
+  @Get('twilio/voicemail/greeting/:file')
+  twilioVoicemailGreeting(@Param('file') file: string, @Res() res: Response) {
+    const full = voicemailAudioPath(file);
+    if (!full) {
+      res.status(404).send('Not found');
+      return;
+    }
+    res.set('Cache-Control', 'public, max-age=300');
+    res.sendFile(full);
   }
 
   /**

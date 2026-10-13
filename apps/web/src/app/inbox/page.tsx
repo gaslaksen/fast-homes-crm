@@ -9,6 +9,7 @@ import Avatar from '@/components/Avatar';
 import CommunicationsTimeline from '@/components/communications/CommunicationsTimeline';
 import type { EmailAction } from '@/components/communications/MessageComposer';
 import MessageComposer from '@/components/communications/MessageComposer';
+import UnmatchedVoicemails from '@/components/communications/UnmatchedVoicemails';
 import LeadSidePanel from '@/components/leadDetailV2/LeadSidePanel';
 import type { TimelineItem, NoteItem } from '@/components/communications/types';
 import { inboxAPI, leadsAPI, authAPI, actionsAPI, type InboxFilter } from '@/lib/api';
@@ -65,7 +66,12 @@ function InboxWorkspace() {
   const searchParams = useSearchParams();
 
   const [filter, setFilter] = useState<InboxFilter>('all');
-  const [counts, setCounts] = useState<{ all: number; unread: number; starred: number }>({
+  const [counts, setCounts] = useState<{
+    all: number;
+    unread: number;
+    starred: number;
+    voicemails?: number;
+  }>({
     all: 0,
     unread: 0,
     starred: 0,
@@ -489,6 +495,12 @@ function InboxWorkspace() {
                 );
               })}
             </div>
+
+            <UnmatchedVoicemails
+              refreshKey={counts.voicemails ?? 0}
+              onChanged={refreshCounts}
+              onAttached={selectThread}
+            />
 
             <ul className="flex-1 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-800">
               {loading && (

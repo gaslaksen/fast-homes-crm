@@ -6,11 +6,14 @@ import { TwilioVoiceService } from './twilio-voice.service';
 import { VapiModule } from '../vapi/vapi.module';
 import { ScoringModule } from '../scoring/scoring.module';
 import { PhoneNumbersModule } from '../phone-numbers/phone-numbers.module';
+import { PushModule } from '../push/push.module';
+import { MailerModule } from '../mailer/mailer.module';
+import { VoicemailService } from './voicemail.service';
 
 @Module({
-  imports: [VapiModule, ScoringModule, PhoneNumbersModule, TouchModule],
+  imports: [VapiModule, ScoringModule, PhoneNumbersModule, TouchModule, PushModule, MailerModule],
   controllers: [CallsController],
-  providers: [CallsService, TwilioVoiceService],
+  providers: [CallsService, TwilioVoiceService, VoicemailService],
   exports: [CallsService],
 })
 export class CallsModule {}

@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -304,6 +304,71 @@ export class InboxService {
         update: { viewedAt: new Date() },
       });
     }
+    return { success: true };
+  }
+
+  // ─── Voicemails from callers who are not a lead ───────────────────────────
+  //
+  // A voicemail from a known number lands on that lead's thread. One from a
+  // number we have never seen has no thread to land on, so it waits here
+  // until someone dismisses it or attaches it to the right lead. CallLog has
+  // no organization of its own; like the inbound ring itself, this is
+  // team-wide.
+
+  private readonly openVoicemailWhere: Prisma.CallLogWhereInput = {
+    voicemail: true,
+    leadId: null,
+    voicemailReviewedAt: null,
+  };
+
+  async listOpenVoicemails() {
+    const rows = await this.prisma.callLog.findMany({
+      where: this.openVoicemailWhere,
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+      select: {
+        id: true,
+        fromNumber: true,
+        toNumber: true,
+        createdAt: true,
+        duration: true,
+        recordingUrl: true,
+        transcript: true,
+      },
+    });
+    return { items: rows };
+  }
+
+  countOpenVoicemails(): Promise<number> {
+    return this.prisma.callLog.count({ where: this.openVoicemailWhere });
+  }
+
+  /** Dealt with: drop it from the list. The call log keeps the recording. */
+  async dismissVoicemail(callLogId: string) {
+    const res = await this.prisma.callLog.updateMany({
+      where: { id: callLogId, voicemail: true },
+      data: { voicemailReviewedAt: new Date() },
+    });
+    if (!res.count) throw new NotFoundException('Voicemail not found');
+    return { success: true };
+  }
+
+  /**
+   * File a voicemail under the lead it turned out to be from, so it shows on
+   * that lead's timeline. The lead's phone numbers are left alone: whether the
+   * number they called from belongs on the record is the caller's call.
+   */
+  async attachVoicemail(callLogId: string, leadId: string, organizationId?: string) {
+    const lead = await this.prisma.lead.findFirst({
+      where: { id: leadId, ...(organizationId ? { organizationId } : {}) },
+      select: { id: true },
+    });
+    if (!lead) throw new NotFoundException('Lead not found');
+    const res = await this.prisma.callLog.updateMany({
+      where: { id: callLogId, voicemail: true, leadId: null },
+      data: { leadId: lead.id, voicemailReviewedAt: new Date() },
+    });
+    if (!res.count) throw new NotFoundException('Voicemail not found or already attached');
     return { success: true };
   }
 

@@ -49,6 +49,10 @@ export type TimelineItem =
         sellerNumber?: string | null;
         /** "Primary", "Phone 2", "Heir: ..." when the number is still on the lead. */
         numberLabel?: string | null;
+        /** The caller left a message on our greeting; recordingUrl is the message. */
+        voicemail?: boolean;
+        /** Set for voicemails only. */
+        transcript?: string | null;
       };
     }
   | {

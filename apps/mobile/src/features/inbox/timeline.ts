@@ -23,6 +23,10 @@ export interface CallPayload {
   type: string | null;
   duration: number | null;
   recordingUrl: string | null;
+  /** The caller left a message on our greeting; recordingUrl is the message. */
+  voicemail?: boolean;
+  /** Set for voicemails only. */
+  transcript?: string | null;
 }
 export interface EmailPayload {
   subject: string | null;
