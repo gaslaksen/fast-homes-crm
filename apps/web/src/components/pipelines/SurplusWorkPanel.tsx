@@ -38,7 +38,7 @@ import { fmtDate, fmtDay, money, phoneDisplay } from './format';
 
 const CONV_POLL_MS = 8_000;
 
-type Tab = 'case' | 'conversation' | 'notes';
+type Tab = 'case' | 'people' | 'conversation' | 'notes';
 
 /** The document kinds worth pulling out of the ledger, in the order they matter. */
 const LEDGER_GROUPS: { kind: string; label: string; tone: string }[] = [
@@ -2453,8 +2453,16 @@ export default function SurplusWorkPanel({
   // leadSource tells the dialer's summary screen to offer the surplus
   // outcomes (spoke to claimant, message passed, already signed elsewhere)
   // instead of the wholesaling dispositions.
-  const call = (number: string) =>
-    dialer.startCall({ name: lead.claimant, phone: number, leadId: lead.id, leadSource: 'SURPLUS' });
+  //
+  // `who` is set when the number belongs to somebody else on the case, a
+  // relative or an heir, so the dialer shows who is actually being rung.
+  const call = (number: string, who?: string) =>
+    dialer.startCall({
+      name: who ? `${who} (${lead.claimant})` : lead.claimant,
+      phone: number,
+      leadId: lead.id,
+      leadSource: 'SURPLUS',
+    });
 
   /** Open the conversation on SMS with this number already selected. */
   const message = (number: string) => {
@@ -2470,6 +2478,8 @@ export default function SurplusWorkPanel({
   };
 
   const ledger = property.claimLedger || [];
+  /** Everybody on the People tab: heirs, living or not, and associates. */
+  const peopleCount = (lead.heirCount || 0) + (lead.associateCount || 0);
   const tone = CLAIM_STATUS_TONE[property.claimStatus] || 'var(--dim)';
 
   return (
@@ -2665,7 +2675,7 @@ export default function SurplusWorkPanel({
           )}
 
           <div style={{ display: 'flex', gap: 6, marginTop: 12 }}>
-            {(['case', 'conversation', 'notes'] as Tab[]).map((t) => (
+            {(['case', 'people', 'conversation', 'notes'] as Tab[]).map((t) => (
               <button
                 key={t}
                 type="button"
@@ -2675,6 +2685,7 @@ export default function SurplusWorkPanel({
               >
                 {t}
                 {t === 'conversation' && comms.timeline.length > 0 && ` (${comms.timeline.length})`}
+                {t === 'people' && peopleCount > 0 && ` (${peopleCount})`}
               </button>
             ))}
           </div>
@@ -2689,6 +2700,22 @@ export default function SurplusWorkPanel({
               currentUser={currentUser}
               onTrace={traceGated}
               tracing={tracing}
+              onCall={call}
+              onText={message}
+              onEmail={mail}
+              onOpenPeople={() => setTab('people')}
+              onChanged={() => {
+                onChanged();
+                loadComms(true);
+              }}
+              say={say}
+            />
+          )}
+
+          {tab === 'people' && (
+            <PeopleTab
+              lead={lead}
+              property={property}
               onCall={call}
               onText={message}
               onEmail={mail}
@@ -2910,6 +2937,7 @@ function CaseTab({
   onCall,
   onText,
   onEmail,
+  onOpenPeople,
   onChanged,
   say,
 }: {
@@ -2922,6 +2950,8 @@ function CaseTab({
   onCall: (number: string) => void;
   onText: (number: string) => void;
   onEmail: (address: string) => void;
+  /** Switch the panel to the People tab, where the heirs and relatives live. */
+  onOpenPeople: () => void;
   onChanged: () => void;
   say: (msg: string) => void;
 }) {
@@ -2954,35 +2984,9 @@ function CaseTab({
   const showHeirs =
     lead.isDeceased || (lead.heirCount || 0) > 0 || (lead.associateCount || 0) > 0 || !lead.tappedAt;
 
-  const heirsBlock = showHeirs && (
-    <div>
-      <SubHead
-        title={lead.isDeceased ? 'Who inherited' : 'People around the claimant'}
-        note={
-          lead.isDeceased
-            ? 'Only a living heir can file this claim'
-            : lead.associateCount
-              ? `${lead.associateCount} who may know where ${lead.claimant} is${lead.associatesUntried ? `, ${lead.associatesUntried} not yet contacted` : ''}`
-              : 'A relative or a neighbor usually knows where they are'
-        }
-      />
-      <SurplusHeirs
-        leadId={lead.id}
-        claimant={lead.claimant}
-        claimantDeceased={!!lead.isDeceased}
-        propertyAddress={property.address}
-        county={property.county}
-        courtRecordsUrl={lead.courtRecordsUrl}
-        social={lead.social?.profiles || []}
-        socialPaused={socialPaused}
-        onCall={onCall}
-        onText={onText}
-        onEmail={onEmail}
-        onChanged={onChanged}
-        say={say}
-      />
-    </div>
-  );
+  // The people themselves are on their own tab, so the case reads as the
+  // case. What stays here is one line saying where things stand with them.
+  const heirsBlock = showHeirs && <PeopleSummary lead={lead} onOpen={onOpenPeople} />;
   const contactsBlock = (
     <ContactsBlock lead={lead} onCall={onCall} onText={onText} onEmail={onEmail} onChanged={onChanged} say={say} />
   );
@@ -3266,6 +3270,104 @@ function CaseTab({
       )}
 
       <StageControl lead={lead} onChanged={onChanged} say={say} />
+    </div>
+  );
+}
+
+/**
+ * The People tab: the heirs who can sign and the relatives, neighbors and
+ * friends who may know where the claimant is.
+ *
+ * Its own tab because on the Case tab it was one long section in the middle
+ * of the outreach, with every person's numbers, profiles and buttons pushing
+ * the rest of the case off the screen. Here they can be read and rung one
+ * after another.
+ */
+function PeopleTab({
+  lead,
+  property,
+  onCall,
+  onText,
+  onEmail,
+  onChanged,
+  say,
+}: {
+  lead: SurplusPanelLead;
+  property: any;
+  onCall: (number: string, who?: string) => void;
+  onText: (number: string) => void;
+  onEmail: (address: string) => void;
+  onChanged: () => void;
+  say: (msg: string) => void;
+}) {
+  // Whether the paid profile search is paused, asked once per tab. Null until
+  // answered; the button reads null as "do not know yet".
+  const [socialPaused, setSocialPaused] = useState<boolean | null>(null);
+  useEffect(() => {
+    surplusAPI
+      .socialUsage()
+      .then((r) => setSocialPaused(!!r.data?.paused))
+      .catch(() => setSocialPaused(true));
+  }, []);
+  return (
+    <div>
+      <SubHead title={lead.isDeceased ? 'Who inherited' : 'People around the claimant'} note={peopleNote(lead)} />
+      <SurplusHeirs
+        key={lead.id}
+        leadId={lead.id}
+        claimant={lead.claimant}
+        claimantDeceased={!!lead.isDeceased}
+        propertyAddress={property.address}
+        county={property.county}
+        courtRecordsUrl={lead.courtRecordsUrl}
+        social={lead.social?.profiles || []}
+        socialPaused={socialPaused}
+        onCall={onCall}
+        onText={onText}
+        onEmail={onEmail}
+        onChanged={onChanged}
+        say={say}
+      />
+    </div>
+  );
+}
+
+/** One line on where things stand with the people around the claimant. */
+function peopleNote(lead: SurplusPanelLead): string {
+  if (lead.isDeceased) return 'Only a living heir can file this claim';
+  if (lead.associateCount) {
+    return `${lead.associateCount} who may know where ${lead.claimant} is${lead.associatesUntried ? `, ${lead.associatesUntried} not yet contacted` : ''}`;
+  }
+  return 'A relative or a neighbor usually knows where they are';
+}
+
+/**
+ * The People tab, summed up on the Case tab. Counts and a way over, so the
+ * case still says whether an heir has been found without listing everybody.
+ */
+function PeopleSummary({ lead, onOpen }: { lead: SurplusPanelLead; onOpen: () => void }) {
+  const total = (lead.heirCount || 0) + (lead.associateCount || 0);
+  const line = lead.isDeceased
+    ? lead.livingHeirCount > 0
+      ? `${lead.livingHeirCount} living heir${lead.livingHeirCount === 1 ? '' : 's'} on file, ${
+          lead.callableHeirCount > 0 ? `${lead.callableHeirCount} callable` : 'no number yet'
+        }`
+      : 'No living heir on file. Find the probate filing and add the heirs from it.'
+    : total > 0
+      ? `${total} on file${lead.callableAssociateCount ? `, ${lead.callableAssociateCount} callable` : ''}${
+          lead.associatesUntried ? `, ${lead.associatesUntried} not yet contacted` : ''
+        }`
+      : 'Nobody on file yet.';
+  const tone = lead.isDeceased && !(lead.livingHeirCount > 0) ? 'var(--red)' : 'var(--text)';
+  return (
+    <div>
+      <SubHead title={lead.isDeceased ? 'Who inherited' : 'People around the claimant'} note={peopleNote(lead)} />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 12.5, color: tone }}>{line}</span>
+        <button type="button" className="dc-wp-btn" onClick={onOpen}>
+          {total > 0 ? 'Open People' : 'Add people'}
+        </button>
+      </div>
     </div>
   );
 }

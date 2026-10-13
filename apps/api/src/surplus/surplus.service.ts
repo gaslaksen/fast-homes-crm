@@ -76,6 +76,7 @@ import {
   complianceGate,
   SurplusLien,
   calendarDayToDate,
+  surplusSearchWhere,
 } from './surplus.util';
 import {
   SURPLUS_FLOOR,
@@ -1869,18 +1870,10 @@ export class SurplusService {
       surplusDetail: { is: detailWhere },
     };
 
-    const q = String(filters.search || '').trim();
-    if (q) {
-      where.OR = [
-        { propertyAddress: { contains: q, mode: 'insensitive' } },
-        { propertyCity: { contains: q, mode: 'insensitive' } },
-        { sellerFirstName: { contains: q, mode: 'insensitive' } },
-        { sellerLastName: { contains: q, mode: 'insensitive' } },
-        { surplusDetail: { is: { county: { contains: q, mode: 'insensitive' } } } },
-        { surplusDetail: { is: { caseNumber: { contains: q, mode: 'insensitive' } } } },
-        { surplusDetail: { is: { parcelId: { contains: q, mode: 'insensitive' } } } },
-      ];
-    }
+    // Word by word, so a first name followed by a last or middle name finds
+    // the person. See surplusSearchWhere.
+    const searched = surplusSearchWhere(filters.search);
+    if (searched) where.AND = [searched];
 
     const leads = await this.prisma.lead.findMany({
       where,

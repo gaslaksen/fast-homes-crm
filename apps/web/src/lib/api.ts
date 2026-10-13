@@ -405,11 +405,13 @@ export const surplusAPI = {
       name: string;
       role?: string | null;
       relationship?: string | null;
+      share?: string | null;
       street?: string | null;
       city?: string | null;
       state?: string | null;
       zip?: string | null;
-      phones?: string[];
+      /** Primary first. A number alone, or with its line type. */
+      phones?: (string | { number: string; type?: string | null })[];
       emails?: string[];
       callNotes?: string | null;
     },

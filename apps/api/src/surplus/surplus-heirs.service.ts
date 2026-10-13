@@ -158,6 +158,7 @@ export class SurplusHeirsService {
       name: string;
       role?: string | null;
       relationship?: string | null;
+      share?: string | null;
       street?: string | null;
       city?: string | null;
       state?: string | null;
@@ -183,6 +184,7 @@ export class SurplusHeirsService {
         name,
         role,
         relationship: String(input.relationship || '').trim() || null,
+        share: String(input.share || '').trim() || null,
         street: String(input.street || '').trim() || null,
         city: String(input.city || '').trim() || null,
         state: String(input.state || '').toUpperCase().slice(0, 2) || null,
@@ -235,17 +237,28 @@ export class SurplusHeirsService {
     // Phones arrive as a whole list, primary first, for the same reason they do
     // on a lead: the slots are positional and writing "the first empty one"
     // races with a skip trace writing the same slots.
+    //
+    // A number keeps its own line type and DNC result wherever it lands. The
+    // slots are positional, so an edit that removed or reordered a number used
+    // to leave each DNC flag in its old slot, on whichever number moved in.
     if (patch.phones !== undefined) {
+      const prior = new Map<string, { type: string | null; dnc: string | null }>();
+      for (let i = 1; i <= 4; i += 1) {
+        const num = normalizePhoneDigits((heir as any)[`phone${i}`]);
+        if (num) prior.set(num, { type: (heir as any)[`phone${i}Type`] || null, dnc: (heir as any)[`phone${i}Dnc`] || null });
+      }
+      const seen = new Set<string>();
       const digits = (patch.phones || [])
-        .map((p: any) => ({
-          num: normalizePhoneDigits(typeof p === 'string' ? p : p?.number) || '',
-          type: (typeof p === 'string' ? null : p?.type) || null,
-        }))
-        .filter((p: any) => p.num.length === 10)
+        .map((p: any) => {
+          const num = normalizePhoneDigits(typeof p === 'string' ? p : p?.number) || '';
+          return { num, type: (typeof p === 'string' ? null : p?.type) || prior.get(num)?.type || null };
+        })
+        .filter((p: any) => p.num.length === 10 && !seen.has(p.num) && seen.add(p.num))
         .slice(0, 4);
       for (let i = 0; i < 4; i += 1) {
         data[`phone${i + 1}`] = digits[i]?.num || null;
         data[`phone${i + 1}Type`] = digits[i]?.type || null;
+        data[`phone${i + 1}Dnc`] = (digits[i] && prior.get(digits[i].num)?.dnc) || null;
       }
     }
     if (patch.emails !== undefined) {

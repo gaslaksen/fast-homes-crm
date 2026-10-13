@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AppShell from '@/components/AppShell';
-import PipelineBoard, { type PipelineView, type PipelineColumn, type PipelineStage } from '@/components/pipelines/PipelineBoard';
+import PipelineBoard, { inBoardOrder, type PipelineView, type PipelineColumn, type PipelineStage } from '@/components/pipelines/PipelineBoard';
 import PipelineWorkPanel from '@/components/pipelines/PipelineWorkPanel';
 import TaxSaleCard, { TAX_ACCENT } from '@/components/pipelines/TaxSaleCard';
 import TaxSaleDetail from '@/components/pipelines/TaxSaleDetail';
@@ -488,13 +488,15 @@ export default function TaxSalesPage() {
   /**
    * Step through the filtered list from inside the panel.
    *
-   * Indexed off the SAME array the board renders, so the arrows follow whatever
-   * filter and sort is on screen rather than some separate order. Null at the
-   * ends instead of wrapping, which is what disables the button and makes the
-   * end of the list visible.
+   * Indexed off the order the board reports, column header sort included, so
+   * the arrows follow whatever filter and sort is on screen rather than some
+   * separate order. Null at the ends instead of wrapping, which is what
+   * disables the button and makes the end of the list visible.
    */
-  const openIndex = shown.findIndex((r) => r.id === openId);
-  const goTo = (i: number) => setOpenId(shown[i] ? (shown[i] as any).id : null);
+  const [boardOrder, setBoardOrder] = useState<string[] | null>(null);
+  const navRows = inBoardOrder(shown, boardOrder, (r: any) => r.id);
+  const openIndex = navRows.findIndex((r: any) => r.id === openId);
+  const goTo = (i: number) => setOpenId(navRows[i] ? (navRows[i] as any).id : null);
 
 
 
@@ -748,6 +750,7 @@ export default function TaxSalesPage() {
           <PipelineBoard
             rows={shown}
             keyOf={(r) => r.id}
+            onOrderChange={setBoardOrder}
             columns={TAX_COLUMNS}
             stages={TAX_KANBAN}
             stageOf={(r) => r.stage}
@@ -810,8 +813,8 @@ export default function TaxSalesPage() {
         {openLead && (
           <PipelineWorkPanel
             onPrev={openIndex > 0 ? () => goTo(openIndex - 1) : null}
-            onNext={openIndex >= 0 && openIndex < shown.length - 1 ? () => goTo(openIndex + 1) : null}
-            position={openIndex >= 0 ? { index: openIndex, total: shown.length } : null}
+            onNext={openIndex >= 0 && openIndex < navRows.length - 1 ? () => goTo(openIndex + 1) : null}
+            position={openIndex >= 0 ? { index: openIndex, total: navRows.length } : null}
             title={openLead.address}
             subtitle={`${[openLead.city, openLead.zip].filter(Boolean).join(' ')} · ${money(openLead.redemptionAmount)} to redeem`}
             meta={`${openLead.county} County${openLead.fileNumber ? ` · file ${openLead.fileNumber}` : ''}`}

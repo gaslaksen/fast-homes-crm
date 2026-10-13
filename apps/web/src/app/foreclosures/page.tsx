@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import PipelineBoard, {
+  inBoardOrder,
   type PipelineView,
   type PipelineColumn,
   type PipelineStage,
@@ -658,13 +659,15 @@ export default function ForeclosuresPage() {
   /**
    * Step through the filtered list from inside the panel.
    *
-   * Indexed off the SAME array the board renders, so the arrows follow whatever
-   * filter and sort is on screen rather than some separate order. Null at the
-   * ends instead of wrapping, which is what disables the button and makes the
-   * end of the list visible.
+   * Indexed off the order the board reports, column header sort included, so
+   * the arrows follow whatever filter and sort is on screen rather than some
+   * separate order. Null at the ends instead of wrapping, which is what
+   * disables the button and makes the end of the list visible.
    */
-  const openIndex = leads.findIndex((l) => l.id === openId);
-  const goTo = (i: number) => setOpenId(leads[i] ? (leads[i] as any).id : null);
+  const [boardOrder, setBoardOrder] = useState<string[] | null>(null);
+  const navRows = inBoardOrder(leads, boardOrder, (r: any) => r.id);
+  const openIndex = navRows.findIndex((r: any) => r.id === openId);
+  const goTo = (i: number) => setOpenId(navRows[i] ? (navRows[i] as any).id : null);
 
 
   const fetchLeads = useCallback(async () => {
@@ -1135,6 +1138,7 @@ export default function ForeclosuresPage() {
           <PipelineBoard
             rows={leads}
             keyOf={(l) => l.id}
+            onOrderChange={setBoardOrder}
             columns={FCL_COLUMNS}
             stages={FCL_KANBAN}
             stageOf={(l) => l.workStatus || 'NOT_CONTACTED'}
@@ -1214,8 +1218,8 @@ export default function ForeclosuresPage() {
         {openLead && (
           <PipelineWorkPanel
             onPrev={openIndex > 0 ? () => goTo(openIndex - 1) : null}
-            onNext={openIndex >= 0 && openIndex < leads.length - 1 ? () => goTo(openIndex + 1) : null}
-            position={openIndex >= 0 ? { index: openIndex, total: leads.length } : null}
+            onNext={openIndex >= 0 && openIndex < navRows.length - 1 ? () => goTo(openIndex + 1) : null}
+            position={openIndex >= 0 ? { index: openIndex, total: navRows.length } : null}
             title={openLead.address}
             subtitle={`${[openLead.city, openLead.zip].filter(Boolean).join(' ')}${
               openLead.daysToSale != null

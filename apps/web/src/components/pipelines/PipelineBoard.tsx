@@ -1,6 +1,6 @@
 'use client';
 
-import { ReactNode, useMemo, useState } from 'react';
+import { ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd';
 
 /**
@@ -27,6 +27,26 @@ import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-p
  */
 
 export type PipelineView = 'table' | 'kanban' | 'cards';
+
+/**
+ * The caller's rows in the order the board last reported, for stepping
+ * through them from a detail panel. Rows the report has not caught up with
+ * yet (a refetch that just landed) keep their place at the end rather than
+ * vanishing from the arrows.
+ */
+export function inBoardOrder<T>(rows: T[], keys: string[] | null, keyOf: (row: T) => string): T[] {
+  if (!keys) return rows;
+  const byKey = new Map(rows.map((r) => [keyOf(r), r]));
+  const out: T[] = [];
+  for (const k of keys) {
+    const r = byKey.get(k);
+    if (r) {
+      out.push(r);
+      byKey.delete(k);
+    }
+  }
+  return out.concat(Array.from(byKey.values()));
+}
 
 export interface PipelineColumn<T> {
   key: string;
@@ -87,6 +107,13 @@ interface Props<T> {
    * this and a stored 'cards' preference falls back to the table.
    */
   hideCards?: boolean;
+  /**
+   * The row keys in the order the table shows them, called whenever that
+   * order changes. A column header sort lives in here, so without this the
+   * panel's arrows stepped through the caller's unsorted list and the next
+   * lead was not the one below on screen.
+   */
+  onOrderChange?: (keys: string[]) => void;
 }
 
 export default function PipelineBoard<T>({
@@ -109,6 +136,7 @@ export default function PipelineBoard<T>({
   empty,
   loading,
   hideCards,
+  onOrderChange,
 }: Props<T>) {
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -126,6 +154,18 @@ export default function PipelineBoard<T>({
       return String(av).localeCompare(String(bv)) * dir;
     });
   }, [rows, columns, sortKey, sortDir]);
+
+  // Reported only when the order really changes. The caller usually passes
+  // keyOf inline, so this runs every render and the signature is the guard.
+  const reported = useRef<string | null>(null);
+  useEffect(() => {
+    if (!onOrderChange) return;
+    const keys = sorted.map(keyOf);
+    const sig = keys.join('\n');
+    if (sig === reported.current) return;
+    reported.current = sig;
+    onOrderChange(keys);
+  });
 
   const allShown = rows.length > 0 && rows.every((r) => selected[keyOf(r)]);
   const chosenCount = rows.filter((r) => selected[keyOf(r)]).length;

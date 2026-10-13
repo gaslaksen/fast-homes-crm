@@ -871,3 +871,34 @@ export function calendarDayToDate(raw?: string | null): Date | null {
   const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12));
   return d.getUTCDate() === Number(m[3]) ? d : null;
 }
+
+/**
+ * The board's search box as a Prisma where clause, or null for an empty box.
+ *
+ * Every word has to match somewhere, but each word can match a different
+ * field. The claimant's name is two columns, so matching the whole phrase
+ * against one column meant "John Smith" found nobody: neither the first name
+ * nor the last name contains both words. The same goes for a middle name
+ * typed after the first. An address or a case number is still found, because
+ * each of its words is inside the one column that holds it.
+ */
+export function surplusSearchWhere(raw?: string | null): any | null {
+  const words = String(raw || '')
+    .split(/[\s,]+/)
+    .map((w) => w.trim())
+    .filter(Boolean)
+    .slice(0, 8);
+  if (!words.length) return null;
+  const anyField = (w: string) => ({
+    OR: [
+      { propertyAddress: { contains: w, mode: 'insensitive' } },
+      { propertyCity: { contains: w, mode: 'insensitive' } },
+      { sellerFirstName: { contains: w, mode: 'insensitive' } },
+      { sellerLastName: { contains: w, mode: 'insensitive' } },
+      { surplusDetail: { is: { county: { contains: w, mode: 'insensitive' } } } },
+      { surplusDetail: { is: { caseNumber: { contains: w, mode: 'insensitive' } } } },
+      { surplusDetail: { is: { parcelId: { contains: w, mode: 'insensitive' } } } },
+    ],
+  });
+  return words.length === 1 ? anyField(words[0]) : { AND: words.map(anyField) };
+}

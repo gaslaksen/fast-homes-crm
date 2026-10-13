@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import AppShell from '@/components/AppShell';
-import PipelineBoard, { type PipelineView } from '@/components/pipelines/PipelineBoard';
+import PipelineBoard, { inBoardOrder, type PipelineView } from '@/components/pipelines/PipelineBoard';
 import AddLeadSheet, { SURPLUS_FIELDS } from '@/components/pipelines/AddLeadSheet';
 import SurplusWorkPanel from '@/components/pipelines/SurplusWorkPanel';
 import SurplusPropertyCard, { STATUS_ACCENT } from '@/components/pipelines/SurplusPropertyCard';
@@ -821,13 +821,15 @@ export default function SurplusFundsPage() {
   /**
    * Step through the filtered list from inside the panel.
    *
-   * Indexed off the SAME array the board renders, so the arrows follow whatever
-   * filter and sort is on screen rather than some separate order. Null at the
-   * ends instead of wrapping, which is what disables the button and makes the
-   * end of the list visible.
+   * Indexed off the order the board reports, column header sort included, so
+   * the arrows follow whatever filter and sort is on screen rather than some
+   * separate order. Null at the ends instead of wrapping, which is what
+   * disables the button and makes the end of the list visible.
    */
-  const openIndex = rows.findIndex((r) => r.key === openId);
-  const goTo = (i: number) => setOpenId(rows[i] ? (rows[i] as any).key : null);
+  const [boardOrder, setBoardOrder] = useState<string[] | null>(null);
+  const navRows = inBoardOrder(rows, boardOrder, (r: any) => r.key);
+  const openIndex = navRows.findIndex((r: any) => r.key === openId);
+  const goTo = (i: number) => setOpenId(navRows[i] ? (navRows[i] as any).key : null);
 
   // Open the linked claimant once the board carries their property.
   useEffect(() => {
@@ -1489,6 +1491,7 @@ export default function SurplusFundsPage() {
           <PipelineBoard
             rows={rows}
             keyOf={(r) => r.key}
+            onOrderChange={setBoardOrder}
             columns={SURPLUS_COLUMNS}
             stages={SURPLUS_KANBAN}
             stageOf={(r) => r.stage}
@@ -1675,8 +1678,8 @@ export default function SurplusFundsPage() {
         {openProperty && (
           <SurplusWorkPanel
             onPrev={openIndex > 0 ? () => goTo(openIndex - 1) : null}
-            onNext={openIndex >= 0 && openIndex < rows.length - 1 ? () => goTo(openIndex + 1) : null}
-            position={openIndex >= 0 ? { index: openIndex, total: rows.length } : null}
+            onNext={openIndex >= 0 && openIndex < navRows.length - 1 ? () => goTo(openIndex + 1) : null}
+            position={openIndex >= 0 ? { index: openIndex, total: navRows.length } : null}
             property={openProperty}
             initialClaimantId={linkedClaimant}
             currentUser={currentUser}
