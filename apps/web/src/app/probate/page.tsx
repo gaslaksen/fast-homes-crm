@@ -10,6 +10,7 @@ import {
   WORK_STATUS_LABELS,
 } from '@/components/probate/ProbateContactRow';
 import PipelineBoard, {
+  inBoardOrder,
   type PipelineView,
   type PipelineColumn,
   type PipelineStage,
@@ -241,13 +242,15 @@ export default function ProbatePage() {
   /**
    * Step through the filtered list from inside the panel.
    *
-   * Indexed off the SAME array the board renders, so the arrows follow whatever
-   * filter and sort is on screen rather than some separate order. Null at the
-   * ends instead of wrapping, which is what disables the button and makes the
-   * end of the list visible.
+   * Indexed off the order the board reports, column header sort included, so
+   * the arrows follow whatever filter and sort is on screen rather than some
+   * separate order. Null at the ends instead of wrapping, which is what
+   * disables the button and makes the end of the list visible.
    */
-  const openIndex = contacts.findIndex((c) => c.contactKey === openKey);
-  const goTo = (i: number) => setOpenKey(contacts[i] ? (contacts[i] as any).contactKey : null);
+  const [boardOrder, setBoardOrder] = useState<string[] | null>(null);
+  const navRows = inBoardOrder(contacts, boardOrder, (r: any) => r.contactKey);
+  const openIndex = navRows.findIndex((r: any) => r.contactKey === openKey);
+  const goTo = (i: number) => setOpenKey(navRows[i] ? (navRows[i] as any).contactKey : null);
 
 
   const toggleSelect = (key: string) => setSelected((prev) => {
@@ -500,6 +503,7 @@ export default function ProbatePage() {
               <PipelineBoard
                 rows={contacts}
                 keyOf={(c) => c.contactKey}
+                onOrderChange={setBoardOrder}
                 columns={PROBATE_COLUMNS}
                 stages={PROBATE_KANBAN}
                 stageOf={(c) => c.workStatus || 'NOT_CONTACTED'}
@@ -593,8 +597,8 @@ export default function ProbatePage() {
             {openContact && (
               <PipelineWorkPanel
                 onPrev={openIndex > 0 ? () => goTo(openIndex - 1) : null}
-                onNext={openIndex >= 0 && openIndex < contacts.length - 1 ? () => goTo(openIndex + 1) : null}
-                position={openIndex >= 0 ? { index: openIndex, total: contacts.length } : null}
+                onNext={openIndex >= 0 && openIndex < navRows.length - 1 ? () => goTo(openIndex + 1) : null}
+                position={openIndex >= 0 ? { index: openIndex, total: navRows.length } : null}
                 title={openContact.heirName}
                 subtitle={`${openContact.heirCity || 'city unknown'} · ${openContact.propertyCount} propert${openContact.propertyCount === 1 ? 'y' : 'ies'}`}
                 meta={openContact.deceasedNames.join(', ')}

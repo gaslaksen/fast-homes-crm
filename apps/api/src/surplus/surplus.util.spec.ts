@@ -35,6 +35,7 @@ import {
   queueOf,
   queueReason,
   calendarDayToDate,
+  surplusSearchWhere,
 } from './surplus.util';
 import {
   SurplusClaimantType,
@@ -935,5 +936,37 @@ describe('calendarDayToDate', () => {
     expect(calendarDayToDate(null)).toBeNull();
     expect(calendarDayToDate('not a date')).toBeNull();
     expect(calendarDayToDate('2026-02-30')).toBeNull();
+  });
+});
+
+describe('surplusSearchWhere', () => {
+  /** The words a clause demands, one list of fields per word. */
+  const words = (w: any): any[] => (w.AND ? w.AND : [w]);
+  const firstNameTerm = (clause: any) => clause.OR.find((f: any) => f.sellerFirstName).sellerFirstName.contains;
+
+  it('is null for an empty box', () => {
+    expect(surplusSearchWhere('')).toBeNull();
+    expect(surplusSearchWhere('   ')).toBeNull();
+    expect(surplusSearchWhere(null)).toBeNull();
+  });
+
+  it('matches one word against every field', () => {
+    const w = surplusSearchWhere('Clark');
+    expect(w.OR).toHaveLength(7);
+    expect(firstNameTerm(w)).toBe('Clark');
+  });
+
+  it('lets a first and last name match different columns', () => {
+    const w = surplusSearchWhere('Rosemary Clark');
+    expect(words(w).map(firstNameTerm)).toEqual(['Rosemary', 'Clark']);
+    // Each word searches the first AND last name, so the two can land apart.
+    for (const clause of words(w)) {
+      expect(clause.OR.some((f: any) => f.sellerLastName)).toBe(true);
+    }
+  });
+
+  it('takes a middle name and a comma between the names', () => {
+    expect(words(surplusSearchWhere('Rosemary Ann Clark')).map(firstNameTerm)).toEqual(['Rosemary', 'Ann', 'Clark']);
+    expect(words(surplusSearchWhere('Clark, Rosemary')).map(firstNameTerm)).toEqual(['Clark', 'Rosemary']);
   });
 });
