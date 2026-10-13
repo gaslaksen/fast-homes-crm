@@ -150,6 +150,9 @@ export default function HomeScreen() {
         band: '',
         needsReply: '',
         source: '',
+        // Changes every tap, so tapping the same card again re-applies its
+        // filter even after it was cleared on the list.
+        t: String(Date.now()),
       },
     });
 

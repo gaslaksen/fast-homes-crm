@@ -28,8 +28,18 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 export function ActiveCallScreen() {
-  const { status, muted, peerName, connectedAt, error, toggleMute, hangUp, dismiss, needsOutcome } =
-    useCall();
+  const {
+    status,
+    muted,
+    peerName,
+    connectedAt,
+    error,
+    toggleMute,
+    hangUp,
+    dismiss,
+    needsOutcome,
+    outcomeName,
+  } = useCall();
   const duration = useDuration(connectedAt);
   const active = status === 'connected' || status === 'reconnecting';
   const ended = status === 'ended';
@@ -42,7 +52,7 @@ export function ActiveCallScreen() {
         <KeyboardAvoidingView style={styles.outcomeContainer} behavior="padding">
           <View style={styles.outcomeHeader}>
             <Text style={styles.outcomeName} numberOfLines={1}>
-              {peerName || 'Call'}
+              {outcomeName || peerName || 'Call'}
             </Text>
             <Text style={styles.status}>Call ended</Text>
             {error ? <Text style={styles.error}>{error}</Text> : null}

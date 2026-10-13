@@ -39,6 +39,8 @@ export interface SurplusListFilters {
   queue?: string;
   contact?: string;
   letterDue?: string;
+  /** Changes on every tap from Home, so the same filter can be re-applied. */
+  t?: string;
 }
 
 function SurplusRowItem({ row, onPress }: { row: SurplusRow; onPress: () => void }) {
@@ -94,7 +96,7 @@ export function SurplusList({ initial }: { initial: SurplusListFilters }) {
     setQueue(initial.queue || undefined);
     setContact(initial.contact || undefined);
     setLetterDue(initial.letterDue || undefined);
-  }, [initial.queue, initial.contact, initial.letterDue]);
+  }, [initial.queue, initial.contact, initial.letterDue, initial.t]);
 
   // The list endpoint classifies every claim on the server, so wait for a
   // pause in typing rather than asking on every keystroke.

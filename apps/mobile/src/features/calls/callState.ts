@@ -49,6 +49,8 @@ export interface CallState {
    * so the end screen asks what happened in the recovery vocabulary.
    */
   needsOutcome: boolean;
+  /** Who the call owed an outcome was to, which outlives a callback ringing in. */
+  outcomeName: string | null;
   /** Save the outcome against this call. Throws with the API's message on refusal. */
   saveOutcome: (input: CallOutcomeInput) => Promise<void>;
 }

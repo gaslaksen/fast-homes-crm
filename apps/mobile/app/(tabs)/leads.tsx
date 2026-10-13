@@ -54,6 +54,8 @@ type LeadsParams = {
   queue?: string;
   contact?: string;
   letterDue?: string;
+  /** Set by Home on every tap so a repeat tap re-applies the filter. */
+  t?: string;
 };
 
 /**
@@ -73,7 +75,7 @@ export default function LeadsScreen() {
     } else if (params.mode === 'surplus') {
       setMode('surplus');
     }
-  }, [params.mode, params.band, params.needsReply, params.source, params.queue, params.contact, params.letterDue]);
+  }, [params.mode, params.band, params.needsReply, params.source, params.t]);
 
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
@@ -96,7 +98,7 @@ export default function LeadsScreen() {
           {/* New leads are property leads; surplus claims come from the county poll. */}
           <Stack.Screen options={{ headerRight: () => null }} />
           <SurplusList
-            initial={{ queue: params.queue, contact: params.contact, letterDue: params.letterDue }}
+            initial={{ queue: params.queue, contact: params.contact, letterDue: params.letterDue, t: params.t }}
           />
         </>
       ) : (
