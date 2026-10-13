@@ -61,7 +61,7 @@ function fmtDuration(seconds: number | null): string {
 
 // Twilio recordings are served via our authenticated proxy; <audio> can't send
 // an Authorization header, so pass the JWT as a query param for those URLs.
-function recordingSrc(url: string): string {
+export function recordingSrc(url: string): string {
   if (!url.includes('/calls/twilio/recording-media/')) return url;
   const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
   if (!token) return url;
@@ -387,7 +387,9 @@ export default function CommunicationsTimeline({
             <div className="w-full max-w-md rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-sm p-3">
               <div className="flex items-center gap-1.5 mb-1.5">
                 <ChannelBadge kind="call" />
-                <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">Call</span>
+                <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                  {item.payload.voicemail ? 'Voicemail' : 'Call'}
+                </span>
                 <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300">
                   {item.payload.status}
                 </span>
@@ -418,6 +420,13 @@ export default function CommunicationsTimeline({
                 <audio controls preload="none" src={recordingSrc(item.payload.recordingUrl)} className="w-full h-8" />
               ) : (
                 <div className="text-[11px] text-gray-400 dark:text-gray-500">No recording</div>
+              )}
+              {item.payload.voicemail && (
+                <p className="mt-1.5 text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
+                  {item.payload.transcript || (
+                    <span className="text-gray-400 dark:text-gray-500">No transcript</span>
+                  )}
+                </p>
               )}
             </div>
           </div>

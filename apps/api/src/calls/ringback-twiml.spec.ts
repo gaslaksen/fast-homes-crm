@@ -2,6 +2,7 @@ import { Test } from '@nestjs/testing';
 import { CallsController } from './calls.controller';
 import { CallsService } from './calls.service';
 import { TwilioVoiceService } from './twilio-voice.service';
+import { VoicemailService } from './voicemail.service';
 
 /**
  * The wait audio has now been wrong twice: first hold music, then a single
@@ -16,6 +17,7 @@ describe('conference wait TwiML', () => {
       controllers: [CallsController],
       providers: [
         { provide: CallsService, useValue: {} },
+        { provide: VoicemailService, useValue: {} },
         {
           provide: TwilioVoiceService,
           useValue: { ringbackAudioUrl: () => 'https://api.test/calls/twilio/ringback.wav' },

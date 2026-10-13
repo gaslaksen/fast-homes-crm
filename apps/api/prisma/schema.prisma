@@ -1704,6 +1704,12 @@ model CallLog {
   recordingUrl String?
   endedReason  String?
   duration     Int?
+  /// An inbound call nobody answered where the caller left a message on the
+  /// greeting. recordingUrl and transcript then hold the message.
+  voicemail           Boolean   @default(false)
+  /// When someone dealt with a voicemail that matched no lead: dismissed it,
+  /// or attached it to a lead. Null means it is still waiting in the inbox.
+  voicemailReviewedAt DateTime?
   initiatedByUserId String?   // user who started the call; null = AI/system
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt

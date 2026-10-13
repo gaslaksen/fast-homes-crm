@@ -60,6 +60,7 @@ function followUpTitle(outcome: SurplusCallOutcome | null, name: string): string
 import { PhoneNumbersService, numberKey } from '../phone-numbers/phone-numbers.service';
 import { LeadPhonesService } from '../phone-numbers/lead-phones.service';
 import { TouchService } from '../leads/touch.service';
+import { appendVoicemailTwiml, voicemailGreetingFor } from './voicemail.util';
 
 const AccessToken = Twilio.jwt.AccessToken;
 const VoiceGrant = AccessToken.VoiceGrant;
@@ -96,7 +97,7 @@ export class TwilioVoiceService {
    * back to TWILIO_WEBHOOK_BASE_URL so status/recording callbacks keep working
    * even if only one is configured.
    */
-  private callbackBase(): string {
+  callbackBase(): string {
     const base =
       this.config.get<string>('API_URL') ||
       this.config.get<string>('TWILIO_WEBHOOK_BASE_URL') ||
@@ -740,20 +741,34 @@ export class TwilioVoiceService {
       }
     }
 
-    const identities = await this.getRingIdentities();
+    const apiBase = this.callbackBase();
+    // A number with a greeting sends an unanswered call to voicemail. Without
+    // a callback base the message could never reach us, so it is not offered.
+    const greeting = apiBase ? voicemailGreetingFor(to) : null;
+
+    const identities = await this.ringIdentities();
     if (identities.length === 0) {
-      response.say('No agents are available to take your call. Please try again later.');
+      if (greeting) {
+        appendVoicemailTwiml(response, greeting, apiBase);
+      } else {
+        response.say('No agents are available to take your call. Please try again later.');
+      }
       return response.toString();
     }
 
-    const apiBase = this.callbackBase();
     const recordCalls =
       (this.config.get<string>('TWILIO_RECORD_CALLS') || 'false').toLowerCase() === 'true';
 
     const dial = response.dial({
       timeout: 25,
       answerOnBridge: true,
-      action: apiBase ? `${apiBase}/calls/twilio/status` : undefined,
+      // The voicemail route does the same bookkeeping as /status, then plays
+      // the greeting when nobody picked up.
+      action: greeting
+        ? `${apiBase}/calls/twilio/voicemail`
+        : apiBase
+          ? `${apiBase}/calls/twilio/status`
+          : undefined,
       method: 'POST',
       ...(recordCalls
         ? {
@@ -778,7 +793,8 @@ export class TwilioVoiceService {
     return response.toString();
   }
 
-  private async getRingIdentities(): Promise<string[]> {
+  /** Who an inbound call rings, and so who hears about a missed one. */
+  async ringIdentities(): Promise<string[]> {
     // Optional explicit allowlist of client identities (userIds) to ring
     const override = this.config.get<string>('TWILIO_INBOUND_RING_IDENTITIES');
     if (override) {
@@ -896,12 +912,7 @@ export class TwilioVoiceService {
     if (!callSid || !recordingSid) return;
     if (recordingStatus !== 'completed') return; // only act on the final recording
 
-    // The raw Twilio media URL needs account auth to fetch, so we store a proxy
-    // URL the browser <audio> can hit; the proxy streams it with our credentials.
-    const base = this.callbackBase();
-    const proxyUrl = base
-      ? `${base}/calls/twilio/recording-media/${recordingSid}`
-      : `${body.RecordingUrl}.mp3`;
+    const proxyUrl = this.recordingPlaybackUrl(recordingSid, body.RecordingUrl);
 
     try {
       await this.prisma.callLog.updateMany({
@@ -921,17 +932,30 @@ export class TwilioVoiceService {
     });
   }
 
-  /** Fetch the recording, transcribe via OpenAI, store it, and run CAMP extraction. */
-  private async transcribeAndExtract(callSid: string, recordingSid: string): Promise<void> {
+  /**
+   * Where the browser plays a recording from. The raw Twilio media URL needs
+   * account auth to fetch, so we store a proxy URL the browser <audio> can hit;
+   * the proxy streams it with our credentials.
+   */
+  recordingPlaybackUrl(recordingSid: string, rawUrl?: string): string {
+    const base = this.callbackBase();
+    return base ? `${base}/calls/twilio/recording-media/${recordingSid}` : `${rawUrl}.mp3`;
+  }
+
+  /**
+   * The words on a Twilio recording, via OpenAI Whisper. Null when
+   * transcription is not configured or Twilio or OpenAI answers with an error.
+   */
+  async transcribeRecording(recordingSid: string): Promise<string | null> {
     const openaiKey = this.config.get<string>('OPENAI_API_KEY');
     if (!openaiKey) {
-      this.logger.warn('OPENAI_API_KEY not set — skipping Twilio call transcription');
-      return;
+      this.logger.warn('OPENAI_API_KEY not set, skipping Twilio call transcription');
+      return null;
     }
 
     const accountSid = this.config.get<string>('TWILIO_ACCOUNT_SID');
     const authToken = this.config.get<string>('TWILIO_AUTH_TOKEN');
-    if (!accountSid || !authToken) return;
+    if (!accountSid || !authToken) return null;
 
     // Pull the audio from Twilio (account-authenticated)
     const mediaUrl = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Recordings/${recordingSid}.mp3`;
@@ -942,7 +966,7 @@ export class TwilioVoiceService {
     });
     if (!audioRes.ok) {
       this.logger.warn(`Could not fetch recording ${recordingSid}: ${audioRes.status}`);
-      return;
+      return null;
     }
     const audioBuffer = Buffer.from(await audioRes.arrayBuffer());
 
@@ -958,10 +982,16 @@ export class TwilioVoiceService {
     });
     if (!trRes.ok) {
       this.logger.warn(`Whisper transcription failed (${trRes.status}): ${await trRes.text()}`);
-      return;
+      return null;
     }
     const { text } = (await trRes.json()) as { text: string };
-    if (!text?.trim()) return;
+    return text?.trim() || null;
+  }
+
+  /** Fetch the recording, transcribe via OpenAI, store it, and run CAMP extraction. */
+  private async transcribeAndExtract(callSid: string, recordingSid: string): Promise<void> {
+    const text = await this.transcribeRecording(recordingSid);
+    if (!text) return;
 
     const call = await this.prisma.callLog.findUnique({
       where: { twilioCallSid: callSid },

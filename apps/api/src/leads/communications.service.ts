@@ -160,6 +160,10 @@ export class CommunicationsService {
           recordingUrl: c.recordingUrl ?? null,
           sellerNumber,
           numberLabel: sellerNumber ? phoneLabels.get(phoneKey(sellerNumber)) ?? null : null,
+          voicemail: !!c.voicemail,
+          // A voicemail is read as much as heard; other calls keep their
+          // transcripts off the timeline as before.
+          transcript: c.voicemail ? c.transcript ?? null : null,
         },
       });
     }
