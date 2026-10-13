@@ -42,6 +42,10 @@ describe('voicemail greeting lookup', () => {
     expect(voicemailGreetingFor(undefined)).toBeNull();
   });
 
+  it('ships the recorded D.I.G. Deeper greeting', () => {
+    expect(voicemailAudioPath('digdeeper.mp3')).toMatch(/assets\/voicemail\/digdeeper\.mp3$/);
+  });
+
   it('serves only files a greeting names', () => {
     expect(voicemailAudioPath('../../.env')).toBeNull();
     expect(voicemailAudioPath('README.md')).toBeNull();
@@ -119,10 +123,24 @@ describe('VoicemailService', () => {
 
     // The CallLog bookkeeping /status used to do still happens.
     expect(twilioVoice.handleStatusCallback).toHaveBeenCalled();
-    expect(twiml).toContain('D. I. G. Deeper');
+    expect(twiml).toContain(`<Play>${API}/calls/twilio/voicemail/greeting/digdeeper.mp3</Play>`);
     expect(twiml).toContain(`action="${API}/calls/twilio/voicemail/done"`);
     expect(twiml).toContain(`recordingStatusCallback="${API}/calls/twilio/voicemail/recording"`);
     expect(twiml).toContain('maxLength="180"');
+  });
+
+  it('reads the script aloud if the recorded greeting is missing', async () => {
+    const { svc } = voicemailHarness();
+    // Run from a directory with no assets folder, as a deploy missing the file would.
+    const exists = jest.spyOn(process, 'cwd').mockReturnValue('/nonexistent');
+    try {
+      const twiml = await svc.afterDialTwiml({ CallSid: 'CA1', To: DIG_DEEPER, DialCallStatus: 'no-answer' });
+      expect(twiml).not.toContain('<Play');
+      expect(twiml).toContain('D. I. G. Deeper');
+      expect(twiml).toContain('<Record');
+    } finally {
+      exists.mockRestore();
+    }
   });
 
   it('does nothing more once someone picked up', async () => {
