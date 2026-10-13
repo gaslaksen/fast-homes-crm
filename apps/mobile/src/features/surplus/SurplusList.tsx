@@ -273,7 +273,11 @@ const makeStyles = (colors: Colors) =>
     input: { flex: 1, fontSize: 16, color: colors.text },
     clear: { fontSize: 14, color: colors.primary, fontWeight: '600' },
 
-    filterScroll: { flexGrow: 0 },
+    // A ScrollView shrinks by default. With a long claimant list below asking
+    // for more height than the screen has, layout took the difference out of
+    // this row too and cut the pills in half; the sort buttons below are a
+    // plain View, which does not shrink, so they were fine.
+    filterScroll: { flexGrow: 0, flexShrink: 0 },
     filters: { gap: 8, paddingHorizontal: 14, paddingBottom: 10 },
     filterBtn: {
       paddingHorizontal: 12,
