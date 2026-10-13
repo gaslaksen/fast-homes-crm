@@ -60,6 +60,11 @@ export class CallsController {
     }
     return {
       configured: true,
+      // Tells the mobile app every incoming call carries a DisplayName
+      // parameter, so it is safe to template the native ring screen on it.
+      // An app that turned the template on before this API shipped would ring
+      // as the literal "${DisplayName}".
+      sendsDisplayName: true,
       ...this.twilioVoiceService.generateToken(userId, platform),
     };
   }

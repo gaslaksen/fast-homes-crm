@@ -57,7 +57,7 @@ function followUpTitle(outcome: SurplusCallOutcome | null, name: string): string
       return `Follow up with ${name}`;
   }
 }
-import { PhoneNumbersService, numberKey } from '../phone-numbers/phone-numbers.service';
+import { PhoneNumbersService, numberKey, prettyNumber } from '../phone-numbers/phone-numbers.service';
 import { LeadPhonesService } from '../phone-numbers/lead-phones.service';
 import { TouchService } from '../leads/touch.service';
 import { appendVoicemailTwiml, voicemailGreetingFor } from './voicemail.util';
@@ -781,11 +781,18 @@ export class TwilioVoiceService {
         : {}),
     });
 
+    // What the iPhone's native ring screen shows. The app sets its CallKit
+    // handle template to ${DisplayName}, and the SDK fills that in natively
+    // from this parameter, so it must be on every invite: a call without it
+    // would ring as the literal text "${DisplayName}".
+    const displayName = callerName || (from ? prettyNumber(from) : '') || 'Unknown caller';
+
     // Ring every agent browser at once; first to answer wins, offline ones no-op.
     for (const identity of identities) {
       const client = dial.client();
       client.identity(identity);
       client.parameter({ name: 'From', value: from });
+      client.parameter({ name: 'DisplayName', value: displayName });
       if (callerName) client.parameter({ name: 'callerName', value: callerName });
       if (lead?.id) client.parameter({ name: 'leadId', value: lead.id });
     }

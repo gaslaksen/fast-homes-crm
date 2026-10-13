@@ -109,7 +109,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       let name = 'Incoming call';
       try {
         const params = invite.getCustomParameters?.() as Record<string, string>;
-        name = params?.callerName || invite.getFrom?.() || name;
+        name = params?.callerName || params?.DisplayName || invite.getFrom?.() || name;
       } catch {
         // fall back to the default label
       }
@@ -152,6 +152,17 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           params: { platform: 'ios' },
         });
         if (data?.configured && data?.token) {
+          // The native ring screen (CallKit) is drawn before any of our JS
+          // runs, so by default it shows only the caller's number. The SDK
+          // can fill in a template from the call's parameters instead; only
+          // switch it on once the API says it sends DisplayName on every
+          // call, or the screen would read "${DisplayName}". The setting is
+          // stored natively, so it also applies when a call wakes the app.
+          await voice
+            .setIncomingCallContactHandleTemplate(
+              data.sendsDisplayName ? '${DisplayName}' : undefined,
+            )
+            .catch((e: any) => console.warn('[call] contact handle template failed:', e?.message || e));
           await voice.register(data.token);
           registeredToken = data.token;
           console.log('[call] registered for incoming calls');
