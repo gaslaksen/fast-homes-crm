@@ -6,7 +6,7 @@ import { Voice, Call, CallInvite } from '@twilio/voice-react-native-sdk';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { CALLER_ID_KEY } from '@/lib/config';
-import { useCallerIds, prettyPhone, type CallerId } from './hooks';
+import { useCallerIds, type CallerId } from './hooks';
 import { ActiveCallScreen } from './ActiveCallScreen';
 import {
   CallContext,
@@ -177,45 +177,23 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       setStatus('connecting');
       currentRef.current = null;
 
-      const refuse = (msg: string) => {
-        setError(msg);
-        setStatus('ended');
-        startingRef.current = false;
-      };
-
-      // Every path that dials a lead (the claim, the conversation, the dialer
-      // search, Recents) comes through here, so the do-not-contact checks live
-      // here once. Both lookups are normally already cached by the screen.
+      // Whether the lead is a surplus claim decides if the call ends on the
+      // outcome form. Settled before the dial, so a slow answer cannot land on
+      // a later call. From Recents the source is not known; it is normally
+      // already cached by the screen the call came from.
       if (lead?.id) {
-        const ten = (n?: string | null) => (n || '').replace(/\D/g, '').slice(-10);
         let surplus = lead.source === 'SURPLUS';
-        try {
-          const l: any = await qc.fetchQuery({
-            queryKey: ['lead', lead.id, 'detail'],
-            queryFn: async () => (await api.get(`/leads/${lead.id}`)).data,
-            staleTime: 30_000,
-          });
-          surplus = l?.source === 'SURPLUS';
-          // The server refuses a flagged NUMBER but not a claim marked
-          // do-not-call, which is what "Asked not to be called" sets.
-          if (surplus && l?.doNotContact) {
-            return refuse(`${name || 'This claimant'} is marked do-not-call, so Dealcore will not dial them.`);
+        if (lead.source === undefined) {
+          try {
+            const l: any = await qc.fetchQuery({
+              queryKey: ['lead', lead.id, 'detail'],
+              queryFn: async () => (await api.get(`/leads/${lead.id}`)).data,
+              staleTime: 30_000,
+            });
+            surplus = l?.source === 'SURPLUS';
+          } catch {
+            // Unknown source: the call still goes, without the outcome form.
           }
-        } catch {
-          // Unknown source: dial anyway, the server still checks the number.
-        }
-        try {
-          const ph: any = await qc.fetchQuery({
-            queryKey: ['lead', lead.id, 'phones'],
-            queryFn: async () => (await api.get(`/leads/${lead.id}/messages/to-options`)).data,
-            staleTime: 60_000,
-          });
-          const hit = (ph?.numbers || []).find((n: any) => ten(n.number) === ten(toNumber));
-          if (hit?.dnc) {
-            return refuse(`${prettyPhone(toNumber)} is on the ${hit.dnc} do-not-call list, so Dealcore will not dial it.`);
-          }
-        } catch {
-          // The voice webhook checks the number again before dialling.
         }
         currentRef.current = { leadId: lead.id, surplus, name: name || toNumber };
       }
@@ -228,8 +206,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         const call = await voiceRef.current!.connect(data.token, {
           // callerId reaches the TwiML voice webhook, which re-checks it
           // against the org's numbers before dialling. Omitted = API default.
-          // leadId lets the voice webhook refuse a DNC number, log the call
-          // on the lead's timeline and key the CallLog to it.
+          // leadId lets the voice webhook log the call on the lead's
+          // timeline and key the CallLog to it.
           params: {
             To: toNumber,
             ...(callerId ? { callerId: callerId.number } : {}),

@@ -17,7 +17,6 @@ import {
   useLeadPhones,
   showPhoneSheet,
   phoneSubtitle,
-  alertDnc,
   type LeadPhone,
 } from '@/features/leads/leadPhones';
 import {
@@ -162,8 +161,9 @@ export function SurplusLeadView({ lead }: { lead: LeadDetail }) {
   const tier = tierStyle(r.tier);
   const status = claimStatusTone(r.claimStatus);
   const queue = queueTone(r.queue);
-  const callable = numbers.filter((n) => !n.dnc && !n.bad);
-  const blockCall = r.doNotCall || lead.doNotContact;
+  const clean = numbers.filter((n) => !n.dnc && !n.bad);
+  // Flags are shown, never enforced here: the person dialling decides.
+  const doNotCall = r.doNotCall || lead.doNotContact;
   const upcoming = nextStage(stage);
   const upcomingBlocks = (upcoming && r.stageBlocks?.[upcoming]) || [];
   const mailing = mailingAddress(r);
@@ -172,10 +172,6 @@ export function SurplusLeadView({ lead }: { lead: LeadDetail }) {
   const docLabel = (kind: string) => r.documents.find((d) => d.kind === kind)?.label || kind;
 
   function call() {
-    if (blockCall) {
-      Alert.alert('Do not call', `${name} asked not to be contacted. The claim is marked do-not-call.`);
-      return;
-    }
     if (numbers.length > 1) {
       showPhoneSheet({
         title: 'Call',
@@ -185,15 +181,11 @@ export function SurplusLeadView({ lead }: { lead: LeadDetail }) {
       });
       return;
     }
-    const only = numbers[0];
-    if (only?.dnc) return alertDnc(only);
-    const num = only?.number ?? lead.sellerPhone;
+    const num = numbers[0]?.number ?? lead.sellerPhone;
     if (num) startCall(num, name, callLead);
   }
 
   function callNumber(p: LeadPhone, who: string) {
-    if (blockCall) return call();
-    if (p.dnc) return alertDnc(p);
     startCall(p.number, who, callLead);
   }
 
@@ -315,7 +307,7 @@ export function SurplusLeadView({ lead }: { lead: LeadDetail }) {
           <Chip label={r.claimStatusLabel} color={status.color} soft={status.soft} />
           <Chip label={tier.label} color={tier.color} soft={tier.soft} />
           {r.isDeceased ? <Chip label="Estate" color="#6D28D9" soft="#EDE9FE" /> : null}
-          {blockCall ? <Chip label="Do not call" color="#B91C1C" soft="#FEE2E2" /> : null}
+          {doNotCall ? <Chip label="Do not call" color="#B91C1C" soft="#FEE2E2" /> : null}
         </View>
       </View>
 
@@ -324,7 +316,7 @@ export function SurplusLeadView({ lead }: { lead: LeadDetail }) {
           icon={<PhoneIcon size={22} color={colors.primary} />}
           label="Call"
           onPress={call}
-          disabled={blockCall || (!lead.sellerPhone && numbers.length === 0)}
+          disabled={!lead.sellerPhone && numbers.length === 0}
         />
         <ActionButton
           icon={<MessageIcon size={22} color={colors.primary} />}
@@ -360,6 +352,7 @@ export function SurplusLeadView({ lead }: { lead: LeadDetail }) {
             Next: {r.nextTask.title} · {dueLabel(r.nextTask.dueDate)}
           </Text>
         ) : null}
+        {doNotCall ? <Note danger text="The claimant asked not to be called." /> : null}
         {r.obituaryMatch === 'possible' ? (
           <Note danger text="Possible obituary match. Check before calling." />
         ) : null}
@@ -430,7 +423,7 @@ export function SurplusLeadView({ lead }: { lead: LeadDetail }) {
       <Card style={styles.listCard}>
         {numbers.length ? (
           numbers.map((p) => {
-            const off = !!p.dnc || !!p.bad || blockCall;
+            const flagged = !!p.dnc || !!p.bad;
             return (
               <TouchableOpacity
                 key={p.number}
@@ -438,20 +431,20 @@ export function SurplusLeadView({ lead }: { lead: LeadDetail }) {
                 onPress={() => callNumber(p, p.label.startsWith('Heir') ? p.label.replace(/^Heir:\s*/, '') : name)}
                 activeOpacity={0.7}
               >
-                <PhoneIcon size={15} color={off ? colors.textMuted : colors.primary} />
+                <PhoneIcon size={15} color={flagged ? colors.danger : colors.primary} />
                 <View style={styles.phoneText}>
-                  <Text style={[styles.phoneNumber, off && styles.phoneOff]}>{prettyPhone(p.number)}</Text>
-                  <Text style={[styles.phoneSub, p.dnc ? styles.phoneDnc : null]}>{phoneSubtitle(p)}</Text>
+                  <Text style={styles.phoneNumber}>{prettyPhone(p.number)}</Text>
+                  <Text style={[styles.phoneSub, flagged ? styles.phoneDnc : null]}>{phoneSubtitle(p)}</Text>
                 </View>
-                {!off ? <ChevronRight size={15} color={colors.textMuted} /> : null}
+                <ChevronRight size={15} color={colors.textMuted} />
               </TouchableOpacity>
             );
           })
         ) : (
           <Text style={styles.empty}>No numbers on file{r.cleanPhoneCount === 0 ? ' yet' : ''}.</Text>
         )}
-        {numbers.length && !callable.length && !blockCall ? (
-          <Note text="Every number on file is flagged. Nothing here can be dialled." />
+        {numbers.length && !clean.length ? (
+          <Note danger text="Every number on file is flagged do-not-call or bad." />
         ) : null}
         {r.contactMismatch ? (
           <Note
@@ -700,7 +693,6 @@ const makeStyles = (colors: Colors) =>
     phoneRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
     phoneText: { flex: 1 },
     phoneNumber: { fontSize: 15, fontWeight: '600', color: colors.text },
-    phoneOff: { color: colors.textMuted, textDecorationLine: 'line-through' },
     phoneSub: { fontSize: 11, color: colors.textMuted, marginTop: 1 },
     phoneDnc: { color: colors.danger, fontWeight: '600' },
 

@@ -23,7 +23,6 @@ import {
   useLeadPhones,
   showPhoneSheet,
   phoneSubtitle,
-  alertDnc,
   type LeadPhone,
 } from '@/features/leads/leadPhones';
 import {
@@ -84,7 +83,6 @@ function ThreadCallButton({
   function onPress() {
     const lead = { id: leadId, source };
     if (numbers.length < 2) {
-      if (numbers[0]?.dnc) return alertDnc(numbers[0]);
       const only = numbers[0]?.number ?? phone;
       if (only) startCall(only, name, lead);
       return;
@@ -266,6 +264,7 @@ export default function ThreadScreen() {
                   message: 'Which of their numbers should this text go to?',
                   numbers,
                   onSelect: (p) => setTo(p.number),
+                  forText: true,
                 })
               }
             >

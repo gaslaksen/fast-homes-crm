@@ -61,9 +61,11 @@ Surplus claims are the main pipeline, so the app treats them as their own kind o
 - **Leads tab.** Opens on a ranked surplus work list (`GET /surplus?group=lead`)
   with queue filters. Property leads are behind the switch at the top, unchanged.
 - **Home.** The stat cards are surplus counts from `GET /surplus/stats`.
-- **Calls.** Every call placed from a lead sends `leadId`, so the API can refuse
-  a DNC number and log the call on the lead. A surplus call ends on an outcome
-  form that posts to `POST /calls/twilio/disposition`, the same as the web dialer.
+- **Calls.** Every call placed from a lead sends `leadId`, so the API logs the
+  call on the lead. DNC flags show beside each number, red, and the number can
+  still be dialled: the decision belongs to the caller. Texting a flagged number
+  is refused. A surplus call ends on an outcome form that posts to
+  `POST /calls/twilio/disposition`, the same as the web dialer.
 
 Documents, notary, filing, disbursement and contact edits stay on the web.
 

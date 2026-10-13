@@ -17,9 +17,9 @@ export interface LeadPhone {
   type: string | null;
   isPrimary: boolean;
   /**
-   * The registry ('federal', 'state', 'litigator', 'tcpa') when the number may
-   * not be dialled or texted. Only surplus numbers carry it today. The API
-   * refuses the call or text either way; this says so before anyone tries.
+   * The registry ('federal', 'state', 'litigator', 'tcpa') the number is on.
+   * Only surplus numbers carry it today. Shown beside the number; calling it
+   * is the caller's decision, and the API refuses a text to it.
    */
   dnc?: string | null;
   /** Tried, and it does not reach this person. */
@@ -82,24 +82,28 @@ export function dncLabel(registry: string): string {
   return `DNC (${registry})`;
 }
 
-/** Tell the user why a flagged number cannot be used, instead of letting the API refuse it. */
-export function alertDnc(p: { number: string; dnc?: string | null }) {
+/**
+ * Why a flagged number cannot be texted. The API refuses a text to a DNC
+ * number; calls are left to the person dialling, so this is texting only.
+ */
+export function alertDncText(p: { number: string; dnc?: string | null }) {
   Alert.alert(
-    'Do not contact',
-    `${prettyPhone(p.number)} is on the ${p.dnc} do-not-call list, so Dealcore will not call or text it.`,
+    'Do not text',
+    `${prettyPhone(p.number)} is on the ${p.dnc} do-not-call list, so Dealcore will not text it.`,
   );
 }
 
 /**
  * Action sheet listing the seller's numbers. Used by both texting and calling.
- * A DNC number stays on the list, labelled, so nobody wonders where it went,
- * but picking it explains the flag rather than dialling.
+ * Every number shows with its DNC flag in the label. A flagged number can be
+ * called; with `forText` set, picking one explains why it cannot be texted.
  */
 export function showPhoneSheet(opts: {
   title: string;
   message?: string;
   numbers: LeadPhone[];
   onSelect: (p: LeadPhone) => void;
+  forText?: boolean;
 }) {
   const labels = opts.numbers.map((n) => `${prettyPhone(n.number)} · ${phoneSubtitle(n)}`);
   ActionSheetIOS.showActionSheetWithOptions(
@@ -112,8 +116,8 @@ export function showPhoneSheet(opts: {
     (i) => {
       if (i == null || i >= opts.numbers.length) return;
       const picked = opts.numbers[i];
-      if (picked.dnc) {
-        alertDnc(picked);
+      if (opts.forText && picked.dnc) {
+        alertDncText(picked);
         return;
       }
       opts.onSelect(picked);

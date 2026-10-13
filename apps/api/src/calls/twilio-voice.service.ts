@@ -189,14 +189,13 @@ export class TwilioVoiceService {
     }
 
     // A number flagged on a do-not-call registry, a litigator list or with a
-    // TCPA restriction is refused here, before the carrier is asked. The panel
-    // shows the flag beside the number; this is what makes it more than a hint.
+    // TCPA restriction is shown with its flag in the web panel and the app,
+    // and the decision to dial it belongs to the person making the call. It is
+    // not refused here; the log keeps a record that a flagged number was rung.
     if (leadId) {
       const flag = await this.leadPhones.dncFor(leadId, to).catch(() => null);
       if (flag) {
-        this.logger.warn(`Refusing to dial ${to} for lead ${leadId}: flagged ${flag}`);
-        response.say('That number is on a do not call list and cannot be dialled from Dealcore.');
-        return response.toString();
+        this.logger.warn(`Dialling ${to} for lead ${leadId}, which is flagged ${flag}`);
       }
     }
 
