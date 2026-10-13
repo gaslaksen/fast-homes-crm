@@ -8,6 +8,7 @@ interface Compliance {
   optOutText: string;
   senderIdEnabled: boolean;
   senderIdText: string;
+  senderIdTextDigDeeper: string;
   periodicEnabled: boolean;
   periodicDays: number;
 }
@@ -17,6 +18,7 @@ const DEFAULTS: Compliance = {
   optOutText: 'Reply STOP to stop texting',
   senderIdEnabled: true,
   senderIdText: 'Quick Cash Home Buyers',
+  senderIdTextDigDeeper: 'D.I.G. Deeper LLC',
   periodicEnabled: false,
   periodicDays: 30,
 };
@@ -28,6 +30,10 @@ const DEFAULTS: Compliance = {
  * two lines are what keeps outbound SMS compliant. They are attached in the
  * send path (not written by the AI) to the first message to each lead, and
  * again on an interval when periodic re-send is on.
+ *
+ * The sender name is per company: surplus leads are texted under D.I.G.
+ * Deeper's own A2P campaign, everyone else under Quick Cash's, and carriers
+ * check the name against the campaign.
  */
 export default function MessagingCompliancePanel() {
   const [settings, setSettings] = useState<Compliance>(DEFAULTS);
@@ -64,13 +70,15 @@ export default function MessagingCompliancePanel() {
     }
   };
 
-  // What a seller actually sees appended to the message.
-  const preview = [
-    settings.senderIdEnabled ? settings.senderIdText : '',
-    settings.optOutEnabled ? settings.optOutText : '',
-  ]
-    .filter(Boolean)
-    .join('\n');
+  // What a contact actually sees appended to the message, per company.
+  const footerFor = (senderId: string) =>
+    [settings.senderIdEnabled ? senderId : '', settings.optOutEnabled ? settings.optOutText : '']
+      .filter(Boolean)
+      .join('\n');
+  const previews = [
+    { label: 'Quick Cash leads', text: footerFor(settings.senderIdText) },
+    { label: 'Surplus leads (D.I.G. Deeper)', text: footerFor(settings.senderIdTextDigDeeper) },
+  ];
 
   if (loading) {
     return (
@@ -127,6 +135,9 @@ export default function MessagingCompliancePanel() {
               Make SMS compliant by adding sender information
             </span>
           </label>
+          <label className="block mt-3 ml-[26px] text-xs font-medium text-gray-600 dark:text-gray-400">
+            Quick Cash leads (property)
+          </label>
           <input
             type="text"
             value={settings.senderIdText}
@@ -134,7 +145,19 @@ export default function MessagingCompliancePanel() {
             maxLength={160}
             onChange={(e) => patch({ senderIdText: e.target.value })}
             placeholder="Quick Cash Home Buyers"
-            className="mt-2 ml-[26px] w-[calc(100%-26px)] px-3 py-2 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-white disabled:opacity-50 disabled:bg-gray-50 dark:disabled:bg-gray-950"
+            className="mt-1 ml-[26px] w-[calc(100%-26px)] px-3 py-2 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-white disabled:opacity-50 disabled:bg-gray-50 dark:disabled:bg-gray-950"
+          />
+          <label className="block mt-3 ml-[26px] text-xs font-medium text-gray-600 dark:text-gray-400">
+            Surplus leads (D.I.G. Deeper)
+          </label>
+          <input
+            type="text"
+            value={settings.senderIdTextDigDeeper}
+            disabled={!settings.senderIdEnabled}
+            maxLength={160}
+            onChange={(e) => patch({ senderIdTextDigDeeper: e.target.value })}
+            placeholder="D.I.G. Deeper LLC"
+            className="mt-1 ml-[26px] w-[calc(100%-26px)] px-3 py-2 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-white disabled:opacity-50 disabled:bg-gray-50 dark:disabled:bg-gray-950"
           />
         </div>
 
@@ -176,16 +199,23 @@ export default function MessagingCompliancePanel() {
           <div className="mt-4 text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">
             Appended to the message
           </div>
-          {preview ? (
-            <pre className="whitespace-pre-wrap font-sans text-sm text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-800 rounded-lg px-3 py-2">
-              {preview}
-            </pre>
-          ) : (
-            <p className="text-sm text-amber-600 dark:text-amber-400">
-              Nothing will be appended. Outbound texts will carry no sender name or opt-out
-              instructions.
-            </p>
-          )}
+          <div className="space-y-3">
+            {previews.map((p) => (
+              <div key={p.label}>
+                <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">{p.label}</div>
+                {p.text ? (
+                  <pre className="whitespace-pre-wrap font-sans text-sm text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-800 rounded-lg px-3 py-2">
+                    {p.text}
+                  </pre>
+                ) : (
+                  <p className="text-sm text-amber-600 dark:text-amber-400">
+                    Nothing will be appended. These texts will carry no sender name or opt-out
+                    instructions.
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 

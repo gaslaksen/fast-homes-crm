@@ -5,6 +5,7 @@ const base: ComplianceSettings = {
   optOutText: 'Reply STOP to stop texting',
   senderIdEnabled: true,
   senderIdText: 'Quick Cash Home Buyers',
+  senderIdTextDigDeeper: 'DIG Deeper LLC',
   periodicEnabled: false,
   periodicDays: 30,
 };
@@ -31,6 +32,22 @@ describe('buildFooter', () => {
 
   it('treats blank custom text as nothing to add', () => {
     expect(svc.buildFooter({ ...base, senderIdText: '', optOutText: '' })).toBe('');
+  });
+});
+
+describe('buildFooter by brand', () => {
+  it('signs a surplus lead text as D.I.G. Deeper', () => {
+    expect(svc.buildFooter(base, 'digdeeper')).toBe('DIG Deeper LLC\nReply STOP to stop texting');
+  });
+
+  it('signs everyone else as Quick Cash', () => {
+    expect(svc.buildFooter(base, 'qchb')).toBe('Quick Cash Home Buyers\nReply STOP to stop texting');
+  });
+
+  it('still adds the opt-out line when a brand has no sender name', () => {
+    expect(svc.buildFooter({ ...base, senderIdTextDigDeeper: '' }, 'digdeeper')).toBe(
+      'Reply STOP to stop texting',
+    );
   });
 });
 
