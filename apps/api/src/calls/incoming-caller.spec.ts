@@ -52,6 +52,8 @@ describe('TwilioVoiceService inbound caller name', () => {
     const twiml = await svc.generateIncomingTwiml(params);
 
     expect(twiml).toContain('name="callerName" value="Pat Seller"');
+    // The iPhone's native ring screen reads this one.
+    expect(twiml).toContain('name="DisplayName" value="Pat Seller"');
     expect(twiml).toContain('name="leadId" value="lead-1"');
     // A lead match never falls through to the user or partner tables.
     expect(queryRaw).not.toHaveBeenCalled();
@@ -84,7 +86,16 @@ describe('TwilioVoiceService inbound caller name', () => {
 
     expect(twiml).toContain('<Client>');
     expect(twiml).not.toContain('callerName');
+    // Never missing: the app's ring screen template would show it raw.
+    expect(twiml).toContain('name="DisplayName" value="(704) 681-2994"');
     expect(log.mock.calls[0][0]).toContain('no lead, user or partner on file');
+  });
+
+  it('names a caller with no number at all', async () => {
+    const { svc } = harness({});
+    const twiml = await svc.generateIncomingTwiml({ ...params, From: '' });
+
+    expect(twiml).toContain('name="DisplayName" value="Unknown caller"');
   });
 
   it('still rings when the user or partner lookup fails', async () => {
