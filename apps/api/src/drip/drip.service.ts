@@ -16,6 +16,7 @@ import {
   CAMP_STEPS,
   FALLBACK_MESSAGES,
 } from './drip.constants';
+import { businessNameForLead } from '../common/company.constants';
 
 @Injectable()
 export class DripService implements OnModuleInit, OnModuleDestroy {
@@ -273,7 +274,7 @@ export class DripService implements OnModuleInit, OnModuleDestroy {
     });
     if (!lead) return;
 
-    const dripBusinessName = (lead as any).organization?.name || 'Quick Cash Home Buyers';
+    const dripBusinessName = businessNameForLead(lead.source, (lead as any).organization?.name);
 
     if (!['NEW', 'ATTEMPTING_CONTACT'].includes(lead.status)) {
       await this.cancelSequence(sequenceId, `Lead status changed to ${lead.status}`);

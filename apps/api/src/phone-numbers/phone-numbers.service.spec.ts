@@ -2,6 +2,8 @@ import { PhoneNumbersService, numberKey, prettyNumber, toE164 } from './phone-nu
 
 const MAIN = '+18885748121';
 const CLT = '+17045299523';
+/** D.I.G. Deeper's number, on its own A2P campaign. */
+const JAX = '+19045959620';
 
 type Row = {
   id: string;
@@ -36,8 +38,10 @@ function svcWith(
   numbers: Row[],
   messages: { outbound?: { from: string }; inbound?: { to: string } } = {},
   env: Record<string, string | undefined> = {},
+  leadSource: string | null = null,
 ) {
   const prisma = {
+    lead: { findUnique: async () => ({ source: leadSource }) },
     phoneNumber: {
       findMany: async ({ where, orderBy }: any) => {
         let out = numbers.filter((n) => {
@@ -188,6 +192,66 @@ describe('resolveForLead', () => {
 });
 
 /**
+ * Each brand texts under its own A2P 10DLC campaign, registered to its own
+ * numbers, so a lead is only ever texted from its brand's numbers. Production
+ * has the D.I.G. Deeper number as the default, which used to put every new
+ * Quick Cash seller's first text on D.I.G. Deeper's campaign.
+ */
+describe('resolveForLead by brand', () => {
+  const live = [
+    row({ number: MAIN, sortOrder: 0 }),
+    row({ number: CLT, sortOrder: 1 }),
+    row({ number: JAX, isDefault: true, sortOrder: 2 }),
+  ];
+  const surplus = (msgs: any = {}) => svcWith(live, msgs, {}, 'SURPLUS');
+  const seller = (msgs: any = {}) => svcWith(live, msgs, {}, 'MANUAL');
+
+  it('texts a new surplus lead from the D.I.G. Deeper number', async () => {
+    expect(await surplus().resolveForLead('lead1')).toBe(JAX);
+  });
+
+  it('texts a new seller from a Quick Cash number even when the default is D.I.G. Deeper', async () => {
+    expect(await seller().resolveForLead('lead1')).toBe(MAIN);
+  });
+
+  it('moves a surplus thread that started on a Quick Cash number', async () => {
+    expect(await surplus({ outbound: { from: MAIN } }).resolveForLead('lead1')).toBe(JAX);
+  });
+
+  it('moves a seller thread that started on the D.I.G. Deeper number', async () => {
+    expect(await seller({ inbound: { to: JAX } }).resolveForLead('lead1')).toBe(MAIN);
+  });
+
+  it('keeps a seller on the Quick Cash number they already know', async () => {
+    expect(await seller({ outbound: { from: CLT } }).resolveForLead('lead1')).toBe(CLT);
+  });
+
+  it('refuses an explicit choice from the other brand', async () => {
+    expect(await surplus().resolveForLead('lead1', MAIN)).toBe(JAX);
+    expect(await seller().resolveForLead('lead1', JAX)).toBe(MAIN);
+  });
+
+  it('offers the composer only the lead brand numbers', async () => {
+    const s = await surplus().smsNumbersForLead('lead1');
+    expect(s.brand.key).toBe('digdeeper');
+    expect(s.numbers.map((n) => n.number)).toEqual([JAX]);
+    const q = await seller().smsNumbersForLead('lead1');
+    expect(q.numbers.map((n) => n.number)).toEqual([MAIN, CLT]);
+  });
+
+  it('falls back to the old rules when the brand has no active number', async () => {
+    const svc = svcWith(
+      [row({ number: MAIN, isDefault: true }), row({ number: JAX, active: false, sortOrder: 1 })],
+      {},
+      {},
+      'SURPLUS',
+    );
+    jest.spyOn((svc as any).logger, 'error').mockImplementation(() => undefined);
+    expect(await svc.resolveForLead('lead1')).toBe(MAIN);
+  });
+});
+
+/**
  * Regression cover for a live outage: the dial path began reading these numbers
  * from the database, and a failing read threw all the way out of the Twilio
  * voice webhook. Twilio got no TwiML back, so calls stopped dialling entirely.
@@ -203,6 +267,11 @@ describe('database failure degrades instead of throwing', () => {
       },
       message: {
         findFirst: async () => {
+          throw new Error('connection terminated');
+        },
+      },
+      lead: {
+        findUnique: async () => {
           throw new Error('connection terminated');
         },
       },

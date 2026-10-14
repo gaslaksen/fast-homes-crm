@@ -655,6 +655,7 @@ export const settingsAPI = {
     optOutText?: string;
     senderIdEnabled?: boolean;
     senderIdText?: string;
+    senderIdTextDigDeeper?: string;
     periodicEnabled?: boolean;
     periodicDays?: number;
   }) => api.patch('/settings/compliance', data),

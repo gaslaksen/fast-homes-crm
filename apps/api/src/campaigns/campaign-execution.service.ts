@@ -17,7 +17,7 @@ import {
   isMailgunRateLimit,
   parseMailgunRetryAfter,
 } from '../mailer/mailer.service';
-import { brandForLeadSource } from '../common/company.constants';
+import { brandForLeadSource, businessNameForLead } from '../common/company.constants';
 import { LEAD_EMAILS_SELECT, campaignEmailFor, knownEmails } from './campaign-recipient';
 
 // Instance tag for distinguishing Railway replicas in logs.
@@ -62,6 +62,8 @@ interface LeadForTemplate {
   askingPrice?: number | null;
   arv?: number | null;
   sellerEmail?: string | null;
+  /** Decides the brand, and so {{companyName}}. */
+  source?: string | null;
 }
 
 // Default campaign templates removed — campaigns are now created and managed
@@ -584,10 +586,11 @@ export class CampaignExecutionService implements OnModuleInit {
     const arvEstimate = lead.arv
       ? `$${Math.round(lead.arv).toLocaleString()}`
       : '';
-    const companyName =
-      org?.name?.trim() ||
-      this.config.get<string>('EMAIL_FROM_NAME') ||
-      'Quick Cash Home Buyers';
+    const companyName = businessNameForLead(
+      lead.source,
+      org?.name,
+      this.config.get<string>('EMAIL_FROM_NAME') || 'Quick Cash Home Buyers',
+    );
 
     return body
       .replace(/\{\{firstName\}\}/g, lead.sellerFirstName || '')

@@ -7,7 +7,7 @@ import { CampaignEnrollmentService } from '../campaigns/campaign-enrollment.serv
 import { LeadsService } from '../leads/leads.service';
 import { SmsProvider, createSmsProvider } from './sms.provider';
 import { MailerService } from '../mailer/mailer.service';
-import { brandForLeadSource, signOffLines } from '../common/company.constants';
+import { brandForLeadSource, businessNameForLead, signOffLines } from '../common/company.constants';
 import { PushService } from '../push/push.service';
 import { ComplianceService } from './compliance.service';
 import { PhoneNumbersService } from '../phone-numbers/phone-numbers.service';
@@ -234,10 +234,14 @@ export class MessagesService {
     let stampFooterSent = false;
     try {
       const compliance = await this.complianceService.get();
-      const footer = this.complianceService.buildFooter(compliance);
+      // The sender name must be the company whose campaign the text goes out
+      // under, which resolveForLead has just made the lead's own brand.
+      const brandKey = brandForLeadSource(lead.source).key;
+      const footer = this.complianceService.buildFooter(compliance, brandKey);
       const attach = await this.complianceService.shouldAttachFooter(
         compliance,
         lead.complianceFooterSentAt,
+        brandKey,
       );
       if (attach) {
         const withFooter = this.complianceService.applyFooter(text, footer);
@@ -430,7 +434,7 @@ export class MessagesService {
     });
     if (!lead) return null;
 
-    const autoBusinessName = (lead as any).organization?.name || 'Quick Cash Home Buyers';
+    const autoBusinessName = businessNameForLead(lead.source, (lead as any).organization?.name);
     const conversationHistory = lead.messages.map(
       (m) => `${m.direction}: ${m.body}`,
     );
@@ -1029,7 +1033,7 @@ You decide the right approach based on the conversation flow.${photoNudge}`.trim
         await this.smsProvider.sendSms(
           data.From,
           data.To,
-          `You have been unsubscribed from ${(lead as any).organization?.name || 'Quick Cash Home Buyers'}. You will not receive further messages.`,
+          `You have been unsubscribed from ${businessNameForLead(lead.source, (lead as any).organization?.name)}. You will not receive further messages.`,
         );
       } catch (err) {
         this.logger.warn(`Could not send opt-out confirmation: ${err.message}`);
@@ -1214,7 +1218,7 @@ You decide the right approach based on the conversation flow.${photoNudge}`.trim
           include: { organization: true },
         });
         if (lead) {
-          const businessName = (lead as any).organization?.name || 'Quick Cash Home Buyers';
+          const businessName = businessNameForLead(lead.source, (lead as any).organization?.name);
           const ack = buildAfterHoursAck(lead.sellerFirstName, businessName);
           await this.sendMessage(leadId, ack, undefined, undefined, await this.replyToFor(leadId));
           this.logger.log(`🌙 After-hours ack sent for lead ${leadId}`);

@@ -101,8 +101,10 @@ export default function PhoneNumbersPanel() {
     <div className="card max-w-2xl mt-6">
       <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-1">Phone Numbers</h3>
       <p className="text-sm text-gray-500 dark:text-gray-400 mb-5">
-        The numbers you can call and text from. The default is used for the first contact with a new
-        lead; replies always go back out from whichever number that seller already knows.
+        The numbers you can call and text from. Each company texts only from its own numbers:
+        surplus leads from D.I.G. Deeper&apos;s (904) 595-9620, everyone else from the Quick Cash
+        numbers, because each has its own carrier registration. Within that, a reply goes out from
+        the number the contact already knows, and the default is used for a new lead.
       </p>
 
       {numbers.length === 0 && (

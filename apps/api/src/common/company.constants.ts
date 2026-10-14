@@ -118,3 +118,36 @@ export function signOffLines(brand: Brand, personName?: string | null): string[]
   const name = (personName || '').trim();
   return [name, brand.companyName, brand.website || '', brand.phone].filter(Boolean);
 }
+
+/**
+ * The company name a message to this lead may use: the AI's business name,
+ * drip and campaign merge fields, the after-hours and opt-out replies.
+ *
+ * A surplus lead is always D.I.G. Deeper. Anyone else keeps what these
+ * messages used before brands: the organization's name, else Quick Cash.
+ */
+export function businessNameForLead(
+  source?: string | null,
+  organizationName?: string | null,
+  fallback: string = COMPANY_NAME,
+): string {
+  if (brandForLeadSource(source).key === 'digdeeper') return DIG_DEEPER_BRAND.companyName;
+  return organizationName?.trim() || fallback;
+}
+
+/**
+ * Which brand one of our phone numbers belongs to.
+ *
+ * Each brand has its own A2P 10DLC campaign, and a carrier registers a text
+ * under the campaign of the number it is sent from. A number is the brand
+ * whose phone it is; every other number is Quick Cash's. Compared on the last
+ * ten digits so any stored spelling matches.
+ */
+export function brandForNumber(number?: string | null): Brand {
+  const key = (number || '').replace(/\D/g, '').slice(-10);
+  if (key.length !== 10) return DEFAULT_BRAND;
+  return (
+    Object.values(BRANDS).find((b) => b.phoneE164.replace(/\D/g, '').slice(-10) === key) ||
+    DEFAULT_BRAND
+  );
+}
