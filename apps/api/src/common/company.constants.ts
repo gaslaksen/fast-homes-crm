@@ -49,6 +49,14 @@ export interface Brand {
   shortName?: string;
   /** The business address as it appears on the company's own documents. */
   address?: string;
+  /**
+   * Every email and text a PERSON sends on this brand ends with their name,
+   * the company, the website and the phone. Asked for by the surplus team so
+   * a claimant always has a name and a number to come back to. Automated
+   * sends are not signed this way: their templates carry the number already
+   * and there is no person to name.
+   */
+  signOff?: boolean;
 }
 
 export const QCHB_BRAND: Brand = {
@@ -76,6 +84,7 @@ export const DIG_DEEPER_BRAND: Brand = {
   websiteUrl: 'https://digdeeperllc.com',
   shortName: 'D.I.G. Deeper',
   address: '7901 4th St N, Suite 300, St. Petersburg, Florida 33702',
+  signOff: true,
 };
 
 /** Everything that is not explicitly another brand is Quick Cash. */
@@ -95,6 +104,19 @@ export const BRANDS: Record<BrandKey, Brand> = {
  */
 export function brandForLeadSource(source?: string | null): Brand {
   return source === 'SURPLUS' ? DIG_DEEPER_BRAND : DEFAULT_BRAND;
+}
+
+/**
+ * The sign-off block for a message a person sends on a brand, one line per
+ * entry, in the order the team asked for: name, company, website, phone.
+ * Null when the brand does not sign this way, so callers can leave the body
+ * alone. The name line is skipped when there is no name rather than printing
+ * a blank.
+ */
+export function signOffLines(brand: Brand, personName?: string | null): string[] | null {
+  if (!brand.signOff) return null;
+  const name = (personName || '').trim();
+  return [name, brand.companyName, brand.website || '', brand.phone].filter(Boolean);
 }
 
 /**

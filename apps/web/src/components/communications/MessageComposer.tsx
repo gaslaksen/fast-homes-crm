@@ -150,7 +150,12 @@ export default function MessageComposer({
   // already on this thread, so a reply keeps the same sender the seller knows.
   const [fromNumber, setFromNumber] = useState<string>('');
   const [fromOptions, setFromOptions] = useState<FromOption[]>([]);
-  const [emailIdentity, setEmailIdentity] = useState<{ fromAddress: string; brandName: string } | null>(null);
+  const [emailIdentity, setEmailIdentity] = useState<{
+    fromAddress: string;
+    brandName: string;
+    /** Lines the server appends to this person's emails and texts on this brand, if any. */
+    signOff?: string[] | null;
+  } | null>(null);
   const [fromPickerOpen, setFromPickerOpen] = useState(false);
 
   // Which of the seller's numbers this text goes to. The server preselects the
@@ -589,6 +594,18 @@ export default function MessageComposer({
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {/* On a brand that signs, the server appends the sender's name, company,
+          site and phone to every email and text a person sends. Say so, or
+          people type their own and the message ends with two. */}
+      {channel !== 'comment' && emailIdentity?.signOff && emailIdentity.signOff.length > 0 && (
+        <div className="text-xs text-gray-500 dark:text-gray-400">
+          Signs off with{' '}
+          <span className="font-medium text-gray-700 dark:text-gray-200">
+            {emailIdentity.signOff.join(', ')}
+          </span>
         </div>
       )}
 
