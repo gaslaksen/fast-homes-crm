@@ -7,7 +7,7 @@ import { CampaignEnrollmentService } from '../campaigns/campaign-enrollment.serv
 import { LeadsService } from '../leads/leads.service';
 import { SmsProvider, createSmsProvider } from './sms.provider';
 import { MailerService } from '../mailer/mailer.service';
-import { brandForLeadSource } from '../common/company.constants';
+import { brandForLeadSource, signOffLines } from '../common/company.constants';
 import { PushService } from '../push/push.service';
 import { ComplianceService } from './compliance.service';
 import { PhoneNumbersService } from '../phone-numbers/phone-numbers.service';
@@ -220,11 +220,17 @@ export class MessagesService {
       (await this.phoneNumbers.resolveForLead(leadId, fromNumber).catch(() => null)) ||
       this.twilioNumber;
 
+    // On a brand that signs, a text a person sends ends with their name, the
+    // company, the site and the phone, so the claimant always has somebody
+    // to come back to. Automated sends (no userId) are left alone: their
+    // templates already carry the number and there is nobody to name.
+    const text = userId ? await this.signTextAsUser(body, lead.source, userId) : body;
+
     // Compliance footer (sender ID + opt-out). Twilio does not add either, so
     // it is attached here per Settings > Messaging Compliance: first message to
     // this lead, then optionally on a repeating interval. Applied before the
     // Message row is written so the stored body matches what the seller sees.
-    let outboundBody = body;
+    let outboundBody = text;
     let stampFooterSent = false;
     try {
       const compliance = await this.complianceService.get();
@@ -234,8 +240,8 @@ export class MessagesService {
         lead.complianceFooterSentAt,
       );
       if (attach) {
-        const withFooter = this.complianceService.applyFooter(body, footer);
-        if (withFooter !== body) {
+        const withFooter = this.complianceService.applyFooter(text, footer);
+        if (withFooter !== text) {
           outboundBody = withFooter;
           stampFooterSent = true;
         }
@@ -285,7 +291,7 @@ export class MessagesService {
       await this.leadsService.recordTouch(leadId, 'MESSAGE_SENT', {
         userId,
         description: userId ? `Message sent to ${to}` : `Auto-response sent to ${to}`,
-        metadata: { body: body.substring(0, 100), automated: !userId },
+        metadata: { body: text.substring(0, 100), automated: !userId },
       });
 
       // If an agent manually sent a message, pause AI and cancel any active drip
@@ -393,6 +399,23 @@ export class MessagesService {
    * Generate and send an automatic response based on CAMP prompt selection.
    * Returns the sent message body, or null if auto-response was skipped.
    */
+
+  /**
+   * Append the sending person's sign-off to a text on a brand that signs.
+   * Returns the body untouched on any other brand or when the user cannot
+   * be read, so a lookup hiccup never blocks a send.
+   */
+  private async signTextAsUser(body: string, source: string | null, userId: string): Promise<string> {
+    const brand = brandForLeadSource(source);
+    if (!brand.signOff) return body;
+    const user = await this.prisma.user
+      .findUnique({ where: { id: userId }, select: { firstName: true, lastName: true } })
+      .catch(() => null);
+    const name = [user?.firstName, user?.lastName].filter(Boolean).join(' ');
+    const lines = signOffLines(brand, name);
+    if (!lines) return body;
+    return `${body.trimEnd()}\n\n${lines.join('\n')}`;
+  }
   async sendAutoResponse(leadId: string, justExtracted?: Record<string, any>): Promise<string | null> {
     if (!(await this.canAutoRespond(leadId))) {
       return null;
@@ -1417,19 +1440,23 @@ You decide the right approach based on the conversation flow.${photoNudge}`.trim
   async getEmailSendIdentity(
     leadId: string,
     userId?: string,
-  ): Promise<{ fromAddress: string; brandName: string } | null> {
+  ): Promise<{ fromAddress: string; brandName: string; signOff: string[] | null } | null> {
     if (!userId) return null;
     const [lead, user] = await Promise.all([
       this.prisma.lead.findUnique({ where: { id: leadId }, select: { source: true } }),
-      this.prisma.user.findUnique({ where: { id: userId }, select: { email: true } }),
+      this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { email: true, firstName: true, lastName: true },
+      }),
     ]).catch(() => [null, null] as const);
     if (!lead || !user?.email) return null;
 
-    const { fromAddress, brandName } = this.mailerService.userSendIdentity(
-      brandForLeadSource(lead.source),
-      user.email,
-    );
-    return { fromAddress, brandName };
+    const brand = brandForLeadSource(lead.source);
+    const { fromAddress, brandName } = this.mailerService.userSendIdentity(brand, user.email);
+    // What gets appended to this person's emails and texts here, so the
+    // composer can say so and nobody types a second signature.
+    const signOff = signOffLines(brand, [user.firstName, user.lastName].filter(Boolean).join(' '));
+    return { fromAddress, brandName, signOff };
   }
 
   /**

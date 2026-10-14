@@ -4,7 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import Mailgun from 'mailgun.js';
 import FormData from 'form-data';
 import * as crypto from 'crypto';
-import { Brand, DEFAULT_BRAND } from '../common/company.constants';
+import { Brand, DEFAULT_BRAND, signOffLines } from '../common/company.constants';
 
 /**
  * All outbound email flows through Mailgun on a verified sending subdomain
@@ -352,6 +352,7 @@ export class MailerService {
     const identity = this.brandConfig(params.brand);
     const sender = this.userSendIdentity(params.brand, params.user.email);
     const displayName = [params.user.firstName, params.user.lastName].filter(Boolean).join(' ') || undefined;
+    const signOff = signOffLines(identity.brand, displayName);
 
     // Thread onto the prior message if replying within a lead conversation.
     let inReplyTo: string | undefined;
@@ -367,14 +368,28 @@ export class MailerService {
       }
     }
 
-    const bodyHtml =
-      params.bodyHtml ?? this.wrapEmailBody(params.bodyText, undefined, identity.brand).bodyHtml;
+    // The composer hands over its own HTML, which wrapEmailBody never
+    // touches, so a person's sign-off is appended to it here. A plain-text
+    // caller goes through the wrap, which signs with the name in the block.
+    let bodyText = params.bodyText;
+    let bodyHtml: string;
+    if (params.bodyHtml) {
+      bodyHtml = params.bodyHtml;
+      if (signOff) {
+        bodyText = `${bodyText.trimEnd()}\n\n${signOff.join('\n')}`;
+        bodyHtml = `${bodyHtml}\n${this.signOffHtml(identity.brand, signOff)}`;
+      }
+    } else {
+      const wrapped = this.wrapEmailBody(params.bodyText, undefined, identity.brand, displayName);
+      bodyText = wrapped.bodyText;
+      bodyHtml = wrapped.bodyHtml;
+    }
     return this.send({
       from: this.buildFrom(displayName, sender.fromAddress),
       fromAddress: sender.fromAddress,
       to: params.to,
       subject: params.subject,
-      bodyText: params.bodyText,
+      bodyText,
       bodyHtml,
       replyTo: sender.replyTo,
       inReplyTo,
@@ -518,22 +533,46 @@ export class MailerService {
   }
 
   /**
+   * The sign-off as an HTML block, for appending to editor HTML that is not
+   * going through wrapEmailBody. Same lines, same order, links on the site
+   * and the phone.
+   */
+  private signOffHtml(brand: Brand, lines: string[]): string {
+    const escape = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const rendered = lines.map((line) => {
+      if (line === brand.website && brand.websiteUrl) {
+        return `<a href="${escape(brand.websiteUrl)}" style="color:#555;text-decoration:none;">${escape(line)}</a>`;
+      }
+      if (line === brand.phone) {
+        return `<a href="tel:${brand.phoneE164}" style="color:#555;text-decoration:none;">${escape(line)}</a>`;
+      }
+      return escape(line);
+    });
+    return `<p style="margin:16px 0 0 0;color:#555;">${rendered.join('<br>')}</p>`;
+  }
+
+  /**
    * Wrap a plain-text body into a branded plain+HTML pair with the sending
    * brand's signature and an optional unsubscribe footer. Defaults to the
-   * default brand so existing callers are unaffected.
+   * default brand so existing callers are unaffected. `signedBy` puts the
+   * sending person's name at the top of the block, for a brand that signs
+   * every message a person sends.
    */
   wrapEmailBody(
     bodyText: string,
     unsubscribeUrl?: string,
     brand: Brand = DEFAULT_BRAND,
+    signedBy?: string | null,
   ): { bodyText: string; bodyHtml: string } {
     const companyName = brand.companyName;
     const phone = brand.phone;
     const website = brand.website;
     const websiteHref = brand.websiteUrl;
+    const name = brand.signOff ? (signedBy || '').trim() : '';
 
-    // A brand with no public site omits the line rather than printing a blank.
-    const textSignature = `\n\n-\n${companyName}\n${phone}${website ? `\n${website}` : ''}`;
+    // Name, company, website, phone: the order the team asked for. A brand
+    // with no public site omits the line rather than printing a blank.
+    const textSignature = `\n\n-\n${name ? `${name}\n` : ''}${companyName}${website ? `\n${website}` : ''}\n${phone}`;
     const textUnsub = unsubscribeUrl ? `\n\nNot interested? Unsubscribe: ${unsubscribeUrl}` : '';
     const finalText = `${bodyText}${textSignature}${textUnsub}`;
 
@@ -558,9 +597,10 @@ export class MailerService {
 <div style="max-width:600px;margin:0 auto;padding:24px 20px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:15px;line-height:1.55;color:#222;background:#ffffff;">
 ${paragraphs}
 <div style="margin-top:24px;padding-top:16px;border-top:1px solid #e5e5e5;font-size:14px;color:#555;">
-  <div style="font-weight:600;color:#222;">${companyName}</div>
-  <div><a href="tel:${brand.phoneE164}" style="color:#555;text-decoration:none;">${phone}</a></div>
+  ${name ? `<div style="font-weight:600;color:#222;">${escape(name)}</div>` : ''}
+  <div style="${name ? '' : 'font-weight:600;color:#222;'}">${companyName}</div>
   ${website && websiteHref ? `<div><a href="${escape(websiteHref)}" style="color:#555;text-decoration:none;">${escape(website)}</a></div>` : ''}
+  <div><a href="tel:${brand.phoneE164}" style="color:#555;text-decoration:none;">${phone}</a></div>
 </div>
 ${unsubHtml}
 </div>

@@ -3,6 +3,7 @@ import {
   DIG_DEEPER_BRAND,
   QCHB_BRAND,
   brandForLeadSource,
+  signOffLines,
 } from '../common/company.constants';
 
 /**
@@ -80,6 +81,47 @@ describe('wrapEmailBody', () => {
     expect(bodyHtml).not.toContain(QCHB_BRAND.websiteUrl);
     // No empty anchor left behind by the missing website.
     expect(bodyHtml).not.toContain('href="undefined"');
+  });
+});
+
+describe('signOffLines', () => {
+  it('signs a Dig Deeper message with name, company, site and phone in that order', () => {
+    expect(signOffLines(DIG_DEEPER_BRAND, 'Ian McCaskill')).toEqual([
+      'Ian McCaskill',
+      'D.I.G. Deeper LLC',
+      'digdeeperllc.com',
+      '(904) 595-9620',
+    ]);
+  });
+
+  it('leaves out the name line rather than printing a blank', () => {
+    expect(signOffLines(DIG_DEEPER_BRAND, '')).toEqual([
+      'D.I.G. Deeper LLC',
+      'digdeeperllc.com',
+      '(904) 595-9620',
+    ]);
+  });
+
+  it('does not sign Quick Cash messages this way', () => {
+    expect(signOffLines(QCHB_BRAND, 'Ian McCaskill')).toBeNull();
+  });
+});
+
+describe('wrapEmailBody sign-off', () => {
+  it('puts the sender name at the top of a Dig Deeper signature', () => {
+    const svc = makeService({});
+    const { bodyText, bodyHtml } = svc.wrapEmailBody('Hi there', undefined, DIG_DEEPER_BRAND, 'Ian McCaskill');
+
+    expect(bodyText).toContain('Ian McCaskill\nD.I.G. Deeper LLC\ndigdeeperllc.com\n(904) 595-9620');
+    expect(bodyHtml).toContain('Ian McCaskill');
+  });
+
+  it('ignores the name on a brand that does not sign', () => {
+    const svc = makeService({});
+    const { bodyText } = svc.wrapEmailBody('Hi there', undefined, QCHB_BRAND, 'Ian McCaskill');
+
+    expect(bodyText).not.toContain('Ian McCaskill');
+    expect(bodyText).toContain(QCHB_BRAND.companyName);
   });
 });
 
