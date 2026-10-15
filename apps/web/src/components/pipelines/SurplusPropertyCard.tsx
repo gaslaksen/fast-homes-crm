@@ -67,6 +67,8 @@ export interface SurplusProperty {
   ownerMailingStreet: string | null;
   ownerMailingCity: string | null;
   ownerMailingState: string | null;
+  /** Null for a US address. */
+  ownerMailingCountry?: string | null;
   grossSurplus: number;
   claimStatus: string;
   claimStatusLabel: string;
@@ -126,7 +128,7 @@ export default function SurplusPropertyCard({ p, picked, onPick, onOpen }: Props
         : { icon: '○', text: 'not skip traced yet', tone: 'var(--faint)' };
 
   const ownerLine = p.ownerMailingStreet
-    ? [p.ownerMailingStreet, p.ownerMailingCity, p.ownerMailingState].filter(Boolean).join(', ')
+    ? [p.ownerMailingStreet, p.ownerMailingCity, p.ownerMailingState, p.ownerMailingCountry].filter(Boolean).join(', ')
     : null;
 
   return (

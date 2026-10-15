@@ -158,6 +158,8 @@ export interface Candidate {
   city: string | null;
   state: string | null;
   zip: string | null;
+  /** Null or absent for a US address. Heirs carry none. */
+  country?: string | null;
   addressKey: string;
   /** 'notice' when this is the owner's own address, 'property' when it is not. */
   addressSource: 'notice' | 'property';
@@ -2419,18 +2421,23 @@ export function candidateOf(l: any): Candidate {
   // carries returned letters on 116 of 141 properties.
   const mailDead = d.mailVerdict === 'undeliverable';
   const useMailing = hasMailing && !(mailDead && nameKnown);
+  // A foreign mailing address is kept, not swapped for the property, so the
+  // eligibility check sees the country and refuses it rather than buying a
+  // lookup on a vacant Florida lot the owner never lived at.
   const c = useMailing
     ? {
         street: d.ownerMailingStreet,
         city: d.ownerMailingCity,
         state: d.ownerMailingState,
         zip: d.ownerMailingZip,
+        country: d.ownerMailingCountry || null,
       }
     : {
         street: l.propertyAddress,
         city: l.propertyCity,
         state: l.propertyState,
         zip: l.propertyZip,
+        country: null,
       };
   return {
     leadId: l.id,

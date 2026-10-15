@@ -102,6 +102,8 @@ export interface SurplusPanelLead {
   ownerMailingCity: string | null;
   ownerMailingState: string | null;
   ownerMailingZip: string | null;
+  /** Null for a US address. */
+  ownerMailingCountry?: string | null;
   ownerAddressSource: string | null;
   nameSearch: {
     query: string;
@@ -3403,12 +3405,14 @@ function MailingAddress({
   const [city, setCity] = useState(lead.ownerMailingCity || '');
   const [state, setState] = useState(lead.ownerMailingState || '');
   const [zip, setZip] = useState(lead.ownerMailingZip || '');
+  const [country, setCountry] = useState(lead.ownerMailingCountry || '');
 
   const reset = () => {
     setStreet(lead.ownerMailingStreet || '');
     setCity(lead.ownerMailingCity || '');
     setState(lead.ownerMailingState || '');
     setZip(lead.ownerMailingZip || '');
+    setCountry(lead.ownerMailingCountry || '');
   };
 
   // Another claimant's address must never sit in this form.
@@ -3424,6 +3428,7 @@ function MailingAddress({
     lead.ownerMailingStreet,
     lead.ownerMailingCity,
     [lead.ownerMailingState, lead.ownerMailingZip].filter(Boolean).join(' '),
+    lead.ownerMailingCountry,
   ]
     .filter(Boolean)
     .join(', ');
@@ -3436,7 +3441,8 @@ function MailingAddress({
     setBusy(true);
     try {
       await surplusAPI.update(lead.id, {
-        ownerMailing: { street: street.trim(), city: city.trim(), state: state.trim(), zip: zip.trim() },
+        // An empty country means the US.
+        ownerMailing: { street: street.trim(), city: city.trim(), state: state.trim(), zip: zip.trim(), country: country.trim() },
       });
       say(lead.ownerMailingStreet ? 'Mailing address updated. The old one is in Notes.' : 'Mailing address saved');
       setEditing(false);
@@ -3475,13 +3481,22 @@ function MailingAddress({
           </label>
           <label style={lbl}>
             State
-            <input style={field} value={state} maxLength={2} onChange={(e) => setState(e.target.value.toUpperCase())} />
+            <input
+              style={field}
+              value={state}
+              maxLength={country.trim() ? undefined : 2}
+              onChange={(e) => setState(e.target.value.toUpperCase())}
+            />
           </label>
           <label style={lbl}>
             ZIP
             <input style={field} value={zip} onChange={(e) => setZip(e.target.value)} />
           </label>
         </div>
+        <label style={lbl}>
+          Country (leave blank for the US)
+          <input style={field} value={country} onChange={(e) => setCountry(e.target.value.toUpperCase())} />
+        </label>
         {lead.ownerMailingStreet && (
           <div style={{ fontSize: 11, color: 'var(--faint)' }}>
             Replaces {onFile}. The old address is saved to Notes.
@@ -4305,6 +4320,7 @@ function LetterHistory({
     lead.ownerMailingStreet,
     lead.ownerMailingCity,
     [lead.ownerMailingState, lead.ownerMailingZip].filter(Boolean).join(' '),
+    lead.ownerMailingCountry,
   ]
     .filter(Boolean)
     .join(', ');

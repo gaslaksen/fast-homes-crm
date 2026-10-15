@@ -223,9 +223,23 @@ describe('Charlotte notices', () => {
     )!;
     expect(r.recipients).toHaveLength(2);
     expect(r.recipients.map((x) => x.city)).toEqual(['THORNHILL', 'MISSISSAUGA']);
-    // Digits stripped out of "L4T 1M9" would be "419".
-    expect(r.recipients.map((x) => x.zip)).toEqual([null, null]);
+    // Kept as printed and marked Canadian. Digits stripped out of "L4T 1M9"
+    // would be "419", and "ONTARIO" cut to two letters is "ON".
+    expect(r.recipients.map((x) => [x.state, x.zip, x.country])).toEqual([
+      ['ONTARIO', 'L4J 4H6', 'CANADA'],
+      ['ONTARIO', 'L4T 1M9', 'CANADA'],
+    ]);
+    expect(r.country).toBe('CANADA');
     expect(r.noticeDate).toBe('2026-01-29');
+  });
+
+  it('never files France as a US state when the reader names the country', () => {
+    const r = svc().parse(
+      JSON.stringify({
+        recipients: [{ name: 'GROLL, PASCAL', street: '12 CHEMIN X', city: 'MALAUCENE', state: null, zip: '84440', country: 'FRANCE' }],
+      }),
+    )!;
+    expect(r.recipients[0]).toMatchObject({ state: null, zip: '84440', country: 'FRANCE' });
   });
 
   it('sends a scanned TIFF as one PNG per page, since the API takes no TIFF', async () => {

@@ -68,6 +68,8 @@ export interface SurplusLeadInput {
   ownerMailingCity?: string | null;
   ownerMailingState?: string | null;
   ownerMailingZip?: string | null;
+  /** Null for a US address. */
+  ownerMailingCountry?: string | null;
   ownerAddressSource?: string | null;
 
   sourceSystem?: string | null;

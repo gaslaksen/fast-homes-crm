@@ -882,6 +882,8 @@ export class SurplusTemplatesService {
           d.ownerMailingStreet,
           d.ownerMailingCity,
           [d.ownerMailingState, d.ownerMailingZip].filter(Boolean).join(' '),
+          // The last line of a foreign envelope, or it goes nowhere.
+          d.ownerMailingCountry,
         ]);
     const today = new Date().toLocaleDateString('en-US', {
       month: 'long',
@@ -1039,6 +1041,7 @@ export class SurplusTemplatesService {
           d.ownerMailingStreet,
           d.ownerMailingCity,
           [d.ownerMailingState, d.ownerMailingZip].filter(Boolean).join(' '),
+          d.ownerMailingCountry,
         ]
           .filter(Boolean)
           .join(', ') || null,

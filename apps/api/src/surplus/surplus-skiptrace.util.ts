@@ -385,6 +385,8 @@ export interface TraceCandidate {
   city?: string | null;
   state?: string | null;
   zip?: string | null;
+  /** Set when the address is outside the US. See normalizeMailing. */
+  country?: string | null;
 }
 
 export type TraceSkipReason =
@@ -451,6 +453,17 @@ export function traceEligibility(
   const street = String(c.street || '').trim();
   if (!street) {
     return { ok: false, reason: 'no_address', detail: 'No street address on the case.' };
+  }
+
+  // Abroad, by the source's own word. The shape check further down cannot be
+  // trusted with this: a French postcode is five digits and the reader once
+  // filed France as "FR", so 84440 Malaucene passed as a US address.
+  if (c.country) {
+    return {
+      ok: false,
+      reason: 'not_us_address',
+      detail: `The owner's address is in ${c.country}, outside what the US skip-trace vendors cover. Write to them there, or search by name.`,
+    };
   }
 
   // BatchData matches on address. A street with no house number cannot match a

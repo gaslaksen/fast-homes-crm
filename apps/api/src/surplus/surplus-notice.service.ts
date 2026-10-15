@@ -35,6 +35,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import axios from 'axios';
 import sharp from 'sharp';
 import { SurplusDocumentFile } from './surplus-source.types';
+import { normalizeMailing } from './surplus-address.util';
 
 /** 32 MB is the API request cap; stay well under it after base64 inflation. */
 const MAX_PDF_BYTES = 8 * 1024 * 1024;
@@ -55,6 +56,8 @@ export interface NoticeRecipient {
   zip: string | null;
   /** An attention line above the street ("C/O GLENN BROWN"), where the source separates one. */
   attention?: string | null;
+  /** Null for a US address. See normalizeMailing. */
+  country?: string | null;
 }
 
 export interface NoticeExtract {
@@ -71,6 +74,7 @@ export interface NoticeExtract {
   city: string | null;
   state: string | null;
   zip: string | null;
+  country?: string | null;
   /** ISO date the notice is dated, which starts the 120 day clock. */
   noticeDate: string | null;
   /** ISO date of sale as stated on the notice. */
@@ -92,7 +96,7 @@ Return a single JSON object, no prose, no code fence:
 
 {
   "recipients": [
-    { "name": "addressee name", "street": "...", "city": "...", "state": "XX", "zip": "12345" }
+    { "name": "addressee name", "street": "...", "city": "...", "state": "XX", "zip": "12345", "country": null }
   ],
   "noticeDate": "the DATED value in the header, as YYYY-MM-DD",
   "saleDate": "the DATE OF SALE value, as YYYY-MM-DD",
@@ -117,8 +121,12 @@ Rules:
   co-owners are frequently at different addresses from each other. The same
   owner may be noticed at two addresses; return both. That is expected and is
   the reason we are reading this. Do not "correct" any of it.
-- For an address outside the US, put the province or region in "state" and the
-  postal code in "zip" exactly as printed.
+- "country" is null for a US address, Puerto Rico included. For any other
+  address it is the country as printed, in English ("CANADA", "FRANCE"), with
+  the province or region in "state" and the postal code in "zip" exactly as
+  printed. Never squeeze a foreign address into a US state code: ONTARIO is not
+  CA, and a French postcode is not a ZIP. The city is the town, not the
+  province.
 - Use null for anything not printed. Never guess or infer a value.
 - Return names exactly as printed, including ESTATE or suffixes.`;
 
@@ -261,18 +269,10 @@ export class SurplusNoticeService {
       ? o.recipients
       : // Tolerate the older single-recipient shape so a cached or partial
         // reply still yields something rather than nothing.
-        [{ name: o.recipient, street: o.street, city: o.city, state: o.state, zip: o.zip }];
+        [{ name: o.recipient, street: o.street, city: o.city, state: o.state, zip: o.zip, country: o.country }];
 
     const recipients: NoticeRecipient[] = rawRecipients
-      .map((r) => ({
-        name: str(r?.name),
-        street: str(r?.street),
-        city: str(r?.city),
-        state: str(r?.state)?.toUpperCase().slice(0, 2) || null,
-        // Five digits or nothing. Stripping the letters out of a Canadian
-        // postcode ("L4T 1M9") would leave "419", a ZIP that is not one.
-        zip: /^\d{5}/.exec(str(r?.zip) || '')?.[0] || null,
-      }))
+      .map((r) => ({ name: str(r?.name), ...normalizeMailing(r || {}) }))
       // The clerk's own block is the one wrong answer the layout invites: it is
       // a perfectly valid address, so a wrong read fails silently and would send
       // every lead to the courthouse.
@@ -288,6 +288,7 @@ export class SurplusNoticeService {
       city: first?.city ?? null,
       state: first?.state ?? null,
       zip: first?.zip ?? null,
+      country: first?.country ?? null,
       noticeDate: date(o.noticeDate),
       saleDate: date(o.saleDate),
       surplusAtNotice: num(o.surplusAtNotice),

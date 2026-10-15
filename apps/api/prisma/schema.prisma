@@ -788,6 +788,12 @@ model SurplusDetail {
   ownerMailingCity   String?
   ownerMailingState  String?
   ownerMailingZip    String?
+  /// The country, when the owner is NOT in the US; null means a US address.
+  /// Then state and zip hold the province and postcode as printed ("ONTARIO",
+  /// "L4T 1M9"), never a two-letter code or five digits that only look
+  /// American, and the address is never sent to the US skip-trace vendors.
+  /// Charlotte notices Canadian, French and German owners by the dozen.
+  ownerMailingCountry String?
   /// Which county document the mailing address came from, for audit.
   ownerAddressSource String?
 

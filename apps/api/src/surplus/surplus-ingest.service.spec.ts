@@ -411,3 +411,69 @@ describe('the pull window', () => {
     expect(tooOldToPull({ saleDate: 'no sale' }, now)).toBe(false);
   });
 });
+
+describe('foreign owners, and the repair run', () => {
+  it('writes the country of a Canadian page, and none on a US one', async () => {
+    const canada = [
+      { name: 'RICHARD MINTON', street: '3431 DORCAS STREET', city: 'MISSISSAUGA', state: 'ONTARIO', zip: 'L4T 1M9', country: 'CANADA' },
+      RECIPIENTS[1],
+    ];
+    const { svc, updates } = harness(
+      [
+        row({ id: 'd1', dedupeUid: uid('RICHARD MINTON'), street: '4027 BESSENT RD', source: 'notice_of_surplus_funds' }),
+        row({ id: 'd2', dedupeUid: uid('CECELIA W HARRIS'), street: '4027 BESSENT RD', source: 'notice_of_surplus_funds' }),
+      ],
+      canada as any,
+    );
+
+    await svc.ingestCounty('duval_taxdeed', { reread: true });
+
+    const d1 = updates.find((u) => u.where?.id === 'd1')?.data;
+    const d2 = updates.find((u) => u.where?.id === 'd2')?.data;
+    expect(d1).toMatchObject({ ownerMailingZip: 'L4T 1M9', ownerMailingCountry: 'CANADA' });
+    expect(d2).toMatchObject({ ownerMailingStreet: '1841 W 14TH ST', ownerMailingCountry: null });
+  });
+
+  it('fetches only the case numbers asked for', async () => {
+    const { svc } = harness([]);
+    const adapter: any = svc.adapterFor('duval_taxdeed');
+    adapter.listSurplusCases.mockResolvedValue([
+      { sourceCaseId: '1', caseNumber: '25-0517', status: 'SOLD', surplus: 9000 },
+      { sourceCaseId: '2', caseNumber: '25-0518', status: 'SOLD', surplus: 9000 },
+    ]);
+
+    await svc.ingestCounty('duval_taxdeed', { cases: ['25-0518'] });
+
+    expect(adapter.fetchCase).toHaveBeenCalledTimes(1);
+    expect(adapter.fetchCase.mock.calls[0][0]).toBe('2');
+  });
+
+  it('says on the run row which cases failed and why', async () => {
+    const { svc, prisma } = harness([]);
+    const adapter: any = svc.adapterFor('duval_taxdeed');
+    adapter.listSurplusCases.mockResolvedValue([{ sourceCaseId: '1', caseNumber: '25-1087', status: 'SOLD', surplus: 9000 }]);
+    adapter.fetchCase.mockRejectedValue(new Error('boom'));
+
+    const r = await svc.ingestCounty('duval_taxdeed', {});
+
+    expect(r.errors).toBe(1);
+    const message = prisma.surplusPollRun.update.mock.calls[0][0].data.message;
+    expect(message).toContain('Failed: 25-1087: boom');
+  });
+
+  it('refuses a second pull of a county already running', async () => {
+    const { svc } = harness([]);
+    const adapter: any = svc.adapterFor('duval_taxdeed');
+    let release: (v: any[]) => void = () => undefined;
+    adapter.listSurplusCases.mockReturnValue(new Promise((r) => (release = r)));
+
+    const first = svc.ingestCounty('duval_taxdeed', {});
+    await new Promise((r) => setImmediate(r));
+    expect(svc.isRunning('duval_taxdeed')).toBe(true);
+    await expect(svc.ingestCounty('duval_taxdeed', {})).rejects.toThrow('already running');
+
+    release([]);
+    await first;
+    expect(svc.isRunning('duval_taxdeed')).toBe(false);
+  });
+});

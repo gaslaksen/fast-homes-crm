@@ -406,3 +406,16 @@ describe('relativeKind', () => {
     expect(relativeKind('Family', '1970-05-01', null)).toBe('family');
   });
 });
+
+describe('foreign owners', () => {
+  it('refuses an address the source says is abroad, even one shaped like a US address', () => {
+    // 25-0870 as first stored: a five digit French postcode under a two letter "state".
+    const shaped = { street: '12 CHEMIN X', city: 'MALAUCENE', state: 'FR', zip: '84440' };
+    expect(traceEligibility({ ...shaped, country: 'FRANCE' })).toMatchObject({ ok: false, reason: 'not_us_address' });
+    expect(traceEligibility({ ...shaped, country: 'FRANCE' }).detail).toContain('FRANCE');
+  });
+
+  it('still traces a US address with no country', () => {
+    expect(traceEligibility({ street: '684 S CLOVER AVENUE', city: 'SAN JOSE', state: 'CA', zip: '95128', country: null }).ok).toBe(true);
+  });
+});

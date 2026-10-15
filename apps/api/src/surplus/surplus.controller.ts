@@ -561,6 +561,9 @@ export class SurplusController {
     if (!this.ingest.adapterFor(source)) {
       throw new BadRequestException(`Unknown surplus source "${source}"`);
     }
+    if (this.ingest.isRunning(source)) {
+      throw new BadRequestException('That county is already being pulled. Its result shows in the run log when it finishes.');
+    }
     const limit = body?.limit == null ? undefined : Number(body.limit);
     if (limit != null && (!Number.isFinite(limit) || limit < 1)) {
       throw new BadRequestException('limit must be a positive number');
@@ -577,6 +580,8 @@ export class SurplusController {
       // Off by default: the tiered refresh is what keeps a weekly county pull
       // a few hundred requests instead of a few thousand.
       full: body?.full === true,
+      // Only these case numbers, eg to re-read a few notices after a fix.
+      cases: Array.isArray(body?.cases) ? body.cases.map((c: unknown) => String(c)) : undefined,
     });
   }
 

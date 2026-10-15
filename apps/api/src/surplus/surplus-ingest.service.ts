@@ -35,6 +35,7 @@ import {
   OWNER_ROLES,
 } from './realtdm.adapter';
 import { SurplusNoticeService, NoticeExtract } from './surplus-notice.service';
+import { normalizeMailing } from './surplus-address.util';
 import { matchRecipient } from './surplus-name-search.util';
 import { SurplusSourceAdapter, SurplusCaseDetail, SurplusCaseSummary } from './surplus-source.types';
 import { classifyCase, collapseClaimants, isWorkable } from './surplus-classify.util';
@@ -57,6 +58,8 @@ export interface SurplusIngestResult {
   /** Held cases the list row alone said were paid out. Retired with no detail fetch. */
   retiredFromList: number;
   message?: string;
+  /** "case: reason" for each case that threw, so the run row says why without the logs. */
+  failures?: string[];
 }
 
 interface IngestOpts {
@@ -84,6 +87,11 @@ interface IngestOpts {
    * in by hand outranks anything a machine read off a scan.
    */
   reread?: boolean;
+  /**
+   * Only these case numbers. With `reread`, the way to correct a handful of
+   * addresses without paying to read every notice in the county again.
+   */
+  cases?: string[];
 }
 
 /**
@@ -177,6 +185,8 @@ interface FoundAddress {
   city: string | null;
   state: string | null;
   zip: string | null;
+  /** Null for a US address. */
+  country?: string | null;
   source: string;
 }
 
@@ -206,17 +216,31 @@ function noticeIsFree(detail: SurplusCaseDetail): boolean {
   return !!(detail.noticeRecipients?.length || detail.noticeDate);
 }
 
+/**
+ * A county-recorded address with its country worked out. A US address is kept
+ * exactly as the county wrote it; a foreign one gets its country and loses the
+ * US shape, so it is never traced or mailed as American.
+ */
+function withCountry<T extends { street: string | null; city: string | null; state: string | null; zip: string | null }>(
+  a: T & { country?: string | null },
+): T & { country: string | null } {
+  const n = normalizeMailing(a);
+  return n.country ? { ...a, ...n } : { ...a, country: null };
+}
+
 /** The notice as the county itself records it, in the shape the vision reader returns. */
 function noticeFromSource(detail: SurplusCaseDetail): NoticeExtract | null {
   if (!noticeIsFree(detail)) return null;
-  const recipients = (detail.noticeRecipients || []).map((r) => ({
-    name: r.name,
-    street: r.street,
-    city: r.city,
-    state: r.state,
-    zip: r.zip,
-    attention: r.attention ?? null,
-  }));
+  const recipients = (detail.noticeRecipients || []).map((r) =>
+    withCountry({
+      name: r.name,
+      street: r.street,
+      city: r.city,
+      state: r.state,
+      zip: r.zip,
+      attention: r.attention ?? null,
+    }),
+  );
   const first = recipients[0];
   return {
     recipients,
@@ -225,6 +249,7 @@ function noticeFromSource(detail: SurplusCaseDetail): NoticeExtract | null {
     city: first?.city ?? null,
     state: first?.state ?? null,
     zip: first?.zip ?? null,
+    country: first?.country ?? null,
     noticeDate: detail.noticeDate || null,
     saleDate: detail.saleDate || null,
     surplusAtNotice: detail.surplusAtNotice ?? null,
@@ -286,9 +311,36 @@ export class SurplusIngestService {
    * row is written before the work starts so a crashed run is visible as one
    * that never finished, rather than leaving no trace at all.
    */
+  /** County pulls in flight on this instance. */
+  private readonly inFlight = new Set<string>();
+
+  isRunning(adapterKey: string): boolean {
+    return this.inFlight.has(adapterKey);
+  }
+
+  /**
+   * Run one county, refusing a second run of the same county while one is in
+   * flight. The cron has its own lock; a manual pull did not, and a double
+   * press on 2026-10-15 ran Charlotte twice side by side for 47 minutes.
+   */
   async ingestCounty(
     adapterKey: string,
     opts: IngestOpts = {},
+  ): Promise<SurplusIngestResult & { runId: string; createdLeadIds: string[] }> {
+    if (this.inFlight.has(adapterKey)) {
+      throw new Error(`A ${adapterKey} pull is already running. It records its result when it finishes.`);
+    }
+    this.inFlight.add(adapterKey);
+    try {
+      return await this.runCounty(adapterKey, opts);
+    } finally {
+      this.inFlight.delete(adapterKey);
+    }
+  }
+
+  private async runCounty(
+    adapterKey: string,
+    opts: IngestOpts,
   ): Promise<SurplusIngestResult & { runId: string; createdLeadIds: string[] }> {
     const adapter = this.adapterFor(adapterKey);
     const organizationId = opts.organizationId || null;
@@ -363,6 +415,10 @@ export class SurplusIngestService {
 
       // The cap is on detail fetches, so it is spent after the age filter and
       // not on rows that are only going to be dropped.
+      if (opts.cases?.length) {
+        const want = new Set(opts.cases.map((c) => String(c).trim()));
+        candidates = candidates.filter((s) => want.has(s.caseNumber));
+      }
       if (opts.limit) candidates = candidates.slice(0, opts.limit);
       const tiered = !opts.full && !opts.reread && !!adapter.probeDocket;
 
@@ -419,6 +475,7 @@ export class SurplusIngestService {
           if (outcome.retired) result.dead += 1;
         } catch (e: any) {
           result.errors += 1;
+          result.failures = [...(result.failures || []), `${summary.caseNumber}: ${String(e.message).slice(0, 160)}`];
           this.logger.warn(
             `Surplus ingest failed on ${adapter.key} case ${summary.sourceCaseId}: ${e.message}`,
           );
@@ -627,6 +684,7 @@ export class SurplusIngestService {
           ownerMailingCity: mine?.city ?? null,
           ownerMailingState: mine?.state ?? null,
           ownerMailingZip: mine?.zip ?? null,
+          ownerMailingCountry: mine?.country ?? null,
           ownerAddressSource: mine?.source ?? null,
 
           grossSurplus: detail.surplus ?? null,
@@ -686,12 +744,14 @@ export class SurplusIngestService {
     const owners = (detail.parties || []).filter((p) => OWNER_ROLES.test(p.role) && p.street);
     const fromParties = recipientFor(claimant, owners, claimantCount);
     if (fromParties?.street) {
+      const a = withCountry(fromParties);
       return {
         name: withAttention(fromParties.name, fromParties.attention),
-        street: fromParties.street,
-        city: fromParties.city,
-        state: fromParties.state,
-        zip: fromParties.zip,
+        street: a.street,
+        city: a.city,
+        state: a.state,
+        zip: a.zip,
+        country: a.country,
         source: ADDRESS_SOURCE.parties,
       };
     }
@@ -765,6 +825,7 @@ export class SurplusIngestService {
         ownerMailingCity: mine.city,
         ownerMailingState: mine.state,
         ownerMailingZip: mine.zip,
+        ownerMailingCountry: mine.country ?? null,
         ownerAddressSource: mine.source,
         ...(notice?.noticeDate
           ? { noticeDate: new Date(`${notice.noticeDate}T00:00:00`), noticeConfirmed: true }
@@ -782,6 +843,7 @@ export class SurplusIngestService {
         ownerMailingCity: null,
         ownerMailingState: null,
         ownerMailingZip: null,
+        ownerMailingCountry: null,
         ownerAddressSource: null,
       };
       this.logger.warn(
@@ -792,7 +854,7 @@ export class SurplusIngestService {
     if (Object.keys(backfill).length) {
       this.logger.log(
         `Surplus ${detail.caseNumber} owner address for ${claimantName} from the notice: ` +
-          `${backfill.ownerMailingStreet || 'cleared'}${backfill.ownerMailingCity ? `, ${backfill.ownerMailingCity} ${backfill.ownerMailingState || ''}` : ''}`,
+          `${backfill.ownerMailingStreet || 'cleared'}${backfill.ownerMailingCity ? `, ${backfill.ownerMailingCity} ${backfill.ownerMailingState || ''}` : ''}${backfill.ownerMailingCountry ? `, ${backfill.ownerMailingCountry}` : ''}`,
       );
     }
 
@@ -952,6 +1014,11 @@ export class SurplusIngestService {
       r.retiredFromList ? `${r.retiredFromList} retired from the list row` : null,
     ].filter(Boolean);
     if (tiers.length) r.message = [r.message, tiers.join(', ')].filter(Boolean).join('. ');
+    if (r.failures?.length) {
+      const shown = r.failures.slice(0, 5).join('; ');
+      const more = r.failures.length > 5 ? ` and ${r.failures.length - 5} more` : '';
+      r.message = [r.message, `Failed: ${shown}${more}`].filter(Boolean).join('. ');
+    }
 
     await this.prisma.surplusPollRun.update({
       where: { id: runId },
