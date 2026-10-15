@@ -33,9 +33,18 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Anthropic from '@anthropic-ai/sdk';
 import axios from 'axios';
+import sharp from 'sharp';
+import { SurplusDocumentFile } from './surplus-source.types';
 
 /** 32 MB is the API request cap; stay well under it after base64 inflation. */
 const MAX_PDF_BYTES = 8 * 1024 * 1024;
+/**
+ * Pages read off a scanned image notice. Charlotte's run two per addressee
+ * (the notice, then a blank Proof of Claim) and the largest seen is 14.
+ */
+const MAX_IMAGE_PAGES = 24;
+/** The long edge the model reads at without downscaling. A 300 dpi letter page is 3300. */
+const IMAGE_LONG_EDGE = 1568;
 
 /** One addressee on the notice. The clerk prints one page per recipient. */
 export interface NoticeRecipient {
@@ -97,11 +106,19 @@ Rules:
 - One entry in "recipients" per PAGE that carries an addressee block, in page
   order. Do not merge two recipients and do not skip a repeat.
 - The ADDRESSEE BLOCK is the owner being notified. Do NOT return the clerk's own
-  address, which sits in the letterhead beside the county seal and is on
-  W Adams St in Jacksonville. If a page shows only the clerk's address, omit it.
+  address, which sits in the letterhead at the top of the page (W Adams St in
+  Jacksonville, E Marion Ave in Punta Gorda, and so on). If a page shows only
+  the clerk's address, omit it.
+- Some counties enclose a blank PROOF OF CLAIM form after each notice. It has
+  no addressee block; skip it.
+- Some notices print no DATED value. Then use the date the clerk certifies the
+  notice was mailed ("mailed ... on this 29th day of January, 2026").
 - An addressee is frequently in a different city or state from the property, and
-  co-owners are frequently at different addresses from each other. That is
-  expected and is the reason we are reading this. Do not "correct" either.
+  co-owners are frequently at different addresses from each other. The same
+  owner may be noticed at two addresses; return both. That is expected and is
+  the reason we are reading this. Do not "correct" any of it.
+- For an address outside the US, put the province or region in "state" and the
+  postal code in "zip" exactly as printed.
 - Use null for anything not printed. Never guess or infer a value.
 - Return names exactly as printed, including ESTATE or suffixes.`;
 
@@ -134,7 +151,7 @@ export class SurplusNoticeService {
   async readNotice(url: string): Promise<NoticeExtract | null> {
     if (!this.available) return null;
 
-    let pdf: Buffer;
+    let file: SurplusDocumentFile;
     try {
       const res = await axios.get(url, {
         responseType: 'arraybuffer',
@@ -142,16 +159,41 @@ export class SurplusNoticeService {
         maxContentLength: MAX_PDF_BYTES,
         headers: { 'User-Agent': 'DealcoreSurplusBot/1.0 (+https://mydealcore.com)' },
       });
-      pdf = Buffer.from(res.data);
+      file = { data: Buffer.from(res.data), contentType: String(res.headers['content-type'] || 'application/pdf') };
     } catch (e: any) {
       this.logger.warn(`Could not fetch notice ${url}: ${e.message}`);
       return null;
     }
+    return this.readNoticeFile(file, url);
+  }
 
-    if (!pdf.length || pdf.length > MAX_PDF_BYTES) {
-      this.logger.warn(`Notice ${url} is ${pdf.length} bytes, outside the readable range`);
+  /**
+   * Read a notice the adapter has already fetched. A PDF goes over as a
+   * document; a scanned image (Charlotte's Group 4 TIFF, which the API does not
+   * take) goes over as one PNG per page.
+   */
+  async readNoticeFile(file: SurplusDocumentFile, label: string): Promise<NoticeExtract | null> {
+    if (!this.available) return null;
+
+    const bytes = file.data;
+    if (!bytes.length || bytes.length > MAX_PDF_BYTES) {
+      this.logger.warn(`Notice ${label} is ${bytes.length} bytes, outside the readable range`);
       return null;
     }
+
+    let content: any[];
+    try {
+      content = isPdf(file)
+        ? [{ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: bytes.toString('base64') } }]
+        : (await imagePages(bytes)).map((png) => ({
+            type: 'image',
+            source: { type: 'base64', media_type: 'image/png', data: png.toString('base64') },
+          }));
+    } catch (e: any) {
+      this.logger.warn(`Notice ${label} (${file.contentType}) could not be prepared: ${e.message}`);
+      return null;
+    }
+    if (!content.length) return null;
 
     try {
       const response = await this.anthropic!.messages.create({
@@ -165,17 +207,7 @@ export class SurplusNoticeService {
         messages: [
           {
             role: 'user',
-            content: [
-              {
-                type: 'document',
-                source: {
-                  type: 'base64',
-                  media_type: 'application/pdf',
-                  data: pdf.toString('base64'),
-                },
-              },
-              { type: 'text', text: PROMPT },
-            ],
+            content: [...content, { type: 'text', text: PROMPT }],
           },
         ],
       } as any);
@@ -186,7 +218,7 @@ export class SurplusNoticeService {
         .join('\n');
       return this.parse(text);
     } catch (e: any) {
-      this.logger.warn(`Notice extraction failed for ${url}: ${e.message}`);
+      this.logger.warn(`Notice extraction failed for ${label}: ${e.message}`);
       return null;
     }
   }
@@ -237,7 +269,9 @@ export class SurplusNoticeService {
         street: str(r?.street),
         city: str(r?.city),
         state: str(r?.state)?.toUpperCase().slice(0, 2) || null,
-        zip: str(r?.zip)?.replace(/[^0-9]/g, '').slice(0, 5) || null,
+        // Five digits or nothing. Stripping the letters out of a Canadian
+        // postcode ("L4T 1M9") would leave "419", a ZIP that is not one.
+        zip: /^\d{5}/.exec(str(r?.zip) || '')?.[0] || null,
       }))
       // The clerk's own block is the one wrong answer the layout invites: it is
       // a perfectly valid address, so a wrong read fails silently and would send
@@ -266,10 +300,31 @@ export class SurplusNoticeService {
   }
 }
 
-/** The Duval clerk's own address, which must never be read as the owner's. */
+/** A clerk's own address (Duval, Charlotte), which must never be read as the owner's. */
 export function isClerkAddress(street?: string | null, city?: string | null): boolean {
   const s = String(street || '').toUpperCase();
   const c = String(city || '').toUpperCase();
   if (!s) return false;
-  return /\bW(EST)?\s+ADAMS\s+ST/.test(s) && (!c || c.includes('JACKSONVILLE'));
+  if (/\bW(EST)?\s+ADAMS\s+ST/.test(s) && (!c || c.includes('JACKSONVILLE'))) return true;
+  return /^350\s+E(AST|\.)?\s+MARION\s+AVE/.test(s) && (!c || c.includes('PUNTA GORDA'));
+}
+
+function isPdf(file: SurplusDocumentFile): boolean {
+  return /pdf/i.test(file.contentType) || file.data.subarray(0, 5).toString('latin1') === '%PDF-';
+}
+
+/** Every page of a scanned image as a PNG the model can read, capped. */
+async function imagePages(bytes: Buffer): Promise<Buffer[]> {
+  const meta = await sharp(bytes).metadata();
+  const count = Math.min(meta.pages || 1, MAX_IMAGE_PAGES);
+  const out: Buffer[] = [];
+  for (let page = 0; page < count; page++) {
+    out.push(
+      await sharp(bytes, { page })
+        .resize({ width: IMAGE_LONG_EDGE, height: IMAGE_LONG_EDGE, fit: 'inside', withoutEnlargement: true })
+        .png()
+        .toBuffer(),
+    );
+  }
+  return out;
 }

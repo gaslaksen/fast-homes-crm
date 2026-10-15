@@ -172,7 +172,7 @@ export function ruleFor(
  * `candidate` is the expansion list. Adding one is a line here, not a rebuild.
  */
 export const FL_COUNTIES = {
-  active: ['Duval', 'Lee', 'Polk', 'Brevard', 'Pinellas', 'Sarasota', 'Lake', 'Alachua', 'Santa Rosa', 'Flagler', 'Citrus', 'Hernando', 'Marion'],
+  active: ['Duval', 'Lee', 'Polk', 'Brevard', 'Pinellas', 'Sarasota', 'Lake', 'Alachua', 'Santa Rosa', 'Flagler', 'Citrus', 'Hernando', 'Marion', 'Charlotte'],
   candidate: ['Volusia', 'Osceola', 'St. Johns'],
 };
 
@@ -248,6 +248,22 @@ export const FL_COUNTY_SEED: Record<string, CountySeed> = {
       'Cover sheet: https://www.leeclerk.org/home/showpublisheddocument/16571/638739291588300000. Checklist: https://www.leeclerk.org/home/showpublisheddocument/562/636824724510070000.',
       'Lienholder claims must arrive within 120 days of the notice of surplus, mailed about two weeks after the sale. Unclaimed surplus escheats to the state each May, one to two years after the sale; claims are taken as long as the clerk holds the funds.',
       'Docket, mailing addresses and claims received are on RealTDM: https://lee.realtdm.com/public/cases/list.',
+    ].join('\n'),
+  },
+  // Charlotte publishes no claim form or filing page: the Proof of Claim is
+  // enclosed with the mailed notice. So the seed is only what that notice
+  // prints, and the claim form, accepted methods and attorney question stay
+  // open for whoever calls the clerk.
+  Charlotte: {
+    surplusList: 'https://taxdeeds.charlotteclerk.com/TaxDeed/Surplus',
+    clerkContactPhone: '(941) 505-4844',
+    clerkAddress: 'Clerk of the Circuit Court, Attn: Tax Deed Dept., 350 East Marion Avenue, Punta Gorda, FL 33950',
+    notes: [
+      'From the clerk\'s Notice of Surplus (case 25-0952, mailed 2026-01-29), read 2026-10-15.',
+      'Claim with the notarized Proof of Claim enclosed with the notice, WITNESSED BY TWO individuals, plus any original documentation, a photocopy of the claimant\'s ID and an IRS W-9.',
+      'Anyone other than the property owners who does not file within 120 days waives their interest (FS 197.582(5)). The clerk disburses by priority after examining every claim.',
+      'Address letters to the attention of the Tax Deed Department.',
+      'Docket and documents: https://taxdeeds.charlotteclerk.com/TaxDeed/Surplus. Payouts and checks are not published there.',
     ].join('\n'),
   },
 };
