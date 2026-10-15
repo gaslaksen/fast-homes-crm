@@ -1,4 +1,5 @@
 import { ConfigService } from '@nestjs/config';
+import sharp from 'sharp';
 import { SurplusNoticeService, isClerkAddress } from './surplus-notice.service';
 
 const svc = () => new SurplusNoticeService({ get: () => undefined } as unknown as ConfigService);
@@ -127,8 +128,15 @@ describe('isClerkAddress', () => {
     expect(isClerkAddress('501 W Adams St, Room 1046', null)).toBe(true);
   });
 
+  it('matches the Charlotte clerk, whose letterhead tops the notice', () => {
+    expect(isClerkAddress('350 E. MARION AVE', 'PUNTA GORDA')).toBe(true);
+    expect(isClerkAddress('350 East Marion Avenue', 'Punta Gorda')).toBe(true);
+    expect(isClerkAddress('350 E MARION AVE', null)).toBe(true);
+  });
+
   it('does not match an unrelated address', () => {
     expect(isClerkAddress('72 SMITH DRIVE', 'HARTFORD')).toBe(false);
+    expect(isClerkAddress('1350 E MARION AVE', 'PUNTA GORDA')).toBe(false);
     expect(isClerkAddress('2866 W 11TH ST', 'JACKSONVILLE')).toBe(false);
     expect(isClerkAddress('', '')).toBe(false);
   });
@@ -194,5 +202,57 @@ describe('one page per recipient', () => {
     )!;
     expect(r.recipients).toHaveLength(1);
     expect(r.street).toBe('72 SMITH DRIVE');
+  });
+});
+
+describe('Charlotte notices', () => {
+  it('reads 25-0952, one owner noticed at two Ontario addresses, without inventing ZIPs', () => {
+    // Read off the 4-page TIFF by hand: notice, proof of claim, notice, proof of claim.
+    const r = svc().parse(
+      JSON.stringify({
+        recipients: [
+          { name: 'PICCIOLO, GIUSEPPE', street: '1500 STEELES AVENUE WEST UNIT 614', city: 'THORNHILL', state: 'ONTARIO', zip: 'L4J 4H6' },
+          { name: 'PICCIOLO, GIUSEPPE', street: '3431 DORCAS STREET', city: 'MISSISSAUGA', state: 'ONTARIO', zip: 'L4T 1M9' },
+        ],
+        noticeDate: '2026-01-29',
+        saleDate: '2026-01-27',
+        surplusAtNotice: 5905.69,
+        certificateNumber: '202-2718',
+        taxDeedNumber: '25-0952',
+      }),
+    )!;
+    expect(r.recipients).toHaveLength(2);
+    expect(r.recipients.map((x) => x.city)).toEqual(['THORNHILL', 'MISSISSAUGA']);
+    // Digits stripped out of "L4T 1M9" would be "419".
+    expect(r.recipients.map((x) => x.zip)).toEqual([null, null]);
+    expect(r.noticeDate).toBe('2026-01-29');
+  });
+
+  it('sends a scanned TIFF as one PNG per page, since the API takes no TIFF', async () => {
+    const page = () => sharp({ create: { width: 850, height: 1100, channels: 3, background: '#ffffff' } }).png().toBuffer();
+    const tiff = await sharp([await page(), await page()], { join: { animated: true } }).tiff().toBuffer();
+    const create = jest.fn().mockResolvedValue({ content: [{ type: 'text', text: '{"recipients":[]}' }] });
+    const s = new SurplusNoticeService({ get: (k: string) => (k === 'ANTHROPIC_API_KEY' ? 'test' : undefined) } as any);
+    (s as any).anthropic = { messages: { create } };
+
+    await s.readNoticeFile({ data: tiff, contentType: 'image/tiff' }, 'test');
+
+    const content = create.mock.calls[0][0].messages[0].content;
+    const images = content.filter((b: any) => b.type === 'image');
+    expect(images).toHaveLength(2);
+    expect(images[0].source.media_type).toBe('image/png');
+    expect(content.some((b: any) => b.type === 'document')).toBe(false);
+  });
+
+  it('still sends a PDF as a document', async () => {
+    const create = jest.fn().mockResolvedValue({ content: [{ type: 'text', text: '{"recipients":[]}' }] });
+    const s = new SurplusNoticeService({ get: (k: string) => (k === 'ANTHROPIC_API_KEY' ? 'test' : undefined) } as any);
+    (s as any).anthropic = { messages: { create } };
+
+    await s.readNoticeFile({ data: Buffer.from('%PDF-1.4 test'), contentType: 'application/octet-stream' }, 'test');
+
+    const content = create.mock.calls[0][0].messages[0].content;
+    expect(content[0].type).toBe('document');
+    expect(content[0].source.media_type).toBe('application/pdf');
   });
 });

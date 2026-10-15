@@ -463,6 +463,13 @@ export function classifyCase(
      * would be invisible here.
      */
     claimsNotPublished?: boolean;
+    /**
+     * The docket carries no dates but arrives in filing order, so a document's
+     * position says whether it came before the operative notice. Charlotte,
+     * whose "MAIL - RETURN RECEIPTS" are the green cards from the notice of
+     * application, filed weeks before the surplus letter.
+     */
+    docketInFilingOrder?: boolean;
   } = {},
 ): CaseClassification {
   const folders = (opts.categoryFolders || []).map((f) => f.trim().toUpperCase());
@@ -558,9 +565,12 @@ export function classifyCase(
   // updated addresses, often care of a relative. Counting the January returns
   // condemned 13 of the first 24 Lee addresses the clerk had since corrected.
   // Duval dates nothing, so there every return still counts, as before.
+  // Charlotte dates nothing either but files in order, so position decides.
   const operativeNotice = notices[notices.length - 1];
   const since = operativeNotice?.filedAt || null;
-  const afterNotice = (d: SurplusDoc) => !since || !d.filedAt || d.filedAt >= since;
+  const noticeAt = opts.docketInFilingOrder && operativeNotice ? ledger.indexOf(operativeNotice) : -1;
+  const afterNotice = (d: ClassifiedDoc) =>
+    noticeAt >= 0 ? ledger.indexOf(d) > noticeAt : !since || !d.filedAt || d.filedAt >= since;
   const dead = of('mail_undeliverable').filter(afterNotice).length;
   const live = of('mail_delivered').filter(afterNotice).length;
   const mailVerdict: MailVerdict =

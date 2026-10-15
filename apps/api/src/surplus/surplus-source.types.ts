@@ -156,6 +156,8 @@ export interface SurplusSourceAdapter {
   readonly claimsNotPublished?: boolean;
   /** An image-less filing is an empty folder, not a filing. Hernando. */
   readonly unlinkedDocsAreFolders?: boolean;
+  /** No dates on the docket, but it arrives in filing order. Charlotte. Passed to classifyCase. */
+  readonly docketInFilingOrder?: boolean;
   /**
    * Every case the county currently flags as carrying a surplus. Adapters
    * return everything and let the ingest apply the floor, so a run can report
@@ -183,4 +185,24 @@ export interface SurplusSourceAdapter {
    * Absent on sources whose ledger URLs are durable.
    */
   resolveDocumentUrl?(doc: Pick<SurplusCaseDocument, 'docId' | 'docType'>): Promise<string | null>;
+  /**
+   * The document's bytes, for sources whose files sit behind a viewer session
+   * that a plain GET of the stored link cannot get past. Charlotte. Preferred
+   * over the link when present.
+   */
+  fetchDocument?(doc: Pick<SurplusCaseDocument, 'docId' | 'url'>): Promise<SurplusDocumentFile | null>;
+  /**
+   * A name as the notice prints it, cleaned the way this adapter cleans its
+   * owners, so the two can be matched. Charlotte prints the deed's wording on
+   * the addressee line ("HAMMER, ALICE M. AS TO AN UNDIVIDED 1/2 INTEREST"),
+   * which leaves INTEREST as the surname and matches nobody.
+   */
+  ownerName?(raw: string): string | null;
+}
+
+/** One document's file as the source served it. */
+export interface SurplusDocumentFile {
+  data: Buffer;
+  /** As the source labels it: application/pdf, image/tiff. */
+  contentType: string;
 }

@@ -21,6 +21,7 @@ import {
 } from '@fast-homes/shared';
 import { SurplusService } from './surplus.service';
 import { CitrusTaxSmartAdapter, DuvalTaxDeedAdapter, HernandoTaxSmartAdapter } from './pioneer-taxsmart.adapter';
+import { CharlotteTaxDeedAdapter } from './charlotte-taxdeed.adapter';
 import {
   AlachuaRealTdmAdapter,
   BrevardRealTdmAdapter,
@@ -253,9 +254,10 @@ export class SurplusIngestService {
     private flagler?: FlaglerRealTdmAdapter,
     private citrus?: CitrusTaxSmartAdapter,
     private hernando?: HernandoTaxSmartAdapter,
+    private charlotte?: CharlotteTaxDeedAdapter,
   ) {}
 
-  /** Every adapter wired up, all weekly: Lee, Polk, Brevard, Pinellas, Sarasota, Lake, Alachua, Santa Rosa and Flagler (RealTDM); Duval, Citrus and Hernando (Pioneer TaxSmart). */
+  /** Every adapter wired up, all weekly: Lee, Polk, Brevard, Pinellas, Sarasota, Lake, Alachua, Santa Rosa and Flagler (RealTDM); Duval, Citrus and Hernando (Pioneer TaxSmart); Charlotte (the clerk's own app). */
   adapters(): SurplusSourceAdapter[] {
     const all: (SurplusSourceAdapter | undefined)[] = [
       this.duval,
@@ -270,6 +272,7 @@ export class SurplusIngestService {
       this.flagler,
       this.citrus,
       this.hernando,
+      this.charlotte,
     ];
     return all.filter((a): a is SurplusSourceAdapter => !!a);
   }
@@ -474,6 +477,7 @@ export class SurplusIngestService {
       payoutsArePartial: !!adapter.payoutsArePartial,
       categoryFolders: adapter.categoryFolders,
       claimsNotPublished: !!adapter.claimsNotPublished,
+      docketInFilingOrder: !!adapter.docketInFilingOrder,
       applicants: String(detail.applicantNames || '')
         .split(/\s*,\s*/)
         .filter(Boolean),
@@ -830,6 +834,19 @@ export class SurplusIngestService {
     verdict: ReturnType<typeof classifyCase>,
     detail: SurplusCaseDetail,
   ): Promise<NoticeExtract | null> {
+    const extract = await this.fetchNotice(adapter, verdict, detail);
+    if (!extract || !adapter.ownerName) return extract;
+    // Addressees as the adapter names its owners, or the match finds nobody.
+    const clean = (name: string | null) => (name ? adapter.ownerName!(name) || name : name);
+    const recipients = extract.recipients.map((r) => ({ ...r, name: clean(r.name) }));
+    return { ...extract, recipients, recipient: recipients[0]?.name ?? null };
+  }
+
+  private async fetchNotice(
+    adapter: SurplusSourceAdapter,
+    verdict: ReturnType<typeof classifyCase>,
+    detail: SurplusCaseDetail,
+  ): Promise<NoticeExtract | null> {
     const fromSource = noticeFromSource(detail);
     if (fromSource) return fromSource;
 
@@ -837,6 +854,12 @@ export class SurplusIngestService {
     const notices = verdict.ledger.filter((d) => d.kind === 'notice_surplus' && (d.url || d.docId));
     const doc = notices[notices.length - 1];
     if (!doc) return null;
+
+    // A source whose files sit behind a viewer session hands over the bytes.
+    if (adapter.fetchDocument) {
+      const file = await adapter.fetchDocument(doc);
+      return file ? this.notice.readNoticeFile(file, `${adapter.county} document ${doc.docId}`) : null;
+    }
 
     let url: string | null = null;
     if (doc.url) {
