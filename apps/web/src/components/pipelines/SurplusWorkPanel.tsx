@@ -2335,7 +2335,12 @@ export default function SurplusWorkPanel({
   }, [tab, loadComms]);
 
   useEffect(() => {
-    if (tab === 'conversation') bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (tab !== 'conversation') return;
+    // Scroll the timeline box only. scrollIntoView would also scroll the
+    // panel itself, which scrolls when the composer is tall, and hide the
+    // header with the lead's name.
+    const box = bottomRef.current?.closest('.dc-wp-body');
+    box?.scrollTo({ top: box.scrollHeight, behavior: 'smooth' });
   }, [comms.timeline, tab]);
 
   useEffect(() => {
