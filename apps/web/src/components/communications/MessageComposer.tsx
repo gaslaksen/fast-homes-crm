@@ -705,7 +705,9 @@ export default function MessageComposer({
 
       {error && <div className="text-xs text-red-600 dark:text-red-400">{error}</div>}
 
-      <div className="flex items-center justify-end gap-2">
+      {/* `composer-actions` lets the pipeline work panel pin this row to its
+          bottom edge, so Send stays in view under a long message. */}
+      <div className="composer-actions flex items-center justify-end gap-2">
         {channel === 'email' && (emailInReplyToId || emailMode === 'forward' || !htmlIsEmpty(emailBodyHtml)) && (
           <button
             type="button"
