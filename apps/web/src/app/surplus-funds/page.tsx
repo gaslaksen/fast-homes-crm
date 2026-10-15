@@ -147,6 +147,8 @@ interface SurplusLead {
   ownerMailingCity: string | null;
   ownerMailingState: string | null;
   ownerMailingZip: string | null;
+  /** Null for a US address. */
+  ownerMailingCountry?: string | null;
   ownerAddressSource: string | null;
   mailVerdict: string | null;
   claimLedger: { title: string; kind: string; docId?: string | null; url?: string | null }[] | null;

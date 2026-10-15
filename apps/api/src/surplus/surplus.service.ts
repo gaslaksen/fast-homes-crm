@@ -89,6 +89,7 @@ import { DIG_DEEPER_BRAND } from '../common/company.constants';
 import { SurplusLeadInput, SurplusListFilters, SurplusPhoneInput } from './surplus.types';
 import { SurplusCountiesService, CountyRow } from './surplus-counties.service';
 import { SurplusDocumentsService } from './surplus-documents.service';
+import { foreignCountry } from './surplus-address.util';
 import { SurplusTemplatesService } from './surplus-templates.service';
 
 /** What toRow needs beyond the lead: per-request lookups fetched once. */
@@ -410,6 +411,7 @@ export class SurplusService {
             ownerMailingCity: input.ownerMailingCity || null,
             ownerMailingState: input.ownerMailingState || null,
             ownerMailingZip: input.ownerMailingZip || null,
+            ownerMailingCountry: input.ownerMailingCountry || null,
             ownerAddressSource: input.ownerAddressSource || null,
             sourceSystem: input.sourceSystem || null,
             sourceCaseId: input.sourceCaseId || null,
@@ -692,9 +694,17 @@ export class SurplusService {
       detailPatch.ownerMailingCity = cellText(m.city) || null;
       detailPatch.ownerMailingState = (cellText(m.state) || '').toUpperCase() || null;
       detailPatch.ownerMailingZip = cellText(m.zip) || null;
+      // Only when the edit says: an older client that sends no country must
+      // not turn a Canadian address American.
+      if (m.country !== undefined) detailPatch.ownerMailingCountry = foreignCountry(cellText(m.country));
       detailPatch.ownerAddressSource = 'manual';
       const label = (s: any) =>
-        [s.ownerMailingStreet, s.ownerMailingCity, [s.ownerMailingState, s.ownerMailingZip].filter(Boolean).join(' ')]
+        [
+          s.ownerMailingStreet,
+          s.ownerMailingCity,
+          [s.ownerMailingState, s.ownerMailingZip].filter(Boolean).join(' '),
+          s.ownerMailingCountry ?? (m.country === undefined ? d.ownerMailingCountry : null),
+        ]
           .filter(Boolean)
           .join(', ');
       const before = d.ownerMailingStreet ? label(d) : '';
@@ -1440,6 +1450,7 @@ export class SurplusService {
             ownerMailingCity: true,
             ownerMailingState: true,
             ownerMailingZip: true,
+            ownerMailingCountry: true,
             heirs: { select: { id: true, name: true, street: true, city: true, state: true, zip: true } },
           },
         },
@@ -1470,7 +1481,12 @@ export class SurplusService {
       const heir = opts.heirId ? d.heirs.find((h) => h.id === opts.heirId) || null : null;
       const defaultAddress = heir
         ? [heir.street, heir.city, [heir.state, heir.zip].filter(Boolean).join(' ')].filter(Boolean).join(', ')
-        : [d.ownerMailingStreet, d.ownerMailingCity, [d.ownerMailingState, d.ownerMailingZip].filter(Boolean).join(' ')]
+        : [
+            d.ownerMailingStreet,
+            d.ownerMailingCity,
+            [d.ownerMailingState, d.ownerMailingZip].filter(Boolean).join(' '),
+            d.ownerMailingCountry,
+          ]
             .filter(Boolean)
             .join(', ');
       const address = (opts.address || '').trim() || defaultAddress || null;
@@ -2317,7 +2333,8 @@ export class SurplusService {
       // per claimant because it keys on their name and their state.
       nameSearch: nameSearchPlan({
         claimant: `${lead.sellerFirstName || ''} ${lead.sellerLastName || ''}`.trim(),
-        ownerState: d.ownerMailingState || lead.propertyState,
+        // A province is no use to a US people search; the property's state is.
+        ownerState: (!d.ownerMailingCountry && d.ownerMailingState) || lead.propertyState,
         propertyAddress: lead.propertyAddress,
         propertyCity: lead.propertyCity,
         isEntity: ENTITY_NAME.test(`${lead.sellerFirstName || ''} ${lead.sellerLastName || ''}`),
@@ -2332,6 +2349,7 @@ export class SurplusService {
       ownerMailingCity: d.ownerMailingCity,
       ownerMailingState: d.ownerMailingState,
       ownerMailingZip: d.ownerMailingZip,
+      ownerMailingCountry: d.ownerMailingCountry,
       ownerAddressSource: d.ownerAddressSource,
       mailVerdict: d.mailVerdict,
       claimLedger: d.claimLedger || null,
@@ -2820,6 +2838,7 @@ export function groupByProperty(rows: any[]): any[] {
       ownerMailingCity: head.ownerMailingCity,
       ownerMailingState: head.ownerMailingState,
       ownerMailingZip: head.ownerMailingZip,
+      ownerMailingCountry: head.ownerMailingCountry,
       ownerAddressSource: head.ownerAddressSource,
 
       // ── Shared: the money and the clock ──
