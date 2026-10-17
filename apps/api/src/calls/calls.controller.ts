@@ -21,6 +21,7 @@ import { isTwilioRequestValid } from '../webhooks/twilio-signature.util';
 import { RINGBACK_WAV } from './ringback.util';
 import { VoicemailService } from './voicemail.service';
 import { voicemailAudioPath } from './voicemail.util';
+import { Public } from '../auth/public.decorator';
 
 @Controller('calls')
 export class CallsController {
@@ -37,6 +38,7 @@ export class CallsController {
     return this.callsService.initiateAiCall(dto.leadId);
   }
 
+  @Public()
   @Post('vapi-webhook')
   async vapiWebhook(@Body() body: any) {
     return this.callsService.handleWebhookEvent(body);
@@ -73,6 +75,7 @@ export class CallsController {
    * TwiML App Voice webhook. Twilio POSTs here when the browser places a call;
    * we return the <Dial> that connects to the seller. Called by Twilio, not the UI.
    */
+  @Public()
   @Post('twilio/voice')
   @HttpCode(200)
   async twilioVoice(@Body() body: any, @Req() req: Request, @Res() res: Response) {
@@ -89,6 +92,7 @@ export class CallsController {
    * Inbound call webhook. Point your Twilio number's Voice "A call comes in" at
    * https://<api>/calls/twilio/incoming. Rings the agents' browser dialers.
    */
+  @Public()
   @Post('twilio/incoming')
   @HttpCode(200)
   async twilioIncoming(@Body() body: any, @Req() req: Request, @Res() res: Response) {
@@ -106,6 +110,7 @@ export class CallsController {
    * Does the /status bookkeeping, then plays the greeting and records when
    * nobody picked up.
    */
+  @Public()
   @Post('twilio/voicemail')
   @HttpCode(200)
   async twilioVoicemail(@Body() body: any, @Req() req: Request, @Res() res: Response) {
@@ -119,6 +124,7 @@ export class CallsController {
   }
 
   /** <Record> action: the caller is done, hang up. */
+  @Public()
   @Post('twilio/voicemail/done')
   @HttpCode(200)
   twilioVoicemailDone(@Res() res: Response) {
@@ -128,6 +134,7 @@ export class CallsController {
   }
 
   /** Recording status callback for a voicemail. */
+  @Public()
   @Post('twilio/voicemail/recording')
   @HttpCode(200)
   async twilioVoicemailRecording(@Body() body: any, @Req() req: Request) {
@@ -142,6 +149,7 @@ export class CallsController {
    * as the ringback tone: Twilio does not sign media fetches, and the file is
    * what every caller hears anyway. Only files a greeting names are served.
    */
+  @Public()
   @Get('twilio/voicemail/greeting/:file')
   twilioVoicemailGreeting(@Param('file') file: string, @Res() res: Response) {
     const full = voicemailAudioPath(file);
@@ -158,6 +166,7 @@ export class CallsController {
    * is when we ring the seller into it (that ordering is what gives the agent
    * real ringback rather than silence).
    */
+  @Public()
   @Post('twilio/conference-status')
   @HttpCode(200)
   async twilioConferenceStatus(@Body() body: any, @Req() req: Request, @Res() res: Response) {
@@ -179,6 +188,7 @@ export class CallsController {
    * Unauthenticated for the same reason as the audio below: a fixed response
    * with no data in it.
    */
+  @Public()
   @Get('twilio/ringback')
   ringbackTwiml(@Res() res: Response) {
     const url = `${this.twilioVoiceService.ringbackAudioUrl()}`;
@@ -196,6 +206,7 @@ export class CallsController {
    * fixed tone carrying no data. Served with a long cache header because the
    * bytes never change.
    */
+  @Public()
   @Get('twilio/ringback.wav')
   ringback(@Res() res: Response) {
     res.set('Content-Type', 'audio/wav');
@@ -204,6 +215,7 @@ export class CallsController {
   }
 
   /** Call status + Dial action callback. */
+  @Public()
   @Post('twilio/status')
   @HttpCode(200)
   async twilioStatus(@Body() body: any, @Req() req: Request, @Res() res: Response) {
@@ -216,6 +228,7 @@ export class CallsController {
   }
 
   /** Recording status callback. */
+  @Public()
   @Post('twilio/recording')
   @HttpCode(200)
   async twilioRecording(@Body() body: any, @Req() req: Request) {

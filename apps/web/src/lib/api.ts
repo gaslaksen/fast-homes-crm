@@ -36,8 +36,6 @@ export default api;
 export const authAPI = {
   login: (email: string, password: string) =>
     api.post('/auth/login', { email, password }),
-  register: (data: { email: string; password: string; firstName: string; lastName: string }) =>
-    api.post('/auth/register', data),
   getMe: () => api.get('/auth/me'),
   getTeam: () => api.get('/auth/team'),
   invite: (data: { email: string; firstName: string; lastName: string; role?: string; tempPassword: string }) =>

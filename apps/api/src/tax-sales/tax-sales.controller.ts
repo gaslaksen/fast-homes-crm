@@ -116,7 +116,7 @@ export class TaxSalesController {
     if (!file) throw new BadRequestException('No file uploaded');
     const { organizationId } = this.decodeToken(authHeader);
     return this.importService.executeImport(file.buffer, {
-      organizationId: body.organizationId || organizationId || null,
+      organizationId: organizationId || null,
       importBatch: body.importBatch || file.originalname,
       dryRun: body.dryRun === true || body.dryRun === 'true',
     });

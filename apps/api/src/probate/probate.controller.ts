@@ -108,7 +108,7 @@ export class ProbateController {
   ) {
     if (!file) throw new BadRequestException('No file uploaded');
     const { organizationId } = this.decodeToken(authHeader);
-    const orgId = body.organizationId || organizationId || null;
+    const orgId = organizationId || null;
 
     const tier = body.tier == null || body.tier === '' ? null : Number(body.tier);
     if (tier != null && !Number.isFinite(tier)) {

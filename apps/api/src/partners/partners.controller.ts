@@ -13,6 +13,7 @@ import {
 import * as jwt from 'jsonwebtoken';
 import { PartnersService } from './partners.service';
 import { DealShareService } from './deal-share.service';
+import { Public } from '../auth/public.decorator';
 
 @Controller()
 export class PartnersController {
@@ -135,6 +136,7 @@ export class PartnersController {
 
   // ── Public Deal View (no auth) ───────────────────────────────────
 
+  @Public()
   @Get('deal-view/:token')
   async viewDeal(@Param('token') token: string) {
     return this.dealShare.trackOpen(token);

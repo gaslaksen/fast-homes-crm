@@ -55,42 +55,6 @@ export class AuthService {
     return { token: this.signToken(user), user: this.userShape(user) };
   }
 
-  async register(data: {
-    email: string;
-    password: string;
-    firstName: string;
-    lastName: string;
-    organizationId?: string;
-  }) {
-    const existing = await this.prisma.user.findUnique({
-      where: { email: data.email.toLowerCase().trim() },
-    });
-    if (existing) throw new Error('Email already registered');
-
-    // Verify org exists if provided
-    if (data.organizationId) {
-      const org = await this.prisma.organization.findUnique({ where: { id: data.organizationId } });
-      if (!org) throw new Error('Organization not found');
-      const memberCount = await this.prisma.user.count({ where: { organizationId: data.organizationId } });
-      if (memberCount >= org.maxUsers) throw new Error(`Organization has reached its user limit (${org.maxUsers})`);
-    }
-
-    const hashedPassword = await bcrypt.hash(data.password, 10);
-    const user = await this.prisma.user.create({
-      data: {
-        email: data.email.toLowerCase().trim(),
-        password: hashedPassword,
-        firstName: data.firstName,
-        lastName: data.lastName,
-        role: 'AGENT',
-        organizationId: data.organizationId || null,
-      },
-      include: { organization: true },
-    });
-
-    return { token: this.signToken(user), user: this.userShape(user) };
-  }
-
   async verifyToken(token: string) {
     try {
       const decoded = jwt.verify(token, this.jwtSecret) as any;

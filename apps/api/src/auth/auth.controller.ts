@@ -2,7 +2,9 @@ import { Controller, Post, Get, Patch, Delete, Body, Headers, Param, Unauthorize
 import { AuthService } from './auth.service';
 import * as jwt from 'jsonwebtoken';
 import { ConfigService } from '@nestjs/config';
+import { OrgOptional, Public } from './public.decorator';
 
+@OrgOptional()
 @Controller('auth')
 export class AuthController {
   constructor(
@@ -20,6 +22,7 @@ export class AuthController {
     }
   }
 
+  @Public()
   @Post('login')
   async login(@Body() body: { email: string; password: string }) {
     try {
@@ -29,11 +32,13 @@ export class AuthController {
     }
   }
 
+  @Public()
   @Post('forgot-password')
   async forgotPassword(@Body() body: { email: string }) {
     return this.authService.forgotPassword(body.email);
   }
 
+  @Public()
   @Post('reset-password')
   async resetPasswordWithToken(@Body() body: { token: string; newPassword: string }) {
     if (!body.newPassword || body.newPassword.length < 6) {
@@ -46,11 +51,15 @@ export class AuthController {
     }
   }
 
+  /**
+   * Closed. It was public and took organizationId from the body, so anyone
+   * could make an account inside the company, or one with no org, which most
+   * queries treated as "see everything". No page uses it: people join through
+   * POST /auth/invite, which an admin sends.
+   */
   @Post('register')
-  async register(@Body() body: {
-    email: string; password: string; firstName: string; lastName: string; organizationId?: string;
-  }) {
-    return this.authService.register(body);
+  async register() {
+    throw new ForbiddenException('Sign-up is closed. Ask an admin to invite you.');
   }
 
   @Get('me')
