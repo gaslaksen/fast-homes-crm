@@ -1,6 +1,7 @@
 import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { numberKey, toE164, prettyNumber } from './phone-numbers.service';
+import { Brand, DIG_DEEPER_BRAND, brandForLeadSource, brandForNumber } from '../common/company.constants';
 
 /**
  * One number we hold for a seller. This is the other side of PhoneNumbersService:
@@ -390,10 +391,33 @@ export class LeadPhonesService {
    * for it. Primary is checked first so a number shared between two leads (one
    * heir, several properties) resolves to the lead that number actually belongs
    * to rather than to whichever row the OR happened to hit first.
+   *
+   * `dialled` is our number the text or call came in on. The same person can
+   * be a surplus claimant and a seller, and without it the newest lead won
+   * whichever line they used: a claimant texting the D.I.G. Deeper number could
+   * land on a Quick Cash seller lead and get that company's handling. So the
+   * company whose number was dialled is searched first, and only when it has
+   * no lead on this number does the search widen to every lead, as before.
    */
-  async findLeadByPhone(phone: string): Promise<LeadPhoneMatch | null> {
+  async findLeadByPhone(phone: string, dialled?: string | null): Promise<LeadPhoneMatch | null> {
     const ten = numberKey(phone);
     if (ten.length !== 10) return null;
+
+    if (numberKey(dialled || '').length === 10) {
+      const inBrand = await this.matchByPhone(ten, brandForNumber(dialled));
+      if (inBrand) return inBrand;
+    }
+    return this.matchByPhone(ten);
+  }
+
+  /** findLeadByPhone's search, limited to one brand's leads when given one. */
+  private async matchByPhone(ten: string, brand?: Brand): Promise<LeadPhoneMatch | null> {
+    // Mirrors brandForLeadSource: surplus leads are D.I.G. Deeper, the rest Quick Cash.
+    const inBrand = !brand
+      ? {}
+      : brand.key === DIG_DEEPER_BRAND.key
+        ? { source: 'SURPLUS' }
+        : { source: { not: 'SURPLUS' } };
 
     const primary = await this.prisma.lead.findFirst({
       where: {
@@ -402,6 +426,7 @@ export class LeadPhonesService {
           { sellerPhone: ten },
           { sellerPhone: `1${ten}` },
         ],
+        ...inBrand,
       },
       orderBy: { createdAt: 'desc' },
       select: { id: true },
@@ -411,8 +436,10 @@ export class LeadPhonesService {
     // The same number spelled some other way, like "(704) 681-2994". A lead
     // edited by hand used to keep whatever was typed, and those leads rang in
     // as an unknown caller.
-    const [loose] = await this.primaryIdsByDigits(ten);
-    if (loose) return { leadId: loose, isPrimary: true };
+    const loose = (await this.primaryRowsByDigits(ten)).find(
+      (r) => !brand || brandForLeadSource(r.source).key === brand.key,
+    );
+    if (loose) return { leadId: loose.id, isPrimary: true };
 
     // Every pipeline's extra slots, off the same table the writes use. The
     // surplus and tax sale slots were missing here, which is how a claimant
@@ -421,11 +448,15 @@ export class LeadPhonesService {
     const alternate = await this.prisma.lead.findFirst({
       where: {
         OR: DETAIL_RELATIONS.map((r) => ({ [r.relation]: { OR: slotsMatching(ten, r.slots) } })),
+        ...inBrand,
       },
       orderBy: { createdAt: 'desc' },
       select: { id: true },
     });
     if (alternate) return { leadId: alternate.id, isPrimary: false };
+
+    // Heirs and associates only ever sit on surplus claims.
+    if (brand && brand.key !== DIG_DEEPER_BRAND.key) return null;
 
     // A surplus heir or associate calling back from a letter. Their numbers
     // live on their own row, indexed, and the letter's whole purpose is this
@@ -512,11 +543,15 @@ export class LeadPhonesService {
    * exact match first and come here when it misses.
    */
   private async primaryIdsByDigits(ten: string): Promise<string[]> {
-    const rows = await this.prisma.$queryRaw<{ id: string }[]>`
-      SELECT id FROM "leads"
+    return (await this.primaryRowsByDigits(ten)).map((r) => r.id);
+  }
+
+  /** primaryIdsByDigits with each lead's source, so a match can stay in one brand. */
+  private async primaryRowsByDigits(ten: string): Promise<{ id: string; source: string | null }[]> {
+    return this.prisma.$queryRaw<{ id: string; source: string | null }[]>`
+      SELECT id, source FROM "leads"
       WHERE right(regexp_replace("sellerPhone", '[^0-9]', '', 'g'), 10) = ${ten}
       ORDER BY "createdAt" DESC`;
-    return rows.map((r) => r.id);
   }
   // ─── Editing what we hold ─────────────────────────────────────────────────
 

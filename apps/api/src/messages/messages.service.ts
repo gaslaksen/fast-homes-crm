@@ -73,7 +73,10 @@ function msUntilMorning(): number {
   const offsetStr = etOffsetFormatter.formatToParts(now).find(x => x.type === 'timeZoneName')?.value || 'GMT-4';
   const offsetMatch = offsetStr.match(/GMT([+-]\d+)/);
   const offsetHours = offsetMatch ? parseInt(offsetMatch[1], 10) : -4;
-  const targetUtc = new Date(`${etMidnightStr}${offsetHours >= 0 ? '+' : ''}${offsetHours}:00`);
+  // The offset needs two digits: "-4:00" is not a valid ISO offset, the Date
+  // came out invalid, and setTimeout(NaN) sent the "morning" reply at once.
+  const offset = `${offsetHours >= 0 ? '+' : '-'}${String(Math.abs(offsetHours)).padStart(2, '0')}:00`;
+  const targetUtc = new Date(`${etMidnightStr}${offset}`);
   // If 8 AM ET today has already passed, use tomorrow
   if (targetUtc.getTime() <= now.getTime()) {
     targetUtc.setDate(targetUtc.getDate() + 1);
@@ -976,7 +979,8 @@ You decide the right approach based on the conversation flow.${photoNudge}`.trim
     // Find the lead by any number we hold for it, not just Lead.sellerPhone.
     // An agent can text a skip-traced second or third number, and the reply
     // comes back from that number: matching on the primary alone would drop it.
-    const match = await this.leadPhones.findLeadByPhone(from);
+    // The line they texted decides which company's lead is tried first.
+    const match = await this.leadPhones.findLeadByPhone(from, data.To);
 
     if (!match) {
       console.warn(`No lead found for phone: ${from}`);
@@ -1211,13 +1215,18 @@ You decide the right approach based on the conversation flow.${photoNudge}`.trim
       const msUntil = msUntilMorning();
       this.logger.log(`🌙 Quiet hours — scheduling auto-response for lead ${leadId} at 6 AM ET (~${Math.round(msUntil / 60000)} min)`);
 
-      // Send an immediate acknowledgment so the seller knows we received their message
+      // Send an immediate acknowledgment so the seller knows we received their
+      // message. Only when the morning reply it promises will actually go out:
+      // a lead with auto-respond off (every surplus, foreclosure, probate and
+      // tax sale lead) got a bot text at night and then silence.
       try {
         const lead = await this.prisma.lead.findUnique({
           where: { id: leadId },
           include: { organization: true },
         });
-        if (lead) {
+        if (lead && !(await this.canAutoRespond(leadId))) {
+          this.logger.log(`🌙 No after-hours ack for lead ${leadId}: auto-respond is not allowed`);
+        } else if (lead) {
           const businessName = businessNameForLead(lead.source, (lead as any).organization?.name);
           const ack = buildAfterHoursAck(lead.sellerFirstName, businessName);
           await this.sendMessage(leadId, ack, undefined, undefined, await this.replyToFor(leadId));
