@@ -52,7 +52,7 @@ export class LeadsController {
     @Headers('authorization') authHeader?: string,
   ) {
     const { organizationId } = this.decodeToken(authHeader);
-    return this.leadsService.createLead({ ...body, organizationId: body.organizationId || organizationId });
+    return this.leadsService.createLead({ ...body, organizationId });
   }
 
   @Get()

@@ -569,7 +569,7 @@ export class SurplusController {
       throw new BadRequestException('limit must be a positive number');
     }
     return this.ingest.ingestCounty(source, {
-      organizationId: body?.organizationId || organizationId || null,
+      organizationId: organizationId || null,
       trigger: 'manual',
       limit,
       // Re-read notices and correct the addresses they produced. Off by
@@ -610,7 +610,7 @@ export class SurplusController {
       throw new BadRequestException('nameSearchLimit must be a positive number');
     }
     return this.skiptrace.traceLeads({
-      organizationId: body?.organizationId || organizationId || null,
+      organizationId: organizationId || null,
       leadIds: Array.isArray(body?.leadIds) ? body.leadIds : undefined,
       limit,
       includeTraced: body?.includeTraced === true,
@@ -639,7 +639,7 @@ export class SurplusController {
       throw new BadRequestException('limit must be a positive number');
     }
     return this.skiptrace.recheckDeaths({
-      organizationId: body?.organizationId || organizationId || null,
+      organizationId: organizationId || null,
       county: typeof body?.county === 'string' && body.county ? body.county : undefined,
       limit,
       dryRun: body?.dryRun === true,
@@ -659,7 +659,7 @@ export class SurplusController {
       throw new BadRequestException('limit must be a positive number');
     }
     return this.skiptrace.relativeBacklog({
-      organizationId: body?.organizationId || organizationId || null,
+      organizationId: organizationId || null,
       county: typeof body?.county === 'string' && body.county ? body.county : undefined,
       limit,
       dryRun: body?.dryRun === true,
@@ -679,7 +679,7 @@ export class SurplusController {
       throw new BadRequestException('limit must be a positive number');
     }
     return this.skiptrace.estateRelatives({
-      organizationId: body?.organizationId || organizationId || null,
+      organizationId: organizationId || null,
       county: typeof body?.county === 'string' && body.county ? body.county : undefined,
       limit,
       dryRun: body?.dryRun === true,
@@ -700,7 +700,7 @@ export class SurplusController {
       throw new BadRequestException('limit must be a positive number');
     }
     return this.obituary.run({
-      organizationId: body?.organizationId || organizationId || null,
+      organizationId: organizationId || null,
       leadIds: Array.isArray(body?.leadIds) ? body.leadIds : undefined,
       county: typeof body?.county === 'string' && body.county ? body.county : undefined,
       limit,
@@ -751,7 +751,7 @@ export class SurplusController {
       throw new BadRequestException('limit must be a positive number');
     }
     return this.social.run({
-      organizationId: body?.organizationId || organizationId || null,
+      organizationId: organizationId || null,
       leadIds: Array.isArray(body?.leadIds) ? body.leadIds : undefined,
       county: typeof body?.county === 'string' && body.county ? body.county : undefined,
       limit,
@@ -956,7 +956,7 @@ export class SurplusController {
     if (!file) throw new BadRequestException('No file uploaded');
     const { organizationId } = this.decodeToken(authHeader);
     return this.importService.executeImport(file.buffer, {
-      organizationId: body.organizationId || organizationId || null,
+      organizationId: organizationId || null,
       importBatch: body.importBatch || file.originalname,
       dryRun: body.dryRun === true || body.dryRun === 'true',
       // Optional: names the county for a file that does not carry one.

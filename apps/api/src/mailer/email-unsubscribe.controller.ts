@@ -12,6 +12,7 @@ import { Response } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailerService } from './mailer.service';
 import { Brand, DEFAULT_BRAND, brandForLeadSource } from '../common/company.constants';
+import { Public } from '../auth/public.decorator';
 
 /**
  * Public (no auth) endpoints that honor the `List-Unsubscribe` /
@@ -24,6 +25,7 @@ import { Brand, DEFAULT_BRAND, brandForLeadSource } from '../common/company.cons
  * Both share the same idempotent opt-out: set Lead.doNotContact = true and
  * move all ACTIVE/PAUSED campaign enrollments for that lead to OPTED_OUT.
  */
+@Public()
 @Controller('email/unsubscribe')
 export class EmailUnsubscribeController {
   private readonly logger = new Logger(EmailUnsubscribeController.name);

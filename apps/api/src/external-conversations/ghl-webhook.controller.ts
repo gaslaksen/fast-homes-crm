@@ -2,6 +2,7 @@ import { Body, Controller, HttpCode, Logger, Post, UseGuards } from '@nestjs/com
 import { GhlWebhookGuard } from './ghl-webhook.guard';
 import { GhlClient, GhlMessage } from './ghl.client';
 import { ExternalConversationsService } from './external-conversations.service';
+import { Public } from '../auth/public.decorator';
 
 // The partner key used to scope external_conversations rows for all GHL
 // (Closercontrol) traffic. We're a single-partner integration today.
@@ -38,6 +39,7 @@ const REPLY_DEBOUNCE_MS = 120_000; // 2 minutes
  * after returning 200 - GHL retries are not useful here, the next seller
  * reply will trigger us again.
  */
+@Public()
 @Controller('external/ghl')
 @UseGuards(GhlWebhookGuard)
 export class GhlWebhookController {

@@ -305,7 +305,7 @@ export class ForeclosuresController {
   ) {
     if (!file) throw new BadRequestException('No file uploaded');
     const { organizationId } = this.decodeToken(authHeader);
-    const orgId = body.organizationId || organizationId || null;
+    const orgId = organizationId || null;
     return this.importService.executeImport(file.buffer, { organizationId: orgId });
   }
 
@@ -325,7 +325,7 @@ export class ForeclosuresController {
   ) {
     if (!file) throw new BadRequestException('No file uploaded');
     const { organizationId } = this.decodeToken(authHeader);
-    const orgId = body.organizationId || organizationId || null;
+    const orgId = organizationId || null;
     return this.ingest.ingestPdf(file.buffer, file.originalname, { organizationId: orgId });
   }
 

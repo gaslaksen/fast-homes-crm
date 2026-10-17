@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { PrismaModule } from './prisma/prisma.module';
@@ -9,6 +10,7 @@ import { CompsModule } from './comps/comps.module';
 import { ScoringModule } from './scoring/scoring.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 import { AuthModule } from './auth/auth.module';
+import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { DripModule } from './drip/drip.module';
 import { SettingsModule } from './settings/settings.module';
@@ -81,5 +83,7 @@ import { WebInquiriesModule } from './web-inquiries/web-inquiries.module';
     DigestModule,
     WebInquiriesModule,
   ],
+  // Every route needs a verified token unless it is marked @Public().
+  providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }],
 })
 export class AppModule {}

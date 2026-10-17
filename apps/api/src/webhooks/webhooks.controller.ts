@@ -17,6 +17,7 @@ import { InvestorFuseService } from './investorfuse.service';
 import { LeadPhonesService } from '../phone-numbers/lead-phones.service';
 import { formatPhoneNumber, LeadSource } from '@fast-homes/shared';
 import { normalizeLeadAddressAsync } from './address-parser';
+import { Public } from '../auth/public.decorator';
 
 @Controller('webhooks')
 export class WebhooksController {
@@ -42,6 +43,7 @@ export class WebhooksController {
    * Mailgun signature, extracts the lead from the reply+{leadId}@ recipient,
    * and stores the reply in the conversation thread.
    */
+  @Public()
   @Post('mailgun/inbound')
   @HttpCode(200)
   // Mailgun posts inbound as multipart/form-data (urlencoded when no
@@ -109,6 +111,7 @@ export class WebhooksController {
    * PropertyLeads.com webhook endpoint
    * Ingests leads from PropertyLeads
    */
+  @Public()
   @Post('propertyleads')
   async handlePropertyLeads(
     @Body() body: any,
@@ -221,6 +224,7 @@ export class WebhooksController {
    * Google Ads / Landing Page form webhook
    * Can also be used for Zapier integration
    */
+  @Public()
   @Post('google-ads')
   async handleGoogleAds(
     @Body() body: any,
@@ -317,6 +321,7 @@ export class WebhooksController {
    * Configure the LeadHouse / LeadConnector outbound webhook to POST here:
    *   https://api.mydealcore.com/webhooks/leadhouse
    */
+  @Public()
   @Post('leadhouse')
   @HttpCode(200)
   async handleLeadHouse(
@@ -535,6 +540,7 @@ export class WebhooksController {
    * Twilio inbound message webhook
    * Receives incoming SMS messages
    */
+  @Public()
   @Post('twilio/inbound')
   async handleTwilioInbound(@Body() body: any, @Req() req: Request, @Res() res: Response) {
     console.log('📥 Twilio inbound message:', JSON.stringify(body).substring(0, 500));
@@ -605,6 +611,7 @@ export class WebhooksController {
    *
    * On receipt: parses address and acknowledges the lead in Slack.
    */
+  @Public()
   @Post('investorfuse')
   @HttpCode(200)
   async handleInvestorFuse(@Body() body: any) {
@@ -617,6 +624,7 @@ export class WebhooksController {
    * Called by Zapier when a new lead posts in the #esl-1-llc channel.
    * Parses the address and posts a minimal lead-received ack back to Slack.
    */
+  @Public()
   @Post('slack-lead')
   @HttpCode(200)
   async handleSlackLead(@Body() body: any) {
@@ -707,6 +715,7 @@ export class WebhooksController {
    * Receives status updates for sent messages (set TWILIO_STATUS_CALLBACK_URL
    * so the provider passes this URL as statusCallback on every send)
    */
+  @Public()
   @Post('twilio/status')
   async handleTwilioStatus(@Body() body: any, @Req() req: Request) {
     console.log('📥 Twilio status update:', JSON.stringify(body).substring(0, 300));

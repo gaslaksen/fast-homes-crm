@@ -2,9 +2,11 @@ import { Body, Controller, Post, Req, UseGuards } from '@nestjs/common';
 import type { Request } from 'express';
 import { ExternalApiKeyGuard } from './external-api-key.guard';
 import { ExternalConversationsService, DraftReplyInput } from './external-conversations.service';
+import { Public } from '../auth/public.decorator';
 
 type PartnerRequest = Request & { partnerKey?: string };
 
+@Public()
 @Controller('external/conversations')
 @UseGuards(ExternalApiKeyGuard)
 export class ExternalConversationsController {

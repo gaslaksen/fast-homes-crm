@@ -1,12 +1,14 @@
 import { Body, Controller, HttpCode, Post, Req } from '@nestjs/common';
 import { WebInquiriesService } from './web-inquiries.service';
 import { CreateWebInquiryDto } from './web-inquiry.dto';
+import { Public } from '../auth/public.decorator';
 
 /**
  * Public, unauthenticated. Reached from digdeeperllc.com through a Vercel
  * rewrite of /api/inquiry, so the browser request is same-origin and this API
  * needs no CORS entry for that site.
  */
+@Public()
 @Controller('public/web-inquiries')
 export class WebInquiriesController {
   constructor(private inquiries: WebInquiriesService) {}
