@@ -676,7 +676,7 @@ export class TwilioVoiceService {
     const to = params.To || params.to || '';
     const callSid = params.CallSid || '';
 
-    const lead = await this.findLeadByPhone(from);
+    const lead = await this.findLeadByPhone(from, to);
     // Not a lead: a teammate or a buyer still gets a name on the ring screen,
     // but is never attached to a lead.
     const other = lead ? null : await this.findNonLeadCaller(from);
@@ -816,11 +816,12 @@ export class TwilioVoiceService {
    * Identify an inbound caller. Matches any number on file for the lead, not
    * just Lead.sellerPhone: a seller we reached on a skip-traced second number
    * calls back from that number, and screen-popping "unknown caller" for a lead
-   * we are actively working is the same bug as dropping their text.
+   * we are actively working is the same bug as dropping their text. The
+   * dialled line decides which company's lead is tried first.
    */
-  private async findLeadByPhone(phone: string) {
+  private async findLeadByPhone(phone: string, dialled?: string) {
     if (!phone) return null;
-    const match = await this.leadPhones.findLeadByPhone(phone);
+    const match = await this.leadPhones.findLeadByPhone(phone, dialled);
     if (!match) return null;
     const lead = await this.prisma.lead.findUnique({
       where: { id: match.leadId },

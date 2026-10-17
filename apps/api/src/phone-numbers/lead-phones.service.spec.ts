@@ -208,6 +208,89 @@ describe('LeadPhonesService.findLeadByPhone', () => {
   });
 });
 
+describe('LeadPhonesService.findLeadByPhone with the dialled line', () => {
+  const DIG_DEEPER_LINE = '+19045959620';
+  const QUICK_CASH_LINE = '+18885748121';
+
+  /**
+   * One person who is both a Quick Cash seller (newer lead) and a D.I.G.
+   * Deeper claimant (older lead), on the same primary number.
+   */
+  function bothBusinesses() {
+    const built = buildService(foreclosureLead());
+    built.prisma.lead.findFirst.mockImplementation(async ({ where }: any) => {
+      if (!where.OR?.some((c: any) => 'sellerPhone' in c)) return null;
+      if (where.source === 'SURPLUS') return { id: 'lead-claimant' };
+      return { id: 'lead-seller' };
+    });
+    return built;
+  }
+
+  it('lands a text to the D.I.G. Deeper line on the surplus lead, not the newer seller lead', async () => {
+    const { service, prisma } = bothBusinesses();
+    await expect(service.findLeadByPhone('+17046082100', DIG_DEEPER_LINE)).resolves.toEqual({
+      leadId: 'lead-claimant',
+      isPrimary: true,
+    });
+    expect(prisma.lead.findFirst.mock.calls[0][0].where.source).toBe('SURPLUS');
+  });
+
+  it('lands a text to a Quick Cash line on the seller lead', async () => {
+    const { service, prisma } = bothBusinesses();
+    await expect(service.findLeadByPhone('+17046082100', QUICK_CASH_LINE)).resolves.toEqual({
+      leadId: 'lead-seller',
+      isPrimary: true,
+    });
+    expect(prisma.lead.findFirst.mock.calls[0][0].where.source).toEqual({ not: 'SURPLUS' });
+  });
+
+  it('keeps the old newest-lead search when no line is given', async () => {
+    const { service, prisma } = bothBusinesses();
+    await expect(service.findLeadByPhone('+17046082100')).resolves.toEqual({
+      leadId: 'lead-seller',
+      isPrimary: true,
+    });
+    expect(prisma.lead.findFirst.mock.calls[0][0].where.source).toBeUndefined();
+  });
+
+  it("widens to every lead when the dialled company has none, so the text is not dropped", async () => {
+    const { service, prisma } = buildService(foreclosureLead());
+    prisma.surplusHeir = { findFirst: jest.fn().mockResolvedValue(null) };
+    prisma.lead.findFirst.mockImplementation(async ({ where }: any) => {
+      if (where.source !== undefined) return null;
+      return where.OR?.some((c: any) => 'sellerPhone' in c) ? { id: 'lead-seller' } : null;
+    });
+
+    await expect(service.findLeadByPhone('+17046082100', DIG_DEEPER_LINE)).resolves.toEqual({
+      leadId: 'lead-seller',
+      isPrimary: true,
+    });
+  });
+
+  it('keeps a formatted primary in the dialled company too', async () => {
+    const { service, prisma } = buildService(foreclosureLead());
+    prisma.$queryRaw.mockResolvedValueOnce([
+      { id: 'lead-seller', source: 'PROPERTY_LEADS' },
+      { id: 'lead-claimant', source: 'SURPLUS' },
+    ]);
+
+    await expect(service.findLeadByPhone('+17046812994', DIG_DEEPER_LINE)).resolves.toEqual({
+      leadId: 'lead-claimant',
+      isPrimary: true,
+    });
+  });
+
+  it('does not look at surplus heirs for a call to a Quick Cash line', async () => {
+    const { service, prisma } = buildService(foreclosureLead());
+    const heirLookup = jest.fn().mockResolvedValue(null);
+    prisma.surplusHeir = { findFirst: heirLookup };
+
+    await expect(service.findLeadByPhone('+17046082100', QUICK_CASH_LINE)).resolves.toBeNull();
+    // Called once, by the widened search, never by the Quick Cash pass.
+    expect(heirLookup).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('LeadPhonesService.findLeadIdsByPhone', () => {
   it('includes leads whose primary is stored with formatting, so STOP reaches them', async () => {
     const { service, prisma } = buildService(foreclosureLead());
