@@ -796,6 +796,10 @@ model SurplusDetail {
   ownerMailingCountry String?
   /// Which county document the mailing address came from, for audit.
   ownerAddressSource String?
+  /// The notice document (docket id, or its url) last paid for with a vision
+  /// read. A read that names nobody on this row leaves the address blank, and
+  /// without this the weekly poll bought the same answer again every Monday.
+  noticeReadDocId    String?
 
   // ── Provenance ────────────────────────────────────────────────────────────
   /// 'duval_taxdeed' | 'realtdm' | 'import' | 'manual'. Counties name things

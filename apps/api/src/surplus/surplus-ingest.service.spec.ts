@@ -32,13 +32,25 @@ function harness(existing: any[], recipients = RECIPIENTS) {
       create: jest.fn(async (a: any) => { updates.push(a); return {}; }),
     },
     surplusDetail: {
-      count: jest.fn().mockResolvedValue(existing.length),
+      // Rows on the case holding an address, as the notice gate asks.
+      count: jest.fn(async ({ where }: any) =>
+        existing.filter(
+          (e) =>
+            (!where?.dedupeUid?.in || where.dedupeUid.in.includes(e.dedupeUid)) &&
+            (!where?.ownerMailingStreet || e.ownerMailingStreet),
+        ).length,
+      ),
       findFirst: jest.fn(async ({ where }: any) =>
         existing.find((e) => where.dedupeUid === e.dedupeUid) || null,
       ),
       // The tiered refresh reads what is held by county case id. The Duval
       // stub has no probe, so these rows only matter to the tiered tests.
-      findMany: jest.fn(async () => existing.filter((e) => e.sourceCaseId)),
+      // The notice gate asks by dedupeUid for the rows of one case.
+      findMany: jest.fn(async ({ where }: any) =>
+        where?.dedupeUid?.in
+          ? existing.filter((e) => where.dedupeUid.in.includes(e.dedupeUid))
+          : existing.filter((e) => e.sourceCaseId),
+      ),
       update: jest.fn(async (a: any) => { updates.push(a); return {}; }),
       updateMany: jest.fn(async (a: any) => { updates.push(a); return { count: 1 }; }),
     },
@@ -90,6 +102,7 @@ const row = (over: any) => ({
   dedupeUid: over.dedupeUid,
   ownerMailingStreet: over.street ?? null,
   ownerAddressSource: over.source ?? null,
+  noticeReadDocId: over.noticeReadDocId ?? null,
 });
 
 /** dedupeUid is "COUNTY|CASE|CLAIMANT", uppercased with spaces as underscores. */
@@ -161,6 +174,78 @@ describe('re-reading notices to correct an address', () => {
     expect(notice.readNotice).not.toHaveBeenCalled();
     const byId = Object.fromEntries(updates.map((u) => [u.where.id, u.data]));
     expect(byId.d2.ownerMailingStreet).toBeUndefined();
+  });
+});
+
+/**
+ * A notice read is a paid vision call. One that names nobody on the case leaves
+ * every address blank, and Duval, Citrus and Hernando fetch every case every
+ * week, so without a record of the read the same answer was bought every
+ * Monday.
+ */
+describe('paying for a notice once', () => {
+  const blank = () => [
+    row({ id: 'd1', dedupeUid: uid('RICHARD MINTON') }),
+    row({ id: 'd2', dedupeUid: uid('CECELIA W HARRIS') }),
+  ];
+  const marked = (updates: any[]) => updates.find((u) => u.data?.noticeReadDocId !== undefined);
+
+  it('records the notice it read on every row of the case', async () => {
+    const { svc, notice, updates } = harness(blank(), []);
+
+    await svc.ingestCounty('duval_taxdeed', {});
+
+    expect(notice.readNotice).toHaveBeenCalledTimes(1);
+    const mark = marked(updates);
+    expect(mark.data.noticeReadDocId).toBe('103369');
+    expect(mark.where.dedupeUid.in).toEqual([uid('RICHARD MINTON'), uid('CECELIA W HARRIS')]);
+  });
+
+  it('does not read the same notice again when it named nobody on the case', async () => {
+    const rows = blank().map((r) => ({ ...r, noticeReadDocId: '103369' }));
+    const { svc, notice } = harness(rows, []);
+
+    await svc.ingestCounty('duval_taxdeed', {});
+
+    expect(notice.readNotice).not.toHaveBeenCalled();
+  });
+
+  it('reads a new notice when the case is re-noticed', async () => {
+    const rows = blank().map((r) => ({ ...r, noticeReadDocId: '99999' }));
+    const { svc, notice } = harness(rows, []);
+
+    await svc.ingestCounty('duval_taxdeed', {});
+
+    expect(notice.readNotice).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads again when one row of the case has not had this notice', async () => {
+    const rows = blank();
+    rows[0] = { ...rows[0], noticeReadDocId: '103369' };
+    const { svc, notice } = harness(rows, []);
+
+    await svc.ingestCounty('duval_taxdeed', {});
+
+    expect(notice.readNotice).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not record a read that failed, so the next poll tries again', async () => {
+    const { svc, notice, updates } = harness(blank(), []);
+    notice.readNotice.mockResolvedValue(null);
+
+    await svc.ingestCounty('duval_taxdeed', {});
+
+    expect(notice.readNotice).toHaveBeenCalledTimes(1);
+    expect(marked(updates)).toBeUndefined();
+  });
+
+  it('still reads on an explicit re-read', async () => {
+    const rows = blank().map((r) => ({ ...r, noticeReadDocId: '103369' }));
+    const { svc, notice } = harness(rows, []);
+
+    await svc.ingestCounty('duval_taxdeed', { reread: true });
+
+    expect(notice.readNotice).toHaveBeenCalledTimes(1);
   });
 });
 
