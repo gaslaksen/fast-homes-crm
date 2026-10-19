@@ -258,6 +258,29 @@ describe('Charlotte notices', () => {
     expect(content.some((b: any) => b.type === 'document')).toBe(false);
   });
 
+  it('counts a billed reply with no JSON as a read that named nobody', async () => {
+    // Null would mean "try again next poll", and this reply was paid for.
+    const create = jest.fn().mockResolvedValue({ content: [{ type: 'text', text: 'I could not read this document.' }] });
+    const s = new SurplusNoticeService({ get: (k: string) => (k === 'ANTHROPIC_API_KEY' ? 'test' : undefined) } as any);
+    (s as any).anthropic = { messages: { create } };
+
+    const r = await s.readNoticeFile({ data: Buffer.from('%PDF-1.4 test'), contentType: 'application/pdf' }, 'test');
+
+    expect(r).not.toBeNull();
+    expect(r!.recipients).toEqual([]);
+    expect(r!.street).toBeNull();
+  });
+
+  it('returns null when the API call itself fails, so it is tried again', async () => {
+    const create = jest.fn().mockRejectedValue(new Error('overloaded'));
+    const s = new SurplusNoticeService({ get: (k: string) => (k === 'ANTHROPIC_API_KEY' ? 'test' : undefined) } as any);
+    (s as any).anthropic = { messages: { create } };
+
+    const r = await s.readNoticeFile({ data: Buffer.from('%PDF-1.4 test'), contentType: 'application/pdf' }, 'test');
+
+    expect(r).toBeNull();
+  });
+
   it('still sends a PDF as a document', async () => {
     const create = jest.fn().mockResolvedValue({ content: [{ type: 'text', text: '{"recipients":[]}' }] });
     const s = new SurplusNoticeService({ get: (k: string) => (k === 'ANTHROPIC_API_KEY' ? 'test' : undefined) } as any);

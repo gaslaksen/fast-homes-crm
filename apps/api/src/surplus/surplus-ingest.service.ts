@@ -259,6 +259,21 @@ function noticeFromSource(detail: SurplusCaseDetail): NoticeExtract | null {
   };
 }
 
+/**
+ * The notice that counts on this case. When a case carries several, the LAST
+ * is the operative one, since a re-noticed case supersedes its earlier letter.
+ */
+function latestNotice(verdict: ReturnType<typeof classifyCase>) {
+  const notices = verdict.ledger.filter((d) => d.kind === 'notice_surplus' && (d.url || d.docId));
+  return notices[notices.length - 1] ?? null;
+}
+
+/** What identifies a notice document across polls: its docket id, else its url. */
+function noticeDocKey(doc: { docId?: string | null; url?: string | null } | null): string | null {
+  if (!doc) return null;
+  return doc.docId != null ? String(doc.docId) : doc.url || null;
+}
+
 @Injectable()
 export class SurplusIngestService {
   private readonly logger = new Logger(SurplusIngestService.name);
@@ -545,6 +560,17 @@ export class SurplusIngestService {
     const workable = isWorkable(verdict.claimStatus);
     if (!workable) out.retired = true;
 
+    const uids = claimants.map((c) =>
+      surplusUidOf({
+        county: adapter.county,
+        caseNumber: detail.caseNumber,
+        parcelId: detail.parcelId,
+        claimant: c.name,
+      }),
+    );
+    const free = noticeIsFree(detail);
+    const noticeKey = noticeDocKey(latestNotice(verdict));
+
     // Read the notice only when it will actually be used: the case is worth
     // working AND at least one of its claimants still has no owner address.
     // A paid-out case does not need one, and a case already carrying one must
@@ -552,27 +578,18 @@ export class SurplusIngestService {
     // publishes the recipients as data costs nothing and is always taken.
     const needsNotice =
       workable &&
-      (noticeIsFree(detail) ||
+      (free ||
         // A re-read is asked for explicitly and always reads. Otherwise the
         // read is skipped once any claimant on the case has an address, since
         // the notice does not change between polls and the call is not free.
         reread ||
-        (await this.prisma.surplusDetail.count({
-          where: {
-            organizationId,
-            dedupeUid: {
-              in: claimants.map((c) =>
-                surplusUidOf({
-                  county: adapter.county,
-                  caseNumber: detail.caseNumber,
-                  parcelId: detail.parcelId,
-                  claimant: c.name,
-                }),
-              ),
-            },
-            ownerMailingStreet: { not: null },
-          },
-        })) === 0);
+        ((await this.prisma.surplusDetail.count({
+          where: { organizationId, dedupeUid: { in: uids }, ownerMailingStreet: { not: null } },
+        })) === 0 &&
+          // Nor when this exact notice was already read and named nobody on
+          // the case. Pioneer counties fetch every case every week, so that
+          // answer used to be bought again every Monday.
+          !(await this.noticeAlreadyRead(organizationId, uids, noticeKey))));
     const notice = needsNotice ? await this.readNotice(adapter, verdict, detail) : null;
 
     for (const claimant of claimants) {
@@ -709,7 +726,35 @@ export class SurplusIngestService {
       } else out.skipped += 1;
     }
 
+    // A vision read was paid for, so remember which notice it was on every row
+    // of the case, including the ones just created. A fetch or API failure
+    // comes back null and is not recorded, so it is tried again next poll.
+    if (notice && !free && noticeKey) {
+      await this.prisma.surplusDetail.updateMany({
+        where: { organizationId, dedupeUid: { in: uids } },
+        data: { noticeReadDocId: noticeKey },
+      });
+    }
+
     return out;
+  }
+
+  /**
+   * Whether this exact notice has already been read for every row the case
+   * holds. A claimant with no row yet (new on the docket, or deleted by hand)
+   * does not force another read: the manual re-read is there for that.
+   */
+  private async noticeAlreadyRead(
+    organizationId: string | null,
+    uids: string[],
+    noticeKey: string | null,
+  ): Promise<boolean> {
+    if (!noticeKey) return false;
+    const rows = await this.prisma.surplusDetail.findMany({
+      where: { organizationId, dedupeUid: { in: uids } },
+      select: { noticeReadDocId: true },
+    });
+    return rows.length > 0 && rows.every((r) => r.noticeReadDocId === noticeKey);
   }
 
   /**
@@ -913,8 +958,7 @@ export class SurplusIngestService {
     if (fromSource) return fromSource;
 
     if (!this.notice.available) return null;
-    const notices = verdict.ledger.filter((d) => d.kind === 'notice_surplus' && (d.url || d.docId));
-    const doc = notices[notices.length - 1];
+    const doc = latestNotice(verdict);
     if (!doc) return null;
 
     // A source whose files sit behind a viewer session hands over the bytes.

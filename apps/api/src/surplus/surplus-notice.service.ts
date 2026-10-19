@@ -224,7 +224,14 @@ export class SurplusNoticeService {
         .filter((b: any) => b.type === 'text')
         .map((b: any) => b.text)
         .join('\n');
-      return this.parse(text);
+      const extract = this.parse(text);
+      if (extract) return extract;
+      // The call was made and billed, so this counts as a read: an empty
+      // extract rather than null, or the weekly poll pays for the same
+      // unreadable reply every Monday. Null is kept for the failures that
+      // cost nothing and are worth trying again.
+      this.logger.warn(`Notice ${label} came back with no readable JSON`);
+      return emptyExtract();
     } catch (e: any) {
       this.logger.warn(`Notice extraction failed for ${label}: ${e.message}`);
       return null;
@@ -308,6 +315,25 @@ export function isClerkAddress(street?: string | null, city?: string | null): bo
   if (!s) return false;
   if (/\bW(EST)?\s+ADAMS\s+ST/.test(s) && (!c || c.includes('JACKSONVILLE'))) return true;
   return /^350\s+E(AST|\.)?\s+MARION\s+AVE/.test(s) && (!c || c.includes('PUNTA GORDA'));
+}
+
+/** A read that was paid for and named nobody. */
+function emptyExtract(): NoticeExtract {
+  return {
+    recipients: [],
+    recipient: null,
+    street: null,
+    city: null,
+    state: null,
+    zip: null,
+    country: null,
+    noticeDate: null,
+    saleDate: null,
+    surplusAtNotice: null,
+    certificateNumber: null,
+    taxDeedNumber: null,
+    realEstateNumber: null,
+  };
 }
 
 function isPdf(file: SurplusDocumentFile): boolean {
