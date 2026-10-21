@@ -828,10 +828,18 @@ You decide the right approach based on the conversation flow.${photoNudge}`.trim
       .catch((err: any) => this.logger.warn(`Could not stamp the claimant update on ${leadId}: ${err.message}`));
   }
 
-  private async markSurplusTapped(leadId: string, source?: string | null) {
+  private async markSurplusTapped(leadId: string, source?: string | null, alsoClaimsOn?: string | null) {
     if (source !== 'SURPLUS') return;
+    // A text from the claimant's own number reaches them on every claim they
+    // hold, not just the one it was filed on.
+    const siblings = alsoClaimsOn
+      ? await this.leadPhones.liveClaimIdsOnNumber(alsoClaimsOn).catch((): string[] => [])
+      : [];
     await this.prisma.surplusDetail
-      .updateMany({ where: { leadId, tappedAt: null }, data: { tappedAt: new Date() } })
+      .updateMany({
+        where: { leadId: { in: Array.from(new Set([leadId, ...siblings])) }, tappedAt: null },
+        data: { tappedAt: new Date() },
+      })
       .catch((err: any) => this.logger.warn(`Could not mark ${leadId} tapped: ${err.message}`));
   }
 
@@ -1060,7 +1068,7 @@ You decide the right approach based on the conversation flow.${photoNudge}`.trim
       },
     });
     await this.syncThreadSummary(lead.id, body, 'INBOUND');
-    await this.markSurplusTapped(lead.id, lead.source);
+    await this.markSurplusTapped(lead.id, lead.source, match.heirId ? null : from);
 
     // Push notify the assigned user (or the whole org) about the inbound reply
     this.pushService.notifyNewMessage(lead, body).catch((err) =>

@@ -70,6 +70,12 @@ export interface LeadPhoneMatch {
   heirRole?: string | null;
 }
 
+/**
+ * Lead.status for a lead nobody is working: a wholesaling lead closed out, or
+ * a surplus claim moved to Dead, which the surplus board mirrors onto the lead.
+ */
+const DEAD = 'DEAD';
+
 /** Prisma OR clauses matching a ten digit number in a detail table's slots. */
 function slotsMatching(ten: string, slots: number): Record<string, string>[] {
   const out: Record<string, string>[] = [];
@@ -396,28 +402,42 @@ export class LeadPhonesService {
    * be a surplus claimant and a seller, and without it the newest lead won
    * whichever line they used: a claimant texting the D.I.G. Deeper number could
    * land on a Quick Cash seller lead and get that company's handling. So the
-   * company whose number was dialled is searched first, and only when it has
-   * no lead on this number does the search widen to every lead, as before.
+   * company whose number was dialled is searched first. The D.I.G. Deeper
+   * line stops there: it only ever lands on a surplus claim, and a caller with
+   * no claim rings as unmatched. A Quick Cash line widens to every lead when
+   * it has no match, as before, since older surplus letters went out on it.
+   *
+   * Within each search a live lead beats a Dead one. One claimant can hold
+   * several claims on one number, and the newest used to win even when it had
+   * been marked Dead and hidden from the board, so the callback landed where
+   * nobody looks. A Dead lead is still matched when it is the only one.
    */
   async findLeadByPhone(phone: string, dialled?: string | null): Promise<LeadPhoneMatch | null> {
     const ten = numberKey(phone);
     if (ten.length !== 10) return null;
 
     if (numberKey(dialled || '').length === 10) {
-      const inBrand = await this.matchByPhone(ten, brandForNumber(dialled));
-      if (inBrand) return inBrand;
+      const brand = brandForNumber(dialled);
+      const inBrand = (await this.matchByPhone(ten, brand, true)) || (await this.matchByPhone(ten, brand, false));
+      if (inBrand || brand.key === DIG_DEEPER_BRAND.key) return inBrand;
     }
-    return this.matchByPhone(ten);
+    return (await this.matchByPhone(ten, undefined, true)) || this.matchByPhone(ten, undefined, false);
   }
 
-  /** findLeadByPhone's search, limited to one brand's leads when given one. */
-  private async matchByPhone(ten: string, brand?: Brand): Promise<LeadPhoneMatch | null> {
+  /**
+   * findLeadByPhone's search, limited to one brand's leads when given one, and
+   * to leads not marked Dead when `liveOnly`.
+   */
+  private async matchByPhone(ten: string, brand: Brand | undefined, liveOnly: boolean): Promise<LeadPhoneMatch | null> {
     // Mirrors brandForLeadSource: surplus leads are D.I.G. Deeper, the rest Quick Cash.
-    const inBrand = !brand
-      ? {}
-      : brand.key === DIG_DEEPER_BRAND.key
-        ? { source: 'SURPLUS' }
-        : { source: { not: 'SURPLUS' } };
+    const inBrand = {
+      ...(!brand
+        ? {}
+        : brand.key === DIG_DEEPER_BRAND.key
+          ? { source: 'SURPLUS' }
+          : { source: { not: 'SURPLUS' } }),
+      ...(liveOnly ? { status: { not: DEAD } } : {}),
+    };
 
     const primary = await this.prisma.lead.findFirst({
       where: {
@@ -437,7 +457,7 @@ export class LeadPhonesService {
     // edited by hand used to keep whatever was typed, and those leads rang in
     // as an unknown caller.
     const loose = (await this.primaryRowsByDigits(ten)).find(
-      (r) => !brand || brandForLeadSource(r.source).key === brand.key,
+      (r) => (!brand || brandForLeadSource(r.source).key === brand.key) && (!liveOnly || r.status !== DEAD),
     );
     if (loose) return { leadId: loose.id, isPrimary: true };
 
@@ -462,7 +482,10 @@ export class LeadPhonesService {
     // live on their own row, indexed, and the letter's whole purpose is this
     // call, so it has to land on the claim rather than in the unmatched pile.
     const heir = await this.prisma.surplusHeir.findFirst({
-      where: { OR: [{ phone1: ten }, { phone2: ten }, { phone3: ten }, { phone4: ten }] },
+      where: {
+        OR: [{ phone1: ten }, { phone2: ten }, { phone3: ten }, { phone4: ten }],
+        ...(liveOnly ? { surplusDetail: { lead: { status: { not: DEAD } } } } : {}),
+      },
       orderBy: { createdAt: 'desc' },
       select: { id: true, role: true, surplusDetail: { select: { leadId: true } } },
     });
@@ -535,6 +558,38 @@ export class LeadPhonesService {
   }
 
   /**
+   * Every live surplus claim this number belongs to as the claimant's own:
+   * the primary or a skip-traced slot, never an heir's or associate's row.
+   *
+   * One person often holds several claims, each its own lead with the same
+   * number on it. A callback or reply lands on one of them, but it reaches the
+   * claimant on all of them, so each one is marked as reached. Without this
+   * the others kept saying nobody had heard back.
+   */
+  async liveClaimIdsOnNumber(phone: string): Promise<string[]> {
+    const ten = numberKey(phone);
+    if (ten.length !== 10) return [];
+    const surplus = DETAIL_RELATIONS.find((r) => r.relation === 'surplusDetail')!;
+    const exact = await this.prisma.lead.findMany({
+      where: {
+        source: 'SURPLUS',
+        status: { not: DEAD },
+        OR: [
+          { sellerPhone: `+1${ten}` },
+          { sellerPhone: ten },
+          { sellerPhone: `1${ten}` },
+          { surplusDetail: { OR: slotsMatching(ten, surplus.slots) } },
+        ],
+      },
+      select: { id: true },
+    });
+    const loose = (await this.primaryRowsByDigits(ten))
+      .filter((r) => r.source === 'SURPLUS' && r.status !== DEAD)
+      .map((r) => r.id);
+    return Array.from(new Set([...exact.map((l) => l.id), ...loose]));
+  }
+
+  /**
    * Leads whose sellerPhone holds this number in any spelling, newest first.
    *
    * Lead creation and import store E.164, but older rows and some integrations
@@ -546,10 +601,15 @@ export class LeadPhonesService {
     return (await this.primaryRowsByDigits(ten)).map((r) => r.id);
   }
 
-  /** primaryIdsByDigits with each lead's source, so a match can stay in one brand. */
-  private async primaryRowsByDigits(ten: string): Promise<{ id: string; source: string | null }[]> {
-    return this.prisma.$queryRaw<{ id: string; source: string | null }[]>`
-      SELECT id, source FROM "leads"
+  /**
+   * primaryIdsByDigits with each lead's source and status, so a match can stay
+   * in one brand and pass over a Dead lead.
+   */
+  private async primaryRowsByDigits(
+    ten: string,
+  ): Promise<{ id: string; source: string | null; status?: string | null }[]> {
+    return this.prisma.$queryRaw<{ id: string; source: string | null; status: string | null }[]>`
+      SELECT id, source, status FROM "leads"
       WHERE right(regexp_replace("sellerPhone", '[^0-9]', '', 'g'), 10) = ${ten}
       ORDER BY "createdAt" DESC`;
   }

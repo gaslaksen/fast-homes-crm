@@ -253,7 +253,22 @@ describe('LeadPhonesService.findLeadByPhone with the dialled line', () => {
     expect(prisma.lead.findFirst.mock.calls[0][0].where.source).toBeUndefined();
   });
 
-  it("widens to every lead when the dialled company has none, so the text is not dropped", async () => {
+  it('widens a Quick Cash line to every lead when it has none, so the text is not dropped', async () => {
+    // Older surplus letters went out on Quick Cash numbers.
+    const { service, prisma } = buildService(foreclosureLead());
+    prisma.surplusHeir = { findFirst: jest.fn().mockResolvedValue(null) };
+    prisma.lead.findFirst.mockImplementation(async ({ where }: any) => {
+      if (where.source !== undefined) return null;
+      return where.OR?.some((c: any) => 'sellerPhone' in c) ? { id: 'lead-claimant' } : null;
+    });
+
+    await expect(service.findLeadByPhone('+17046082100', QUICK_CASH_LINE)).resolves.toEqual({
+      leadId: 'lead-claimant',
+      isPrimary: true,
+    });
+  });
+
+  it('never lands a call to the D.I.G. Deeper line on a Quick Cash lead', async () => {
     const { service, prisma } = buildService(foreclosureLead());
     prisma.surplusHeir = { findFirst: jest.fn().mockResolvedValue(null) };
     prisma.lead.findFirst.mockImplementation(async ({ where }: any) => {
@@ -261,8 +276,52 @@ describe('LeadPhonesService.findLeadByPhone with the dialled line', () => {
       return where.OR?.some((c: any) => 'sellerPhone' in c) ? { id: 'lead-seller' } : null;
     });
 
-    await expect(service.findLeadByPhone('+17046082100', DIG_DEEPER_LINE)).resolves.toEqual({
-      leadId: 'lead-seller',
+    await expect(service.findLeadByPhone('+17046082100', DIG_DEEPER_LINE)).resolves.toBeNull();
+    for (const [args] of prisma.lead.findFirst.mock.calls) expect(args.where.source).toBe('SURPLUS');
+  });
+
+  it('lands on a live claim before a newer one marked Dead', async () => {
+    // Jean Fleurinor, 2026-10-21: three claims on one number, the newest
+    // marked Dead and hidden from the board, and his callback landed there.
+    const { service, prisma } = buildService(foreclosureLead());
+    prisma.lead.findFirst.mockImplementation(async ({ where }: any) => {
+      if (!where.OR?.some((c: any) => 'sellerPhone' in c)) return null;
+      return where.status ? { id: 'claim-live' } : { id: 'claim-dead' };
+    });
+
+    await expect(service.findLeadByPhone('+19548054423', DIG_DEEPER_LINE)).resolves.toEqual({
+      leadId: 'claim-live',
+      isPrimary: true,
+    });
+    expect(prisma.lead.findFirst.mock.calls[0][0].where).toMatchObject({
+      source: 'SURPLUS',
+      status: { not: 'DEAD' },
+    });
+  });
+
+  it('still lands on a Dead claim when it is the only one on the number', async () => {
+    const { service, prisma } = buildService(foreclosureLead());
+    prisma.surplusHeir = { findFirst: jest.fn().mockResolvedValue(null) };
+    prisma.lead.findFirst.mockImplementation(async ({ where }: any) => {
+      if (where.status || !where.OR?.some((c: any) => 'sellerPhone' in c)) return null;
+      return { id: 'claim-dead' };
+    });
+
+    await expect(service.findLeadByPhone('+19548054423', DIG_DEEPER_LINE)).resolves.toEqual({
+      leadId: 'claim-dead',
+      isPrimary: true,
+    });
+  });
+
+  it('passes over a Dead lead in the formatted-number scan on the live pass', async () => {
+    const { service, prisma } = buildService(foreclosureLead());
+    prisma.$queryRaw.mockResolvedValue([
+      { id: 'claim-dead', source: 'SURPLUS', status: 'DEAD' },
+      { id: 'claim-live', source: 'SURPLUS', status: 'NEW' },
+    ]);
+
+    await expect(service.findLeadByPhone('+17046812994', DIG_DEEPER_LINE)).resolves.toEqual({
+      leadId: 'claim-live',
       isPrimary: true,
     });
   });
@@ -286,8 +345,9 @@ describe('LeadPhonesService.findLeadByPhone with the dialled line', () => {
     prisma.surplusHeir = { findFirst: heirLookup };
 
     await expect(service.findLeadByPhone('+17046082100', QUICK_CASH_LINE)).resolves.toBeNull();
-    // Called once, by the widened search, never by the Quick Cash pass.
-    expect(heirLookup).toHaveBeenCalledTimes(1);
+    // Called only by the widened search (its live pass, then its Dead pass),
+    // never by the Quick Cash passes.
+    expect(heirLookup).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -302,6 +362,35 @@ describe('LeadPhonesService.findLeadIdsByPhone', () => {
       'lead-exact',
       'lead-formatted',
     ]);
+  });
+});
+
+describe('LeadPhonesService.liveClaimIdsOnNumber', () => {
+  it('returns every live surplus claim on the number, in any spelling', async () => {
+    const { service, prisma } = buildService(foreclosureLead());
+    prisma.lead.findMany.mockResolvedValueOnce([{ id: 'claim-1319' }, { id: 'claim-1321' }]);
+    prisma.$queryRaw.mockResolvedValueOnce([
+      { id: 'claim-1319', source: 'SURPLUS', status: 'NEW' },
+      { id: 'claim-dead', source: 'SURPLUS', status: 'DEAD' },
+      { id: 'seller-lead', source: 'PROPERTY_LEADS', status: 'NEW' },
+      { id: 'claim-formatted', source: 'SURPLUS', status: 'NEW' },
+    ]);
+
+    await expect(service.liveClaimIdsOnNumber('+19548054423')).resolves.toEqual([
+      'claim-1319',
+      'claim-1321',
+      'claim-formatted',
+    ]);
+    expect(prisma.lead.findMany.mock.calls[0][0].where).toMatchObject({
+      source: 'SURPLUS',
+      status: { not: 'DEAD' },
+    });
+  });
+
+  it('ignores anything that is not a 10 digit number', async () => {
+    const { service, prisma } = buildService(foreclosureLead());
+    await expect(service.liveClaimIdsOnNumber('12345')).resolves.toEqual([]);
+    expect(prisma.lead.findMany).not.toHaveBeenCalled();
   });
 });
 

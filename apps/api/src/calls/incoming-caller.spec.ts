@@ -106,3 +106,54 @@ describe('TwilioVoiceService inbound caller name', () => {
     expect(twiml).toContain('<Client>');
   });
 });
+
+describe('TwilioVoiceService inbound claimant with several claims', () => {
+  function claimantHarness(match: { leadId: string; isPrimary: boolean; heirId?: string; heirRole?: string }) {
+    const tapped = jest.fn(async () => ({ count: 1 }));
+    const prisma = {
+      callLog: { upsert: jest.fn(async () => ({})) },
+      user: { findMany: async () => [{ id: 'agent-1' }] },
+      lead: {
+        findUnique: async () => ({ id: match.leadId, sellerFirstName: 'Jean', sellerLastName: 'Fleurinor', source: 'SURPLUS' }),
+      },
+      surplusDetail: { updateMany: tapped },
+      surplusHeir: { update: jest.fn(async () => ({})), updateMany: jest.fn(async () => ({})) },
+      $queryRaw: jest.fn(async () => []),
+    } as any;
+    const liveClaimIdsOnNumber = jest.fn(async () => ['claim-1319', 'claim-1321']);
+    const leadPhones = { findLeadByPhone: async () => match, liveClaimIdsOnNumber } as any;
+    const svc = new TwilioVoiceService(
+      { get: () => undefined } as any,
+      prisma,
+      null as any,
+      { resolve: async () => '', defaultFor: async () => '' } as any,
+      leadPhones,
+      { record: async () => {} } as any,
+    );
+    jest.spyOn((svc as any).logger, 'log').mockImplementation(() => undefined);
+    return { svc, tapped, liveClaimIdsOnNumber };
+  }
+
+  it('marks every live claim on the number as reached, not just the one the call is filed on', async () => {
+    const { svc, tapped } = claimantHarness({ leadId: 'claim-1319', isPrimary: true });
+    await svc.generateIncomingTwiml({ From: '+19548054423', To: '+19045959620', CallSid: 'CAjean' });
+
+    expect((tapped.mock.calls[0] as any)[0].where).toEqual({
+      leadId: { in: ['claim-1319', 'claim-1321'] },
+      tappedAt: null,
+    });
+  });
+
+  it("marks only the matched claim when the caller is an heir, not the claimant", async () => {
+    const { svc, tapped, liveClaimIdsOnNumber } = claimantHarness({
+      leadId: 'claim-1319',
+      isPrimary: false,
+      heirId: 'heir-1',
+      heirRole: 'heir',
+    });
+    await svc.generateIncomingTwiml({ From: '+19548054423', To: '+19045959620', CallSid: 'CAheir' });
+
+    expect(liveClaimIdsOnNumber).not.toHaveBeenCalled();
+    expect((tapped.mock.calls[0] as any)[0].where.leadId).toEqual({ in: ['claim-1319'] });
+  });
+});
