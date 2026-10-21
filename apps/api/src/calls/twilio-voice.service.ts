@@ -735,8 +735,14 @@ export class TwilioVoiceService {
           .catch(() => undefined);
       }
       if (!heirId || heirRole === 'heir') {
+        // The claimant's own number reaches them on every claim they hold, not
+        // just the one the call was filed on.
+        const siblings = heirId ? [] : await this.leadPhones.liveClaimIdsOnNumber(from).catch((): string[] => []);
         await this.prisma.surplusDetail
-          .updateMany({ where: { leadId: lead.id, tappedAt: null }, data: { tappedAt: new Date() } })
+          .updateMany({
+            where: { leadId: { in: Array.from(new Set([lead.id, ...siblings])) }, tappedAt: null },
+            data: { tappedAt: new Date() },
+          })
           .catch(() => undefined);
       }
     }

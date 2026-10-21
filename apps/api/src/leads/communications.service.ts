@@ -39,14 +39,14 @@ export class CommunicationsService {
   async getCommunications(leadId: string) {
     const lead = await this.prisma.lead.findUnique({
       where: { id: leadId },
-      select: { id: true, sellerFirstName: true, sellerLastName: true, sellerPhone: true },
+      select: { id: true, sellerFirstName: true, sellerLastName: true, sellerPhone: true, source: true },
     });
     if (!lead) throw new Error('Lead not found');
 
     const sellerName =
       [lead.sellerFirstName, lead.sellerLastName].filter(Boolean).join(' ').trim() || 'Seller';
 
-    const [messages, emails, callLogs, activities, notes, leadPhones] = await Promise.all([
+    const [messages, emails, ownCallLogs, activities, notes, leadPhones] = await Promise.all([
       this.prisma.message.findMany({ where: { leadId }, orderBy: { createdAt: 'asc' } }),
       this.prisma.email.findMany({ where: { leadId }, orderBy: { sentAt: 'asc' } }),
       this.prisma.callLog.findMany({ where: { leadId }, orderBy: { createdAt: 'asc' } }),
@@ -56,6 +56,27 @@ export class CommunicationsService {
       // card can say which one was dialled. A failure here only costs labels.
       this.leadPhones.listForLead(leadId).catch((): LeadPhone[] => []),
     ]);
+
+    // A claimant with several claims rings in on one number, and the call is
+    // filed on one of those claims. It reached them on all of them, so each
+    // claim shows it rather than only the one that happened to match.
+    const siblingCalls =
+      lead.source === 'SURPLUS' && leadPhones.length
+        ? await this.prisma.callLog
+            .findMany({
+              where: {
+                type: 'twilio_inbound',
+                leadId: { not: leadId },
+                fromNumber: { in: leadPhones.map((p) => p.number) },
+                lead: { source: 'SURPLUS' },
+              },
+              orderBy: { createdAt: 'asc' },
+            })
+            .catch((): any[] => [])
+        : [];
+    const callLogs = [...ownCallLogs, ...siblingCalls].sort(
+      (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+    );
 
     // Resolve every referenced user in one query for actor avatars/names.
     const userIds = new Set<string>();
