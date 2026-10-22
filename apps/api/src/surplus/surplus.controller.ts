@@ -13,6 +13,7 @@ import { SurplusSkiptraceService } from './surplus-skiptrace.service';
 import { SurplusEndatoService } from './surplus-endato.service';
 import { SurplusObituaryService } from './surplus-obituary.service';
 import { SurplusSocialService } from './surplus-social.service';
+import { SurplusIdiService } from './surplus-idi.service';
 import { SurplusTemplatesService } from './surplus-templates.service';
 import { SurplusCredibilityService, CredibilityChannel } from './surplus-credibility.service';
 import { SurplusCountiesService, ACCEPTED_METHOD_LABEL } from './surplus-counties.service';
@@ -82,6 +83,7 @@ export class SurplusController {
     private endato: SurplusEndatoService,
     private obituary: SurplusObituaryService,
     private social: SurplusSocialService,
+    private idi: SurplusIdiService,
   ) {}
 
   private decodeToken(authHeader?: string): { userId?: string; organizationId?: string } {
@@ -937,6 +939,60 @@ export class SurplusController {
       limit,
       includeTraced: body?.includeTraced === true,
     });
+  }
+
+  /**
+   * IDI batch skip trace. Export builds the upload file in IDI's Batch
+   * Template from the chosen claimants; the results come back over SFTP and
+   * are previewed, then applied. Nothing is written by the preview.
+   */
+  @Post('idi/export')
+  async idiExport(@Body() body: any, @Headers('authorization') authHeader?: string) {
+    const { organizationId } = this.decodeToken(authHeader);
+    const leadIds = Array.isArray(body?.leadIds) ? body.leadIds.filter((x: any) => typeof x === 'string') : [];
+    if (!leadIds.length) throw new BadRequestException('Select at least one claimant to export.');
+    return this.idi.exportBatch({ organizationId: organizationId || null, leadIds });
+  }
+
+  @Post('idi/import/parse')
+  @UseInterceptors(FileInterceptor('file', IMPORT_UPLOAD_OPTIONS))
+  async idiImportParse(@UploadedFile() file: Express.Multer.File, @Headers('authorization') authHeader?: string) {
+    if (!file) throw new BadRequestException('No file uploaded');
+    const { organizationId } = this.decodeToken(authHeader);
+    try {
+      return await this.idi.previewImport(file.buffer, { organizationId: organizationId || null, fileName: file.originalname });
+    } catch (err: any) {
+      throw new BadRequestException(err?.message || 'That file could not be read.');
+    }
+  }
+
+  @Post('idi/import')
+  @UseInterceptors(FileInterceptor('file', IMPORT_UPLOAD_OPTIONS))
+  async idiImport(
+    @UploadedFile() file: Express.Multer.File,
+    @Body() body: any,
+    @Headers('authorization') authHeader?: string,
+  ) {
+    if (!file) throw new BadRequestException('No file uploaded');
+    const { organizationId, userId } = this.decodeToken(authHeader);
+    let assignments: Record<string, string | null> | undefined;
+    if (body?.assignments) {
+      try {
+        assignments = typeof body.assignments === 'string' ? JSON.parse(body.assignments) : body.assignments;
+      } catch {
+        throw new BadRequestException('assignments must be JSON: { "rowIndex": "leadId" | null }');
+      }
+    }
+    try {
+      return await this.idi.applyImport(file.buffer, {
+        organizationId: organizationId || null,
+        fileName: file.originalname,
+        assignments,
+        userId: userId || null,
+      });
+    } catch (err: any) {
+      throw new BadRequestException(err?.message || 'That file could not be imported.');
+    }
   }
 
   @Post('import/parse')

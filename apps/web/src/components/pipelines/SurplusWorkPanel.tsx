@@ -146,7 +146,7 @@ export interface SurplusPanelLead {
   isDeceased: boolean;
   /** YYYY-MM-DD, when a people search dated the death. */
   dateOfDeath?: string | null;
-  /** 'endato' | 'batchdata' | 'obituary' when a vendor record or an obituary set the flag. */
+  /** 'endato' | 'batchdata' | 'idi' | 'obituary' when a vendor record or an obituary set the flag. */
   deathSource?: string | null;
   /** 'possible' asks for a check on the card before anybody calls. */
   obituaryMatch?: string | null;
@@ -5321,7 +5321,9 @@ function deathLabel(lead: { dateOfDeath?: string | null; deathSource?: string | 
         ? 'BatchData'
         : lead.deathSource === 'obituary'
           ? 'obituary'
-          : null;
+          : lead.deathSource === 'idi'
+            ? 'IDI'
+            : null;
   if (!vendor) return 'deceased';
   const d = lead.dateOfDeath ? new Date(`${lead.dateOfDeath}T12:00:00Z`) : null;
   const when = d && !isNaN(d.getTime())
