@@ -418,6 +418,25 @@ export const surplusAPI = {
   deleteHeir: (heirId: string) => api.post(`/surplus/heirs/${heirId}/delete`),
   skipTraceHeirs: (body: { heirIds?: string[]; limit?: number; includeTraced?: boolean }) =>
     api.post('/surplus/heirs/skip-trace', body),
+  /** IDI batch skip trace: the upload file for the chosen claimants. */
+  idiExport: (leadIds: string[]) => api.post('/surplus/idi/export', { leadIds }),
+  /** Read an IDI results file and match each row to a claimant. Writes nothing. */
+  idiImportParse: (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.post('/surplus/idi/import/parse', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+  /** Apply an IDI results file. assignments: row index to lead id, or null to leave the row out. */
+  idiImportExecute: (file: File, assignments: Record<string, string | null>) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('assignments', JSON.stringify(assignments));
+    return api.post('/surplus/idi/import', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
   importParse: (file: File) => {
     const formData = new FormData();
     formData.append('file', file);

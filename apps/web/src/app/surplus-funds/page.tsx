@@ -5,6 +5,7 @@ import AppShell from '@/components/AppShell';
 import PipelineBoard, { inBoardOrder, type PipelineView } from '@/components/pipelines/PipelineBoard';
 import AddLeadSheet, { SURPLUS_FIELDS } from '@/components/pipelines/AddLeadSheet';
 import SurplusWorkPanel from '@/components/pipelines/SurplusWorkPanel';
+import SurplusIdiImport from '@/components/pipelines/SurplusIdiImport';
 import SurplusPropertyCard, { STATUS_ACCENT } from '@/components/pipelines/SurplusPropertyCard';
 import type { PipelineColumn, PipelineStage } from '@/components/pipelines/PipelineBoard';
 import { authAPI, surplusAPI } from '@/lib/api';
@@ -677,6 +678,9 @@ export default function SurplusFundsPage() {
   const [leadCount, setLeadCount] = useState(0);
   const [currentUser, setCurrentUser] = useState<any>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const idiFileRef = useRef<HTMLInputElement>(null);
+  /** An IDI results file being previewed before it is applied. */
+  const [idiFile, setIdiFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [polling, setPolling] = useState(false);
   /** The last few county pulls, for the feed-health line under the title. */
@@ -1037,6 +1041,44 @@ export default function SurplusFundsPage() {
   };
 
   /**
+   * The IDI batch upload file for every claimant on the selected properties,
+   * in IDI's Batch Template. Upload it to the profile folder over SFTP and
+   * bring the file from its out folder back through Import IDI results.
+   */
+  const exportIdi = async () => {
+    if (!chosen.length || busy) return;
+    setBusy(true);
+    try {
+      const r = (await surplusAPI.idiExport(chosen)).data;
+      if (r.included) {
+        const blob = new Blob([r.csv], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = r.fileName;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+      const left = r.skipped?.length || 0;
+      say(
+        (r.included
+          ? `${r.included} claimant${r.included === 1 ? '' : 's'} in ${r.fileName}. Upload it to the IDI profile folder, beside the out folder.`
+          : 'Nobody selected can be sent to IDI.') +
+          (left
+            ? ` Left out ${left}: ${r.skipped
+                .slice(0, 3)
+                .map((x: any) => `${x.claimant} (${x.reason.replace(/\.$/, '')})`)
+                .join(', ')}${left > 3 ? ` and ${left - 3} more` : ''}.`
+            : ''),
+      );
+    } catch (err: any) {
+      say(err?.response?.data?.message || 'The IDI file could not be built.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /**
    * Move every claimant on the selected properties to one stage.
    *
    * Dead is the common case: a board is cleared by retiring what has been
@@ -1193,6 +1235,17 @@ export default function SurplusFundsPage() {
             </div>
             <div style={{ display: 'flex', gap: 9, flexWrap: 'wrap', alignItems: 'center' }}>
               <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls" style={{ display: 'none' }} onChange={onFile} />
+              <input
+                ref={idiFileRef}
+                type="file"
+                accept=".csv,.xlsx,.xls"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  e.target.value = '';
+                  if (f) setIdiFile(f);
+                }}
+              />
               {/* Everything a caller does not do on a normal day sits behind
                   More: the county pull, the import, the references. One
                   primary button remains. */}
@@ -1222,6 +1275,15 @@ export default function SurplusFundsPage() {
                   </button>
                   <button type="button" className="dc-menu-item" onClick={() => fileRef.current?.click()} disabled={busy}>
                     {busy ? 'Importing...' : 'Import county list'}
+                  </button>
+                  <button
+                    type="button"
+                    className="dc-menu-item"
+                    onClick={() => idiFileRef.current?.click()}
+                    disabled={busy}
+                    title="The file from the out folder of an IDI batch. Each row is matched to a claimant and shown before anything is written."
+                  >
+                    Import IDI results
                   </button>
                   <button
                     type="button"
@@ -1479,6 +1541,19 @@ export default function SurplusFundsPage() {
             </div>
           )}
 
+          {idiFile && (
+            <SurplusIdiImport
+              file={idiFile}
+              onClose={() => setIdiFile(null)}
+              onDone={(summary) => {
+                setIdiFile(null);
+                say(summary);
+                fetchRows();
+                fetchStats();
+              }}
+            />
+          )}
+
           {adding && (
             <AddLeadSheet
               title="New surplus lead"
@@ -1591,6 +1666,14 @@ export default function SurplusFundsPage() {
               <>
                 {chosenKeys.length > 0 && (
                   <>
+                    <button
+                      className="dc-btn sm"
+                      disabled={busy}
+                      onClick={exportIdi}
+                      title="Download the selected claimants in IDI's Batch Template, at the clerk's notice address when we have one"
+                    >
+                      Export for IDI
+                    </button>
                     <button
                       className="dc-btn sm"
                       disabled={busy}
