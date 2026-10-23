@@ -90,6 +90,7 @@ import { SurplusLeadInput, SurplusListFilters, SurplusPhoneInput } from './surpl
 import { SurplusCountiesService, CountyRow } from './surplus-counties.service';
 import { SurplusDocumentsService } from './surplus-documents.service';
 import { foreignCountry } from './surplus-address.util';
+import { NO_CONTACTS, claimantContacts, contactStampPatch } from './surplus-contact-stamp.util';
 import { SurplusTemplatesService } from './surplus-templates.service';
 
 /** What toRow needs beyond the lead: per-request lookups fetched once. */
@@ -399,6 +400,8 @@ export class SurplusService {
             phone3Dnc: phones[2]?.dnc || null,
             phone4Dnc: phones[3]?.dnc || null,
             email2: emails[1] || null,
+            // An import that arrives with numbers is new contact info as of now.
+            ...contactStampPatch(NO_CONTACTS, { phones: phones.map((p) => p.number), emails }),
             dncScrubbedAt: isoToDate(cellText(input.dncScrubbedAt)),
             contactMismatch: !!input.contactMismatch,
             mismatchedName: input.mismatchedName || null,
@@ -680,6 +683,15 @@ export class SurplusService {
       const emails = (patch.emails || []).map((e: any) => cellText(e)).filter(Boolean);
       leadPatch.sellerEmail = emails[0] || null;
       detailPatch.email2 = emails[1] || null;
+    }
+    if (patch.phones !== undefined || patch.emails !== undefined) {
+      Object.assign(
+        detailPatch,
+        contactStampPatch(
+          claimantContacts(lead, d),
+          claimantContacts({ ...lead, ...leadPatch }, { ...d, ...detailPatch }),
+        ),
+      );
     }
     // A current address somebody confirmed by hand. It becomes the address
     // letters default to and the skip trace targets, and the 'manual' source
@@ -2400,6 +2412,11 @@ export class SurplusService {
       totalTouches,
       touches: lead.touchCount || 0,
       lastTouchedAt: lead.lastTouchedAt,
+      // When the claimant last gained a phone or email, and the newest such
+      // date across the claimant and everyone filed under them. The board
+      // sorts on the second, so a relative's new number surfaces the file.
+      contactInfoUpdatedAt: d.contactInfoUpdatedAt || null,
+      contactUpdatedAt: latestDate([d.contactInfoUpdatedAt, ...heirRows.map((h: any) => h.contactInfoUpdatedAt)]),
 
       // Tapped / Not Tapped, and which of the four channels have been tried.
       // Recap scheduled is tapped with a dated follow-up on the books.
@@ -2803,6 +2820,22 @@ export class SurplusService {
  * group. Per-person facts (phones, mismatch flags, touches) stay on each
  * claimant and are worked in the panel.
  */
+/**
+ * The most recent of some dates, or null. Compares instants: a bare sort()
+ * on Date objects orders them by their string form, which starts with the
+ * weekday, so "Thu" beat "Fri" whatever the dates were.
+ */
+export function latestDate(values: (Date | string | null | undefined)[]): Date | null {
+  let best: Date | null = null;
+  for (const v of values) {
+    if (!v) continue;
+    const at = v instanceof Date ? v : new Date(v);
+    if (Number.isNaN(at.getTime())) continue;
+    if (!best || at.getTime() > best.getTime()) best = at;
+  }
+  return best;
+}
+
 export function groupByProperty(rows: any[]): any[] {
   const norm = (v: any) => String(v || '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
   const byKey = new Map<string, any[]>();
@@ -2885,19 +2918,12 @@ export function groupByProperty(rows: any[]): any[] {
       letterDue: ranked.some((m: any) => m.letterDue && m.workScore > 0),
       escalateMail: ranked.some((m: any) => m.escalateMail),
       claimantUpdateOverdue: ranked.some((m: any) => m.claimantUpdate?.overdue),
-      letterMailedAt: ranked
-        .map((m: any) => m.letterMailedAt)
-        .filter(Boolean)
-        .sort()
-        .pop() || null,
+      letterMailedAt: latestDate(ranked.map((m: any) => m.letterMailedAt)),
       // Summed and maxed across the claimants, since the property is worked as
       // one thing even though each claimant is contacted separately.
       touches: ranked.reduce((n: number, m: any) => n + (m.touches || 0), 0),
-      lastTouchedAt: ranked
-        .map((m: any) => m.lastTouchedAt)
-        .filter(Boolean)
-        .sort()
-        .pop() || null,
+      lastTouchedAt: latestDate(ranked.map((m: any) => m.lastTouchedAt)),
+      contactUpdatedAt: latestDate(ranked.map((m: any) => m.contactUpdatedAt)),
       // Contact state rolled up: the property is tapped if anyone on it has
       // replied, and a channel counts as tried if it was tried on anyone.
       contactStatus: ranked

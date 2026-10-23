@@ -420,6 +420,30 @@ const SURPLUS_COLUMNS: PipelineColumn<any>[] = [
       );
     },
   },
+  {
+    // When anyone on the file, the claimant or a person filed under them,
+    // last gained a phone or email. Only an addition moves it, so the column
+    // answers "who has new numbers" and sorts the newest first. Green when
+    // the new info landed after the last touch: nobody has used it yet.
+    key: 'contactUpdated',
+    label: 'Contact updated',
+    width: '120px',
+    nowrap: true,
+    sortValue: (r) => (r.contactUpdatedAt ? new Date(r.contactUpdatedAt).getTime() : 0),
+    render: (r) => {
+      if (!r.contactUpdatedAt) return <span style={{ fontSize: 12, color: 'var(--faint)' }}>never</span>;
+      const fresh =
+        !r.lastTouchedAt || new Date(r.contactUpdatedAt).getTime() > new Date(r.lastTouchedAt).getTime();
+      return (
+        <div style={{ fontSize: 12 }}>
+          <span>{agoLabel(r.contactUpdatedAt)}</span>
+          {fresh && (
+            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--mint)' }}>New since last touch</div>
+          )}
+        </div>
+      );
+    },
+  },
 ];
 
 /** Kanban columns. Dead is deliberately last and unhighlighted. */

@@ -2,6 +2,7 @@ import { Injectable, Logger, BadRequestException, NotFoundException } from '@nes
 import { PrismaService } from '../prisma/prisma.service';
 import { numberKey, toE164, prettyNumber } from './phone-numbers.service';
 import { Brand, DIG_DEEPER_BRAND, brandForLeadSource, brandForNumber } from '../common/company.constants';
+import { claimantContacts, contactStampPatch } from '../surplus/surplus-contact-stamp.util';
 
 /**
  * One number we hold for a seller. This is the other side of PhoneNumbersService:
@@ -640,6 +641,28 @@ export class LeadPhonesService {
   }
 
   /**
+   * The new-contact stamp for a surplus claimant, or nothing for any other
+   * pipeline, since only surplus carries the column. Compares what is on file
+   * with what is about to be written; see surplus-contact-stamp.util.ts.
+   */
+  private async claimantStamp(
+    leadId: string,
+    detail: { spec: DetailRelation; row: any } | null,
+    leadAfter: { sellerPhone?: string | null; sellerEmail?: string | null },
+    detailAfter: Record<string, any>,
+  ): Promise<{ contactInfoUpdatedAt?: Date }> {
+    if (detail?.spec.model !== 'surplusDetail') return {};
+    const lead = await this.prisma.lead.findUnique({
+      where: { id: leadId },
+      select: { sellerPhone: true, sellerEmail: true },
+    });
+    return contactStampPatch(
+      claimantContacts(lead, detail.row),
+      claimantContacts({ ...lead, ...leadAfter }, { ...detail.row, ...detailAfter }),
+    );
+  }
+
+  /**
    * Replace the numbers on file, primary first.
    *
    * The whole list is written at once rather than one slot at a time, because
@@ -686,6 +709,7 @@ export class LeadPhonesService {
         detailPatch[`phone${i}`] = clean[i - 1]?.number ?? null;
         detailPatch[`phone${i}Type`] = clean[i - 1]?.type ?? null;
       }
+      Object.assign(detailPatch, await this.claimantStamp(leadId, detail, leadPatch, detailPatch));
       writes.push(
         (this.prisma as any)[detail.spec.model].update({
           where: { id: detail.id },
@@ -754,10 +778,14 @@ export class LeadPhonesService {
       }),
     ];
     if (detail && detail.spec.emails > 1) {
+      const detailPatch = { email2: clean[1] || null };
       writes.push(
         (this.prisma as any)[detail.spec.model].update({
           where: { id: detail.id },
-          data: { email2: clean[1] || null },
+          data: {
+            ...detailPatch,
+            ...(await this.claimantStamp(leadId, detail, { sellerEmail: clean[0] || null }, detailPatch)),
+          },
         }),
       );
     }

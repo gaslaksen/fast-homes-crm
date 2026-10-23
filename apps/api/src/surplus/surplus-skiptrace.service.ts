@@ -35,6 +35,14 @@ import { PrismaService } from '../prisma/prisma.service';
 import { DncRegistry, LeadSource, SurplusClaimantType, SurplusTraceChannel } from '@fast-homes/shared';
 import { normalizePhoneDigits } from '../foreclosures/foreclosure-scoring.util';
 import {
+  ContactSet,
+  NO_CONTACTS,
+  claimantContacts,
+  contactStampPatch,
+  heirContacts,
+} from './surplus-contact-stamp.util';
+
+import {
   addressCaseCounts,
   addressKeyOf,
   splitClaimantName,
@@ -60,6 +68,9 @@ import {
   endatoDate,
   EndatoRelative,
 } from './surplus-endato.service';
+
+/** An heir row's contact slots, read for the new-contact stamp. */
+type ContactSlots = Partial<Record<'phone1' | 'phone2' | 'phone3' | 'phone4' | 'email1' | 'email2', string | null>>;
 
 /**
  * V3, not V1, and the difference is not cosmetic.
@@ -183,6 +194,11 @@ export interface Candidate {
    * sold.
    */
   matchOn?: 'property' | 'self';
+  /**
+   * What the claimant held when the run loaded them, so a trace can tell new
+   * contact info from the same numbers handed back.
+   */
+  contacts?: ContactSet;
   /** The parcel that generated the surplus, always, whatever we submit. */
   propertyStreet: string | null;
   propertyCity: string | null;
@@ -1409,7 +1425,8 @@ export class SurplusSkiptraceService {
    * address history, so it confirms the family rather than the person.
    */
   private async applyToHeir(
-    heir: { id: string; surplusDetailId: string; name: string; street: string | null; city: string | null },
+    // The whole row in practice; the contact slots are read for the stamp.
+    heir: { id: string; surplusDetailId: string; name: string; street: string | null; city: string | null } & ContactSlots,
     persons: TracedPerson[],
     result: SurplusTraceResult,
   ): Promise<void> {
@@ -1468,6 +1485,10 @@ export class SurplusSkiptraceService {
     await this.prisma.surplusHeir.update({
       where: { id: heir.id },
       data: {
+        ...contactStampPatch(heirContacts(heir), {
+          phones: ph.slice(0, 4).map((p) => p.num),
+          emails: best.person.emails.slice(0, 2),
+        }),
         phone1: ph[0]?.num || null,
         phone2: ph[1]?.num || null,
         phone3: ph[2]?.num || null,
@@ -1840,16 +1861,31 @@ export class SurplusSkiptraceService {
       }
 
       const ph = best.person.phones;
+      const leadPatch = {
+        ...(ph[0] ? { sellerPhone: `+1${ph[0].num}` } : {}),
+        ...(best.person.emails[0] ? { sellerEmail: best.person.emails[0] } : {}),
+      };
+      const slots = {
+        phone2: ph[1]?.num || null,
+        phone3: ph[2]?.num || null,
+        phone4: ph[3]?.num || null,
+        email2: best.person.emails[1] || null,
+      };
+      // Compared with what the claimant held when the run loaded them, so a
+      // re-trace that hands back the same numbers is not new contact info.
+      const before = c.contacts || NO_CONTACTS;
+      const stamp = contactStampPatch(before, {
+        phones: [leadPatch.sellerPhone ?? before.phones[0], slots.phone2, slots.phone3, slots.phone4],
+        emails: [leadPatch.sellerEmail ?? before.emails[0], slots.email2],
+      });
       await this.prisma.lead.update({
         where: { id: c.leadId },
-        data: {
-          ...(ph[0] ? { sellerPhone: `+1${ph[0].num}` } : {}),
-          ...(best.person.emails[0] ? { sellerEmail: best.person.emails[0] } : {}),
-        },
+        data: leadPatch,
       });
       await this.prisma.surplusDetail.update({
         where: { id: c.detailId },
         data: {
+          ...stamp,
           phone2: ph[1]?.num || null,
           phone3: ph[2]?.num || null,
           phone4: ph[3]?.num || null,
@@ -2151,6 +2187,7 @@ export class SurplusSkiptraceService {
       where: { id: h.id },
       data: {
         ...(cur && !h.street ? { street: cur.line || cur.street, city: cur.city, state: cur.state, zip: cur.zip } : {}),
+        ...contactStampPatch(heirContacts(h), { phones: ph.map((p) => p.num), emails }),
         phone1: ph[0]?.num || null,
         phone2: ph[1]?.num || null,
         phone3: ph[2]?.num || null,
@@ -2458,6 +2495,7 @@ export function candidateOf(l: any): Candidate {
     mailingState: d.ownerMailingState,
     mailingZip: d.ownerMailingZip,
     nameSearchedAt: d.nameSearchedAt,
+    contacts: claimantContacts(l, d),
   };
 }
 

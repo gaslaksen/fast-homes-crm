@@ -1,6 +1,11 @@
 import { Injectable, Inject, forwardRef, Logger, Optional , BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { TouchService } from './touch.service';
+import {
+  CLAIMANT_CONTACT_SELECT,
+  claimantContacts,
+  contactStampPatch,
+} from '../surplus/surplus-contact-stamp.util';
 import { ScoringService } from '../scoring/scoring.service';
 import { MessagesService } from '../messages/messages.service';
 import { DripService } from '../drip/drip.service';
@@ -872,6 +877,19 @@ export class LeadsService {
       where: { id },
       data: data as Prisma.LeadUncheckedUpdateInput,
     });
+
+    // A surplus claimant's best number and email live on the Lead, so an edit
+    // here can be new contact info for the board's "Contact updated" column.
+    if (lead.source === 'SURPLUS' && ('sellerPhone' in data || 'sellerEmail' in data)) {
+      const d = await this.prisma.surplusDetail.findUnique({
+        where: { leadId: id },
+        select: { id: true, ...CLAIMANT_CONTACT_SELECT },
+      });
+      const stamp = d ? contactStampPatch(claimantContacts(lead, d), claimantContacts(updated, d)) : {};
+      if (d && stamp.contactInfoUpdatedAt) {
+        await this.prisma.surplusDetail.update({ where: { id: d.id }, data: stamp });
+      }
+    }
 
     // Rescore if needed
     if (needsRescore) {
