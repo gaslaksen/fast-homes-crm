@@ -437,17 +437,71 @@ export function computePriority(o: PriorityInput): 'HIGH' | 'MEDIUM' | 'LOW' {
   return 'MEDIUM';
 }
 
+// A company, not a person: never turned round, never recased ("ABC HOLDINGS, LLC").
+const ENTITY_OWNER =
+  /\b(LLC|L\.L\.C|INC|CORP|CORPORATION|COMPANY|LP|LLP|LLLP|LTD|TRUST|ASSOCIATION|CHURCH|BANK|PARTNERS|HOLDINGS|PROPERTIES)\b/i;
+
+// What can follow a comma without the name being surname first: "WILLIAMS, SR",
+// "SMITH, ET AL", "ESTATE OF THERESA MCPARLIN, DECEASED". Same list displayName() uses.
+const NOT_SURNAME_FIRST =
+  /^(SR|JR|II|III|IV|V|ESQ|ET\s*AL|ETAL|ESTATE\s*OF|DECEASED|DECD|EST|ESTATE|TRUSTEE|TR)\.?$/i;
+
+// Words that go after the surname once a name is turned round, so "SMITH, JOHN,
+// JR" reads "John Smith Jr" and not "John Jr Smith". A lone V is left where it
+// is, because it is far more often a middle initial than "the fifth".
+const TRAILING_WORD = /^(SR|JR|II|III|IV|ESQ|ETAL|DECEASED|DECD|EST|ESTATE)\.?$/i;
+
+/**
+ * "JESSICA" to "Jessica", "MCCASKILL" to "McCaskill", "O'BRIEN" to "O'Brien".
+ * Only an all-caps (or all-lowercase) name is recased. One typed in mixed case,
+ * like "DeShawn", is already how the person spells it and is left alone.
+ */
+export function personNameCase(raw?: string | null): string {
+  const s = String(raw || '').trim();
+  if (!s || (/[a-z]/.test(s) && /[A-Z]/.test(s))) return s;
+  return s
+    .toLowerCase()
+    // Capital after anything that is not a letter or digit, as Postgres initcap()
+    // does, so the backfill migration and new imports agree.
+    .replace(/(^|[^a-z0-9])([a-z])/g, (_, sep, c) => sep + c.toUpperCase())
+    .replace(/\bMc([a-z])/g, (_, c) => `Mc${c.toUpperCase()}`)
+    .replace(/\b(Ii|Iii|Iv)\b/g, (r) => r.toUpperCase());
+}
+
 /**
  * Split an "Owner Names" string into a first/last pair for the Lead record.
  * Uses the first owner when several are semicolon-separated. Returns empty
  * strings when nothing usable is present (Lead requires non-null names).
+ *
+ * Counties write people surname first: "KLARENBEEK, JESSICA". Split on spaces
+ * alone, that stored "KLARENBEEK," as the first name and every {{firstName}}
+ * greeting went out as "Hi KLARENBEEK,,". The comma form is turned round, with
+ * the first given name as the first name and everything else kept in the last
+ * name, so first + " " + last still reads as the whole name.
  */
 export function splitOwnerName(owners?: string): { firstName: string; lastName: string } {
   const first = String(owners || '').split(';')[0].trim();
   if (!first) return { firstName: '', lastName: '' };
-  const parts = first.split(/\s+/);
-  if (parts.length === 1) return { firstName: parts[0], lastName: '' };
-  return { firstName: parts[0], lastName: parts.slice(1).join(' ') };
+  if (ENTITY_OWNER.test(first)) {
+    const parts = first.split(/\s+/);
+    return { firstName: parts[0], lastName: parts.slice(1).join(' ') };
+  }
+
+  let parts: string[];
+  const m = /^([^,]+),\s*(.+)$/.exec(first);
+  if (m && !NOT_SURNAME_FIRST.test(m[2].trim()) && !/^(?:the\s+)?estate\s+of\b/i.test(first)) {
+    // "SMITH, JOHN A, JR": given names first, surname next, suffixes last.
+    const given = m[2].split(/[\s,]+/).filter(Boolean);
+    const trailing = given.filter((t) => TRAILING_WORD.test(t));
+    parts = [...given.filter((t) => !TRAILING_WORD.test(t)), ...m[1].trim().split(/\s+/), ...trailing];
+  } else {
+    parts = first.split(/\s+/);
+  }
+  if (!parts.length) return { firstName: '', lastName: '' };
+  return {
+    firstName: personNameCase(parts[0].replace(/,+$/, '')),
+    lastName: personNameCase(parts.slice(1).join(' ')),
+  };
 }
 
 /** Whether a lead should be treated as dead based on notes/skip text. */

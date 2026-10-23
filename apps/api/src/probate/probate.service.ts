@@ -1,7 +1,7 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { LeadSource, ProbateWorkStatus } from '@fast-homes/shared';
-import { countyForCity, stateForCity, citiesInCounty } from '../foreclosures/foreclosure-scoring.util';
+import { countyForCity, stateForCity, citiesInCounty, personNameCase } from '../foreclosures/foreclosure-scoring.util';
 import {
   ProbateLeadInput,
   ProbateListFilters,
@@ -114,8 +114,8 @@ export class ProbateService {
         propertyZip: normalizeZip(input.zip),
         // The seller fields describe the HEIR, not the decedent: the heir is
         // who answers the phone and who can actually sell.
-        sellerFirstName: cellText(input.heirFirstName),
-        sellerLastName: cellText(input.heirLastName),
+        sellerFirstName: personNameCase(cellText(input.heirFirstName)),
+        sellerLastName: personNameCase(cellText(input.heirLastName)),
         sellerPhone: `+1${phone}`,
         sellerEmail: cellText(input.email) || null,
         sellerMotivation: cellText(input.whyThisLead) || null,

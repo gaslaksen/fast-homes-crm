@@ -1,4 +1,11 @@
-import { ownerOccupiedFrom, parcelLinkFor, addressKeyOf, dupeScore } from './foreclosure-scoring.util';
+import {
+  ownerOccupiedFrom,
+  parcelLinkFor,
+  addressKeyOf,
+  dupeScore,
+  splitOwnerName,
+  personNameCase,
+} from './foreclosure-scoring.util';
 
 describe('ownerOccupiedFrom', () => {
   it('calls it owner-occupied when house number and street word match', () => {
@@ -111,5 +118,58 @@ describe('dupeScore', () => {
 
   it('counts this week checkmarks as work', () => {
     expect(dupeScore(lead({ touchDays: { T: true } }))).toBeGreaterThan(0);
+  });
+});
+
+describe('splitOwnerName', () => {
+  const split = (s: string) => {
+    const { firstName, lastName } = splitOwnerName(s);
+    return [firstName, lastName];
+  };
+
+  it('turns a surname-first county name round so the first name is the given name', () => {
+    expect(split('KLARENBEEK, JESSICA')).toEqual(['Jessica', 'Klarenbeek']);
+    expect(split('VAN DYKE, JOHN A')).toEqual(['John', 'A Van Dyke']);
+  });
+
+  it('puts a suffix or estate word after the surname once turned round', () => {
+    expect(split('SMITH, JOHN, JR')).toEqual(['John', 'Smith Jr']);
+    expect(split('MCGRATH, HARRY A III EST')).toEqual(['Harry', 'A McGrath III Est']);
+  });
+
+  it('does not turn round a name whose comma only leads to a suffix or estate wording', () => {
+    expect(split('JOHNNY LOVE WILLIAMS, SR')).toEqual(['Johnny', 'Love Williams, Sr']);
+    expect(split('SMITH, ET AL')).toEqual(['Smith', 'Et Al']);
+    expect(split('ESTATE OF THERESA MCPARLIN, DECEASED')).toEqual(['Estate', 'Of Theresa McParlin, Deceased']);
+  });
+
+  it('leaves a company name exactly as written', () => {
+    expect(split('ABC HOLDINGS, LLC')).toEqual(['ABC', 'HOLDINGS, LLC']);
+  });
+
+  it('still splits a given-name-first name and uses only the first owner', () => {
+    expect(split('DANNIE LESTER STEWART; MARY STEWART')).toEqual(['Dannie', 'Lester Stewart']);
+    expect(split('CHER')).toEqual(['Cher', '']);
+    expect(split('')).toEqual(['', '']);
+  });
+});
+
+describe('personNameCase', () => {
+  it('recases an all-caps name', () => {
+    expect(personNameCase('JESSICA')).toBe('Jessica');
+    expect(personNameCase("O'BRIEN")).toBe("O'Brien");
+    expect(personNameCase('MARY-ANN')).toBe('Mary-Ann');
+    expect(personNameCase('MCCASKILL')).toBe('McCaskill');
+    expect(personNameCase('HARRY III')).toBe('Harry III');
+  });
+
+  it('leaves a mixed-case name as the person typed it', () => {
+    expect(personNameCase('DeShawn')).toBe('DeShawn');
+    expect(personNameCase('McCaskill')).toBe('McCaskill');
+  });
+
+  it('handles nothing', () => {
+    expect(personNameCase(null)).toBe('');
+    expect(personNameCase('  ')).toBe('');
   });
 });

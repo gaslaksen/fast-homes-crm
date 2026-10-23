@@ -18,6 +18,7 @@ import {
   realtorQueryOf,
   parcelLinkFor,
   splitOwnerName,
+  personNameCase,
   ownerOccupiedFrom,
   addressKeyOf,
   dupeScore,
@@ -154,8 +155,8 @@ export class ForeclosuresService {
     const derived = this.buildDerived({ ...input, ownerOccupied }, { saleIso, loanIso });
 
     const split = splitOwnerName(input.ownerNames || input.countyOwner);
-    const firstName = (input.ownerFirstName || '').trim() || split.firstName;
-    const lastName = (input.ownerLastName || '').trim() || split.lastName;
+    const firstName = personNameCase(input.ownerFirstName) || split.firstName;
+    const lastName = personNameCase(input.ownerLastName) || split.lastName;
     const phone1 = normalizePhoneDigits(input.phone1) || '';
     const phone2 = normalizePhoneDigits(input.phone2) || null;
     const phone3 = normalizePhoneDigits(input.phone3) || null;
