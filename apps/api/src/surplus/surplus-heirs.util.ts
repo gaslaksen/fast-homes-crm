@@ -34,6 +34,8 @@ export function heirRow(h: any) {
     contactStatus,
     contactStatusLabel: SURPLUS_CONTACT_STATUS_LABEL[contactStatus] || contactStatus,
     lastContactedAt: h.lastContactedAt || null,
+    /** When this person last gained a phone or email. See surplus-contact-stamp.util.ts. */
+    contactInfoUpdatedAt: h.contactInfoUpdatedAt || null,
     relationship: h.relationship,
     share: h.share,
     street: h.street,

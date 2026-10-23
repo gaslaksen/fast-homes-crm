@@ -1570,3 +1570,28 @@ describe('the county pull keeps EnformionGo out', () => {
     expect(endato.lookup).toHaveBeenCalledWith('R1');
   });
 });
+
+describe('the "Contact updated" stamp on a trace', () => {
+  const found = (detailUpdates: any[]) => detailUpdates.find((u) => u.data.contactMismatch === false);
+
+  it('stamps a claimant the trace found new numbers for', async () => {
+    const { svc, detailUpdates } = harness([lead({ first: 'Dannie', last: 'Stewart' })]);
+    respond([person('Dannie', 'Stewart', ['9045550000'])]);
+
+    await svc.traceLeads({ organizationId: 'org' });
+    expect(found(detailUpdates).data.contactInfoUpdatedAt).toBeInstanceOf(Date);
+  });
+
+  it('does not stamp a re-trace that hands back the numbers already on file', async () => {
+    // Same two numbers, the other way round. Both tables are rewritten and
+    // nothing is new, so the board must not call it new contact info.
+    const l = lead({ first: 'Dannie', last: 'Stewart' });
+    l.sellerPhone = '+19045551111';
+    (l.surplusDetail as any).phone2 = '9045550000';
+    const { svc, detailUpdates } = harness([l]);
+    respond([person('Dannie', 'Stewart', ['9045550000', '9045551111'])]);
+
+    await svc.traceLeads({ organizationId: 'org', includeTraced: true } as any);
+    expect(found(detailUpdates).data.contactInfoUpdatedAt).toBeUndefined();
+  });
+});

@@ -51,6 +51,8 @@ export interface Heir {
   contactStatus: string;
   contactStatusLabel: string;
   lastContactedAt: string | null;
+  /** When this person last gained a phone or email. */
+  contactInfoUpdatedAt?: string | null;
   relationship: string | null;
   share: string | null;
   address: string | null;
@@ -614,6 +616,9 @@ function HeirRow({
           ))}
         </select>
         {h.lastContactedAt && <span style={{ color: 'var(--faint)' }}>last {fmtDate(h.lastContactedAt)}</span>}
+        {h.contactInfoUpdatedAt && (
+          <span style={{ color: 'var(--faint)' }}>contact updated {fmtDate(h.contactInfoUpdatedAt)}</span>
+        )}
       </div>
 
       <div style={{ display: 'flex', gap: 6, marginTop: 5, flexWrap: 'wrap' }}>

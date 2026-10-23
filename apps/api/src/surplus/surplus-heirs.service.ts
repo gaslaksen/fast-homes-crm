@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SurplusProbateService, ExtractedHeir, ProbateExtract } from './surplus-probate.service';
 import { normalizePhoneDigits } from '../foreclosures/foreclosure-scoring.util';
 import { heirRow } from './surplus-heirs.util';
+import { contactStampPatch, heirContacts } from './surplus-contact-stamp.util';
 import { SurplusPersonRole, SurplusContactStatus } from '@fast-homes/shared';
 
 /**
@@ -265,6 +266,9 @@ export class SurplusHeirsService {
       const emails = (patch.emails || []).map((e: any) => String(e || '').trim()).filter(Boolean);
       data.email1 = emails[0] || null;
       data.email2 = emails[1] || null;
+    }
+    if (patch.phones !== undefined || patch.emails !== undefined) {
+      Object.assign(data, contactStampPatch(heirContacts(heir), heirContacts({ ...heir, ...data })));
     }
 
     if (!data.name && patch.name !== undefined) {

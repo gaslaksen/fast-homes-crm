@@ -502,6 +502,50 @@ describe('LeadPhonesService.setPhones', () => {
   });
 });
 
+describe('LeadPhonesService stamps new surplus contact info', () => {
+  const surplusLead = () => ({
+    sellerPhone: '+19045551234',
+    sellerEmail: 'pat@example.com',
+    surplusDetail: { id: 'sd-1', phone2: '9045559876', phone3: null, phone4: null, email2: null },
+    badContacts: null,
+  });
+  const detailWrite = (updates: any[]) => updates.find((u) => u.where.id === 'sd-1');
+
+  it('stamps the claimant when a number is added', async () => {
+    const { service, updates } = editHarness(surplusLead());
+    await service.setPhones('l1', [{ number: '9045551234' }, { number: '9045559876' }, { number: '9045550000' }]);
+    expect(detailWrite(updates).data.contactInfoUpdatedAt).toBeInstanceOf(Date);
+  });
+
+  it('does not stamp when the same numbers are saved in another order', async () => {
+    const { service, updates } = editHarness(surplusLead());
+    await service.setPhones('l1', [{ number: '9045559876' }, { number: '9045551234' }]);
+    expect(detailWrite(updates).data.contactInfoUpdatedAt).toBeUndefined();
+  });
+
+  it('does not stamp when a number is only removed', async () => {
+    const { service, updates } = editHarness(surplusLead());
+    await service.setPhones('l1', [{ number: '9045551234' }]);
+    expect(detailWrite(updates).data.contactInfoUpdatedAt).toBeUndefined();
+  });
+
+  it('stamps the claimant when an email is added', async () => {
+    const { service, updates } = editHarness(surplusLead());
+    await service.setEmails('l1', ['pat@example.com', 'pat@work.com']);
+    expect(detailWrite(updates).data.contactInfoUpdatedAt).toBeInstanceOf(Date);
+  });
+
+  it('never writes the column on a pipeline that does not have it', async () => {
+    const { service, updates } = editHarness({
+      sellerPhone: '',
+      taxSaleDetail: { id: 'td-1', phone2: null, phone3: null, phone4: null, email2: null },
+    });
+    await service.setPhones('l1', [{ number: '9045551234' }]);
+    await service.setEmails('l1', ['a@b.com', 'c@d.com']);
+    for (const u of updates) expect(u.data.contactInfoUpdatedAt).toBeUndefined();
+  });
+});
+
 describe('LeadPhonesService.flagContact', () => {
   it('keeps the number and records that it does not work', async () => {
     // Deleting it loses the fact that it was tried, and the next person to open

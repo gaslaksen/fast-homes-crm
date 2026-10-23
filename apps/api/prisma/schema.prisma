@@ -972,6 +972,11 @@ model SurplusDetail {
   phone4Dnc  String?
   /// When the numbers were last run against the registries.
   dncScrubbedAt DateTime?
+  /// When the claimant last GAINED a phone number or email, across
+  /// Lead.sellerPhone, Lead.sellerEmail and the slots here. A reorder, a
+  /// removal or a bad flag does not move it, so it reads as "new contact info"
+  /// rather than "somebody saved the row". Written through contact-stamp.ts.
+  contactInfoUpdatedAt DateTime?
   /// Set when a skip trace came back with contacts that do NOT belong to the
   /// claimant. The contacts are discarded rather than stored, and this records
   /// why the lead has none, so nobody re-runs the same trace expecting a hit.
@@ -2318,6 +2323,9 @@ model SurplusHeir {
   phone4Dnc  String?
   email1     String?
   email2     String?
+  /// When this person last GAINED a phone number or email. Same meaning as
+  /// SurplusDetail.contactInfoUpdatedAt.
+  contactInfoUpdatedAt DateTime?
 
   // Trace state, same three columns and same meaning as SurplusDetail: "never
   // tried" and "tried and found nothing" need different next actions.

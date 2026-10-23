@@ -142,6 +142,8 @@ export interface SurplusPanelLead {
   } | null;
   /** When EnformionGo last searched this claimant, by name or as an estate. */
   enformionSearchedAt?: string | null;
+  /** When the claimant last gained a phone or email. */
+  contactInfoUpdatedAt?: string | null;
   doNotCall: boolean;
   isDeceased: boolean;
   /** YYYY-MM-DD, when a people search dated the death. */
@@ -3717,6 +3719,9 @@ function TraceBlock({ lead, tracing, onTrace }: { lead: SurplusPanelLead; tracin
         </button>
         {lead.enformionSearchedAt && (
           <span style={{ marginLeft: 8, fontSize: 11 }}>EnformionGo searched {fmtDate(lead.enformionSearchedAt)}.</span>
+        )}
+        {lead.contactInfoUpdatedAt && (
+          <span style={{ marginLeft: 8, fontSize: 11 }}>Contact updated {fmtDate(lead.contactInfoUpdatedAt)}.</span>
         )}
         <div style={{ marginTop: 4, fontSize: 11 }}>
           {lead.isDeceased
