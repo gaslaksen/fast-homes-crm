@@ -395,7 +395,7 @@ export class DigestService {
         where: {
           ...active,
           createdAt: { gte: since },
-          OR: [{ source: null }, { source: { not: LeadSource.SURPLUS } }],
+          source: { not: LeadSource.SURPLUS },
         },
       }),
 
