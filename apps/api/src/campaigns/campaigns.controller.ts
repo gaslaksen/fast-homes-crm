@@ -116,14 +116,21 @@ export class CampaignsController {
 
   // ─── Enrollments ─────────────────────────────────────────────────────────
 
-  /** Body { toEmail } picks which of the lead's emails the campaign uses. */
+  /**
+   * Body { toEmail } picks which email the campaign uses. { heirId } enrolls a
+   * person on a surplus case (an heir, a relative, a neighbor) instead of the
+   * claimant.
+   */
   @Post('campaigns/:id/enroll/:leadId')
   async enrollLead(
     @Param('id') campaignId: string,
     @Param('leadId') leadId: string,
-    @Body() body?: { toEmail?: string | null },
+    @Body() body?: { toEmail?: string | null; heirId?: string | null },
   ) {
-    return this.enrollmentService.enrollLead(leadId, campaignId, { toEmail: body?.toEmail });
+    return this.enrollmentService.enrollLead(leadId, campaignId, {
+      toEmail: body?.toEmail,
+      heirId: body?.heirId,
+    });
   }
 
   /** Bulk enroll. Reports per-lead skips rather than failing the whole batch. */

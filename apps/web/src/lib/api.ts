@@ -726,10 +726,18 @@ export const pipelineAPI = {
 // Campaigns API (drip)
 export const campaignsAPI = {
   list: () => api.get('/campaigns'),
-  enroll: (campaignId: string, leadId: string, toEmail?: string) =>
-    api.post(`/campaigns/${campaignId}/enroll/${leadId}`, toEmail ? { toEmail } : {}),
+  /** heirId enrolls a person on a surplus case instead of the claimant. */
+  enroll: (campaignId: string, leadId: string, toEmail?: string, heirId?: string | null) =>
+    api.post(`/campaigns/${campaignId}/enroll/${leadId}`, {
+      ...(toEmail ? { toEmail } : {}),
+      ...(heirId ? { heirId } : {}),
+    }),
   pauseEnrollment: (enrollmentId: string) =>
     api.patch(`/campaigns/enrollments/${enrollmentId}/pause`),
+  resumeEnrollment: (enrollmentId: string) =>
+    api.patch(`/campaigns/enrollments/${enrollmentId}/resume`),
+  removeEnrollment: (enrollmentId: string) =>
+    api.delete(`/campaigns/enrollments/${enrollmentId}`),
   leadEnrollments: (leadId: string) =>
     api.get(`/leads/${leadId}/campaigns`),
 };

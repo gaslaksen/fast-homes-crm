@@ -6,7 +6,21 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CampaignExecutionService } from './campaign-execution.service';
-import { LEAD_EMAILS_SELECT, campaignEmailFor, knownEmails } from './campaign-recipient';
+import {
+  HEIR_CONTACT_SELECT,
+  HeirContact,
+  LEAD_EMAILS_SELECT,
+  campaignEmailFor,
+  heirBlockedReason,
+  heirEmails,
+  heirTextNumber,
+  knownEmails,
+} from './campaign-recipient';
+
+/** ", for Ricardo Berrios" when the enrollment is a person on the case. */
+function forWhom(enrollment: { heir?: { name: string } | null }): string {
+  return enrollment.heir ? ` for ${enrollment.heir.name}` : '';
+}
 
 @Injectable()
 export class CampaignEnrollmentService {
@@ -28,12 +42,21 @@ export class CampaignEnrollmentService {
   }
 
   /**
-   * opts.toEmail names which of the lead's emails EMAIL steps go to. It must
-   * already be on the lead. Omitted keeps whatever the enrollment had (the
-   * lead's first email for a new one); passing it to an existing enrollment
-   * changes the recipient without restarting the sequence.
+   * opts.toEmail names which email EMAIL steps go to. It must already be on
+   * the recipient. Omitted keeps whatever the enrollment had (the first email
+   * for a new one); passing it to an existing enrollment changes the recipient
+   * without restarting the sequence.
+   *
+   * opts.heirId enrolls a person on a surplus case rather than the claimant:
+   * an heir, a relative, a neighbor. Their own phone and email are used, and
+   * each person holds their own enrollment, so the son can be on the same
+   * campaign as the claimant without either one replacing the other.
    */
-  async enrollLead(leadId: string, campaignId: string, opts: { toEmail?: string | null } = {}) {
+  async enrollLead(
+    leadId: string,
+    campaignId: string,
+    opts: { toEmail?: string | null; heirId?: string | null } = {},
+  ) {
     // Get campaign with its first step
     const campaign = await this.prisma.campaign.findUnique({
       where: { id: campaignId },
@@ -60,17 +83,36 @@ export class CampaignEnrollmentService {
     // outreach scheduler and autoEnrollInDefaults leaves them out, so the
     // person who adds a claimant owns the wording under FS 45.033.
 
+    const heirId = opts.heirId || null;
+    let heir: HeirContact | null = null;
+    if (heirId) {
+      const row = await this.prisma.surplusHeir.findUnique({
+        where: { id: heirId },
+        select: HEIR_CONTACT_SELECT,
+      });
+      if (!row || row.surplusDetail?.leadId !== leadId) {
+        throw new NotFoundException('That person is not on this case');
+      }
+      heir = row;
+      const blocked = heirBlockedReason(heir);
+      if (blocked) throw new BadRequestException(`${blocked}, so cannot be enrolled in a drip campaign.`);
+    }
+    // Who this is, in the words the activity log and errors use.
+    const who = heir ? heir.name : 'Lead';
+
     const channels = new Set<string>(
       (campaign.steps ?? []).map((s: any) => s.channel),
     );
-    const emails = knownEmails(lead);
+    const emails = heir ? heirEmails(heir) : knownEmails(lead);
     let toEmail: string | null | undefined = undefined;
     if (opts.toEmail !== undefined) {
       const wanted = (opts.toEmail || '').trim().toLowerCase();
       if (wanted) {
         const match = emails.find((e) => e.toLowerCase() === wanted);
         if (!match) {
-          throw new BadRequestException(`${opts.toEmail} is not one of this lead's email addresses.`);
+          throw new BadRequestException(
+            `${opts.toEmail} is not one of ${heir ? `${heir.name}'s` : "this lead's"} email addresses.`,
+          );
         }
         toEmail = match;
       } else {
@@ -79,23 +121,31 @@ export class CampaignEnrollmentService {
     }
     if (channels.has('EMAIL') && emails.length === 0) {
       throw new BadRequestException(
-        'Lead has no email address — cannot enroll in an email campaign',
+        `${who} has no email address, so cannot be enrolled in an email campaign`,
       );
     }
-    if (channels.has('TEXT') && !lead.sellerPhone) {
+    if (channels.has('TEXT') && !(heir ? heirTextNumber(heir) : lead.sellerPhone)) {
       throw new BadRequestException(
-        'Lead has no phone number — cannot enroll in an SMS campaign',
+        heir
+          ? `${heir.name} has no phone number that is clear to text, so cannot be enrolled in an SMS campaign`
+          : 'Lead has no phone number, so cannot be enrolled in an SMS campaign',
       );
     }
+    // A claimant marked Do Not Contact holds the whole case, people included:
+    // the send path refuses every text on the lead, so enrolling would only
+    // queue skips.
     if (channels.has('TEXT') && lead.doNotContact) {
       throw new BadRequestException(
-        'Lead is marked Do Not Contact — cannot enroll in an SMS campaign',
+        'Lead is marked Do Not Contact, so cannot be enrolled in an SMS campaign',
       );
     }
 
+    const recipientKey = heirId || '';
+    const enrolledWhat = `${heir ? `${heir.name} enrolled` : 'Enrolled'} in drip campaign "${campaign.name}"${toEmail ? `, emailing ${toEmail}` : ''}`;
+
     // Check if already enrolled (upsert with unique constraint)
     const existing = await this.prisma.campaignEnrollment.findUnique({
-      where: { campaignId_leadId: { campaignId, leadId } },
+      where: { campaignId_leadId_recipientKey: { campaignId, leadId, recipientKey } },
     });
     if (existing && existing.status !== 'REMOVED') {
       if (toEmail === undefined || toEmail === existing.toEmail) return existing;
@@ -106,21 +156,19 @@ export class CampaignEnrollmentService {
       await this.logActivity(
         leadId,
         'CAMPAIGN_RECIPIENT_CHANGED',
-        `Drip campaign "${campaign.name}" now emails ${toEmail || emails[0] || 'the lead'}`,
+        `Drip campaign "${campaign.name}" now emails ${toEmail || emails[0] || (heir ? heir.name : 'the lead')}`,
       );
       return updated;
     }
 
     // Calculate first nextSendAt. delayDays/delayHours are cumulative offsets
     // from enrollment start (enrolledAt), the same convention used by every
-    // subsequent step in CampaignExecutionService.calculateNextSendAt — so a
+    // subsequent step in CampaignExecutionService.calculateNextSendAt, so a
     // campaign with delays [0d, 1d, 2d, 3d] fires on day 0, 1, 2, 3 from
     // enrollment, not day 0, 1, 3, 6.
     //
     // For a brand new enrollment, enrolledAt === now, so step 1 with
-    // delayDays=0 fires on the next cron tick. Same-lead double-send with
-    // initial outreach is prevented by the 5-minute outbound throttle in
-    // MessagesService.sendMessage.
+    // delayDays=0 fires on the next cron tick.
     const firstStep = campaign.steps[0];
     const enrolledAt = new Date();
     let nextSendAt: Date | null = null;
@@ -145,7 +193,7 @@ export class CampaignEnrollmentService {
           ...(toEmail !== undefined ? { toEmail } : {}),
         },
       });
-      await this.logActivity(leadId, 'CAMPAIGN_ENROLLED', `Enrolled in drip campaign "${campaign.name}"${toEmail ? `, emailing ${toEmail}` : ''}`);
+      await this.logActivity(leadId, 'CAMPAIGN_ENROLLED', enrolledWhat);
       return reEnrolled;
     }
 
@@ -153,6 +201,8 @@ export class CampaignEnrollmentService {
       data: {
         campaignId,
         leadId,
+        heirId,
+        recipientKey,
         currentStepOrder: 0,
         status: 'ACTIVE',
         enrolledAt,
@@ -160,7 +210,7 @@ export class CampaignEnrollmentService {
         toEmail: toEmail ?? null,
       },
     });
-    await this.logActivity(leadId, 'CAMPAIGN_ENROLLED', `Enrolled in drip campaign "${campaign.name}"${toEmail ? `, emailing ${toEmail}` : ''}`);
+    await this.logActivity(leadId, 'CAMPAIGN_ENROLLED', enrolledWhat);
     return enrollment;
   }
 
@@ -264,9 +314,9 @@ export class CampaignEnrollmentService {
     const enrollment = await this.prisma.campaignEnrollment.update({
       where: { id: enrollmentId },
       data: { status: 'REMOVED' },
-      include: { campaign: { select: { name: true } } },
+      include: { campaign: { select: { name: true } }, heir: { select: { name: true } } },
     });
-    await this.logActivity(enrollment.leadId, 'CAMPAIGN_UNENROLLED', `Removed from drip campaign "${enrollment.campaign.name}"`);
+    await this.logActivity(enrollment.leadId, 'CAMPAIGN_UNENROLLED', `Removed from drip campaign "${enrollment.campaign.name}"${forWhom(enrollment)}`);
     return enrollment;
   }
 
@@ -274,19 +324,39 @@ export class CampaignEnrollmentService {
     const enrollment = await this.prisma.campaignEnrollment.update({
       where: { id: enrollmentId },
       data: { status: 'PAUSED' },
-      include: { campaign: { select: { name: true } } },
+      include: { campaign: { select: { name: true } }, heir: { select: { name: true } } },
     });
-    await this.logActivity(enrollment.leadId, 'CAMPAIGN_PAUSED', `Paused drip campaign "${enrollment.campaign.name}"`);
+    await this.logActivity(enrollment.leadId, 'CAMPAIGN_PAUSED', `Paused drip campaign "${enrollment.campaign.name}"${forWhom(enrollment)}`);
     return enrollment;
   }
 
+  /**
+   * Back to active. An enrollment paused by failed sends, or one that had its
+   * send time cleared, has no nextSendAt and would sit active forever, so it
+   * gets a fresh one the way resumeAllPaused does. Nothing left to send
+   * completes it instead.
+   */
   async resumeEnrollment(enrollmentId: string) {
+    const current = await this.prisma.campaignEnrollment.findUnique({
+      where: { id: enrollmentId },
+      include: { campaign: { include: { steps: { orderBy: { stepOrder: 'asc' } } } } },
+    });
+    if (!current) throw new NotFoundException('Enrollment not found');
+    const nextStep = current.campaign.steps.find(
+      (s: any) => s.stepOrder === current.currentStepOrder + 1,
+    );
+    const data: any = { status: 'ACTIVE' };
+    if (!nextStep) {
+      Object.assign(data, { status: 'COMPLETED', completedAt: new Date(), nextSendAt: null });
+    } else if (!current.nextSendAt) {
+      data.nextSendAt = this.execution.calculateNextSendAt(nextStep, current.enrolledAt);
+    }
     const enrollment = await this.prisma.campaignEnrollment.update({
       where: { id: enrollmentId },
-      data: { status: 'ACTIVE' },
-      include: { campaign: { select: { name: true } } },
+      data,
+      include: { campaign: { select: { name: true } }, heir: { select: { name: true } } },
     });
-    await this.logActivity(enrollment.leadId, 'CAMPAIGN_RESUMED', `Resumed drip campaign "${enrollment.campaign.name}"`);
+    await this.logActivity(enrollment.leadId, 'CAMPAIGN_RESUMED', `Resumed drip campaign "${enrollment.campaign.name}"${forWhom(enrollment)}`);
     return enrollment;
   }
 
@@ -362,6 +432,21 @@ export class CampaignEnrollmentService {
   }
 
   /**
+   * End every live enrollment for one person on a surplus case, leaving the
+   * claimant's and everyone else's alone. Used when that person opts out.
+   */
+  async removeAllForHeir(heirId: string, status: 'REMOVED' | 'OPTED_OUT' = 'OPTED_OUT') {
+    const result = await this.prisma.campaignEnrollment.updateMany({
+      where: { heirId, status: { notIn: ['REMOVED', 'COMPLETED', 'OPTED_OUT'] } },
+      data: { status, nextSendAt: null },
+    });
+    if (result.count > 0) {
+      this.logger.log(`Ended ${result.count} campaign enrollment(s) for case person ${heirId}`);
+    }
+    return result.count;
+  }
+
+  /**
    * Auto-enroll a lead in all active default campaigns.
    *
    * Surplus claimants are left out. The default campaigns are written for
@@ -410,6 +495,9 @@ export class CampaignEnrollmentService {
       where: { leadId },
       include: {
         campaign: { select: { id: true, name: true, steps: { orderBy: { stepOrder: 'asc' } } } },
+        // Null for the claimant. The panel files each enrollment under the
+        // person it talks to.
+        heir: { select: { id: true, name: true } },
         messageLogs: {
           orderBy: { createdAt: 'desc' },
           take: 1,
@@ -447,6 +535,7 @@ export class CampaignEnrollmentService {
             ...LEAD_EMAILS_SELECT,
           },
         },
+        heir: { select: HEIR_CONTACT_SELECT },
         messageLogs: {
           orderBy: { createdAt: 'desc' },
           take: 1,
@@ -456,11 +545,15 @@ export class CampaignEnrollmentService {
     });
     return rows.map((r) => {
       const { surplusDetail, probateDetail, taxSaleDetail, foreclosureDetail, ...lead } = r.lead as any;
+      // A person on the case is sent to on their own contacts, not the
+      // claimant's. Only their id and name leave the API.
+      const heir = r.heir as HeirContact | null;
       return {
         ...r,
         lead,
-        sendsToEmail: campaignEmailFor(r.toEmail, knownEmails(r.lead as any)),
-        sendsToPhone: lead.sellerPhone || null,
+        heir: heir ? { id: heir.id, name: heir.name } : null,
+        sendsToEmail: campaignEmailFor(r.toEmail, heir ? heirEmails(heir) : knownEmails(r.lead as any)),
+        sendsToPhone: heir ? heirTextNumber(heir) : lead.sellerPhone || null,
       };
     });
   }

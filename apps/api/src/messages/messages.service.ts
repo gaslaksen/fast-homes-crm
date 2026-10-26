@@ -219,6 +219,13 @@ export class MessagesService {
     if (flag) {
       throw new Error(`That number is flagged ${flag} and cannot be texted`);
     }
+    // A person on a surplus case keeps their own footer clock. The lead's is
+    // the claimant's, and the first text to a son has to say who is writing
+    // and how to stop it even when the claimant already heard that.
+    const heirId = toNumber ? await this.leadPhones.heirIdForNumber(leadId, to).catch(() => null) : null;
+    const heirFooter = heirId
+      ? await this.prisma.surplusHeir.findUnique({ where: { id: heirId }, select: { complianceFooterSentAt: true } })
+      : null;
     const from =
       (await this.phoneNumbers.resolveForLead(leadId, fromNumber).catch(() => null)) ||
       this.twilioNumber;
@@ -243,7 +250,7 @@ export class MessagesService {
       const footer = this.complianceService.buildFooter(compliance, brandKey);
       const attach = await this.complianceService.shouldAttachFooter(
         compliance,
-        lead.complianceFooterSentAt,
+        heirId ? heirFooter?.complianceFooterSentAt ?? null : lead.complianceFooterSentAt,
         brandKey,
       );
       if (attach) {
@@ -275,7 +282,13 @@ export class MessagesService {
     try {
       const sent = await this.smsProvider.sendSms(to, from, outboundBody);
 
-      if (stampFooterSent) {
+      if (stampFooterSent && heirId) {
+        await this.prisma.surplusHeir
+          .update({ where: { id: heirId }, data: { complianceFooterSentAt: new Date() } })
+          .catch((err) =>
+            this.logger.warn(`Failed to stamp complianceFooterSentAt for case person ${heirId}: ${err.message}`),
+          );
+      } else if (stampFooterSent) {
         await this.prisma.lead
           .update({ where: { id: leadId }, data: { complianceFooterSentAt: new Date() } })
           .catch((err) =>
@@ -1029,16 +1042,27 @@ You decide the right approach based on the conversation flow.${photoNudge}`.trim
 
     // Check for opt-out
     if (isOptOutMessage(body)) {
-      await this.prisma.lead.update({
-        where: { id: lead.id },
-        data: {
-          doNotContact: true,
-          unsubscribedAt: new Date(),
-          autoRespond: false,
-        },
-      });
+      // A person on a surplus case opting out speaks for themselves, not the
+      // claimant: they are marked do not call and their drips end, and the
+      // lead stays reachable.
+      if (match.heirId) {
+        await this.prisma.surplusHeir.update({ where: { id: match.heirId }, data: { doNotCall: true } });
+        await this.campaignEnrollmentService.removeAllForHeir(match.heirId).catch((err) =>
+          this.logger.warn(`Could not end drips for case person ${match.heirId}: ${err.message}`),
+        );
+        this.logger.log(`Case person ${match.heirId} on lead ${lead.id} opted out`);
+      } else {
+        await this.prisma.lead.update({
+          where: { id: lead.id },
+          data: {
+            doNotContact: true,
+            unsubscribedAt: new Date(),
+            autoRespond: false,
+          },
+        });
 
-      this.logger.log(`Lead ${lead.id} opted out`);
+        this.logger.log(`Lead ${lead.id} opted out`);
+      }
 
       // Send opt-out confirmation
       try {

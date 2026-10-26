@@ -498,27 +498,35 @@ export class MailerService {
    * Build a stateless, HMAC-signed unsubscribe URL for a lead. Reused by
    * campaign sends and any transactional email that should honor opt-outs.
    */
-  buildUnsubscribeUrl(leadId: string): string {
-    const token = `${leadId}.${this.signUnsubscribe(leadId)}`;
+  buildUnsubscribeUrl(leadId: string, heirId?: string | null): string {
+    // A person on a surplus case gets a link naming them, so their click
+    // unsubscribes them and leaves the claimant alone. Ids are cuids, which
+    // never contain ':' or '.'.
+    const subject = heirId ? `${leadId}:${heirId}` : leadId;
+    const token = `${subject}.${this.signUnsubscribe(subject)}`;
     const apiBase = this.config.get<string>('API_URL') || 'https://api.mydealcore.com';
     return `${apiBase.replace(/\/$/, '')}/email/unsubscribe?token=${encodeURIComponent(token)}`;
   }
 
   /**
-   * Verify an unsubscribe token and return the leadId if valid, else null.
+   * Verify an unsubscribe token and return who it names if valid, else null.
+   * heirId is set when the email went to a person on a surplus case rather
+   * than the lead. Tokens minted before people could be mailed carry the
+   * leadId alone and still verify.
    */
-  verifyUnsubscribeToken(token: string): string | null {
+  verifyUnsubscribeToken(token: string): { leadId: string; heirId: string | null } | null {
     if (!token || typeof token !== 'string') return null;
     const idx = token.lastIndexOf('.');
     if (idx <= 0) return null;
-    const leadId = token.slice(0, idx);
+    const subject = token.slice(0, idx);
     const sig = token.slice(idx + 1);
-    const expected = this.signUnsubscribe(leadId);
+    const expected = this.signUnsubscribe(subject);
     const a = Buffer.from(sig);
     const b = Buffer.from(expected);
     if (a.length !== b.length) return null;
     if (!crypto.timingSafeEqual(a, b)) return null;
-    return leadId;
+    const [leadId, heirId] = subject.split(':');
+    return { leadId, heirId: heirId || null };
   }
 
   private signUnsubscribe(leadId: string): string {

@@ -5,7 +5,8 @@ import CommunicationsTimeline from '@/components/communications/CommunicationsTi
 import MessageComposer, { type EmailAction } from '@/components/communications/MessageComposer';
 import NotesPanel from '@/components/communications/NotesPanel';
 import type { NoteItem, TimelineItem } from '@/components/communications/types';
-import { authAPI, campaignsAPI, leadsAPI, surplusAPI, tasksAPI } from '@/lib/api';
+import { authAPI, leadsAPI, surplusAPI, tasksAPI } from '@/lib/api';
+import { PersonDrips, SurplusDripProvider, useSurplusDrips } from './SurplusDrips';
 import { dueLabel, isOverdue, quickDueDates, todayLocal } from '@/lib/dates';
 import { SURPLUS_DEAD_REASONS, deadReasonLabel } from '@/lib/surplus-dead';
 import { SURPLUS_EXPENSE_KINDS, SURPLUS_FEE_SCHEDULE_LABEL, expenseLabel, usd } from '@/lib/surplus-money';
@@ -2264,15 +2265,10 @@ export default function SurplusWorkPanel({
     notes: [],
   });
   const [emailAction, setEmailAction] = useState<EmailAction | null>(null);
-  const [campaigns, setCampaigns] = useState<{ id: string; name: string; steps?: { channel: string }[] }[]>([]);
-  // A campaign picked for a claimant with more than one email waits here
-  // while somebody chooses which address it goes to.
-  const [pickEmailFor, setPickEmailFor] = useState<string | null>(null);
-  const [pickedEmail, setPickedEmail] = useState('');
-  useEffect(() => {
-    setPickEmailFor(null);
-  }, [lead.id]);
-  const [enrolling, setEnrolling] = useState(false);
+  // Every person's drips on this claim, shared by the claimant's contacts on
+  // the Case tab and each card on the People tab. Reloads with the lead row,
+  // so a change made elsewhere on the panel shows here too.
+  const drips = useSurplusDrips(lead.id, lead, say);
   const [tracing, setTracing] = useState(false);
   /** Raised by clicking a number or an email, consumed by the composer. */
   const [composeIntent, setComposeIntent] = useState<any>(null);
@@ -2350,10 +2346,6 @@ export default function SurplusWorkPanel({
       .getTeam()
       .then((r) => setTeamMembers(r.data || []))
       .catch(() => {});
-    campaignsAPI
-      .list()
-      .then((r) => setCampaigns(r.data?.filter?.((c: any) => c.isActive !== false) || r.data || []))
-      .catch(() => {});
   }, []);
 
   /**
@@ -2385,28 +2377,6 @@ export default function SurplusWorkPanel({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose, onPrev, onNext]);
-
-  const enroll = async (campaignId: string, toEmail?: string) => {
-    if (!campaignId || enrolling) return;
-    const campaign = campaigns.find((c) => c.id === campaignId);
-    const emails = campaign?.steps?.some((st) => st.channel === 'EMAIL');
-    if (emails && toEmail === undefined && lead.emails.length > 1) {
-      setPickEmailFor(campaignId);
-      setPickedEmail(lead.emails[0]);
-      return;
-    }
-    setEnrolling(true);
-    try {
-      await campaignsAPI.enroll(campaignId, lead.id, toEmail);
-      say(toEmail ? `Enrolled in campaign, emailing ${toEmail}` : 'Enrolled in campaign');
-      setPickEmailFor(null);
-      onChanged();
-    } catch (e: any) {
-      say(e?.response?.data?.message || 'Could not enrol this lead');
-    } finally {
-      setEnrolling(false);
-    }
-  };
 
   /**
    * EnformionGo on this one claimant. A name search for a living claimant,
@@ -2702,38 +2672,42 @@ export default function SurplusWorkPanel({
 
         <div className="dc-wp-body">
           {tab === 'case' && (
-            <CaseTab
-              lead={lead}
-              property={property}
-              ledger={ledger}
-              currentUser={currentUser}
-              onTrace={traceGated}
-              tracing={tracing}
-              onCall={call}
-              onText={message}
-              onEmail={mail}
-              onOpenPeople={() => setTab('people')}
-              onChanged={() => {
-                onChanged();
-                loadComms(true);
-              }}
-              say={say}
-            />
+            <SurplusDripProvider value={drips}>
+              <CaseTab
+                lead={lead}
+                property={property}
+                ledger={ledger}
+                currentUser={currentUser}
+                onTrace={traceGated}
+                tracing={tracing}
+                onCall={call}
+                onText={message}
+                onEmail={mail}
+                onOpenPeople={() => setTab('people')}
+                onChanged={() => {
+                  onChanged();
+                  loadComms(true);
+                }}
+                say={say}
+              />
+            </SurplusDripProvider>
           )}
 
           {tab === 'people' && (
-            <PeopleTab
-              lead={lead}
-              property={property}
-              onCall={call}
-              onText={message}
-              onEmail={mail}
-              onChanged={() => {
-                onChanged();
-                loadComms(true);
-              }}
-              say={say}
-            />
+            <SurplusDripProvider value={drips}>
+              <PeopleTab
+                lead={lead}
+                property={property}
+                onCall={call}
+                onText={message}
+                onEmail={mail}
+                onChanged={() => {
+                  onChanged();
+                  loadComms(true);
+                }}
+                say={say}
+              />
+            </SurplusDripProvider>
           )}
 
           {tab === 'conversation' && (
@@ -2787,36 +2761,6 @@ export default function SurplusWorkPanel({
             ) : (
               <div style={{ fontSize: 12, color: 'var(--faint)' }}>Loading composer...</div>
             )
-          ) : pickEmailFor ? (
-            <div style={{ display: 'grid', gap: 6 }}>
-              <div style={{ fontSize: 12.5, fontWeight: 600 }}>
-                Which email should &quot;{campaigns.find((c) => c.id === pickEmailFor)?.name || 'this campaign'}&quot; go to?
-              </div>
-              {lead.emails.map((e) => (
-                <label key={e} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13 }}>
-                  <input
-                    type="radio"
-                    name="campaign-email"
-                    checked={pickedEmail === e}
-                    onChange={() => setPickedEmail(e)}
-                  />
-                  {e}
-                </label>
-              ))}
-              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                <button type="button" className="dc-wp-btn" disabled={enrolling} onClick={() => setPickEmailFor(null)}>
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  className="dc-wp-btn on"
-                  disabled={enrolling || !pickedEmail}
-                  onClick={() => enroll(pickEmailFor, pickedEmail)}
-                >
-                  Enroll
-                </button>
-              </div>
-            </div>
           ) : (
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
               <button
@@ -2826,30 +2770,6 @@ export default function SurplusWorkPanel({
               >
                 Open conversation
               </button>
-              <select
-                className="dc-wp-sel"
-                defaultValue=""
-                disabled={enrolling || lead.doNotCall}
-                onChange={(e) => {
-                  enroll(e.target.value);
-                  e.target.value = '';
-                }}
-                // Surplus outreach is regulated speech under FS 45.033, so
-                // enrolment stays a deliberate act by a person rather than
-                // something ingestion does on its own.
-                title={
-                  lead.doNotCall
-                    ? 'This claimant is marked do not call'
-                    : 'Add this claimant to a drip campaign'
-                }
-              >
-                <option value="">Add to drip campaign...</option>
-                {campaigns.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
               <span style={{ fontSize: 12, color: 'var(--faint)', marginLeft: 'auto' }}>
                 {lead.totalTouches} touch{lead.totalTouches === 1 ? '' : 'es'} logged
               </span>
@@ -2997,7 +2917,16 @@ function CaseTab({
   // case. What stays here is one line saying where things stand with them.
   const heirsBlock = showHeirs && <PeopleSummary lead={lead} onOpen={onOpenPeople} />;
   const contactsBlock = (
-    <ContactsBlock lead={lead} onCall={onCall} onText={onText} onEmail={onEmail} onChanged={onChanged} say={say} />
+    <>
+      <ContactsBlock lead={lead} onCall={onCall} onText={onText} onEmail={onEmail} onChanged={onChanged} say={say} />
+      {/* The claimant's own drips. Everyone else's are on their People card. */}
+      <PersonDrips
+        heirId={null}
+        name={lead.claimant}
+        emails={lead.emails}
+        blocked={lead.doNotCall ? 'marked do not call' : null}
+      />
+    </>
   );
   const socialBlock = lead.social && (
     <SocialBlock lead={lead} currentUser={currentUser} paused={socialPaused} say={say} onChanged={onChanged} />

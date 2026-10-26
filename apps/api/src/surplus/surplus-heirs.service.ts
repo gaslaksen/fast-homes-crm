@@ -276,6 +276,14 @@ export class SurplusHeirsService {
     }
 
     const saved = await this.prisma.surplusHeir.update({ where: { id: heir.id }, data });
+    // Do not call, or found to be dead: their drips end here rather than
+    // marching on through a skip at every step.
+    if (data.doNotCall === true || data.deceased === true) {
+      await this.prisma.campaignEnrollment.updateMany({
+        where: { heirId: heir.id, status: { in: ['ACTIVE', 'PAUSED', 'REPLIED'] } },
+        data: { status: 'REMOVED', nextSendAt: null },
+      });
+    }
     return this.toRow(saved);
   }
 

@@ -765,12 +765,32 @@ export class WebhooksController {
   // Matches secondary numbers too. We now text skip-traced numbers, so a STOP
   // can arrive from a number that is not the lead's sellerPhone, and honouring
   // it is not optional.
+  //
+  // A number held by a person on a surplus case (a son, a neighbor) opts out
+  // that person: they are marked do not call and their drips end. The
+  // claimant's lead is left reachable, because the son saying STOP is not the
+  // claimant saying it.
   private async markDoNotText(rawPhone: string, reason: string) {
     const phone = formatPhoneNumber(rawPhone || '');
     if (!phone) return;
 
-    const leadIds = await this.leadPhones.findLeadIdsByPhone(phone);
+    const { leadIds, heirIds } = await this.leadPhones.findOptOutTargets(phone);
+    if (heirIds.length) {
+      await this.leadsService['prisma'].surplusHeir.updateMany({
+        where: { id: { in: heirIds } },
+        data: { doNotCall: true },
+      });
+      for (const heirId of heirIds) {
+        try {
+          await this.campaignEnrollmentService.removeAllForHeir(heirId);
+        } catch (err: any) {
+          this.logger.error(`Failed to end campaign enrollments for case person ${heirId}: ${err.message}`);
+        }
+      }
+      console.log(`🚫 DNT (STOP): ${phone} - ${reason} (${heirIds.length} case person(s) marked do not call)`);
+    }
     if (!leadIds.length) {
+      if (heirIds.length) return;
       console.log(`🚫 DNT (STOP): ${phone} - ${reason} (no matching lead)`);
       return;
     }
@@ -798,11 +818,14 @@ export class WebhooksController {
   }
 
   // ─── Helper: START / re-subscribe - clear DNT flag ───
+  // Only leads whose own number this is. A case person's START must not undo
+  // the claimant's STOP, and their do not call stays until a person clears it,
+  // since it may have been set by hand for another reason.
   private async unmarkDoNotText(rawPhone: string) {
     const phone = formatPhoneNumber(rawPhone || '');
     if (!phone) return;
 
-    const leadIds = await this.leadPhones.findLeadIdsByPhone(phone);
+    const { leadIds } = await this.leadPhones.findOptOutTargets(phone);
     if (!leadIds.length) return;
 
     await this.leadsService['prisma'].lead.updateMany({
