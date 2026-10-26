@@ -34,6 +34,11 @@ export interface LeadPhone {
    * dial a number that may work perfectly well.
    */
   bad: boolean;
+  /**
+   * Set when the number belongs to a person on a surplus case rather than the
+   * claimant, so a send can keep that person's own compliance footer clock.
+   */
+  heirId?: string | null;
 }
 
 /**
@@ -196,7 +201,7 @@ export class LeadPhonesService {
       badPhonesOf(lead.badContacts).map((n) => numberKey(toE164(n) || n)),
     );
 
-    const raw: { value: string | null; label: string; type: string | null; dnc: string | null }[] = [
+    const raw: { value: string | null; label: string; type: string | null; dnc: string | null; heirId?: string }[] = [
       {
         value: lead.sellerPhone,
         label: 'Primary',
@@ -239,6 +244,7 @@ export class LeadPhonesService {
           label: `Heir: ${h.name}`,
           type: (h as any)[`phone${i}Type`] ?? null,
           dnc: (h as any)[`phone${i}Dnc`] ?? null,
+          heirId: h.id,
         });
       }
     }
@@ -258,6 +264,7 @@ export class LeadPhonesService {
         isPrimary: r.label === 'Primary',
         dnc: r.dnc,
         bad: badKeys.has(key),
+        ...(r.heirId ? { heirId: r.heirId } : {}),
       });
     }
     return out;
@@ -285,6 +292,17 @@ export class LeadPhonesService {
       );
     }
     return match.number;
+  }
+
+  /**
+   * The case person this number belongs to on this lead, or null when it is
+   * the lead's own. The lead's own slots win, matching how listForLead
+   * de-dupes a number held by both.
+   */
+  async heirIdForNumber(leadId: string, number: string): Promise<string | null> {
+    const key = numberKey(number);
+    const match = (await this.listForLead(leadId)).find((n) => numberKey(n.number) === key);
+    return match?.heirId ?? null;
   }
 
   /**
@@ -525,14 +543,33 @@ export class LeadPhonesService {
   }
 
   /**
+   * Who a STOP from this number silences, split by whose number it is.
+   *
+   * leadIds are leads where the number is the lead's own (the claimant, the
+   * seller), so the whole lead goes Do Not Contact. heirIds are people on a
+   * surplus case who hold the number: a son texting STOP opts himself out and
+   * leaves the claimant, and everyone else on the case, reachable.
+   */
+  async findOptOutTargets(phone: string): Promise<{ leadIds: string[]; heirIds: string[] }> {
+    const { leadIds, heirs } = await this.phoneHolders(phone);
+    return { leadIds, heirIds: heirs.map((h) => h.id) };
+  }
+
+  /**
    * Every lead reachable on this number. One heir can own several probate
    * properties and one number can sit on several leads, so opt-out has to sweep
    * all of them: a STOP text from any number we hold silences every lead it
    * belongs to, not just the one that happened to be texted.
    */
   async findLeadIdsByPhone(phone: string): Promise<string[]> {
+    const { leadIds, heirs } = await this.phoneHolders(phone);
+    return Array.from(new Set([...leadIds, ...heirs.map((h) => h.leadId).filter(Boolean) as string[]]));
+  }
+
+  /** Leads whose own number this is, and case people who hold it. */
+  private async phoneHolders(phone: string): Promise<{ leadIds: string[]; heirs: { id: string; leadId: string | null }[] }> {
     const ten = numberKey(phone);
-    if (ten.length !== 10) return [];
+    if (ten.length !== 10) return { leadIds: [], heirs: [] };
 
     const leads = await this.prisma.lead.findMany({
       where: {
@@ -545,17 +582,16 @@ export class LeadPhonesService {
       },
       select: { id: true },
     });
-    const heirs = await this.prisma.surplusHeir.findMany({
-      where: { OR: [{ phone1: ten }, { phone2: ten }, { phone3: ten }, { phone4: ten }] },
-      select: { surplusDetail: { select: { leadId: true } } },
-    });
     // A STOP has to reach a lead whose primary is stored formatted too.
     const loose = await this.primaryIdsByDigits(ten);
-    return Array.from(new Set([
-      ...leads.map((l) => l.id),
-      ...loose,
-      ...heirs.map((h) => h.surplusDetail?.leadId).filter(Boolean) as string[],
-    ]));
+    const heirs = await this.prisma.surplusHeir.findMany({
+      where: { OR: [{ phone1: ten }, { phone2: ten }, { phone3: ten }, { phone4: ten }] },
+      select: { id: true, surplusDetail: { select: { leadId: true } } },
+    });
+    return {
+      leadIds: Array.from(new Set([...leads.map((l) => l.id), ...loose])),
+      heirs: heirs.map((h) => ({ id: h.id, leadId: h.surplusDetail?.leadId ?? null })),
+    };
   }
 
   /**

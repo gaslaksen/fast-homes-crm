@@ -6,6 +6,7 @@ import { DNC_STATE, phoneDisplay, fmtDate } from './format';
 import { SURPLUS_PERSON_ROLES, SURPLUS_CONTACT_STATUSES, personRoleLabel } from '@/lib/surplus-people';
 import { rememberSocialTarget, socialSearchLinks, type SocialProfile } from '@/lib/surplus-social';
 import { AddSocialProfile, FindProfilesButton, SocialProfileList } from './SurplusSocial';
+import { PersonDrips } from './SurplusDrips';
 
 /**
  * Who inherited a deceased claimant's interest, and who is safe to ring.
@@ -620,6 +621,14 @@ function HeirRow({
           <span style={{ color: 'var(--faint)' }}>contact updated {fmtDate(h.contactInfoUpdatedAt)}</span>
         )}
       </div>
+
+      {/* This person's own drips, on their own number and email. */}
+      <PersonDrips
+        heirId={h.id}
+        name={h.name}
+        emails={h.emails}
+        blocked={h.deceased ? 'marked deceased' : h.doNotCall ? 'marked do not call' : null}
+      />
 
       <div style={{ display: 'flex', gap: 6, marginTop: 5, flexWrap: 'wrap' }}>
         {/* Offered only while a submission could still tell us something. The

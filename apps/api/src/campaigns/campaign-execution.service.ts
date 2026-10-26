@@ -18,7 +18,16 @@ import {
   parseMailgunRetryAfter,
 } from '../mailer/mailer.service';
 import { brandForLeadSource, businessNameForLead } from '../common/company.constants';
-import { LEAD_EMAILS_SELECT, campaignEmailFor, knownEmails } from './campaign-recipient';
+import { splitOwnerName } from '../foreclosures/foreclosure-scoring.util';
+import {
+  HEIR_CONTACT_SELECT,
+  LEAD_EMAILS_SELECT,
+  campaignEmailFor,
+  heirBlockedReason,
+  heirEmails,
+  heirTextNumber,
+  knownEmails,
+} from './campaign-recipient';
 
 // Instance tag for distinguishing Railway replicas in logs.
 const INSTANCE_TAG = `${os.hostname()}/${process.pid}`;
@@ -64,6 +73,16 @@ interface LeadForTemplate {
   sellerEmail?: string | null;
   /** Decides the brand, and so {{companyName}}. */
   source?: string | null;
+}
+
+/**
+ * Who the message is addressed to when it is not the claimant: a person on a
+ * surplus case. {{firstName}} and {{lastName}} become theirs, and
+ * {{claimantName}} stays the claimant's, so a step written for relatives can
+ * say who it is trying to reach.
+ */
+interface TemplateRecipient {
+  name: string;
 }
 
 // Default campaign templates removed — campaigns are now created and managed
@@ -112,6 +131,7 @@ export class CampaignExecutionService implements OnModuleInit {
           },
         },
         lead: true,
+        heir: { select: { id: true, name: true } },
       },
       take: 50, // cap per run
     });
@@ -193,9 +213,10 @@ export class CampaignExecutionService implements OnModuleInit {
         })
       : null;
 
-    const renderedBody = this.renderTemplate(currentStep.body, lead, org);
+    const recipient: TemplateRecipient | null = enrollment.heir ?? null;
+    const renderedBody = this.renderTemplate(currentStep.body, lead, org, recipient);
     const renderedSubject = currentStep.subject
-      ? this.renderTemplate(currentStep.subject, lead, org)
+      ? this.renderTemplate(currentStep.subject, lead, org, recipient)
       : undefined;
 
     // Run the channel-specific send. This returns a StepOutcome and does NOT
@@ -428,6 +449,37 @@ export class CampaignExecutionService implements OnModuleInit {
     renderedBody: string,
     renderedSubject: string | undefined,
   ): Promise<StepOutcome> {
+    // A person on the case is read fresh, the same way the lead's emails are:
+    // a number removed or a do not call set since enrollment wins.
+    const heir = enrollment.heirId
+      ? await this.prisma.surplusHeir.findUnique({
+          where: { id: enrollment.heirId },
+          select: HEIR_CONTACT_SELECT,
+        })
+      : null;
+    if (enrollment.heirId) {
+      if (!heir) return { kind: 'SKIPPED', reason: `case person ${enrollment.heirId} no longer exists` };
+      const blocked = heirBlockedReason(heir);
+      if (blocked) return { kind: 'SKIPPED', reason: blocked };
+    }
+
+    if (currentStep.channel === 'TEXT' && heir) {
+      const to = heirTextNumber(heir);
+      if (!to) {
+        return { kind: 'SKIPPED', reason: `${heir.name} has no phone number clear to text` };
+      }
+      if (lead.doNotContact) {
+        return { kind: 'SKIPPED', reason: `lead ${lead.id} marked doNotContact` };
+      }
+      const fromNumber = enrollment.campaign?.fromNumber || undefined;
+      return this.sendWithRetry(enrollment, currentStep, async () => {
+        // The person's own number, on the claim's thread. sendMessage checks it
+        // is one this lead holds and refuses a flagged one.
+        await this.messagesService.sendMessage(lead.id, renderedBody, undefined, fromNumber, to);
+        return undefined;
+      });
+    }
+
     if (currentStep.channel === 'TEXT') {
       if (!lead.sellerPhone) {
         return { kind: 'SKIPPED', reason: `lead ${lead.id} has no sellerPhone` };
@@ -463,13 +515,17 @@ export class CampaignExecutionService implements OnModuleInit {
       // The address picked at enrollment while it is still on the lead, else
       // the lead's first email. Read fresh, so an address deleted from the
       // lead since enrollment is never mailed.
-      const emailSource = await this.prisma.lead.findUnique({
-        where: { id: lead.id },
-        select: LEAD_EMAILS_SELECT,
-      });
-      const to = campaignEmailFor(enrollment.toEmail, knownEmails(emailSource));
+      // A person on the case is mailed on their own addresses, never the
+      // claimant's.
+      const emailSource = heir
+        ? null
+        : await this.prisma.lead.findUnique({
+            where: { id: lead.id },
+            select: LEAD_EMAILS_SELECT,
+          });
+      const to = campaignEmailFor(enrollment.toEmail, heir ? heirEmails(heir) : knownEmails(emailSource));
       if (!to) {
-        return { kind: 'SKIPPED', reason: `lead ${lead.id} has no email` };
+        return { kind: 'SKIPPED', reason: heir ? `${heir.name} has no email` : `lead ${lead.id} has no email` };
       }
       const orgId = lead.organizationId;
       if (!orgId) {
@@ -495,7 +551,8 @@ export class CampaignExecutionService implements OnModuleInit {
       const throttle = await this.emailThrottle();
       if (throttle) return throttle;
 
-      const unsubUrl = this.mailerService.buildUnsubscribeUrl(lead.id);
+      // A person's link unsubscribes that person, not the claimant.
+      const unsubUrl = this.mailerService.buildUnsubscribeUrl(lead.id, heir?.id);
       return this.sendWithRetry(enrollment, currentStep, async () => {
         const email = await this.mailerService.sendAsDeals({
           orgId,
@@ -579,6 +636,7 @@ export class CampaignExecutionService implements OnModuleInit {
     body: string,
     lead: LeadForTemplate,
     org?: { name: string } | null,
+    recipient?: TemplateRecipient | null,
   ): string {
     const offerAmount = lead.askingPrice
       ? `$${Math.round(lead.askingPrice).toLocaleString()}`
@@ -592,9 +650,15 @@ export class CampaignExecutionService implements OnModuleInit {
       this.config.get<string>('EMAIL_FROM_NAME') || 'Quick Cash Home Buyers',
     );
 
+    const claimantName = [lead.sellerFirstName, lead.sellerLastName].filter(Boolean).join(' ');
+    const to = recipient
+      ? splitOwnerName(recipient.name)
+      : { firstName: lead.sellerFirstName || '', lastName: lead.sellerLastName || '' };
+
     return body
-      .replace(/\{\{firstName\}\}/g, lead.sellerFirstName || '')
-      .replace(/\{\{lastName\}\}/g, lead.sellerLastName || '')
+      .replace(/\{\{firstName\}\}/g, to.firstName)
+      .replace(/\{\{lastName\}\}/g, to.lastName)
+      .replace(/\{\{claimantName\}\}/g, claimantName)
       .replace(/\{\{propertyAddress\}\}/g, lead.propertyAddress || '')
       .replace(/\{\{city\}\}/g, lead.propertyCity || '')
       .replace(/\{\{state\}\}/g, lead.propertyState || '')

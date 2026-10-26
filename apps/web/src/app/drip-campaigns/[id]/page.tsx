@@ -465,8 +465,16 @@ export default function CampaignDetailPage() {
                           }
                           className="hover:text-blue-600 transition-colors"
                         >
-                          {enrollment.lead?.sellerFirstName} {enrollment.lead?.sellerLastName}
+                          {enrollment.heir
+                            ? enrollment.heir.name
+                            : `${enrollment.lead?.sellerFirstName ?? ''} ${enrollment.lead?.sellerLastName ?? ''}`}
                         </Link>
+                        {/* A person on the case rather than the claimant: say whose case. */}
+                        {enrollment.heir && (
+                          <div className="text-xs font-normal text-gray-500 dark:text-gray-400">
+                            for {enrollment.lead?.sellerFirstName} {enrollment.lead?.sellerLastName}
+                          </div>
+                        )}
                       </td>
                       {/* Where the next message goes, resolved by the API the same
                           way the sender resolves it. */}

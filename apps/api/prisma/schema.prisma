@@ -1876,12 +1876,24 @@ model CampaignEnrollment {
   /// sends fall back to sellerEmail, so a deleted address is never mailed.
   /// Null means sellerEmail.
   toEmail          String?
+  /// The person on a surplus case this enrollment talks to, when it is not
+  /// the claimant: a son, a neighbor, an heir. Null is the claimant, which is
+  /// every enrollment made before people could be enrolled. Their own phone
+  /// and email are used, and {{firstName}} is their name, not the claimant's.
+  heirId           String?
+  heir             SurplusHeir?     @relation(fields: [heirId], references: [id], onDelete: Cascade)
+  /// '' for the claimant, else the heirId. Exists only so the unique key
+  /// below means one enrollment per person per campaign: Postgres treats
+  /// NULLs as distinct, so a unique key on heirId would let the claimant be
+  /// enrolled twice.
+  recipientKey     String           @default("")
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
 
   messageLogs CampaignMessageLog[]
 
-  @@unique([campaignId, leadId])
+  @@unique([campaignId, leadId, recipientKey])
+  @@index([heirId])
   @@map("campaign_enrollments")
 }
 
@@ -2368,6 +2380,12 @@ model SurplusHeir {
   socialProfiles SurplusSocialProfile[]
   /// When the social profile search last ran for this person.
   socialSearchedAt DateTime?
+  /// Drip campaigns this person is enrolled in, apart from the claimant's.
+  campaignEnrollments CampaignEnrollment[]
+  /// When this person's texts last carried the compliance footer. Lead's own
+  /// column is the claimant's, so the first text to a son still says who is
+  /// writing and how to stop it.
+  complianceFooterSentAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

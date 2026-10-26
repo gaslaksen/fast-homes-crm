@@ -51,13 +51,14 @@ export class EmailUnsubscribeController {
   private async processUnsubscribe(
     token: string,
   ): Promise<{ ok: boolean; message: string; brand: Brand }> {
-    const leadId = this.mailerService.verifyUnsubscribeToken(token || '');
-    if (!leadId) {
+    const who = this.mailerService.verifyUnsubscribeToken(token || '');
+    if (!who) {
       this.logger.warn(`Unsubscribe rejected: invalid token`);
       // No lead, so no brand to show: fall back to the default.
       return { ok: false, message: 'Invalid or expired unsubscribe link.', brand: DEFAULT_BRAND };
     }
 
+    const { leadId, heirId } = who;
     const lead = await this.prisma.lead.findUnique({
       where: { id: leadId },
       select: { id: true, sellerEmail: true, source: true },
@@ -70,6 +71,31 @@ export class EmailUnsubscribeController {
     // The page must name the same company the email did, or the seller lands
     // on an unsubscribe confirmation from a business they never heard from.
     const brand = brandForLeadSource(lead.source);
+
+    // A person on a surplus case (a son, a neighbor) unsubscribes themselves.
+    // Their drips end and they are marked do not call; the claimant's
+    // enrollments and the lead are left as they were.
+    if (heirId) {
+      const heir = await this.prisma.surplusHeir.findFirst({
+        where: { id: heirId, surplusDetail: { leadId } },
+        select: { id: true },
+      });
+      if (heir) {
+        await this.prisma.surplusHeir.update({ where: { id: heir.id }, data: { doNotCall: true } });
+        const ended = await this.prisma.campaignEnrollment.updateMany({
+          where: { heirId: heir.id, status: { in: ['ACTIVE', 'PAUSED'] } },
+          data: { status: 'OPTED_OUT' },
+        });
+        this.logger.log(`📭 Unsubscribed case person ${heir.id} on lead ${leadId}: ${ended.count} enrollment(s) opted out`);
+        return {
+          ok: true,
+          message: "You've been unsubscribed. We won't contact you again.",
+          brand,
+        };
+      }
+      // The person was removed from the case since the email went out. Fall
+      // through and honour the click against the lead, the safe direction.
+    }
 
     await this.prisma.lead.update({
       where: { id: leadId },
