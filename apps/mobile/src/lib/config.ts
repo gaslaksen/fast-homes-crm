@@ -14,3 +14,5 @@ export const TOKEN_KEY = 'dealcore.auth_token';
 export const USER_KEY = 'dealcore.auth_user';
 /** Outbound number the dialer presents, chosen in the dialer or Settings. */
 export const CALLER_ID_KEY = 'dealcore.caller_id';
+/** The company Home and Leads show, chosen from the switcher on Home. */
+export const COMPANY_KEY = 'dealcore.company';

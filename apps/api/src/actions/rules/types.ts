@@ -63,6 +63,7 @@ export function snapshotOf(lead: LeadForRules): ActionLeadSnapshot {
     scoreBand: lead.scoreBand,
     status: lead.status,
     primaryPhoto: lead.primaryPhoto,
+    source: lead.source,
   };
 }
 

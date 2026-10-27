@@ -77,6 +77,14 @@ export function ChevronRight({ size, color = '#000' }: IconProps) {
   );
 }
 
+export function ChevronDown({ size, color = '#000' }: IconProps) {
+  return (
+    <Svg {...base(size)} stroke={color}>
+      <Polyline points="6 9 12 15 18 9" />
+    </Svg>
+  );
+}
+
 export function ChevronLeft({ size, color = '#000' }: IconProps) {
   return (
     <Svg {...base(size)} stroke={color}>

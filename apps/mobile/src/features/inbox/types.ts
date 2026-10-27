@@ -15,6 +15,8 @@ export interface InboxThread {
   lastMessageDirection: 'INBOUND' | 'OUTBOUND' | null;
   threadUnread: boolean;
   threadStarred: boolean;
+  /** The lead's pipeline, which says which company the thread belongs to. */
+  source?: string | null;
 }
 
 export interface InboxThreadsResponse {
