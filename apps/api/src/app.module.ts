@@ -39,6 +39,7 @@ import { TaxSalesModule } from './tax-sales/tax-sales.module';
 import { SurplusModule } from './surplus/surplus.module';
 import { DigestModule } from './digest/digest.module';
 import { WebInquiriesModule } from './web-inquiries/web-inquiries.module';
+import { CompaniesModule } from './companies/companies.module';
 
 @Module({
   imports: [
@@ -82,6 +83,7 @@ import { WebInquiriesModule } from './web-inquiries/web-inquiries.module';
     SurplusModule,
     DigestModule,
     WebInquiriesModule,
+    CompaniesModule,
   ],
   // Every route needs a verified token unless it is marked @Public().
   providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }],

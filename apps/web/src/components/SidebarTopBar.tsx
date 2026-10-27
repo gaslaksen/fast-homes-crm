@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useTheme } from 'next-themes';
 import { authAPI } from '@/lib/api';
 import Avatar from '@/components/Avatar';
+import { resetCompanies } from '@/lib/companies';
 
 export default function SidebarTopBar({
   onOpenMobileSidebar,
@@ -38,6 +39,7 @@ export default function SidebarTopBar({
 
   const handleSignOut = () => {
     localStorage.removeItem('auth_token');
+    resetCompanies();
     router.push('/login');
   };
 

@@ -57,6 +57,11 @@ export const authAPI = {
 };
 
 // Leads API
+// The companies the signed-in user can switch between, each with its pipelines.
+export const companiesAPI = {
+  list: () => api.get('/companies'),
+};
+
 export const leadsAPI = {
   list: (params?: any) => api.get('/leads', { params }),
   pipeline: (params?: any) => api.get('/leads/pipeline', { params }),

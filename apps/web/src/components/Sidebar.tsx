@@ -1,11 +1,14 @@
 'use client';
 
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { ReactNode } from 'react';
 import Logo from '@/components/Logo';
+import CompanySwitcher from '@/components/CompanySwitcher';
 import SidebarNavItem from '@/components/SidebarNavItem';
 import SidebarNavSection from '@/components/SidebarNavSection';
 import { useActionBadges } from '@/hooks/useActionBadges';
+import { ModuleKey, useCompanies, useFollowPath } from '@/lib/companies';
 
 const iconClass = 'w-5 h-5';
 const strokeProps = {
@@ -101,10 +104,15 @@ type NavItem = {
   href: string;
   icon: ReactNode;
   badge?: number;
+  /** Shown only while the selected company runs this pipeline. */
+  module?: ModuleKey;
 };
 
 type NavGroup = { label: string; items: NavItem[] };
 
+// Deal Search, Comps and Partners (buyers) are property wholesaling tools,
+// so they go with Property Leads. Inbox, Deals and Drip Campaigns serve every
+// company and always show.
 function buildNavGroups(badges: { needsReply: number; newLeads: number }): NavGroup[] {
   return [
     {
@@ -120,25 +128,25 @@ function buildNavGroups(badges: { needsReply: number; newLeads: number }): NavGr
     {
       label: 'Pipeline',
       items: [
-        { label: 'Property Leads', href: '/leads', icon: ICON.leads, badge: badges.newLeads },
-        { label: 'Foreclosures', href: '/foreclosures', icon: ICON.foreclosure },
-        { label: 'Probate', href: '/probate', icon: ICON.probate },
-        { label: 'Tax Sales', href: '/tax-sales', icon: ICON.taxSale },
-        { label: 'Surplus Funds', href: '/surplus-funds', icon: ICON.surplus },
+        { label: 'Property Leads', href: '/leads', icon: ICON.leads, badge: badges.newLeads, module: 'PROPERTY_LEADS' },
+        { label: 'Foreclosures', href: '/foreclosures', icon: ICON.foreclosure, module: 'FORECLOSURES' },
+        { label: 'Probate', href: '/probate', icon: ICON.probate, module: 'PROBATE' },
+        { label: 'Tax Sales', href: '/tax-sales', icon: ICON.taxSale, module: 'TAX_SALES' },
+        { label: 'Surplus Funds', href: '/surplus-funds', icon: ICON.surplus, module: 'SURPLUS_FUNDS' },
       ],
     },
     {
       label: 'Acquisition',
       items: [
-        { label: 'Deal Search', href: '/deal-search', icon: ICON.dealSearch },
+        { label: 'Deal Search', href: '/deal-search', icon: ICON.dealSearch, module: 'PROPERTY_LEADS' },
         { label: 'Drip Campaigns', href: '/drip-campaigns', icon: ICON.drip },
-        { label: 'Comps & Analysis', href: '/comps-analysis', icon: ICON.comps },
+        { label: 'Comps & Analysis', href: '/comps-analysis', icon: ICON.comps, module: 'PROPERTY_LEADS' },
       ],
     },
     {
       label: 'Network',
       items: [
-        { label: 'Partners', href: '/settings/partners', icon: ICON.partners },
+        { label: 'Partners', href: '/settings/partners', icon: ICON.partners, module: 'PROPERTY_LEADS' },
         { label: 'Team', href: '/settings/team', icon: ICON.team },
       ],
     },
@@ -161,7 +169,11 @@ export default function Sidebar({
   const width = collapsed ? 'md:w-16' : 'md:w-60';
   const mobileTransform = mobileOpen ? 'translate-x-0' : '-translate-x-full';
   const badges = useActionBadges();
-  const navGroups = buildNavGroups(badges);
+  const { shows } = useCompanies();
+  useFollowPath(usePathname());
+  const navGroups = buildNavGroups(badges)
+    .map((g) => ({ ...g, items: g.items.filter((i) => !i.module || shows(i.module)) }))
+    .filter((g) => g.items.length > 0);
 
   return (
     <aside
@@ -185,6 +197,10 @@ export default function Sidebar({
         >
           {collapsed ? <Logo size="sm" showText={false} /> : <Logo size="md" />}
         </Link>
+      </div>
+
+      <div className={collapsed ? 'px-2' : 'px-3'}>
+        <CompanySwitcher variant="sidebar" collapsed={collapsed} />
       </div>
 
       {/* Nav */}
