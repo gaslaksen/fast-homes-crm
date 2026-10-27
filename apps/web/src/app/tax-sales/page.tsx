@@ -812,6 +812,7 @@ export default function TaxSalesPage() {
 
         {openLead && (
           <PipelineWorkPanel
+            leadSource="TAX_SALE"
             onPrev={openIndex > 0 ? () => goTo(openIndex - 1) : null}
             onNext={openIndex >= 0 && openIndex < navRows.length - 1 ? () => goTo(openIndex + 1) : null}
             position={openIndex >= 0 ? { index: openIndex, total: navRows.length } : null}

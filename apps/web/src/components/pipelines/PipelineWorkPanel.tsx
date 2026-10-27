@@ -6,6 +6,7 @@ import MessageComposer, { type EmailAction } from '@/components/communications/M
 import NotesPanel from '@/components/communications/NotesPanel';
 import type { NoteItem, TimelineItem } from '@/components/communications/types';
 import { authAPI, campaignsAPI, leadsAPI } from '@/lib/api';
+import { useCompanies } from '@/lib/companies';
 import ContactEditor from './ContactEditor';
 import { useDialer } from '@/components/dialer/DialerContext';
 import { DNC_STATE, phoneDisplay } from './format';
@@ -94,6 +95,8 @@ interface Props {
   onClose: () => void;
   onChanged: () => void;
   say: (msg: string) => void;
+  /** The pipeline's lead source (FORECLOSURE, PROBATE, TAX_SALE), so the enroll list only offers campaigns that fit. */
+  leadSource?: string;
 }
 
 export default function PipelineWorkPanel({
@@ -112,6 +115,7 @@ export default function PipelineWorkPanel({
   onClose,
   onChanged,
   say,
+  leadSource,
 }: Props) {
   const [tab, setTab] = useState<Tab>('detail');
   const [subjectId, setSubjectId] = useState<string>(subjects[0]?.leadId);
@@ -123,7 +127,10 @@ export default function PipelineWorkPanel({
   });
   const [emailAction, setEmailAction] = useState<EmailAction | null>(null);
   const [composeIntent, setComposeIntent] = useState<any>(null);
-  const [campaigns, setCampaigns] = useState<{ id: string; name: string }[]>([]);
+  const [allCampaigns, setCampaigns] = useState<{ id: string; name: string; brandId?: string | null }[]>([]);
+  // Only campaigns this pipeline's company can send.
+  const { campaignFits } = useCompanies();
+  const campaigns = allCampaigns.filter((c) => campaignFits(c, leadSource));
   const [enrolling, setEnrolling] = useState(false);
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [teamMembers, setTeamMembers] = useState<any[]>([]);

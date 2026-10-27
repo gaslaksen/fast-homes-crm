@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import { agoLabel, agoDays } from '@/components/pipelines/format';
 import { probateAPI, campaignAPI } from '@/lib/api';
+import { useCompanies } from '@/lib/companies';
 import ProbateImportModal from '@/components/probate/ProbateImportModal';
 import {
   ProbateContact,
@@ -175,7 +176,10 @@ export default function ProbatePage() {
   const [view, setView] = useState<PipelineView>('table');
   const [openKey, setOpenKey] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [campaigns, setCampaigns] = useState<{ id: string; name: string }[]>([]);
+  const [allCampaigns, setCampaigns] = useState<{ id: string; name: string; brandId?: string | null }[]>([]);
+  // Only campaigns probate leads can go on.
+  const { campaignFits } = useCompanies();
+  const campaigns = allCampaigns.filter((c) => campaignFits(c, 'PROBATE'));
   const [bulkCampaign, setBulkCampaign] = useState('');
   const [enrolling, setEnrolling] = useState(false);
   const [showImport, setShowImport] = useState(false);
@@ -596,6 +600,7 @@ export default function ProbatePage() {
 
             {openContact && (
               <PipelineWorkPanel
+                leadSource="PROBATE"
                 onPrev={openIndex > 0 ? () => goTo(openIndex - 1) : null}
                 onNext={openIndex >= 0 && openIndex < navRows.length - 1 ? () => goTo(openIndex + 1) : null}
                 position={openIndex >= 0 ? { index: openIndex, total: navRows.length } : null}

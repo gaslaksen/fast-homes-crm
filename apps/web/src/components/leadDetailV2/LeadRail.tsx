@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { format, formatDistanceToNow } from 'date-fns';
 import { leadsAPI, callsAPI, tasksAPI, authAPI, campaignAPI } from '@/lib/api';
+import { useCompanies } from '@/lib/companies';
 import Avatar from '@/components/Avatar';
 import DripEnvelopeIcon from '@/components/icons/DripEnvelopeIcon';
 import LeadQueueNav from '@/components/leadDetailV2/LeadQueueNav';
@@ -124,7 +125,10 @@ export default function LeadRail({ lead, onLeadPatch, onMarkDead, hideNav }: Pro
   const [showShareModal, setShowShareModal] = useState(false);
   const [backHref, setBackHref] = useState('/leads');
   const [enrollments, setEnrollments] = useState<any[]>([]);
-  const [campaigns, setCampaigns] = useState<any[]>([]);
+  const [allCampaigns, setCampaigns] = useState<any[]>([]);
+  // Only campaigns this lead's company can send.
+  const { campaignFits } = useCompanies();
+  const campaigns = allCampaigns.filter((c: any) => campaignFits(c, lead.source));
   const [selectedCampaignId, setSelectedCampaignId] = useState('');
   const [enrolling, setEnrolling] = useState(false);
   const [aiInsight, setAiInsight] = useState<string | null>(lead.aiInsight ?? null);
