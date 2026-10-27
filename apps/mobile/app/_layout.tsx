@@ -11,6 +11,7 @@ import { useNotificationRouting } from '@/features/push/useNotificationRouting';
 import { useBadgeSync } from '@/features/push/useBadgeSync';
 import { ChevronLeft } from '@/components/icons';
 import { CallProvider } from '@/features/calls/CallContext';
+import { CompanyProvider } from '@/features/companies/companies';
 import { ThemeProvider, useColors, useThemeMode } from '@/theme';
 
 /** Redirects between the auth flow and the app shell based on session state. */
@@ -85,10 +86,12 @@ export default function RootLayout() {
       <SafeAreaProvider>
         <QueryClientProvider client={queryClient}>
           <AuthProvider>
-            <CallProvider>
-              <ThemedStatusBar />
-              <AuthGate />
-            </CallProvider>
+            <CompanyProvider>
+              <CallProvider>
+                <ThemedStatusBar />
+                <AuthGate />
+              </CallProvider>
+            </CompanyProvider>
           </AuthProvider>
         </QueryClientProvider>
       </SafeAreaProvider>

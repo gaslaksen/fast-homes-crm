@@ -20,6 +20,8 @@ export interface ActionLeadSnapshot {
   scoreBand: string;
   status: string;
   primaryPhoto: string | null;
+  /** Which pipeline, and so which company, the lead belongs to. */
+  source: string;
 }
 
 export interface ActionItem {

@@ -14,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useThreads } from '@/features/inbox/hooks';
 import type { InboxFilter, InboxThread } from '@/features/inbox/types';
 import { SearchIcon } from '@/components/icons';
+import { useCompany } from '@/features/companies/companies';
 import { useThemed, type Colors } from '@/theme';
 
 function fullName(t: InboxThread) {
@@ -31,6 +32,13 @@ function timeAgo(iso: string | null) {
   return `${Math.floor(h / 24)}d`;
 }
 
+// The inbox holds every company's threads, so each row says whose it is.
+// D.I.G. Deeper gets a warm tint so a surplus claimant stands out, as on web.
+const COMPANY_TAG: Record<string, { bg: string; fg: string }> = {
+  digdeeper: { bg: '#FEF3C7', fg: '#92400E' },
+};
+const DEFAULT_TAG = { bg: '#F3F4F6', fg: '#4B5563' };
+
 const FILTERS: { key: InboxFilter; label: string }[] = [
   { key: 'all', label: 'All' },
   { key: 'unread', label: 'Unread' },
@@ -38,6 +46,7 @@ const FILTERS: { key: InboxFilter; label: string }[] = [
 
 export default function InboxScreen() {
   const router = useRouter();
+  const company = useCompany();
   const { colors, styles } = useThemed(makeStyles);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<InboxFilter>('all');
@@ -138,6 +147,18 @@ export default function InboxScreen() {
                 <Text style={[styles.name, item.threadUnread && styles.unreadText]} numberOfLines={1}>
                   {fullName(item)}
                 </Text>
+                {(() => {
+                  const c = company.canSwitch ? company.companyForSource(item.source) : null;
+                  if (!c) return null;
+                  const tint = COMPANY_TAG[c.key] || DEFAULT_TAG;
+                  return (
+                    <View style={[styles.tag, { backgroundColor: tint.bg }]}>
+                      <Text style={[styles.tagText, { color: tint.fg }]} numberOfLines={1}>
+                        {c.name}
+                      </Text>
+                    </View>
+                  );
+                })()}
                 <Text style={styles.time}>{timeAgo(item.lastMessageAt)}</Text>
               </View>
               <Text
@@ -217,6 +238,8 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
   rowTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   name: { fontSize: 16, fontWeight: '600', color: colors.text, flex: 1 },
   time: { fontSize: 13, color: colors.textMuted, marginLeft: 8 },
+  tag: { marginLeft: 8, paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4, maxWidth: 130 },
+  tagText: { fontSize: 11, fontWeight: '600' },
   preview: { fontSize: 14, color: colors.textSecondary, marginTop: 2 },
   unreadText: { color: colors.text, fontWeight: '700' },
   unreadDot: {

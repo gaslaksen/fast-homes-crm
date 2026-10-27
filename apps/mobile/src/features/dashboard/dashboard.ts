@@ -12,6 +12,8 @@ export interface ActionLead {
   scoreBand: string | null;
   status: string;
   primaryPhoto: string | null;
+  /** The lead's pipeline, which says which company the action is for. */
+  source?: string | null;
 }
 
 export interface ActionItem {

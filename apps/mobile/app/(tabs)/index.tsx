@@ -23,11 +23,13 @@ import {
 import { useSurplusStats } from '@/features/surplus/surplus';
 import { bandStyle, fullName, useSetScoreBand, BAND_OPTIONS } from '@/features/leads/leads';
 import { useAuth } from '@/lib/auth';
+import { moduleForSource, useCompany } from '@/features/companies/companies';
 import { Logo } from '@/components/Logo';
 import { Card, SectionLabel, Chip } from '@/components/ui';
 import {
   BellIcon,
   SettingsIcon,
+  ChevronDown,
   ChevronRight,
   ZapIcon,
   TrendingUpIcon,
@@ -120,8 +122,10 @@ export default function HomeScreen() {
   const { colors, styles } = useThemed(makeStyles);
   const router = useRouter();
   const { user } = useAuth();
+  const company = useCompany();
   const surplus = useSurplusStats();
-  const actions = useActionQueue(6);
+  // Pull more than the card shows, so filtering to one company still fills it.
+  const actions = useActionQueue(24);
   const hot = useHotLeads(5);
   const dismissHot = useDismissHotLead();
   const setBand = useSetScoreBand();
@@ -132,6 +136,30 @@ export default function HomeScreen() {
     actions.refetch();
     hot.refetch();
   };
+
+  // Home shows the selected company's work: the surplus cards for D.I.G.
+  // Deeper, hot leads for Quick Cash, and each one's own to-dos. With no
+  // company loaded it shows everything, as before.
+  const showSurplus = company.shows('SURPLUS_FUNDS');
+  const showHot = company.shows('PROPERTY_LEADS');
+  const doNext = (actions.data ?? [])
+    .filter((it) => !company.current || it.lead?.source == null || company.shows(moduleForSource(it.lead.source)))
+    .slice(0, 6);
+
+  function chooseCompany() {
+    const names = company.companies.map((c) => c.name);
+    ActionSheetIOS.showActionSheetWithOptions(
+      {
+        title: 'Switch company',
+        options: [...names, 'Cancel'],
+        cancelButtonIndex: names.length,
+      },
+      (i) => {
+        if (i == null || i >= names.length) return;
+        company.select(company.companies[i].key);
+      },
+    );
+  }
 
   // Surplus funds is the main pipeline, so its working lists lead. Counts are
   // properties, as on the web board; the list they open shows each claimant.
@@ -191,17 +219,27 @@ export default function HomeScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       <View style={styles.topbar}>
-        <View style={styles.org}>
+        <TouchableOpacity
+          style={styles.org}
+          onPress={chooseCompany}
+          disabled={!company.canSwitch}
+          activeOpacity={0.7}
+          accessibilityRole={company.canSwitch ? 'button' : undefined}
+          accessibilityLabel={company.canSwitch ? `Company: ${company.current?.name}. Switch company` : undefined}
+        >
           <Logo size={34} />
           <View style={styles.orgText}>
-            <Text style={styles.orgName} numberOfLines={1}>
-              {user?.organization?.name || 'Dealcore'}
-            </Text>
+            <View style={styles.orgNameRow}>
+              <Text style={styles.orgName} numberOfLines={1}>
+                {company.current?.name || user?.organization?.name || 'Dealcore'}
+              </Text>
+              {company.canSwitch ? <ChevronDown size={16} color={colors.textSecondary} /> : null}
+            </View>
             <Text style={styles.orgSub} numberOfLines={1}>
               {[user?.firstName, user?.lastName].filter(Boolean).join(' ')}
             </Text>
           </View>
-        </View>
+        </TouchableOpacity>
         <View style={styles.topActions}>
           <TouchableOpacity
             hitSlop={8}
@@ -221,48 +259,52 @@ export default function HomeScreen() {
       >
         <Text style={styles.welcome}>Welcome, {user?.firstName || 'there'}</Text>
 
-        <SectionLabel>Surplus funds</SectionLabel>
-        <View style={styles.statGrid}>
-          <StatCard
-            label="Call now"
-            value={count(s?.queues?.call)}
-            Icon={PhoneIcon}
-            iconColor="#047857"
-            iconBg="#D1FAE5"
-            onPress={() => openSurplus({ queue: 'call' })}
-          />
-          <StatCard
-            label="Not tapped"
-            value={count(s?.notTapped)}
-            Icon={ZapIcon}
-            iconColor="#A16207"
-            iconBg="#FEF9C3"
-            onPress={() => openSurplus({ contact: 'not_tapped' })}
-          />
-          <StatCard
-            label="Letters due"
-            value={count(s?.letterDue)}
-            Icon={MessageIcon}
-            iconColor={colors.primary}
-            iconBg={colors.primarySoft}
-            onPress={() => openSurplus({ letterDue: 'true' })}
-          />
-          <StatCard
-            label="Net in pipeline"
-            value={s ? moneyShort(s.netInPipeline) : '-'}
-            Icon={TrendingUpIcon}
-            iconColor="#15803D"
-            iconBg="#DCFCE7"
-            onPress={() => openSurplus({})}
-          />
-        </View>
+        {showSurplus ? (
+          <>
+            <SectionLabel>Surplus funds</SectionLabel>
+            <View style={styles.statGrid}>
+              <StatCard
+                label="Call now"
+                value={count(s?.queues?.call)}
+                Icon={PhoneIcon}
+                iconColor="#047857"
+                iconBg="#D1FAE5"
+                onPress={() => openSurplus({ queue: 'call' })}
+              />
+              <StatCard
+                label="Not tapped"
+                value={count(s?.notTapped)}
+                Icon={ZapIcon}
+                iconColor="#A16207"
+                iconBg="#FEF9C3"
+                onPress={() => openSurplus({ contact: 'not_tapped' })}
+              />
+              <StatCard
+                label="Letters due"
+                value={count(s?.letterDue)}
+                Icon={MessageIcon}
+                iconColor={colors.primary}
+                iconBg={colors.primarySoft}
+                onPress={() => openSurplus({ letterDue: 'true' })}
+              />
+              <StatCard
+                label="Net in pipeline"
+                value={s ? moneyShort(s.netInPipeline) : '-'}
+                Icon={TrendingUpIcon}
+                iconColor="#15803D"
+                iconBg="#DCFCE7"
+                onPress={() => openSurplus({})}
+              />
+            </View>
+          </>
+        ) : null}
 
         <SectionLabel>Do next</SectionLabel>
         <Card style={styles.listCard}>
           {actions.isLoading ? (
             <ActivityIndicator style={styles.pad} />
-          ) : actions.data?.length ? (
-            actions.data.map((it: ActionItem, i: number) => (
+          ) : doNext.length ? (
+            doNext.map((it: ActionItem, i: number) => (
               <View key={it.actionKey}>
                 {i > 0 ? <View style={styles.divider} /> : null}
                 <ActionRow item={it} onPress={() => openAction(it)} />
@@ -273,25 +315,29 @@ export default function HomeScreen() {
           )}
         </Card>
 
-        <SectionLabel>Hot leads</SectionLabel>
-        <Card style={styles.listCard}>
-          {hot.isLoading ? (
-            <ActivityIndicator style={styles.pad} />
-          ) : hot.data?.length ? (
-            hot.data.map((l: HotLead, i: number) => (
-              <View key={l.id}>
-                {i > 0 ? <View style={styles.divider} /> : null}
-                <HotLeadRow
-                  lead={l}
-                  onPress={() => router.push({ pathname: '/lead/detail/[id]', params: { id: l.id } })}
-                  onLongPress={() => openHotLeadActions(l)}
-                />
-              </View>
-            ))
-          ) : (
-            <Text style={styles.empty}>No hot leads right now.</Text>
-          )}
-        </Card>
+        {showHot ? (
+          <>
+            <SectionLabel>Hot leads</SectionLabel>
+            <Card style={styles.listCard}>
+              {hot.isLoading ? (
+                <ActivityIndicator style={styles.pad} />
+              ) : hot.data?.length ? (
+                hot.data.map((l: HotLead, i: number) => (
+                  <View key={l.id}>
+                    {i > 0 ? <View style={styles.divider} /> : null}
+                    <HotLeadRow
+                      lead={l}
+                      onPress={() => router.push({ pathname: '/lead/detail/[id]', params: { id: l.id } })}
+                      onLongPress={() => openHotLeadActions(l)}
+                    />
+                  </View>
+                ))
+              ) : (
+                <Text style={styles.empty}>No hot leads right now.</Text>
+              )}
+            </Card>
+          </>
+        ) : null}
       </ScrollView>
     </SafeAreaView>
   );
@@ -312,7 +358,8 @@ const makeStyles = (colors: Colors) => StyleSheet.create({
   },
   org: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
   orgText: { flex: 1 },
-  orgName: { fontSize: 16, fontWeight: '700', color: colors.text },
+  orgNameRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  orgName: { fontSize: 16, fontWeight: '700', color: colors.text, flexShrink: 1 },
   orgSub: { fontSize: 12, color: colors.textSecondary },
   topActions: { flexDirection: 'row', alignItems: 'center', gap: 18 },
 

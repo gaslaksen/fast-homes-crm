@@ -22,6 +22,7 @@ import {
 } from '@/features/leads/leads';
 import { Chip } from '@/components/ui';
 import { SurplusList } from '@/features/surplus/SurplusList';
+import { useCompany } from '@/features/companies/companies';
 import { SearchIcon, ChevronRight } from '@/components/icons';
 import { useThemed, type Colors } from '@/theme';
 
@@ -59,40 +60,62 @@ type LeadsParams = {
 };
 
 /**
- * Surplus claims are the main work now, so the tab opens on them. Property
- * leads (PPL, PPC, foreclosure, probate) are one tap away and unchanged.
+ * The selected company's leads: surplus claims for D.I.G. Deeper, property
+ * leads (PPL, PPC, foreclosure, probate) for Quick Cash. The toggle between
+ * the two only shows when one company runs both, or before companies load.
  */
 export default function LeadsScreen() {
   const { styles } = useThemed(makeStyles);
   const params = useLocalSearchParams<LeadsParams>();
+  const company = useCompany();
   const [mode, setMode] = useState<Mode>('surplus');
 
+  const showsProperty =
+    company.shows('PROPERTY_LEADS') ||
+    company.shows('FORECLOSURES') ||
+    company.shows('PROBATE') ||
+    company.shows('TAX_SALES');
+  const modes: Mode[] = [
+    ...(company.shows('SURPLUS_FUNDS') ? (['surplus'] as Mode[]) : []),
+    ...(showsProperty ? (['property'] as Mode[]) : []),
+  ];
+
   // A link from Home says which list it means. Property filters imply the
-  // property list even without an explicit mode.
+  // property list even without an explicit mode. A link to the other
+  // company's list switches company rather than showing an empty tab.
   useEffect(() => {
     if (params.mode === 'property' || params.band || params.needsReply || params.source) {
       setMode('property');
+      company.follow('PROPERTY_LEADS');
     } else if (params.mode === 'surplus') {
       setMode('surplus');
+      company.follow('SURPLUS_FUNDS');
     }
   }, [params.mode, params.band, params.needsReply, params.source, params.t]);
 
+  // Switching company on Home moves the tab onto that company's list.
+  useEffect(() => {
+    if (modes.length && !modes.includes(mode)) setMode(modes[0]);
+  }, [modes.join(), mode]);
+
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
-      <View style={styles.segment}>
-        {(['surplus', 'property'] as Mode[]).map((m) => (
-          <TouchableOpacity
-            key={m}
-            style={[styles.segmentBtn, mode === m && styles.segmentOn]}
-            onPress={() => setMode(m)}
-            activeOpacity={0.8}
-          >
-            <Text style={[styles.segmentText, mode === m && styles.segmentTextOn]}>
-              {m === 'surplus' ? 'Surplus funds' : 'Property leads'}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
+      {modes.length > 1 ? (
+        <View style={styles.segment}>
+          {modes.map((m) => (
+            <TouchableOpacity
+              key={m}
+              style={[styles.segmentBtn, mode === m && styles.segmentOn]}
+              onPress={() => setMode(m)}
+              activeOpacity={0.8}
+            >
+              <Text style={[styles.segmentText, mode === m && styles.segmentTextOn]}>
+                {m === 'surplus' ? 'Surplus funds' : 'Property leads'}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      ) : null}
       {mode === 'surplus' ? (
         <>
           {/* New leads are property leads; surplus claims come from the county poll. */}
