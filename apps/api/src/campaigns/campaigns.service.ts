@@ -67,11 +67,40 @@ export class CampaignsService {
     return brand.id;
   }
 
+  /**
+   * The campaign fields the builder edits. The request body is otherwise
+   * taken as sent, and the edit page posts the whole campaign back, so
+   * anything else in it (the account, timestamps, counts, the id) is
+   * dropped here rather than written.
+   */
+  private editableFields(dto: Partial<CreateCampaignDto>) {
+    return {
+      ...(dto.name !== undefined && { name: dto.name }),
+      ...(dto.description !== undefined && { description: dto.description }),
+      ...(dto.triggerDays !== undefined && { triggerDays: dto.triggerDays }),
+      ...(dto.enrollmentMode !== undefined && { enrollmentMode: dto.enrollmentMode }),
+      ...(dto.isActive !== undefined && { isActive: dto.isActive }),
+    };
+  }
+
+  /**
+   * The campaign, when it belongs to this account. Every write by id goes
+   * through here so one account cannot change another's campaign. A request
+   * with no account matches nothing.
+   */
+  private async findOwned(id: string, organizationId?: string) {
+    const campaign = organizationId
+      ? await this.prisma.campaign.findFirst({ where: { id, organizationId }, select: { id: true } })
+      : null;
+    if (!campaign) throw new NotFoundException('Campaign not found');
+    return campaign;
+  }
+
   async createCampaign(dto: CreateCampaignDto, organizationId?: string) {
-    const { steps = [], ...rest } = dto;
-    const fromNumber = this.normalizeFromNumber(rest.fromNumber);
-    const brandId = await this.checkBrand(rest.brandId, organizationId);
-    const campaignData = { ...rest, fromNumber: fromNumber ?? null, brandId };
+    const steps = dto.steps ?? [];
+    const fromNumber = this.normalizeFromNumber(dto.fromNumber);
+    const brandId = await this.checkBrand(dto.brandId, organizationId);
+    const campaignData = { ...this.editableFields(dto), name: dto.name, fromNumber: fromNumber ?? null, brandId };
     return this.prisma.$transaction(async (tx) => {
       const campaign = await tx.campaign.create({
         data: {
@@ -97,11 +126,18 @@ export class CampaignsService {
     });
   }
 
-  async updateCampaign(id: string, dto: Partial<CreateCampaignDto>) {
-    const { steps, ...rest } = dto;
-    const fromNumber = this.normalizeFromNumber(rest.fromNumber);
-    const campaignData =
-      fromNumber === undefined ? rest : { ...rest, fromNumber };
+  async updateCampaign(id: string, dto: Partial<CreateCampaignDto>, organizationId?: string) {
+    await this.findOwned(id, organizationId);
+    const { steps } = dto;
+    const fromNumber = this.normalizeFromNumber(dto.fromNumber);
+    // Absent leaves the company alone; null clears it.
+    const brandId =
+      dto.brandId === undefined ? undefined : await this.checkBrand(dto.brandId, organizationId);
+    const campaignData = {
+      ...this.editableFields(dto),
+      ...(fromNumber !== undefined && { fromNumber }),
+      ...(brandId !== undefined && { brandId }),
+    };
     return this.prisma.$transaction(async (tx) => {
       const campaign = await tx.campaign.update({
         where: { id },
@@ -161,12 +197,14 @@ export class CampaignsService {
     });
   }
 
-  async deleteCampaign(id: string) {
+  async deleteCampaign(id: string, organizationId?: string) {
+    await this.findOwned(id, organizationId);
     await this.prisma.campaign.delete({ where: { id } });
     return { success: true };
   }
 
-  async duplicateCampaign(id: string) {
+  async duplicateCampaign(id: string, organizationId?: string) {
+    await this.findOwned(id, organizationId);
     const original = await this.prisma.campaign.findUnique({
       where: { id },
       include: { steps: { orderBy: { stepOrder: 'asc' } } },
@@ -192,7 +230,8 @@ export class CampaignsService {
     });
   }
 
-  async toggleCampaign(id: string, isActive: boolean) {
+  async toggleCampaign(id: string, isActive: boolean, organizationId?: string) {
+    await this.findOwned(id, organizationId);
     return this.prisma.campaign.update({
       where: { id },
       data: { isActive },
