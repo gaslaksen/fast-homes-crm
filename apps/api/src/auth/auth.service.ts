@@ -87,6 +87,13 @@ export class AuthService {
     const existing = await this.prisma.user.findUnique({ where: { email: data.email.toLowerCase().trim() } });
     if (existing) throw new Error('Email already registered');
 
+    // A new teammate sees every company in the account, the same as everyone
+    // who was here before companies existed.
+    const brands = await this.prisma.brand.findMany({
+      where: { organizationId: data.organizationId },
+      select: { id: true },
+    });
+
     const hashedPassword = await bcrypt.hash(data.tempPassword, 10);
     const user = await this.prisma.user.create({
       data: {
@@ -96,6 +103,7 @@ export class AuthService {
         lastName: data.lastName,
         role: data.role || 'AGENT',
         organizationId: data.organizationId,
+        brands: { create: brands.map((b) => ({ brandId: b.id })) },
       },
       include: { organization: true },
     });

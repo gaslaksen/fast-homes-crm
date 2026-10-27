@@ -20,8 +20,85 @@ model Organization {
   leads         Lead[]
   orgGmailToken OrgGmailToken?
   savedSearches SavedSearch[]
+  brands        Brand[]
+  brandModules  BrandModule[]
 
   @@map("organizations")
+}
+
+/// A company the account does business as, e.g. Quick Cash Home Buyers or
+/// D.I.G. Deeper LLC. Screens call it a Company; the table keeps "brands".
+///
+/// `key` matches BrandKey in common/company.constants.ts, which stays the code
+/// fallback until sends read from this table. Sending config (Mailgun domain,
+/// Messaging Service) is still env and is not copied here yet.
+model Brand {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  key            String // 'qchb' | 'digdeeper'
+  /// As filed with the state, e.g. "D.I.G. Deeper LLC".
+  legalName      String
+  /// The spoken name, e.g. "D.I.G. Deeper". Null uses legalName.
+  shortName      String?
+  phone          String? // display form, "(904) 595-9620"
+  phoneE164      String?
+  website        String?
+  websiteUrl     String?
+  address        String?
+  /// A person's sends end with name, company, website and phone.
+  signOff        Boolean      @default(false)
+  active         Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  modules      BrandModule[]
+  users        UserBrand[]
+  phoneNumbers PhoneNumber[]
+  campaigns    Campaign[]
+
+  @@unique([organizationId, key])
+  @@map("brands")
+}
+
+/// The pipelines a company can have. A lead's module follows from its source:
+/// SURPLUS is SURPLUS_FUNDS, FORECLOSURE, PROBATE and TAX_SALE have their own,
+/// and every other source is PROPERTY_LEADS.
+enum ModuleKey {
+  PROPERTY_LEADS
+  FORECLOSURES
+  PROBATE
+  TAX_SALES
+  SURPLUS_FUNDS
+}
+
+/// Which company runs which module in an account. One company per module, so
+/// a lead's company is found from its source with no column on the lead.
+model BrandModule {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  brandId        String
+  brand          Brand        @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  module         ModuleKey
+  createdAt      DateTime     @default(now())
+
+  @@unique([organizationId, module])
+  @@index([brandId])
+  @@map("brand_modules")
+}
+
+/// Which companies a user can see. One login, any number of companies.
+model UserBrand {
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  brandId   String
+  brand     Brand    @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([userId, brandId])
+  @@index([brandId])
+  @@map("user_brands")
 }
 
 model User {
@@ -52,6 +129,7 @@ model User {
   savedSearches SavedSearch[]
   aiCompCurations AiCompCuration[]
   pushDevices   PushDevice[]
+  brands          UserBrand[]
 
   @@map("users")
 }
@@ -1825,12 +1903,16 @@ model Campaign {
   /// used on the lead's thread, else the org default. Validated against the
   /// active SMS numbers at send time, never trusted as stored.
   fromNumber     String?
+  /// The company this campaign sends as. Null means not yet assigned.
+  brandId        String?
+  brand          Brand?   @relation(fields: [brandId], references: [id], onDelete: SetNull)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
   steps       CampaignStep[]
   enrollments CampaignEnrollment[]
 
+  @@index([brandId])
   @@map("campaigns")
 }
 
@@ -2030,10 +2112,15 @@ model PhoneNumber {
   isDefault    Boolean  @default(false)
   active       Boolean  @default(true)   // false hides it without losing history
   sortOrder    Int      @default(0)
+  /// The company this number belongs to. Null means not yet assigned, and
+  /// sending still decides from the number itself (brandForNumber).
+  brandId      String?
+  brand        Brand?   @relation(fields: [brandId], references: [id], onDelete: SetNull)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
   @@index([active, sortOrder])
+  @@index([brandId])
   @@map("phone_numbers")
 }
 
