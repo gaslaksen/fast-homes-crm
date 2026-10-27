@@ -22,6 +22,7 @@ import StageColumn from './StageColumn';
 import BulkActionBar from './BulkActionBar';
 import CardContextMenu from './CardContextMenu';
 import type { Density, KanbanLead, LeadsByStage } from './types';
+import { useCompanies } from '@/lib/companies';
 
 export default function KanbanV2Board() {
   const params = useSearchParams();
@@ -72,7 +73,10 @@ export default function KanbanV2Board() {
   const [data, setData] = useState<LeadsByStage>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [campaigns, setCampaigns] = useState<{ id: string; name: string }[]>([]);
+  const [allCampaigns, setCampaigns] = useState<{ id: string; name: string; brandId?: string | null }[]>([]);
+  // The board is property leads, so only campaigns they can go on.
+  const { campaignFits } = useCompanies();
+  const campaigns = allCampaigns.filter((c) => campaignFits(c, 'PROPERTY_LEADS'));
 
   // Selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -97,7 +101,7 @@ export default function KanbanV2Board() {
       const { data: res } = await campaignsAPI.list();
       const arr = Array.isArray(res) ? res : res?.campaigns || [];
       setCampaigns(
-        arr.map((c: any) => ({ id: c.id, name: c.name })).filter((c: any) => c.id && c.name),
+        arr.map((c: any) => ({ id: c.id, name: c.name, brandId: c.brandId ?? null })).filter((c: any) => c.id && c.name),
       );
     } catch {
       setCampaigns([]);

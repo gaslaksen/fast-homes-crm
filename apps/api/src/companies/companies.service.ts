@@ -11,6 +11,26 @@ export interface CompanyView {
   modules: ModuleKey[];
 }
 
+/**
+ * A lead's pipeline, from its source. Same rule as PIPELINE_SOURCES in
+ * leads.service.ts: the four distress sources have their own board, and every
+ * other source is a property lead. The web and mobile apps carry a copy.
+ */
+export function moduleForSource(source?: string | null): ModuleKey {
+  switch (source) {
+    case 'SURPLUS':
+      return 'SURPLUS_FUNDS';
+    case 'FORECLOSURE':
+      return 'FORECLOSURES';
+    case 'PROBATE':
+      return 'PROBATE';
+    case 'TAX_SALE':
+      return 'TAX_SALES';
+    default:
+      return 'PROPERTY_LEADS';
+  }
+}
+
 /** The order the pipelines appear in the menu. */
 const MODULE_ORDER: ModuleKey[] = [
   'PROPERTY_LEADS',

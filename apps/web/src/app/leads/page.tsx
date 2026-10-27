@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useSearchParams, useRouter, usePathname } from 'next/navigation';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 import { leadsAPI, authAPI, pipelineAPI, campaignAPI } from '@/lib/api';
+import { useCompanies } from '@/lib/companies';
 import PropertyPhoto from '@/components/PropertyPhoto';
 import { formatPhoneDisplay, getLeadDisplayName } from '@/lib/format';
 import Avatar from '@/components/Avatar';
@@ -324,7 +325,10 @@ function LeadsPageInner() {
   const [bulkStatus,    setBulkStatus]    = useState('');
   const [bulkSource,    setBulkSource]    = useState('');
   const [bulkCampaign,  setBulkCampaign]  = useState('');
-  const [campaigns,     setCampaigns]     = useState<{ id: string; name: string }[]>([]);
+  const [allCampaigns,  setCampaigns]     = useState<{ id: string; name: string; brandId?: string | null }[]>([]);
+  // Only campaigns property leads can go on.
+  const { campaignFits } = useCompanies();
+  const campaigns = allCampaigns.filter(c => campaignFits(c, 'PROPERTY_LEADS'));
   const [enrolling,     setEnrolling]     = useState(false);
   const [showFilters,   setShowFilters]   = useState(() => {
     // Auto-show filters panel if any filter param is present in URL

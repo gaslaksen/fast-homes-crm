@@ -28,6 +28,12 @@ interface CampaignData {
   isActive: boolean;
   /** E.164 number TEXT steps send from. Empty string means the org default. */
   fromNumber: string;
+  /**
+   * The company the campaign belongs to; only that company's leads can be
+   * enrolled. Null means no company. Undefined on a new campaign means the
+   * company selected in the switcher.
+   */
+  brandId?: string | null;
   steps: Step[];
 }
 
@@ -565,7 +571,7 @@ function AiSequenceModal({
 
 export default function CampaignBuilder({ initial, onSave }: CampaignBuilderProps) {
   const router = useRouter();
-  const { current } = useCompanies();
+  const { current, companies, canSwitch } = useCompanies();
   const [campaign, setCampaign] = useState<CampaignData>(
     initial || {
       name: 'New Campaign',
@@ -577,6 +583,8 @@ export default function CampaignBuilder({ initial, onSave }: CampaignBuilderProp
       steps: [],
     },
   );
+  // A new campaign starts on the company selected in the switcher.
+  const brandId = campaign.brandId !== undefined ? campaign.brandId : campaign.id ? null : current?.id ?? null;
   const [editingStepIdx, setEditingStepIdx] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [showAiModal, setShowAiModal] = useState(false);
@@ -639,6 +647,7 @@ export default function CampaignBuilder({ initial, onSave }: CampaignBuilderProp
     try {
       const payload = {
         ...campaign,
+        brandId,
         steps: campaign.steps.map((s) => ({
           ...s,
           subject: s.channel === 'EMAIL' ? s.subject : undefined,
@@ -660,8 +669,7 @@ export default function CampaignBuilder({ initial, onSave }: CampaignBuilderProp
           );
         }
       } else {
-        // A new campaign belongs to the company selected while making it.
-        await campaignAPI.create({ ...payload, brandId: current?.id ?? null });
+        await campaignAPI.create(payload);
       }
 
       router.push('/drip-campaigns');
@@ -755,6 +763,30 @@ export default function CampaignBuilder({ initial, onSave }: CampaignBuilderProp
               : 'Leads are automatically enrolled when they first reply'}
           </p>
         </div>
+        {canSwitch && (
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              Company
+            </label>
+            <select
+              value={brandId ?? ''}
+              onChange={(e) => setCampaign((c) => ({ ...c, brandId: e.target.value || null }))}
+              className="w-full sm:w-80 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-sm dark:bg-gray-800 dark:text-gray-100"
+            >
+              {companies.map((co) => (
+                <option key={co.id} value={co.id}>
+                  {co.name}
+                </option>
+              ))}
+              <option value="">No company</option>
+            </select>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              {brandId
+                ? `Only ${companies.find((co) => co.id === brandId)?.name ?? 'this company'} leads can be enrolled.`
+                : 'Any lead can be enrolled, and the campaign shows under every company.'}
+            </p>
+          </div>
+        )}
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
             Send texts from

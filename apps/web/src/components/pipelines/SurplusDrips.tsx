@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { campaignsAPI } from '@/lib/api';
+import { useCompanies } from '@/lib/companies';
 import { fmtDate } from './format';
 
 /**
@@ -21,6 +22,8 @@ export interface DripCampaign {
   id: string;
   name: string;
   isActive?: boolean;
+  /** The company it sends as; null until one is assigned. */
+  brandId?: string | null;
   steps?: { channel: string }[];
 }
 
@@ -56,8 +59,12 @@ export const SurplusDripProvider = DripContext.Provider;
  * change without reopening the panel.
  */
 export function useSurplusDrips(leadId: string, refreshKey: unknown, say: (msg: string) => void): DripState {
-  const [campaigns, setCampaigns] = useState<DripCampaign[]>([]);
+  const [allCampaigns, setCampaigns] = useState<DripCampaign[]>([]);
   const [enrollments, setEnrollments] = useState<DripEnrollment[]>([]);
+  // Only campaigns a surplus claimant can go on: D.I.G. Deeper's, or ones
+  // with no company yet.
+  const { campaignFits } = useCompanies();
+  const campaigns = allCampaigns.filter((c) => campaignFits(c, 'SURPLUS'));
 
   useEffect(() => {
     campaignsAPI

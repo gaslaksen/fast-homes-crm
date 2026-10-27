@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CampaignExecutionService } from './campaign-execution.service';
+import { moduleForSource } from '../companies/companies.service';
 import {
   HEIR_CONTACT_SELECT,
   HeirContact,
@@ -52,6 +53,32 @@ export class CampaignEnrollmentService {
    * each person holds their own enrollment, so the son can be on the same
    * campaign as the claimant without either one replacing the other.
    */
+  /**
+   * A campaign that belongs to a company only takes that company's leads. A
+   * lead always sends as its own company (its number, name and sign-off), so
+   * a surplus claimant on a Quick Cash campaign would get "we buy houses"
+   * wording from D.I.G. Deeper's number. A campaign with no company, or an
+   * account with no companies set up, is not checked.
+   */
+  private async checkSameCompany(
+    campaign: { name: string; brandId: string | null; brand?: { legalName: string; shortName: string | null } | null },
+    lead: { source: string; organizationId: string | null },
+  ) {
+    if (!campaign.brandId || !lead.organizationId) return;
+    const runs = await this.prisma.brandModule.findUnique({
+      where: {
+        organizationId_module: { organizationId: lead.organizationId, module: moduleForSource(lead.source) },
+      },
+      select: { brandId: true, brand: { select: { legalName: true, shortName: true } } },
+    });
+    if (!runs || runs.brandId === campaign.brandId) return;
+    const name = (b?: { legalName: string; shortName: string | null } | null) =>
+      b ? b.shortName || b.legalName : 'another company';
+    throw new BadRequestException(
+      `This is a ${name(runs.brand)} lead, and "${campaign.name}" is a ${name(campaign.brand)} campaign.`,
+    );
+  }
+
   async enrollLead(
     leadId: string,
     campaignId: string,
@@ -60,7 +87,10 @@ export class CampaignEnrollmentService {
     // Get campaign with its first step
     const campaign = await this.prisma.campaign.findUnique({
       where: { id: campaignId },
-      include: { steps: { orderBy: { stepOrder: 'asc' } } },
+      include: {
+        steps: { orderBy: { stepOrder: 'asc' } },
+        brand: { select: { legalName: true, shortName: true } },
+      },
     });
     if (!campaign) throw new NotFoundException('Campaign not found');
 
@@ -74,10 +104,13 @@ export class CampaignEnrollmentService {
         id: true,
         sellerPhone: true,
         doNotContact: true,
+        source: true,
+        organizationId: true,
         ...LEAD_EMAILS_SELECT,
       },
     });
     if (!lead) throw new NotFoundException('Lead not found');
+    await this.checkSameCompany(campaign, lead);
     // Surplus claimants are enrolled like any other lead when a person picks
     // the campaign. Nothing enrolls them automatically: ingestion skips the
     // outreach scheduler and autoEnrollInDefaults leaves them out, so the

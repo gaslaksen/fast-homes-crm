@@ -70,6 +70,21 @@ export function companyForModule(companies: Company[], module: ModuleKey): Compa
   return companies.find((c) => c.modules.includes(module)) || null;
 }
 
+/**
+ * Whether a lead from this source can go on this campaign: the campaign has
+ * no company, or it is the company that runs the lead's pipeline. The API
+ * refuses the rest; this keeps them out of the pickers.
+ */
+export function campaignFitsSource(
+  companies: Company[],
+  campaign: { brandId?: string | null },
+  source?: string | null,
+): boolean {
+  if (!campaign.brandId) return true;
+  const owner = companyForModule(companies, moduleForSource(source));
+  return !owner || owner.id === campaign.brandId;
+}
+
 // Store
 
 const STORAGE_KEY = 'dealcore:company';
@@ -161,6 +176,9 @@ export function useCompanies() {
     shows: (module: ModuleKey) => !current || current.modules.includes(module),
     companyForSource: (source?: string | null) =>
       companyForModule(snapshot.companies, moduleForSource(source)),
+    /** Whether a lead from this source can go on this campaign. */
+    campaignFits: (campaign: { brandId?: string | null }, source?: string | null) =>
+      campaignFitsSource(snapshot.companies, campaign, source),
   };
 }
 
