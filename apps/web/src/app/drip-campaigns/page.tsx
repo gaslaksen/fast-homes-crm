@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import AppShell from '@/components/AppShell';
 import { campaignAPI } from '@/lib/api';
+import { useCompanies } from '@/lib/companies';
 
 interface Campaign {
   id: string;
@@ -14,6 +15,8 @@ interface Campaign {
   enrollmentMode: 'manual' | 'auto';
   isActive: boolean;
   isDefault: boolean;
+  /** The company it sends as; null until one is assigned. */
+  brandId?: string | null;
   steps: any[];
   _count: { enrollments: number };
   enrollmentStats: Record<string, number>;
@@ -21,7 +24,13 @@ interface Campaign {
 
 export default function DripCampaignsPage() {
   const router = useRouter();
-  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [allCampaigns, setCampaigns] = useState<Campaign[]>([]);
+  // The selected company's campaigns, plus any not yet assigned to one so
+  // nothing goes missing.
+  const { current, canSwitch } = useCompanies();
+  const campaigns = current
+    ? allCampaigns.filter((c) => !c.brandId || c.brandId === current.id)
+    : allCampaigns;
   const [loading, setLoading] = useState(true);
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -110,6 +119,7 @@ export default function DripCampaignsPage() {
             <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">🔁 Drip Campaigns</h1>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
               Re-engage stale leads with automated multi-step campaigns
+              {canSwitch && current ? ` for ${current.name}` : ''}
             </p>
           </div>
           <Link

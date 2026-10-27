@@ -13,6 +13,8 @@ export interface CreateCampaignDto {
    * per-lead resolution (sticky thread, else the org default).
    */
   fromNumber?: string | null;
+  /** The company the campaign sends as. Must be a company in the account. */
+  brandId?: string | null;
   steps?: CreateStepDto[];
 }
 
@@ -52,10 +54,24 @@ export class CampaignsService {
     return e164;
   }
 
+  /**
+   * A company id from the client is only kept when it is one of this
+   * account's companies. Null or omitted leaves the campaign unassigned.
+   */
+  private async checkBrand(brandId: string | null | undefined, organizationId?: string): Promise<string | null> {
+    if (!brandId) return null;
+    const brand = organizationId
+      ? await this.prisma.brand.findFirst({ where: { id: brandId, organizationId }, select: { id: true } })
+      : null;
+    if (!brand) throw new BadRequestException('Unknown company');
+    return brand.id;
+  }
+
   async createCampaign(dto: CreateCampaignDto, organizationId?: string) {
     const { steps = [], ...rest } = dto;
     const fromNumber = this.normalizeFromNumber(rest.fromNumber);
-    const campaignData = { ...rest, fromNumber: fromNumber ?? null };
+    const brandId = await this.checkBrand(rest.brandId, organizationId);
+    const campaignData = { ...rest, fromNumber: fromNumber ?? null, brandId };
     return this.prisma.$transaction(async (tx) => {
       const campaign = await tx.campaign.create({
         data: {

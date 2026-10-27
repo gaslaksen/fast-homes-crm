@@ -20,6 +20,8 @@ const THREAD_SELECT = {
   lastMessageDirection: true,
   threadUnread: true,
   threadStarred: true,
+  // Which pipeline, and so which company, the thread belongs to.
+  source: true,
 } satisfies Prisma.LeadSelect;
 
 function toRow(lead: any, unread?: boolean) {
@@ -40,6 +42,7 @@ function toRow(lead: any, unread?: boolean) {
     // Per-user when we know who is asking, team-level otherwise.
     threadUnread: unread ?? lead.threadUnread,
     threadStarred: lead.threadStarred,
+    source: lead.source,
   };
 }
 

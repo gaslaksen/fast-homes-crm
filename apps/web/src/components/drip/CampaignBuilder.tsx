@@ -4,6 +4,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { campaignAPI, settingsAPI } from '@/lib/api';
 import { formatPhoneDisplay } from '@/lib/format';
+import { useCompanies } from '@/lib/companies';
 
 interface Step {
   id?: string;
@@ -564,6 +565,7 @@ function AiSequenceModal({
 
 export default function CampaignBuilder({ initial, onSave }: CampaignBuilderProps) {
   const router = useRouter();
+  const { current } = useCompanies();
   const [campaign, setCampaign] = useState<CampaignData>(
     initial || {
       name: 'New Campaign',
@@ -658,7 +660,8 @@ export default function CampaignBuilder({ initial, onSave }: CampaignBuilderProp
           );
         }
       } else {
-        await campaignAPI.create(payload);
+        // A new campaign belongs to the company selected while making it.
+        await campaignAPI.create({ ...payload, brandId: current?.id ?? null });
       }
 
       router.push('/drip-campaigns');

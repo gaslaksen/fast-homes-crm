@@ -8,26 +8,33 @@ import { authAPI } from '@/lib/api';
 import Avatar from '@/components/Avatar';
 import Logo from '@/components/Logo';
 import { useDialer } from '@/components/dialer/DialerContext';
+import CompanySwitcher from '@/components/CompanySwitcher';
+import { ModuleKey, resetCompanies, useCompanies, useFollowPath } from '@/lib/companies';
 
-const NAV_ITEMS = [
+type NavItem = { label: string; href: string; icon?: string; module?: ModuleKey };
+
+// An item with a module shows only while the selected company runs it. Deal
+// Search and Partners (buyers) go with Property Leads.
+const NAV_ITEMS: NavItem[] = [
   { label: 'Dashboard', href: '/dashboard' },
-  { label: 'Property Leads', href: '/leads' },
-  { label: 'Foreclosures', href: '/foreclosures' },
-  { label: 'Probate', href: '/probate' },
-  { label: 'Tax Sales', href: '/tax-sales' },
-  { label: 'Surplus Funds', href: '/surplus-funds' },
+  { label: 'Property Leads', href: '/leads', module: 'PROPERTY_LEADS' },
+  { label: 'Foreclosures', href: '/foreclosures', module: 'FORECLOSURES' },
+  { label: 'Probate', href: '/probate', module: 'PROBATE' },
+  { label: 'Tax Sales', href: '/tax-sales', module: 'TAX_SALES' },
+  { label: 'Surplus Funds', href: '/surplus-funds', module: 'SURPLUS_FUNDS' },
   { label: 'Drip Campaigns', href: '/drip-campaigns' },
-  { label: 'Deal Search', href: '/deal-search' },
-  { label: 'Partners',  href: '/settings/partners' },
+  { label: 'Deal Search', href: '/deal-search', module: 'PROPERTY_LEADS' },
+  { label: 'Partners',  href: '/settings/partners', module: 'PROPERTY_LEADS' },
   { label: 'Team',      href: '/settings/team' },
   { label: 'Settings',  href: '/settings' },
 ];
 
-const BOTTOM_NAV_ITEMS = [
+const BOTTOM_NAV_ITEMS: NavItem[] = [
   { label: 'Dashboard', href: '/dashboard', icon: '📊' },
-  { label: 'Property Leads', href: '/leads', icon: '🏠' },
+  { label: 'Property Leads', href: '/leads', icon: '🏠', module: 'PROPERTY_LEADS' },
+  { label: 'Surplus', href: '/surplus-funds', icon: '💰', module: 'SURPLUS_FUNDS' },
   { label: 'Campaigns', href: '/drip-campaigns', icon: '🔁' },
-  { label: 'Search',    href: '/deal-search', icon: '🔍' },
+  { label: 'Search',    href: '/deal-search', icon: '🔍', module: 'PROPERTY_LEADS' },
   { label: 'Settings',  href: '/settings',  icon: '⚙️' },
 ];
 
@@ -41,6 +48,14 @@ export default function AppNav() {
   const [profileOpen, setProfileOpen] = useState(false);
   const [user, setUser] = useState<any>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const { current, shows } = useCompanies();
+  useFollowPath(pathname);
+  const navItems = NAV_ITEMS.filter((i) => !i.module || shows(i.module));
+  // Until a company is chosen the bottom bar keeps its old five tabs rather
+  // than squeezing in a sixth.
+  const bottomItems = BOTTOM_NAV_ITEMS.filter((i) =>
+    !i.module ? true : current ? shows(i.module) : i.module !== 'SURPLUS_FUNDS',
+  );
 
   useEffect(() => setMounted(true), []);
 
@@ -67,6 +82,7 @@ export default function AppNav() {
 
   const handleSignOut = () => {
     localStorage.removeItem('auth_token');
+    resetCompanies();
     router.push('/login');
   };
 
@@ -82,8 +98,11 @@ export default function AppNav() {
           <Link href="/dashboard" className="flex-shrink-0">
             <Logo size="sm" />
           </Link>
+          <div className="hidden md:block -ml-4">
+            <CompanySwitcher variant="topbar" />
+          </div>
           <nav className="hidden md:flex items-center gap-1">
-            {NAV_ITEMS.map(({ label, href }) => (
+            {navItems.map(({ label, href }) => (
               <Link
                 key={href}
                 href={href}
@@ -195,7 +214,10 @@ export default function AppNav() {
       {/* Mobile dropdown */}
       {mobileOpen && (
         <div className="md:hidden border-t border-gray-100 dark:border-gray-700 bg-white dark:bg-gray-900 px-4 py-3 space-y-1 shadow-lg">
-          {NAV_ITEMS.map(({ label, href }) => (
+          <div className="pb-2">
+            <CompanySwitcher variant="topbar" />
+          </div>
+          {navItems.map(({ label, href }) => (
             <Link
               key={href}
               href={href}
@@ -230,7 +252,7 @@ export default function AppNav() {
 
     {/* Mobile bottom nav */}
     <nav className="fixed bottom-0 left-0 right-0 z-50 md:hidden bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 flex items-stretch h-16 safe-area-inset-bottom">
-      {BOTTOM_NAV_ITEMS.map(({ label, href, icon }) => {
+      {bottomItems.map(({ label, href, icon }) => {
         const active = isActive(href);
         return (
           <Link

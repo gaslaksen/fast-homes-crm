@@ -14,6 +14,7 @@ import LeadSidePanel from '@/components/leadDetailV2/LeadSidePanel';
 import type { TimelineItem, NoteItem } from '@/components/communications/types';
 import { inboxAPI, leadsAPI, authAPI, actionsAPI, type InboxFilter } from '@/lib/api';
 import { getLeadAddressLine, getLeadDisplayName } from '@/lib/format';
+import { useCompanies } from '@/lib/companies';
 
 const POLL_MS = 60_000;
 // Faster cadence for the open conversation so inbound texts appear without a
@@ -37,7 +38,16 @@ interface ThreadRow {
   lastMessageDirection: string | null;
   threadUnread: boolean;
   threadStarred: boolean;
+  /** The lead's source, which says which company the thread belongs to. */
+  source?: string;
 }
+
+// The inbox holds every company's threads, so each row says whose it is.
+// D.I.G. Deeper gets a warm tint so a surplus claimant stands out at a glance.
+const COMPANY_TAG_CLASS: Record<string, string> = {
+  digdeeper: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300',
+};
+const DEFAULT_TAG_CLASS = 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300';
 
 const TABS: { key: InboxFilter; label: string }[] = [
   { key: 'all', label: 'All' },
@@ -64,6 +74,7 @@ function threadName(t: ThreadRow): string {
 function InboxWorkspace() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { canSwitch, companyForSource } = useCompanies();
 
   const [filter, setFilter] = useState<InboxFilter>('all');
   const [counts, setCounts] = useState<{
@@ -582,8 +593,22 @@ function InboxWorkspace() {
                               </span>
                             </div>
                           </div>
-                          <div className="text-[11px] text-gray-500 dark:text-gray-400 truncate">
-                            {t.propertyAddress}
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            {(() => {
+                              const company = canSwitch ? companyForSource(t.source) : null;
+                              return company ? (
+                                <span
+                                  className={`shrink-0 rounded px-1.5 py-px text-[10px] font-medium ${
+                                    COMPANY_TAG_CLASS[company.key] || DEFAULT_TAG_CLASS
+                                  }`}
+                                >
+                                  {company.name}
+                                </span>
+                              ) : null;
+                            })()}
+                            <span className="text-[11px] text-gray-500 dark:text-gray-400 truncate">
+                              {t.propertyAddress}
+                            </span>
                           </div>
                           <div
                             className={`text-xs truncate mt-0.5 ${

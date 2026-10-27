@@ -18,6 +18,7 @@ import type { EmailAction } from '@/components/communications/MessageComposer';
 import NotesPanel from '@/components/communications/NotesPanel';
 import MessageComposer from '@/components/communications/MessageComposer';
 import type { TimelineItem, NoteItem } from '@/components/communications/types';
+import { useFollowLeadSource } from '@/lib/companies';
 
 const LEAD_DETAIL_V2 = process.env.NEXT_PUBLIC_LEAD_DETAIL_V2 === 'restructured';
 
@@ -31,6 +32,8 @@ export default function LeadDetailPage() {
   const leadId = params.id as string;
 
   const [lead, setLead] = useState<any>(null);
+  // Opening a lead switches the menu to the company that runs its pipeline.
+  useFollowLeadSource(lead ? lead.source ?? null : undefined);
   const [activeTab, setActiveTab] = useState(() => {
     const tab = searchParams.get('tab');
     // Redirect comps-analysis tabs to the comps-analysis page
