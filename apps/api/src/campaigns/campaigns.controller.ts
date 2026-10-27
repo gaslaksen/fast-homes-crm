@@ -69,8 +69,13 @@ export class CampaignsController {
    * enrollments. Idempotent, so a copy-only edit moves nobody.
    */
   @Put('campaigns/:id')
-  async updateCampaign(@Param('id') id: string, @Body() body: any) {
-    const campaign = await this.campaignsService.updateCampaign(id, body);
+  async updateCampaign(
+    @Param('id') id: string,
+    @Body() body: any,
+    @Headers('authorization') authHeader?: string,
+  ) {
+    const { organizationId } = this.decodeToken(authHeader);
+    const campaign = await this.campaignsService.updateCampaign(id, body, organizationId);
     if (body?.steps === undefined) return campaign;
     const resync = await this.enrollmentService.resyncSchedule(id);
     return { ...campaign, resync };
@@ -93,18 +98,25 @@ export class CampaignsController {
   }
 
   @Delete('campaigns/:id')
-  async deleteCampaign(@Param('id') id: string) {
-    return this.campaignsService.deleteCampaign(id);
+  async deleteCampaign(@Param('id') id: string, @Headers('authorization') authHeader?: string) {
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.campaignsService.deleteCampaign(id, organizationId);
   }
 
   @Post('campaigns/:id/duplicate')
-  async duplicateCampaign(@Param('id') id: string) {
-    return this.campaignsService.duplicateCampaign(id);
+  async duplicateCampaign(@Param('id') id: string, @Headers('authorization') authHeader?: string) {
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.campaignsService.duplicateCampaign(id, organizationId);
   }
 
   @Patch('campaigns/:id/toggle')
-  async toggleCampaign(@Param('id') id: string, @Body() body: { isActive: boolean }) {
-    return this.campaignsService.toggleCampaign(id, body.isActive);
+  async toggleCampaign(
+    @Param('id') id: string,
+    @Body() body: { isActive: boolean },
+    @Headers('authorization') authHeader?: string,
+  ) {
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.campaignsService.toggleCampaign(id, body.isActive, organizationId);
   }
 
   // ─── Campaign Stats ───────────────────────────────────────────────────────
