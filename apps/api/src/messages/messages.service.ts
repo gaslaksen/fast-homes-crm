@@ -895,6 +895,31 @@ You decide the right approach based on the conversation flow.${photoNudge}`.trim
       });
     }
 
+    //  4. sender email → a person on a surplus case (a daughter, a neighbor),
+    //     who writes from their own address, not the claimant's. Marked on
+    //     their own row, as an inbound text from their number is.
+    if (!lead && senderEmail) {
+      const heir = await this.prisma.surplusHeir.findFirst({
+        where: {
+          OR: [
+            { email1: { equals: senderEmail, mode: 'insensitive' } },
+            { email2: { equals: senderEmail, mode: 'insensitive' } },
+          ],
+        },
+        orderBy: { updatedAt: 'desc' },
+        select: { id: true, surplusDetail: { select: { leadId: true } } },
+      });
+      if (heir) {
+        lead = await this.prisma.lead.findUnique({ where: { id: heir.surplusDetail.leadId } });
+        await this.prisma.surplusHeir
+          .update({ where: { id: heir.id }, data: { lastContactedAt: new Date() } })
+          .catch(() => undefined);
+        await this.prisma.surplusHeir
+          .updateMany({ where: { id: heir.id, contactStatus: 'not_contacted' }, data: { contactStatus: 'contacted' } })
+          .catch(() => undefined);
+      }
+    }
+
     if (!lead) {
       this.logger.warn(`Inbound email: no lead for leadId=${data.leadId} sender=${senderEmail}`);
       return { success: false, reason: 'Lead not found' };

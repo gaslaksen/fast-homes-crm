@@ -222,6 +222,8 @@ export interface CreateSurplusResult {
   reason?: string;
   /** On a duplicate: what the existing file is, so an import can say "previously worked". */
   existing?: { stage: string | null; deadReason: string | null; deadAt: Date | null };
+  /** On a case deleted by hand: when, so an import can say so. */
+  suppressedAt?: Date;
 }
 
 /**
@@ -270,7 +272,17 @@ export class SurplusService {
    */
   async createSurplusLead(
     input: SurplusLeadInput,
-    opts: { organizationId?: string | null },
+    opts: {
+      organizationId?: string | null;
+      /**
+       * Refuse a case somebody deleted by hand. The county poll checks its own
+       * tombstones before it gets here; a spreadsheet import (what the bots
+       * feed) passes this so a deleted lead does not come back with the next
+       * list. Adding a lead by hand leaves it off: typing a case in is a
+       * deliberate choice to have it.
+       */
+      respectSuppression?: boolean;
+    },
   ): Promise<CreateSurplusResult> {
     const organizationId = opts.organizationId || null;
 
@@ -306,6 +318,15 @@ export class SurplusService {
         reason: 'duplicate',
         existing: { stage: existing.stage, deadReason: existing.deadReason, deadAt: existing.deadAt },
       };
+    }
+    if (opts.respectSuppression) {
+      const suppressed = await this.prisma.surplusSuppression.findFirst({
+        where: { organizationId, dedupeUid },
+        select: { createdAt: true },
+      });
+      if (suppressed) {
+        return { leadId: null, created: false, reason: 'suppressed', suppressedAt: suppressed.createdAt };
+      }
     }
 
     const { firstName, lastName } = splitOwnerName(claimant);
@@ -2735,11 +2756,17 @@ export class SurplusService {
       note: l.note || null,
     }));
     const cadence = d.letterCadenceDays || DEFAULT_LETTER_CADENCE_DAYS;
-    const last = letters[0]?.mailedAt ? new Date(letters[0].mailedAt) : null;
+    // The clock is the claimant's own. A letter to a living claimant's son is
+    // not a letter to the claimant, and counting it hid that the claimant was
+    // overdue. A dead claimant cannot be written to, so there the heirs'
+    // envelopes are the claim's letters and still count.
+    const estate = !!d.deceased || !!d.heirsRequired;
+    const clockLetters = estate ? letters : letters.filter((l) => !l.heirId);
+    const last = clockLetters[0]?.mailedAt ? new Date(clockLetters[0].mailedAt) : null;
     const dueAt = last ? new Date(last.getTime() + cadence * 86_400_000) : null;
     const hasAddress = !!(d.ownerMailingStreet || d.letterMailedTo);
     const replied = !!d.tappedAt;
-    const standardUnanswered = replied ? 0 : letters.filter((l) => l.mailType === 'standard').length;
+    const standardUnanswered = replied ? 0 : clockLetters.filter((l) => l.mailType === 'standard').length;
     return {
       letters,
       letterCount: letters.length,
