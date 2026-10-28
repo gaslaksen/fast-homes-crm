@@ -274,6 +274,7 @@ export class MessagesService {
         from,
         to,
         sentByUserId: userId ?? null,
+        heirId,
       },
     });
     await this.syncThreadSummary(leadId, outboundBody, 'OUTBOUND');
@@ -896,8 +897,8 @@ You decide the right approach based on the conversation flow.${photoNudge}`.trim
     }
 
     //  4. sender email → a person on a surplus case (a daughter, a neighbor),
-    //     who writes from their own address, not the claimant's. Marked on
-    //     their own row, as an inbound text from their number is.
+    //     who writes from their own address, not the claimant's.
+    let heirId: string | null = null;
     if (!lead && senderEmail) {
       const heir = await this.prisma.surplusHeir.findFirst({
         where: {
@@ -911,12 +912,7 @@ You decide the right approach based on the conversation flow.${photoNudge}`.trim
       });
       if (heir) {
         lead = await this.prisma.lead.findUnique({ where: { id: heir.surplusDetail.leadId } });
-        await this.prisma.surplusHeir
-          .update({ where: { id: heir.id }, data: { lastContactedAt: new Date() } })
-          .catch(() => undefined);
-        await this.prisma.surplusHeir
-          .updateMany({ where: { id: heir.id, contactStatus: 'not_contacted' }, data: { contactStatus: 'contacted' } })
-          .catch(() => undefined);
+        heirId = heir.id;
       }
     }
 
@@ -926,6 +922,32 @@ You decide the right approach based on the conversation flow.${photoNudge}`.trim
     }
     if (!lead.organizationId) {
       return { success: false, reason: 'Lead has no organization' };
+    }
+
+    // A reply in a thread can come from somebody on the case other than the
+    // claimant: the daughter answering the email her mother was sent. The
+    // claimant's own address wins where both hold it.
+    if (!heirId && senderEmail && lead.source === 'SURPLUS' && senderEmail !== String(lead.sellerEmail || '').toLowerCase()) {
+      const onCase = await this.prisma.surplusHeir.findFirst({
+        where: {
+          surplusDetail: { leadId: lead.id },
+          OR: [
+            { email1: { equals: senderEmail, mode: 'insensitive' } },
+            { email2: { equals: senderEmail, mode: 'insensitive' } },
+          ],
+        },
+        select: { id: true },
+      });
+      heirId = onCase?.id || null;
+    }
+    // Marked on their own row, as an inbound text from their number is.
+    if (heirId) {
+      await this.prisma.surplusHeir
+        .update({ where: { id: heirId }, data: { lastContactedAt: new Date() } })
+        .catch(() => undefined);
+      await this.prisma.surplusHeir
+        .updateMany({ where: { id: heirId, contactStatus: 'not_contacted' }, data: { contactStatus: 'contacted' } })
+        .catch(() => undefined);
     }
 
     // Idempotency: Mailgun can retry deliveries.
@@ -953,6 +975,7 @@ You decide the right approach based on the conversation flow.${photoNudge}`.trim
         mailgunMessageId: data.mailgunMessageId ?? null,
         messageIdHeader: data.messageIdHeader ?? null,
         inReplyTo: data.inReplyTo ?? null,
+        heirId,
       },
     });
 
@@ -1114,6 +1137,7 @@ You decide the right approach based on the conversation flow.${photoNudge}`.trim
         to: data.To,
         twilioSid: data.MessageSid,
         sentAt: new Date(),
+        heirId: match.heirId ?? null,
       },
     });
     await this.syncThreadSummary(lead.id, body, 'INBOUND');
