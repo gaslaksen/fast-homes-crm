@@ -1156,6 +1156,7 @@ export class TwilioVoiceService {
           metadata: {
             callSid,
             to: log.toNumber,
+            heirId: personId,
             outcome,
             objection,
             followUpAt: followUpAt ? followUpAt.toISOString() : null,
@@ -1206,6 +1207,31 @@ export class TwilioVoiceService {
         data: { lastClaimantUpdateAt: new Date() },
       });
     }
+    // A wrong or dead number is marked bad where it was dialled, whoever on
+    // the case holds it, so it stops counting as a way to reach anybody and
+    // nobody rings it again. The flag shows beside the number and can be
+    // cleared in Edit contacts.
+    if (
+      lead.source === LeadSource.SURPLUS &&
+      log.toNumber &&
+      (outcome === SurplusCallOutcome.WRONG_NUMBER || outcome === SurplusCallOutcome.DISCONNECTED)
+    ) {
+      await this.leadPhones
+        .flagContact(lead.id, log.toNumber, true)
+        .catch((err: any) => this.logger.warn(`Could not mark ${log.toNumber} bad on ${lead.id}: ${err.message}`));
+    }
+
+    // Somebody on the case picked up and talked: that person is reached,
+    // marked on their own row the way their reply would be.
+    if (personId && outcome && surplusCallConnected(outcome)) {
+      await this.prisma.surplusHeir
+        .update({ where: { id: personId }, data: { lastContactedAt: new Date() } })
+        .catch(() => undefined);
+      await this.prisma.surplusHeir
+        .updateMany({ where: { id: personId, contactStatus: 'not_contacted' }, data: { contactStatus: 'contacted' } })
+        .catch(() => undefined);
+    }
+
     // A number held by a person on the case (a son, a neighbor) opts out that
     // person, the same as their STOP does: the son asking not to be called is
     // not the claimant asking it.

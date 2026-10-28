@@ -29,7 +29,8 @@ import { CLAIM_STATUS_LABEL } from './surplus-classify.util';
 import { nameSearchPlan } from './surplus-name-search.util';
 import { leadSearchUrl, messageUrl, platformLabel, socialSearchLinks } from './surplus-social.util';
 import { traceState } from './surplus-skiptrace.util';
-import { heirRow } from './surplus-heirs.util';
+import { heirRow, phoneTail } from './surplus-heirs.util';
+import { badPhonesOf } from '../phone-numbers/lead-phones.service';
 import {
   normalizePhoneDigits,
   isoWeekKey,
@@ -1597,6 +1598,40 @@ export class SurplusService {
     return { updated, mailedAt };
   }
 
+  /**
+   * Mark an envelope as having come back undeliverable, or undo that. The
+   * address on it is not written to again (see letterState), and the
+   * returned letter stops holding the claim in Letter sent.
+   */
+  async markLetterReturned(
+    letterId: string,
+    returned: boolean,
+    organizationId?: string | null,
+    userId?: string | null,
+  ) {
+    const letter = await this.prisma.surplusLetter.findFirst({
+      where: { id: letterId, ...(organizationId ? { organizationId } : {}) },
+      include: { surplusDetail: { select: { leadId: true } } },
+    });
+    if (!letter) throw new BadRequestException('Letter not found');
+    const returnedAt = returned ? new Date() : null;
+    await this.prisma.surplusLetter.update({ where: { id: letter.id }, data: { returnedAt } });
+    if (returned && userId) {
+      await this.prisma.note.create({
+        data: {
+          leadId: letter.surplusDetail.leadId,
+          userId,
+          content:
+            `Letter mailed ${letter.mailedAt.toLocaleDateString('en-US', { timeZone: 'America/New_York' })}` +
+            (letter.recipientName ? ` to ${letter.recipientName}` : '') +
+            (letter.address ? ` at ${letter.address}` : '') +
+            ' came back undeliverable. That address is not to be mailed again.',
+        },
+      });
+    }
+    return { id: letter.id, returnedAt };
+  }
+
   /** Take one envelope out of the history and re-cache the latest. */
   async removeLetter(letterId: string, organizationId?: string | null) {
     const letter = await this.prisma.surplusLetter.findFirst({
@@ -2184,19 +2219,25 @@ export class SurplusService {
     const d = lead.surplusDetail;
     const county = d.county ? ctx.counties?.get(String(d.county).toLowerCase()) || null : null;
 
+    // Numbers somebody marked wrong or disconnected, on the claimant or on a
+    // person on the case. Shown flagged, never counted as callable, so a dead
+    // number cannot keep a claim in Call now.
+    const badNumbers = new Set(badPhonesOf(lead.badContacts).map(phoneTail).filter(Boolean));
     const phones = [
       { number: normalizePhoneDigits(lead.sellerPhone) || '', type: d.phone1Type, dnc: d.phone1Dnc },
       { number: normalizePhoneDigits(d.phone2) || '', type: d.phone2Type, dnc: d.phone2Dnc },
       { number: normalizePhoneDigits(d.phone3) || '', type: d.phone3Type, dnc: d.phone3Dnc },
       { number: normalizePhoneDigits(d.phone4) || '', type: d.phone4Type, dnc: d.phone4Dnc },
-    ].filter((p) => p.number);
+    ]
+      .filter((p) => p.number)
+      .map((p) => ({ ...p, bad: badNumbers.has(phoneTail(p.number)) }));
     const emails = [lead.sellerEmail, d.email2].map((e) => cellText(e)).filter(Boolean);
 
     // Heirs come off the detail row. Shaped by the same function the heirs
     // endpoint uses, so the board and the panel cannot disagree about who is
     // callable. The counts consider only the LIVING: a dead heir cannot sign
     // either, and their share needs its own estate opened.
-    const heirRows = (d.heirs || []).map((h: any) => heirRow(h));
+    const heirRows = (d.heirs || []).map((h: any) => heirRow(h, badNumbers));
     // Signer counts read heirs only. A neighbor with a phone number is a
     // route to the claimant, not somebody who can file.
     const livingHeirs = heirRows.filter((h: any) => !h.deceased && h.isHeir);
@@ -2418,7 +2459,7 @@ export class SurplusService {
 
       phones,
       emails,
-      cleanPhoneCount: phones.filter((p) => !p.dnc).length,
+      cleanPhoneCount: phones.filter((p: any) => !p.dnc && !p.bad).length,
       dncScrubbedAt: d.dncScrubbedAt,
       contactMismatch: d.contactMismatch,
       mismatchedName: d.mismatchedName,
@@ -2779,6 +2820,7 @@ export class SurplusService {
       templateVersion: l.templateVersion ?? null,
       heirId: l.heirId || null,
       note: l.note || null,
+      returnedAt: l.returnedAt || null,
     }));
     const cadence = d.letterCadenceDays || DEFAULT_LETTER_CADENCE_DAYS;
     // The clock is the claimant's own. A letter to a living claimant's son is
@@ -2790,6 +2832,10 @@ export class SurplusService {
     const last = clockLetters[0]?.mailedAt ? new Date(clockLetters[0].mailedAt) : null;
     const dueAt = last ? new Date(last.getTime() + cadence * 86_400_000) : null;
     const hasAddress = !!(d.ownerMailingStreet || d.letterMailedTo);
+    // The course's RETURNED MAIL rule: a letter that came back means that
+    // address is dead, so nothing more goes to it. Due again only once a
+    // different address is on file.
+    const mailReturned = mailReturnedToCurrentAddress(d);
     const replied = !!d.tappedAt;
     const standardUnanswered = replied ? 0 : clockLetters.filter((l) => l.mailType === 'standard').length;
     return {
@@ -2797,7 +2843,8 @@ export class SurplusService {
       letterCount: letters.length,
       letterCadenceDays: cadence,
       letterDueAt: dueAt,
-      letterDue: !replied && hasAddress && !d.doNotCall && (!last || dueAt!.getTime() <= Date.now()),
+      letterDue: !replied && hasAddress && !mailReturned && !d.doNotCall && (!last || dueAt!.getTime() <= Date.now()),
+      mailReturned,
       escalateMail: standardUnanswered >= LETTER_ESCALATE_AFTER,
     };
   }
@@ -2818,7 +2865,7 @@ export class SurplusService {
   ) {
     const f = {
       claimStatus: d.claimStatus,
-      cleanPhoneCount: phones.filter((p) => !p.dnc).length,
+      cleanPhoneCount: phones.filter((p: any) => !p.dnc && !p.bad).length,
       doNotCall: d.doNotCall,
       isEntity: ENTITY_NAME.test(`${lead.sellerFirstName || ''} ${lead.sellerLastName || ''}`),
       traceState: trace.state,
@@ -2830,7 +2877,8 @@ export class SurplusService {
       livingHeirCount,
       callableHeirCount,
       callableAssociateCount,
-      letterMailed: !!d.letterMailedAt,
+      // A letter that came back is not one the claim is waiting on.
+      letterMailed: !!d.letterMailedAt && !((d.letters || []).length && (d.letters || []).every((l: any) => l.returnedAt)),
     };
     const queue = queueOf(f);
     return { queue, queueLabel: SURPLUS_QUEUE_LABEL[queue], queueReason: queueReason(f) };
@@ -2848,7 +2896,7 @@ export class SurplusService {
     const wf = {
       claimStatus: d.claimStatus,
       netToClaimant: netToClaimant(facts),
-      cleanPhoneCount: phones.filter((p) => !p.dnc).length,
+      cleanPhoneCount: phones.filter((p: any) => !p.dnc && !p.bad).length,
       mailVerdict: d.mailVerdict,
       daysRemaining: daysRemaining(facts),
       contactMismatch: d.contactMismatch,
@@ -2886,6 +2934,33 @@ export function latestDate(values: (Date | string | null | undefined)[]): Date |
     if (!best || at.getTime() > best.getTime()) best = at;
   }
   return best;
+}
+
+/** Letters and mailing addresses compared without case, spacing or punctuation. */
+function addressKey(v: string | null | undefined): string {
+  return String(v || '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
+}
+
+/**
+ * Whether the claimant's mailing address on file today is one a letter came
+ * back from. Only the claimant's own envelopes count: a relative's returned
+ * letter says nothing about the claimant's address.
+ */
+export function mailReturnedToCurrentAddress(d: any): boolean {
+  const current = addressKey(
+    [d.ownerMailingStreet, d.ownerMailingCity, [d.ownerMailingState, d.ownerMailingZip].filter(Boolean).join(' '), d.ownerMailingCountry]
+      .filter(Boolean)
+      .join(', '),
+  );
+  const street = addressKey(d.ownerMailingStreet);
+  return ((d.letters || []) as any[]).some((l) => {
+    if (!l.returnedAt || l.heirId) return false;
+    const sent = addressKey(l.address);
+    if (!sent) return false;
+    // The envelope's address as recorded, or one that starts with the street
+    // on file today: a typed address can differ in the city or ZIP line.
+    return sent === current || (!!street && sent.startsWith(street));
+  });
 }
 
 export function groupByProperty(rows: any[]): any[] {

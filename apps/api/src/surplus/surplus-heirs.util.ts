@@ -6,6 +6,11 @@ import {
   SURPLUS_CONTACT_STATUS_LABEL,
 } from '@fast-homes/shared';
 
+/** The last ten digits, the key Lead.badContacts is compared on. */
+export function phoneTail(v: string | null | undefined): string {
+  return String(v || '').replace(/\D/g, '').slice(-10);
+}
+
 /**
  * One heir as every surface sees it.
  *
@@ -15,12 +20,20 @@ import {
  * exists to prevent: the card saying an estate is callable while the panel
  * shows nobody to ring.
  */
-export function heirRow(h: any) {
+export function heirRow(h: any, badNumbers?: Set<string>) {
+  // A number somebody marked wrong or disconnected (Lead.badContacts, shared
+  // by everyone on the case) stays on show, flagged, but is not a reason to
+  // call this person callable.
   const phones = [1, 2, 3, 4]
-    .map((i) => ({ number: h[`phone${i}`], type: h[`phone${i}Type`], dnc: h[`phone${i}Dnc`] }))
+    .map((i) => ({
+      number: h[`phone${i}`],
+      type: h[`phone${i}Type`],
+      dnc: h[`phone${i}Dnc`],
+      bad: !!badNumbers?.has(phoneTail(h[`phone${i}`])),
+    }))
     .filter((p) => p.number);
   const emails = [h.email1, h.email2].filter(Boolean);
-  const cleanPhoneCount = phones.filter((p) => !p.dnc).length;
+  const cleanPhoneCount = phones.filter((p) => !p.dnc && !p.bad).length;
   const role = (h.role || SurplusPersonRole.HEIR) as SurplusPersonRole;
   const contactStatus = (h.contactStatus || SurplusContactStatus.NOT_CONTACTED) as SurplusContactStatus;
 

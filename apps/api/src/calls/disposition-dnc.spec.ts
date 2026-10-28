@@ -40,6 +40,7 @@ function harness(toNumber: string, heirId: string | null = null) {
     surplusDetail: { update: record('surplusDetail', 'update'), updateMany: record('surplusDetail', 'updateMany') },
     surplusHeir: {
       update: record('surplusHeir', 'update'),
+      updateMany: record('surplusHeir', 'updateMany'),
       findUnique: async ({ where }: any) => (where.id === 'heir-son' ? { name: 'ROBERT KESSLER' } : null),
     },
     campaignEnrollment: { updateMany: record('campaignEnrollment', 'updateMany') },
@@ -47,6 +48,10 @@ function harness(toNumber: string, heirId: string | null = null) {
 
   const leadPhones = {
     heirIdForNumber: async (_leadId: string, number: string) => (number === SON_NUMBER ? 'heir-son' : null),
+    flagContact: async (leadId: string, value: string, bad: boolean) => {
+      writes.push({ model: 'badContacts', op: 'flag', args: { leadId, value, bad } });
+      return { phones: [], emails: [] };
+    },
   } as any;
 
   const svc = new TwilioVoiceService(
@@ -66,7 +71,7 @@ describe('TwilioVoiceService.setDisposition do not call', () => {
     await svc.setDisposition(CALL_SID, { disposition: 'Not Interested', outcome: SurplusCallOutcome.DO_NOT_CALL });
 
     expect(writes.find((w) => w.model === 'lead')).toBeUndefined();
-    const heir = writes.find((w) => w.model === 'surplusHeir');
+    const heir = writes.find((w) => w.model === 'surplusHeir' && w.args.data?.doNotCall);
     expect(heir?.args).toEqual({ where: { id: 'heir-son' }, data: { doNotCall: true } });
     const drips = writes.find((w) => w.model === 'campaignEnrollment');
     expect(drips?.args.where.heirId).toBe('heir-son');
@@ -92,5 +97,31 @@ describe('TwilioVoiceService.setDisposition do not call', () => {
     const task = writes.find((w) => w.model === 'task');
     expect(task?.args.data.heirId).toBe('heir-son');
     expect(task?.args.data.title).toContain('ROBERT KESSLER');
+  });
+
+  it('marks a wrong or disconnected number bad, whoever holds it', async () => {
+    for (const outcome of [SurplusCallOutcome.WRONG_NUMBER, SurplusCallOutcome.DISCONNECTED]) {
+      const { svc, writes } = harness(SON_NUMBER, 'heir-son');
+      await svc.setDisposition(CALL_SID, { disposition: 'Wrong Number', outcome });
+      expect(writes.find((w) => w.model === 'badContacts')?.args).toEqual({ leadId: 'lead1', value: SON_NUMBER, bad: true });
+    }
+  });
+
+  it('marks the relative reached when they picked up and talked', async () => {
+    const { svc, writes } = harness(SON_NUMBER, 'heir-son');
+    await svc.setDisposition(CALL_SID, {
+      disposition: 'Spoke',
+      outcome: SurplusCallOutcome.SPOKE_RELATIVE,
+      followUpAt: '2026-11-02T15:00:00Z',
+    });
+    expect(writes.find((w) => w.model === 'surplusHeir' && w.op === 'update')?.args.where).toEqual({ id: 'heir-son' });
+    expect(writes.find((w) => w.model === 'surplusHeir' && w.op === 'updateMany')?.args.data).toEqual({ contactStatus: 'contacted' });
+    expect(writes.find((w) => w.model === 'badContacts')).toBeUndefined();
+  });
+
+  it('marks nobody reached on a voicemail', async () => {
+    const { svc, writes } = harness(SON_NUMBER, 'heir-son');
+    await svc.setDisposition(CALL_SID, { disposition: 'Voicemail', outcome: SurplusCallOutcome.NO_ANSWER_VOICEMAIL });
+    expect(writes.find((w) => w.model === 'surplusHeir')).toBeUndefined();
   });
 });
