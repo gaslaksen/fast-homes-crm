@@ -1188,7 +1188,22 @@ export class TwilioVoiceService {
         data: { lastClaimantUpdateAt: new Date() },
       });
     }
-    if (detail && outcome === SurplusCallOutcome.DO_NOT_CALL && !detail.doNotCall) {
+    // A number held by a person on the case (a son, a neighbor) opts out that
+    // person, the same as their STOP does: the son asking not to be called is
+    // not the claimant asking it.
+    const heirId =
+      detail && outcome === SurplusCallOutcome.DO_NOT_CALL && log.toNumber
+        ? await this.leadPhones.heirIdForNumber(lead.id, log.toNumber).catch(() => null)
+        : null;
+    if (heirId) {
+      await this.prisma.surplusHeir.update({ where: { id: heirId }, data: { doNotCall: true } });
+      // Mirrors CampaignEnrollmentService.removeAllForHeir, which this module
+      // does not import.
+      await this.prisma.campaignEnrollment.updateMany({
+        where: { heirId, status: { notIn: ['REMOVED', 'COMPLETED', 'OPTED_OUT'] } },
+        data: { status: 'OPTED_OUT', nextSendAt: null },
+      });
+    } else if (detail && outcome === SurplusCallOutcome.DO_NOT_CALL && !detail.doNotCall) {
       await this.prisma.lead.update({
         where: { id: lead.id },
         data: { doNotContact: true, surplusDetail: { update: { doNotCall: true } } },

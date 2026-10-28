@@ -148,6 +148,8 @@ export interface SurplusImportResult {
    * re-researches a case the team already closed.
    */
   previouslyDead: { row: number; claimant: string; caseNumber: string | null; reason: string | null; deadAt: Date | null }[];
+  /** Rows for cases somebody deleted by hand. Not re-created, and named for the same reason. */
+  previouslyDeleted: { row: number; claimant: string; caseNumber: string | null; deletedAt: Date | null }[];
   /** Rows dropped for sitting under the surplus floor, counted rather than errored. */
   belowFloor: number;
   /**
@@ -216,6 +218,7 @@ export class SurplusImportService {
       created: 0,
       duplicates: 0,
       previouslyDead: [],
+      previouslyDeleted: [],
       belowFloor: 0,
       contactMismatches: [],
       countyInferred: 0,
@@ -252,6 +255,7 @@ export class SurplusImportService {
 
         const res = await this.surplus.createSurplusLead(input, {
           organizationId: opts.organizationId,
+          respectSuppression: true,
         });
         if (!res.created) {
           if (res.reason === 'duplicate') {
@@ -266,6 +270,14 @@ export class SurplusImportService {
                 deadAt: ex.deadAt || null,
               });
             }
+          }
+          else if (res.reason === 'suppressed') {
+            result.previouslyDeleted.push({
+              row: rowNo,
+              claimant: input.claimant || '',
+              caseNumber: input.caseNumber || null,
+              deletedAt: res.suppressedAt || null,
+            });
           }
           else if (res.reason === 'below the surplus floor') result.belowFloor++;
           else result.errors.push({ row: rowNo, reason: res.reason || 'not created' });

@@ -1015,6 +1015,12 @@ export default function SurplusFundsPage() {
                 .slice(0, 3)
                 .map((p: any) => `${p.claimant}${p.reason ? ` (${p.reason})` : ''}`)
                 .join(', ')}${r.previouslyDead.length > 3 ? ` and ${r.previouslyDead.length - 3} more` : ''}.`
+            : '') +
+          (r.previouslyDeleted?.length
+            ? ` ${r.previouslyDeleted.length} ${r.previouslyDeleted.length === 1 ? 'was' : 'were'} deleted earlier and left out: ${r.previouslyDeleted
+                .slice(0, 3)
+                .map((p: any) => p.claimant)
+                .join(', ')}${r.previouslyDeleted.length > 3 ? ` and ${r.previouslyDeleted.length - 3} more` : ''}.`
             : ''),
       );
       fetchRows();
