@@ -250,6 +250,13 @@ const SURPLUS_COLUMNS: PipelineColumn<any>[] = [
             {r.caseNumber ? ` · ${r.caseNumber}` : ''}
           </span>
         </div>
+        {/* Found through somebody around the claim, not the claimant. */}
+        {r.searchMatches?.length > 0 && (
+          <div style={{ fontSize: 11.5, color: 'var(--mint)', overflowWrap: 'anywhere' }}>
+            Found: {r.searchMatches.slice(0, 3).join(', ')}
+            {r.searchMatches.length > 3 ? ` +${r.searchMatches.length - 3} more` : ''}
+          </div>
+        )}
         {/* The whole point of the heirs work: say who can actually sign, so
             nobody spends an afternoon on a dead claimant. */}
         {r.anyDeceased && (
@@ -779,13 +786,18 @@ export default function SurplusFundsPage() {
       .catch(() => say('That surplus lead could not be found.'));
   }, [say]);
 
+  // A typed search answers "is this person anywhere in Dealcore", so it looks
+  // past the queue and the cuts the board opens with, the same as a batch.
+  const searching = q.trim().length > 0;
+  const wide = searching || !!batchQ;
+
   const fetchRows = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const res = await surplusAPI.list({
         search: q || undefined,
-        queue: queueQ || undefined,
+        queue: (!searching && queueQ) || undefined,
         tier: tierQ || undefined,
         stage: stageQ || undefined,
         claimantType: ctype === 'all' ? undefined : ctype,
@@ -797,10 +809,11 @@ export default function SurplusFundsPage() {
         // "New, 7 days" is a deliberate look at what just landed, and asking
         // for the claims under 120 days is the same deliberate look. Both show
         // the early ones whatever this toggle says.
-        hideEarly: hideEarly && !batchQ && chipQ !== 'new' && ageQ !== 'under-120' ? true : undefined,
+        hideEarly: hideEarly && !wide && chipQ !== 'new' && ageQ !== 'under-120' ? true : undefined,
         lienWindow: lienWin === 'all' ? undefined : lienWin,
-        hideDead: (hideDead && !batchQ) || undefined,
-        hideDnc: (hideDnc && !batchQ) || undefined,
+        hideDead: (hideDead && !wide) || undefined,
+        hideDnc: (hideDnc && !wide) || undefined,
+        hideRetired: searching ? false : undefined,
         contact: chipQ === 'not_tapped' ? 'not_tapped' : undefined,
         missingChannel: chipQ === 'missing' || undefined,
         letterDue: chipQ === 'letter_due' || undefined,
@@ -816,7 +829,7 @@ export default function SurplusFundsPage() {
       // claimant on it qualifies.
       if (chipQ === 'estate') data = data.filter((r) => r.anyDeceased);
       if (chipQ === 'lien') data = data.filter((r) => r.competingLien);
-      if (underYear && !batchQ) data = data.filter((r) => r.daysSinceSale == null || r.daysSinceSale <= 365);
+      if (underYear && !wide) data = data.filter((r) => r.daysSinceSale == null || r.daysSinceSale <= 365);
       setRows(data);
       setLeadCount(res.data.leadCount ?? data.length);
       setCounties(Array.isArray(res.data.counties) ? res.data.counties : []);
@@ -828,7 +841,7 @@ export default function SurplusFundsPage() {
     } finally {
       setLoading(false);
     }
-  }, [q, queueQ, tierQ, stageQ, ctype, county, band, chipQ, ageQ, lienWin, hideDead, hideDnc, sort, underYear, hideEarly, batchQ]);
+  }, [q, searching, wide, queueQ, tierQ, stageQ, ctype, county, band, chipQ, ageQ, lienWin, hideDead, hideDnc, sort, underYear, hideEarly, batchQ]);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -1405,7 +1418,8 @@ export default function SurplusFundsPage() {
               <input
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
-                placeholder="Search claimant, address, county, case number..."
+                placeholder="Search a claimant, relative, phone, email, address or case number"
+                aria-label="Search every claim by person, phone, email, address or case number"
               />
               {q && (
                 <button onClick={() => setQ('')} style={{ color: 'var(--faint)' }}>
@@ -1477,8 +1491,15 @@ export default function SurplusFundsPage() {
             {QUEUES.map(([k, label]) => (
               <button
                 key={k}
-                className={`dc-tab${queueQ === k ? ' on' : ''}`}
-                onClick={() => setQueueQ(queueQ === k ? null : k)}
+                className={`dc-tab${queueQ === k && !searching ? ' on' : ''}`}
+                onClick={() => {
+                  // Picking a queue while a search is in the box means "this
+                  // queue", so the search gives way to it.
+                  if (searching) {
+                    setQ('');
+                    setQueueQ(k);
+                  } else setQueueQ(queueQ === k ? null : k);
+                }}
                 title={QUEUE_HELP[k]}
               >
                 {label}
@@ -1715,6 +1736,8 @@ export default function SurplusFundsPage() {
             empty={
               stats.total === 0 ? (
                 'No surplus leads yet. Import a county list (under More) to get started.'
+              ) : searching ? (
+                `Nothing in Dealcore matches "${q.trim()}".`
               ) : queueQ ? (
                 <span>
                   Nothing in {QUEUE_LABEL[queueQ] || queueQ} right now.{' '}
@@ -1736,7 +1759,12 @@ export default function SurplusFundsPage() {
             }
             toolbarLeft={
               <span>
-                {queueQ ? (
+                {searching ? (
+                  <>
+                    {rows.length} propert{rows.length === 1 ? 'y' : 'ies'} match <b>&quot;{q.trim()}&quot;</b> across every
+                    claim
+                  </>
+                ) : queueQ ? (
                   <>
                     {rows.length} in <b>{QUEUE_LABEL[queueQ] || queueQ}</b> · {stats.openClaims} open
                   </>

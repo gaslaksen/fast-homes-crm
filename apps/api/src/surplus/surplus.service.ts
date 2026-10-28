@@ -77,6 +77,7 @@ import {
   SurplusLien,
   calendarDayToDate,
   surplusSearchWhere,
+  surplusSearchPeopleHits,
 } from './surplus.util';
 import {
   SURPLUS_FLOOR,
@@ -1940,6 +1941,15 @@ export class SurplusService {
     const ctx = await this.rowContext(filters.organizationId);
     let rows = leads.filter((l) => l.surplusDetail).map((l) => this.toRow(l, ctx));
 
+    // A claim found through somebody around it says who, or the board shows
+    // the claimant's name for a search that typed the daughter's.
+    if (filters.search) {
+      const people = new Map(leads.map((l) => [l.id, (l.surplusDetail as any)?.heirs || []]));
+      for (const r of rows as any[]) {
+        r.searchMatches = surplusSearchPeopleHits(filters.search, people.get(r.id) || []);
+      }
+    }
+
     // These read the compliance gate, a derived clock, or the per-number DNC
     // flags, none of which is a single column, so they are the passes done in
     // memory.
@@ -2938,6 +2948,8 @@ export function groupByProperty(rows: any[]): any[] {
       claimantCount: ranked.length,
       /** Names for the card, so the group reads as one property with N owners. */
       claimantNames: ranked.map((m) => m.claimant),
+      /** The people around these claims the search box found, when it found any. */
+      searchMatches: ranked.flatMap((m: any) => m.searchMatches || []),
       /** Rolled up so the card can show contact state without opening. */
       anyContactable: ranked.some((m) => m.cleanPhoneCount > 0),
       anyMismatch: ranked.some((m) => m.contactMismatch),
