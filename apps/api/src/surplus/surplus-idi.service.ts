@@ -58,6 +58,64 @@ export interface IdiBatchSummary {
   paired: number;
 }
 
+/** One batch in the Batches list. */
+export interface IdiBatchListItem {
+  id: string;
+  code: string;
+  fileName: string;
+  createdAt: Date;
+  createdBy: string | null;
+  rowCount: number;
+  skippedCount: number;
+  resultsAppliedAt: Date | null;
+  resultsFileName: string | null;
+  /** Rows by what IDI returned. Waiting is every row with no result yet. */
+  matched: number;
+  noContact: number;
+  noPerson: number;
+  waiting: number;
+  deceased: number;
+  relativesFiled: number;
+  /** Claimants somebody has called, texted, emailed or written to since the results came in. */
+  touchedSince: number;
+}
+
+/** A person IDI filed as a relative of a batch claimant. */
+export interface IdiBatchRelative {
+  id: string;
+  name: string;
+  relationship: string | null;
+  phones: string[];
+  emails: string[];
+  place: string | null;
+  deceased: boolean;
+  doNotCall: boolean;
+  contactStatus: string;
+  lastContactedAt: Date | null;
+}
+
+/** One row of an open batch: the claimant it was sent for and what came back. */
+export interface IdiBatchMemberRow {
+  rowNumber: number;
+  sent: { first: string; last: string; street: string; city: string; state: string; zip: string };
+  result: string | null;
+  deceased: boolean;
+  phonesReturned: number;
+  emailsReturned: number;
+  relativesFiled: number;
+  leadId: string;
+  claimant: string;
+  county: string | null;
+  caseNumber: string | null;
+  stage: string | null;
+  claimantDeceased: boolean;
+  doNotCall: boolean;
+  /** Numbers on the claimant today, IDI's and any held before. */
+  phoneCount: number;
+  lastTouchedAt: Date | null;
+  relatives: IdiBatchRelative[];
+}
+
 /** How many recent batches a results file is checked against. */
 const BATCH_LOOKBACK = 30;
 
@@ -250,6 +308,129 @@ export class SurplusIdiService {
         throw err;
       }
     }
+  }
+
+  // ─── Batches ──────────────────────────────────────────────────────────────
+
+  /** Every saved batch, newest first, with what came back and how much has been worked. */
+  async listBatches(organizationId?: string | null): Promise<IdiBatchListItem[]> {
+    const batches = await this.prisma.surplusBatch.findMany({
+      where: organizationId ? { organizationId } : {},
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+      include: {
+        members: {
+          select: {
+            result: true,
+            deceased: true,
+            relativesFiled: true,
+            surplusDetail: { select: { lead: { select: { lastTouchedAt: true } } } },
+          },
+        },
+      },
+    });
+    return this.summarize(batches);
+  }
+
+  /** The list line for each batch. Members need result, deceased, relativesFiled and the lead's last touch. */
+  private async summarize(batches: any[]): Promise<IdiBatchListItem[]> {
+    const userIds = Array.from(new Set(batches.map((b) => b.createdByUserId).filter((x): x is string => !!x)));
+    const users = userIds.length
+      ? await this.prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, firstName: true, lastName: true } })
+      : [];
+    const nameOf = new Map(users.map((u) => [u.id, `${u.firstName || ''} ${u.lastName || ''}`.trim() || null]));
+
+    return batches.map((b) => {
+      const since = b.resultsAppliedAt || b.createdAt;
+      const count = (fn: (m: any) => boolean) => b.members.filter(fn).length;
+      return {
+        id: b.id,
+        code: idiBatchCode(b.number),
+        fileName: b.fileName,
+        createdAt: b.createdAt,
+        createdBy: (b.createdByUserId && nameOf.get(b.createdByUserId)) || null,
+        rowCount: b.rowCount,
+        skippedCount: b.skippedCount,
+        resultsAppliedAt: b.resultsAppliedAt,
+        resultsFileName: b.resultsFileName,
+        matched: count((m) => m.result === 'matched'),
+        noContact: count((m) => m.result === 'no_contact'),
+        noPerson: count((m) => m.result === 'no_person'),
+        waiting: count((m) => !m.result),
+        deceased: count((m) => m.deceased),
+        relativesFiled: b.members.reduce((n: number, m: any) => n + (m.relativesFiled || 0), 0),
+        touchedSince: count((m) => {
+          const t = m.surplusDetail?.lead?.lastTouchedAt;
+          return !!t && new Date(t).getTime() > new Date(since).getTime();
+        }),
+      };
+    });
+  }
+
+  /**
+   * One batch, row by row: the claimant each row was sent for as they stand
+   * today, and every relative IDI filed on that case, so the people a batch
+   * turned up can be found and worked from one place.
+   */
+  async getBatch(
+    batchId: string,
+    organizationId?: string | null,
+  ): Promise<{ batch: IdiBatchListItem; members: IdiBatchMemberRow[] } | null> {
+    const b = await this.prisma.surplusBatch.findFirst({
+      where: { id: batchId, ...(organizationId ? { organizationId } : {}) },
+      include: {
+        members: {
+          orderBy: { rowNumber: 'asc' },
+          include: {
+            surplusDetail: {
+              include: {
+                lead: true,
+                heirs: { where: { sourceKind: IDI_SOURCE }, orderBy: { createdAt: 'asc' } },
+              },
+            },
+          },
+        },
+      },
+    });
+    if (!b) return null;
+    const [summary] = await this.summarize([b]);
+
+    const members: IdiBatchMemberRow[] = (b.members as any[]).map((m) => {
+      const d = m.surplusDetail;
+      const l = d.lead;
+      const phones = [l.sellerPhone, d.phone2, d.phone3, d.phone4].filter((p) => digits(p));
+      return {
+        rowNumber: m.rowNumber,
+        sent: { first: m.sentFirst, last: m.sentLast, street: m.sentStreet, city: m.sentCity, state: m.sentState, zip: m.sentZip },
+        result: m.result,
+        deceased: m.deceased,
+        phonesReturned: m.phonesReturned,
+        emailsReturned: m.emailsReturned,
+        relativesFiled: m.relativesFiled,
+        leadId: l.id,
+        claimant: `${l.sellerFirstName || ''} ${l.sellerLastName || ''}`.trim(),
+        county: d.county || null,
+        caseNumber: d.caseNumber || null,
+        stage: d.stage || null,
+        claimantDeceased: !!d.deceased || !!d.heirsRequired,
+        doNotCall: !!d.doNotCall || !!l.doNotContact,
+        phoneCount: phones.length,
+        lastTouchedAt: l.lastTouchedAt || null,
+        relatives: (d.heirs as any[]).map((h) => ({
+          id: h.id,
+          name: h.name,
+          relationship: h.relationship || null,
+          phones: [h.phone1, h.phone2, h.phone3, h.phone4].filter((p) => digits(p)).map((p) => prettyPhone(digits(p))),
+          emails: [h.email1, h.email2].filter(Boolean),
+          place: [h.city, h.state].filter(Boolean).join(', ') || null,
+          deceased: !!h.deceased,
+          doNotCall: !!h.doNotCall,
+          contactStatus: h.contactStatus || 'not_contacted',
+          lastContactedAt: h.lastContactedAt || null,
+        })),
+      };
+    });
+    return { batch: summary, members };
   }
 
   // ─── Import ───────────────────────────────────────────────────────────────

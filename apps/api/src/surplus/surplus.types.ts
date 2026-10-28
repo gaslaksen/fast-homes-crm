@@ -129,6 +129,12 @@ export interface SurplusListFilters {
   letterDue?: boolean;
   /** Only signed claimants who have not heard from us in thirty days. */
   updateOverdue?: boolean;
+  /**
+   * Only claimants sent out in this saved skip-trace batch. Opening a batch
+   * is a deliberate look at everyone in it, so the default cuts (lienholders,
+   * the floor, retired cases) do not hide any of them.
+   */
+  batchId?: string;
   /** 'notice' | 'surplus' | 'net' | 'tier' */
   sort?: string;
   page?: number;

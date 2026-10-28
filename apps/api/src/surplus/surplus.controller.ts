@@ -1,6 +1,6 @@
 import {
   Controller, Get, Post, Patch, Body, Param, Query, Headers,
-  UseInterceptors, UploadedFile, BadRequestException,
+  UseInterceptors, UploadedFile, BadRequestException, NotFoundException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
@@ -119,6 +119,7 @@ export class SurplusController {
     @Query('missingChannel') missingChannel?: string,
     @Query('letterDue') letterDue?: string,
     @Query('updateOverdue') updateOverdue?: string,
+    @Query('batch') batch?: string,
     @Query('sort') sort?: string,
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
@@ -147,6 +148,7 @@ export class SurplusController {
       missingChannel: missingChannel === 'true',
       letterDue: letterDue === 'true',
       updateOverdue: updateOverdue === 'true',
+      batchId: batch || undefined,
       sort,
       page: num(page),
       pageSize: num(pageSize),
@@ -953,6 +955,21 @@ export class SurplusController {
     const leadIds = Array.isArray(body?.leadIds) ? body.leadIds.filter((x: any) => typeof x === 'string') : [];
     if (!leadIds.length) throw new BadRequestException('Select at least one claimant to export.');
     return this.idi.exportBatch({ organizationId: organizationId || null, leadIds, userId: userId || null });
+  }
+
+  /** Saved IDI batches, newest first, and one batch row by row. */
+  @Get('batches')
+  async batches(@Headers('authorization') authHeader?: string) {
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.idi.listBatches(organizationId || null);
+  }
+
+  @Get('batches/:batchId')
+  async batch(@Param('batchId') batchId: string, @Headers('authorization') authHeader?: string) {
+    const { organizationId } = this.decodeToken(authHeader);
+    const found = await this.idi.getBatch(batchId, organizationId || null);
+    if (!found) throw new NotFoundException('That batch was not found.');
+    return found;
   }
 
   @Post('idi/import/parse')
