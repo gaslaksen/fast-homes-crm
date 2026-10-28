@@ -873,6 +873,29 @@ export function calendarDayToDate(raw?: string | null): Date | null {
 }
 
 /**
+ * A search box that holds a phone number, as the digits to look for, or null.
+ * Seven digits or more and nothing but phone punctuation around them, so
+ * "(352) 555-0141" and "3525550141" both qualify and a case number like
+ * "2026-0135TD" does not. A leading country code 1 is dropped, since every
+ * number is held without it or as +1 and ten digits.
+ */
+export function surplusSearchDigits(raw?: string | null): string | null {
+  const text = String(raw || '').trim();
+  if (!/^[\d\s().+-]+$/.test(text)) return null;
+  let digits = text.replace(/\D/g, '');
+  if (digits.length === 11 && digits.startsWith('1')) digits = digits.slice(1);
+  return digits.length >= 7 && digits.length <= 10 ? digits : null;
+}
+
+function searchWords(raw?: string | null): string[] {
+  return String(raw || '')
+    .split(/[\s,]+/)
+    .map((w) => w.trim())
+    .filter(Boolean)
+    .slice(0, 8);
+}
+
+/**
  * The board's search box as a Prisma where clause, or null for an empty box.
  *
  * Every word has to match somewhere, but each word can match a different
@@ -881,24 +904,95 @@ export function calendarDayToDate(raw?: string | null): Date | null {
  * nor the last name contains both words. The same goes for a middle name
  * typed after the first. An address or a case number is still found, because
  * each of its words is inside the one column that holds it.
+ *
+ * The people around a claim count as well as the claimant: a relative's or
+ * heir's name or email, the owner's mailing address and the claimant's own
+ * emails. A phone number is looked for on the claimant and on every person on
+ * the case, so "is this number already in Dealcore" is one search.
  */
 export function surplusSearchWhere(raw?: string | null): any | null {
-  const words = String(raw || '')
-    .split(/[\s,]+/)
-    .map((w) => w.trim())
-    .filter(Boolean)
-    .slice(0, 8);
+  const digits = surplusSearchDigits(raw);
+  if (digits) {
+    const has = { contains: digits };
+    // Some counties number their cases in digits alone (Lee: 2025001379), so
+    // a run of digits is still looked for as a case or parcel number too.
+    const typed = { contains: String(raw || '').trim(), mode: 'insensitive' };
+    return {
+      OR: [
+        { surplusDetail: { is: { caseNumber: typed } } },
+        { surplusDetail: { is: { parcelId: typed } } },
+        { sellerPhone: has },
+        { surplusDetail: { is: { phone2: has } } },
+        { surplusDetail: { is: { phone3: has } } },
+        { surplusDetail: { is: { phone4: has } } },
+        {
+          surplusDetail: {
+            is: {
+              heirs: {
+                some: { OR: [{ phone1: has }, { phone2: has }, { phone3: has }, { phone4: has }] },
+              },
+            },
+          },
+        },
+      ],
+    };
+  }
+  const words = searchWords(raw);
   if (!words.length) return null;
-  const anyField = (w: string) => ({
-    OR: [
-      { propertyAddress: { contains: w, mode: 'insensitive' } },
-      { propertyCity: { contains: w, mode: 'insensitive' } },
-      { sellerFirstName: { contains: w, mode: 'insensitive' } },
-      { sellerLastName: { contains: w, mode: 'insensitive' } },
-      { surplusDetail: { is: { county: { contains: w, mode: 'insensitive' } } } },
-      { surplusDetail: { is: { caseNumber: { contains: w, mode: 'insensitive' } } } },
-      { surplusDetail: { is: { parcelId: { contains: w, mode: 'insensitive' } } } },
-    ],
-  });
+  const anyField = (w: string) => {
+    const has = { contains: w, mode: 'insensitive' };
+    return {
+      OR: [
+        { propertyAddress: has },
+        { propertyCity: has },
+        { sellerFirstName: has },
+        { sellerLastName: has },
+        { sellerEmail: has },
+        { surplusDetail: { is: { county: has } } },
+        { surplusDetail: { is: { caseNumber: has } } },
+        { surplusDetail: { is: { parcelId: has } } },
+        { surplusDetail: { is: { email2: has } } },
+        { surplusDetail: { is: { ownerMailingStreet: has } } },
+        { surplusDetail: { is: { ownerMailingCity: has } } },
+        { surplusDetail: { is: { heirs: { some: { OR: [{ name: has }, { email1: has }, { email2: has }] } } } } },
+      ],
+    };
+  };
   return words.length === 1 ? anyField(words[0]) : { AND: words.map(anyField) };
+}
+
+/**
+ * The people on a case the search box found, named for the board, so a claim
+ * that came up because of a daughter says so instead of showing only the
+ * claimant. A person counts when the number is one of theirs, or when every
+ * word is in their name or email. Empty when the search matched the claim
+ * itself rather than anybody around it.
+ */
+export function surplusSearchPeopleHits(
+  raw: string | null | undefined,
+  people: {
+    name?: string | null;
+    relationship?: string | null;
+    role?: string | null;
+    phone1?: string | null;
+    phone2?: string | null;
+    phone3?: string | null;
+    phone4?: string | null;
+    email1?: string | null;
+    email2?: string | null;
+  }[],
+): string[] {
+  const digits = surplusSearchDigits(raw);
+  const words = digits ? [] : searchWords(raw).map((w) => w.toLowerCase());
+  if (!digits && !words.length) return [];
+  return people
+    .filter((p) => {
+      if (digits) return [p.phone1, p.phone2, p.phone3, p.phone4].some((n) => String(n || '').includes(digits));
+      const hay = [p.name, p.email1, p.email2].filter(Boolean).join(' ').toLowerCase();
+      return words.every((w) => hay.includes(w));
+    })
+    .map((p) => {
+      const what = p.relationship || p.role || '';
+      return `${p.name || 'Unnamed'}${what ? ` (${what.toLowerCase()})` : ''}`;
+    });
 }

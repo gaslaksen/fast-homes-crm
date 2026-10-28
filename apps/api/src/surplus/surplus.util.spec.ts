@@ -36,6 +36,8 @@ import {
   queueReason,
   calendarDayToDate,
   surplusSearchWhere,
+  surplusSearchDigits,
+  surplusSearchPeopleHits,
 } from './surplus.util';
 import {
   SurplusClaimantType,
@@ -952,7 +954,7 @@ describe('surplusSearchWhere', () => {
 
   it('matches one word against every field', () => {
     const w = surplusSearchWhere('Clark');
-    expect(w.OR).toHaveLength(7);
+    expect(w.OR).toHaveLength(12);
     expect(firstNameTerm(w)).toBe('Clark');
   });
 
@@ -968,5 +970,48 @@ describe('surplusSearchWhere', () => {
   it('takes a middle name and a comma between the names', () => {
     expect(words(surplusSearchWhere('Rosemary Ann Clark')).map(firstNameTerm)).toEqual(['Rosemary', 'Ann', 'Clark']);
     expect(words(surplusSearchWhere('Clark, Rosemary')).map(firstNameTerm)).toEqual(['Clark', 'Rosemary']);
+  });
+});
+
+describe('searching for the people around a claim', () => {
+  const heirsClause = (clause: any) =>
+    clause.OR.find((f: any) => f.surplusDetail?.is?.heirs).surplusDetail.is.heirs.some.OR;
+
+  it('looks for each word in the names and emails of relatives and heirs', () => {
+    const w = surplusSearchWhere('Linda');
+    expect(heirsClause(w).map((f: any) => Object.keys(f)[0])).toEqual(['name', 'email1', 'email2']);
+    expect(w.OR.some((f: any) => f.surplusDetail?.is?.ownerMailingStreet)).toBe(true);
+    expect(w.OR.some((f: any) => f.sellerEmail)).toBe(true);
+  });
+
+  it('reads a phone number however it is typed', () => {
+    expect(surplusSearchDigits('(352) 555-0141')).toBe('3525550141');
+    expect(surplusSearchDigits('+1 352 555 0141')).toBe('3525550141');
+    expect(surplusSearchDigits('555-0141')).toBe('5550141');
+    expect(surplusSearchDigits('2026-0135TD')).toBeNull();
+    expect(surplusSearchDigits('Linda')).toBeNull();
+    expect(surplusSearchDigits('0141')).toBeNull();
+  });
+
+  it('searches every number on the claimant and the people, and still the case number', () => {
+    const w = surplusSearchWhere('(352) 555-0141');
+    const json = JSON.stringify(w);
+    for (const field of ['sellerPhone', 'phone2', 'phone3', 'phone4', 'heirs', 'caseNumber']) {
+      expect(json).toContain(field);
+    }
+    expect(json).toContain('3525550141');
+    expect(JSON.stringify(surplusSearchWhere('2025001379'))).toContain('"caseNumber":{"contains":"2025001379"');
+  });
+
+  it('names the people the search found', () => {
+    const people = [
+      { name: 'LINDA K MORRIS', relationship: 'Child', phone1: '3525550141', email1: 'linda@example.com' },
+      { name: 'ROBERT KESSLER', role: 'relative', phone1: '4045550102' },
+    ];
+    expect(surplusSearchPeopleHits('linda morris', people)).toEqual(['LINDA K MORRIS (child)']);
+    expect(surplusSearchPeopleHits('(404) 555-0102', people)).toEqual(['ROBERT KESSLER (relative)']);
+    expect(surplusSearchPeopleHits('linda@example', people)).toEqual(['LINDA K MORRIS (child)']);
+    expect(surplusSearchPeopleHits('Kessler Dorothy', people)).toEqual([]);
+    expect(surplusSearchPeopleHits('', people)).toEqual([]);
   });
 });
