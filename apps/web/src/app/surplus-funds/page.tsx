@@ -1092,7 +1092,7 @@ export default function SurplusFundsPage() {
       const left = r.skipped?.length || 0;
       say(
         (r.included
-          ? `${r.included} claimant${r.included === 1 ? '' : 's'} in ${r.fileName}. Upload it to the IDI profile folder, beside the out folder.`
+          ? `${r.batch ? `Batch ${r.batch.code}: ` : ''}${r.included} claimant${r.included === 1 ? '' : 's'} in ${r.fileName}. Upload it to the IDI profile folder, beside the out folder.`
           : 'Nobody selected can be sent to IDI.') +
           (left
             ? ` Left out ${left}: ${r.skipped

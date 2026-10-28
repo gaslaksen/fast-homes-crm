@@ -9,6 +9,7 @@ function setup(leadsIn: any[], heirsIn: any[] = []) {
   const leads = leadsIn.map((l) => ({ ...l, surplusDetail: { ...l.surplusDetail } }));
   const heirs = heirsIn.map((h) => ({ ...h }));
   const attempts: any[] = [];
+  const batches: any[] = [];
   const detailOf = (id: string) => leads.find((l) => l.surplusDetail.id === id)!.surplusDetail;
   const matchesWhere = (l: any, where: any) => {
     if (where.id && typeof where.id === 'string' && l.id !== where.id) return false;
@@ -39,9 +40,38 @@ function setup(leadsIn: any[], heirsIn: any[] = []) {
       update: jest.fn(async ({ where, data }: any) => Object.assign(heirs.find((h) => h.id === where.id)!, data)),
     },
     surplusTraceAttempt: { create: jest.fn(async ({ data }: any) => attempts.push(data)) },
+    surplusBatch: {
+      findFirst: jest.fn(async ({ where }: any) =>
+        [...batches].filter((b) => b.organizationId === where.organizationId).sort((a, b) => b.number - a.number)[0] || null,
+      ),
+      create: jest.fn(async ({ data }: any) => {
+        const id = `b${batches.length + 1}`;
+        const members = data.members.create.map((m: any, i: number) => ({ id: `${id}m${i + 1}`, batchId: id, result: null, ...m }));
+        const b = { ...data, id, members, createdAt: new Date(Date.now() + batches.length) };
+        batches.push(b);
+        return { id };
+      }),
+      findMany: jest.fn(async () => [...batches].sort((a, b) => b.createdAt - a.createdAt)),
+      findUnique: jest.fn(async ({ where }: any) => {
+        const b = batches.find((x) => x.id === where.id);
+        if (!b) return null;
+        const withLead = (m: any) => {
+          const l = leads.find((x) => x.surplusDetail.id === m.surplusDetailId)!;
+          return { ...m, surplusDetail: { ...l.surplusDetail, leadId: l.id, lead: l } };
+        };
+        return { ...b, members: b.members.map(withLead) };
+      }),
+      update: jest.fn(async ({ where, data }: any) => Object.assign(batches.find((b) => b.id === where.id)!, data)),
+    },
+    surplusBatchMember: {
+      update: jest.fn(async ({ where, data }: any) => {
+        const m = batches.flatMap((b) => b.members).find((x: any) => x.id === where.id);
+        return Object.assign(m, data);
+      }),
+    },
   };
   const config: any = { get: () => undefined };
-  return { service: new SurplusIdiService(prisma, config), leads, heirs, attempts };
+  return { service: new SurplusIdiService(prisma, config), leads, heirs, attempts, batches };
 }
 
 const lead = (id: string, first: string, last: string, street: string, over: any = {}) => ({
@@ -206,6 +236,95 @@ describe('SurplusIdiService.exportBatch', () => {
     expect(r.included).toBe(1);
     expect(r.csv.split('\r\n')[1]).toBe('MARY T,SAMPLE,48 Village Ct,Nashotah,WI,53058');
     expect(r.skipped).toEqual([{ leadId: '2', claimant: 'ACME HOLDINGS LLC', reason: 'An entity, not a person. Sunbiz is the route.' }]);
-    expect(r.fileName).toMatch(/^\d{4}-\d{2}-\d{2}_IDI_Batch_Surplus\.csv$/);
+    expect(r.fileName).toMatch(/^\d{4}-\d{2}-\d{2}_IDI_Batch_Surplus_B001\.csv$/);
+    expect(r.batch).toMatchObject({ number: 1, code: 'B001' });
+  });
+
+  it('saves every row exactly as sent, and numbers batches in order', async () => {
+    const { service, batches } = setup([lead('1', 'JANE Q', 'SAMPLE', '100 Example Rd SE')]);
+    await service.exportBatch({ organizationId: 'org1', leadIds: ['1'], userId: 'u1' });
+    const second = await service.exportBatch({ organizationId: 'org1', leadIds: ['1'], userId: 'u1' });
+
+    expect(second.batch?.code).toBe('B002');
+    expect(batches[0]).toMatchObject({ organizationId: 'org1', rowCount: 1, skippedCount: 0, createdByUserId: 'u1' });
+    expect(batches[0].members[0]).toMatchObject({
+      surplusDetailId: 'd1',
+      rowNumber: 1,
+      sentFirst: 'JANE Q',
+      sentLast: 'SAMPLE',
+      sentStreet: '100 Example Rd SE',
+      sentState: 'FL',
+    });
+  });
+
+  it('saves no batch when nobody can be sent', async () => {
+    const { service, batches } = setup([lead('2', 'ACME HOLDINGS', 'LLC', '1 Main St')]);
+    const r = await service.exportBatch({ organizationId: 'org1', leadIds: ['2'] });
+    expect(r.batch).toBeNull();
+    expect(batches).toHaveLength(0);
+  });
+});
+
+describe('SurplusIdiService batches on import', () => {
+  // Two cases for the same owner at the same address: by name and address
+  // they are a tie, and only the batch knows which row was sent for which.
+  const twins = () => [
+    lead('1', 'JANE Q', 'SAMPLE', '100 Example Rd SE', { surplusDetail: { caseNumber: 'case-A' } }),
+    lead('3', 'JANE Q', 'SAMPLE', '100 Example Rd SE', { surplusDetail: { caseNumber: 'case-B' } }),
+    lead('2', 'PAUL G', 'EXAMPLE', '7500 E Sample Ct'),
+  ];
+
+  it('without a saved batch the twins are ambiguous', async () => {
+    const { service } = setup(twins());
+    const { rows, batch } = await service.previewImport(file, { organizationId: 'org1', fileName: 'x_out.csv' });
+    expect(batch).toBeNull();
+    expect(rows[0].confidence).toBe('ambiguous');
+  });
+
+  it('pairs each returned row with the row it echoes in the batch', async () => {
+    const { service } = setup(twins());
+    await service.exportBatch({ organizationId: 'org1', leadIds: ['3', '2'] });
+    const { rows, batch } = await service.previewImport(file, { organizationId: 'org1', fileName: 'x_out.csv' });
+
+    expect(batch).toMatchObject({ code: 'B001', paired: 2, rowCount: 2 });
+    expect(rows.map((r) => [r.leadId, r.confidence, r.batchRow])).toEqual([
+      ['3', 'batch', 1],
+      [null, 'none', null],
+      ['2', 'batch', 2],
+    ]);
+    // The other twin is still offered, in case a person knows better.
+    expect(rows[0].options.map((o) => o.leadId)).toEqual(['3', '1']);
+  });
+
+  it('records what came back on the batch rows and stamps the batch', async () => {
+    const { service, batches } = setup(twins());
+    await service.exportBatch({ organizationId: 'org1', leadIds: ['3', '2'] });
+    const res = await service.applyImport(file, { organizationId: 'org1', fileName: 'x_out.csv', userId: 'u1' });
+
+    expect(res.batch).toEqual({ id: 'b1', code: 'B001' });
+    const [jane, paul] = batches[0].members;
+    expect(jane).toMatchObject({ result: 'matched', deceased: false, phonesReturned: 3, emailsReturned: 2, relativesFiled: 2 });
+    expect(paul).toMatchObject({ result: 'matched', deceased: true });
+    expect(batches[0]).toMatchObject({ resultsFileName: 'x_out.csv', resultsAppliedById: 'u1' });
+    expect(batches[0].resultsAppliedAt).toBeInstanceOf(Date);
+  });
+
+  it('marks an empty row on the batch without writing to the claimant', async () => {
+    const nobody = lead('4', 'GLEN A', 'NOBODY', '1 Vacant Lot Rd');
+    const { service, batches, leads } = setup([nobody]);
+    await service.exportBatch({ organizationId: 'org1', leadIds: ['4'] });
+    const res = await service.applyImport(file, { organizationId: 'org1', fileName: 'x_out.csv', assignments: { '1': null } });
+
+    expect(res.applied).toBe(0);
+    expect(batches[0].members[0]).toMatchObject({ result: 'no_person' });
+    expect(batches[0].resultsFileName).toBe('x_out.csv');
+    expect(leads[0].surplusDetail.tracedAt).toBeUndefined();
+  });
+
+  it('leaves a batch row alone when a person re-points the result', async () => {
+    const { service, batches } = setup(twins());
+    await service.exportBatch({ organizationId: 'org1', leadIds: ['3', '2'] });
+    await service.applyImport(file, { organizationId: 'org1', fileName: 'x_out.csv', assignments: { '0': '1' } });
+    expect(batches[0].members[0].result).toBeNull();
   });
 });

@@ -943,15 +943,16 @@ export class SurplusController {
 
   /**
    * IDI batch skip trace. Export builds the upload file in IDI's Batch
-   * Template from the chosen claimants; the results come back over SFTP and
-   * are previewed, then applied. Nothing is written by the preview.
+   * Template from the chosen claimants and saves it as a numbered batch; the
+   * results come back over SFTP and are previewed, then applied against that
+   * batch. Nothing is written by the preview.
    */
   @Post('idi/export')
   async idiExport(@Body() body: any, @Headers('authorization') authHeader?: string) {
-    const { organizationId } = this.decodeToken(authHeader);
+    const { organizationId, userId } = this.decodeToken(authHeader);
     const leadIds = Array.isArray(body?.leadIds) ? body.leadIds.filter((x: any) => typeof x === 'string') : [];
     if (!leadIds.length) throw new BadRequestException('Select at least one claimant to export.');
-    return this.idi.exportBatch({ organizationId: organizationId || null, leadIds });
+    return this.idi.exportBatch({ organizationId: organizationId || null, leadIds, userId: userId || null });
   }
 
   @Post('idi/import/parse')
