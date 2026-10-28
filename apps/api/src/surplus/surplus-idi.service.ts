@@ -7,6 +7,7 @@ import { displayName } from './surplus-skiptrace.util';
 import { tierOf } from './surplus.util';
 import {
   buildIdiBatchCsv,
+  IdiBatchRow,
   idiFirstName,
   idiRelationshipLabel,
   idiSurname,
@@ -14,7 +15,10 @@ import {
   IdiMatchCandidate,
   IdiRelative,
   IdiResultRow,
+  idiBatchCode,
+  idiEchoKey,
   matchIdiRow,
+  pairBatchRows,
   mergeEmails,
   mergePhones,
   namesSeveralPeople,
@@ -39,6 +43,35 @@ export interface IdiExportResult {
   fileName: string;
   included: number;
   skipped: { leadId: string; claimant: string; reason: string }[];
+  /** The saved batch, or null when nobody could be sent. */
+  batch: { id: string; number: number; code: string } | null;
+}
+
+/** A saved batch, as the import preview and result describe it. */
+export interface IdiBatchSummary {
+  id: string;
+  code: string;
+  fileName: string;
+  createdAt: Date;
+  rowCount: number;
+  /** Rows in this results file that echo a row of the batch. */
+  paired: number;
+}
+
+/** How many recent batches a results file is checked against. */
+const BATCH_LOOKBACK = 30;
+
+interface LoadedBatchMember {
+  id: string;
+  rowNumber: number;
+  key: string;
+  candidate: IdiMatchCandidate;
+}
+
+interface LoadedBatch {
+  summary: IdiBatchSummary;
+  /** Returned row index to the sent row it echoes. */
+  pairs: Map<number, LoadedBatchMember>;
 }
 
 export interface IdiPreviewRow {
@@ -61,6 +94,8 @@ export interface IdiPreviewRow {
   }[];
   /** Another row in the same file is matched to the same claimant. */
   sharedWith: number[];
+  /** The batch row this one echoes, one based, when it echoes one. */
+  batchRow: number | null;
 }
 
 export interface IdiApplyResult {
@@ -72,6 +107,8 @@ export interface IdiApplyResult {
   relativesFiled: number;
   skipped: { index: number; name: string; reason: string }[];
   errors: { index: number; name: string; message: string }[];
+  /** The batch the results were recorded against, when the file echoed one. */
+  batch: { id: string; code: string } | null;
 }
 
 /**
@@ -103,7 +140,11 @@ export class SurplusIdiService {
    * Entities, claimants without a usable name, and foreign addresses are left
    * out and named, because IDI can do nothing useful with them.
    */
-  async exportBatch(opts: { organizationId?: string | null; leadIds: string[] }): Promise<IdiExportResult> {
+  async exportBatch(opts: {
+    organizationId?: string | null;
+    leadIds: string[];
+    userId?: string | null;
+  }): Promise<IdiExportResult> {
     const leads = await this.prisma.lead.findMany({
       where: {
         source: LeadSource.SURPLUS,
@@ -113,7 +154,7 @@ export class SurplusIdiService {
       include: { surplusDetail: true },
     });
     const skipped: IdiExportResult['skipped'] = [];
-    const rows = [];
+    const rows: (IdiBatchRow & { detailId: string })[] = [];
     for (const l of leads as any[]) {
       if (!l.surplusDetail) continue;
       const c = candidateOf(l);
@@ -141,23 +182,86 @@ export class SurplusIdiService {
         city: String(c.city).trim(),
         state: String(c.state).trim().toUpperCase(),
         zip: String(c.zip || '').replace(/[^0-9]/g, '').slice(0, 5),
+        detailId: l.surplusDetail.id,
       });
     }
     const day = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+    const batch = rows.length
+      ? await this.saveBatch({ organizationId: opts.organizationId || null, userId: opts.userId || null, rows, skipped: skipped.length, day })
+      : null;
     return {
       csv: buildIdiBatchCsv(rows),
-      fileName: `${day}_IDI_Batch_Surplus.csv`,
+      fileName: batch ? batch.fileName : `${day}_IDI_Batch_Surplus.csv`,
       included: rows.length,
       skipped,
+      batch: batch ? { id: batch.id, number: batch.number, code: idiBatchCode(batch.number) } : null,
     };
+  }
+
+  /**
+   * Save the batch and every row exactly as sent. The number counts up per
+   * organization; two exports in the same instant collide on the unique
+   * index, and the second simply takes the next number.
+   */
+  private async saveBatch(opts: {
+    organizationId: string | null;
+    userId: string | null;
+    rows: (IdiBatchRow & { detailId: string })[];
+    skipped: number;
+    day: string;
+  }): Promise<{ id: string; number: number; fileName: string }> {
+    for (let attempt = 0; ; attempt += 1) {
+      const last = await this.prisma.surplusBatch.findFirst({
+        where: { organizationId: opts.organizationId },
+        orderBy: { number: 'desc' },
+        select: { number: true },
+      });
+      const number = (last?.number || 0) + 1;
+      const fileName = `${opts.day}_IDI_Batch_Surplus_${idiBatchCode(number)}.csv`;
+      try {
+        const made = await this.prisma.surplusBatch.create({
+          data: {
+            organizationId: opts.organizationId,
+            number,
+            kind: 'idi_export',
+            fileName,
+            createdByUserId: opts.userId,
+            rowCount: opts.rows.length,
+            skippedCount: opts.skipped,
+            members: {
+              create: opts.rows.map((r, i) => ({
+                surplusDetailId: r.detailId,
+                organizationId: opts.organizationId,
+                rowNumber: i + 1,
+                sentFirst: r.first,
+                sentLast: r.last,
+                sentStreet: r.street,
+                sentCity: r.city,
+                sentState: r.state,
+                sentZip: r.zip,
+              })),
+            },
+          },
+          select: { id: true },
+        });
+        return { id: made.id, number, fileName };
+      } catch (err: any) {
+        if (err?.code === 'P2002' && attempt < 3) continue;
+        throw err;
+      }
+    }
   }
 
   // ─── Import ───────────────────────────────────────────────────────────────
 
   /** What a results file would do, written nowhere. */
-  async previewImport(buffer: Buffer, opts: { organizationId?: string | null; fileName?: string }): Promise<{ rows: IdiPreviewRow[] }> {
+  async previewImport(
+    buffer: Buffer,
+    opts: { organizationId?: string | null; fileName?: string },
+  ): Promise<{ rows: IdiPreviewRow[]; batch: IdiBatchSummary | null }> {
     const rows = parseIdiResults(readIdiTable(buffer, opts.fileName));
-    const matches = await this.matchAll(rows, opts.organizationId);
+    const batch = await this.findBatch(rows, opts.organizationId);
+    const matches = await this.matchAll(rows, opts.organizationId, batch);
     const preview: IdiPreviewRow[] = rows.map((r, i) => ({
       index: r.index,
       input: r.input,
@@ -176,12 +280,13 @@ export class SurplusIdiService {
         addressMatch: o.addressMatch,
       })),
       sharedWith: [],
+      batchRow: batch?.pairs.get(r.index)?.rowNumber ?? null,
     }));
     for (const p of preview) {
       if (!p.leadId) continue;
       p.sharedWith = preview.filter((o) => o !== p && o.leadId === p.leadId).map((o) => o.index);
     }
-    return { rows: preview };
+    return { rows: preview, batch: batch?.summary || null };
   }
 
   /**
@@ -200,7 +305,8 @@ export class SurplusIdiService {
     },
   ): Promise<IdiApplyResult> {
     const rows = parseIdiResults(readIdiTable(buffer, opts.fileName));
-    const matches = await this.matchAll(rows, opts.organizationId);
+    const batch = await this.findBatch(rows, opts.organizationId);
+    const matches = await this.matchAll(rows, opts.organizationId, batch);
     const result: IdiApplyResult = {
       rows: rows.length,
       applied: 0,
@@ -210,8 +316,10 @@ export class SurplusIdiService {
       relativesFiled: 0,
       skipped: [],
       errors: [],
+      batch: batch ? { id: batch.summary.id, code: batch.summary.code } : null,
     };
     const assignments = opts.assignments || {};
+    const recorded = new Set<string>();
 
     for (let i = 0; i < rows.length; i += 1) {
       const row = rows[i];
@@ -246,6 +354,23 @@ export class SurplusIdiService {
       }
       try {
         const out = await this.applyRow(row, lead, opts.userId || null);
+        // Recorded on the batch row only when the result went to the claimant
+        // that row was sent for. A row a person re-pointed belongs elsewhere.
+        const member = batch?.pairs.get(row.index);
+        if (member && member.candidate.leadId === lead.id) {
+          recorded.add(member.id);
+          await this.prisma.surplusBatchMember.update({
+            where: { id: member.id },
+            data: {
+              result: !row.matched ? 'no_person' : out.contact ? 'matched' : 'no_contact',
+              deceased: row.deceased === 'Y',
+              phonesReturned: row.phones.length,
+              emailsReturned: row.emails.length,
+              relativesFiled: out.relativesFiled,
+              appliedAt: new Date(),
+            },
+          });
+        }
         result.applied += 1;
         if (!row.matched) result.noMatch += 1;
         if (out.contact) result.withContact += 1;
@@ -256,11 +381,96 @@ export class SurplusIdiService {
         result.errors.push({ index: row.index, name, message: err?.message || String(err) });
       }
     }
+    // A row IDI came back empty on is still an answer for the batch, even
+    // when nobody chose to stamp it on the claimant, so the batch never shows
+    // it as waiting. Nothing is written to the claimant.
+    const emptyAt = new Date();
+    for (const row of rows) {
+      const member = batch?.pairs.get(row.index);
+      if (!member || row.matched || recorded.has(member.id)) continue;
+      await this.prisma.surplusBatchMember.update({
+        where: { id: member.id },
+        data: { result: 'no_person', appliedAt: emptyAt },
+      });
+      recorded.add(member.id);
+    }
+    if (batch && recorded.size) {
+      await this.prisma.surplusBatch.update({
+        where: { id: batch.summary.id },
+        data: { resultsAppliedAt: new Date(), resultsFileName: opts.fileName || null, resultsAppliedById: opts.userId || null },
+      });
+    }
     return result;
   }
 
-  /** Candidates by surname, then the name and address test in the util. */
-  private async matchAll(rows: IdiResultRow[], organizationId?: string | null): Promise<IdiMatch[]> {
+  /**
+   * The saved batch this results file answers: of the recent batches, the one
+   * whose sent rows the most returned rows echo, newest on a tie. Null when
+   * the file echoes none of them, which is every file exported before batches
+   * were saved.
+   */
+  private async findBatch(rows: IdiResultRow[], organizationId?: string | null): Promise<LoadedBatch | null> {
+    if (!rows.length) return null;
+    const recent = await this.prisma.surplusBatch.findMany({
+      where: { kind: 'idi_export', ...(organizationId ? { organizationId } : {}) },
+      orderBy: { createdAt: 'desc' },
+      take: BATCH_LOOKBACK,
+      select: {
+        id: true,
+        members: { select: { id: true, rowNumber: true, sentFirst: true, sentLast: true, sentStreet: true } },
+      },
+    });
+    let best: { id: string; paired: number } | null = null;
+    for (const b of recent) {
+      const keyed = b.members.map((m) => ({ ...m, key: idiEchoKey({ first: m.sentFirst, last: m.sentLast, street: m.sentStreet }) }));
+      const paired = pairBatchRows(rows, keyed).size;
+      // Newest first, so only a strictly better count replaces the pick.
+      if (paired > 0 && (!best || paired > best.paired)) best = { id: b.id, paired };
+    }
+    if (!best) return null;
+
+    const full = await this.prisma.surplusBatch.findUnique({
+      where: { id: best.id },
+      include: { members: { include: { surplusDetail: { include: { lead: true } } } } },
+    });
+    if (!full) return null;
+    const members: LoadedBatchMember[] = (full.members as any[]).map((m) => {
+      const d = m.surplusDetail;
+      const l = d.lead;
+      return {
+        id: m.id,
+        rowNumber: m.rowNumber,
+        key: idiEchoKey({ first: m.sentFirst, last: m.sentLast, street: m.sentStreet }),
+        candidate: {
+          leadId: l.id,
+          detailId: d.id,
+          claimant: `${l.sellerFirstName || ''} ${l.sellerLastName || ''}`.trim(),
+          county: d.county || null,
+          caseNumber: d.caseNumber || null,
+          streets: [d.ownerMailingStreet, l.propertyAddress],
+        },
+      };
+    });
+    const pairs = pairBatchRows(rows, members);
+    return {
+      summary: {
+        id: full.id,
+        code: idiBatchCode(full.number),
+        fileName: full.fileName,
+        createdAt: full.createdAt,
+        rowCount: full.rowCount,
+        paired: pairs.size,
+      },
+      pairs,
+    };
+  }
+
+  /**
+   * Candidates by surname, then the name and address test in the util. A row
+   * that echoes one in the saved batch goes to the claimant it was sent for,
+   * and the name matches stay listed so a person can still re-point it.
+   */
+  private async matchAll(rows: IdiResultRow[], organizationId?: string | null, batch?: LoadedBatch | null): Promise<IdiMatch[]> {
     const cache = new Map<string, IdiMatchCandidate[]>();
     const out: IdiMatch[] = [];
     for (const row of rows) {
@@ -295,7 +505,20 @@ export class SurplusIdiService {
           })),
         );
       }
-      out.push(matchIdiRow(row, cache.get(surname)!));
+      const byName = matchIdiRow(row, cache.get(surname)!);
+      const sent = batch?.pairs.get(row.index);
+      out.push(
+        sent
+          ? {
+              confidence: 'batch',
+              pick: sent.candidate,
+              options: [
+                { candidate: sent.candidate, addressMatch: true },
+                ...byName.options.filter((o) => o.candidate.leadId !== sent.candidate.leadId),
+              ],
+            }
+          : byName,
+      );
     }
     return out;
   }

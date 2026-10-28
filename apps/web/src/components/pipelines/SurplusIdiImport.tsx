@@ -27,13 +27,25 @@ interface PreviewRow {
   phones: number;
   emails: number;
   relatives: number;
-  confidence: 'name_and_address' | 'name_only' | 'ambiguous' | 'none';
+  confidence: 'batch' | 'name_and_address' | 'name_only' | 'ambiguous' | 'none';
   leadId: string | null;
   options: PreviewOption[];
   sharedWith: number[];
+  /** The batch row this one echoes, one based. */
+  batchRow: number | null;
+}
+
+interface BatchSummary {
+  id: string;
+  code: string;
+  fileName: string;
+  createdAt: string;
+  rowCount: number;
+  paired: number;
 }
 
 const CONFIDENCE: Record<PreviewRow['confidence'], { label: string; color: string }> = {
+  batch: { label: 'Sent for this claimant', color: 'var(--mint)' },
   name_and_address: { label: 'Name and address match', color: 'var(--mint)' },
   name_only: { label: 'Name matches, address differs', color: 'var(--amber, #d69e2e)' },
   ambiguous: { label: 'More than one claimant fits. Pick one', color: 'var(--amber, #d69e2e)' },
@@ -51,6 +63,7 @@ export default function SurplusIdiImport({
   onDone: (summary: string) => void;
 }) {
   const [rows, setRows] = useState<PreviewRow[] | null>(null);
+  const [batch, setBatch] = useState<BatchSummary | null>(null);
   const [choice, setChoice] = useState<Record<number, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(true);
@@ -67,6 +80,7 @@ export default function SurplusIdiImport({
         if (!live) return;
         const r: PreviewRow[] = res.data.rows || [];
         setRows(r);
+        setBatch(res.data.batch || null);
         setChoice(Object.fromEntries(r.map((row) => [row.index, row.leadId || ''])));
       })
       .catch((err: any) => live && setError(err?.response?.data?.message || 'That file could not be read.'))
@@ -113,7 +127,7 @@ export default function SurplusIdiImport({
       const res = await surplusAPI.idiImportExecute(file, assignments);
       const d = res.data;
       const parts = [
-        `IDI results applied to ${d.applied} claimant${d.applied === 1 ? '' : 's'}`,
+        `IDI results applied to ${d.applied} claimant${d.applied === 1 ? '' : 's'}${d.batch ? ` from batch ${d.batch.code}` : ''}`,
         d.withContact ? `${d.withContact} with new contacts` : null,
         d.deceased ? `${d.deceased} marked deceased` : null,
         d.noMatch ? `${d.noMatch} no match` : null,
@@ -183,7 +197,11 @@ export default function SurplusIdiImport({
                   ))}
                 </select>
                 {(r.found || recordEmpty) && (
-                  <div style={{ color: conf.color, fontSize: 11.5, marginTop: 4 }}>{conf.label}</div>
+                  <div style={{ color: conf.color, fontSize: 11.5, marginTop: 4 }}>
+                    {r.confidence === 'batch' && batch && r.batchRow
+                      ? `Sent for this claimant in ${batch.code}, row ${r.batchRow}`
+                      : conf.label}
+                  </div>
                 )}
                 {clash.has(r.index) && (
                   <div style={{ color: 'var(--red, #e53e3e)', fontSize: 11.5, marginTop: 2 }}>
@@ -213,6 +231,25 @@ export default function SurplusIdiImport({
           check numbers against the Do Not Call registries, so new numbers show as unscrubbed. Rows where IDI found
           nothing are left out unless you choose to record them.
         </div>
+
+        {rows && (
+          <div style={{ fontSize: 12.5, marginBottom: 12, lineHeight: 1.5 }}>
+            {batch ? (
+              <>
+                <b>Batch {batch.code}</b>
+                <span style={{ color: 'var(--dim)' }}>
+                  {' '}
+                  · {batch.fileName} · sent {new Date(batch.createdAt).toLocaleDateString('en-US')} ·{' '}
+                  {batch.paired} of {batch.rowCount} sent row{batch.rowCount === 1 ? '' : 's'} came back in this file
+                </span>
+              </>
+            ) : (
+              <span style={{ color: 'var(--dim)' }}>
+                This file does not match a saved batch, so each row is matched by name and address.
+              </span>
+            )}
+          </div>
+        )}
 
         {error && (
           <div style={{ color: 'var(--red, #e53e3e)', fontSize: 13, marginBottom: 12 }} role="alert">

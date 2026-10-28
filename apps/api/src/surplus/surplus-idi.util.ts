@@ -101,6 +101,47 @@ export function buildIdiBatchCsv(rows: IdiBatchRow[]): string {
   return lines.map((cells) => cells.map(csvCell).join(',')).join('\r\n') + '\r\n';
 }
 
+// ─── Batches ────────────────────────────────────────────────────────────────
+
+/** 14 is "B014". Short enough to say out loud and to sit in a file name. */
+export function idiBatchCode(n: number): string {
+  return `B${String(n).padStart(3, '0')}`;
+}
+
+/**
+ * The name and street as IDI echoes them, compared without case, spacing or
+ * punctuation, so "100 Example Rd SE" and "100 EXAMPLE RD. SE" are one row.
+ * City, state and ZIP are left out: the vendor reformats them more often
+ * than it reformats a name.
+ */
+export function idiEchoKey(r: Pick<IdiBatchRow, 'first' | 'last' | 'street'>): string {
+  const norm = (v: string) => String(v || '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
+  return [norm(r.first), norm(r.last), norm(r.street)].join('|');
+}
+
+/**
+ * Which sent row each returned row answers. Equal keys pair off in file
+ * order, so one owner sent twice for two cases at the same address gets one
+ * result each rather than both landing on the first case. Returned rows that
+ * echo nothing in the batch are left out of the map.
+ */
+export function pairBatchRows<M extends { rowNumber: number; key: string }>(
+  rows: { index: number; input: IdiBatchRow }[],
+  members: M[],
+): Map<number, M> {
+  const queues = new Map<string, M[]>();
+  for (const m of [...members].sort((a, b) => a.rowNumber - b.rowNumber)) {
+    if (!queues.has(m.key)) queues.set(m.key, []);
+    queues.get(m.key)!.push(m);
+  }
+  const out = new Map<number, M>();
+  for (const r of [...rows].sort((a, b) => a.index - b.index)) {
+    const next = queues.get(idiEchoKey(r.input))?.shift();
+    if (next) out.set(r.index, next);
+  }
+  return out;
+}
+
 // ─── Reading the results ────────────────────────────────────────────────────
 
 /**
@@ -311,7 +352,8 @@ export interface IdiMatchCandidate {
   streets: (string | null | undefined)[];
 }
 
-export type IdiMatchConfidence = 'name_and_address' | 'name_only' | 'ambiguous' | 'none';
+/** 'batch' is the strongest: the row echoes one we sent, in a batch we saved. */
+export type IdiMatchConfidence = 'batch' | 'name_and_address' | 'name_only' | 'ambiguous' | 'none';
 
 export interface IdiMatch {
   confidence: IdiMatchConfidence;

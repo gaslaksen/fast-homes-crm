@@ -1,5 +1,8 @@
 import {
   buildIdiBatchCsv,
+  idiBatchCode,
+  idiEchoKey,
+  pairBatchRows,
   idiFirstName,
   idiRelationshipLabel,
   matchIdiRow,
@@ -189,5 +192,39 @@ describe('merging contacts, newest first', () => {
     );
     expect(r.emails).toEqual(['new@example.com', 'kept@example.com']);
     expect(r.added).toBe(1);
+  });
+});
+
+describe('IDI batches', () => {
+  const row = (index: number, first: string, last: string, street: string) => ({
+    index,
+    input: { first, last, street, city: 'Palm Bay', state: 'FL', zip: '32909' },
+  });
+
+  it('names a batch by its number', () => {
+    expect(idiBatchCode(1)).toBe('B001');
+    expect(idiBatchCode(14)).toBe('B014');
+    expect(idiBatchCode(1203)).toBe('B1203');
+  });
+
+  it('compares the echo without case, spacing or punctuation', () => {
+    expect(idiEchoKey({ first: 'Jane Q', last: 'Sample', street: '100 Example Rd. SE' })).toBe(
+      idiEchoKey({ first: 'JANE  Q', last: 'SAMPLE', street: '100 EXAMPLE RD SE' }),
+    );
+  });
+
+  it('pairs equal rows off in file order and skips rows it never sent', () => {
+    const key = idiEchoKey({ first: 'JANE Q', last: 'SAMPLE', street: '100 Example Rd SE' });
+    const members = [
+      { id: 'second', rowNumber: 5, key },
+      { id: 'first', rowNumber: 2, key },
+    ];
+    const pairs = pairBatchRows(
+      [row(0, 'Jane Q', 'Sample', '100 Example Rd SE'), row(1, 'Glen', 'Nobody', '1 Lot Rd'), row(2, 'JANE Q', 'SAMPLE', '100 EXAMPLE RD SE')],
+      members,
+    );
+    expect(pairs.get(0)?.id).toBe('first');
+    expect(pairs.has(1)).toBe(false);
+    expect(pairs.get(2)?.id).toBe('second');
   });
 });

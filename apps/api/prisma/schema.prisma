@@ -1112,6 +1112,8 @@ model SurplusDetail {
   /// Every search run for this claimant, by channel, so nothing is run
   /// twice and the free routes are provably exhausted before a paid one.
   traceAttempts SurplusTraceAttempt[]
+  /// Every skip-trace batch this claimant was sent out in.
+  batchMembers SurplusBatchMember[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2567,6 +2569,73 @@ model SurplusTraceAttempt {
   @@index([surplusDetailId, ranAt])
   @@index([organizationId, channel])
   @@map("surplus_trace_attempts")
+}
+
+/// One file of claimants sent out to be skip traced, so the people in it can
+/// be found again when the results come back. IDI echoes only the name and
+/// address we sent and no id of ours, so the batch keeps exactly what each
+/// row said: a results row that echoes it is that claimant, with no guessing.
+model SurplusBatch {
+  id              String  @id @default(cuid())
+  organizationId  String?
+  /// Counts up per organization and names the batch: 14 is "B014", which is
+  /// also in the file name, so the file on the SFTP server says which batch.
+  number          Int
+  /// 'idi_export'. Kept open for spreadsheet and county imports later.
+  kind            String  @default("idi_export")
+  fileName        String
+  createdByUserId String?
+  /// Rows in the file, and claimants left out (entities, no name, no address).
+  rowCount        Int     @default(0)
+  skippedCount    Int     @default(0)
+
+  /// When a results file was last applied against this batch, and which file.
+  resultsAppliedAt   DateTime?
+  resultsFileName    String?
+  resultsAppliedById String?
+
+  members SurplusBatchMember[]
+
+  createdAt DateTime @default(now())
+
+  @@unique([organizationId, number])
+  @@index([organizationId, createdAt])
+  @@map("surplus_batches")
+}
+
+/// One row of a batch: the claimant, and the fields exactly as sent.
+model SurplusBatchMember {
+  id              String        @id @default(cuid())
+  batchId         String
+  batch           SurplusBatch  @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  surplusDetailId String
+  surplusDetail   SurplusDetail @relation(fields: [surplusDetailId], references: [id], onDelete: Cascade)
+  organizationId  String?
+
+  /// One based, the row's position in the file under the header.
+  rowNumber  Int
+  sentFirst  String
+  sentLast   String
+  sentStreet String
+  sentCity   String
+  sentState  String
+  sentZip    String
+
+  /// Null until results come back. Then 'matched' (contacts found),
+  /// 'no_contact' (found the person, no phone or email) or 'no_person' (IDI
+  /// could not place them).
+  result         String?
+  deceased       Boolean   @default(false)
+  phonesReturned Int       @default(0)
+  emailsReturned Int       @default(0)
+  relativesFiled Int       @default(0)
+  appliedAt      DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@unique([batchId, rowNumber])
+  @@index([surplusDetailId])
+  @@map("surplus_batch_members")
 }
 
 /// A public social media profile that may belong to a claimant or to somebody
