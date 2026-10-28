@@ -1337,6 +1337,10 @@ model Message {
   id          String    @id @default(cuid())
   leadId      String
   lead        Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  /// The person on a surplus case this was with, when it was not the
+  /// claimant: a relative, an heir or a neighbor. Null means the claimant.
+  heirId      String?
+  heir        SurplusHeir? @relation(fields: [heirId], references: [id], onDelete: SetNull)
   direction   String
   status      String    @default("PENDING")
   body        String
@@ -1352,6 +1356,7 @@ model Message {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
+  @@index([heirId])
   @@map("messages")
 }
 
@@ -1554,6 +1559,10 @@ model Task {
   id          String    @id @default(cuid())
   leadId      String
   lead        Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  /// The person on a surplus case this was with, when it was not the
+  /// claimant: a relative, an heir or a neighbor. Null means the claimant.
+  heirId      String?
+  heir        SurplusHeir? @relation(fields: [heirId], references: [id], onDelete: SetNull)
   userId      String?
   user        User?     @relation(fields: [userId], references: [id])
   title       String
@@ -1565,6 +1574,7 @@ model Task {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
+  @@index([heirId])
   @@map("tasks")
 }
 
@@ -1758,6 +1768,10 @@ model CallLog {
   id           String   @id @default(cuid())
   leadId       String?
   lead         Lead?    @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  /// The person on a surplus case this was with, when it was not the
+  /// claimant: a relative, an heir or a neighbor. Null means the claimant.
+  heirId       String?
+  heir         SurplusHeir? @relation(fields: [heirId], references: [id], onDelete: SetNull)
   vapiCallId       String?  @unique
   twilioCallSid    String?  @unique  // Twilio browser-dialer call (CallSid)
   fromNumber       String?           // dialer caller ID used
@@ -1809,6 +1823,7 @@ model CallLog {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
+  @@index([heirId])
   @@map("call_logs")
 }
 
@@ -1846,6 +1861,10 @@ model Email {
   orgId       String
   leadId      String?
   lead        Lead?    @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  /// The person on a surplus case this was with, when it was not the
+  /// claimant: a relative, an heir or a neighbor. Null means the claimant.
+  heirId      String?
+  heir        SurplusHeir? @relation(fields: [heirId], references: [id], onDelete: SetNull)
   gmailMsgId  String?  @unique
   mailgunMessageId String? @unique // Mailgun Message-Id (with angle brackets stripped)
   messageIdHeader  String? // RFC 5322 Message-ID we set/received, for threading
@@ -1861,6 +1880,7 @@ model Email {
   sentAt      DateTime
   createdAt   DateTime @default(now())
 
+  @@index([heirId])
   @@map("emails")
 }
 
@@ -2471,6 +2491,11 @@ model SurplusHeir {
   socialSearchedAt DateTime?
   /// Drip campaigns this person is enrolled in, apart from the claimant's.
   campaignEnrollments CampaignEnrollment[]
+  /// Texts, calls, emails and follow-ups that were with this person.
+  messages Message[]
+  callLogs CallLog[]
+  emails   Email[]
+  tasks    Task[]
   /// When this person's texts last carried the compliance footer. Lead's own
   /// column is the claimant's, so the first text to a son still says who is
   /// writing and how to stop it.

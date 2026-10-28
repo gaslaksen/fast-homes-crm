@@ -166,6 +166,33 @@ export class MailerService {
     return `${clean}@${domain}`;
   }
 
+  /**
+   * The person on a surplus case an email went to, when it was not the
+   * claimant: a relative or heir whose address this is. The claimant's own
+   * address wins where both hold it. Null for every other lead.
+   */
+  private async heirIdForEmail(leadId: string, to: string): Promise<string | null> {
+    const address = String(to || '').replace(/^.*<([^>]+)>.*$/, '$1').trim().toLowerCase();
+    if (!address) return null;
+    try {
+      const lead = await this.prisma.lead.findUnique({ where: { id: leadId }, select: { source: true, sellerEmail: true } });
+      if (lead?.source !== 'SURPLUS' || String(lead.sellerEmail || '').toLowerCase() === address) return null;
+      const heir = await this.prisma.surplusHeir.findFirst({
+        where: {
+          surplusDetail: { leadId },
+          OR: [
+            { email1: { equals: address, mode: 'insensitive' } },
+            { email2: { equals: address, mode: 'insensitive' } },
+          ],
+        },
+        select: { id: true },
+      });
+      return heir?.id || null;
+    } catch {
+      return null;
+    }
+  }
+
   private buildFrom(displayName: string | undefined, address: string): string {
     return displayName ? `${displayName} <${address}>` : address;
   }
@@ -222,6 +249,7 @@ export class MailerService {
     // Persist to the Email table so it shows in the lead conversation thread.
     if (params.orgId) {
       try {
+        const heirId = params.leadId ? await this.heirIdForEmail(params.leadId, params.to) : null;
         await this.prisma.email.create({
           data: {
             orgId: params.orgId,
@@ -237,6 +265,7 @@ export class MailerService {
             threadId: params.leadId ?? null,
             mailgunMessageId: mailgunId,
             messageIdHeader: mailgunId ? `<${mailgunId}>` : null,
+            heirId,
           },
         });
       } catch (err: any) {

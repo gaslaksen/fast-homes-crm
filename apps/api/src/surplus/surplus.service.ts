@@ -1412,14 +1412,20 @@ export class SurplusService {
     await this.createTaskOnce(leadId, rule.title(name, attorney), rule.days, userId);
   }
 
-  private async createTaskOnce(leadId: string, title: string, days: number, userId?: string | null) {
+  private async createTaskOnce(
+    leadId: string,
+    title: string,
+    days: number,
+    userId?: string | null,
+    heirId?: string | null,
+  ) {
     const open = await this.prisma.task.findFirst({ where: { leadId, title, completed: false } });
     if (open) return;
     const dueDate = new Date();
     dueDate.setDate(dueDate.getDate() + days);
     dueDate.setHours(9, 0, 0, 0);
     await this.prisma.task.create({
-      data: { leadId, title, dueDate, userId: userId || undefined },
+      data: { leadId, title, dueDate, userId: userId || undefined, heirId: heirId || null },
     });
     await this.prisma.activity.create({
       data: {
@@ -1558,12 +1564,17 @@ export class SurplusService {
 
       // A letter in the post is a promise to check for a reply. Two weeks is
       // the course's cadence, and past it the claimant is due another one.
-      const name = `${lead.sellerFirstName || ''} ${lead.sellerLastName || ''}`.trim() || 'the claimant';
+      // A letter to a relative is that relative's follow-up, in their name.
+      const name =
+        (heir ? recipientName : null) ||
+        `${lead.sellerFirstName || ''} ${lead.sellerLastName || ''}`.trim() ||
+        'the claimant';
       await this.createTaskOnce(
         lead.id,
         `Check for a reply to the letter to ${name}`,
         LETTER_FOLLOW_UP_DAYS,
         userId,
+        heir?.id || null,
       );
 
       if (userId) {

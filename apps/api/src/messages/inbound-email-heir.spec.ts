@@ -48,8 +48,20 @@ describe('MessagesService inbound email from a person on a surplus case', () => 
     const where = prisma.surplusHeir.findFirst.mock.calls[0][0].where;
     expect(where.OR[0].email1.equals).toBe('linda.morris@example.com');
     expect(prisma.email.create.mock.calls[0][0].data.leadId).toBe('lead1');
+    expect(prisma.email.create.mock.calls[0][0].data.heirId).toBe('heir1');
     expect(prisma.surplusHeir.update.mock.calls[0][0].where).toEqual({ id: 'heir1' });
     expect(prisma.surplusHeir.updateMany.mock.calls[0][0].data).toEqual({ contactStatus: 'contacted' });
+  });
+
+  it('files a reply in the thread under the relative who sent it', async () => {
+    const { service, prisma } = build({ id: 'heir1', surplusDetail: { leadId: 'lead1' } });
+    prisma.email.findFirst.mockResolvedValue({ leadId: 'lead1' });
+    const res = await service.handleInboundEmail({ ...inbound, inReplyTo: '<sent@x>' });
+
+    expect(res.success).toBe(true);
+    const where = prisma.surplusHeir.findFirst.mock.calls[0][0].where;
+    expect(where.surplusDetail).toEqual({ leadId: 'lead1' });
+    expect(prisma.email.create.mock.calls[0][0].data.heirId).toBe('heir1');
   });
 
   it('still reports no lead when nobody holds the address', async () => {

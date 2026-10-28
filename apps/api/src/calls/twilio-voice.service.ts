@@ -201,6 +201,9 @@ export class TwilioVoiceService {
     }
 
     const conferenceName = this.conferenceNameFor(callSid);
+    // Whose number this is on the lead: a relative's or heir's, or null for
+    // the lead's own, so the call is filed under the person it rang.
+    const heirId = leadId ? await this.leadPhones.heirIdForNumber(leadId, to).catch(() => null) : null;
 
     // Open a CallLog row keyed by the browser leg's CallSid
     if (callSid) {
@@ -216,8 +219,9 @@ export class TwilioVoiceService {
             status: 'in-progress',
             type: 'twilio_browser',
             conferenceName,
+            heirId,
           },
-          update: { status: 'in-progress', toNumber: to, conferenceName },
+          update: { status: 'in-progress', toNumber: to, conferenceName, heirId },
         });
       } catch (err: any) {
         this.logger.error(`Failed to open CallLog for ${callSid}: ${err.message}`);
@@ -707,6 +711,7 @@ export class TwilioVoiceService {
             toNumber: to,
             status: 'in-progress',
             type: 'twilio_inbound',
+            heirId: ((lead as any)?.heirId as string | null) || null,
           },
           update: { status: 'in-progress' },
         });
@@ -1095,6 +1100,7 @@ export class TwilioVoiceService {
         id: true,
         leadId: true,
         toNumber: true,
+        heirId: true,
         lead: {
           select: {
             id: true,
@@ -1122,7 +1128,18 @@ export class TwilioVoiceService {
 
     const lead = log?.lead;
     if (!log?.leadId || !lead) return;
-    const name = `${lead.sellerFirstName || ''} ${lead.sellerLastName || ''}`.trim() || 'the claimant';
+    // The person the call rang: stamped on the log when it was dialled, and
+    // looked up from the number for a call logged before that was recorded.
+    const personId =
+      log.heirId ||
+      (lead.source === LeadSource.SURPLUS && log.toNumber
+        ? await this.leadPhones.heirIdForNumber(lead.id, log.toNumber).catch(() => null)
+        : null);
+    const person = personId
+      ? await this.prisma.surplusHeir.findUnique({ where: { id: personId }, select: { name: true } }).catch(() => null)
+      : null;
+    const name =
+      person?.name || `${lead.sellerFirstName || ''} ${lead.sellerLastName || ''}`.trim() || 'the claimant';
 
     // The outcome goes on the timeline as its own event, beside the CALL_PLACED
     // the dial wrote, so reading the thread says what happened and not only
@@ -1156,6 +1173,7 @@ export class TwilioVoiceService {
           title,
           description: notes || undefined,
           dueDate: followUpAt,
+          heirId: personId,
         },
       });
       await this.prisma.activity.create({
@@ -1191,10 +1209,7 @@ export class TwilioVoiceService {
     // A number held by a person on the case (a son, a neighbor) opts out that
     // person, the same as their STOP does: the son asking not to be called is
     // not the claimant asking it.
-    const heirId =
-      detail && outcome === SurplusCallOutcome.DO_NOT_CALL && log.toNumber
-        ? await this.leadPhones.heirIdForNumber(lead.id, log.toNumber).catch(() => null)
-        : null;
+    const heirId = detail && outcome === SurplusCallOutcome.DO_NOT_CALL ? personId : null;
     if (heirId) {
       await this.prisma.surplusHeir.update({ where: { id: heirId }, data: { doNotCall: true } });
       // Mirrors CampaignEnrollmentService.removeAllForHeir, which this module

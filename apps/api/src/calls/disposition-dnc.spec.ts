@@ -10,7 +10,7 @@ const SON_NUMBER = '+13525550141';
  * the line. A son saying it opts out the son, the way his STOP would, and
  * leaves the claimant reachable.
  */
-function harness(toNumber: string) {
+function harness(toNumber: string, heirId: string | null = null) {
   const writes: { model: string; op: string; args: any }[] = [];
   const record = (model: string, op: string) => async (args: any) => {
     writes.push({ model, op, args });
@@ -23,6 +23,7 @@ function harness(toNumber: string) {
         id: 'log1',
         leadId: 'lead1',
         toNumber,
+        heirId,
         lead: {
           id: 'lead1',
           source: LeadSource.SURPLUS,
@@ -37,7 +38,10 @@ function harness(toNumber: string) {
     task: { create: record('task', 'create') },
     lead: { update: record('lead', 'update') },
     surplusDetail: { update: record('surplusDetail', 'update'), updateMany: record('surplusDetail', 'updateMany') },
-    surplusHeir: { update: record('surplusHeir', 'update') },
+    surplusHeir: {
+      update: record('surplusHeir', 'update'),
+      findUnique: async ({ where }: any) => (where.id === 'heir-son' ? { name: 'ROBERT KESSLER' } : null),
+    },
     campaignEnrollment: { updateMany: record('campaignEnrollment', 'updateMany') },
   } as any;
 
@@ -76,5 +80,17 @@ describe('TwilioVoiceService.setDisposition do not call', () => {
     const lead = writes.find((w) => w.model === 'lead');
     expect(lead?.args.data).toEqual({ doNotContact: true, surplusDetail: { update: { doNotCall: true } } });
     expect(writes.find((w) => w.model === 'surplusHeir')).toBeUndefined();
+  });
+
+  it('files a follow-up under the relative the call rang, in their name', async () => {
+    const { svc, writes } = harness(SON_NUMBER, 'heir-son');
+    await svc.setDisposition(CALL_SID, {
+      disposition: 'Follow Up',
+      outcome: SurplusCallOutcome.CALLBACK_SCHEDULED,
+      followUpAt: '2026-11-02T15:00:00Z',
+    });
+    const task = writes.find((w) => w.model === 'task');
+    expect(task?.args.data.heirId).toBe('heir-son');
+    expect(task?.args.data.title).toContain('ROBERT KESSLER');
   });
 });
