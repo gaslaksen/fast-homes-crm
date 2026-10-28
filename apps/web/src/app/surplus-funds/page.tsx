@@ -5,6 +5,7 @@ import AppShell from '@/components/AppShell';
 import PipelineBoard, { inBoardOrder, type PipelineView } from '@/components/pipelines/PipelineBoard';
 import AddLeadSheet, { SURPLUS_FIELDS } from '@/components/pipelines/AddLeadSheet';
 import SurplusWorkPanel from '@/components/pipelines/SurplusWorkPanel';
+import SurplusBatches, { BatchRef } from '@/components/pipelines/SurplusBatches';
 import SurplusIdiImport from '@/components/pipelines/SurplusIdiImport';
 import SurplusPropertyCard, { STATUS_ACCENT } from '@/components/pipelines/SurplusPropertyCard';
 import type { PipelineColumn, PipelineStage } from '@/components/pipelines/PipelineBoard';
@@ -698,6 +699,14 @@ export default function SurplusFundsPage() {
   const [view, setView] = useState<PipelineView>('table');
   /** The lead whose work panel is open, or null. */
   const [openId, setOpenId] = useState<string | null>(null);
+  /**
+   * The saved IDI batch the board is narrowed to. While it is on, the board
+   * shows everyone in the batch: the early, dead, do-not-call and under-a-year
+   * cuts are set aside for the query, and put back when it is cleared.
+   */
+  const [batchQ, setBatchQ] = useState<BatchRef | null>(null);
+  /** The Batches window: closed, the list (''), or open on one batch. */
+  const [batchesOpen, setBatchesOpen] = useState<string | null>(null);
   /** Total claimant leads behind the properties on screen. */
   const [leadCount, setLeadCount] = useState(0);
   const [currentUser, setCurrentUser] = useState<any>(null);
@@ -788,14 +797,15 @@ export default function SurplusFundsPage() {
         // "New, 7 days" is a deliberate look at what just landed, and asking
         // for the claims under 120 days is the same deliberate look. Both show
         // the early ones whatever this toggle says.
-        hideEarly: hideEarly && chipQ !== 'new' && ageQ !== 'under-120' ? true : undefined,
+        hideEarly: hideEarly && !batchQ && chipQ !== 'new' && ageQ !== 'under-120' ? true : undefined,
         lienWindow: lienWin === 'all' ? undefined : lienWin,
-        hideDead: hideDead || undefined,
-        hideDnc: hideDnc || undefined,
+        hideDead: (hideDead && !batchQ) || undefined,
+        hideDnc: (hideDnc && !batchQ) || undefined,
         contact: chipQ === 'not_tapped' ? 'not_tapped' : undefined,
         missingChannel: chipQ === 'missing' || undefined,
         letterDue: chipQ === 'letter_due' || undefined,
         updateOverdue: chipQ === 'update_overdue' || undefined,
+        batch: batchQ?.id,
         sort,
         pageSize: 200,
       });
@@ -806,7 +816,7 @@ export default function SurplusFundsPage() {
       // claimant on it qualifies.
       if (chipQ === 'estate') data = data.filter((r) => r.anyDeceased);
       if (chipQ === 'lien') data = data.filter((r) => r.competingLien);
-      if (underYear) data = data.filter((r) => r.daysSinceSale == null || r.daysSinceSale <= 365);
+      if (underYear && !batchQ) data = data.filter((r) => r.daysSinceSale == null || r.daysSinceSale <= 365);
       setRows(data);
       setLeadCount(res.data.leadCount ?? data.length);
       setCounties(Array.isArray(res.data.counties) ? res.data.counties : []);
@@ -818,7 +828,7 @@ export default function SurplusFundsPage() {
     } finally {
       setLoading(false);
     }
-  }, [q, queueQ, tierQ, stageQ, ctype, county, band, chipQ, ageQ, lienWin, hideDead, hideDnc, sort, underYear, hideEarly]);
+  }, [q, queueQ, tierQ, stageQ, ctype, county, band, chipQ, ageQ, lienWin, hideDead, hideDnc, sort, underYear, hideEarly, batchQ]);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -1055,8 +1065,16 @@ export default function SurplusFundsPage() {
     .filter((r) => picked[r.key])
     .flatMap((r) => r.claimants.map((c: any) => c.id));
 
+  /** Narrow the board to one batch, clearing the other cuts so nobody in it is hidden. */
+  const showBatch = (b: BatchRef) => {
+    reset();
+    setBatchQ(b);
+    setBatchesOpen(null);
+  };
+
   const reset = () => {
     setQ('');
+    setBatchQ(null);
     setQueueQ(null);
     setTierQ(null);
     setChipQ(null);
@@ -1318,6 +1336,14 @@ export default function SurplusFundsPage() {
                   <button
                     type="button"
                     className="dc-menu-item"
+                    onClick={() => setBatchesOpen('')}
+                    title="Every IDI export, what came back, and the people each batch turned up."
+                  >
+                    IDI batches
+                  </button>
+                  <button
+                    type="button"
+                    className="dc-menu-item"
                     onClick={socialBatch}
                     disabled={polling || busy}
                     title="Search the web for the profiles of living claimants nobody can reach. Paid per check; asks first."
@@ -1428,6 +1454,26 @@ export default function SurplusFundsPage() {
               good for: ordering inside a queue, not choosing between them.
               These stay on the front row. They are the workflow. */}
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
+            {batchQ && (
+              <span style={{ display: 'inline-flex', gap: 4 }}>
+                <button
+                  type="button"
+                  className="dc-tab on"
+                  onClick={() => setBatchesOpen(batchQ.id)}
+                  title="Open this batch's rows and relatives"
+                >
+                  Batch {batchQ.code}
+                </button>
+                <button
+                  type="button"
+                  className="dc-tab"
+                  onClick={() => setBatchQ(null)}
+                  aria-label={`Stop showing batch ${batchQ.code}`}
+                >
+                  ✕
+                </button>
+              </span>
+            )}
             {QUEUES.map(([k, label]) => (
               <button
                 key={k}
@@ -1575,11 +1621,26 @@ export default function SurplusFundsPage() {
             <SurplusIdiImport
               file={idiFile}
               onClose={() => setIdiFile(null)}
-              onDone={(summary) => {
+              onDone={(summary, batchId) => {
                 setIdiFile(null);
                 say(summary);
                 fetchRows();
                 fetchStats();
+                // Land on the batch, so the people it turned up are in front
+                // of whoever ran it rather than in a toast.
+                if (batchId) setBatchesOpen(batchId);
+              }}
+            />
+          )}
+
+          {batchesOpen !== null && (
+            <SurplusBatches
+              initialBatchId={batchesOpen || null}
+              onClose={() => setBatchesOpen(null)}
+              onShowOnBoard={showBatch}
+              onOpenClaimant={(leadId, b) => {
+                showBatch(b);
+                setLinkedLead(leadId);
               }}
             />
           )}

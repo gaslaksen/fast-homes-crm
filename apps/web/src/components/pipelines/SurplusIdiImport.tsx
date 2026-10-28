@@ -59,8 +59,8 @@ export default function SurplusIdiImport({
 }: {
   file: File;
   onClose: () => void;
-  /** Called after a successful apply with a one line summary for the toast. */
-  onDone: (summary: string) => void;
+  /** Called after a successful apply with a one line summary, and the batch the results went to. */
+  onDone: (summary: string, batchId: string | null) => void;
 }) {
   const [rows, setRows] = useState<PreviewRow[] | null>(null);
   const [batch, setBatch] = useState<BatchSummary | null>(null);
@@ -135,7 +135,7 @@ export default function SurplusIdiImport({
         d.skipped?.length ? `${d.skipped.length} left out` : null,
         d.errors?.length ? `${d.errors.length} failed` : null,
       ].filter(Boolean);
-      onDone(`${parts.join(', ')}.`);
+      onDone(`${parts.join(', ')}.`, d.batch?.id || null);
     } catch (err: any) {
       setError(err?.response?.data?.message || 'The results could not be applied.');
       setBusy(false);

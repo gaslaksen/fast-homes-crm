@@ -1843,9 +1843,13 @@ export class SurplusService {
     if (stages.length) detailWhere.stage = { in: stages };
     else if (filters.hideDead) detailWhere.stage = { not: SurplusStage.DEAD };
 
+    if (filters.batchId) {
+      detailWhere.batchMembers = { some: { batchId: filters.batchId } };
+    }
+
     if (filters.claimantType) {
       detailWhere.claimantType = claimantTypeFromText(filters.claimantType);
-    } else {
+    } else if (!filters.batchId) {
       // Lienholders are a different conversation with different economics and
       // are out of the default view rather than mixed in with owners and heirs.
       detailWhere.claimantType = { not: SurplusClaimantType.LIENHOLDER };
@@ -1853,7 +1857,7 @@ export class SurplusService {
 
     // The floor is enforced at ingestion, but a lead whose surplus was later
     // revised down should drop out of the feed too.
-    detailWhere.grossSurplus = { gte: SURPLUS_FLOOR };
+    if (!filters.batchId) detailWhere.grossSurplus = { gte: SURPLUS_FLOOR };
     if (filters.band === '15-25') detailWhere.grossSurplus = { gte: 15000, lt: 25000 };
     if (filters.band === '25-50') detailWhere.grossSurplus = { gte: 25000, lt: 50000 };
     if (filters.band === '50+') detailWhere.grossSurplus = { gte: 50000 };
@@ -1953,7 +1957,7 @@ export class SurplusService {
     if (filters.claimStatus) {
       const wanted = asList(filters.claimStatus);
       rows = rows.filter((r) => wanted.includes(r.claimStatus));
-    } else if (filters.hideRetired !== false) {
+    } else if (filters.hideRetired !== false && !filters.batchId) {
       rows = rows.filter((r) => r.workScore > 0 || r.stage === SurplusStage.DEAD);
     }
 

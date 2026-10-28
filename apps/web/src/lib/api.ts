@@ -423,6 +423,9 @@ export const surplusAPI = {
   deleteHeir: (heirId: string) => api.post(`/surplus/heirs/${heirId}/delete`),
   skipTraceHeirs: (body: { heirIds?: string[]; limit?: number; includeTraced?: boolean }) =>
     api.post('/surplus/heirs/skip-trace', body),
+  /** Saved IDI batches, newest first, and one batch row by row with the relatives it filed. */
+  batches: () => api.get('/surplus/batches'),
+  batch: (id: string) => api.get(`/surplus/batches/${id}`),
   /** IDI batch skip trace: the upload file for the chosen claimants. */
   idiExport: (leadIds: string[]) => api.post('/surplus/idi/export', { leadIds }),
   /** Read an IDI results file and match each row to a claimant. Writes nothing. */

@@ -41,9 +41,19 @@ function setup(leadsIn: any[], heirsIn: any[] = []) {
     },
     surplusTraceAttempt: { create: jest.fn(async ({ data }: any) => attempts.push(data)) },
     surplusBatch: {
-      findFirst: jest.fn(async ({ where }: any) =>
-        [...batches].filter((b) => b.organizationId === where.organizationId).sort((a, b) => b.number - a.number)[0] || null,
-      ),
+      findFirst: jest.fn(async ({ where }: any) => {
+        if (where.id) {
+          const b = batches.find((x) => x.id === where.id && (!where.organizationId || x.organizationId === where.organizationId));
+          if (!b) return null;
+          const withCase = (m: any) => {
+            const l = leads.find((x) => x.surplusDetail.id === m.surplusDetailId)!;
+            const own = heirs.filter((h) => h.surplusDetailId === m.surplusDetailId && h.sourceKind === 'idi');
+            return { ...m, surplusDetail: { ...l.surplusDetail, lead: l, heirs: own } };
+          };
+          return { ...b, members: [...b.members].sort((x: any, y: any) => x.rowNumber - y.rowNumber).map(withCase) };
+        }
+        return [...batches].filter((b) => b.organizationId === where.organizationId).sort((a, b) => b.number - a.number)[0] || null;
+      }),
       create: jest.fn(async ({ data }: any) => {
         const id = `b${batches.length + 1}`;
         const members = data.members.create.map((m: any, i: number) => ({ id: `${id}m${i + 1}`, batchId: id, result: null, ...m }));
@@ -51,7 +61,17 @@ function setup(leadsIn: any[], heirsIn: any[] = []) {
         batches.push(b);
         return { id };
       }),
-      findMany: jest.fn(async () => [...batches].sort((a, b) => b.createdAt - a.createdAt)),
+      findMany: jest.fn(async () =>
+        [...batches]
+          .sort((a, b) => b.createdAt - a.createdAt)
+          .map((b) => ({
+            ...b,
+            members: b.members.map((m: any) => {
+              const l = leads.find((x) => x.surplusDetail.id === m.surplusDetailId)!;
+              return { ...m, surplusDetail: { ...l.surplusDetail, lead: l } };
+            }),
+          })),
+      ),
       findUnique: jest.fn(async ({ where }: any) => {
         const b = batches.find((x) => x.id === where.id);
         if (!b) return null;
@@ -63,6 +83,7 @@ function setup(leadsIn: any[], heirsIn: any[] = []) {
       }),
       update: jest.fn(async ({ where, data }: any) => Object.assign(batches.find((b) => b.id === where.id)!, data)),
     },
+    user: { findMany: jest.fn(async () => [{ id: 'u1', firstName: 'Ian', lastName: 'Test' }]) },
     surplusBatchMember: {
       update: jest.fn(async ({ where, data }: any) => {
         const m = batches.flatMap((b) => b.members).find((x: any) => x.id === where.id);
@@ -326,5 +347,56 @@ describe('SurplusIdiService batches on import', () => {
     await service.exportBatch({ organizationId: 'org1', leadIds: ['3', '2'] });
     await service.applyImport(file, { organizationId: 'org1', fileName: 'x_out.csv', assignments: { '0': '1' } });
     expect(batches[0].members[0].result).toBeNull();
+  });
+});
+
+describe('SurplusIdiService batch list and detail', () => {
+  const people = () => [
+    lead('1', 'JANE Q', 'SAMPLE', '100 Example Rd SE', { lastTouchedAt: null }),
+    lead('2', 'PAUL G', 'EXAMPLE', '7500 E Sample Ct', { lastTouchedAt: null }),
+  ];
+
+  it('counts what came back and who has been worked since', async () => {
+    const { service, leads } = setup(people());
+    await service.exportBatch({ organizationId: 'org1', leadIds: ['1', '2'], userId: 'u1' });
+    await service.applyImport(file, { organizationId: 'org1', fileName: 'x_out.csv' });
+    leads[0].lastTouchedAt = new Date(Date.now() + 60_000);
+
+    const [b] = await service.listBatches('org1');
+    expect(b).toMatchObject({
+      code: 'B001',
+      createdBy: 'Ian Test',
+      rowCount: 2,
+      matched: 2,
+      noPerson: 0,
+      waiting: 0,
+      deceased: 1,
+      relativesFiled: 4,
+      touchedSince: 1,
+      resultsFileName: 'x_out.csv',
+    });
+  });
+
+  it('lists each row with its claimant today and the relatives IDI filed', async () => {
+    const { service } = setup(people());
+    const exp = await service.exportBatch({ organizationId: 'org1', leadIds: ['1', '2'] });
+    await service.applyImport(file, { organizationId: 'org1', fileName: 'x_out.csv' });
+
+    const found = await service.getBatch(exp.batch!.id, 'org1');
+    expect(found?.members.map((m) => [m.rowNumber, m.claimant, m.result])).toEqual([
+      [1, 'JANE Q SAMPLE', 'matched'],
+      [2, 'PAUL G EXAMPLE', 'matched'],
+    ]);
+    const jane = found!.members[0];
+    expect(jane.phoneCount).toBe(3);
+    expect(jane.relatives.map((r) => r.name)).toEqual(['JOHN P SAMPLE JR', 'ANN SAMPLE']);
+    expect(jane.relatives[0].phones).toEqual(['(262) 555-0201', '(262) 555-0202']);
+    expect(found!.members[1].claimantDeceased).toBe(true);
+  });
+
+  it('does not open another organization\'s batch', async () => {
+    const { service } = setup(people());
+    const exp = await service.exportBatch({ organizationId: 'org1', leadIds: ['1'] });
+    expect(await service.getBatch(exp.batch!.id, 'org2')).toBeNull();
   });
 });
