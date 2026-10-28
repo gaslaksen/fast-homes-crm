@@ -449,6 +449,22 @@ export class CampaignExecutionService implements OnModuleInit {
     renderedBody: string,
     renderedSubject: string | undefined,
   ): Promise<StepOutcome> {
+    // A surplus file a person put on hold waits, step and attempts untouched,
+    // and carries on where it was once released. Checked a day at a time.
+    if (lead.source === 'SURPLUS') {
+      const held = await this.prisma.surplusDetail.findUnique({
+        where: { leadId: lead.id },
+        select: { heldAt: true, holdReason: true },
+      });
+      if (held?.heldAt) {
+        return {
+          kind: 'DEFERRED',
+          reason: `file on hold${held.holdReason ? `: ${held.holdReason}` : ''}`,
+          retryAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        };
+      }
+    }
+
     // A person on the case is read fresh, the same way the lead's emails are:
     // a number removed or a do not call set since enrollment wins.
     const heir = enrollment.heirId

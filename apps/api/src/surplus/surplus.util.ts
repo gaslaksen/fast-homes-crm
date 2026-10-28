@@ -284,12 +284,20 @@ export interface QueueFacts {
   callableAssociateCount?: number | null;
   /** One of us has mailed a letter to the address on file. */
   letterMailed?: boolean | null;
+  /** A person put the file on hold, and why. */
+  onHold?: boolean | null;
+  holdReason?: string | null;
 }
 
 export function queueOf(f: QueueFacts): SurplusQueue {
   const status = (f.claimStatus || SurplusClaimStatus.UNKNOWN) as SurplusClaimStatus;
 
   if (!isWorkable(status) || f.doNotCall) return SurplusQueue.CLOSED;
+
+  // A person said not to work it. Tested after CLOSED, which is final, and
+  // before everything else, so a held file never reads as callable however
+  // good its numbers are.
+  if (f.onHold) return SurplusQueue.HOLD;
 
   // A dead claimant is tested before contactability, and that ordering is the
   // point of this queue. Their own phone number is worthless: they cannot sign,
@@ -340,6 +348,8 @@ export function queueReason(f: QueueFacts): string {
       return `${f.cleanPhoneCount} number${f.cleanPhoneCount === 1 ? '' : 's'} from a likely match. Confirm who you are speaking to before the claim`;
     case SurplusQueue.MAILED:
       return 'Letter mailed, waiting on a reply';
+    case SurplusQueue.HOLD:
+      return f.holdReason ? `On hold: ${f.holdReason}` : 'On hold';
     case SurplusQueue.ENTITY:
       return 'Entity claimant, the registered agent on Sunbiz is who can sign';
     case SurplusQueue.HEIRS:

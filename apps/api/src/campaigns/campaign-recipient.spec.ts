@@ -95,6 +95,8 @@ describe('sending to the chosen email', () => {
     const sent: any[] = [];
     const prisma = {
       lead: { findUnique: jest.fn(async () => leadEmails) },
+      // Not on hold, so the step goes out.
+      surplusDetail: { findUnique: jest.fn(async () => ({ heldAt: null, holdReason: null })) },
       email: { count: jest.fn(async () => 0), findFirst: jest.fn(async () => null) },
     } as unknown as PrismaService;
     const mailer = {

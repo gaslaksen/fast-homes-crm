@@ -1599,6 +1599,42 @@ export class SurplusService {
   }
 
   /**
+   * Put a file on hold with a reason, or release it. A held file drops into
+   * the On hold queue and its drips wait (see CampaignExecutionService).
+   * Both directions leave a note, so the history says who held it and why.
+   */
+  async setHold(
+    leadId: string,
+    hold: { on: boolean; reason?: string | null },
+    organizationId?: string | null,
+    userId?: string | null,
+  ) {
+    const d = await this.prisma.surplusDetail.findFirst({
+      where: { leadId, ...(organizationId ? { organizationId } : {}) },
+      select: { id: true, heldAt: true, holdReason: true },
+    });
+    if (!d) throw new BadRequestException('Surplus lead not found');
+    const reason = String(hold.reason || '').trim();
+    if (hold.on && !reason) throw new BadRequestException('Say why the file is on hold.');
+    await this.prisma.surplusDetail.update({
+      where: { id: d.id },
+      data: hold.on
+        ? { heldAt: d.heldAt || new Date(), holdReason: reason, heldByUserId: userId || null }
+        : { heldAt: null, holdReason: null, heldByUserId: null },
+    });
+    if (userId && (hold.on || d.heldAt)) {
+      await this.prisma.note.create({
+        data: {
+          leadId,
+          userId,
+          content: hold.on ? `Put on hold: ${reason}` : `Released from hold${d.holdReason ? ` (was: ${d.holdReason})` : ''}.`,
+        },
+      });
+    }
+    return { heldAt: hold.on ? d.heldAt || new Date() : null, holdReason: hold.on ? reason : null };
+  }
+
+  /**
    * Mark an envelope as having come back undeliverable, or undo that. The
    * address on it is not written to again (see letterState), and the
    * returned letter stops holding the claim in Letter sent.
@@ -2483,6 +2519,8 @@ export class SurplusService {
       callableAssociateCount: associates.filter((h: any) => h.callable).length,
       associatesUntried: associates.filter((h: any) => h.contactStatus === 'not_contacted').length,
       doNotCall: d.doNotCall,
+      heldAt: d.heldAt || null,
+      holdReason: d.holdReason || null,
       callNotes: d.callNotes || '',
       letterMailedAt: d.letterMailedAt,
       letterMailedTo: d.letterMailedTo || null,
@@ -2877,6 +2915,8 @@ export class SurplusService {
       livingHeirCount,
       callableHeirCount,
       callableAssociateCount,
+      onHold: !!d.heldAt,
+      holdReason: d.holdReason || null,
       // A letter that came back is not one the claim is waiting on.
       letterMailed: !!d.letterMailedAt && !((d.letters || []).length && (d.letters || []).every((l: any) => l.returnedAt)),
     };

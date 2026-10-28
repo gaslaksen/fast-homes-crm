@@ -891,6 +891,13 @@ model SurplusDetail {
   lastPolledAt DateTime?
 
   // ── Working the lead ──────────────────────────────────────────────────────
+  /// A person put the file on hold: an active claim to check, a legal
+  /// question, "Ian to clear". Nobody works it and its drips wait until
+  /// somebody releases it. A human decision, unlike claimStatus, which is
+  /// read off the docket.
+  heldAt       DateTime?
+  holdReason   String?
+  heldByUserId String?
   doNotCall  Boolean @default(false)
   callNotes  String?
   touchDays  Json?
