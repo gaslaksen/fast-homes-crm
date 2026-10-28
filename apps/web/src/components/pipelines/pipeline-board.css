@@ -709,6 +709,9 @@ details.dc-fold-sub > summary .flag {
 .dc-wp-stagepill i { width: 7px; height: 7px; border-radius: 50%; background: var(--mint); display: inline-block; }
 
 /* The next stage's requirements as a short checklist, not a sentence. */
+/* Whose conversation the thread shows: everyone, the claimant, or one person. */
+.dc-wp-people-filter { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.dc-wp-people-filter button.dc-wp-btn { padding: 4px 10px; font-size: 12px; }
 .dc-wp-gate { font-size: 12px; color: var(--dim); display: grid; gap: 4px; }
 .dc-wp-gate .lead b { color: var(--text); }
 .dc-wp-gate .item { display: flex; gap: 8px; align-items: center; color: var(--text); }
