@@ -523,14 +523,17 @@ function HeirRow({
         </div>
       )}
 
-      {h.phones.map((p) => {
+      {h.phones.map((p: any) => {
         const flag = p.dnc ? DNC_STATE[p.dnc] : null;
         return (
-          <div key={p.number} className="dc-wp-contact">
+          <div key={p.number} className="dc-wp-contact" style={p.bad ? { opacity: 0.6 } : undefined}>
             <div className="dc-wp-contact-main">
-              <span className="num">{phoneDisplay(p.number)}</span>
+              <span className="num" style={p.bad ? { textDecoration: 'line-through' } : undefined}>
+                {phoneDisplay(p.number)}
+              </span>
               <span className="meta">{p.type || 'Phone'}</span>
               {flag && <span className="flag">{flag.label}</span>}
+              {p.bad && <span className="flag">Wrong or disconnected</span>}
             </div>
             <div className="dc-wp-contact-actions">
               <button type="button" className="dc-wp-btn" disabled={h.doNotCall} onClick={() => onCall(p.number)}>

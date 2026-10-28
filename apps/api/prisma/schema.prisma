@@ -2782,6 +2782,9 @@ model SurplusLetter {
   trackingNumber String?
   note           String?
   sentByUserId   String?
+  /// When the envelope came back undeliverable. That address is not written
+  /// to again, and the claim stops waiting on it in Letter sent.
+  returnedAt     DateTime?
 
   createdAt DateTime @default(now())
 

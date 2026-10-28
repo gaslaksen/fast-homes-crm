@@ -235,6 +235,9 @@ export const surplusAPI = {
       heirId?: string | null;
     } = {},
   ) => api.post('/surplus/letter-mailed', { ids, ...data }),
+  /** An envelope came back undeliverable (or undo it): that address is not mailed again. */
+  letterReturned: (letterId: string, returned: boolean) =>
+    api.post(`/surplus/letters/${letterId}/returned`, { returned }),
   /** Take one envelope out of a claimant's letter history. */
   deleteLetter: (letterId: string) => api.post(`/surplus/letters/${letterId}/delete`),
   /** A rendered letter for the print view. Records nothing. */

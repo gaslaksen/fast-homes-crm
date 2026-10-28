@@ -2,7 +2,8 @@ import { BadRequestException, Injectable, Logger, NotFoundException } from '@nes
 import { PrismaService } from '../prisma/prisma.service';
 import { SurplusProbateService, ExtractedHeir, ProbateExtract } from './surplus-probate.service';
 import { normalizePhoneDigits } from '../foreclosures/foreclosure-scoring.util';
-import { heirRow } from './surplus-heirs.util';
+import { heirRow, phoneTail } from './surplus-heirs.util';
+import { badPhonesOf } from '../phone-numbers/lead-phones.service';
 import { contactStampPatch, heirContacts } from './surplus-contact-stamp.util';
 import { SurplusPersonRole, SurplusContactStatus } from '@fast-homes/shared';
 
@@ -144,7 +145,8 @@ export class SurplusHeirsService {
       where: { surplusDetailId: detail.id },
       orderBy: [{ deceased: 'asc' }, { createdAt: 'asc' }],
     });
-    return rows.map((h) => this.toRow(h));
+    const bad = new Set(badPhonesOf(detail.lead.badContacts).map(phoneTail).filter(Boolean));
+    return rows.map((h) => heirRow(h, bad));
   }
 
   /**
@@ -311,7 +313,7 @@ export class SurplusHeirsService {
       select: {
         id: true,
         organizationId: true,
-        lead: { select: { sellerFirstName: true, sellerLastName: true } },
+        lead: { select: { sellerFirstName: true, sellerLastName: true, badContacts: true } },
       },
     });
     if (!detail) throw new NotFoundException('Surplus lead not found');

@@ -120,7 +120,8 @@ export interface SurplusPanelLead {
   noticeDate: string | null;
   noticeConfirmed: boolean;
   daysRemaining: number | null;
-  phones: { number: string; type: string | null; dnc: string | null }[];
+  /** bad: marked wrong or disconnected. Shown, never counted as callable. */
+  phones: { number: string; type: string | null; dnc: string | null; bad?: boolean }[];
   emails: string[];
   contactMismatch: boolean;
   mismatchedName: string | null;
@@ -196,8 +197,12 @@ export interface SurplusPanelLead {
     trackingNumber: string | null;
     templateKind: string | null;
     heirId: string | null;
+    /** The envelope came back undeliverable. */
+    returnedAt: string | null;
   }[];
   letterCount: number;
+  /** A letter came back from the mailing address on file, so it is not mailed again. */
+  mailReturned?: boolean;
   /** 7 or 14. */
   letterCadenceDays: number;
   letterDueAt: string | null;
@@ -2612,8 +2617,8 @@ export default function SurplusWorkPanel({
                           ? `${lead.livingHeirCount} heir${lead.livingHeirCount === 1 ? '' : 's'} on file, no number`
                           : 'no heirs on file'
                     }`
-                  : lead.phones.filter((p) => !p.dnc).length > 0
-                    ? `${lead.phones.filter((p) => !p.dnc).length} callable number${lead.phones.filter((p) => !p.dnc).length === 1 ? '' : 's'}`
+                  : lead.phones.filter((p) => !p.dnc && !p.bad).length > 0
+                    ? `${lead.phones.filter((p) => !p.dnc && !p.bad).length} callable number${lead.phones.filter((p) => !p.dnc && !p.bad).length === 1 ? '' : 's'}`
                     : lead.trace?.label || 'Never skip traced'}
               </span>
             </div>
@@ -3600,11 +3605,14 @@ function ContactsBlock({
       {lead.phones.map((p) => {
         const flag = p.dnc ? DNC_STATE[p.dnc] : null;
         return (
-          <div key={p.number} className="dc-wp-contact">
+          <div key={p.number} className="dc-wp-contact" style={p.bad ? { opacity: 0.6 } : undefined}>
             <div className="dc-wp-contact-main">
-              <span className="num">{phoneDisplay(p.number)}</span>
+              <span className="num" style={p.bad ? { textDecoration: 'line-through' } : undefined}>
+                {phoneDisplay(p.number)}
+              </span>
               <span className="meta">{p.type || 'Phone'}</span>
               {flag && <span className="flag">{flag.label}</span>}
+              {p.bad && <span className="flag">Wrong or disconnected</span>}
             </div>
             <div className="dc-wp-contact-actions">
               <button type="button" className="dc-wp-btn" onClick={() => onCall(p.number)}>
@@ -4075,7 +4083,7 @@ function NextStepBanner({
       text += ` ${lead.claimant} is owed a monthly update, news or not.`;
     }
   } else {
-    const phone = lead.phones.find((p) => !p.dnc)?.number || null;
+    const phone = lead.phones.find((p) => !p.dnc && !p.bad)?.number || null;
     switch (queue) {
       case 'call':
         tone = 'mint';
@@ -4119,7 +4127,7 @@ function NextStepBanner({
           .filter((h) => h.callable && !h.isHeir && !h.deceased)
           .sort((a, b) => Number(/spouse/i.test(b.relationship || '')) - Number(/spouse/i.test(a.relationship || '')));
         const first = reach[0];
-        const firstPhone = first?.phones?.find((p) => !p.dnc)?.number || null;
+        const firstPhone = first?.phones?.find((p: any) => !p.dnc && !p.bad)?.number || null;
         text = first
           ? `${lead.claimant} is deceased and no heir is on file yet. ${reach.length === 1 ? 'One relative has a number' : `${reach.length} relatives have numbers`}. Start with ${first.name}${first.relationship ? ` (${first.relationship.toLowerCase()})` : ''} and ask who is handling the estate.`
           : `${lead.claimant} is deceased and no living heir is on file. Only a living heir can sign, so a phone number for the claimant is worth nothing yet. Find the probate case and read the petition.`;
@@ -4371,6 +4379,20 @@ function LetterHistory({
     }
   };
 
+  const markReturned = async (letterId: string, returned: boolean) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await surplusAPI.letterReturned(letterId, returned);
+      say(returned ? 'Marked as returned. That address will not be mailed again.' : 'No longer marked returned');
+      onChanged();
+    } catch (e: any) {
+      say(e?.response?.data?.message || 'The letter could not be updated');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const remove = async (letterId: string) => {
     if (busy) return;
     if (!window.confirm('Remove this letter from the history? The note in the Notes tab stays.')) return;
@@ -4477,6 +4499,22 @@ function LetterHistory({
         </div>
       )}
 
+      {lead.mailReturned && (
+        <div
+          style={{
+            fontSize: 12,
+            padding: '6px 9px',
+            borderRadius: 6,
+            background: 'var(--bg2)',
+            borderLeft: '3px solid var(--red)',
+            color: 'var(--dim)',
+          }}
+        >
+          A letter came back from the mailing address on file, so it will not be mailed again. Find a newer
+          address to write to.
+        </div>
+      )}
+
       {letters.length > 0 && (
         <div style={{ display: 'grid', gap: 3 }}>
           {letters.map((l) => (
@@ -4488,7 +4526,20 @@ function LetterHistory({
                 {l.mailType !== 'standard' ? ` · ${MAIL_TYPE_LABEL[l.mailType] || l.mailType}` : ''}
                 {l.trackingNumber ? ` · ${l.trackingNumber}` : ''}
                 {l.templateKind ? ` · ${LETTER_KINDS.find(([k]) => k === l.templateKind)?.[1] || l.templateKind}` : ''}
+                {l.returnedAt && (
+                  <span style={{ color: 'var(--red)', fontWeight: 600 }}> · Came back {fmtDate(l.returnedAt)}</span>
+                )}
               </span>
+              <button
+                type="button"
+                className="dc-wp-btn"
+                disabled={busy}
+                onClick={() => markReturned(l.id, !l.returnedAt)}
+                title={l.returnedAt ? 'It was delivered after all' : 'The envelope came back undeliverable'}
+                style={{ padding: '2px 7px', fontSize: 11, whiteSpace: 'nowrap' }}
+              >
+                {l.returnedAt ? 'Not returned' : 'Came back'}
+              </button>
               <button
                 type="button"
                 className="dc-wp-btn"
@@ -5159,7 +5210,7 @@ function CredibilityBlock({
       .catch(() => setStatus({ ready: false, missing: ['status unavailable'] }));
   }, []);
 
-  const phone = lead.phones.find((p) => !p.dnc)?.number || null;
+  const phone = lead.phones.find((p) => !p.dnc && !p.bad)?.number || null;
   const email = lead.emails[0] || null;
 
   const send = async (channel: 'sms' | 'email') => {

@@ -1086,6 +1086,17 @@ export class SurplusController {
     return this.surplus.markLetterMailed(ids, opts, userId, organizationId);
   }
 
+  /** An envelope came back undeliverable, or undo that: { returned: boolean }. */
+  @Post('letters/:letterId/returned')
+  async letterReturned(
+    @Param('letterId') letterId: string,
+    @Body() body: any,
+    @Headers('authorization') authHeader?: string,
+  ) {
+    const { organizationId, userId } = this.decodeToken(authHeader);
+    return this.surplus.markLetterReturned(letterId, body?.returned !== false, organizationId, userId);
+  }
+
   /** Take one envelope out of the history. Re-caches the latest for the queue. */
   @Post('letters/:letterId/delete')
   async removeLetter(@Param('letterId') letterId: string, @Headers('authorization') authHeader?: string) {
