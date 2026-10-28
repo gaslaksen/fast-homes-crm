@@ -23,6 +23,29 @@ const TIMELINE_EVENT_TYPES = new Set([
 const phoneKey = (raw: string | null | undefined): string =>
   (raw || '').replace(/\D/g, '').slice(-10);
 
+/** The bare address, lowercased, out of "Name <addr>" or a plain one. */
+const emailKey = (raw: string | null | undefined): string =>
+  String(raw || '').replace(/^.*<([^>]+)>.*$/, '$1').trim().toLowerCase();
+
+/**
+ * Who on a surplus case a text, call or email was with. id is null for the
+ * claimant. Only surplus leads carry it: every other lead has one seller.
+ */
+export interface TimelinePerson {
+  id: string | null;
+  name: string;
+  /** "Claimant", or the relationship or role: "Daughter", "Relative". */
+  label: string;
+}
+
+const ROLE_LABEL: Record<string, string> = {
+  heir: 'Heir',
+  relative: 'Relative',
+  neighbor: 'Neighbor',
+  friend: 'Friend',
+  associate: 'Associate',
+};
+
 type Actor =
   | { type: 'user'; name: string; avatarUrl: string | null }
   | { type: 'seller'; name: string }
@@ -39,7 +62,33 @@ export class CommunicationsService {
   async getCommunications(leadId: string) {
     const lead = await this.prisma.lead.findUnique({
       where: { id: leadId },
-      select: { id: true, sellerFirstName: true, sellerLastName: true, sellerPhone: true, source: true },
+      select: {
+        id: true,
+        sellerFirstName: true,
+        sellerLastName: true,
+        sellerPhone: true,
+        sellerEmail: true,
+        source: true,
+        surplusDetail: {
+          select: {
+            email2: true,
+            heirs: {
+              select: {
+                id: true,
+                name: true,
+                relationship: true,
+                role: true,
+                phone1: true,
+                phone2: true,
+                phone3: true,
+                phone4: true,
+                email1: true,
+                email2: true,
+              },
+            },
+          },
+        },
+      },
     });
     if (!lead) throw new Error('Lead not found');
 
@@ -111,9 +160,59 @@ export class CommunicationsService {
     const aiActor: Actor = { type: 'ai', name: 'AI' };
     const systemActor: Actor = { type: 'system', name: 'System' };
 
-    // Outbound actor = the sending user, else AI/automated. Inbound = seller.
-    const commActor = (direction: string, userId: string | null | undefined): Actor =>
-      direction === 'INBOUND' ? sellerActor : userActor(userId) ?? aiActor;
+    // ── Who each text, call and email was with, on a surplus case ──────────
+    // The row's own heirId first, which every send and reply has carried
+    // since it was added. A row from before that is read off its number or
+    // address against the people on the case today. The claimant's own
+    // numbers and addresses win wherever a relative holds the same one.
+    const heirs = lead.source === 'SURPLUS' ? lead.surplusDetail?.heirs || [] : [];
+    const claimantPerson: TimelinePerson = { id: null, name: sellerName, label: 'Claimant' };
+    const personById = new Map<string, TimelinePerson>(
+      heirs.map((h) => [
+        h.id,
+        { id: h.id, name: h.name, label: h.relationship || ROLE_LABEL[h.role] || 'Relative' },
+      ]),
+    );
+    const claimantNumbers = new Set(
+      [lead.sellerPhone, ...leadPhones.filter((p) => !p.heirId).map((p) => p.number)].map(phoneKey).filter(Boolean),
+    );
+    const claimantEmails = new Set([lead.sellerEmail, lead.surplusDetail?.email2].map(emailKey).filter(Boolean));
+    const heirByNumber = new Map<string, string>();
+    const heirByEmail = new Map<string, string>();
+    for (const h of heirs) {
+      for (const n of [h.phone1, h.phone2, h.phone3, h.phone4].map(phoneKey)) {
+        if (n && !claimantNumbers.has(n) && !heirByNumber.has(n)) heirByNumber.set(n, h.id);
+      }
+      for (const e of [h.email1, h.email2].map(emailKey)) {
+        if (e && !claimantEmails.has(e) && !heirByEmail.has(e)) heirByEmail.set(e, h.id);
+      }
+    }
+    const personFor = (
+      heirId: string | null | undefined,
+      number?: string | null,
+      email?: string | null,
+    ): TimelinePerson | null => {
+      if (lead.source !== 'SURPLUS') return null;
+      const id =
+        (heirId && personById.has(heirId) ? heirId : null) ||
+        (number ? heirByNumber.get(phoneKey(number)) : undefined) ||
+        (email ? heirByEmail.get(emailKey(email)) : undefined) ||
+        null;
+      return id ? personById.get(id)! : claimantPerson;
+    };
+
+    // Outbound actor = the sending user, else AI/automated. Inbound = seller,
+    // or on a surplus case whoever on it wrote in.
+    const commActor = (
+      direction: string,
+      userId: string | null | undefined,
+      person?: TimelinePerson | null,
+    ): Actor =>
+      direction === 'INBOUND'
+        ? person && person.id
+          ? { type: 'seller', name: person.name }
+          : sellerActor
+        : userActor(userId) ?? aiActor;
 
     const timeline: any[] = [];
 
@@ -126,12 +225,14 @@ export class CommunicationsService {
       const media = Array.isArray(m.mediaUrls) ? m.mediaUrls : [];
       // For outbound the seller's number is `to`; for inbound it is `from`.
       const sellerNumber = m.direction === 'INBOUND' ? m.from : m.to;
+      const person = personFor(m.heirId, sellerNumber);
       timeline.push({
         id: `sms_${m.id}`,
         kind: 'sms',
         direction: m.direction,
         at: m.createdAt,
-        actor: commActor(m.direction, m.sentByUserId),
+        person,
+        actor: commActor(m.direction, m.sentByUserId, person),
         payload: {
           body: m.body,
           media,
@@ -143,12 +244,14 @@ export class CommunicationsService {
 
     for (const e of emails as any[]) {
       const direction = String(e.direction).toUpperCase() === 'INBOUND' ? 'INBOUND' : 'OUTBOUND';
+      const person = personFor(e.heirId, null, direction === 'INBOUND' ? e.fromAddress : e.toAddress);
       timeline.push({
         id: `email_${e.id}`,
         kind: 'email',
         direction,
         at: e.sentAt,
-        actor: commActor(direction, e.sentByUserId),
+        person,
+        actor: commActor(direction, e.sentByUserId, person),
         payload: {
           subject: e.subject,
           fromAddress: e.fromAddress,
@@ -173,6 +276,9 @@ export class CommunicationsService {
         kind: 'call',
         direction,
         at: c.createdAt,
+        // A sibling claim's inbound call carries that claim's heirId, so it is
+        // read off the number here rather than trusted.
+        person: personFor(c.leadId === leadId ? c.heirId : null, sellerNumber),
         actor: c.initiatedByUserId ? userActor(c.initiatedByUserId) ?? aiActor : aiActor,
         payload: {
           status: c.status,
@@ -251,6 +357,23 @@ export class CommunicationsService {
     }
     noteItems.sort((x, y) => new Date(y.at).getTime() - new Date(x.at).getTime());
 
-    return { timeline, notes: noteItems };
+    // Everybody the thread was with, for filtering it by person: the claimant
+    // first, then each person in the order they were filed, with a count.
+    let people: (TimelinePerson & { count: number })[] | undefined;
+    if (lead.source === 'SURPLUS') {
+      const counts = new Map<string | null, number>();
+      for (const t of timeline) {
+        if (!t.person) continue;
+        counts.set(t.person.id, (counts.get(t.person.id) || 0) + 1);
+      }
+      people = [
+        { ...claimantPerson, count: counts.get(null) || 0 },
+        ...Array.from(personById.values())
+          .filter((p) => counts.has(p.id))
+          .map((p) => ({ ...p, count: counts.get(p.id) || 0 })),
+      ];
+    }
+
+    return { timeline, notes: noteItems, ...(people ? { people } : {}) };
   }
 }

@@ -4,6 +4,22 @@ export type Actor =
   | { type: 'ai'; name: string }
   | { type: 'system'; name: string };
 
+/**
+ * Who on a surplus case a text, call or email was with. id is null for the
+ * claimant. Absent on every other lead, which has one seller.
+ */
+export interface TimelinePerson {
+  id: string | null;
+  name: string;
+  /** "Claimant", or the relationship or role: "Daughter", "Relative". */
+  label: string;
+}
+
+/** A person in the thread's filter, with how many texts, calls and emails were with them. */
+export interface ThreadPerson extends TimelinePerson {
+  count: number;
+}
+
 export type TimelineItem =
   | {
       id: string;
@@ -11,6 +27,7 @@ export type TimelineItem =
       direction: 'INBOUND' | 'OUTBOUND';
       at: string;
       actor: Actor;
+      person?: TimelinePerson | null;
       payload: {
         body: string;
         media?: { url: string; thumbnailUrl: string }[];
@@ -26,6 +43,7 @@ export type TimelineItem =
       direction: 'INBOUND' | 'OUTBOUND';
       at: string;
       actor: Actor;
+      person?: TimelinePerson | null;
       payload: {
         subject: string;
         fromAddress: string;
@@ -40,6 +58,7 @@ export type TimelineItem =
       direction: 'INBOUND' | 'OUTBOUND';
       at: string;
       actor: Actor;
+      person?: TimelinePerson | null;
       payload: {
         status: string;
         type: string;

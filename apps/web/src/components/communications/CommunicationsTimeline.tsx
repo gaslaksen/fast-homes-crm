@@ -5,7 +5,7 @@ import { format } from 'date-fns';
 import Avatar from '@/components/Avatar';
 import LightboxOverlay, { type LightboxPhoto } from '@/components/LightboxOverlay';
 import { formatPhoneDisplay } from '@/lib/format';
-import type { Actor, TimelineItem } from './types';
+import type { Actor, TimelineItem, TimelinePerson } from './types';
 import type { EmailAction } from './MessageComposer';
 
 function escapeHtml(s: string): string {
@@ -149,6 +149,27 @@ function NumberBadge({ number, outbound }: { number: string; outbound: boolean }
   );
 }
 
+/**
+ * Who on a surplus case this was with, on every text, call and email, so a
+ * thread with a claimant and three relatives reads as four conversations.
+ */
+function PersonChip({ person, outbound }: { person: TimelinePerson; outbound: boolean }) {
+  const claimant = person.id === null;
+  return (
+    <span
+      className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+        claimant
+          ? 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300'
+          : 'bg-teal-100 dark:bg-teal-900/40 text-teal-800 dark:text-teal-300'
+      }`}
+      title={claimant ? 'The claimant' : `${person.label} on this case`}
+    >
+      {outbound ? 'To' : 'From'} {person.name}
+      {claimant ? '' : ` · ${person.label}`}
+    </span>
+  );
+}
+
 // Bold any @mention tokens in an internal comment.
 function renderWithMentions(body: string) {
   const parts = body.split(/(@[\w.'-]+(?:\s+[\w.'-]+)?)/g);
@@ -278,6 +299,7 @@ export default function CommunicationsTimeline({
                 <div className="flex items-center gap-1.5 mb-1 flex-wrap">
                   <ChannelBadge kind="sms" />
                   <MetaLine actor={item.actor} at={item.at} />
+                  {item.person && <PersonChip person={item.person} outbound={outbound} />}
                   {item.payload.onPrimaryNumber === false && item.payload.sellerNumber && (
                     <NumberBadge number={item.payload.sellerNumber} outbound={outbound} />
                   )}
@@ -327,6 +349,7 @@ export default function CommunicationsTimeline({
                   <div className="flex items-center gap-1.5 mb-1">
                     <ChannelBadge kind="email" />
                     <MetaLine actor={item.actor} at={item.at} />
+                    {item.person && <PersonChip person={item.person} outbound={item.direction === 'OUTBOUND'} />}
                   </div>
                   <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">
                     {item.payload.subject || '(no subject)'}
@@ -393,6 +416,7 @@ export default function CommunicationsTimeline({
                 <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300">
                   {item.payload.status}
                 </span>
+                {item.person && <PersonChip person={item.person} outbound={outbound} />}
                 {item.payload.duration != null && (
                   <span className="text-[10px] text-gray-500 dark:text-gray-400">
                     {fmtDuration(item.payload.duration)}

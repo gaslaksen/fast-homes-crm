@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import CommunicationsTimeline from '@/components/communications/CommunicationsTimeline';
 import MessageComposer, { type EmailAction } from '@/components/communications/MessageComposer';
 import NotesPanel from '@/components/communications/NotesPanel';
-import type { NoteItem, TimelineItem } from '@/components/communications/types';
+import type { NoteItem, ThreadPerson, TimelineItem } from '@/components/communications/types';
 import { authAPI, leadsAPI, surplusAPI, tasksAPI } from '@/lib/api';
 import { PersonDrips, SurplusDripProvider, useSurplusDrips } from './SurplusDrips';
 import { dueLabel, isOverdue, quickDueDates, todayLocal } from '@/lib/dates';
@@ -2260,10 +2260,16 @@ export default function SurplusWorkPanel({
       setClaimantId(property.claimants[0]?.id);
     }
   }, [property.claimants, claimantId]);
-  const [comms, setComms] = useState<{ timeline: TimelineItem[]; notes: NoteItem[] }>({
+  const [comms, setComms] = useState<{ timeline: TimelineItem[]; notes: NoteItem[]; people?: ThreadPerson[] }>({
     timeline: [],
     notes: [],
   });
+  /**
+   * Whose conversation is showing: 'all', 'claimant', or a person's id. A
+   * claim worked through a daughter, a son and a neighbor reads as one thread
+   * per person instead of all of them interleaved.
+   */
+  const [personFilter, setPersonFilter] = useState<string>('all');
   const [emailAction, setEmailAction] = useState<EmailAction | null>(null);
   // Every person's drips on this claim, shared by the claimant's contacts on
   // the Case tab and each card on the People tab. Reloads with the lead row,
@@ -2288,10 +2294,11 @@ export default function SurplusWorkPanel({
         const res = await leadsAPI.communications(lead.id);
         const timeline = res.data?.timeline || [];
         const notes = res.data?.notes || [];
+        const people: ThreadPerson[] | undefined = res.data?.people;
         const sig = sigOf(timeline, notes);
         if (silent && sig === sigRef.current) return;
         sigRef.current = sig;
-        setComms({ timeline, notes });
+        setComms({ timeline, notes, people });
       } catch {
         // Keep whatever is on screen; a transient failure should not blank the
         // thread mid-conversation.
@@ -2305,6 +2312,7 @@ export default function SurplusWorkPanel({
   useEffect(() => {
     let cancelled = false;
     setComms({ timeline: [], notes: [] });
+    setPersonFilter('all');
     sigRef.current = '';
     setFullLead(null);
     // An address or number clicked on the last lead belongs to that lead. Left
@@ -2717,7 +2725,43 @@ export default function SurplusWorkPanel({
                   No messages yet with {lead.claimant}.
                 </div>
               )}
-              <CommunicationsTimeline items={comms.timeline} onEmailAction={setEmailAction} />
+              {(comms.people?.length || 0) > 1 && (
+                <div className="dc-wp-people-filter" role="group" aria-label="Show the conversation with">
+                  <button
+                    type="button"
+                    className={`dc-wp-btn${personFilter === 'all' ? ' on' : ''}`}
+                    onClick={() => setPersonFilter('all')}
+                  >
+                    Everyone
+                  </button>
+                  {comms.people!.map((p) => {
+                    const key = p.id ?? 'claimant';
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        className={`dc-wp-btn${personFilter === key ? ' on' : ''}`}
+                        onClick={() => setPersonFilter(key)}
+                        title={p.label}
+                      >
+                        {p.name}
+                        {p.id ? <span style={{ opacity: 0.7 }}> · {p.label}</span> : null}
+                        <span style={{ marginLeft: 5, opacity: 0.6 }}>{p.count}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              <CommunicationsTimeline
+                items={
+                  personFilter === 'all'
+                    ? comms.timeline
+                    : comms.timeline.filter(
+                        (t: any) => t.person && (t.person.id ?? 'claimant') === personFilter,
+                      )
+                }
+                onEmailAction={setEmailAction}
+              />
               <div ref={bottomRef} />
             </div>
           )}
