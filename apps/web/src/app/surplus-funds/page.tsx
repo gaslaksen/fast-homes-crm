@@ -8,6 +8,7 @@ import AddLeadSheet, { SURPLUS_FIELDS } from '@/components/pipelines/AddLeadShee
 import SurplusWorkPanel from '@/components/pipelines/SurplusWorkPanel';
 import SurplusBatches, { BatchRef } from '@/components/pipelines/SurplusBatches';
 import SurplusIdiImport from '@/components/pipelines/SurplusIdiImport';
+import SurplusImportReport, { SurplusImportResult } from '@/components/pipelines/SurplusImportReport';
 import SurplusPropertyCard, { STATUS_ACCENT } from '@/components/pipelines/SurplusPropertyCard';
 import type { PipelineColumn, PipelineStage } from '@/components/pipelines/PipelineBoard';
 import { authAPI, surplusAPI } from '@/lib/api';
@@ -759,6 +760,8 @@ export default function SurplusFundsPage() {
   const idiFileRef = useRef<HTMLInputElement>(null);
   /** An IDI results file being previewed before it is applied. */
   const [idiFile, setIdiFile] = useState<File | null>(null);
+  /** The last list import's report, open until dismissed. */
+  const [importReport, setImportReport] = useState<{ fileName: string; result: SurplusImportResult } | null>(null);
   const [busy, setBusy] = useState(false);
   const [polling, setPolling] = useState(false);
   /** The last few county pulls, for the feed-health line under the title. */
@@ -1055,34 +1058,9 @@ export default function SurplusFundsPage() {
     setBusy(true);
     try {
       const res = await surplusAPI.importExecute(f, { importBatch: f.name });
-      const r = res.data;
-      const mismatches = r.contactMismatches?.length || 0;
-      say(
-        `Imported ${r.created} lead${r.created === 1 ? '' : 's'} from ${f.name}` +
-          (r.duplicates ? `, ${r.duplicates} already on file` : '') +
-          (r.belowFloor ? `, ${r.belowFloor} under the ${money(floor)} floor` : '') +
-          (r.errors?.length ? `, ${r.errors.length} row${r.errors.length === 1 ? '' : 's'} skipped` : '') +
-          '.' +
-          // Worth its own sentence: these leads landed WITHOUT contacts, and a
-          // count buried in a list reads as a rounding detail rather than work.
-          (mismatches
-            ? ` ${mismatches} skip trace${mismatches === 1 ? '' : 's'} came back as a different person, so those contacts were discarded.`
-            : '') +
-          // Previously worked and retired, named rather than silently skipped,
-          // so nobody re-researches a case the team already closed.
-          (r.previouslyDead?.length
-            ? ` ${r.previouslyDead.length} ${r.previouslyDead.length === 1 ? 'was' : 'were'} previously worked and marked dead: ${r.previouslyDead
-                .slice(0, 3)
-                .map((p: any) => `${p.claimant}${p.reason ? ` (${p.reason})` : ''}`)
-                .join(', ')}${r.previouslyDead.length > 3 ? ` and ${r.previouslyDead.length - 3} more` : ''}.`
-            : '') +
-          (r.previouslyDeleted?.length
-            ? ` ${r.previouslyDeleted.length} ${r.previouslyDeleted.length === 1 ? 'was' : 'were'} deleted earlier and left out: ${r.previouslyDeleted
-                .slice(0, 3)
-                .map((p: any) => p.claimant)
-                .join(', ')}${r.previouslyDeleted.length > 3 ? ` and ${r.previouslyDeleted.length - 3} more` : ''}.`
-            : ''),
-      );
+      // The report, not a toast: the matched rows need reading, and the ruled
+      // out ones are the cases nobody should research again.
+      setImportReport({ fileName: f.name, result: res.data });
       fetchRows();
       fetchStats();
     } catch (err: any) {
@@ -1687,6 +1665,15 @@ export default function SurplusFundsPage() {
                 </button>
               </div>
             </div>
+          )}
+
+          {importReport && (
+            <SurplusImportReport
+              fileName={importReport.fileName}
+              result={importReport.result}
+              floorLabel={money(floor)}
+              onClose={() => setImportReport(null)}
+            />
           )}
 
           {idiFile && (

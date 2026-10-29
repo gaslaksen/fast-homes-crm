@@ -28,7 +28,7 @@ import {
 import { CLAIM_STATUS_LABEL } from './surplus-classify.util';
 import { nameSearchPlan } from './surplus-name-search.util';
 import { leadSearchUrl, messageUrl, platformLabel, socialSearchLinks } from './surplus-social.util';
-import { traceState } from './surplus-skiptrace.util';
+import { sameClaimantName, traceState } from './surplus-skiptrace.util';
 import { heirRow, phoneTail } from './surplus-heirs.util';
 import { badPhonesOf } from '../phone-numbers/lead-phones.service';
 import {
@@ -226,9 +226,19 @@ export interface CreateSurplusResult {
   created: boolean;
   reason?: string;
   /** On a duplicate: what the existing file is, so an import can say "previously worked". */
-  existing?: { stage: string | null; deadReason: string | null; deadAt: Date | null };
+  existing?: { stage: string | null; deadReason: string | null; deadAt: Date | null; claimStatus?: string | null };
   /** On a case deleted by hand: when, so an import can say so. */
   suppressedAt?: Date;
+  /**
+   * The claimant as already on file, when the match was a different spelling
+   * of the same person on the same case rather than the name as written.
+   */
+  variantOf?: string;
+}
+
+/** The claimant part of a dedupe key, readable again: "JOHN_A_SMITH" to "JOHN A SMITH". */
+function uidClaimant(uid: string): string {
+  return uid.split('|').slice(2).join('|').replace(/_/g, ' ').trim();
 }
 
 /**
@@ -287,6 +297,13 @@ export class SurplusService {
        * deliberate choice to have it.
        */
       respectSuppression?: boolean;
+      /**
+       * Also treat a different spelling of a claimant already on the same
+       * county and case as that claimant (see `sameClaimantName`). The
+       * spreadsheet import passes this: bot lists re-spell names, and each
+       * spelling used to come in as a new lead.
+       */
+      matchNameVariants?: boolean;
     },
   ): Promise<CreateSurplusResult> {
     const organizationId = opts.organizationId || null;
@@ -309,10 +326,26 @@ export class SurplusService {
       parcelId: input.parcelId,
       claimant,
     });
-    const existing = await this.prisma.surplusDetail.findFirst({
+    const existingSelect = { leadId: true, stage: true, deadReason: true, deadAt: true, claimStatus: true, dedupeUid: true } as const;
+    let existing = await this.prisma.surplusDetail.findFirst({
       where: { organizationId, dedupeUid },
-      select: { leadId: true, stage: true, deadReason: true, deadAt: true },
+      select: existingSelect,
     });
+    // Same county and case, so the uid differs only in the claimant part.
+    // Needs a case or parcel number: without one the prefix is the whole
+    // county and the match would be a guess.
+    const prefix = dedupeUid.split('|').slice(0, 2).join('|') + '|';
+    const canVary = !!opts.matchNameVariants && dedupeUid.split('|')[1] !== '';
+    let variantOf: string | undefined;
+    if (!existing && canVary) {
+      const sameCase = await this.prisma.surplusDetail.findMany({
+        where: { organizationId, dedupeUid: { startsWith: prefix } },
+        select: existingSelect,
+        take: 20,
+      });
+      existing = sameCase.find((d) => sameClaimantName(uidClaimant(d.dedupeUid || ''), claimant)) || null;
+      if (existing) variantOf = uidClaimant(existing.dedupeUid || '');
+    }
     if (existing) {
       // Say what the existing file is, so an import can tell "already on
       // the board" from "previously worked and retired" instead of both
@@ -321,16 +354,37 @@ export class SurplusService {
         leadId: existing.leadId,
         created: false,
         reason: 'duplicate',
-        existing: { stage: existing.stage, deadReason: existing.deadReason, deadAt: existing.deadAt },
+        existing: {
+          stage: existing.stage,
+          deadReason: existing.deadReason,
+          deadAt: existing.deadAt,
+          claimStatus: existing.claimStatus,
+        },
+        ...(variantOf ? { variantOf } : {}),
       };
     }
     if (opts.respectSuppression) {
-      const suppressed = await this.prisma.surplusSuppression.findFirst({
+      let suppressed = await this.prisma.surplusSuppression.findFirst({
         where: { organizationId, dedupeUid },
-        select: { createdAt: true },
+        select: { createdAt: true, dedupeUid: true },
       });
+      if (!suppressed && canVary) {
+        const sameCase = await this.prisma.surplusSuppression.findMany({
+          where: { organizationId, dedupeUid: { startsWith: prefix } },
+          select: { createdAt: true, dedupeUid: true },
+          take: 20,
+        });
+        suppressed = sameCase.find((d) => sameClaimantName(uidClaimant(d.dedupeUid), claimant)) || null;
+        if (suppressed) variantOf = uidClaimant(suppressed.dedupeUid);
+      }
       if (suppressed) {
-        return { leadId: null, created: false, reason: 'suppressed', suppressedAt: suppressed.createdAt };
+        return {
+          leadId: null,
+          created: false,
+          reason: 'suppressed',
+          suppressedAt: suppressed.createdAt,
+          ...(variantOf ? { variantOf } : {}),
+        };
       }
     }
 
