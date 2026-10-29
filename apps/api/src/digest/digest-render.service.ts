@@ -167,6 +167,18 @@ export class DigestRenderService {
       </td></tr>`;
   }
 
+  /** The outreach list's Due today, one line and a link. */
+  private renderTouchesDue(b: DigestBrief): string {
+    if (!b.touchesDue) return '';
+    return `
+      ${this.divider()}
+      <tr><td class="px" style="padding:18px 36px 18px 36px;">
+        <div style="font-size:11px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:${MUTED};">Touches due today</div>
+        <div style="font-size:14px;color:${BODY};line-height:1.6;padding-top:6px;">${this.esc(b.touchesDue.line)}</div>
+        <div style="font-size:13px;padding-top:6px;"><a href="${this.esc(b.appUrl)}/surplus-funds/outreach?due=1" style="color:${TEAL};font-weight:600;text-decoration:none;">Open the outreach list &rarr;</a></div>
+      </td></tr>`;
+  }
+
   private renderPromises(b: DigestBrief): string {
     if (!b.promises.length) return '';
     const rows = b.promises.map((p, i) => `
@@ -324,6 +336,7 @@ export class DigestRenderService {
   ${this.renderBigThing(b)}
   ${this.renderScorecard(b)}
   ${this.renderCalls(b)}
+  ${this.renderTouchesDue(b)}
   ${this.renderPromises(b)}
   ${this.renderNeedsTrace(b)}
   ${this.renderInFlight(b)}
@@ -384,6 +397,13 @@ export class DigestRenderService {
         out.push(`     ${c.phone ? `Call ${c.phone} - ` : ''}${c.url}`);
       });
       out.push(`  Full call list (${b.callsTotal}): ${b.appUrl}/surplus-funds`);
+      out.push('');
+    }
+
+    if (b.touchesDue) {
+      out.push('TOUCHES DUE TODAY');
+      out.push(`  ${b.touchesDue.line}`);
+      out.push(`  Outreach list: ${b.appUrl}/surplus-funds/outreach?due=1`);
       out.push('');
     }
 

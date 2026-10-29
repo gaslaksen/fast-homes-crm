@@ -29,6 +29,7 @@ import { CLAIM_STATUS_LABEL } from './surplus-classify.util';
 import { nameSearchPlan } from './surplus-name-search.util';
 import { leadSearchUrl, messageUrl, platformLabel, socialSearchLinks } from './surplus-social.util';
 import { sameClaimantName, traceState } from './surplus-skiptrace.util';
+import { pauseOffer, shortWindow } from './surplus-windows.util';
 import { heirRow, phoneTail } from './surplus-heirs.util';
 import { badPhonesOf } from '../phone-numbers/lead-phones.service';
 import {
@@ -1662,7 +1663,7 @@ export class SurplusService {
    */
   async setHold(
     leadId: string,
-    hold: { on: boolean; reason?: string | null },
+    hold: { on: boolean; reason?: string | null; until?: string | null },
     organizationId?: string | null,
     userId?: string | null,
   ) {
@@ -1673,22 +1674,31 @@ export class SurplusService {
     if (!d) throw new BadRequestException('Surplus lead not found');
     const reason = String(hold.reason || '').trim();
     if (hold.on && !reason) throw new BadRequestException('Say why the file is on hold.');
+    // A revisit date makes the hold a pause, which the daily cadence ends.
+    const until = hold.on && hold.until ? calendarDayToDate(hold.until) : null;
+    if (hold.on && hold.until && !until) throw new BadRequestException('The revisit date is not a date.');
+    if (until && until.getTime() <= Date.now()) throw new BadRequestException('The revisit date has to be in the future.');
     await this.prisma.surplusDetail.update({
       where: { id: d.id },
       data: hold.on
-        ? { heldAt: d.heldAt || new Date(), holdReason: reason, heldByUserId: userId || null }
-        : { heldAt: null, holdReason: null, heldByUserId: null },
+        ? { heldAt: d.heldAt || new Date(), holdReason: reason, heldByUserId: userId || null, holdUntil: until }
+        : { heldAt: null, holdReason: null, heldByUserId: null, holdUntil: null },
     });
     if (userId && (hold.on || d.heldAt)) {
+      const day = until ? until.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }) : null;
       await this.prisma.note.create({
         data: {
           leadId,
           userId,
-          content: hold.on ? `Put on hold: ${reason}` : `Released from hold${d.holdReason ? ` (was: ${d.holdReason})` : ''}.`,
+          content: hold.on
+            ? day
+              ? `Paused until ${day}: ${reason}`
+              : `Put on hold: ${reason}`
+            : `Released from hold${d.holdReason ? ` (was: ${d.holdReason})` : ''}.`,
         },
       });
     }
-    return { heldAt: hold.on ? d.heldAt || new Date() : null, holdReason: hold.on ? reason : null };
+    return { heldAt: hold.on ? d.heldAt || new Date() : null, holdReason: hold.on ? reason : null, holdUntil: until };
   }
 
   /**
@@ -2437,6 +2447,8 @@ export class SurplusService {
 
     const gate = complianceGate(facts);
 
+    // What Unresponsive would still need. Empty means every channel has been tried.
+    const effortMissing = deadGateMissing(SurplusDeadReason.UNRESPONSIVE, this.deadEffort(lead, d));
     const row = {
       id: lead.id,
       claimant: `${lead.sellerFirstName} ${lead.sellerLastName}`.trim(),
@@ -2512,6 +2524,11 @@ export class SurplusService {
       noticeDate: d.noticeDate,
       noticeConfirmed: d.noticeConfirmed,
       noticeAge: noticeAge(facts),
+      // Under two months to the team's day-340 cutoff.
+      ...(() => {
+        const w = shortWindow(noticeAge(facts), daysSinceSale({ saleDate: d.saleDate }));
+        return { shortWindow: w.short, daysToCutoff: w.daysToCutoff };
+      })(),
       claimDeadline: claimDeadline(facts),
       daysRemaining: daysRemaining(facts),
       windowElapsedPct: windowElapsedPct(facts),
@@ -2655,6 +2672,8 @@ export class SurplusService {
       doNotCall: d.doNotCall,
       heldAt: d.heldAt || null,
       holdReason: d.holdReason || null,
+      /** Set on a pause: the day the cadence brings the file back. */
+      holdUntil: d.holdUntil || null,
       callNotes: d.callNotes || '',
       letterMailedAt: d.letterMailedAt,
       letterMailedTo: d.letterMailedTo || null,
@@ -2828,7 +2847,15 @@ export class SurplusService {
       // Why it died, when it did. Kept so the board's Dead column reads as
       // a list of reasons and a re-listed case says what happened last time.
       /** What "unresponsive" still needs before it is a reason. Empty when it is. */
-      deadGateMissing: deadGateMissing(SurplusDeadReason.UNRESPONSIVE, this.deadEffort(lead, d)),
+      deadGateMissing: effortMissing,
+      // Sixty days of full effort and nobody reached: offer to pause it.
+      pauseOffer: pauseOffer({
+        stage: d.stage,
+        tappedAt: d.tappedAt,
+        heldAt: d.heldAt,
+        effortMissing,
+        firstEffortAt: this.firstEffortAt(d),
+      }),
       deadReason: d.deadReason || null,
       deadReasonLabel: d.deadReason ? SURPLUS_DEAD_REASON_LABEL[d.deadReason as SurplusDeadReason] || d.deadReason : null,
       deadNote: d.deadNote || null,
@@ -2983,6 +3010,21 @@ export class SurplusService {
    * Attempts against an heir or an associate do not count: the claimant is
    * the one being called unresponsive.
    */
+  /**
+   * When the claimant was first worked: the earliest logged search or letter
+   * aimed at them. Calls are not dated here, and every file the pause rule
+   * looks at has had a search and a letter by then anyway.
+   */
+  private firstEffortAt(d: any): Date | null {
+    const times = [
+      ...((d.traceAttempts || []) as any[]).filter((a) => !a.heirId && a.result !== 'skipped').map((a) => a.ranAt),
+      ...((d.letters || []) as any[]).filter((l) => !l.heirId).map((l) => l.mailedAt),
+    ]
+      .filter(Boolean)
+      .map((t) => new Date(t).getTime());
+    return times.length ? new Date(Math.min(...times)) : null;
+  }
+
   private deadEffort(lead: any, d: any) {
     const own = ((d.traceAttempts || []) as any[]).filter((a) => !a.heirId && a.result !== 'skipped');
     return {
@@ -3063,6 +3105,7 @@ export class SurplusService {
       callableAssociateCount,
       onHold: !!d.heldAt,
       holdReason: d.holdReason || null,
+      holdUntil: d.holdUntil || null,
       // A letter that came back is not one the claim is waiting on.
       letterMailed: !!d.letterMailedAt && !((d.letters || []).length && (d.letters || []).every((l: any) => l.returnedAt)),
     };
@@ -3290,6 +3333,13 @@ export function groupByProperty(rows: any[]): any[] {
       }, {}),
       allDeceased: ranked.every((m) => m.isDeceased),
       anyDeceased: ranked.some((m) => m.isDeceased),
+      // The claimants share a sale and a notice, so the window is the
+      // property's. Taken as the tightest one in case a date differs.
+      shortWindow: ranked.some((m: any) => m.shortWindow),
+      daysToCutoff: ranked.reduce(
+        (lo: number | null, m: any) => (m.daysToCutoff == null ? lo : lo == null ? m.daysToCutoff : Math.min(lo, m.daysToCutoff)),
+        null,
+      ),
       // Heirs rolled up across the claimants, so a card can say "2 deceased, 2
       // heirs" instead of leaving somebody to open the panel to find out there
       // is nobody alive to ring.

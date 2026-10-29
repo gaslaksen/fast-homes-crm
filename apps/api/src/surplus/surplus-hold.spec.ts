@@ -29,7 +29,7 @@ describe('SurplusService.setHold', () => {
     const { service, prisma } = build({ id: 'd1', heldAt: new Date(), holdReason: 'Ian to clear' });
     await service.setHold('lead1', { on: false }, 'org1', 'u1');
 
-    expect(prisma.surplusDetail.update.mock.calls[0][0].data).toEqual({ heldAt: null, holdReason: null, heldByUserId: null });
+    expect(prisma.surplusDetail.update.mock.calls[0][0].data).toEqual({ heldAt: null, holdReason: null, heldByUserId: null, holdUntil: null });
     expect(prisma.note.create.mock.calls[0][0].data.content).toBe('Released from hold (was: Ian to clear).');
   });
 });

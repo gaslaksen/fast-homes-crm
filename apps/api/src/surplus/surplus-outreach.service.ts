@@ -17,6 +17,7 @@ import {
   personKey,
   personReachable,
 } from './surplus-outreach.util';
+import { TOUCH_EVERY_DAYS, touchDue } from './surplus-windows.util';
 
 /** The most cases one outreach list holds. A batch is far smaller; Call now rarely comes close. */
 const OUTREACH_MAX_CASES = 600;
@@ -120,6 +121,13 @@ export class SurplusOutreachService {
           };
           const sent = ticks.get(k) || {};
           const { rank, label } = outreachRank(p);
+          const personTicks = {
+            called: newerTick(sent.called, logged('called')) || null,
+            texted: newerTick(sent.texted, logged('texted')) || null,
+            emailed: newerTick(sent.emailed, logged('emailed')) || null,
+            letter: sent.letter || null,
+          };
+          const touch = touchDue({ reachable: personReachable(p), done, ticks: personTicks }, !!r.heldAt);
           return {
             heirId: p.heirId,
             name: p.name,
@@ -135,12 +143,10 @@ export class SurplusOutreachService {
             mailReturned: p.mailReturned,
             statusLabel: p.statusLabel,
             reachable: personReachable(p),
-            ticks: {
-              called: newerTick(sent.called, logged('called')) || null,
-              texted: newerTick(sent.texted, logged('texted')) || null,
-              emailed: newerTick(sent.emailed, logged('emailed')) || null,
-              letter: sent.letter || null,
-            },
+            ticks: personTicks,
+            /** Can be tried and nothing has been tried in a week (or ever). */
+            dueToday: touch.due,
+            lastTouchAt: touch.lastAt,
             done: done ? { at: done.createdAt, by: users.get(done.userId || '') || null } : null,
             notes: mine
               .filter((t) => t.note)
@@ -166,14 +172,18 @@ export class SurplusOutreachService {
         queueLabel: r.queueLabel,
         queueReason: r.queueReason,
         holdReason: r.holdReason || null,
+        holdUntil: r.holdUntil || null,
         netToClaimant: r.netToClaimant,
         daysLeft,
+        shortWindow: !!r.shortWindow,
+        daysToCutoff: r.daysToCutoff ?? null,
         group: outreachGroup({ queue: r.queue, daysLeft, reachable }),
         letterDue: !!r.letterDue,
         people,
         /** People who can be tried and are not marked done. Zero means the case is worked through for now. */
         openCount: open.length,
         untriedCount: open.filter((p) => !p.ticks.called && !p.ticks.texted && !p.ticks.emailed && !p.ticks.letter).length,
+        dueCount: people.filter((p) => p.dueToday).length,
       };
     });
 
@@ -191,8 +201,36 @@ export class SurplusOutreachService {
       caseCount: cases.length,
       peopleCount: cases.reduce((s, c) => s + c.people.length, 0),
       openCount: cases.reduce((s, c) => s + c.openCount, 0),
+      dueCount: cases.reduce((s, c) => s + c.dueCount, 0),
+      touchEveryDays: TOUCH_EVERY_DAYS,
       truncated: rows.length >= OUTREACH_MAX_CASES,
       groups,
+    };
+  }
+
+  /**
+   * Everybody due a touch today on Call now, biggest surplus first and then
+   * the nearest deadline. For the Daily Brief, whose link opens the outreach
+   * page on Call now with Due today on, so the two counts agree.
+   */
+  async dueToday(organizationId?: string | null) {
+    const list = await this.list({ queue: SurplusQueue.CALL }, organizationId);
+    const cases = list.groups
+      .flatMap((g) => g.cases)
+      .filter((c) => c.dueCount > 0)
+      .sort((a, b) => b.netToClaimant - a.netToClaimant || (a.daysLeft ?? 9999) - (b.daysLeft ?? 9999));
+    return {
+      caseCount: cases.length,
+      peopleCount: cases.reduce((n, c) => n + c.dueCount, 0),
+      top: cases.slice(0, 3).map((c) => ({
+        leadId: c.leadId,
+        claimant: c.claimant,
+        county: c.county,
+        netToClaimant: c.netToClaimant,
+        daysLeft: c.daysLeft,
+        shortWindow: c.shortWindow,
+        people: c.people.filter((p) => p.dueToday).map((p) => p.name),
+      })),
     };
   }
 

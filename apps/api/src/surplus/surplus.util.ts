@@ -287,6 +287,8 @@ export interface QueueFacts {
   /** A person put the file on hold, and why. */
   onHold?: boolean | null;
   holdReason?: string | null;
+  /** A pause: the day the file comes back on its own. */
+  holdUntil?: Date | string | null;
 }
 
 export function queueOf(f: QueueFacts): SurplusQueue {
@@ -349,6 +351,10 @@ export function queueReason(f: QueueFacts): string {
     case SurplusQueue.MAILED:
       return 'Letter mailed, waiting on a reply';
     case SurplusQueue.HOLD:
+      if (f.holdUntil) {
+        const day = new Date(f.holdUntil).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+        return `Paused until ${day}${f.holdReason ? `: ${f.holdReason}` : ''}`;
+      }
       return f.holdReason ? `On hold: ${f.holdReason}` : 'On hold';
     case SurplusQueue.ENTITY:
       return 'Entity claimant, the registered agent on Sunbiz is who can sign';

@@ -1127,11 +1127,19 @@ export class SurplusController {
     return this.surplus.markLetterMailed(ids, opts, userId, organizationId);
   }
 
-  /** Put a file on hold or release it: { on: boolean, reason?: string }. A reason is required to hold. */
+  /**
+   * Put a file on hold or release it: { on: boolean, reason?: string, until?: "2027-04-29" }.
+   * A reason is required to hold. A revisit date makes it a pause, ended by the daily cadence.
+   */
   @Post(':id/hold')
   async hold(@Param('id') id: string, @Body() body: any, @Headers('authorization') authHeader?: string) {
     const { organizationId, userId } = this.decodeToken(authHeader);
-    return this.surplus.setHold(id, { on: body?.on !== false, reason: body?.reason }, organizationId, userId);
+    return this.surplus.setHold(
+      id,
+      { on: body?.on !== false, reason: body?.reason, until: body?.until || null },
+      organizationId,
+      userId,
+    );
   }
 
   /** Who on the team owns the case: { userId } or { userId: null } to clear. */

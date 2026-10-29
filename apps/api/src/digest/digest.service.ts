@@ -4,6 +4,8 @@ import { LeadSource, SurplusStage, surplusCallConnected } from '@fast-homes/shar
 import { PrismaService } from '../prisma/prisma.service';
 import { SurplusService } from '../surplus/surplus.service';
 import { SurplusIngestService } from '../surplus/surplus-ingest.service';
+import { SurplusOutreachService } from '../surplus/surplus-outreach.service';
+import { TOUCH_EVERY_DAYS } from '../surplus/surplus-windows.util';
 import { estFee, SurplusLien } from '../surplus/surplus.util';
 import { describeCountyListDue, describeFeed, summarizeHealthyFeeds } from './digest-feeds.util';
 import { todayNoonUtc } from '../surplus/surplus-county-lists.util';
@@ -80,6 +82,7 @@ export class DigestService {
     private config: ConfigService,
     private surplusService: SurplusService,
     private surplusIngest: SurplusIngestService,
+    private outreach: SurplusOutreachService,
   ) {}
 
   private get appUrl(): string {
@@ -688,6 +691,7 @@ export class DigestService {
     // ── Feeds ───────────────────────────────────────────────────────────────
     const feeds = await this.buildFeeds(orgId, now);
     const countyListsDue = await this.buildCountyListsDue(orgId, now);
+    const touchesDue = await this.buildTouchesDue(orgId);
 
     // ── Wholesale, parked ───────────────────────────────────────────────────
     const oldestWholesale = wholesaleReplies[0]?.lastMessageAt
@@ -728,13 +732,14 @@ export class DigestService {
       feedProblems: feeds.filter((f) => f.urgency === 'warn' || f.urgency === 'critical'),
       feedSummary: summarizeHealthyFeeds(feeds),
       countyListsDue,
+      touchesDue,
       wholesale: wholesaleParts.length ? wholesaleParts.join(' · ') : null,
       appUrl: this.appUrl,
       // A failed county feed is never an empty day; that is the one morning
       // the email must go out.
       isEmpty:
         !bigThing && !calls.length && !allPromises.length && !needsTrace &&
-        !inFlight.length && !feeds.some((f) => f.urgency === 'critical') && !countyListsDue.length,
+        !inFlight.length && !feeds.some((f) => f.urgency === 'critical') && !countyListsDue.length && !touchesDue,
     };
 
     brief.subject = this.buildSubject(brief, followUpsDue);
@@ -936,6 +941,38 @@ export class DigestService {
       orderBy: { listNextRequestAt: 'asc' },
     });
     return rows.map((c) => describeCountyListDue({ ...c, listNextRequestAt: c.listNextRequestAt as Date }, now));
+  }
+
+  /**
+   * The outreach list's Due today, as one line: how many people on workable
+   * files have had nothing tried in a week, and the biggest file first. A
+   * failure here costs the line, never the brief.
+   */
+  private async buildTouchesDue(orgId: string | null): Promise<DigestBrief['touchesDue']> {
+    try {
+      const due = await this.outreach.dueToday(orgId);
+      if (!due.peopleCount) return null;
+      const first = due.top[0];
+      const left =
+        first.daysLeft == null ? null : first.daysLeft < 0 ? 'past the year' : `${this.plural(first.daysLeft, 'day')} left`;
+      const lead = first
+        ? ` Biggest first: ${first.people.join(' and ')} on ${first.claimant}'s file (${[
+            this.moneyCompact(first.netToClaimant),
+            left,
+            first.shortWindow ? 'short window' : null,
+          ]
+            .filter(Boolean)
+            .join(', ')}).`
+        : '';
+      return {
+        people: due.peopleCount,
+        cases: due.caseCount,
+        line: `${this.plural(due.peopleCount, 'person', 'people')} on ${this.plural(due.caseCount, 'file')} with nothing tried in ${TOUCH_EVERY_DAYS} days or more.${lead}`,
+      };
+    } catch (err: any) {
+      this.logger.warn(`Touches due line skipped: ${err?.message || err}`);
+      return null;
+    }
   }
 
   /** Subject line, rebuilt daily from whatever leads the brief. */

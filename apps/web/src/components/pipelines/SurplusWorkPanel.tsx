@@ -182,6 +182,13 @@ export interface SurplusPanelLead {
   /** A person put the file on hold, and why. Null when it is not held. */
   heldAt?: string | null;
   holdReason?: string | null;
+  /** Set when the hold is a pause: the day it ends. */
+  holdUntil?: string | null;
+  /** Sixty days of full effort and nobody reached: the rules say pause it. */
+  pauseOffer?: { since: string; days: number; until: string } | null;
+  /** Under two months to the day-340 cutoff (negative once past it). */
+  shortWindow?: boolean;
+  daysToCutoff?: number | null;
   isDeceased: boolean;
   /** YYYY-MM-DD, when a people search dated the death. */
   dateOfDeath?: string | null;
@@ -2579,6 +2586,17 @@ export default function SurplusWorkPanel({
                 {property.anyDeceased && (
                   <span style={{ fontSize: 11, color: 'var(--amber)' }}>Estate</span>
                 )}
+                {lead.shortWindow && (
+                  <span
+                    style={{ fontSize: 11, color: 'var(--red)', fontWeight: 600 }}
+                    title="Under two months to the team's day-340 cutoff. Day 365 is the legal end."
+                  >
+                    {shortWindowLabel(lead.daysToCutoff)}
+                  </span>
+                )}
+                {lead.holdUntil && (
+                  <span style={{ fontSize: 11, color: 'var(--dim)' }}>Paused until {fmtDay(lead.holdUntil)}</span>
+                )}
                 <span className="dc-wp-stagepill" title="This claimant's stage">
                   <i />
                   {lead.stage}
@@ -3045,6 +3063,12 @@ function ResearchTab({
   );
 }
 
+/** "Short window, 41 days", or "Past day 340" once the team cutoff has gone by. */
+function shortWindowLabel(days: number | null | undefined) {
+  if (days == null) return 'Short window';
+  return days >= 0 ? `Short window, ${days} day${days === 1 ? '' : 's'}` : 'Past day 340';
+}
+
 /** A dated step that has happened, or not yet. */
 function stepAt(at: string | null | undefined): { done: boolean; at: string | null } {
   return { done: !!at, at: at || null };
@@ -3161,6 +3185,21 @@ function DetailsTab({
               : 'Estimated from the sale date. Duval publishes no filing dates and its notice is a scan, so this is a floor, not a confirmed date.'
           }
         />
+        {lead.daysToCutoff != null && (
+          <Row
+            k="Team cutoff"
+            v={
+              lead.daysToCutoff >= 0
+                ? `day 340, ${lead.daysToCutoff} day${lead.daysToCutoff === 1 ? '' : 's'} from now`
+                : `day 340, passed ${-lead.daysToCutoff} day${lead.daysToCutoff === -1 ? '' : 's'} ago`
+            }
+            note={
+              lead.shortWindow
+                ? 'Short window: under two months to the cutoff. The legal end is day 365, so a claim that moves now can still be filed.'
+                : 'The team works to day 340 so a late find still has time to be signed, notarized and filed before day 365.'
+            }
+          />
+        )}
         {property.daysRemaining != null && (
           <Row
             k="Other claims"
@@ -3220,14 +3259,23 @@ function HoldControl({
 }) {
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState('');
+  /** A revisit date makes it a pause. Empty is an ordinary hold with no end. */
+  const [until, setUntil] = useState('');
   const [saving, setSaving] = useState(false);
 
   const save = async (on: boolean) => {
     if (saving || (on && !reason.trim())) return;
     setSaving(true);
     try {
-      await surplusAPI.hold(lead.id, on, on ? reason.trim() : undefined);
-      say(on ? `${lead.claimant} is on hold. Drips wait until it is released.` : `${lead.claimant} released from hold`);
+      await surplusAPI.hold(lead.id, on, on ? reason.trim() : undefined, on && until ? until : undefined);
+      say(
+        !on
+          ? `${lead.claimant} released from hold`
+          : until
+            ? `${lead.claimant} paused until ${fmtDay(until)}. It comes back on its own then.`
+            : `${lead.claimant} is on hold. Drips wait until it is released.`,
+      );
+      setUntil('');
       setOpen(false);
       setReason('');
       onChanged();
@@ -3242,8 +3290,17 @@ function HoldControl({
     return (
       <div className="dc-wp-hold on">
         <div>
-          <b>On hold</b> since {fmtDate(lead.heldAt)}
-          {lead.holdReason ? `: ${lead.holdReason}` : ''}. Nobody works it and its drips wait.
+          {lead.holdUntil ? (
+            <>
+              <b>Paused</b> since {fmtDate(lead.heldAt)} until {fmtDay(lead.holdUntil)}
+              {lead.holdReason ? `: ${lead.holdReason}` : ''}. It comes back on its own that morning with a revisit task.
+            </>
+          ) : (
+            <>
+              <b>On hold</b> since {fmtDate(lead.heldAt)}
+              {lead.holdReason ? `: ${lead.holdReason}` : ''}. Nobody works it and its drips wait.
+            </>
+          )}
         </div>
         <button type="button" className="dc-wp-btn" disabled={saving} onClick={() => save(false)}>
           {saving ? 'Releasing...' : 'Release'}
@@ -3271,8 +3328,20 @@ function HoldControl({
         autoFocus
         onKeyDown={(e) => e.key === 'Enter' && save(true)}
       />
+      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--dim)' }}>
+        Until
+        <input
+          type="date"
+          className="dc-input"
+          style={{ width: 'auto' }}
+          value={until}
+          min={todayLocal()}
+          onChange={(e) => setUntil(e.target.value)}
+          aria-label="Revisit date, leave empty for a hold with no end"
+        />
+      </label>
       <button type="button" className="dc-wp-btn on" disabled={saving || !reason.trim()} onClick={() => save(true)}>
-        {saving ? 'Holding...' : 'Hold'}
+        {saving ? 'Saving...' : until ? 'Pause' : 'Hold'}
       </button>
       <button type="button" className="dc-wp-btn" onClick={() => setOpen(false)}>
         Cancel
@@ -5084,6 +5153,27 @@ function CaseQuestions({
     }
   };
 
+  /** The rules' pause: aside for about six months, back on its own. */
+  const pause = async () => {
+    const offer = lead.pauseOffer;
+    if (!offer) return;
+    setBusy(true);
+    try {
+      await surplusAPI.hold(
+        lead.id,
+        true,
+        `${offer.days} days of full effort, nobody reached`,
+        String(offer.until).slice(0, 10),
+      );
+      say(`${lead.claimant} paused until ${fmtDay(offer.until)}. It comes back on its own then.`);
+      onChanged();
+    } catch (err: any) {
+      say(err?.response?.data?.message || 'The file could not be paused.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const take = async (text: string) => {
     setBusy(true);
     try {
@@ -5140,15 +5230,23 @@ function CaseQuestions({
           </div>
         ))}
       </div>
-      {!lead.nextTask && suggestions.length > 0 && (
+      {/* The pause offer shows even with a next action set: it is the
+          decision the file is waiting on, not another thing to do. */}
+      {(!lead.nextTask || suggestions.some((s) => s.key === 'pause')) && suggestions.length > 0 && (
         <div style={{ marginTop: 10, display: 'grid', gap: 6 }}>
-          <div className="dc-lbl">Suggested, no next action set</div>
+          <div className="dc-lbl">{lead.nextTask ? 'Suggested' : 'Suggested, no next action set'}</div>
           {suggestions.map((s) => (
             <div key={s.key} className="dc-wp-suggest">
               <span style={{ flex: 1, minWidth: 0 }}>{s.text}</span>
-              <button type="button" className="dc-wp-mini on" disabled={busy} onClick={() => take(s.text)}>
-                Make it the next action
-              </button>
+              {s.key === 'pause' ? (
+                <button type="button" className="dc-wp-mini on" disabled={busy} onClick={pause}>
+                  Pause until {lead.pauseOffer ? fmtDay(lead.pauseOffer.until) : 'later'}
+                </button>
+              ) : (
+                <button type="button" className="dc-wp-mini on" disabled={busy} onClick={() => take(s.text)}>
+                  Make it the next action
+                </button>
+              )}
               <button type="button" className="dc-wp-mini" onClick={() => dismiss(s.key)}>
                 Dismiss
               </button>

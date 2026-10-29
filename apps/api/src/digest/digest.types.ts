@@ -135,6 +135,8 @@ export interface DigestBrief {
   feedSummary: string | null;
   /** Counties whose surplus list is due to be asked for again, from the county list tracker. */
   countyListsDue: FeedRow[];
+  /** People on workable files with nothing tried in a week: the outreach list's Due today. */
+  touchesDue: { people: number; cases: number; line: string } | null;
   /** One line of wholesaling counts, or null when there is nothing to say. */
   wholesale: string | null;
 

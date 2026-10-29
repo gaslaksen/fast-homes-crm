@@ -79,6 +79,8 @@ import { MessagesModule } from '../messages/messages.module';
     SurplusIngestService,
     SurplusSkiptraceService,
     SurplusHeirsService,
+    // The Daily Brief's touches-due line reads the same list the outreach page shows.
+    SurplusOutreachService,
   ],
 })
 export class SurplusModule {}

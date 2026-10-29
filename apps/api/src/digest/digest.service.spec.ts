@@ -49,7 +49,7 @@ const BOARD = [
   claimant({ id: 's1', claimant: 'NANCY E ANDREWS', noticeAge: 120, grossSurplus: 20000, netToClaimant: 20000 }),
 ];
 
-function makeService(over: { unread?: any[]; tasks?: any[]; recentKeys?: string[]; inFlight?: any[]; counties?: any[] } = {}) {
+function makeService(over: { unread?: any[]; tasks?: any[]; recentKeys?: string[]; inFlight?: any[]; counties?: any[]; due?: any } = {}) {
   const prisma: any = {
     lead: {
       findMany: jest.fn().mockResolvedValue(over.unread ?? []),
@@ -78,7 +78,8 @@ function makeService(over: { unread?: any[]; tasks?: any[]; recentKeys?: string[
   const config: any = { get: () => 'https://mydealcore.com' };
   const surplus: any = { list: jest.fn().mockResolvedValue({ data: [{ claimants: BOARD }] }) };
   const ingest: any = { adapters: () => [] };
-  return new DigestService(prisma, config, surplus, ingest);
+  const outreach: any = { dueToday: jest.fn().mockResolvedValue(over.due ?? { caseCount: 0, peopleCount: 0, top: [] }) };
+  return new DigestService(prisma, config, surplus, ingest, outreach);
 }
 
 describe('DigestService.build', () => {
@@ -139,6 +140,22 @@ describe('DigestService.build', () => {
     expect(b.promises[0]).toMatchObject({ when: '5 days late · Ian' });
     expect(b.needsTrace).toEqual({ total: 38, byCounty: 'Citrus 28 · Alachua 10' });
     expect(b.surplusOpeningSoonNote).toBe('1 claimant clears the lien window in the next 30 days, $20.0K between them. First: Nancy E Andrews, tomorrow.');
+  });
+
+  it('says how many people are due a touch today, biggest file first', async () => {
+    const due = {
+      caseCount: 2,
+      peopleCount: 3,
+      top: [{ leadId: 'k1', claimant: 'DAVID G KELLY', county: 'Citrus', netToClaimant: 32000, daysLeft: 40, shortWindow: true, people: ['DAVID G KELLY'] }],
+    };
+    const b = await makeService({ due }).build({ organizationId: 'org1', now: NOW });
+    expect(b.touchesDue).toEqual({
+      people: 3,
+      cases: 2,
+      line: "3 people on 2 files with nothing tried in 7 days or more. Biggest first: DAVID G KELLY on DAVID G KELLY's file ($32.0K, 40 days left, short window).",
+    });
+    const none = await makeService().build({ organizationId: 'org1', now: NOW });
+    expect(none.touchesDue).toBeNull();
   });
 
   it('lists a county whose list is due, asking only for dates up to today in this organization', async () => {
