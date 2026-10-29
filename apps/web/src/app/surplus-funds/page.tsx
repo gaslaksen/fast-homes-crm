@@ -542,6 +542,9 @@ const AGE_OPTS: [string, string][] = [
   ['365+', 'Over 365 days'],
 ];
 
+/** The board's page sizes, in properties. */
+const PAGE_SIZES = [25, 50, 100];
+
 const WINDOW_OPTS: [string, string][] = [
   ['all', 'Any claim window'],
   ['open', 'Other claims still possible'],
@@ -586,8 +589,8 @@ function pulled(r: any): boolean {
   return !!r.ok || (!!r.finishedAt && (r.scanned || 0) > 0);
 }
 
-function FeedLine({ runs, sources }: { runs: any[]; sources: FeedSource[] }) {
-  if (!runs.length && !sources.length) return null;
+function feedItems(runs: any[], sources: FeedSource[]) {
+  if (!runs.length && !sources.length) return [];
   // One entry per registered feed. A weekly feed judged by the daily rule was
   // amber six days out of seven, which taught everyone to ignore the line.
   const feeds: FeedSource[] = sources.length
@@ -619,36 +622,119 @@ function FeedLine({ runs, sources }: { runs: any[]; sources: FeedSource[] }) {
       : late
         ? `The ${f.county} pull last succeeded ${agoLabel(lastCron.startedAt)}. It should run ${scheduleLabel(f.cadence)}.`
         : `${f.county}, ${scheduleLabel(f.cadence)}: ${lastCron.scanned} scanned, ${lastCron.created} new, ${lastCron.updated} updated, ${lastCron.belowFloor} under the floor${errs}.`;
-    return { key: f.key, late, short, detail };
+    return { key: f.key, county: f.county, late, short, detail };
   });
-  const bad = items.some((i) => i.late);
+  return items;
+}
 
+/**
+ * The feeds and the call numbers, behind one button instead of two lines of
+ * small print under the title. The button keeps the one thing that has to
+ * stay visible: a late or failing feed turns it amber and says so, because a
+ * broken pull looks exactly like a quiet week on the board.
+ *
+ * The call numbers only show once there are enough calls to say anything; a
+ * best window off four calls is noise dressed as advice.
+ */
+function StatusMenu({ runs, sources, calls }: { runs: any[]; sources: FeedSource[]; calls: any }) {
+  const items = feedItems(runs, sources);
+  if (!items.length && !(calls && calls.calls >= 10)) return null;
+  const late = items.filter((i) => i.late);
+  const rate = calls ? Math.round((calls.connectRate || 0) * 100) : 0;
   return (
-    <div className={`dc-feedline${bad ? ' warn' : ''}`} title={items.map((i) => i.detail).join('\n')}>
-      <i />
-      Feeds: {items.map((i) => i.short).join(' · ')}
-    </div>
+    <details className="dc-menu">
+      <summary className={`dc-btn dc-status${late.length ? ' warn' : ''}`} title={late.map((i) => i.detail).join('\n') || 'Every county feed is on time'}>
+        <i />
+        {late.length ? `${late.length} feed${late.length === 1 ? '' : 's'} late` : 'Status'}
+      </summary>
+      <div className="dc-menu-list" style={{ minWidth: 320, maxWidth: 420, padding: 12, gap: 10, whiteSpace: 'normal' }}>
+        {items.length > 0 && (
+          <div>
+            <div className="dc-flabel" style={{ marginBottom: 6 }}>County feeds</div>
+            <div style={{ display: 'grid', gap: 5 }}>
+              {items.map((i) => (
+                <div key={i.key} style={{ fontSize: 12.5, lineHeight: 1.45 }} title={i.detail}>
+                  <span
+                    style={{
+                      display: 'inline-block',
+                      width: 7,
+                      height: 7,
+                      borderRadius: '50%',
+                      marginRight: 7,
+                      background: i.late ? 'var(--amber)' : 'var(--mint)',
+                    }}
+                  />
+                  <span style={{ color: i.late ? 'var(--amber)' : 'var(--text)' }}>{i.short}</span>
+                  {i.late && <div style={{ color: 'var(--dim)', fontSize: 11.5, marginLeft: 14 }}>{i.detail}</div>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {calls && calls.calls >= 10 && (
+          <div>
+            <div className="dc-flabel" style={{ marginBottom: 6 }}>Calls, last {calls.sinceDays} days</div>
+            <div style={{ fontSize: 12.5, lineHeight: 1.5 }}>
+              {calls.calls} placed, {rate}% reached a person.
+              {calls.best && (
+                <>
+                  {' '}
+                  Best window so far: <b style={{ color: 'var(--mint)' }}>{calls.best.label}</b> ({calls.best.connected} of{' '}
+                  {calls.best.calls}).
+                </>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </details>
   );
 }
 
 /**
- * When calls connect. Shown only once there are enough calls to say
- * anything; a best window off four calls is noise dressed as advice.
+ * Pages of 25, 50 or 100 properties. The board used to ask for 200 at once,
+ * which was slow to draw and, past 200, quietly left the rest off.
  */
-function CallWindows({ stats }: { stats: any }) {
-  if (!stats || stats.calls < 10) return null;
-  const rate = Math.round((stats.connectRate || 0) * 100);
+function Pager({
+  page,
+  pageSize,
+  total,
+  onPage,
+  onPageSize,
+}: {
+  page: number;
+  pageSize: number;
+  total: number;
+  onPage: (n: number) => void;
+  onPageSize: (n: number) => void;
+}) {
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  if (total <= PAGE_SIZES[0]) return null;
+  const go = (n: number) => {
+    onPage(n);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
   return (
-    <div style={{ fontSize: 12, color: 'var(--faint)', marginTop: 2 }}>
-      Calls, last {stats.sinceDays} days: {stats.calls} placed, {rate}% reached a person
-      {stats.best ? (
-        <>
-          . Best window so far: <b style={{ color: 'var(--mint)' }}>{stats.best.label}</b> (
-          {stats.best.connected} of {stats.best.calls})
-        </>
-      ) : (
-        '.'
-      )}
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 14, fontSize: 13, color: 'var(--dim)' }}>
+      <button type="button" className="dc-btn sm" disabled={page <= 1} onClick={() => go(page - 1)}>
+        Previous
+      </button>
+      <span>
+        Page <b style={{ color: 'var(--text)' }}>{page}</b> of {pages}
+      </span>
+      <button type="button" className="dc-btn sm" disabled={page >= pages} onClick={() => go(page + 1)}>
+        Next
+      </button>
+      <label style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+        Per page
+        <select className="dc-in" value={pageSize} onChange={(e) => onPageSize(Number(e.target.value))} style={{ width: 'auto', padding: '6px 9px', fontSize: 12.5 }}>
+          {PAGE_SIZES.map((n) => (
+            <option key={n} value={n}>
+              {n}
+            </option>
+          ))}
+        </select>
+      </label>
     </div>
   );
 }
@@ -846,8 +932,43 @@ export default function SurplusFundsPage() {
   const searching = q.trim().length > 0;
   const wide = searching || !!batchQ;
 
+  // Paging. The filters as one key: any change to them goes back to page 1,
+  // set during render rather than in an effect so the fetch never runs once
+  // with the old page first.
+  const filterKey = JSON.stringify([q, queueQ, tierQ, stageQ, ctype, county, band, chipQ, ageQ, lienWin, hideDead, hideDnc, sort, underYear, hideEarly, batchQ?.id, mineQ]);
+  const [pageAt, setPageAt] = useState<{ key: string; page: number }>({ key: filterKey, page: 1 });
+  const page = pageAt.key === filterKey ? pageAt.page : 1;
+  const setPage = (n: number) => setPageAt({ key: filterKey, page: n });
+  /** Properties per page, remembered in the browser. */
+  const [pageSize, setPageSizeState] = useState(50);
+  useEffect(() => {
+    try {
+      const v = Number(localStorage.getItem('dc-surplus-page-size'));
+      if (PAGE_SIZES.includes(v)) setPageSizeState(v);
+    } catch {
+      /* the default is fine */
+    }
+  }, []);
+  const setPageSize = (n: number) => {
+    setPageSizeState(n);
+    setPage(1);
+    try {
+      localStorage.setItem('dc-surplus-page-size', String(n));
+    } catch {
+      /* the default is fine */
+    }
+  };
+  /** Properties matching the filters, across every page. */
+  const [total, setTotal] = useState(0);
+  // The last query that drew the board. A refetch of the same query (a save
+  // in the panel, a touch logged) refreshes in the background instead of
+  // blanking the list behind the panel while it reloads.
+  const drawnFor = useRef<string | null>(null);
+
   const fetchRows = useCallback(async () => {
-    setLoading(true);
+    const loadKey = `${filterKey}|${page}|${pageSize}`;
+    const quiet = drawnFor.current === loadKey;
+    if (!quiet) setLoading(true);
     setError(null);
     try {
       const res = await surplusAPI.list({
@@ -873,30 +994,43 @@ export default function SurplusFundsPage() {
         updateOverdue: chipQ === 'update_overdue' || undefined,
         batch: batchQ?.id,
         mine: mineQ || undefined,
+        // These used to narrow the loaded rows in the browser, which was only
+        // right while the whole list came back at once. The API applies them
+        // per property, before paging.
+        estate: chipQ === 'estate' || undefined,
+        shortWindow: chipQ === 'short' || undefined,
+        competingLien: chipQ === 'lien' || undefined,
+        underYear: (underYear && !wide) || undefined,
         sort,
-        pageSize: 200,
+        page,
+        pageSize,
       });
-      let data: any[] = res.data.data || [];
-      // Estate and competing-lien are facts about the loaded row, not query
-      // parameters, so they narrow here rather than round-tripping. They read
-      // off the group's rolled-up flags, since a property counts if ANY
-      // claimant on it qualifies.
-      if (chipQ === 'estate') data = data.filter((r) => r.anyDeceased);
-      if (chipQ === 'short') data = data.filter((r) => r.shortWindow);
-      if (chipQ === 'lien') data = data.filter((r) => r.competingLien);
-      if (underYear && !wide) data = data.filter((r) => r.daysSinceSale == null || r.daysSinceSale <= 365);
+      const data: any[] = res.data.data || [];
+      // Past the last page, which a save that shrinks the list can cause.
+      const pages = Math.max(1, Math.ceil((res.data.total ?? data.length) / pageSize));
+      if (!data.length && page > pages) {
+        setPage(pages);
+        return;
+      }
       setRows(data);
+      setTotal(res.data.total ?? data.length);
+      drawnFor.current = loadKey;
       setLeadCount(res.data.leadCount ?? data.length);
       setCounties(Array.isArray(res.data.counties) ? res.data.counties : []);
       setFloor(res.data.surplusFloor ?? 15000);
     } catch (err: any) {
       setError(err?.response?.data?.message || err.message || 'Could not load surplus leads.');
-      setRows([]);
-      setLeadCount(0);
+      // A background refresh that fails keeps what is on screen.
+      if (!quiet) {
+        setRows([]);
+        setLeadCount(0);
+        setTotal(0);
+      }
     } finally {
       setLoading(false);
     }
-  }, [q, searching, wide, queueQ, tierQ, stageQ, ctype, county, band, chipQ, ageQ, lienWin, hideDead, hideDnc, sort, underYear, hideEarly, batchQ, mineQ]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterKey, q, searching, wide, queueQ, tierQ, stageQ, ctype, county, band, chipQ, ageQ, lienWin, hideDead, hideDnc, sort, underYear, hideEarly, batchQ, mineQ, page, pageSize]);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -1346,8 +1480,6 @@ export default function SurplusFundsPage() {
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, flexWrap: 'wrap' }}>
             <div style={{ flex: 1, minWidth: 260 }}>
               <h1 className="dc-h1">Surplus Funds</h1>
-              <FeedLine runs={runs} sources={sources} />
-              <CallWindows stats={callStats} />
             </div>
             <div style={{ display: 'flex', gap: 9, flexWrap: 'wrap', alignItems: 'center' }}>
               <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls" style={{ display: 'none' }} onChange={onFile} />
@@ -1365,6 +1497,7 @@ export default function SurplusFundsPage() {
               {/* Everything a caller does not do on a normal day sits behind
                   More: the county pull, the import, the references. One
                   primary button remains. */}
+              <StatusMenu runs={runs} sources={sources} calls={callStats} />
               <details className="dc-menu" ref={menuRef}>
                 <summary className="dc-btn">More</summary>
                 <div className="dc-menu-list" onClick={() => menuRef.current?.removeAttribute('open')}>
@@ -1814,19 +1947,25 @@ export default function SurplusFundsPage() {
               <span>
                 {searching ? (
                   <>
-                    {rows.length} propert{rows.length === 1 ? 'y' : 'ies'} match <b>&quot;{q.trim()}&quot;</b> across every
+                    {total} propert{total === 1 ? 'y' : 'ies'} match <b>&quot;{q.trim()}&quot;</b> across every
                     claim
                   </>
                 ) : queueQ ? (
                   <>
-                    {rows.length} in <b>{QUEUE_LABEL[queueQ] || queueQ}</b> · {stats.openClaims} open
+                    {total} in <b>{QUEUE_LABEL[queueQ] || queueQ}</b> · {stats.openClaims} open
                   </>
                 ) : (
                   <>
-                    {rows.length} propert{rows.length === 1 ? 'y' : 'ies'}
+                    {total} propert{total === 1 ? 'y' : 'ies'}
                   </>
                 )}
-                {leadCount !== rows.length && `, ${leadCount} claimants`}
+                {leadCount !== total && `, ${leadCount} claimants`}
+                {total > rows.length && (
+                  <span style={{ color: 'var(--faint)' }}>
+                    {' '}
+                    · showing {(page - 1) * pageSize + 1} to {(page - 1) * pageSize + rows.length}
+                  </span>
+                )}
                 {chosenKeys.length > 0 && (
                   <>
                     {' '}· <b style={{ color: 'var(--mint)' }}>{chosenKeys.length} selected</b>
@@ -1928,6 +2067,8 @@ export default function SurplusFundsPage() {
               </>
             }
           />
+
+          <Pager page={page} pageSize={pageSize} total={total} onPage={setPage} onPageSize={setPageSize} />
 
           <div style={{ height: 34 }} />
         </div>

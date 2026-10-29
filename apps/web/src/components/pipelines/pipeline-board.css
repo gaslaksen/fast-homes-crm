@@ -746,6 +746,11 @@ details.dc-fold-sub > summary .flag {
 .dc-feedline.warn i { background: var(--amber); }
 
 details.dc-menu { position: relative; }
+/* The Status button: a dot that turns amber, with the count, when a feed is late. */
+.dc-status { display: inline-flex; align-items: center; gap: 7px; }
+.dc-status i { width: 8px; height: 8px; border-radius: 50%; background: var(--mint); flex: 0 0 8px; }
+.dc-status.warn { color: var(--amber); border-color: var(--amber); }
+.dc-status.warn i { background: var(--amber); }
 details.dc-menu > summary { list-style: none; }
 details.dc-menu > summary::-webkit-details-marker { display: none; }
 details.dc-menu > summary::after { content: "\25BE"; font-size: 11px; opacity: 0.7; }

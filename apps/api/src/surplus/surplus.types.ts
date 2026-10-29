@@ -130,6 +130,16 @@ export interface SurplusListFilters {
   /** Only signed claimants who have not heard from us in thirty days. */
   updateOverdue?: boolean;
   /**
+   * Property-level cuts the board used to make in the browser on whatever
+   * page it had loaded. Server-side so paging stays right: an estate, a
+   * competing lien, a short window, a sale under a year old. On the grouped
+   * board each one keeps the whole property when any claimant on it qualifies.
+   */
+  estate?: boolean;
+  competingLien?: boolean;
+  shortWindow?: boolean;
+  underYear?: boolean;
+  /**
    * Only claimants sent out in this saved skip-trace batch. Opening a batch
    * is a deliberate look at everyone in it, so the default cuts (lienholders,
    * the floor, retired cases) do not hide any of them.
