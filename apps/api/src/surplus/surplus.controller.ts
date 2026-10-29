@@ -495,6 +495,13 @@ export class SurplusController {
     return this.documents.remove(docId, organizationId, userId);
   }
 
+  /** Somebody asked the county for its surplus list today. */
+  @Post('counties/:countyId/list-requested')
+  async countyListRequested(@Param('countyId') countyId: string, @Headers('authorization') authHeader?: string) {
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.counties.markListRequested(countyId, organizationId);
+  }
+
   /** The answers were just checked with the clerk. Resets the 180-day clock. */
   @Post('counties/:countyId/verified')
   async verifyCounty(@Param('countyId') countyId: string, @Headers('authorization') authHeader?: string) {

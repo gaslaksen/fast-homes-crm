@@ -243,12 +243,18 @@ export class DigestRenderService {
    * its own red or amber line; the healthy ones are a single count.
    */
   private renderComingUp(b: DigestBrief): string {
-    if (!b.surplusIngestNote && !b.surplusOpeningSoonNote && !b.feedProblems.length && !b.feedSummary) return '';
+    const lists = b.countyListsDue || [];
+    if (!b.surplusIngestNote && !b.surplusOpeningSoonNote && !b.feedProblems.length && !b.feedSummary && !lists.length) return '';
     const para = (html: string) => `<div style="font-size:14px;color:${BODY};line-height:1.6;padding-bottom:8px;">${html}</div>`;
     const dot = (u: DigestUrgency) =>
       `<span style="display:inline-block;width:8px;height:8px;border-radius:4px;background:${PALETTE[u].accent};margin-right:8px;"></span>`;
     const problems = b.feedProblems.map((f) =>
       para(`${dot(f.urgency)}<b style="color:${INK};">${this.esc(f.label)}</b> <span style="color:${f.urgency === 'critical' ? PALETTE.critical.accent : BODY};">${this.esc(f.detail)}</span>`),
+    ).join('');
+    // The county list tracker's UPDATE DUE lines, after the feeds since both
+    // are about where new claims come from.
+    const listLines = lists.map((f) =>
+      para(`${dot(f.urgency)}<b style="color:${INK};">${this.esc(f.label)}</b> <span style="color:${MUTED};">(${this.esc(f.schedule)})</span> ${this.esc(f.detail)}`),
     ).join('');
 
     return `
@@ -259,6 +265,7 @@ export class DigestRenderService {
         ${b.surplusIngestNote ? para(`<b style="color:${INK};">Overnight:</b> ${this.esc(b.surplusIngestNote)}`) : ''}
         ${problems}
         ${b.feedSummary ? para(`${dot('good')}${this.esc(b.feedSummary)}`) : ''}
+        ${listLines}
       </td></tr>`;
   }
 
@@ -409,12 +416,14 @@ export class DigestRenderService {
       out.push('');
     }
 
-    if (b.surplusIngestNote || b.surplusOpeningSoonNote || b.feedProblems.length || b.feedSummary) {
+    const lists = b.countyListsDue || [];
+    if (b.surplusIngestNote || b.surplusOpeningSoonNote || b.feedProblems.length || b.feedSummary || lists.length) {
       out.push('COMING UP');
       if (b.surplusOpeningSoonNote) out.push(`  ${b.surplusOpeningSoonNote}`);
       if (b.surplusIngestNote) out.push(`  Overnight: ${b.surplusIngestNote}`);
       for (const f of b.feedProblems) out.push(`  ${f.label} (${f.schedule}): ${f.detail}`);
       if (b.feedSummary) out.push(`  ${b.feedSummary}`);
+      for (const f of lists) out.push(`  ${f.label} (${f.schedule}): ${f.detail}`);
       out.push('');
     }
 

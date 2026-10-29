@@ -49,7 +49,7 @@ const BOARD = [
   claimant({ id: 's1', claimant: 'NANCY E ANDREWS', noticeAge: 120, grossSurplus: 20000, netToClaimant: 20000 }),
 ];
 
-function makeService(over: { unread?: any[]; tasks?: any[]; recentKeys?: string[]; inFlight?: any[] } = {}) {
+function makeService(over: { unread?: any[]; tasks?: any[]; recentKeys?: string[]; inFlight?: any[]; counties?: any[] } = {}) {
   const prisma: any = {
     lead: {
       findMany: jest.fn().mockResolvedValue(over.unread ?? []),
@@ -73,6 +73,7 @@ function makeService(over: { unread?: any[]; tasks?: any[]; recentKeys?: string[
       findMany: jest.fn().mockResolvedValue((over.recentKeys ?? []).map((k) => ({ bigThingKey: k }))),
     },
     surplusPollRun: { findMany: jest.fn().mockResolvedValue([]) },
+    surplusCounty: { findMany: jest.fn().mockResolvedValue(over.counties ?? []) },
   };
   const config: any = { get: () => 'https://mydealcore.com' };
   const surplus: any = { list: jest.fn().mockResolvedValue({ data: [{ claimants: BOARD }] }) };
@@ -138,6 +139,20 @@ describe('DigestService.build', () => {
     expect(b.promises[0]).toMatchObject({ when: '5 days late · Ian' });
     expect(b.needsTrace).toEqual({ total: 38, byCounty: 'Citrus 28 · Alachua 10' });
     expect(b.surplusOpeningSoonNote).toBe('1 claimant clears the lien window in the next 30 days, $20.0K between them. First: Nancy E Andrews, tomorrow.');
+  });
+
+  it('lists a county whose list is due, asking only for dates up to today in this organization', async () => {
+    const counties = [{
+      name: 'Marion', listSource: 'email', listUpdateEveryDays: 30,
+      listRequestedAt: new Date('2026-09-12T12:00:00Z'), listNextRequestAt: new Date('2026-10-12T12:00:00Z'), listUpdatedAt: null,
+    }];
+    const svc = makeService({ counties });
+    const b = await svc.build({ organizationId: 'org1', now: NOW });
+    const where = (svc as any).prisma.surplusCounty.findMany.mock.calls[0][0].where;
+    expect(where).toEqual({ organizationId: 'org1', listNextRequestAt: { not: null, lte: new Date('2026-10-13T12:00:00Z') } });
+    expect(b.countyListsDue).toEqual([
+      { label: 'Marion list', schedule: 'monthly, by email', detail: 'UPDATE DUE Mon 10/12, 1 day late. Last asked Sat 9/12.', urgency: 'warn' },
+    ]);
   });
 });
 

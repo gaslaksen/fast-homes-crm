@@ -2914,6 +2914,20 @@ model SurplusCounty {
   lastVerifiedAt   DateTime?
   verifiedByUserId String?
 
+  /// The county's surplus list itself, tracked the way the rules keep a
+  /// county list log: where the list comes from, how often the county puts
+  /// out a new one, when we last asked, when to ask next, and the date the
+  /// list itself says it was updated. Calendar days are stored at noon UTC.
+  /// 'online' | 'email' | 'records_request' | 'paid', null when not known.
+  listSource          String?
+  /// Days between the county's own updates: 7 weekly, 30 monthly and so on.
+  listUpdateEveryDays Int?
+  listRequestedAt     DateTime?
+  /// When it comes due the Daily Brief lists the county as UPDATE DUE.
+  listNextRequestAt   DateTime?
+  /// The "as of" date printed on the list the county sent.
+  listUpdatedAt       DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

@@ -38,6 +38,53 @@ interface County {
   lastVerifiedAt: string | null;
   stale: boolean;
   unknowns: string[];
+  /** The county list tracker. Dates are calendar days at noon UTC. */
+  listSource: string | null;
+  listUpdateEveryDays: number | null;
+  listRequestedAt: string | null;
+  listNextRequestAt: string | null;
+  listUpdatedAt: string | null;
+  listDue: boolean;
+  listDueInDays: number | null;
+}
+
+const LIST_SOURCES: [string | null, string][] = [
+  [null, 'Not known'],
+  ['online', 'Online'],
+  ['email', 'Email'],
+  ['records_request', 'Open records request'],
+  ['paid', 'Paid'],
+];
+
+const LIST_EVERY: [string, string][] = [
+  ['', 'Not known'],
+  ['7', 'Weekly'],
+  ['14', 'Every two weeks'],
+  ['30', 'Monthly'],
+  ['90', 'Quarterly'],
+  ['182', 'Twice a year'],
+  ['365', 'Yearly'],
+];
+
+/** A stored calendar day as a date input wants it. Noon UTC, so the UTC date is the day. */
+function dayInput(iso: string | null | undefined) {
+  return iso ? iso.slice(0, 10) : '';
+}
+
+/** A stored calendar day for reading, in UTC so it never shows a day early. */
+function fmtListDay(iso: string | null) {
+  return iso
+    ? new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
+    : null;
+}
+
+/** "Due today", "3 days late", "Due in 12 days", or null with no date. */
+function listDueLabel(c: Pick<County, 'listDueInDays'>) {
+  const d = c.listDueInDays;
+  if (d == null) return null;
+  if (d < 0) return `Update due, ${-d} day${d === -1 ? '' : 's'} late`;
+  if (d === 0) return 'Update due today';
+  return `Next request in ${d} day${d === 1 ? '' : 's'}`;
 }
 
 const METHODS: [string, string][] = [
@@ -130,7 +177,7 @@ export default function SurplusCountiesPage() {
     setDirty(false);
     // Only when the selection or the saved row changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current?.id, current?.lastVerifiedAt, current?.notes]);
+  }, [current?.id, current?.lastVerifiedAt, current?.notes, current?.listRequestedAt, current?.listNextRequestAt]);
 
   const set = (patch: Partial<County>) => {
     setForm((f) => ({ ...f, ...patch }));
@@ -140,6 +187,14 @@ export default function SurplusCountiesPage() {
   const save = async () => {
     if (!current || saving) return;
     setSaving(true);
+    // Leave the next request date out when only the last request or the
+    // cadence changed, so the API moves it on from them. Sending it as it
+    // was would pin the old date.
+    const nextChanged = dayInput(form.listNextRequestAt) !== dayInput(current.listNextRequestAt);
+    const recompute =
+      !nextChanged &&
+      (dayInput(form.listRequestedAt) !== dayInput(current.listRequestedAt) ||
+        (form.listUpdateEveryDays ?? null) !== (current.listUpdateEveryDays ?? null));
     try {
       await surplusAPI.updateCounty(current.id, {
         active: form.active,
@@ -156,6 +211,11 @@ export default function SurplusCountiesPage() {
         clerkAddress: form.clerkAddress || null,
         notes: form.notes || null,
         practiceRunAt: form.practiceRunAt || null,
+        listSource: form.listSource || null,
+        listUpdateEveryDays: form.listUpdateEveryDays ?? null,
+        listRequestedAt: dayInput(form.listRequestedAt) || null,
+        ...(recompute ? {} : { listNextRequestAt: dayInput(form.listNextRequestAt) || null }),
+        listUpdatedAt: dayInput(form.listUpdatedAt) || null,
       });
       say(`${current.name} saved.`);
       await load();
@@ -176,6 +236,19 @@ export default function SurplusCountiesPage() {
       await load();
     } catch (err: any) {
       say(err?.response?.data?.message || 'Could not mark verified.');
+    }
+  };
+
+  const askedToday = async () => {
+    if (!current) return;
+    try {
+      if (dirty) await save();
+      const r = await surplusAPI.countyListRequested(current.id);
+      const next = r.data?.listNextRequestAt ? fmtListDay(r.data.listNextRequestAt) : null;
+      say(next ? `${current.name} list requested today. Next request ${next}.` : `${current.name} list requested today. Set how often it updates to get a next date.`);
+      await load();
+    } catch (err: any) {
+      say(err?.response?.data?.message || 'That could not be saved.');
     }
   };
 
@@ -296,6 +369,9 @@ export default function SurplusCountiesPage() {
                         {c.lastVerifiedAt ? (c.stale ? 'Recheck' : 'Verified') : 'Not checked'}
                       </span>
                     </div>
+                    {c.listDue && (
+                      <div className="text-[11px] font-semibold text-amber-700 dark:text-amber-300 mt-0.5">{listDueLabel(c)}</div>
+                    )}
                     <div className="text-[11px] text-gray-500 mt-0.5">
                       {c.active ? 'Active' : 'Candidate'}
                       {c.feedKey ? ' · automated feed' : ''}
@@ -442,6 +518,97 @@ export default function SurplusCountiesPage() {
                   <div>
                     <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Where a claim package is mailed</label>
                     <textarea className="input w-full" rows={4} value={form.clerkAddress || ''} onChange={(e) => set({ clerkAddress: e.target.value })} placeholder="Clerk of Court, Attn: ..., street, city, state zip" />
+                  </div>
+
+                  {/* The county list tracker. A next request date that comes due
+                      puts the county in the Daily Brief as UPDATE DUE. */}
+                  <div className="md:col-span-2 rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+                    <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
+                      <div>
+                        <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">County list</div>
+                        <p className="text-xs text-gray-500">
+                          {current.feedKey
+                            ? 'This county has an automated feed. Track the list here too if the team also asks for it.'
+                            : 'No automated feed, so the list is only as fresh as the last request.'}
+                          {listDueLabel(current) ? ` ${listDueLabel(current)}.` : ''}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={askedToday}
+                        className="text-xs px-3 py-1.5 rounded-md border border-primary-600 text-primary-700 dark:text-primary-300 hover:bg-primary-50 dark:hover:bg-primary-900/20"
+                      >
+                        Requested the list today
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="sm:col-span-2">
+                        <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Where the list comes from</label>
+                        <div className="flex flex-wrap gap-1.5">
+                          {LIST_SOURCES.map(([v, l]) => (
+                            <button
+                              key={String(v)}
+                              type="button"
+                              onClick={() => set({ listSource: v })}
+                              className={`px-2.5 py-1 text-xs rounded-md border ${
+                                (form.listSource || null) === v
+                                  ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300 font-semibold'
+                                  : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300'
+                              }`}
+                            >
+                              {l}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">How often the county updates it</label>
+                        <select
+                          className="input w-full"
+                          value={form.listUpdateEveryDays ? String(form.listUpdateEveryDays) : ''}
+                          onChange={(e) => set({ listUpdateEveryDays: e.target.value ? Number(e.target.value) : null })}
+                        >
+                          {LIST_EVERY.map(([v, l]) => (
+                            <option key={v} value={v}>
+                              {l}
+                            </option>
+                          ))}
+                          {form.listUpdateEveryDays && !LIST_EVERY.some(([v]) => v === String(form.listUpdateEveryDays)) && (
+                            <option value={String(form.listUpdateEveryDays)}>Every {form.listUpdateEveryDays} days</option>
+                          )}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Date printed on the list we have</label>
+                        <input
+                          type="date"
+                          className="input w-full"
+                          value={dayInput(form.listUpdatedAt)}
+                          onChange={(e) => set({ listUpdatedAt: e.target.value || null })}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Last requested</label>
+                        <input
+                          type="date"
+                          className="input w-full"
+                          value={dayInput(form.listRequestedAt)}
+                          onChange={(e) => set({ listRequestedAt: e.target.value || null })}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                          Next request{' '}
+                          <span className="font-normal text-gray-400">(fills in from the last request and how often)</span>
+                        </label>
+                        <input
+                          type="date"
+                          className="input w-full"
+                          value={dayInput(form.listNextRequestAt)}
+                          onChange={(e) => set({ listNextRequestAt: e.target.value || null })}
+                        />
+                      </div>
+                    </div>
                   </div>
 
                   <div className="md:col-span-2">
