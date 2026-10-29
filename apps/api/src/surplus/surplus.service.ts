@@ -2240,15 +2240,23 @@ export class SurplusService {
     // Grouping happens HERE and not in the browser because the board pages. Two
     // claimants on one property can land either side of a page boundary, and a
     // client-side group would then split them and show the duplicate anyway.
+    const underYear = (days: number | null | undefined) => days == null || days <= 365;
     if (filters.group !== 'lead') {
-      const groups = groupByProperty(rows);
+      const groups = groupByProperty(rows).filter(
+        (g: any) =>
+          (!filters.estate || g.anyDeceased) &&
+          (!filters.competingLien || (g.claimants || []).some((c: any) => c.competingLien)) &&
+          (!filters.shortWindow || g.shortWindow) &&
+          (!filters.underYear || underYear(g.daysSinceSale)),
+      );
       const total = groups.length;
       const start = (page - 1) * pageSize;
       return {
         data: groups.slice(start, start + pageSize),
         grouped: true,
         total,
-        leadCount: rows.length,
+        // Claimants on the properties that passed, so the count matches the board.
+        leadCount: groups.reduce((n: number, g: any) => n + (g.claimants || []).length, 0),
         page,
         pageSize,
         counties: await this.countiesInUse(filters.organizationId),
@@ -2257,6 +2265,13 @@ export class SurplusService {
       };
     }
 
+    rows = rows.filter(
+      (r: any) =>
+        (!filters.estate || r.isDeceased) &&
+        (!filters.competingLien || r.competingLien) &&
+        (!filters.shortWindow || r.shortWindow) &&
+        (!filters.underYear || underYear(r.daysSinceSale)),
+    );
     const total = rows.length;
     const start = (page - 1) * pageSize;
 
