@@ -303,6 +303,8 @@ export const surplusAPI = {
   updateCounty: (id: string, data: any) => api.patch(`/surplus/counties/${id}`, data),
   /** The answers were just checked with the clerk. Resets the staleness clock. */
   verifyCounty: (id: string) => api.post(`/surplus/counties/${id}/verified`),
+  /** The county was asked for its surplus list today; the next request date follows. */
+  countyListRequested: (id: string) => api.post(`/surplus/counties/${id}/list-requested`),
   uploadCountyForm: (id: string, file: File) => {
     const fd = new FormData();
     fd.append('file', file);

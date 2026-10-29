@@ -9,6 +9,7 @@
  */
 
 import { DigestUrgency } from './digest.types';
+import { LIST_SOURCE_LABEL, everyLabel, listDue } from '../surplus/surplus-county-lists.util';
 
 export interface FeedSource {
   key: string;
@@ -192,4 +193,38 @@ export function summarizeHealthyFeeds(rows: FeedRow[]): string | null {
     ? `All ${rows.length} county feed${rows.length === 1 ? '' : 's'} healthy`
     : `${healthy.length} other county feed${healthy.length === 1 ? '' : 's'} healthy`;
   return `${lead}: ${n(scanned)} scanned, ${n(created)} new on their last pulls.`;
+}
+
+/** A county from the list tracker, as the brief reads it. */
+export interface CountyListDue {
+  name: string;
+  listSource: string | null;
+  listUpdateEveryDays: number | null;
+  listRequestedAt: Date | null;
+  listNextRequestAt: Date;
+  listUpdatedAt: Date | null;
+}
+
+/**
+ * One UPDATE DUE line for a county whose list is due to be asked for again.
+ * Amber, not red: a late request costs freshness, while a failed feed can
+ * hide a whole week of new claims.
+ */
+export function describeCountyListDue(c: CountyListDue, now: Date): FeedRow {
+  const { days } = listDue(c.listNextRequestAt, now);
+  const late = days != null && days < 0 ? `, ${-days} day${days === -1 ? '' : 's'} late` : '';
+  const how = [everyLabel(c.listUpdateEveryDays), c.listSource ? LIST_SOURCE_LABEL[c.listSource] : null]
+    .filter(Boolean)
+    .join(', ');
+  const parts = [
+    `UPDATE DUE ${shortDateInTz(c.listNextRequestAt)}${late}.`,
+    c.listRequestedAt ? `Last asked ${shortDateInTz(c.listRequestedAt)}.` : 'Never asked.',
+    c.listUpdatedAt ? `The list we have is as of ${shortDateInTz(c.listUpdatedAt)}.` : null,
+  ].filter(Boolean);
+  return {
+    label: `${c.name} list`,
+    schedule: how || 'cadence not set',
+    detail: parts.join(' '),
+    urgency: 'warn',
+  };
 }

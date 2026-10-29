@@ -30,6 +30,7 @@ function brief(over: Partial<DigestBrief> = {}): DigestBrief {
     surplusOpeningSoonNote: null,
     feedProblems: [],
     feedSummary: null,
+    countyListsDue: [],
     wholesale: null,
     appUrl: 'https://mydealcore.com',
     isEmpty: false,
@@ -147,6 +148,19 @@ describe('DigestRenderService', () => {
 
     const text = render.renderText(b);
     expect(text).toContain('Lee County (weekly, Monday 4:30am ET): Did not run this morning.');
+  });
+
+  it('lists a county whose list is due under Coming up, even on a quiet day', () => {
+    const b = brief({
+      countyListsDue: [
+        { label: 'Marion list', schedule: 'monthly, by email', detail: 'UPDATE DUE Sun 10/25, 4 days late. Never asked.', urgency: 'warn' },
+      ],
+    });
+    const html = render.renderHtml(b);
+    expect(html).toContain('Coming up');
+    expect(html).toContain('Marion list');
+    expect(html).toContain('UPDATE DUE Sun 10/25');
+    expect(render.renderText(b)).toContain('Marion list (monthly, by email): UPDATE DUE Sun 10/25, 4 days late. Never asked.');
   });
 
   it('puts wholesaling on one line at the bottom', () => {

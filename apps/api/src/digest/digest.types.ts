@@ -133,6 +133,8 @@ export interface DigestBrief {
   feedProblems: FeedRow[];
   /** "All 12 county feeds healthy: 6,907 scanned, 42 new on their last pulls." */
   feedSummary: string | null;
+  /** Counties whose surplus list is due to be asked for again, from the county list tracker. */
+  countyListsDue: FeedRow[];
   /** One line of wholesaling counts, or null when there is nothing to say. */
   wholesale: string | null;
 

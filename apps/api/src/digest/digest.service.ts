@@ -5,7 +5,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SurplusService } from '../surplus/surplus.service';
 import { SurplusIngestService } from '../surplus/surplus-ingest.service';
 import { estFee, SurplusLien } from '../surplus/surplus.util';
-import { describeFeed, summarizeHealthyFeeds } from './digest-feeds.util';
+import { describeCountyListDue, describeFeed, summarizeHealthyFeeds } from './digest-feeds.util';
+import { todayNoonUtc } from '../surplus/surplus-county-lists.util';
 import {
   BigThing,
   BoardTile,
@@ -686,6 +687,7 @@ export class DigestService {
 
     // ── Feeds ───────────────────────────────────────────────────────────────
     const feeds = await this.buildFeeds(orgId, now);
+    const countyListsDue = await this.buildCountyListsDue(orgId, now);
 
     // ── Wholesale, parked ───────────────────────────────────────────────────
     const oldestWholesale = wholesaleReplies[0]?.lastMessageAt
@@ -725,13 +727,14 @@ export class DigestService {
       surplusOpeningSoonNote: openingSoon.length ? this.openingSoonNote(openingSoon) : null,
       feedProblems: feeds.filter((f) => f.urgency === 'warn' || f.urgency === 'critical'),
       feedSummary: summarizeHealthyFeeds(feeds),
+      countyListsDue,
       wholesale: wholesaleParts.length ? wholesaleParts.join(' · ') : null,
       appUrl: this.appUrl,
       // A failed county feed is never an empty day; that is the one morning
       // the email must go out.
       isEmpty:
         !bigThing && !calls.length && !allPromises.length && !needsTrace &&
-        !inFlight.length && !feeds.some((f) => f.urgency === 'critical'),
+        !inFlight.length && !feeds.some((f) => f.urgency === 'critical') && !countyListsDue.length,
     };
 
     brief.subject = this.buildSubject(brief, followUpsDue);
@@ -920,6 +923,19 @@ export class DigestService {
       orderBy: { startedAt: 'desc' },
     });
     return sources.map((s) => describeFeed(s, runs, now));
+  }
+
+  /**
+   * Counties whose list is due to be asked for: the next request date in the
+   * county list tracker is today or earlier. Only counties somebody gave a
+   * date, so a county nobody tracks never nags.
+   */
+  private async buildCountyListsDue(orgId: string | null, now: Date): Promise<FeedRow[]> {
+    const rows = await this.prisma.surplusCounty.findMany({
+      where: { organizationId: orgId, listNextRequestAt: { not: null, lte: todayNoonUtc(now) } },
+      orderBy: { listNextRequestAt: 'asc' },
+    });
+    return rows.map((c) => describeCountyListDue({ ...c, listNextRequestAt: c.listNextRequestAt as Date }, now));
   }
 
   /** Subject line, rebuilt daily from whatever leads the brief. */

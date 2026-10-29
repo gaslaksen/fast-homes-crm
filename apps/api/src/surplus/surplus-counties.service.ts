@@ -15,6 +15,8 @@ import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
 import { FL_COUNTIES, FL_COUNTY_SEED, RULE_MAX_AGE_DAYS, CountySeed } from './surplus-compliance';
+import { calendarDayToDate } from './surplus.util';
+import { LIST_SOURCES, addDays, listDue, todayNoonUtc } from './surplus-county-lists.util';
 
 export const ACCEPTED_METHODS = ['usps', 'fedex', 'ups', 'in_person', 'efile'] as const;
 export const ACCEPTED_METHOD_LABEL: Record<string, string> = {
@@ -68,6 +70,48 @@ export function blanksToFill(row: Record<string, any>, seed: Record<string, stri
   return fill;
 }
 
+/**
+ * The list tracker fields of a county edit, validated. A new last request
+ * date with no next date given moves the next one on by the county's update
+ * cadence, so logging the request is one step.
+ */
+export function listPatch(patch: any, row: { listUpdateEveryDays?: number | null }): Record<string, any> {
+  const data: Record<string, any> = {};
+  if (patch.listSource !== undefined) {
+    const v = patch.listSource || null;
+    if (v && !(LIST_SOURCES as readonly string[]).includes(v)) {
+      throw new BadRequestException('The list source is online, email, records_request or paid.');
+    }
+    data.listSource = v;
+  }
+  if (patch.listUpdateEveryDays !== undefined) {
+    const raw = patch.listUpdateEveryDays;
+    if (raw === null || raw === '') data.listUpdateEveryDays = null;
+    else {
+      const n = Number(raw);
+      if (!Number.isInteger(n) || n < 1 || n > 730) {
+        throw new BadRequestException('How often the list updates is a number of days, 1 to 730.');
+      }
+      data.listUpdateEveryDays = n;
+    }
+  }
+  for (const k of ['listRequestedAt', 'listNextRequestAt', 'listUpdatedAt'] as const) {
+    if (patch[k] === undefined) continue;
+    if (!patch[k]) {
+      data[k] = null;
+      continue;
+    }
+    const d = calendarDayToDate(patch[k]);
+    if (!d) throw new BadRequestException(`${k} must be a date.`);
+    data[k] = d;
+  }
+  const every = data.listUpdateEveryDays !== undefined ? data.listUpdateEveryDays : row.listUpdateEveryDays;
+  if (data.listRequestedAt && patch.listNextRequestAt === undefined && every) {
+    data.listNextRequestAt = addDays(data.listRequestedAt, every);
+  }
+  return data;
+}
+
 export interface CountyRow {
   id: string;
   name: string;
@@ -89,6 +133,16 @@ export interface CountyRow {
   notes: string | null;
   practiceRunAt: Date | null;
   lastVerifiedAt: Date | null;
+  /** The county list tracker. See surplus-county-lists.util. */
+  listSource: string | null;
+  listUpdateEveryDays: number | null;
+  listRequestedAt: Date | null;
+  listNextRequestAt: Date | null;
+  listUpdatedAt: Date | null;
+  /** The next request date has come. */
+  listDue: boolean;
+  /** Days until the next request, negative once late, null with no date. */
+  listDueInDays: number | null;
   /** Never verified, or verified longer ago than the compliance table allows. */
   stale: boolean;
   /** How many of the filing facts are still unanswered. */
@@ -234,7 +288,28 @@ export class SurplusCountiesService {
     if (patch.practiceRunAt !== undefined) {
       data.practiceRunAt = patch.practiceRunAt ? new Date(patch.practiceRunAt) : null;
     }
+    Object.assign(data, listPatch(patch, row));
     const saved = await this.prisma.surplusCounty.update({ where: { id: row.id }, data });
+    return this.toRow(saved);
+  }
+
+  /**
+   * Somebody asked the county for its list today. The next request date
+   * follows from how often the county updates it, when that is known.
+   */
+  async markListRequested(id: string, organizationId?: string | null) {
+    const row = await this.prisma.surplusCounty.findFirst({
+      where: { id, organizationId: organizationId || null },
+    });
+    if (!row) throw new BadRequestException('County not found');
+    const today = todayNoonUtc();
+    const saved = await this.prisma.surplusCounty.update({
+      where: { id: row.id },
+      data: {
+        listRequestedAt: today,
+        listNextRequestAt: row.listUpdateEveryDays ? addDays(today, row.listUpdateEveryDays) : row.listNextRequestAt,
+      },
+    });
     return this.toRow(saved);
   }
 
@@ -261,6 +336,7 @@ export class SurplusCountiesService {
     if (r.signatureRequired == null) unknowns.push('whether a signature is required');
     if (r.attorneyRequired == null) unknowns.push('whether an attorney is required');
     if (!r.assignmentPreference) unknowns.push('full or partial assignment');
+    const due = listDue(r.listNextRequestAt);
     return {
       id: r.id,
       name: r.name,
@@ -281,6 +357,13 @@ export class SurplusCountiesService {
       notes: r.notes || null,
       practiceRunAt: r.practiceRunAt || null,
       lastVerifiedAt: r.lastVerifiedAt || null,
+      listSource: r.listSource || null,
+      listUpdateEveryDays: r.listUpdateEveryDays ?? null,
+      listRequestedAt: r.listRequestedAt || null,
+      listNextRequestAt: r.listNextRequestAt || null,
+      listUpdatedAt: r.listUpdatedAt || null,
+      listDue: due.due,
+      listDueInDays: due.days,
       stale: ageDays > RULE_MAX_AGE_DAYS,
       unknowns,
       updatedAt: r.updatedAt,
