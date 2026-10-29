@@ -14,10 +14,9 @@ import { SURPLUS_TRACE_CHANNELS, SURPLUS_TIER1_CHANNELS, TRACE_RESULTS, channelF
 import { useDialer } from '@/components/dialer/DialerContext';
 import { DNC_STATE, SURPLUS_STAGES } from './format';
 import ContactEditor from './ContactEditor';
-import SurplusHeirs, { courtRecordsSearch } from './SurplusHeirs';
+import SurplusHeirs, { PersonLine, contactSummary, courtRecordsSearch, personConfidence } from './SurplusHeirs';
 import { AddSocialProfile, FindProfilesButton, SocialProfileList } from './SurplusSocial';
 import { SOCIAL_LEAD_LABEL, rememberSocialTarget, saveToDealcoreBookmarklet, socialOpener, type SocialProfile } from '@/lib/surplus-social';
-import { Fold, useFolds } from './PanelFold';
 import { fmtDate, fmtDay, money, phoneDisplay } from './format';
 
 /**
@@ -39,7 +38,20 @@ import { fmtDate, fmtDay, money, phoneDisplay } from './format';
 
 const CONV_POLL_MS = 8_000;
 
-type Tab = 'case' | 'people' | 'conversation' | 'notes';
+/**
+ * Tabs by kind of work, not by step. Every tab is always one click away and
+ * nothing is locked; the panel opens on People before a signature and on
+ * Claim after one.
+ */
+type Tab = 'people' | 'activity' | 'research' | 'claim' | 'details';
+
+const TAB_LABEL: Record<Tab, string> = {
+  people: 'People',
+  activity: 'Activity',
+  research: 'Research',
+  claim: 'Claim',
+  details: 'Details',
+};
 
 interface CaseQuestion {
   key: 'money' | 'signer' | 'person' | 'reach';
@@ -161,6 +173,8 @@ export interface SurplusPanelLead {
   /** The earliest open follow-up: the course's Next action and Due. */
   nextTask?: { id: string; title: string; dueDate: string | null; userId: string | null; userName: string | null } | null;
   openTaskCount?: number;
+  /** The last call, text or email that went out to anyone on the claim. */
+  lastTouchedAt?: string | null;
   /** The four things every case has to settle, computed by the API. */
   questions?: CaseQuestion[];
   /** At most three things to do, offered when no next action is set. */
@@ -2266,7 +2280,10 @@ export default function SurplusWorkPanel({
   onChanged,
   say,
 }: Props) {
-  const [tab, setTab] = useState<Tab>('case');
+  const [tab, setTab] = useState<Tab>(() => {
+    const first = property.claimants.find((c: any) => c.id === initialClaimantId) || property.claimants[0];
+    return first ? defaultTab(first) : 'people';
+  });
   /**
    * Which claimant's conversation is open. Shared facts (the property, the
    * money, the docket) belong to the case; the conversation, the notes and the
@@ -2279,6 +2296,15 @@ export default function SurplusWorkPanel({
   );
   const lead: SurplusPanelLead =
     property.claimants.find((c: any) => c.id === claimantId) || property.claimants[0];
+
+  // A different claimant opens on their own default tab: People before a
+  // signature, Claim after one. Set during render, React's pattern for
+  // state that follows a prop, so the old tab never flashes first.
+  const [tabFor, setTabFor] = useState(lead?.id);
+  if (lead && tabFor !== lead.id) {
+    setTabFor(lead.id);
+    setTab(defaultTab(lead));
+  }
 
   // A refresh can reorder or replace claimants; keep the selection valid.
   useEffect(() => {
@@ -2310,6 +2336,7 @@ export default function SurplusWorkPanel({
   const [teamMembers, setTeamMembers] = useState<any[]>([]);
   const sigRef = useRef('');
   const bottomRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
 
   const sigOf = (t: TimelineItem[], n: NoteItem[]) =>
     `${t.length}:${t[t.length - 1]?.id ?? ''}|${n.length}:${n[n.length - 1]?.id ?? ''}`;
@@ -2359,15 +2386,22 @@ export default function SurplusWorkPanel({
   // Poll only while the conversation tab is open and the window is visible, so
   // an open panel on a background tab is not hitting the API every 8 seconds.
   useEffect(() => {
-    if (tab !== 'conversation') return;
+    if (tab !== 'activity') return;
     const t = setInterval(() => {
       if (!document.hidden) loadComms(true);
     }, CONV_POLL_MS);
     return () => clearInterval(t);
   }, [tab, loadComms]);
 
+  // Every other tab opens at its top. The body is one scroll box shared by
+  // all tabs, so without this Claim opened halfway down, wherever People was.
   useEffect(() => {
-    if (tab !== 'conversation') return;
+    if (tab === 'activity') return;
+    bodyRef.current?.scrollTo({ top: 0 });
+  }, [tab, lead.id]);
+
+  useEffect(() => {
+    if (tab !== 'activity') return;
     // Scroll the timeline box only. scrollIntoView would also scroll the
     // panel itself, which scrolls when the composer is tall, and hide the
     // header with the lead's name.
@@ -2480,17 +2514,27 @@ export default function SurplusWorkPanel({
   /** Open the conversation on SMS with this number already selected. */
   const message = (number: string) => {
     setComposeIntent({ nonce: Date.now(), channel: 'sms', to: number });
-    setTab('conversation');
+    setTab('activity');
   };
 
   /** Open the conversation on email, addressed to this address. */
   const mail = (address: string) => {
     setComposeIntent({ nonce: Date.now(), channel: 'email', to: address });
     setEmailAction({ nonce: Date.now(), mode: 'reply', subject: '', bodyHtml: '', to: address });
-    setTab('conversation');
+    setTab('activity');
   };
 
   const ledger = property.claimLedger || [];
+  /** A change anywhere on the panel refreshes the row and the thread. */
+  const changed = () => {
+    onChanged();
+    loadComms(true);
+  };
+  const addNote = async (text: string) => {
+    if (!currentUser?.id) return;
+    await leadsAPI.addNote(lead.id, text, currentUser.id);
+    await loadComms();
+  };
   /** Everybody on the People tab: heirs, living or not, and associates. */
   const peopleCount = (lead.heirCount || 0) + (lead.associateCount || 0);
   const tone = CLAIM_STATUS_TONE[property.claimStatus] || 'var(--dim)';
@@ -2621,29 +2665,9 @@ export default function SurplusWorkPanel({
               step; nothing here is guessed from the queue. */}
           <CaseFields lead={lead} team={teamMembers} currentUser={currentUser} onChanged={onChanged} say={say} />
 
-          {/* One property, several claims. Each claimant is contacted separately,
-              so the conversation and notes tabs follow this selection. */}
-          {/* Always shown, even for a single claimant. The NAME is what gets
-              searched and traced, and burying it made it unclear whose result
-              the panel below was showing. */}
-          {property.claimants.length === 1 && (
-            <div style={{ fontSize: 12.5, marginTop: 10, display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap' }}>
-              <b style={lead.isDeceased ? { textDecoration: 'line-through' } : undefined}>{lead.claimant}</b>
-              <span style={{ fontSize: 11.5, color: lead.isDeceased ? (lead.callableHeirCount > 0 ? 'var(--mint)' : 'var(--red)') : TRACE_TONE[lead.trace?.tone || 'idle'] }}>
-                {lead.isDeceased
-                  ? `${deathLabel(lead)}, ${
-                      lead.callableHeirCount > 0
-                        ? `${lead.callableHeirCount} callable heir${lead.callableHeirCount === 1 ? '' : 's'}`
-                        : lead.livingHeirCount > 0
-                          ? `${lead.livingHeirCount} heir${lead.livingHeirCount === 1 ? '' : 's'} on file, no number`
-                          : 'no heirs on file'
-                    }`
-                  : lead.phones.filter((p) => !p.dnc && !p.bad).length > 0
-                    ? `${lead.phones.filter((p) => !p.dnc && !p.bad).length} callable number${lead.phones.filter((p) => !p.dnc && !p.bad).length === 1 ? '' : 's'}`
-                    : lead.trace?.label || 'Never skip traced'}
-              </span>
-            </div>
-          )}
+          {/* One property, several claims. Each claimant is contacted
+              separately, so every tab follows this selection. A single
+              claimant needs no switcher: they are the first person on People. */}
           {property.claimants.length > 1 && (
             <div style={{ display: 'flex', gap: 6, marginTop: 11, flexWrap: 'wrap' }}>
               {property.claimants.map((c: any) => (
@@ -2688,63 +2712,56 @@ export default function SurplusWorkPanel({
           )}
 
           <div style={{ display: 'flex', gap: 6, marginTop: 12 }}>
-            {(['case', 'people', 'conversation', 'notes'] as Tab[]).map((t) => (
+            {(Object.keys(TAB_LABEL) as Tab[]).map((t) => (
               <button
                 key={t}
                 type="button"
                 className={`dc-wp-btn${tab === t ? ' on' : ''}`}
                 onClick={() => setTab(t)}
-                style={{ textTransform: 'capitalize' }}
               >
-                {t}
-                {t === 'conversation' && comms.timeline.length > 0 && ` (${comms.timeline.length})`}
-                {t === 'people' && peopleCount > 0 && ` (${peopleCount})`}
+                {TAB_LABEL[t]}
+                {t === 'activity' && comms.timeline.length > 0 && ` (${comms.timeline.length})`}
+                {t === 'people' && ` (${peopleCount + 1})`}
               </button>
             ))}
           </div>
         </div>
 
-        <div className="dc-wp-body">
-          {tab === 'case' && (
-            <SurplusDripProvider value={drips}>
-              <CaseTab
-                lead={lead}
-                property={property}
-                ledger={ledger}
-                currentUser={currentUser}
-                onTrace={traceGated}
-                tracing={tracing}
-                onCall={call}
-                onText={message}
-                onEmail={mail}
-                onOpenPeople={() => setTab('people')}
-                onChanged={() => {
-                  onChanged();
-                  loadComms(true);
-                }}
-                say={say}
-              />
-            </SurplusDripProvider>
-          )}
-
+        <div className="dc-wp-body" ref={bodyRef}>
           {tab === 'people' && (
             <SurplusDripProvider value={drips}>
-              <PeopleTab
+              <PeopleWork
                 lead={lead}
                 property={property}
+                currentUser={currentUser}
                 onCall={call}
                 onText={message}
                 onEmail={mail}
-                onChanged={() => {
-                  onChanged();
-                  loadComms(true);
-                }}
+                onChanged={changed}
                 say={say}
               />
             </SurplusDripProvider>
           )}
 
-          {tab === 'conversation' && (
+          {tab === 'research' && (
+            <ResearchTab
+              lead={lead}
+              property={property}
+              currentUser={currentUser}
+              tracing={tracing}
+              onTrace={traceGated}
+              notes={comms.notes}
+              onAddNote={addNote}
+              onChanged={changed}
+              say={say}
+            />
+          )}
+
+          {tab === 'claim' && <ClaimTab lead={lead} onChanged={changed} say={say} />}
+
+          {tab === 'details' && <DetailsTab lead={lead} property={property} ledger={ledger} onChanged={changed} say={say} />}
+
+          {tab === 'activity' && (
             <div>
               {comms.timeline.length === 0 && (
                 <div style={{ color: 'var(--faint)', fontSize: 13, padding: '8px 0 16px' }}>
@@ -2792,22 +2809,11 @@ export default function SurplusWorkPanel({
             </div>
           )}
 
-          {tab === 'notes' && (
-            <NotesPanel
-              notes={comms.notes}
-              canAdd={!!currentUser}
-              onAddNote={async (text) => {
-                if (!currentUser?.id) return;
-                await leadsAPI.addNote(lead.id, text, currentUser.id);
-                await loadComms();
-              }}
-            />
-          )}
         </div>
 
         {/* The composer on the conversation tab, actions everywhere else. */}
         <div className="dc-wp-foot">
-          {tab === 'conversation' ? (
+          {tab === 'activity' ? (
             // Only once the Lead row is THIS lead's. Right after the arrows the
             // row on hand is still the previous lead's, and its email, phone
             // and do-not-contact flag must never reach this lead's composer.
@@ -2836,7 +2842,7 @@ export default function SurplusWorkPanel({
               <button
                 type="button"
                 className="dc-wp-btn on"
-                onClick={() => setTab('conversation')}
+                onClick={() => setTab('activity')}
               >
                 Open conversation
               </button>
@@ -2865,90 +2871,149 @@ const STAGE_ORDER = [
   'Paid',
 ];
 
-type FoldPlan = 'open' | 'done' | 'wait' | 'later';
-type FoldKey = 'reach' | 'case' | 'qualify' | 'sign' | 'file' | 'paid';
+/** Where the panel opens: the people before a signature, the paperwork after one. */
+function defaultTab(lead: SurplusPanelLead): Tab {
+  return STAGE_ORDER.indexOf(lead.stage) >= STAGE_ORDER.indexOf('Agreement Signed') ? 'claim' : 'people';
+}
+
+/** How sure we are the claimant is the claimant, in the same words as the people rows. */
+function claimantConfidence(lead: SurplusPanelLead): { label: string; tone: string } {
+  if (lead.entitlementVerified) return { label: 'Confirmed', tone: 'var(--mint)' };
+  return personConfidence({ contactMismatch: lead.contactMismatch, trace: lead.trace });
+}
 
 /**
- * Which section is the work right now, which are finished, and which are not
- * yet possible.
- *
- * Read off the stage and the queue the API already sends on every row, so
- * nothing here is stored or configured. A New lead opens on its queue's
- * tools and never sees the notary; a lead at Agreement Signed opens on the
- * documents and the notary and finds the outreach folded with a check. Dead
- * reads like New: nothing later is possible, so nothing later is shown.
+ * The People tab: the claim jacket. What the case still has to settle and
+ * the team's follow-ups, then the claimant, then everyone around them best
+ * first, each one line until it is opened. Nothing here is in a fixed order
+ * to tick through: whoever is the best route today is the one to open.
  */
-function planFolds(lead: SurplusPanelLead): Record<FoldKey, FoldPlan> {
-  const idx = STAGE_ORDER.indexOf(lead.stage);
-  const i = idx < 0 ? 0 : idx;
-  const replied = !!lead.tappedAt;
-  return {
-    reach: i >= 2 || replied ? 'done' : 'wait',
-    case: 'wait',
-    qualify: i >= 2 ? 'done' : i === 1 ? (replied ? 'open' : 'wait') : 'later',
-    sign: i === 2 ? 'open' : i >= 3 ? 'done' : 'later',
-    file: i === 3 || i === 4 ? 'open' : i >= 5 ? 'done' : 'later',
-    paid: i >= 5 ? 'open' : 'later',
-  };
-}
-
-/** Why a later section is folded away, in its own words. */
-const LATER_NOTE: Record<FoldKey, string> = {
-  reach: '',
-  case: '',
-  qualify: 'Opens once someone with standing has replied. The three checks and the disclosures live here.',
-  sign: 'Opens at Agreement Signed: the document set, the notary and the attorney.',
-  file: 'Opens at Package Notarized: how the package goes to the county and what the county says back.',
-  paid: 'Opens when the county acknowledges the filing: the check, the expenses, the shares and the survey.',
-};
-
-const FOLD_TITLE: Record<FoldKey, string> = {
-  reach: 'Reach the claimant',
-  case: 'The case',
-  qualify: 'Qualify the claim',
-  sign: 'Sign and notarize',
-  file: 'File with the county',
-  paid: 'Get paid',
-};
-
-/** The channels tried, as a short list for a fold header. */
-function channelsTried(lead: SurplusPanelLead): string[] {
-  return CHANNEL_GLYPH.filter(([k]) => lead.channels?.[k]).map(([, , label]) => label.toLowerCase());
-}
-
-function CaseTab({
+function PeopleWork({
   lead,
   property,
-  ledger,
   currentUser,
-  onTrace,
-  tracing,
   onCall,
   onText,
   onEmail,
-  onOpenPeople,
   onChanged,
   say,
 }: {
   lead: SurplusPanelLead;
   property: any;
-  ledger: LedgerDoc[];
   currentUser: any;
-  onTrace: () => void;
-  tracing: boolean;
-  onCall: (number: string) => void;
+  onCall: (number: string, who?: string) => void;
   onText: (number: string) => void;
   onEmail: (address: string) => void;
-  /** Switch the panel to the People tab, where the heirs and relatives live. */
-  onOpenPeople: () => void;
   onChanged: () => void;
   say: (msg: string) => void;
 }) {
-  const { overrides, set } = useFolds(lead.id, lead.stage);
-  const plan = planFolds(lead);
-  const idx = STAGE_ORDER.indexOf(lead.stage);
-  // Whether the paid profile search is paused, asked once per panel. Null
-  // until answered; the button reads null as "do not know yet".
+  const [claimantOpen, setClaimantOpen] = useState(!lead.isDeceased);
+  useEffect(() => setClaimantOpen(!lead.isDeceased), [lead.id, lead.isDeceased]);
+  const listRef = useRef<HTMLDivElement>(null);
+  const toPeople = () => listRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const status = lead.tappedAt ? `Replied ${fmtDate(lead.tappedAt)}` : lead.lastTouchedAt ? `No reply yet, last tried ${fmtDate(lead.lastTouchedAt)}` : 'Nothing tried yet';
+
+  return (
+    <div style={{ display: 'grid', gap: 14 }}>
+      <div>
+        <CaseQuestions lead={lead} property={property} currentUser={currentUser} onOpenPeople={toPeople} onChanged={onChanged} say={say} />
+        <TasksSection lead={lead} currentUser={currentUser} onChanged={onChanged} say={say} />
+      </div>
+
+      <div>
+        <SubHead title="The claimant" />
+        {claimantOpen ? (
+          <div className="dc-wp-person-card">
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 7, flexWrap: 'wrap', marginBottom: 6 }}>
+              <b style={{ fontSize: 13, ...(lead.isDeceased ? { textDecoration: 'line-through' } : {}) }}>{lead.claimant}</b>
+              {(() => {
+                const c = claimantConfidence(lead);
+                return (
+                  <span className="dc-wp-conf" style={{ color: c.tone, borderColor: c.tone }}>
+                    {c.label}
+                  </span>
+                );
+              })()}
+              {lead.isDeceased && <span style={{ fontSize: 11.5, color: 'var(--red)' }}>{deathLabel(lead)}. Their own contacts cannot sign anything.</span>}
+              <button
+                type="button"
+                className="dc-wp-btn"
+                style={{ marginLeft: 'auto', padding: '2px 8px', fontSize: 11 }}
+                onClick={() => setClaimantOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+            <ContactLine lead={lead} />
+            <ContactsBlock lead={lead} onCall={onCall} onText={onText} onEmail={onEmail} onChanged={onChanged} say={say} />
+            {/* The claimant's own drips. Everyone else's are on their own card. */}
+            <PersonDrips heirId={null} name={lead.claimant} emails={lead.emails} blocked={lead.doNotCall ? 'marked do not call' : null} />
+            <MailingAddress
+              lead={lead}
+              variant="row"
+              noticeReadForCase={property.claimants.some((c: any) => c.ownerMailingStreet)}
+              onChanged={onChanged}
+              say={say}
+            />
+            <div style={{ marginTop: 8 }}>
+              <CredibilityBlock lead={lead} say={say} onChanged={onChanged} />
+            </div>
+          </div>
+        ) : (
+          <PersonLine
+            name={lead.claimant}
+            who={lead.isDeceased ? 'Claimant, deceased' : 'Claimant'}
+            confidence={claimantConfidence(lead)}
+            contacts={contactSummary(lead.phones, lead.emails)}
+            status={status}
+            statusTone={lead.tappedAt ? 'var(--mint)' : undefined}
+            struck={lead.isDeceased}
+            open={false}
+            onToggle={() => setClaimantOpen(true)}
+          />
+        )}
+      </div>
+
+      <div ref={listRef}>
+        <PeopleTab lead={lead} property={property} onCall={onCall} onText={onText} onEmail={onEmail} onChanged={onChanged} say={say} />
+      </div>
+
+      <div>
+        <SubHead title="Letters" />
+        <LetterHistory lead={lead} onChanged={onChanged} say={say} />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The Research tab: every search run for the claimant and the people around
+ * them, free and paid, dead ends included so nobody repeats them, and the
+ * notes that go with it.
+ */
+function ResearchTab({
+  lead,
+  property,
+  currentUser,
+  tracing,
+  onTrace,
+  notes,
+  onAddNote,
+  onChanged,
+  say,
+}: {
+  lead: SurplusPanelLead;
+  property: any;
+  currentUser: any;
+  tracing: boolean;
+  onTrace: () => void;
+  notes: NoteItem[];
+  onAddNote: (text: string) => Promise<void>;
+  onChanged: () => void;
+  say: (msg: string) => void;
+}) {
+  // Whether the paid profile search is paused, asked once per tab. Null until
+  // answered; the button reads null as "do not know yet".
   const [socialPaused, setSocialPaused] = useState<boolean | null>(null);
   useEffect(() => {
     surplusAPI
@@ -2956,102 +3021,151 @@ function CaseTab({
       .then((r) => setSocialPaused(!!r.data?.paused))
       .catch(() => setSocialPaused(true));
   }, []);
-  const showHeirs =
-    lead.isDeceased || (lead.heirCount || 0) > 0 || (lead.associateCount || 0) > 0 || !lead.tappedAt;
-
-  // The people themselves are on their own tab, so the case reads as the
-  // case. What stays here is one line saying where things stand with them.
-  const heirsBlock = showHeirs && <PeopleSummary lead={lead} onOpen={onOpenPeople} />;
-  const contactsBlock = (
-    <>
-      <ContactsBlock lead={lead} onCall={onCall} onText={onText} onEmail={onEmail} onChanged={onChanged} say={say} />
-      {/* The claimant's own drips. Everyone else's are on their People card. */}
-      <PersonDrips
-        heirId={null}
-        name={lead.claimant}
-        emails={lead.emails}
-        blocked={lead.doNotCall ? 'marked do not call' : null}
-      />
-    </>
-  );
-  const socialBlock = lead.social && (
-    <SocialBlock lead={lead} currentUser={currentUser} paused={socialPaused} say={say} onChanged={onChanged} />
-  );
-  const traceBlock = lead.phones.length === 0 && <TraceBlock lead={lead} tracing={tracing} onTrace={onTrace} />;
-  const searchBlock = lead.nameSearch && <NameSearchBlock lead={lead} property={property} say={say} onChanged={onChanged} />;
-  const lettersBlock = (
-    <div>
-      <SubHead title="Letters" />
-      <LetterHistory lead={lead} onChanged={onChanged} say={say} />
+  return (
+    <div style={{ display: 'grid', gap: 14 }}>
+      {lead.phones.length === 0 && <TraceBlock lead={lead} tracing={tracing} onTrace={onTrace} />}
+      <SearchLog lead={lead} say={say} onChanged={onChanged} />
+      {lead.nameSearch && <NameSearchBlock lead={lead} property={property} say={say} onChanged={onChanged} />}
+      {lead.social && <SocialBlock lead={lead} currentUser={currentUser} paused={socialPaused} say={say} onChanged={onChanged} />}
+      <div>
+        <SubHead title="Notes" />
+        <NotesPanel notes={notes} canAdd={!!currentUser} onAddNote={onAddNote} />
+      </div>
     </div>
   );
+}
 
-  // ── Header lines for the folded sections ────────────────────────────────
-  const tried = channelsTried(lead);
-  const reachStatus = [
-    lead.tappedAt ? `Replied ${fmtDate(lead.tappedAt)}` : 'No reply yet',
-    tried.length ? tried.join(', ') : 'nothing tried yet',
-    lead.letterCount ? `${lead.letterCount} letter${lead.letterCount === 1 ? '' : 's'}` : null,
-  ]
-    .filter(Boolean)
-    .join(' · ');
-  const caseStatus = [
-    money(property.grossSurplus),
-    property.saleDate ? `sold ${fmtDay(property.saleDate)}` : 'sale date unknown',
-    property.noticeConfirmed ? 'notice confirmed' : 'notice date estimated',
-  ].join(' · ');
-  const checksDone = [lead.entitlementVerified, lead.noticeConfirmed, lead.titleSearchComplete].filter(Boolean).length;
-  const qualifyStatus =
-    plan.qualify === 'later'
-      ? ''
-      : `${checksDone} of 3 checks${lead.compliance?.blocks?.length && idx >= 1 ? ' · compliance blocked' : ''}`;
-  const required = (lead.documents || []).filter((d) => d.required);
-  const inHand = required.filter((d) => d.collected).length;
-  const n = lead.notary || ({} as SurplusPanelLead['notary']);
-  const signStatus =
-    plan.sign === 'later'
-      ? ''
-      : [
-          required.length ? `${inHand} of ${required.length} documents in hand` : null,
-          n.signedInOrderAt ? `notarized ${fmtDate(n.signedInOrderAt)}` : n.appointmentAt ? 'notary booked' : null,
-        ]
-          .filter(Boolean)
-          .join(' · ');
-  const s = lead.submission || ({} as SurplusPanelLead['submission']);
-  const fileStatus =
-    plan.file === 'later'
-      ? ''
-      : s.countyAcknowledgedAt
-        ? `Acknowledged ${fmtDate(s.countyAcknowledgedAt)}`
-        : s.submittedAt
-          ? `Submitted ${fmtDate(s.submittedAt)}, awaiting acknowledgement`
-          : 'Not filed yet';
-  const m = lead.disbursement || ({} as SurplusPanelLead['disbursement']);
-  const paidStatus =
-    plan.paid === 'later'
-      ? ''
-      : m.frozen
-        ? `Paid ${fmtDate(m.checkSentAt)}`
-        : m.checkReceivedAt
-          ? `Check in hand ${fmtDate(m.checkReceivedAt)}`
-          : "Waiting for the county's check";
+/** A dated step that has happened, or not yet. */
+function stepAt(at: string | null | undefined): { done: boolean; at: string | null } {
+  return { done: !!at, at: at || null };
+}
 
-  // ── The folds themselves ────────────────────────────────────────────────
-  const bodies: Record<FoldKey, React.ReactNode> = {
-    reach: (
-      <>
-        <CredibilityBlock lead={lead} say={say} onChanged={onChanged} />
-        <ContactLine lead={lead} />
-        <div>
-          <SubHead
-            title={`Reaching ${lead.claimant}`}
-            note={lead.isDeceased ? 'Deceased. Their own contacts cannot sign anything.' : undefined}
+/**
+ * The paperwork in signing order, read off the documents, the notary, the
+ * filing and the payout. Each line is what Dealcore holds, not a box for
+ * somebody to tick: a document marked signed in its section ticks here.
+ * After a Yes this really is a fixed sequence, fee agreement first and the
+ * county form last.
+ */
+function PaperworkChecklist({ lead }: { lead: SurplusPanelLead }) {
+  const doc = (kind: string) => (lead.documents || []).find((d) => d.kind === kind);
+  const signed = (kind: string) => {
+    const d = doc(kind);
+    if (!d || !d.required) return null;
+    return { done: d.collected, at: d.signedAt || null };
+  };
+  const steps: { label: string; state: { done: boolean; at: string | null } | null }[] = [
+    { label: 'Fee agreement signed', state: lead.notary?.retentionConfirmed ? { done: true, at: doc('fee_agreement')?.signedAt || null } : { done: false, at: null } },
+    { label: 'Limited power of attorney', state: signed('limited_poa') },
+    { label: 'Partial assignment', state: signed('assignment_of_rights') },
+    { label: 'County claim form', state: signed('county_claim_form') },
+    { label: 'Package notarized', state: stepAt(lead.notary?.signedInOrderAt) },
+    { label: 'Submitted to the county', state: stepAt(lead.submission?.submittedAt) },
+    { label: 'County acknowledged', state: stepAt(lead.submission?.countyAcknowledgedAt) },
+    { label: 'Check received', state: stepAt(lead.disbursement?.checkReceivedAt) },
+    { label: 'Claimant paid', state: stepAt(lead.disbursement?.checkSentAt) },
+  ];
+  const shown = steps.filter((s) => s.state);
+  const next = shown.find((s) => !s.state!.done);
+  return (
+    <Section title="Paperwork" note={next ? `Next: ${next.label.toLowerCase()}` : 'All done'}>
+      <div style={{ display: 'grid', gap: 4 }}>
+        {shown.map((s) => (
+          <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5 }}>
+            <span aria-hidden="true" style={{ width: 16, color: s.state!.done ? 'var(--mint)' : 'var(--faint)' }}>
+              {s.state!.done ? '✓' : '○'}
+            </span>
+            <span style={{ fontWeight: s === next ? 700 : 400, color: s.state!.done ? 'var(--text)' : s === next ? 'var(--text)' : 'var(--dim)' }}>{s.label}</span>
+            {s.state!.at && <span style={{ color: 'var(--faint)', fontSize: 11.5 }}>{fmtDate(s.state!.at)}</span>}
+          </div>
+        ))}
+      </div>
+    </Section>
+  );
+}
+
+/** The Claim tab: the checks, then the paperwork and everything after a signature, in order. */
+function ClaimTab({ lead, onChanged, say }: { lead: SurplusPanelLead; onChanged: () => void; say: (msg: string) => void }) {
+  return (
+    <div style={{ display: 'grid', gap: 14 }}>
+      <PaperworkChecklist lead={lead} />
+      <QualificationSection lead={lead} onChanged={onChanged} say={say} />
+      <DocumentsSection lead={lead} onChanged={onChanged} say={say} />
+      <NotarySection lead={lead} onChanged={onChanged} say={say} />
+      <AttorneySection lead={lead} onChanged={onChanged} say={say} />
+      <FilingSection lead={lead} onChanged={onChanged} say={say} />
+      <DisbursementSection lead={lead} onChanged={onChanged} say={say} />
+      <SurveySection lead={lead} onChanged={onChanged} say={say} />
+    </div>
+  );
+}
+
+/**
+ * The Details tab: the money, the clocks, the property, the county's rules
+ * and the docket. Looked up, not worked, so out of the way until needed.
+ */
+function DetailsTab({
+  lead,
+  property,
+  ledger,
+  onChanged,
+  say,
+}: {
+  lead: SurplusPanelLead;
+  property: any;
+  ledger: LedgerDoc[];
+  onChanged: () => void;
+  say: (msg: string) => void;
+}) {
+  return (
+    <div style={{ display: 'grid', gap: 14 }}>
+      <div>
+        <SubHead title="The money" />
+        <Row k="Surplus posted today" v={money(property.grossSurplus)} />
+        {property.surplusAtNotice != null && property.surplusAtNotice !== property.grossSurplus && (
+          <Row
+            k="Stated in the mailed notice"
+            v={money(property.surplusAtNotice)}
+            note="What the claimant was told they are owed. Use this number on a call."
           />
-          {traceBlock}
-          {contactsBlock}
-          {socialBlock}
-        </div>
-        <SearchLog lead={lead} say={say} onChanged={onChanged} />
+        )}
+        <Row k="Net to claimant" v={money(property.netToClaimant)} />
+        {property.estFee != null && <Row k="Estimated fee under the agreement" v={money(property.estFee)} note={SURPLUS_FEE_SCHEDULE_LABEL} />}
+      </div>
+      <div>
+        <SubHead title="The clock" />
+        <Row
+          k="Sale"
+          v={
+            property.saleDate
+              ? `${fmtDay(property.saleDate)}${property.daysSinceSale != null ? ` (${property.daysSinceSale} days ago)` : ''}`
+              : 'unknown'
+          }
+        />
+        <Row
+          k="Notice mailed"
+          v={property.noticeDate ? fmtDay(property.noticeDate) : 'unknown'}
+          note={
+            property.noticeConfirmed
+              ? undefined
+              : 'Estimated from the sale date. Duval publishes no filing dates and its notice is a scan, so this is a floor, not a confirmed date.'
+          }
+        />
+        {property.daysRemaining != null && (
+          <Row
+            k="Other claims"
+            v={
+              property.daysRemaining > 0
+                ? `still possible until ${fmtDate(new Date(Date.now() + property.daysRemaining * 86400000))}`
+                : `closed ${fmtDate(new Date(Date.now() + property.daysRemaining * 86400000))}`
+            }
+            note="Until then another lienholder can still appear and shrink the payout. A previous owner is not barred by it."
+          />
+        )}
+      </div>
+      <div>
+        <SubHead title="The property" />
+        <Row k="Property that sold" v={[property.address, property.city, property.zip].filter(Boolean).join(', ')} />
         {property.mailVerdict && (
           <Row
             k="Clerk mail"
@@ -3072,161 +3186,9 @@ function CaseTab({
             }
           />
         )}
-        {lettersBlock}
-        {heirsBlock}
-        {searchBlock}
-      </>
-    ),
-    case: (
-      <>
-        <div>
-          <SubHead title="The money" />
-          <Row k="Surplus posted today" v={money(property.grossSurplus)} />
-          {property.surplusAtNotice != null && property.surplusAtNotice !== property.grossSurplus && (
-            <Row
-              k="Stated in the mailed notice"
-              v={money(property.surplusAtNotice)}
-              note="What the claimant was told they are owed. Use this number on a call."
-            />
-          )}
-          <Row k="Net to claimant" v={money(property.netToClaimant)} />
-          {property.estFee != null && <Row k="Estimated fee under the agreement" v={money(property.estFee)} note={SURPLUS_FEE_SCHEDULE_LABEL} />}
-        </div>
-        <div>
-          <SubHead title="The clock" />
-          <Row
-            k="Sale"
-            v={
-              property.saleDate
-                ? `${fmtDay(property.saleDate)}${property.daysSinceSale != null ? ` (${property.daysSinceSale} days ago)` : ''}`
-                : 'unknown'
-            }
-          />
-          <Row
-            k="Notice mailed"
-            v={property.noticeDate ? fmtDay(property.noticeDate) : 'unknown'}
-            note={
-              property.noticeConfirmed
-                ? undefined
-                : 'Estimated from the sale date. Duval publishes no filing dates and its notice is a scan, so this is a floor, not a confirmed date.'
-            }
-          />
-          {property.daysRemaining != null && (
-            <Row
-              k="Other claims"
-              v={
-                property.daysRemaining > 0
-                  ? `still possible until ${fmtDate(new Date(Date.now() + property.daysRemaining * 86400000))}`
-                  : `closed ${fmtDate(new Date(Date.now() + property.daysRemaining * 86400000))}`
-              }
-              note="Until then another lienholder can still appear and shrink the payout. A previous owner is not barred by it."
-            />
-          )}
-        </div>
-        {/* The two addresses are different things and the difference is the
-            whole game. The property is where the tax deed sold; the mailing
-            address is where the clerk actually wrote to the owner, and it is
-            what gets traced. */}
-        <div>
-          <SubHead title="Addresses" />
-          <Row k="Property that sold" v={[property.address, property.city, property.zip].filter(Boolean).join(', ')} />
-          <MailingAddress
-            lead={lead}
-            variant="row"
-            noticeReadForCase={property.claimants.some((c: any) => c.ownerMailingStreet)}
-            onChanged={onChanged}
-            say={say}
-          />
-        </div>
-        <CountySection lead={lead} />
-        <DocketBlock property={property} ledger={ledger} />
-      </>
-    ),
-    qualify: (
-      <>
-        <QualificationSection lead={lead} onChanged={onChanged} say={say} />
-        {plan.qualify === 'later' && <div style={{ fontSize: 11.5, color: 'var(--faint)' }}>{LATER_NOTE.qualify}</div>}
-      </>
-    ),
-    sign: (
-      <>
-        {plan.sign === 'later' && <div style={{ fontSize: 11.5, color: 'var(--faint)' }}>{LATER_NOTE.sign}</div>}
-        <DocumentsSection lead={lead} onChanged={onChanged} say={say} />
-        <NotarySection lead={lead} onChanged={onChanged} say={say} />
-        <AttorneySection lead={lead} onChanged={onChanged} say={say} />
-      </>
-    ),
-    file: (
-      <>
-        {plan.file === 'later' && <div style={{ fontSize: 11.5, color: 'var(--faint)' }}>{LATER_NOTE.file}</div>}
-        <FilingSection lead={lead} onChanged={onChanged} say={say} />
-      </>
-    ),
-    paid: (
-      <>
-        {plan.paid === 'later' && <div style={{ fontSize: 11.5, color: 'var(--faint)' }}>{LATER_NOTE.paid}</div>}
-        <DisbursementSection lead={lead} onChanged={onChanged} say={say} />
-        <SurveySection lead={lead} onChanged={onChanged} say={say} />
-      </>
-    ),
-  };
-  const status: Record<FoldKey, string> = {
-    reach: reachStatus,
-    case: caseStatus,
-    qualify: qualifyStatus,
-    sign: signStatus,
-    file: fileStatus,
-    paid: paidStatus,
-  };
-
-  const fold = (key: FoldKey) => {
-    const state = plan[key] === 'later' ? 'wait' : plan[key];
-    return (
-      <Fold
-        key={key}
-        title={FOLD_TITLE[key]}
-        status={status[key]}
-        state={state}
-        open={overrides[key] ?? state === 'open'}
-        onToggle={(o) => set(key, o)}
-      >
-        {bodies[key]}
-      </Fold>
-    );
-  };
-
-  // The order: the work first, then what is waiting, then what is done with
-  // the most recent on top, then the reference facts, then what is not yet
-  // possible behind one line.
-  const order: FoldKey[] = ['reach', 'qualify', 'sign', 'file', 'paid'];
-  const open = order.filter((k) => plan[k] === 'open');
-  const wait = order.filter((k) => plan[k] === 'wait');
-  const done = order.filter((k) => plan[k] === 'done').reverse();
-  const later = order.filter((k) => plan[k] === 'later');
-
-  return (
-    <div>
-      {/* What the case still has to settle, in any order, and the team's
-          follow-ups. The old Next step fold pulled one tool up here by
-          guessing from the queue; the guess was often wrong. */}
-      <CaseQuestions lead={lead} property={property} currentUser={currentUser} onOpenPeople={onOpenPeople} onChanged={onChanged} say={say} />
-      <TasksSection lead={lead} currentUser={currentUser} onChanged={onChanged} say={say} />
-
-      {open.map(fold)}
-      {wait.map(fold)}
-      {done.map(fold)}
-      {fold('case')}
-
-      {later.length > 0 && (
-        <details className="dc-fold-later">
-          <summary>
-            <b>Later steps ({later.length})</b>
-            <span>{later.map((k) => FOLD_TITLE[k]).join(' · ')}</span>
-          </summary>
-          <div>{later.map(fold)}</div>
-        </details>
-      )}
-
+      </div>
+      <CountySection lead={lead} />
+      <DocketBlock property={property} ledger={ledger} />
       <HoldControl lead={lead} onChanged={onChanged} say={say} />
     </div>
   );
@@ -3374,37 +3336,6 @@ function peopleNote(lead: SurplusPanelLead): string {
     return `${lead.associateCount} who may know where ${lead.claimant} is${lead.associatesUntried ? `, ${lead.associatesUntried} not yet contacted` : ''}`;
   }
   return 'A relative or a neighbor usually knows where they are';
-}
-
-/**
- * The People tab, summed up on the Case tab. Counts and a way over, so the
- * case still says whether an heir has been found without listing everybody.
- */
-function PeopleSummary({ lead, onOpen }: { lead: SurplusPanelLead; onOpen: () => void }) {
-  const total = (lead.heirCount || 0) + (lead.associateCount || 0);
-  const line = lead.isDeceased
-    ? lead.livingHeirCount > 0
-      ? `${lead.livingHeirCount} living heir${lead.livingHeirCount === 1 ? '' : 's'} on file, ${
-          lead.callableHeirCount > 0 ? `${lead.callableHeirCount} callable` : 'no number yet'
-        }`
-      : 'No living heir on file. Find the probate filing and add the heirs from it.'
-    : total > 0
-      ? `${total} on file${lead.callableAssociateCount ? `, ${lead.callableAssociateCount} callable` : ''}${
-          lead.associatesUntried ? `, ${lead.associatesUntried} not yet contacted` : ''
-        }`
-      : 'Nobody on file yet.';
-  const tone = lead.isDeceased && !(lead.livingHeirCount > 0) ? 'var(--red)' : 'var(--text)';
-  return (
-    <div>
-      <SubHead title={lead.isDeceased ? 'Who inherited' : 'People around the claimant'} note={peopleNote(lead)} />
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 12.5, color: tone }}>{line}</span>
-        <button type="button" className="dc-wp-btn" onClick={onOpen}>
-          {total > 0 ? 'Open People' : 'Add people'}
-        </button>
-      </div>
-    </div>
-  );
 }
 
 /**
@@ -4548,8 +4479,7 @@ function TasksSection({
 
   useEffect(() => {
     setTasks(null);
-    load();
-  }, [load]);
+  }, [lead.id]);
 
   // The header's Next action writes tasks too. Reload when it changes, or
   // this list says nothing is scheduled right under a next action.

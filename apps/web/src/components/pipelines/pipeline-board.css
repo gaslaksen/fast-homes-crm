@@ -814,3 +814,20 @@ button.dc-wp-mini.on { background: var(--mint); border-color: var(--mint); color
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12.5px;
   padding: 8px 10px; border: 1px dashed var(--border2); border-radius: 8px;
 }
+
+/* ── People rows: one line per person, the full card on click ─────────────
+ *
+ * `button.dc-wp-person` is element-qualified for the same reason as every
+ * other panel button: `.dc-board button` would strip a bare class.
+ */
+button.dc-wp-person {
+  display: flex; align-items: baseline; gap: 6px 12px; flex-wrap: wrap; width: 100%; text-align: left;
+  padding: 9px 10px; margin-top: 6px; font-size: 12.5px; color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px; background: var(--surface); transition: 0.12s;
+}
+button.dc-wp-person:hover { background: var(--surface2); border-color: var(--border2); }
+.dc-wp-person-card { margin-top: 6px; padding: 4px 10px 8px; border: 1px solid var(--border2); border-radius: 8px; background: var(--surface); }
+.dc-wp-conf {
+  display: inline-block; margin-left: 6px; padding: 0 6px; border: 1px solid; border-radius: 10px;
+  font-size: 10.5px; font-weight: 700; line-height: 16px; vertical-align: 1px;
+}

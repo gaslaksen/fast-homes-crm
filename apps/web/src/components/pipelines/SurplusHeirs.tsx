@@ -63,9 +63,12 @@ export interface Heir {
   zip: string | null;
   deceased: boolean;
   dateOfDeath: string | null;
-  phones: { number: string; type: string | null; dnc: string | null }[];
+  phones: { number: string; type: string | null; dnc: string | null; bad?: boolean }[];
   emails: string[];
   cleanPhoneCount: number;
+  /** Who to try first, lowest first, and the word for it (Spouse, Child, Neighbor). */
+  priority?: number;
+  priorityLabel?: string;
   contactMismatch: boolean;
   mismatchedName: string | null;
   trace: { state: string; label: string; tone: 'good' | 'warn' | 'bad' | 'idle'; detail: string; actionable: boolean } | null;
@@ -84,6 +87,81 @@ const TONE: Record<string, string> = {
   bad: 'var(--red)',
   idle: 'var(--dim)',
 };
+
+/**
+ * How sure we are this is the person, in the course's words. A court filing
+ * names them; a trace that matched is probable; anything else is unverified.
+ */
+export function personConfidence(p: {
+  sourceDocument?: string | null;
+  contactMismatch?: boolean;
+  trace?: { state: string } | null;
+}): { label: string; tone: string } {
+  if (p.contactMismatch || p.trace?.state === 'mismatch') return { label: 'Wrong person?', tone: 'var(--red)' };
+  if (p.sourceDocument) return { label: 'From a filing', tone: 'var(--mint)' };
+  if (p.trace?.state === 'matched') return { label: 'Probable', tone: 'var(--mint)' };
+  return { label: 'Unverified', tone: 'var(--amber)' };
+}
+
+/** "2 numbers, 1 wrong · 1 email", the contact summary on a compact row. */
+export function contactSummary(phones: { dnc?: string | null; bad?: boolean }[], emails: string[]): string {
+  const bad = phones.filter((p) => p.bad).length;
+  const dnc = phones.filter((p) => !p.bad && p.dnc).length;
+  const parts = [
+    phones.length
+      ? `${phones.length} number${phones.length === 1 ? '' : 's'}${bad ? `, ${bad} wrong` : ''}${dnc ? `, ${dnc} DNC` : ''}`
+      : 'no number',
+    emails.length ? `${emails.length} email${emails.length === 1 ? '' : 's'}` : null,
+  ];
+  return parts.filter(Boolean).join(' · ');
+}
+
+/**
+ * One person as a single line: who they are, how sure we are, how to reach
+ * them and where it stands. Clicking it opens the full card. The list reads
+ * as the claim jacket, every person on one screen, instead of a stack of
+ * cards ten controls deep.
+ */
+export function PersonLine({
+  name,
+  who,
+  confidence,
+  contacts,
+  status,
+  statusTone,
+  struck,
+  open,
+  onToggle,
+}: {
+  name: string;
+  who: string;
+  confidence: { label: string; tone: string } | null;
+  contacts: string;
+  status: string;
+  statusTone?: string;
+  struck?: boolean;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button type="button" className={`dc-wp-person${open ? ' open' : ''}`} onClick={onToggle} aria-expanded={open}>
+      <span style={{ minWidth: 0, flex: '1 1 180px' }}>
+        <b style={struck ? { textDecoration: 'line-through' } : undefined}>{name}</b>
+        <span style={{ color: 'var(--dim)' }}> · {who}</span>
+        {confidence && (
+          <span className="dc-wp-conf" style={{ color: confidence.tone, borderColor: confidence.tone }}>
+            {confidence.label}
+          </span>
+        )}
+      </span>
+      <span style={{ color: 'var(--dim)', flex: '1 1 140px' }}>{contacts}</span>
+      <span style={{ color: statusTone || 'var(--faint)', flex: '0 1 auto' }}>{status}</span>
+      <span aria-hidden="true" style={{ color: 'var(--faint)' }}>
+        {open ? '▴' : '▾'}
+      </span>
+    </button>
+  );
+}
 
 export default function SurplusHeirs({
   leadId,
@@ -126,6 +204,8 @@ export default function SurplusHeirs({
   const [pending, setPending] = useState<any>(null);
   /** The person whose row is open as a form, or null. One at a time. */
   const [editingId, setEditingId] = useState<string | null>(null);
+  /** The person whose full card is open. Everyone else is one line. */
+  const [openId, setOpenId] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const load = () => {
@@ -225,11 +305,15 @@ export default function SurplusHeirs({
     }
   };
 
-  const living = (heirs || []).filter((h) => !h.deceased && h.isHeir);
-  const dead = (heirs || []).filter((h) => h.deceased && h.isHeir);
+  // Best first within each group: spouse, children, heirs, family, then
+  // neighbors, the order the course works associates in.
+  const byPriority = (a: Heir, b: Heir) => (a.priority ?? 9) - (b.priority ?? 9) || a.name.localeCompare(b.name);
+  const living = (heirs || []).filter((h) => !h.deceased && h.isHeir).sort(byPriority);
+  // Everyone dead, heir or not, so a dead relative is not simply missing.
+  const dead = (heirs || []).filter((h) => h.deceased);
   // People who are not heirs: a relative, a neighbor, a friend. They cannot
   // sign anything, but one of them usually knows where the claimant is.
-  const associates = (heirs || []).filter((h) => !h.deceased && !h.isHeir);
+  const associates = (heirs || []).filter((h) => !h.deceased && !h.isHeir).sort(byPriority);
   const coreSearch = courtRecordsUrl || courtRecordsSearch(county);
 
   const setStatus = async (h: Heir, contactStatus: string) => {
@@ -263,9 +347,32 @@ export default function SurplusHeirs({
       </div>
     ) : null;
 
-  const personRow = (h: Heir) => (
+  const statusColor = (h: Heir) =>
+    h.contactStatus === 'message_passed' ? 'var(--mint)' : h.contactStatus === 'dead_end' ? 'var(--red)' : h.contactStatus === 'contacted' ? 'var(--amber)' : 'var(--faint)';
+
+  const personRow = (h: Heir) =>
+    openId === h.id ? (
+      <div key={h.id} className="dc-wp-person-card">
+        {personCard(h)}
+      </div>
+    ) : (
+      <PersonLine
+        key={h.id}
+        name={h.name}
+        who={h.relationship || h.priorityLabel || h.roleLabel}
+        confidence={personConfidence(h)}
+        contacts={contactSummary(h.phones, h.emails)}
+        status={`${h.contactStatusLabel}${h.lastContactedAt ? `, ${fmtDate(h.lastContactedAt)}` : ''}${h.doNotCall ? ' · do not call' : ''}`}
+        statusTone={statusColor(h)}
+        open={false}
+        onToggle={() => setOpenId(h.id)}
+      />
+    );
+
+  const personCard = (h: Heir) => (
     <HeirRow
       key={h.id}
+      onCollapse={() => setOpenId(null)}
       h={h}
       busy={busy}
       onCall={(n) => onCall(n, h.name)}
@@ -456,6 +563,7 @@ export default function SurplusHeirs({
 
 function HeirRow({
   h,
+  onCollapse,
   busy,
   onCall,
   onText,
@@ -472,6 +580,8 @@ function HeirRow({
   onChanged,
 }: {
   h: Heir;
+  /** Fold the card back to its one line. */
+  onCollapse?: () => void;
   busy: boolean;
   onCall: (n: string) => void;
   onText: (n: string) => void;
@@ -488,12 +598,21 @@ function HeirRow({
   onChanged: () => void;
 }) {
   const [findOpen, setFindOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const statusTone =
     h.contactStatus === 'message_passed' ? 'var(--mint)' : h.contactStatus === 'dead_end' ? 'var(--red)' : h.contactStatus === 'contacted' ? 'var(--amber)' : 'var(--faint)';
   return (
-    <div style={{ padding: '7px 0', borderTop: '1px solid var(--border)' }}>
+    <div style={{ padding: '7px 0' }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 7, flexWrap: 'wrap' }}>
         <b style={{ fontSize: 13 }}>{h.name}</b>
+        {(() => {
+          const c = personConfidence(h);
+          return (
+            <span className="dc-wp-conf" style={{ color: c.tone, borderColor: c.tone }}>
+              {c.label}
+            </span>
+          );
+        })()}
         {!h.isHeir && (
           <span className="dc-tag" style={{ background: 'var(--bg2)', color: 'var(--dim)' }}>
             {h.roleLabel}
@@ -506,6 +625,11 @@ function HeirRow({
           </span>
         )}
         {h.doNotCall && <span style={{ fontSize: 11.5, color: 'var(--red)' }}>do not call</span>}
+        {onCollapse && (
+          <button type="button" className="dc-wp-btn" style={{ marginLeft: 'auto', padding: '2px 8px', fontSize: 11 }} onClick={onCollapse}>
+            Close
+          </button>
+        )}
       </div>
 
       <div style={{ fontSize: 11.5, color: 'var(--faint)' }}>
@@ -652,15 +776,24 @@ function HeirRow({
             Skip trace {h.name}
           </button>
         )}
-        <button type="button" className="dc-wp-btn" disabled={busy} onClick={onEdit}>
-          Edit
+        {/* The rarely used controls behind one button, so the card reads as
+            the person and their numbers rather than a row of switches. */}
+        <button type="button" className="dc-wp-btn" aria-expanded={moreOpen} onClick={() => setMoreOpen((v) => !v)}>
+          {moreOpen ? 'Less' : 'More ⋯'}
         </button>
-        <button type="button" className="dc-wp-btn" disabled={busy} onClick={onDnc}>
-          {h.doNotCall ? 'Allow calls' : 'Do not call'}
-        </button>
-        <button type="button" className="dc-wp-btn" disabled={busy} onClick={onRemove}>
-          Remove
-        </button>
+        {moreOpen && (
+          <>
+            <button type="button" className="dc-wp-btn" disabled={busy} onClick={onEdit}>
+              Edit
+            </button>
+            <button type="button" className="dc-wp-btn" disabled={busy} onClick={onDnc}>
+              {h.doNotCall ? 'Allow calls' : 'Do not call'}
+            </button>
+            <button type="button" className="dc-wp-btn" disabled={busy} onClick={onRemove}>
+              Remove
+            </button>
+          </>
+        )}
       </div>
     </div>
   );
