@@ -183,6 +183,7 @@ const QUEUE_CHIP: Record<string, { bg: string; fg: string }> = {
   entity: CHIP.violet,
   // Red because it is a hard block, not a contact problem: nobody can sign.
   heirs: CHIP.red,
+  hold: CHIP.pink,
   closed: CHIP.slate,
 };
 
@@ -478,6 +479,7 @@ const QUEUES: [string, string][] = [
   ['name_search', 'Name search'],
   ['entity', 'Entity'],
   ['mailed', 'Letter sent'],
+  ['hold', 'On hold'],
   ['closed', 'Closed'],
 ];
 const QUEUE_LABEL: Record<string, string> = Object.fromEntries(QUEUES);
@@ -494,6 +496,7 @@ const QUEUE_HELP: Record<string, string> = {
   entity: 'An LLC, estate or trust. No consumer record exists; the registered agent on Sunbiz is who can sign.',
   mailed:
     'A letter went out to the address on file and nobody can be phoned. Parked until they reply, so the address is not traced or searched again. A claimant with a callable number stays in Call now even after a letter.',
+  hold: 'A person put the file on hold, with a reason. Nobody works it and its drips wait until somebody releases it.',
   closed: 'Paid out, already assigned, or do-not-call. Nothing to do.',
 };
 

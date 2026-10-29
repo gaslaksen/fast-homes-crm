@@ -147,6 +147,9 @@ export interface SurplusPanelLead {
   /** When the claimant last gained a phone or email. */
   contactInfoUpdatedAt?: string | null;
   doNotCall: boolean;
+  /** A person put the file on hold, and why. Null when it is not held. */
+  heldAt?: string | null;
+  holdReason?: string | null;
   isDeceased: boolean;
   /** YYYY-MM-DD, when a people search dated the death. */
   dateOfDeath?: string | null;
@@ -2521,6 +2524,11 @@ export default function SurplusWorkPanel({
                 {lead.doNotCall && (
                   <span style={{ fontSize: 11, color: 'var(--red)' }}>Do not call</span>
                 )}
+                {lead.heldAt && (
+                  <span style={{ fontSize: 11, color: 'var(--amber)' }} title={lead.holdReason || undefined}>
+                    On hold
+                  </span>
+                )}
               </div>
               <div style={{ fontSize: 13, fontWeight: 400, color: 'var(--text)', marginTop: 4, overflowWrap: 'anywhere' }}>
                 {property.address}
@@ -3256,7 +3264,85 @@ function CaseTab({
         </details>
       )}
 
+      <HoldControl lead={lead} onChanged={onChanged} say={say} />
       <StageControl lead={lead} onChanged={onChanged} say={say} />
+    </div>
+  );
+}
+
+/**
+ * Put the file on hold, with a reason, or release it. A held file leaves the
+ * working queues for On hold and its drips wait, so nobody contacts anyone on
+ * it until somebody clears it: an active claim to check, a legal question.
+ */
+function HoldControl({
+  lead,
+  onChanged,
+  say,
+}: {
+  lead: SurplusPanelLead;
+  onChanged: () => void;
+  say: (msg: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const save = async (on: boolean) => {
+    if (saving || (on && !reason.trim())) return;
+    setSaving(true);
+    try {
+      await surplusAPI.hold(lead.id, on, on ? reason.trim() : undefined);
+      say(on ? `${lead.claimant} is on hold. Drips wait until it is released.` : `${lead.claimant} released from hold`);
+      setOpen(false);
+      setReason('');
+      onChanged();
+    } catch (e: any) {
+      say(e?.response?.data?.message || 'The hold could not be changed');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (lead.heldAt) {
+    return (
+      <div className="dc-wp-hold on">
+        <div>
+          <b>On hold</b> since {fmtDate(lead.heldAt)}
+          {lead.holdReason ? `: ${lead.holdReason}` : ''}. Nobody works it and its drips wait.
+        </div>
+        <button type="button" className="dc-wp-btn" disabled={saving} onClick={() => save(false)}>
+          {saving ? 'Releasing...' : 'Release'}
+        </button>
+      </div>
+    );
+  }
+  if (!open) {
+    return (
+      <div className="dc-wp-hold">
+        <button type="button" className="dc-wp-btn" onClick={() => setOpen(true)}>
+          Put on hold
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className="dc-wp-hold">
+      <input
+        className="dc-input"
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+        placeholder="Why: an active claim to check, a legal question, waiting on Ian"
+        aria-label="Why the file is on hold"
+        autoFocus
+        onKeyDown={(e) => e.key === 'Enter' && save(true)}
+      />
+      <button type="button" className="dc-wp-btn on" disabled={saving || !reason.trim()} onClick={() => save(true)}>
+        {saving ? 'Holding...' : 'Hold'}
+      </button>
+      <button type="button" className="dc-wp-btn" onClick={() => setOpen(false)}>
+        Cancel
+      </button>
     </div>
   );
 }

@@ -1015,3 +1015,19 @@ describe('searching for the people around a claim', () => {
     expect(surplusSearchPeopleHits('', people)).toEqual([]);
   });
 });
+
+describe('a file on hold', () => {
+  it('goes to On hold however callable it is, and says why', () => {
+    const f = { claimStatus: 'open', cleanPhoneCount: 3, onHold: true, holdReason: 'Ian to clear' };
+    expect(queueOf(f)).toBe('hold');
+    expect(queueReason(f)).toBe('On hold: Ian to clear');
+  });
+
+  it('stays Closed when the claim is closed as well', () => {
+    expect(queueOf({ claimStatus: 'distributed', cleanPhoneCount: 3, onHold: true })).toBe('closed');
+  });
+
+  it('is callable again once released', () => {
+    expect(queueOf({ claimStatus: 'open', cleanPhoneCount: 3, onHold: false })).toBe('call');
+  });
+});

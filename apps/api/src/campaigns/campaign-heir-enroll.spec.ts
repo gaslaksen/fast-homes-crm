@@ -113,6 +113,8 @@ describe('sending to a person on the case', () => {
     const emails: any[] = [];
     const prisma = {
       surplusHeir: { findUnique: jest.fn(async () => heir) },
+      // Not on hold, so the step goes out.
+      surplusDetail: { findUnique: jest.fn(async () => ({ heldAt: null, holdReason: null })) },
       lead: { findUnique: jest.fn(async () => ({ sellerEmail: 'teodoro@example.com' })) },
       email: { count: jest.fn(async () => 0), findFirst: jest.fn(async () => null) },
     } as unknown as PrismaService;

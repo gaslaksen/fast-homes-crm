@@ -1086,6 +1086,13 @@ export class SurplusController {
     return this.surplus.markLetterMailed(ids, opts, userId, organizationId);
   }
 
+  /** Put a file on hold or release it: { on: boolean, reason?: string }. A reason is required to hold. */
+  @Post(':id/hold')
+  async hold(@Param('id') id: string, @Body() body: any, @Headers('authorization') authHeader?: string) {
+    const { organizationId, userId } = this.decodeToken(authHeader);
+    return this.surplus.setHold(id, { on: body?.on !== false, reason: body?.reason }, organizationId, userId);
+  }
+
   /** An envelope came back undeliverable, or undo that: { returned: boolean }. */
   @Post('letters/:letterId/returned')
   async letterReturned(

@@ -245,6 +245,11 @@ export enum SurplusQueue {
    * again while the letter is in the post.
    */
   MAILED = 'mailed',
+  /**
+   * A person put the file on hold, with a reason: an active claim to check,
+   * a legal question. Nobody works it until somebody releases it.
+   */
+  HOLD = 'hold',
   /** Denied, paid out, already assigned, or do-not-call. Nothing to do. */
   CLOSED = 'closed',
 }
@@ -263,15 +268,17 @@ export enum SurplusQueue {
  * a one-click submission, then finding a court filing, then open-ended research.
  */
 export const SURPLUS_QUEUE_RANK: Record<SurplusQueue, number> = {
-  [SurplusQueue.CALL]: 7,
-  [SurplusQueue.LIKELY]: 6,
-  [SurplusQueue.TRACE]: 5,
-  [SurplusQueue.HEIRS]: 4,
-  [SurplusQueue.NAME_SEARCH]: 3,
-  [SurplusQueue.ENTITY]: 2,
+  [SurplusQueue.CALL]: 8,
+  [SurplusQueue.LIKELY]: 7,
+  [SurplusQueue.TRACE]: 6,
+  [SurplusQueue.HEIRS]: 5,
+  [SurplusQueue.NAME_SEARCH]: 4,
+  [SurplusQueue.ENTITY]: 3,
   // Below every working queue: a mailed co-owner is parked, so if the other
   // owner still needs a name search the property shows the search.
-  [SurplusQueue.MAILED]: 1,
+  [SurplusQueue.MAILED]: 2,
+  // Held by a person: below anything somebody could work, above finished.
+  [SurplusQueue.HOLD]: 1,
   [SurplusQueue.CLOSED]: 0,
 };
 
@@ -283,6 +290,7 @@ export const SURPLUS_QUEUE_LABEL: Record<SurplusQueue, string> = {
   [SurplusQueue.TRACE]: 'Skip trace',
   [SurplusQueue.NAME_SEARCH]: 'Name search',
   [SurplusQueue.MAILED]: 'Letter sent',
+  [SurplusQueue.HOLD]: 'On hold',
   [SurplusQueue.CLOSED]: 'Closed',
 };
 
