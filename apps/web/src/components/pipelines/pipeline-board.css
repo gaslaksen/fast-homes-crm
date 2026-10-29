@@ -772,3 +772,19 @@ label.dc-menu-item select.dc-in { width: auto; padding: 5px 8px; font-size: 12.5
 }
 .dc-drawer-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .dc-drawer-row > .dc-flabel { min-width: 56px; }
+
+/* ── Surplus outreach list ──────────────────────────────────────────────────
+ *
+ * Element-qualified for the same reason as the work panel: `.dc-board button`
+ * and `.dc-board a` sit at (0,1,1) and would strip a bare class. These come
+ * later in the file at the same specificity, so they win.
+ */
+button.dc-or-btn, a.dc-or-btn {
+  display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
+  background: var(--surface2); border: 1px solid var(--border2); border-radius: 7px;
+  padding: 4px 9px; font-size: 11.5px; font-weight: 600; color: var(--text); transition: 0.12s;
+}
+button.dc-or-btn:hover:not(:disabled), a.dc-or-btn:hover { background: var(--surface3); }
+button.dc-or-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+button.dc-or-btn.on { border-color: var(--mint); color: var(--mint); background: var(--mintGhost); }
+button.dc-or-btn.ghost { background: transparent; border-color: transparent; color: var(--dim); padding-left: 0; }

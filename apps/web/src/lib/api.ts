@@ -431,6 +431,20 @@ export const surplusAPI = {
   /** Saved IDI batches, newest first, and one batch row by row with the relatives it filed. */
   batches: () => api.get('/surplus/batches'),
   batch: (id: string) => api.get(`/surplus/batches/${id}`),
+  /** The outreach list: everyone on a batch, a queue (Call now by default) or the claims with a letter due. */
+  outreach: (scope: { batch?: string | null; queue?: string | null; letters?: boolean }) =>
+    api.get('/surplus/outreach', {
+      params: {
+        ...(scope.batch ? { batch: scope.batch } : {}),
+        ...(scope.queue ? { queue: scope.queue } : {}),
+        ...(scope.letters ? { letters: '1' } : {}),
+      },
+    }),
+  /** Mark a person on the outreach list: a call, text or email made outside Dealcore, a note, or done. */
+  addTouch: (leadId: string, body: { heirId: string | null; kind: string; note?: string }) =>
+    api.post(`/surplus/${leadId}/touches`, body),
+  clearDone: (leadId: string, heirId: string | null) =>
+    api.delete(`/surplus/${leadId}/touches/done`, { params: heirId ? { heir: heirId } : {} }),
   /** IDI batch skip trace: the upload file for the chosen claimants. */
   idiExport: (leadIds: string[]) => api.post('/surplus/idi/export', { leadIds }),
   /** Read an IDI results file and match each row to a claimant. Writes nothing. */
