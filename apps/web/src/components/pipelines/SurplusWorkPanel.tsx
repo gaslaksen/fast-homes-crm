@@ -41,6 +41,14 @@ const CONV_POLL_MS = 8_000;
 
 type Tab = 'case' | 'people' | 'conversation' | 'notes';
 
+interface CaseQuestion {
+  key: 'money' | 'signer' | 'person' | 'reach';
+  label: string;
+  state: 'known' | 'unknown' | 'problem';
+  answer: string;
+  detail: string | null;
+}
+
 /** The document kinds worth pulling out of the ledger, in the order they matter. */
 const LEDGER_GROUPS: { kind: string; label: string; tone: string }[] = [
   { kind: 'distribution', label: 'Distribution', tone: 'var(--red)' },
@@ -147,6 +155,16 @@ export interface SurplusPanelLead {
   /** When the claimant last gained a phone or email. */
   contactInfoUpdatedAt?: string | null;
   doNotCall: boolean;
+  /** The teammate who owns the case. The course's Owner field. */
+  ownerId?: string | null;
+  ownerName?: string | null;
+  /** The earliest open follow-up: the course's Next action and Due. */
+  nextTask?: { id: string; title: string; dueDate: string | null; userId: string | null; userName: string | null } | null;
+  openTaskCount?: number;
+  /** The four things every case has to settle, computed by the API. */
+  questions?: CaseQuestion[];
+  /** At most three things to do, offered when no next action is set. */
+  suggestions?: { key: string; text: string }[];
   /** A person put the file on hold, and why. Null when it is not held. */
   heldAt?: string | null;
   holdReason?: string | null;
@@ -2599,14 +2617,9 @@ export default function SurplusWorkPanel({
             </button>
           </div>
 
-          <NextStepBanner
-            lead={lead}
-            property={property}
-            onCall={call}
-            onText={message}
-            onTrace={traceGated}
-            tracing={tracing}
-          />
+          {/* The course's four tracking fields. The team writes the next
+              step; nothing here is guessed from the queue. */}
+          <CaseFields lead={lead} team={teamMembers} currentUser={currentUser} onChanged={onChanged} say={say} />
 
           {/* One property, several claims. Each claimant is contacted separately,
               so the conversation and notes tabs follow this selection. */}
@@ -2852,16 +2865,6 @@ const STAGE_ORDER = [
   'Paid',
 ];
 
-/** The job each back-half stage is doing, for the banner. */
-const STAGE_JOB: Record<string, string> = {
-  'Agreement Signed': 'Sign and notarize',
-  'Package Notarized': 'File with the county',
-  'Claim Filed': 'File with the county',
-  'Awaiting Disbursement': 'Get paid',
-  'Check Received': 'Get paid',
-  Paid: 'Paid',
-};
-
 type FoldPlan = 'open' | 'done' | 'wait' | 'later';
 type FoldKey = 'reach' | 'case' | 'qualify' | 'sign' | 'file' | 'paid';
 
@@ -2944,13 +2947,6 @@ function CaseTab({
   const { overrides, set } = useFolds(lead.id, lead.stage);
   const plan = planFolds(lead);
   const idx = STAGE_ORDER.indexOf(lead.stage);
-  const back = idx >= 2;
-  const dead = lead.stage === 'Dead';
-  const queue: string = (lead as any).queue || property.queue || '';
-
-  // Which tool belongs in Next step. Whatever is not the next step renders in
-  // Reach, so every tool is on the panel exactly once.
-  const front = !back && !dead;
   // Whether the paid profile search is paused, asked once per panel. Null
   // until answered; the button reads null as "do not know yet".
   const [socialPaused, setSocialPaused] = useState<boolean | null>(null);
@@ -2960,13 +2956,6 @@ function CaseTab({
       .then((r) => setSocialPaused(!!r.data?.paused))
       .catch(() => setSocialPaused(true));
   }, []);
-  const inNext = {
-    contacts: front && (queue === 'call' || queue === 'likely'),
-    heirs: front && queue === 'heirs',
-    trace: front && queue === 'trace',
-    search: front && (queue === 'name_search' || queue === 'entity'),
-    letters: front && queue === 'mailed',
-  };
   const showHeirs =
     lead.isDeceased || (lead.heirCount || 0) > 0 || (lead.associateCount || 0) > 0 || !lead.tappedAt;
 
@@ -3051,20 +3040,17 @@ function CaseTab({
   const bodies: Record<FoldKey, React.ReactNode> = {
     reach: (
       <>
-        {!inNext.contacts && <CredibilityBlock lead={lead} say={say} onChanged={onChanged} />}
+        <CredibilityBlock lead={lead} say={say} onChanged={onChanged} />
         <ContactLine lead={lead} />
-        {!inNext.contacts && (
-          <div>
-            <SubHead
-              title={`Reaching ${lead.claimant}`}
-              note={lead.isDeceased ? 'Deceased. Their own contacts cannot sign anything.' : undefined}
-            />
-            {!inNext.trace && traceBlock}
-            {contactsBlock}
-            {socialBlock}
-          </div>
-        )}
-        {inNext.contacts && !inNext.trace && traceBlock}
+        <div>
+          <SubHead
+            title={`Reaching ${lead.claimant}`}
+            note={lead.isDeceased ? 'Deceased. Their own contacts cannot sign anything.' : undefined}
+          />
+          {traceBlock}
+          {contactsBlock}
+          {socialBlock}
+        </div>
         <SearchLog lead={lead} say={say} onChanged={onChanged} />
         {property.mailVerdict && (
           <Row
@@ -3086,9 +3072,9 @@ function CaseTab({
             }
           />
         )}
-        {!inNext.letters && lettersBlock}
-        {!inNext.heirs && heirsBlock}
-        {!inNext.search && searchBlock}
+        {lettersBlock}
+        {heirsBlock}
+        {searchBlock}
       </>
     ),
     case: (
@@ -3220,34 +3206,11 @@ function CaseTab({
 
   return (
     <div>
-      <Fold title="Next step" status={dead ? 'Dead' : undefined} state="open" open={overrides.next ?? true} onToggle={(o) => set('next', o)}>
-        {dead && lead.deadReason && (
-          <div style={{ fontSize: 12, color: 'var(--red)' }}>
-            Dead{lead.deadAt ? ` since ${fmtDate(lead.deadAt)}` : ''}: {deadReasonLabel(lead.deadReason)}
-            {lead.deadNote ? <span style={{ color: 'var(--dim)' }}>. {lead.deadNote}</span> : null}
-          </div>
-        )}
-        <TasksSection lead={lead} currentUser={currentUser} onChanged={onChanged} say={say} />
-        {inNext.contacts && (
-          <div>
-            <SubHead title={`Reaching ${lead.claimant}`} />
-            {contactsBlock}
-            {socialBlock}
-            <div style={{ marginTop: 8 }}>
-              <CredibilityBlock lead={lead} say={say} onChanged={onChanged} />
-            </div>
-          </div>
-        )}
-        {inNext.heirs && heirsBlock}
-        {inNext.trace && (
-          <div>
-            <SubHead title={`Skip trace ${lead.claimant}`} />
-            {traceBlock}
-          </div>
-        )}
-        {inNext.search && searchBlock}
-        {inNext.letters && lettersBlock}
-      </Fold>
+      {/* What the case still has to settle, in any order, and the team's
+          follow-ups. The old Next step fold pulled one tool up here by
+          guessing from the queue; the guess was often wrong. */}
+      <CaseQuestions lead={lead} property={property} currentUser={currentUser} onOpenPeople={onOpenPeople} onChanged={onChanged} say={say} />
+      <TasksSection lead={lead} currentUser={currentUser} onChanged={onChanged} say={say} />
 
       {open.map(fold)}
       {wait.map(fold)}
@@ -3265,7 +3228,6 @@ function CaseTab({
       )}
 
       <HoldControl lead={lead} onChanged={onChanged} say={say} />
-      <StageControl lead={lead} onChanged={onChanged} say={say} />
     </div>
   );
 }
@@ -4115,185 +4077,6 @@ function DocketBlock({ property, ledger }: { property: any; ledger: LedgerDoc[] 
 }
 
 /**
- * The instruction at the top of the panel: what to do with this claimant,
- * in plain words, with the button that does it.
- *
- * On the front half it is the queue the API assigns and the reason it gives.
- * From Agreement Signed on it is the job the stage is doing and what the
- * next stage still needs. It replaces the "Rank 153.7" line, which was
- * auditable and not actionable; the rank still decides the board's order.
- */
-function NextStepBanner({
-  lead,
-  property,
-  onCall,
-  onText,
-  onTrace,
-  tracing,
-}: {
-  lead: SurplusPanelLead;
-  property: any;
-  onCall: (number: string) => void;
-  onText: (number: string) => void;
-  onTrace: () => void;
-  tracing: boolean;
-}) {
-  const idx = STAGE_ORDER.indexOf(lead.stage);
-  const l = lead as any;
-  const queue: string = l.queue || property.queue || '';
-  const label: string = l.queueLabel || property.queueLabel || '';
-  const reason: string = l.queueReason || property.queueReason || '';
-
-  let tone = 'mint';
-  let head = label;
-  let text = reason;
-  let actions: React.ReactNode = null;
-
-  if (lead.stage === 'Dead') {
-    tone = 'slate';
-    head = 'Dead';
-    text = lead.deadReason
-      ? `${deadReasonLabel(lead.deadReason)}${lead.deadAt ? `, since ${fmtDate(lead.deadAt)}` : ''}.${lead.deadNote ? ` ${lead.deadNote}` : ''}`
-      : 'Retired without a reason on file.';
-  } else if (idx >= 2) {
-    const next = nextGatedStage(lead.stage);
-    const missing = next ? lead.stageBlocks?.[next] || [] : [];
-    head = STAGE_JOB[lead.stage] || lead.stage;
-    text = !next
-      ? `Claim closed. ${lead.disbursement?.checkSentAt ? `${lead.claimant}'s check went out ${fmtDate(lead.disbursement.checkSentAt)}.` : ''}`
-      : missing.length
-        ? `${next} still needs ${missing.slice(0, 3).join(', ')}${missing.length > 3 ? ` and ${missing.length - 3} more` : ''}.`
-        : `Ready for ${next}. Everything it needs is in hand.`;
-    if (lead.claimantUpdate?.overdue) {
-      tone = 'amber';
-      text += ` ${lead.claimant} is owed a monthly update, news or not.`;
-    }
-  } else {
-    const phone = lead.phones.find((p) => !p.dnc && !p.bad)?.number || null;
-    switch (queue) {
-      case 'call':
-        tone = 'mint';
-        if (lead.isDeceased) {
-          text = `${reason}. Work the heirs below; ${lead.claimant} cannot sign.`;
-        } else if (phone) {
-          text = `${reason}${lead.tappedAt ? '' : '. Nobody has heard back yet'}.`;
-          actions = (
-            <>
-              <button type="button" className="dc-wp-btn on" onClick={() => onCall(phone)}>
-                Call {phoneDisplay(phone)}
-              </button>
-              <button type="button" className="dc-wp-btn" onClick={() => onText(phone)}>
-                Text
-              </button>
-            </>
-          );
-        }
-        break;
-      case 'likely':
-        tone = 'amber';
-        text = `${reason}.`;
-        if (phone) {
-          actions = (
-            <>
-              <button type="button" className="dc-wp-btn on" onClick={() => onCall(phone)}>
-                Call {phoneDisplay(phone)}
-              </button>
-              <button type="button" className="dc-wp-btn" onClick={() => onText(phone)}>
-                Text
-              </button>
-            </>
-          );
-        }
-        break;
-      case 'heirs': {
-        tone = 'red';
-        // A relative with a number is the fastest way to the heirs: a spouse
-        // or a child knows who is handling the estate. Spouse first.
-        const reach = (lead.heirs || [])
-          .filter((h) => h.callable && !h.isHeir && !h.deceased)
-          .sort((a, b) => Number(/spouse/i.test(b.relationship || '')) - Number(/spouse/i.test(a.relationship || '')));
-        const first = reach[0];
-        const firstPhone = first?.phones?.find((p: any) => !p.dnc && !p.bad)?.number || null;
-        text = first
-          ? `${lead.claimant} is deceased and no heir is on file yet. ${reach.length === 1 ? 'One relative has a number' : `${reach.length} relatives have numbers`}. Start with ${first.name}${first.relationship ? ` (${first.relationship.toLowerCase()})` : ''} and ask who is handling the estate.`
-          : `${lead.claimant} is deceased and no living heir is on file. Only a living heir can sign, so a phone number for the claimant is worth nothing yet. Find the probate case and read the petition.`;
-        actions = (
-          <>
-            {first && firstPhone && (
-              <button type="button" className="dc-wp-btn on" onClick={() => onCall(firstPhone)}>
-                Call {first.name.split(' ')[0]} {phoneDisplay(firstPhone)}
-              </button>
-            )}
-            {/* Nobody to ring yet. EnformionGo lists the family and looks up
-                the spouse and likely children, when somebody asks for it. */}
-            {!first && !lead.enformionSearchedAt && (
-              <button type="button" className="dc-wp-btn" onClick={onTrace} disabled={tracing}>
-                {tracing ? 'Searching EnformionGo...' : 'Find relatives on EnformionGo'}
-              </button>
-            )}
-            <a
-              href={lead.courtRecordsUrl || courtRecordsSearch(property.county)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={`dc-wp-btn${first && firstPhone ? '' : ' on'}`}
-            >
-              Open {property.county || 'county'} court records
-            </a>
-          </>
-        );
-        break;
-      }
-      case 'trace':
-        tone = 'amber';
-        actions = (
-          <button type="button" className="dc-wp-btn on" onClick={onTrace} disabled={tracing}>
-            {tracing ? 'Searching EnformionGo...' : `Skip trace ${lead.claimant}`}
-          </button>
-        );
-        break;
-      case 'name_search':
-      case 'entity': {
-        tone = 'amber';
-        const first = lead.nameSearch?.links?.[0];
-        // The address route came up empty. EnformionGo is the paid name
-        // search, offered first until it has been tried on this claimant.
-        const offerEnformion = queue === 'name_search' && !lead.enformionSearchedAt;
-        if (!offerEnformion && !first) break;
-        actions = (
-          <>
-            {offerEnformion && (
-              <button type="button" className="dc-wp-btn on" onClick={onTrace} disabled={tracing}>
-                {tracing ? 'Searching EnformionGo...' : `Skip trace ${lead.claimant}`}
-              </button>
-            )}
-            {first && (
-              <a href={first.url} target="_blank" rel="noopener noreferrer" className={`dc-wp-btn${offerEnformion ? '' : ' on'}`}>
-                Search {first.site}
-              </a>
-            )}
-          </>
-        );
-        break;
-      }
-      case 'mailed':
-        tone = 'slate';
-        text = `${reason}. ${lead.letterDue ? 'The next letter is due.' : lead.letterDueAt ? `Next letter due ${fmtDate(lead.letterDueAt)}.` : ''}`;
-        break;
-      default:
-        tone = 'slate';
-    }
-  }
-
-  return (
-    <div className={`dc-wp-banner ${tone}`}>
-      <div className="head">{head}</div>
-      {text && <div className="text">{text}</div>}
-      {actions && <div className="acts">{actions}</div>}
-    </div>
-  );
-}
-
-/**
  * One document on the docket.
  *
  * Duval links are durable relative paths and open directly. RealTDM hands out
@@ -4768,6 +4551,13 @@ function TasksSection({
     load();
   }, [load]);
 
+  // The header's Next action writes tasks too. Reload when it changes, or
+  // this list says nothing is scheduled right under a next action.
+  const nextKey = `${lead.nextTask?.id || ''}:${lead.nextTask?.title || ''}:${lead.nextTask?.dueDate || ''}:${lead.openTaskCount || 0}`;
+  useEffect(() => {
+    load();
+  }, [nextKey, load]);
+
   const complete = async (t: any) => {
     setBusy(true);
     try {
@@ -4904,33 +4694,31 @@ function TasksSection({
 }
 
 /**
- * Where this claimant's claim stands, and the one place to move it.
+ * Moving this claimant's stage, shared by the header's Stage field.
  *
  * Per claimant, not per property: each person files their own claim and
  * signs their own agreement, so one co-owner can be at Agreement Signed while
- * the other is still unreached. The API refuses Agreement Signed until the
- * qualification gate is met and says which item is missing, and that message
- * is shown as is rather than paraphrased.
+ * the other is still unreached. The API refuses a gated stage and says which
+ * item is missing, and that message is shown as is rather than paraphrased.
+ * Dead needs a reason, so choosing it opens a form instead of a confirm.
  */
-function StageControl({
-  lead,
-  onChanged,
-  say,
-}: {
-  lead: SurplusPanelLead;
-  onChanged: () => void;
-  say: (msg: string) => void;
-}) {
+function useStageMove(lead: SurplusPanelLead, onChanged: () => void, say: (msg: string) => void) {
   const [saving, setSaving] = useState(false);
   const [deadOpen, setDeadOpen] = useState(false);
   const [deadReason, setDeadReason] = useState('');
   const [deadNote, setDeadNote] = useState('');
   const [deadOverride, setDeadOverride] = useState(false);
-  const stages = SURPLUS_STAGES.concat('Dead');
   // The effort gate: "unresponsive" is a claim about the work done, and the
   // panel knows what is still missing before the button is pressed.
   const gateMissing = deadReason === 'unresponsive' ? lead.deadGateMissing || [] : [];
   const gateBlocks = gateMissing.length > 0 && !(deadOverride && deadNote.trim());
+
+  useEffect(() => {
+    setDeadOpen(false);
+    setDeadReason('');
+    setDeadNote('');
+    setDeadOverride(false);
+  }, [lead.id]);
 
   const markDead = async () => {
     if (!deadReason || saving || gateBlocks) return;
@@ -4957,7 +4745,6 @@ function StageControl({
 
   const move = async (stage: string) => {
     if (!stage || stage === lead.stage || saving) return;
-    // Dead needs a reason, so it opens a form instead of a confirm.
     if (stage === 'Dead') {
       setDeadOpen(true);
       return;
@@ -4975,132 +4762,459 @@ function StageControl({
     }
   };
 
+  const deadForm = deadOpen && (
+    <div style={{ display: 'grid', gap: 6, padding: 8, border: '1px solid var(--red)', borderRadius: 8, marginTop: 8 }}>
+      <div style={{ fontSize: 12, fontWeight: 700 }}>Why is this claim dead?</div>
+      <select className="dc-wp-sel" value={deadReason} onChange={(e) => setDeadReason(e.target.value)} aria-label="Dead reason">
+        <option value="">Pick a reason</option>
+        {SURPLUS_DEAD_REASONS.map(([k, l]) => (
+          <option key={k} value={k}>
+            {l}
+          </option>
+        ))}
+      </select>
+      <input
+        className="dc-input"
+        value={deadNote}
+        placeholder={deadOverride ? 'Why the file is done despite the gaps (required)' : 'Anything worth remembering, optional'}
+        onChange={(e) => setDeadNote(e.target.value)}
+      />
+      {gateMissing.length > 0 && (
+        <div style={{ fontSize: 11.5, color: 'var(--amber)', display: 'grid', gap: 4 }}>
+          <div>
+            Nobody is unresponsive until the free routes, the mail and the calls have been tried. Still needed: {gateMissing.join(', ')}.
+          </div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+            <input type="checkbox" checked={deadOverride} onChange={(e) => setDeadOverride(e.target.checked)} />
+            Override, with a note saying why
+          </label>
+        </div>
+      )}
+      <div style={{ fontSize: 11, color: 'var(--faint)' }}>
+        The lead stays on file with the reason, and the county poll will not bring it back as new.
+      </div>
+      <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+        <button type="button" className="dc-wp-btn" disabled={saving} onClick={() => setDeadOpen(false)}>
+          Cancel
+        </button>
+        <button type="button" className="dc-wp-btn on" disabled={saving || !deadReason || gateBlocks} onClick={markDead}>
+          Mark dead
+        </button>
+      </div>
+    </div>
+  );
+
+  return { saving, move, deadForm };
+}
+
+/**
+ * "Thu 10/29, 9:00 AM", or "Overdue since ..." once it has passed. Spelled out
+ * rather than "due in 1d", which rounds hours to days and called 9am
+ * tomorrow "due today" when it was set late in the evening.
+ */
+function dueWhen(iso: string): string {
+  const d = new Date(iso);
+  const when = `${d.toLocaleDateString('en-US', { weekday: 'short', month: 'numeric', day: 'numeric' })}, ${d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+  return d.getTime() < Date.now() ? `Overdue since ${when}` : when;
+}
+
+/** Tomorrow at 9am, as a datetime-local value: the default due date for a suggestion taken up. */
+function tomorrowNine(): string {
+  return quickDueDates().find((p) => p.label === 'Tomorrow 9am')?.value || '';
+}
+
+/**
+ * The course's four tracking fields, at the top of the panel: Stage, Next
+ * action, Owner, Due.
+ *
+ * Next action is the earliest open follow-up, so a call outcome or a stage
+ * change that schedules one fills it, and so does the team. Owner is the
+ * lead's assignee. Nothing here is guessed from the queue: when no next
+ * action is set the field says so, and the Case tab offers suggestions.
+ */
+function CaseFields({
+  lead,
+  team,
+  currentUser,
+  onChanged,
+  say,
+}: {
+  lead: SurplusPanelLead;
+  team: any[];
+  currentUser: any;
+  onChanged: () => void;
+  say: (msg: string) => void;
+}) {
+  const stage = useStageMove(lead, onChanged, say);
+  const stages = SURPLUS_STAGES.concat('Dead');
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const next = lead.nextTask || null;
+  const late = !!next?.dueDate && isOverdue(next.dueDate);
+
+  useEffect(() => setEditing(false), [lead.id]);
+
+  const setOwner = async (userId: string) => {
+    setBusy(true);
+    try {
+      const res = await surplusAPI.setOwner(lead.id, userId || null);
+      say(res.data?.ownerName ? `Owner: ${res.data.ownerName}` : 'Owner cleared');
+      onChanged();
+    } catch (err: any) {
+      say(err?.response?.data?.message || 'The owner could not be saved.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const done = async () => {
+    if (!next) return;
+    setBusy(true);
+    try {
+      await tasksAPI.complete(next.id, currentUser?.id);
+      say(`Done: ${next.title}`);
+      onChanged();
+    } catch {
+      say('That could not be marked done.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const cell: React.CSSProperties = { minWidth: 0 };
   return (
-    <Section title="Stage" note="This claimant only">
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-        <select
-          className="dc-wp-sel"
-          value={lead.stage}
-          disabled={saving}
-          onChange={(e) => {
-            const next = e.target.value;
-            // Reset so a refused move leaves the select on the real stage.
-            e.target.value = lead.stage;
-            move(next);
-          }}
-          aria-label="Stage"
-        >
-          {stages.map((s) => (
-            <option key={s} value={s}>
-              {s}
-            </option>
-          ))}
-        </select>
+    <div style={{ marginTop: 12 }}>
+      <div className="dc-wp-fields">
+        <div style={{ ...cell, gridColumn: '1 / -1' }}>
+          <div className="dc-lbl">Next action</div>
+          {next ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+              <span
+                style={{ fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                title={next.title}
+              >
+                {next.title}
+              </span>
+              <button type="button" className="dc-wp-mini" disabled={busy} onClick={done} title="Mark this done">
+                Done
+              </button>
+              <button type="button" className="dc-wp-mini" disabled={busy} onClick={() => setEditing((v) => !v)}>
+                Change
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+              <span style={{ fontSize: 12.5, color: 'var(--faint)' }}>None set</span>
+              <button type="button" className="dc-wp-mini" onClick={() => setEditing((v) => !v)}>
+                Set
+              </button>
+            </div>
+          )}
+        </div>
+        <div style={cell}>
+          <div className="dc-lbl">Stage</div>
+          <select
+            className="dc-wp-sel"
+            value={lead.stage}
+            disabled={stage.saving}
+            onChange={(e) => {
+              const to = e.target.value;
+              // Reset so a refused move leaves the select on the real stage.
+              e.target.value = lead.stage;
+              stage.move(to);
+            }}
+            aria-label="Stage"
+            style={{ padding: '5px 8px', marginTop: 3 }}
+          >
+            {stages.map((x) => (
+              <option key={x} value={x}>
+                {x}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div style={cell}>
+          <div className="dc-lbl">Owner</div>
+          <select
+            className="dc-wp-sel"
+            value={lead.ownerId || ''}
+            disabled={busy}
+            onChange={(e) => setOwner(e.target.value)}
+            aria-label="Owner"
+            style={{ padding: '5px 8px', marginTop: 3, maxWidth: 140 }}
+          >
+            <option value="">Nobody</option>
+            {team.map((m) => (
+              <option key={m.id} value={m.id}>
+                {`${m.firstName || ''} ${m.lastName || ''}`.trim() || m.email}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div style={cell}>
+          <div className="dc-lbl">Due</div>
+          <div style={{ fontSize: 12.5, marginTop: 5, color: late ? 'var(--red)' : next?.dueDate ? 'var(--text)' : 'var(--faint)', whiteSpace: 'nowrap' }}>
+            {next?.dueDate ? dueWhen(next.dueDate) : '-'}
+            {next?.userName ? <span style={{ color: 'var(--faint)' }}> · {next.userName}</span> : null}
+          </div>
+        </div>
       </div>
       {lead.stage === 'Dead' && lead.deadReason && (
-        <div style={{ fontSize: 12, color: 'var(--red)' }}>
+        <div style={{ fontSize: 12, color: 'var(--red)', marginTop: 6 }}>
           Dead{lead.deadAt ? ` since ${fmtDate(lead.deadAt)}` : ''}: {deadReasonLabel(lead.deadReason)}
           {lead.deadNote ? <span style={{ color: 'var(--dim)' }}>. {lead.deadNote}</span> : null}
         </div>
       )}
-      {deadOpen && (
-        <div style={{ display: 'grid', gap: 6, padding: 8, border: '1px solid var(--red)', borderRadius: 8 }}>
-          <div style={{ fontSize: 12, fontWeight: 700 }}>Why is this claim dead?</div>
-          <select className="dc-wp-sel" value={deadReason} onChange={(e) => setDeadReason(e.target.value)} aria-label="Dead reason">
-            <option value="">Pick a reason</option>
-            {SURPLUS_DEAD_REASONS.map(([k, l]) => (
-              <option key={k} value={k}>
-                {l}
-              </option>
-            ))}
-          </select>
-          <input
-            className="dc-input"
-            value={deadNote}
-            placeholder={deadOverride ? 'Why the file is done despite the gaps (required)' : 'Anything worth remembering, optional'}
-            onChange={(e) => setDeadNote(e.target.value)}
-          />
-          {gateMissing.length > 0 && (
-            <div style={{ fontSize: 11.5, color: 'var(--amber)', display: 'grid', gap: 4 }}>
-              <div>
-                Nobody is unresponsive until the free routes, the mail and the calls have been tried. Still needed: {gateMissing.join(', ')}.
-              </div>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-                <input type="checkbox" checked={deadOverride} onChange={(e) => setDeadOverride(e.target.checked)} />
-                Override, with a note saying why
-              </label>
-            </div>
-          )}
-          <div style={{ fontSize: 11, color: 'var(--faint)' }}>
-            The lead stays on file with the reason, and the county poll will not bring it back as new.
-          </div>
-          <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-            <button type="button" className="dc-wp-btn" disabled={saving} onClick={() => setDeadOpen(false)}>
-              Cancel
-            </button>
-            <button type="button" className="dc-wp-btn on" disabled={saving || !deadReason || gateBlocks} onClick={markDead}>
-              Mark dead
-            </button>
-          </div>
-        </div>
+      {stage.deadForm}
+      {editing && (
+        <NextActionEditor
+          lead={lead}
+          team={team}
+          currentUser={currentUser}
+          initial={next ? { taskId: next.id, title: next.title, due: next.dueDate, userId: next.userId } : null}
+          onDone={() => {
+            setEditing(false);
+            onChanged();
+          }}
+          onCancel={() => setEditing(false)}
+          say={say}
+        />
       )}
-      <StageGateHint lead={lead} />
-    </Section>
+    </div>
   );
 }
 
-/** The next gated stage after the current one, or null past Claim Filed. */
-function nextGatedStage(stage: string): string | null {
-  const order = ['New', 'Contacted', 'Agreement Signed', 'Package Notarized', 'Claim Filed', 'Awaiting Disbursement'];
-  const gated = ['Agreement Signed', 'Package Notarized', 'Claim Filed', 'Awaiting Disbursement'];
-  const idx = order.indexOf(stage);
-  if (idx < 0) return null;
-  return gated.find((g) => order.indexOf(g) > idx) || null;
+/** Write or rewrite the next action: what, when, and who. */
+function NextActionEditor({
+  lead,
+  team,
+  currentUser,
+  initial,
+  onDone,
+  onCancel,
+  say,
+}: {
+  lead: SurplusPanelLead;
+  team: any[];
+  currentUser: any;
+  initial: { taskId: string; title: string; due: string | null; userId: string | null } | null;
+  onDone: () => void;
+  onCancel: () => void;
+  say: (msg: string) => void;
+}) {
+  const toLocal = (iso: string | null) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+  const [title, setTitle] = useState(initial?.title || '');
+  const [due, setDue] = useState(initial ? toLocal(initial.due) : tomorrowNine());
+  const [userId, setUserId] = useState(initial?.userId || lead.ownerId || currentUser?.id || '');
+  const [busy, setBusy] = useState(false);
+  const picks = quickDueDates();
+
+  const save = async () => {
+    if (!title.trim() || !due || busy) return;
+    setBusy(true);
+    try {
+      await surplusAPI.setNextAction(lead.id, {
+        title: title.trim(),
+        dueDate: new Date(due).toISOString(),
+        userId: userId || null,
+        taskId: initial?.taskId || null,
+      });
+      say(initial ? 'Next action changed' : 'Next action set');
+      onDone();
+    } catch (err: any) {
+      say(err?.response?.data?.message || 'The next action could not be saved.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={{ display: 'grid', gap: 6, marginTop: 8, padding: 8, border: '1px solid var(--border2)', borderRadius: 8 }}>
+      <input
+        className="dc-input"
+        placeholder="What happens next, e.g. Call the daughter and ask who is handling the estate"
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        onKeyDown={(e) => e.key === 'Enter' && save()}
+        autoFocus
+        aria-label="Next action"
+      />
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+        {picks.map((p) => (
+          <button key={p.label} type="button" className={`dc-wp-mini${due === p.value ? ' on' : ''}`} onClick={() => setDue(p.value)}>
+            {p.label}
+          </button>
+        ))}
+        <input className="dc-input" type="datetime-local" value={due} onChange={(e) => setDue(e.target.value)} aria-label="Due" style={{ width: 'auto' }} />
+        <select className="dc-wp-sel" value={userId} onChange={(e) => setUserId(e.target.value)} aria-label="Whose action" style={{ padding: '5px 8px' }}>
+          <option value="">Anyone</option>
+          {team.map((m) => (
+            <option key={m.id} value={m.id}>
+              {`${m.firstName || ''} ${m.lastName || ''}`.trim() || m.email}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+        <button type="button" className="dc-wp-btn" onClick={onCancel} disabled={busy}>
+          Cancel
+        </button>
+        <button type="button" className="dc-wp-btn on" onClick={save} disabled={busy || !title.trim() || !due}>
+          Save
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const QUESTION_TONE: Record<CaseQuestion['state'], string> = {
+  known: 'var(--mint)',
+  unknown: 'var(--amber)',
+  problem: 'var(--red)',
+};
+
+/** Suggestions somebody dismissed on this case, kept per browser. A convenience, so a lost list is harmless. */
+function useDismissed(leadId: string) {
+  const key = `dc-surplus-dismissed:${leadId}`;
+  const read = useCallback((): string[] => {
+    try {
+      return JSON.parse(window.localStorage.getItem(key) || '[]');
+    } catch {
+      return [];
+    }
+  }, [key]);
+  const [dismissed, setDismissed] = useState<string[]>([]);
+  useEffect(() => setDismissed(read()), [read]);
+  const dismiss = (k: string) => {
+    const next = Array.from(new Set([...dismissed, k]));
+    setDismissed(next);
+    try {
+      window.localStorage.setItem(key, JSON.stringify(next));
+    } catch {
+      // Storage blocked: the dismissal lasts until the panel closes.
+    }
+  };
+  return { dismissed, dismiss };
 }
 
 /**
- * What the next stage still needs, as a checklist rather than a sentence.
- * The list comes from the same function the API refuses with, so the panel
- * and the refusal can never disagree. Three items show; the rest fold, so a
- * New lead is not read a paragraph about a filing months away.
+ * The four open questions, answered in any order, and up to three
+ * suggestions when no next action is set.
+ *
+ * The answers come from the API, read off what the case already has. They
+ * replace the progress circles: nothing here is a step to tick in order.
+ * Where a person decides, the answer is a real switch.
  */
-function StageGateHint({ lead }: { lead: SurplusPanelLead }) {
-  const next = nextGatedStage(lead.stage);
-  if (!next) return null;
-  const missing = lead.stageBlocks?.[next] || [];
-  if (!missing.length) {
-    return (
-      <div className="dc-wp-gate">
-        <div className="lead">
-          Next: <b>{next}</b>
-        </div>
-        <div style={{ color: 'var(--mint)' }}>Ready. Everything it needs is in hand.</div>
-      </div>
-    );
-  }
-  const shown = missing.slice(0, 3);
-  const rest = missing.slice(3);
+function CaseQuestions({
+  lead,
+  property,
+  currentUser,
+  onOpenPeople,
+  onChanged,
+  say,
+}: {
+  lead: SurplusPanelLead;
+  property: any;
+  currentUser: any;
+  onOpenPeople: () => void;
+  onChanged: () => void;
+  say: (msg: string) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const { dismissed, dismiss } = useDismissed(lead.id);
+  const questions = lead.questions || [];
+  const suggestions = (lead.suggestions || []).filter((s) => !dismissed.includes(s.key));
+  const hasPeople = (lead.heirCount || 0) + (lead.associateCount || 0) > 0;
+
+  const flipPerson = async () => {
+    setBusy(true);
+    try {
+      await surplusAPI.update(lead.id, { entitlementVerified: !lead.entitlementVerified });
+      say(lead.entitlementVerified ? 'Right person: not confirmed' : 'Right person confirmed');
+      onChanged();
+    } catch (err: any) {
+      say(err?.response?.data?.message || 'That could not be saved.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const take = async (text: string) => {
+    setBusy(true);
+    try {
+      await surplusAPI.setNextAction(lead.id, {
+        title: text,
+        dueDate: new Date(tomorrowNine()).toISOString(),
+        userId: lead.ownerId || currentUser?.id || null,
+      });
+      say('Next action set, due tomorrow');
+      onChanged();
+    } catch (err: any) {
+      say(err?.response?.data?.message || 'The next action could not be saved.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const extra = (q: CaseQuestion) => {
+    if (q.key === 'money' && property.sourceUrl) {
+      return (
+        <a href={property.sourceUrl} target="_blank" rel="noopener noreferrer" className="dc-wp-link">
+          open at the clerk
+        </a>
+      );
+    }
+    if (q.key === 'person') {
+      return (
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
+          <input type="checkbox" checked={!!lead.entitlementVerified} disabled={busy} onChange={flipPerson} style={{ accentColor: 'var(--mint)' }} />
+          Confirmed
+        </label>
+      );
+    }
+    if ((q.key === 'signer' || q.key === 'reach') && (hasPeople || lead.isDeceased)) {
+      return (
+        <button type="button" className="dc-wp-mini" onClick={onOpenPeople}>
+          People
+        </button>
+      );
+    }
+    return null;
+  };
+
+  if (!questions.length) return null;
   return (
-    <div className="dc-wp-gate">
-      <div className="lead">
-        Next: <b>{next}</b> still needs
+    <div style={{ marginBottom: 14 }}>
+      <div className="dc-wp-questions">
+        {questions.map((q) => (
+          <div key={q.key} className={`dc-wp-q ${q.state}`}>
+            <div className="dc-lbl">{q.label}</div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: QUESTION_TONE[q.state], marginTop: 3 }}>{q.answer}</div>
+            {q.detail && <div style={{ fontSize: 11.5, color: 'var(--faint)', marginTop: 2 }}>{q.detail}</div>}
+            {extra(q) && <div style={{ fontSize: 11.5, marginTop: 5 }}>{extra(q)}</div>}
+          </div>
+        ))}
       </div>
-      {shown.map((m) => (
-        <div key={m} className="item">
-          <span className="box" aria-hidden="true" />
-          {m}
-        </div>
-      ))}
-      {rest.length > 0 && (
-        <details>
-          <summary>and {rest.length} more</summary>
-          {rest.map((m) => (
-            <div key={m} className="item">
-              <span className="box" aria-hidden="true" />
-              {m}
+      {!lead.nextTask && suggestions.length > 0 && (
+        <div style={{ marginTop: 10, display: 'grid', gap: 6 }}>
+          <div className="dc-lbl">Suggested, no next action set</div>
+          {suggestions.map((s) => (
+            <div key={s.key} className="dc-wp-suggest">
+              <span style={{ flex: 1, minWidth: 0 }}>{s.text}</span>
+              <button type="button" className="dc-wp-mini on" disabled={busy} onClick={() => take(s.text)}>
+                Make it the next action
+              </button>
+              <button type="button" className="dc-wp-mini" onClick={() => dismiss(s.key)}>
+                Dismiss
+              </button>
             </div>
           ))}
-        </details>
+        </div>
       )}
     </div>
   );

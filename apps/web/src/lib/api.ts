@@ -237,6 +237,11 @@ export const surplusAPI = {
   ) => api.post('/surplus/letter-mailed', { ids, ...data }),
   /** Put a file on hold with a reason, or release it. A held file is not worked and its drips wait. */
   hold: (id: string, on: boolean, reason?: string) => api.post(`/surplus/${id}/hold`, { on, reason }),
+  /** Who on the team owns the case; null clears it. */
+  setOwner: (id: string, userId: string | null) => api.post(`/surplus/${id}/owner`, { userId }),
+  /** Set the next action, or rewrite the current one in place with its taskId. */
+  setNextAction: (id: string, body: { title: string; dueDate: string; userId?: string | null; taskId?: string | null }) =>
+    api.post(`/surplus/${id}/next-action`, body),
   /** An envelope came back undeliverable (or undo it): that address is not mailed again. */
   letterReturned: (letterId: string, returned: boolean) =>
     api.post(`/surplus/letters/${letterId}/returned`, { returned }),

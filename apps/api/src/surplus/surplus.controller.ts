@@ -122,14 +122,16 @@ export class SurplusController {
     @Query('letterDue') letterDue?: string,
     @Query('updateOverdue') updateOverdue?: string,
     @Query('batch') batch?: string,
+    @Query('mine') mine?: string,
     @Query('sort') sort?: string,
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
   ) {
-    const { organizationId } = this.decodeToken(authHeader);
+    const { organizationId, userId } = this.decodeToken(authHeader);
     const num = (v?: string) => (v == null || v === '' ? undefined : Number(v));
     return this.surplus.list({
       organizationId,
+      ownerId: mine === 'true' && userId ? userId : undefined,
       search,
       tier,
       queue,
@@ -1123,6 +1125,20 @@ export class SurplusController {
   async hold(@Param('id') id: string, @Body() body: any, @Headers('authorization') authHeader?: string) {
     const { organizationId, userId } = this.decodeToken(authHeader);
     return this.surplus.setHold(id, { on: body?.on !== false, reason: body?.reason }, organizationId, userId);
+  }
+
+  /** Who on the team owns the case: { userId } or { userId: null } to clear. */
+  @Post(':id/owner')
+  async owner(@Param('id') id: string, @Body() body: any, @Headers('authorization') authHeader?: string) {
+    const { organizationId, userId } = this.decodeToken(authHeader);
+    return this.surplus.setOwner(id, body?.userId || null, organizationId || null, userId || null);
+  }
+
+  /** The next action: { title, dueDate, userId?, taskId? }. A taskId rewrites that follow-up in place. */
+  @Post(':id/next-action')
+  async nextAction(@Param('id') id: string, @Body() body: any, @Headers('authorization') authHeader?: string) {
+    const { organizationId, userId } = this.decodeToken(authHeader);
+    return this.surplus.setNextAction(id, body || {}, organizationId || null, userId || null);
   }
 
   /** An envelope came back undeliverable, or undo that: { returned: boolean }. */

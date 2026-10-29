@@ -80,6 +80,7 @@ import {
   surplusSearchWhere,
   surplusSearchPeopleHits,
 } from './surplus.util';
+import { caseQuestions, caseSuggestions } from './surplus-questions.util';
 import {
   SURPLUS_FLOOR,
   SURPLUS_EARLY_DAYS,
@@ -129,8 +130,10 @@ const LEAD_INCLUDE = {
     where: { completed: false },
     orderBy: { dueDate: 'asc' as const },
     take: 3,
-    select: { id: true, title: true, dueDate: true, userId: true },
+    select: { id: true, title: true, dueDate: true, userId: true, user: { select: { firstName: true, lastName: true } } },
   },
+  // Who on the team owns the case: the course's Owner field.
+  assignedTo: { select: { id: true, firstName: true, lastName: true } },
   // Whether each channel has been TRIED, counted off the records the
   // channels themselves write. The course's rule is that a file is not worked
   // until it has been called, texted, emailed and lettered, and a checkbox
@@ -1635,6 +1638,75 @@ export class SurplusService {
   }
 
   /**
+   * Give the case an owner on the team, or take it away. The course's Owner
+   * field, stored on the lead's assignee, which surplus had never used.
+   */
+  async setOwner(leadId: string, userId: string | null, organizationId?: string | null, byUserId?: string | null) {
+    const lead = await this.prisma.lead.findFirst({
+      where: { id: leadId, source: LeadSource.SURPLUS, ...(organizationId ? { organizationId } : {}) },
+      select: { id: true, assignedToUserId: true },
+    });
+    if (!lead) throw new BadRequestException('Surplus lead not found');
+    let name: string | null = null;
+    if (userId) {
+      const user = await this.prisma.user.findFirst({
+        where: { id: userId, ...(organizationId ? { organizationId } : {}) },
+        select: { firstName: true, lastName: true },
+      });
+      if (!user) throw new BadRequestException('That person is not on the team.');
+      name = `${user.firstName || ''} ${user.lastName || ''}`.trim();
+    }
+    if (lead.assignedToUserId === userId) return { ownerId: userId, ownerName: name };
+    await this.prisma.lead.update({ where: { id: leadId }, data: { assignedToUserId: userId } });
+    if (byUserId) {
+      await this.prisma.note.create({
+        data: { leadId, userId: byUserId, content: userId ? `Owner set to ${name}.` : 'Owner cleared.' },
+      });
+    }
+    return { ownerId: userId, ownerName: name };
+  }
+
+  /**
+   * Set the case's next action: a dated task with a person on it. With a
+   * taskId it rewrites that task in place, so changing the next action does
+   * not leave the old one behind looking done or still open.
+   */
+  async setNextAction(
+    leadId: string,
+    body: { taskId?: string | null; title?: string; dueDate?: string | null; userId?: string | null },
+    organizationId?: string | null,
+    byUserId?: string | null,
+  ) {
+    const lead = await this.prisma.lead.findFirst({
+      where: { id: leadId, source: LeadSource.SURPLUS, ...(organizationId ? { organizationId } : {}) },
+      select: { id: true },
+    });
+    if (!lead) throw new BadRequestException('Surplus lead not found');
+    const title = String(body.title || '').trim();
+    if (!title) throw new BadRequestException('Say what the next action is.');
+    const due = body.dueDate ? new Date(body.dueDate) : null;
+    if (!due || isNaN(due.getTime())) throw new BadRequestException('Give the next action a due date.');
+    const userId = body.userId || byUserId || null;
+    if (userId) {
+      const user = await this.prisma.user.findFirst({
+        where: { id: userId, ...(organizationId ? { organizationId } : {}) },
+        select: { id: true },
+      });
+      if (!user) throw new BadRequestException('That person is not on the team.');
+    }
+    if (body.taskId) {
+      const task = await this.prisma.task.findFirst({ where: { id: body.taskId, leadId, completed: false }, select: { id: true } });
+      if (!task) throw new BadRequestException('That follow-up is no longer open.');
+      return this.prisma.task.update({ where: { id: task.id }, data: { title, dueDate: due, userId } });
+    }
+    const task = await this.prisma.task.create({ data: { leadId, title, dueDate: due, userId } });
+    await this.prisma.activity.create({
+      data: { leadId, userId: byUserId || null, type: 'TASK_CREATED', description: `Next action set: ${title}`, metadata: { title } },
+    });
+    return task;
+  }
+
+  /**
    * Mark an envelope as having come back undeliverable, or undo that. The
    * address on it is not written to again (see letterState), and the
    * returned letter stops holding the claim in Letter sent.
@@ -2006,6 +2078,10 @@ export class SurplusService {
       surplusDetail: { is: detailWhere },
     };
 
+    // "Mine": the cases this teammate owns. Unowned cases are everyone's and
+    // stay out of it.
+    if (filters.ownerId) where.assignedToUserId = filters.ownerId;
+
     // Word by word, so a first name followed by a last or middle name finds
     // the person. See surplusSearchWhere.
     const searched = surplusSearchWhere(filters.search);
@@ -2307,9 +2383,13 @@ export class SurplusService {
 
     const gate = complianceGate(facts);
 
-    return {
+    const row = {
       id: lead.id,
       claimant: `${lead.sellerFirstName} ${lead.sellerLastName}`.trim(),
+      isEntity: ENTITY_NAME.test(`${lead.sellerFirstName || ''} ${lead.sellerLastName || ''}`),
+      /** The teammate who owns this claimant's case, or null. */
+      ownerId: lead.assignedToUserId || null,
+      ownerName: lead.assignedTo ? `${lead.assignedTo.firstName || ''} ${lead.assignedTo.lastName || ''}`.trim() : null,
       claimantType: d.claimantType,
       address: lead.propertyAddress,
       city: lead.propertyCity,
@@ -2801,8 +2881,16 @@ export class SurplusService {
 
       // The next thing somebody has committed to doing on this claimant, and
       // whether it has slipped. Open tasks only, soonest first.
+      // The course's Next action and Due. Tasks are soonest first, so this
+      // is whatever somebody committed to doing next.
       nextTask: lead.tasks?.[0]
-        ? { id: lead.tasks[0].id, title: lead.tasks[0].title, dueDate: lead.tasks[0].dueDate }
+        ? {
+            id: lead.tasks[0].id,
+            title: lead.tasks[0].title,
+            dueDate: lead.tasks[0].dueDate,
+            userId: lead.tasks[0].userId || null,
+            userName: lead.tasks[0].user?.firstName || null,
+          }
         : null,
       openTaskCount: lead.tasks?.length || 0,
       overdueTaskCount: (lead.tasks || []).filter(
@@ -2821,6 +2909,10 @@ export class SurplusService {
         associates.filter((h: any) => h.callable).length,
       ),
     };
+    // What the case still has to settle, read off the row itself, and what
+    // to do about it when nobody has set a next action.
+    const questions = caseQuestions(row);
+    return { ...row, questions, suggestions: caseSuggestions(row, questions) };
   }
 
   /**
@@ -3113,6 +3205,8 @@ export function groupByProperty(rows: any[]): any[] {
         .sort((a: any, b: any) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())[0] || null,
       openTaskCount: ranked.reduce((n: number, m: any) => n + (m.openTaskCount || 0), 0),
       overdueTaskCount: ranked.reduce((n: number, m: any) => n + (m.overdueTaskCount || 0), 0),
+      /** Whoever owns any claimant on the property, so the board can say whose it is. */
+      ownerNames: Array.from(new Set(ranked.map((m: any) => m.ownerName).filter(Boolean))),
       // A property takes its most actionable claimant's queue, since that is
       // the work it represents: one callable owner makes the house callable
       // even when their co-owner is a dead end.
