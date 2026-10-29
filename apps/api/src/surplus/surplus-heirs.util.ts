@@ -1,4 +1,5 @@
 import { traceState } from './surplus-skiptrace.util';
+import { outreachRank } from './surplus-outreach.util';
 import {
   SurplusPersonRole,
   SURPLUS_PERSON_ROLE_LABEL,
@@ -35,6 +36,9 @@ export function heirRow(h: any, badNumbers?: Set<string>) {
   const emails = [h.email1, h.email2].filter(Boolean);
   const cleanPhoneCount = phones.filter((p) => !p.dnc && !p.bad).length;
   const role = (h.role || SurplusPersonRole.HEIR) as SurplusPersonRole;
+  // Who to try first: spouse, children, heirs, family, then neighbors. The
+  // same order the outreach list uses, so the two never disagree.
+  const priority = outreachRank({ role, relationship: h.relationship, deceased: h.deceased, doNotCall: h.doNotCall });
   const contactStatus = (h.contactStatus || SurplusContactStatus.NOT_CONTACTED) as SurplusContactStatus;
 
   return {
@@ -50,6 +54,8 @@ export function heirRow(h: any, badNumbers?: Set<string>) {
     /** When this person last gained a phone or email. See surplus-contact-stamp.util.ts. */
     contactInfoUpdatedAt: h.contactInfoUpdatedAt || null,
     relationship: h.relationship,
+    priority: priority.rank,
+    priorityLabel: priority.label,
     share: h.share,
     street: h.street,
     city: h.city,
