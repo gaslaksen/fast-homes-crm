@@ -239,7 +239,9 @@ export const surplusAPI = {
     } = {},
   ) => api.post('/surplus/letter-mailed', { ids, ...data }),
   /** Put a file on hold with a reason, or release it. A held file is not worked and its drips wait. */
-  hold: (id: string, on: boolean, reason?: string) => api.post(`/surplus/${id}/hold`, { on, reason }),
+  /** A revisit date ("2027-04-29") makes the hold a pause, which the daily cadence ends. */
+  hold: (id: string, on: boolean, reason?: string, until?: string) =>
+    api.post(`/surplus/${id}/hold`, { on, reason, ...(until ? { until } : {}) }),
   /** Who on the team owns the case; null clears it. */
   setOwner: (id: string, userId: string | null) => api.post(`/surplus/${id}/owner`, { userId }),
   /** Set the next action, or rewrite the current one in place with its taskId. */

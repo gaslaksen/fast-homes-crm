@@ -43,6 +43,9 @@ interface Person {
   ticks: Record<Channel, Tick | null>;
   done: { at: string; by: string | null } | null;
   notes: { at: string; kind: string; note: string; by: string | null }[];
+  /** Can be tried and nothing has been tried in a week, or ever. */
+  dueToday?: boolean;
+  lastTouchAt?: string | null;
 }
 
 interface OutreachCase {
@@ -54,8 +57,13 @@ interface OutreachCase {
   queueLabel: string;
   queueReason: string;
   holdReason: string | null;
+  holdUntil?: string | null;
   netToClaimant: number;
   daysLeft: number | null;
+  /** Under two months to the day-340 cutoff. */
+  shortWindow?: boolean;
+  daysToCutoff?: number | null;
+  dueCount?: number;
   letterDue: boolean;
   people: Person[];
   openCount: number;
@@ -67,6 +75,8 @@ interface OutreachList {
   caseCount: number;
   peopleCount: number;
   openCount: number;
+  dueCount?: number;
+  touchEveryDays?: number;
   truncated: boolean;
   groups: { key: string; label: string; cases: OutreachCase[] }[];
 }
@@ -128,6 +138,11 @@ function OutreachPage() {
   const [batches, setBatches] = useState<BatchOption[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [hideDone, setHideDone] = useState(false);
+  /**
+   * Only the people due a touch, as one list with the biggest surplus first
+   * and then the nearest deadline. The Daily Brief links here with ?due=1.
+   */
+  const [dueOnly, setDueOnly] = useState(params.get('due') === '1');
   const [busy, setBusy] = useState<string | null>(null);
   const [noteFor, setNoteFor] = useState<string | null>(null);
   const [noteText, setNoteText] = useState('');
@@ -197,11 +212,19 @@ function OutreachPage() {
 
   const groups = useMemo(() => {
     if (!list) return [];
+    if (dueOnly) {
+      const cases = list.groups
+        .flatMap((g) => g.cases)
+        .filter((c) => (c.dueCount || 0) > 0)
+        .map((c) => ({ ...c, people: c.people.filter((p) => p.dueToday) }))
+        .sort((a, b) => b.netToClaimant - a.netToClaimant || (a.daysLeft ?? 9999) - (b.daysLeft ?? 9999));
+      return cases.length ? [{ key: 'due', label: 'Due a touch today', cases }] : [];
+    }
     if (!hideDone) return list.groups;
     return list.groups
       .map((g) => ({ ...g, cases: g.cases.filter((c) => c.openCount > 0) }))
       .filter((g) => g.cases.length);
-  }, [list, hideDone]);
+  }, [list, hideDone, dueOnly]);
 
   const exportCsv = () => {
     if (!list) return;
@@ -285,6 +308,11 @@ function OutreachPage() {
               : `${p.rankLabel}${p.relationship ? ` · ${p.relationship}` : ''}`}
           </div>
           <div style={{ color: 'var(--faint)', fontSize: 11.5 }}>{p.statusLabel}</div>
+          {p.dueToday && (
+            <div style={{ color: 'var(--amber)', fontSize: 11.5, fontWeight: 600 }}>
+              {p.lastTouchAt ? `Due: last tried ${fmtDate(p.lastTouchAt)}` : 'Due: never tried'}
+            </div>
+          )}
         </td>
         <td style={cell}>
           {p.phones.length === 0 && <span style={{ color: 'var(--faint)' }}>None</span>}
@@ -412,8 +440,15 @@ function OutreachPage() {
                   </optgroup>
                 )}
               </select>
+              <label
+                style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: 'var(--dim)' }}
+                title={`People who can be tried and have had nothing tried in ${list?.touchEveryDays ?? 7} days, or ever.`}
+              >
+                <input type="checkbox" checked={dueOnly} onChange={(e) => setDueOnly(e.target.checked)} />
+                Due today{list?.dueCount != null ? ` (${list.dueCount})` : ''}
+              </label>
               <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: 'var(--dim)' }}>
-                <input type="checkbox" checked={hideDone} onChange={(e) => setHideDone(e.target.checked)} />
+                <input type="checkbox" checked={hideDone} disabled={dueOnly} onChange={(e) => setHideDone(e.target.checked)} />
                 Hide worked-through cases
               </label>
               <button type="button" className="dc-or-btn" onClick={exportCsv} disabled={!list}>
@@ -466,8 +501,16 @@ function OutreachPage() {
                     <div style={{ fontSize: 12.5, color: c.daysLeft !== null && c.daysLeft <= 30 ? 'var(--red)' : 'var(--dim)' }}>
                       {daysLeftLabel(c.daysLeft)}
                     </div>
+                    {c.shortWindow && (
+                      <div
+                        style={{ fontSize: 12, color: 'var(--red)', fontWeight: 600 }}
+                        title="Under two months to the team's day-340 cutoff. Day 365 is the legal end."
+                      >
+                        {c.daysToCutoff != null && c.daysToCutoff >= 0 ? `Short window, ${c.daysToCutoff}d to day 340` : 'Past day 340'}
+                      </div>
+                    )}
                     <div style={{ color: 'var(--faint)', fontSize: 12 }}>
-                      {c.holdReason ? `On hold: ${c.holdReason}` : c.queueReason}
+                      {c.holdUntil ? c.queueReason : c.holdReason ? `On hold: ${c.holdReason}` : c.queueReason}
                     </div>
                     <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
                       <span style={{ color: 'var(--faint)', fontSize: 12 }}>

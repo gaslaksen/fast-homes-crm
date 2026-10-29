@@ -31,6 +31,7 @@ function brief(over: Partial<DigestBrief> = {}): DigestBrief {
     feedProblems: [],
     feedSummary: null,
     countyListsDue: [],
+    touchesDue: null,
     wholesale: null,
     appUrl: 'https://mydealcore.com',
     isEmpty: false,
@@ -161,6 +162,14 @@ describe('DigestRenderService', () => {
     expect(html).toContain('Marion list');
     expect(html).toContain('UPDATE DUE Sun 10/25');
     expect(render.renderText(b)).toContain('Marion list (monthly, by email): UPDATE DUE Sun 10/25, 4 days late. Never asked.');
+  });
+
+  it('shows the touches due today with a link to the outreach list', () => {
+    const b = brief({ touchesDue: { people: 3, cases: 2, line: '3 people on 2 files with nothing tried in 7 days or more.' } });
+    const html = render.renderHtml(b);
+    expect(html).toContain('Touches due today');
+    expect(html).toContain('/surplus-funds/outreach?due=1');
+    expect(render.renderText(b)).toContain('TOUCHES DUE TODAY\n  3 people on 2 files with nothing tried in 7 days or more.');
   });
 
   it('puts wholesaling on one line at the bottom', () => {

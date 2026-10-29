@@ -899,6 +899,11 @@ model SurplusDetail {
   heldAt       DateTime?
   holdReason   String?
   heldByUserId String?
+  /// A hold with a revisit date is a pause: after sixty days of full effort
+  /// with nobody reached, the file is set aside for about six months. The
+  /// daily cadence releases it on this day and leaves a revisit task.
+  /// Calendar day at noon UTC. Null on an ordinary hold, which has no end.
+  holdUntil    DateTime?
   doNotCall  Boolean @default(false)
   callNotes  String?
   touchDays  Json?

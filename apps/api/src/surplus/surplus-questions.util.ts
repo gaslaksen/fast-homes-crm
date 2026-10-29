@@ -88,6 +88,10 @@ export interface QuestionFacts {
   stageBlocks?: Record<string, string[]> | null;
   heldAt?: Date | string | null;
   holdReason?: string | null;
+  /** Set when the hold is a pause, which ends on its own. */
+  holdUntil?: Date | string | null;
+  /** Sixty days of full effort and nobody reached (see surplus-windows.util). */
+  pauseOffer?: { since: Date | string; days: number; until: Date | string } | null;
   claimantUpdate?: { overdue?: boolean } | null;
 }
 
@@ -201,7 +205,21 @@ export function caseQuestions(r: QuestionFacts): CaseQuestion[] {
 export function caseSuggestions(r: QuestionFacts, questions = caseQuestions(r)): CaseSuggestion[] {
   if (r.stage === 'Dead' || r.stage === 'Paid') return [];
   if (r.heldAt) {
+    // A pause ends itself; there is nothing to settle until it does.
+    if (r.holdUntil) return [];
     return [{ key: 'hold', text: `Settle the hold${r.holdReason ? ` (${r.holdReason})` : ''} and release the file` }];
+  }
+  // The rules' answer to a file that has had everything: stop, and come back
+  // in six months. Ahead of everything else, because it is the decision the
+  // file is waiting on.
+  if (r.pauseOffer) {
+    const until = new Date(r.pauseOffer.until).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+    return [
+      {
+        key: 'pause',
+        text: `${r.pauseOffer.days} days of full effort and nobody reached. Pause the file until ${until} and revisit it then`,
+      },
+    ];
   }
   const q = Object.fromEntries(questions.map((x) => [x.key, x])) as Record<QuestionKey, CaseQuestion>;
   const out: CaseSuggestion[] = [];

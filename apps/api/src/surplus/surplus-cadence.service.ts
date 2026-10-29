@@ -37,6 +37,7 @@ export const remailTitle = (name: string) => `Write to ${name} again`;
 export const RECHECK_TITLE_PREFIX = 'Re-run the free searches for ';
 export const REMAIL_TITLE_PREFIX = 'Write to ';
 export const REMAIL_TITLE_SUFFIX = ' again';
+export const revisitTitle = (name: string) => `Revisit ${name}: the pause has ended`;
 
 /** Stages where nobody has signed and a claimant can still be unreached. */
 const UNREACHED_STAGES = [SurplusStage.NEW, SurplusStage.CONTACTED];
@@ -73,8 +74,16 @@ export class SurplusCadenceService {
   }
 
   /** One pass over every live claim. Returns what it created, for the log and the manual trigger. */
-  async runOnce(): Promise<{ countyTasks: number; claimantTasks: number; recheckTasks: number; remailTasks: number }> {
+  async runOnce(): Promise<{
+    countyTasks: number;
+    claimantTasks: number;
+    recheckTasks: number;
+    remailTasks: number;
+    pausesEnded: number;
+  }> {
     const now = new Date();
+    // Pauses first, so a file that comes back today gets its rechecks today.
+    const pausesEnded = await this.endPauses(now);
     const rechecks = await this.rechecks(now);
     const leads = await this.prisma.lead.findMany({
       where: {
@@ -119,12 +128,56 @@ export class SurplusCadenceService {
         if (await this.nextClaimantTask(lead.id, name, d, lead.tasks, now)) claimantTasks += 1;
       }
     }
-    if (countyTasks || claimantTasks || rechecks.recheckTasks || rechecks.remailTasks) {
+    if (countyTasks || claimantTasks || rechecks.recheckTasks || rechecks.remailTasks || pausesEnded) {
       this.logger.log(
-        `Cadence: ${countyTasks} county follow-up(s), ${claimantTasks} claimant update(s), ${rechecks.recheckTasks} recheck(s), ${rechecks.remailTasks} re-mail(s) scheduled`,
+        `Cadence: ${countyTasks} county follow-up(s), ${claimantTasks} claimant update(s), ${rechecks.recheckTasks} recheck(s), ${rechecks.remailTasks} re-mail(s) scheduled, ${pausesEnded} pause(s) ended`,
       );
     }
-    return { countyTasks, claimantTasks, ...rechecks };
+    return { countyTasks, claimantTasks, ...rechecks, pausesEnded };
+  }
+
+  /**
+   * Bring paused files back on their revisit day: release the hold, say so
+   * on the timeline, and leave a task so somebody looks at the file again
+   * rather than it quietly rejoining a queue.
+   */
+  async endPauses(now: Date): Promise<number> {
+    const due = await this.prisma.surplusDetail.findMany({
+      where: { heldAt: { not: null }, holdUntil: { not: null, lte: now } },
+      select: {
+        id: true,
+        leadId: true,
+        heldAt: true,
+        holdReason: true,
+        lead: { select: { sellerFirstName: true, sellerLastName: true } },
+      },
+    });
+    for (const d of due) {
+      const name = `${d.lead?.sellerFirstName || ''} ${d.lead?.sellerLastName || ''}`.trim() || 'the claimant';
+      const since = d.heldAt
+        ? new Date(d.heldAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'America/New_York' })
+        : null;
+      await this.prisma.surplusDetail.update({
+        where: { id: d.id },
+        data: { heldAt: null, holdReason: null, heldByUserId: null, holdUntil: null },
+      });
+      await this.prisma.activity.create({
+        data: {
+          leadId: d.leadId,
+          type: 'NOTE_ADDED',
+          description: [
+            'Pause ended, back in the queues.',
+            since ? `Paused ${since}.` : null,
+            d.holdReason ? `Reason: ${d.holdReason}` : null,
+          ]
+            .filter(Boolean)
+            .join(' '),
+          metadata: { auto: true, cadence: true, pauseEnded: true },
+        },
+      });
+      await this.createTask(d.leadId, revisitTitle(name), now);
+    }
+    return due.length;
   }
 
   /**
@@ -137,7 +190,8 @@ export class SurplusCadenceService {
       where: {
         source: LeadSource.SURPLUS,
         status: { not: 'DEAD' },
-        surplusDetail: { stage: { in: UNREACHED_STAGES }, tappedAt: null, doNotCall: false },
+        // A held or paused file is not worked, so it gets no recheck either.
+        surplusDetail: { stage: { in: UNREACHED_STAGES }, tappedAt: null, doNotCall: false, heldAt: null },
       },
       select: {
         id: true,

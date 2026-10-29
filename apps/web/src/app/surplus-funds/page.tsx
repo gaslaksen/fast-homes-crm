@@ -343,6 +343,19 @@ const SURPLUS_COLUMNS: PipelineColumn<any>[] = [
           }
         >
           {r.daysSinceSale > 365 ? `${(r.daysSinceSale / 365).toFixed(1)}y` : `${r.daysSinceSale}d`}
+          {/* Under two months to the team's day-340 cutoff. */}
+          {r.shortWindow && (
+            <span
+              style={{ display: 'block', fontSize: 10.5, color: 'var(--red)', fontWeight: 600 }}
+              title={
+                r.daysToCutoff != null && r.daysToCutoff >= 0
+                  ? `${r.daysToCutoff} days to the day-340 cutoff. Day 365 is the legal end.`
+                  : 'Past the day-340 cutoff, still inside the legal year.'
+              }
+            >
+              short
+            </span>
+          )}
         </span>
       ),
   },
@@ -503,6 +516,7 @@ const STATUS_CHIPS: [string, string, string | undefined][] = [
     'Update overdue',
     'A signed claimant who has not heard from us in thirty days. The course says monthly, news or not.',
   ],
+  ['short', 'Short window', 'Under two months to the day-340 cutoff the team works to, or past it but still inside the year.'],
   ['estate', 'Estate or probate', undefined],
   ['lien', 'Competing lien filed', 'Informational. Does not block outreach, but the payout may land under the posted surplus.'],
 ];
@@ -868,6 +882,7 @@ export default function SurplusFundsPage() {
       // off the group's rolled-up flags, since a property counts if ANY
       // claimant on it qualifies.
       if (chipQ === 'estate') data = data.filter((r) => r.anyDeceased);
+      if (chipQ === 'short') data = data.filter((r) => r.shortWindow);
       if (chipQ === 'lien') data = data.filter((r) => r.competingLien);
       if (underYear && !wide) data = data.filter((r) => r.daysSinceSale == null || r.daysSinceSale <= 365);
       setRows(data);
