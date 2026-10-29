@@ -294,6 +294,27 @@ export class LeadsController {
     });
   }
 
+  /** Change a saved note. Only its author or an admin may. */
+  @Patch(':id/notes/:noteId')
+  async editNote(
+    @Param('id') leadId: string,
+    @Param('noteId') noteId: string,
+    @Body() body: { content: string },
+    @Headers('authorization') authHeader?: string,
+  ) {
+    return this.leadsService.editNote(leadId, noteId, body?.content, this.decodeToken(authHeader));
+  }
+
+  /** Delete a saved note. Only its author or an admin may. */
+  @Delete(':id/notes/:noteId')
+  async deleteNote(
+    @Param('id') leadId: string,
+    @Param('noteId') noteId: string,
+    @Headers('authorization') authHeader?: string,
+  ) {
+    return this.leadsService.deleteNote(leadId, noteId, this.decodeToken(authHeader));
+  }
+
   @Post(':id/send-outreach')
   async sendInitialOutreach(@Param('id') id: string) {
     try {

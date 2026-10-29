@@ -415,6 +415,9 @@ export default function PipelineWorkPanel({
                 await leadsAPI.addNote(subject.leadId, t, currentUser.id);
                 await loadComms();
               }}
+              leadId={subject.leadId}
+              currentUser={currentUser}
+              onNotesChanged={() => loadComms()}
             />
           )}
         </div>

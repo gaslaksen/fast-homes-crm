@@ -99,6 +99,10 @@ export interface NoteItem {
   title: string;
   body: string | null;
   transcript: string | null;
+  /** The user who wrote a note. Absent on call summaries. */
+  authorId?: string | null;
+  /** Set once a note has been changed after it was saved. */
+  editedAt?: string | null;
 }
 
 export interface CommunicationsResponse {

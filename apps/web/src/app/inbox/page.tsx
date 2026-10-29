@@ -728,6 +728,7 @@ function InboxWorkspace() {
               await leadsAPI.addNote(selectedId, text, currentUser.id);
               await loadCommunications(selectedId);
             }}
+            onNotesChanged={() => (selectedId ? loadCommunications(selectedId) : undefined)}
             onLeadPatch={patchLead}
             onMarkDead={handleMarkDead}
             hideRailNav

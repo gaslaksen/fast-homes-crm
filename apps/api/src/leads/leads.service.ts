@@ -1,4 +1,4 @@
-import { Injectable, Inject, forwardRef, Logger, Optional , BadRequestException } from '@nestjs/common';
+import { Injectable, Inject, forwardRef, Logger, Optional, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { TouchService } from './touch.service';
 import {
@@ -1180,6 +1180,50 @@ export class LeadsService {
     });
 
     return note;
+  }
+
+  /**
+   * The note a person may change: on this lead, in their organization, and
+   * written by them unless they are an admin. The panel shows notes as
+   * `note_<id>`, so either form of the id is taken.
+   */
+  private async ownNote(
+    leadId: string,
+    noteId: string,
+    who: { userId?: string; organizationId?: string; role?: string },
+  ) {
+    if (!who.userId || !who.organizationId) throw new ForbiddenException('Sign in to change notes');
+    const id = noteId.replace(/^note_/, '');
+    const note = await this.prisma.note.findFirst({
+      where: { id, leadId, lead: { organizationId: who.organizationId } },
+    });
+    if (!note) throw new NotFoundException('Note not found');
+    if (note.userId !== who.userId && who.role !== 'ADMIN') {
+      throw new ForbiddenException('Only the person who wrote a note, or an admin, can change it');
+    }
+    return note;
+  }
+
+  async editNote(
+    leadId: string,
+    noteId: string,
+    content: string | undefined,
+    who: { userId?: string; organizationId?: string; role?: string },
+  ) {
+    const text = (content ?? '').trim();
+    if (!text) throw new BadRequestException('A note cannot be empty. Delete it instead.');
+    const note = await this.ownNote(leadId, noteId, who);
+    return this.prisma.note.update({ where: { id: note.id }, data: { content: text } });
+  }
+
+  async deleteNote(
+    leadId: string,
+    noteId: string,
+    who: { userId?: string; organizationId?: string; role?: string },
+  ) {
+    const note = await this.ownNote(leadId, noteId, who);
+    await this.prisma.note.delete({ where: { id: note.id } });
+    return { deleted: note.id };
   }
 
   /**

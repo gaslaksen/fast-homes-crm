@@ -76,6 +76,9 @@ export const leadsAPI = {
     userId: string,
     opts?: { isInternalComment?: boolean; mentions?: string[] },
   ) => api.post(`/leads/${id}/notes`, { content, userId, ...opts }),
+  /** Only the note's author or an admin may; the API refuses anyone else. */
+  editNote: (id: string, noteId: string, content: string) => api.patch(`/leads/${id}/notes/${noteId}`, { content }),
+  deleteNote: (id: string, noteId: string) => api.delete(`/leads/${id}/notes/${noteId}`),
   upsertContract: (id: string, data: any) => api.post(`/leads/${id}/contract`, data),
   toggleAutoRespond: (id: string, autoRespond: boolean) =>
     api.patch(`/leads/${id}/auto-respond`, { autoRespond }),

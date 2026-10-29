@@ -488,6 +488,51 @@ const QUEUE_HELP: Record<string, string> = {
   closed: 'Paid out, already assigned, or do-not-call. Nothing to do.',
 };
 
+/** The drawer's status cuts: key, label, what it means. */
+const STATUS_CHIPS: [string, string, string | undefined][] = [
+  ['not_tapped', 'No reply yet', 'Nobody has heard back from anyone on this property yet. The working list.'],
+  ['missing', 'Untried channel', 'At least one of call, text, email, letter has not been tried on this property.'],
+  [
+    'letter_due',
+    'Letter due',
+    'Nobody has replied, there is an address, and the last letter is older than the cadence, or none has gone out.',
+  ],
+  [
+    'update_overdue',
+    'Update overdue',
+    'A signed claimant who has not heard from us in thirty days. The course says monthly, news or not.',
+  ],
+  ['estate', 'Estate or probate', undefined],
+  ['lien', 'Competing lien filed', 'Informational. Does not block outreach, but the payout may land under the posted surplus.'],
+];
+
+const TIER_HELP: Record<string, string> = {
+  A: '$25k and up, living owner, no competing lien',
+  B: '$10k to $25k, living owner',
+  C: '$25k and up, owner deceased',
+};
+
+const BAND_OPTS: [string, string][] = [
+  ['all', 'Any surplus'],
+  ['15-25', '$15k to $25k'],
+  ['25-50', '$25k to $50k'],
+  ['50+', '$50k+'],
+];
+
+const AGE_OPTS: [string, string][] = [
+  ['all', 'Any claim age'],
+  ['0-7', 'New, last 7 days'],
+  ['under-120', 'Under 120 days'],
+  ['120-365', '120 to 365 days'],
+  ['365+', 'Over 365 days'],
+];
+
+const WINDOW_OPTS: [string, string][] = [
+  ['all', 'Any claim window'],
+  ['open', 'Other claims still possible'],
+  ['closed', 'Other claims closed'],
+];
+
 /**
  * Whether the daily county pull is actually running.
  *
@@ -796,13 +841,11 @@ export default function SurplusFundsPage() {
         claimantType: ctype === 'all' ? undefined : ctype,
         county,
         band: band === 'all' ? undefined : band,
-        // "New, 7 days" is the same window as the 0-7 notice-age filter, so the
-        // quick chip drives the same query rather than a second one.
-        noticeAge: chipQ === 'new' ? '0-7' : ageQ === 'all' ? undefined : ageQ,
-        // "New, 7 days" is a deliberate look at what just landed, and asking
-        // for the claims under 120 days is the same deliberate look. Both show
-        // the early ones whatever this toggle says.
-        hideEarly: hideEarly && !wide && chipQ !== 'new' && ageQ !== 'under-120' ? true : undefined,
+        noticeAge: ageQ === 'all' ? undefined : ageQ,
+        // "New, last 7 days" is a deliberate look at what just landed, and
+        // asking for the claims under 120 days is the same deliberate look.
+        // Both show the early ones whatever this toggle says.
+        hideEarly: hideEarly && !wide && ageQ !== '0-7' && ageQ !== 'under-120' ? true : undefined,
         lienWindow: lienWin === 'all' ? undefined : lienWin,
         hideDead: (hideDead && !wide) || undefined,
         hideDnc: (hideDnc && !wide) || undefined,
@@ -1096,6 +1139,20 @@ export default function SurplusFundsPage() {
     setHideDnc(true);
   };
 
+  /** Take off the drawer's filters, leaving the queue, the search and the batch alone. */
+  const clearFilters = () => {
+    setTierQ(null);
+    setChipQ(null);
+    setStageQ(null);
+    setCounty('all');
+    setBand('all');
+    setCtype('all');
+    setAgeQ('all');
+    setLienWin('all');
+    setHideDead(true);
+    setHideDnc(true);
+  };
+
   /**
    * The IDI batch upload file for every claimant on the selected properties,
    * in IDI's Batch Template. Upload it to the profile folder over SFTP and
@@ -1256,21 +1313,31 @@ export default function SurplusFundsPage() {
     say(`Exported ${list.length} lead${list.length === 1 ? '' : 's'}.`);
   };
 
-  // How many secondary filters are on, for the badge on the Filters button.
-  // The queue chip is not counted: it is the board's primary cut, not a filter
-  // somebody could forget they set.
-  const activeFilters = [
-    tierQ,
-    chipQ,
-    stageQ,
-    county !== 'all',
-    band !== 'all',
-    ctype !== 'all',
-    ageQ !== 'all',
-    lienWin !== 'all',
-    !hideDead,
-    !hideDnc,
-  ].filter(Boolean).length;
+  /**
+   * The secondary filters that are on, each with a way to take it off. Drives
+   * both the badge on the Filters button and the chips under the queues. The
+   * queue is not here: it is the board's primary cut, not a filter somebody
+   * could forget they set.
+   */
+  const filterChips: { key: string; label: string; clear: () => void }[] = [];
+  const optLabel = (opts: [string, string][], v: string) => opts.find(([k]) => k === v)?.[1] ?? v;
+  if (chipQ) filterChips.push({ key: 'status', label: optLabel(STATUS_CHIPS.map(([k, l]) => [k, l]), chipQ), clear: () => setChipQ(null) });
+  if (tierQ) filterChips.push({ key: 'tier', label: `Tier: ${TIER[tierQ as keyof typeof TIER]?.label ?? tierQ}`, clear: () => setTierQ(null) });
+  if (stageQ) filterChips.push({ key: 'stage', label: `Stage: ${stageQ}`, clear: () => setStageQ(null) });
+  if (county !== 'all') filterChips.push({ key: 'county', label: county, clear: () => setCounty('all') });
+  if (band !== 'all') filterChips.push({ key: 'band', label: optLabel(BAND_OPTS, band), clear: () => setBand('all') });
+  if (ctype !== 'all') filterChips.push({ key: 'ctype', label: CLAIMANT_TYPE_LABEL[ctype] || ctype, clear: () => setCtype('all') });
+  if (ageQ !== 'all') filterChips.push({ key: 'age', label: optLabel(AGE_OPTS, ageQ), clear: () => setAgeQ('all') });
+  if (lienWin !== 'all') filterChips.push({ key: 'window', label: optLabel(WINDOW_OPTS, lienWin), clear: () => setLienWin('all') });
+  if (!hideDead) filterChips.push({ key: 'dead', label: 'Showing dead', clear: () => setHideDead(true) });
+  if (!hideDnc) filterChips.push({ key: 'dnc', label: 'Showing Do-Not-Call', clear: () => setHideDnc(true) });
+  const activeFilters = filterChips.length;
+
+  /** The count beside a status chip, where the stats carry one. */
+  const statusCount = (k: string): number | null => {
+    const n = { not_tapped: stats.notTapped, missing: stats.missingChannel, letter_due: stats.letterDue, update_overdue: stats.updateOverdue }[k];
+    return n ?? null;
+  };
 
   // Only counties we hold leads for. Offering the ones we intend to work next
   // put seven options on the menu that every returned an empty board.
@@ -1438,7 +1505,6 @@ export default function SurplusFundsPage() {
               set={setSort}
               opts={[
                 ['work', 'Sort: Call first'],
-                ['untapped', 'Sort: No reply first'],
                 ['surplus', 'Sort: Biggest surplus'],
                 ['net', 'Sort: Net to claimant'],
                 ['notice', 'Sort: Newest notice'],
@@ -1524,8 +1590,47 @@ export default function SurplusFundsPage() {
             </button>
           </div>
 
+          {/* What is narrowing the board, each with its own ✕. The Filters
+              badge said how many were on but not which, so a board that came
+              up short sent people opening the drawer to find out why. */}
+          {filterChips.length > 0 && (
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
+              {filterChips.map((c) => (
+                <span key={c.key} className="dc-active" style={{ background: 'var(--mintGhost)', color: 'var(--mint)', borderColor: 'var(--mint)' }}>
+                  {c.label}
+                  <button type="button" onClick={c.clear} aria-label={`Remove ${c.label}`}>
+                    ✕
+                  </button>
+                </span>
+              ))}
+              {filterChips.length > 1 && (
+                <button type="button" className="dc-btn sm" onClick={clearFilters}>
+                  Clear all
+                </button>
+              )}
+            </div>
+          )}
+
           {filtersOpen && (
             <div className="dc-drawer">
+              {/* Status first: these are the cuts people reach for. "New, 7
+                  days" moved to the claim age menu it always duplicated, and
+                  the "No reply first" sort went, since No reply yet is the
+                  same list without the rest under it. */}
+              <div className="dc-drawer-row">
+                <span className="dc-flabel">Status</span>
+                {STATUS_CHIPS.map(([k, l, help]) => (
+                  <button
+                    key={k}
+                    className={`dc-tab${chipQ === k ? ' on' : ''}`}
+                    onClick={() => setChipQ(chipQ === k ? null : k)}
+                    title={help}
+                  >
+                    {l}
+                    {statusCount(k) != null && <span style={{ marginLeft: 5, opacity: 0.6 }}>{statusCount(k)}</span>}
+                  </button>
+                ))}
+              </div>
               {/* The dollar band. Computed on every row and kept as a sort, but
                   the course's first quick filter is tier and a caller working
                   the big ones first should not need the dropdowns. */}
@@ -1536,87 +1641,23 @@ export default function SurplusFundsPage() {
                     key={t}
                     className={`dc-tab${tierQ === t ? ' on' : ''}`}
                     onClick={() => setTierQ(tierQ === t ? null : t)}
-                    title={
-                      t === 'A'
-                        ? '$25k and up, living owner, no competing lien'
-                        : t === 'B'
-                          ? '$10k to $25k, living owner'
-                          : '$25k and up, owner deceased'
-                    }
+                    title={TIER_HELP[t]}
                   >
                     {TIER[t].icon} {TIER[t].label}
                   </button>
                 ))}
               </div>
+              {/* One menu per question. The stage used to be three buttons and
+                  a menu that held the same three. */}
               <div className="dc-drawer-row">
-                <span className="dc-flabel">Status</span>
-                {(
-                  [
-                    ['not_tapped', 'No reply yet'],
-                    ['missing', 'Untried channel'],
-                    ['letter_due', 'Letter due'],
-                    ['update_overdue', 'Update overdue'],
-                    ['new', 'New, 7 days'],
-                    ['estate', 'Estate or probate'],
-                    ['lien', 'Competing lien filed'],
-                  ] as [string, string][]
-                ).map(([k, l]) => (
-                  <button
-                    key={k}
-                    className={`dc-tab${chipQ === k ? ' on' : ''}`}
-                    onClick={() => setChipQ(chipQ === k ? null : k)}
-                    title={
-                      k === 'lien'
-                        ? 'Informational. Does not block outreach, but the payout may land under the posted surplus.'
-                        : k === 'not_tapped'
-                          ? 'Nobody has heard back from anyone on this property yet. The working list.'
-                          : k === 'missing'
-                            ? 'At least one of call, text, email, letter has not been tried on this property.'
-                            : k === 'letter_due'
-                              ? 'Nobody has replied, there is an address, and the last letter is older than the cadence, or none has gone out.'
-                              : k === 'update_overdue'
-                                ? 'A signed claimant who has not heard from us in thirty days. The course says monthly, news or not.'
-                                : k === 'new'
-                                  ? 'Notice mailed in the last seven days.'
-                                  : undefined
-                    }
-                  >
-                    {l}
-                    {k === 'new' && <span style={{ marginLeft: 5, opacity: 0.6 }}>{stats.newSevenDays}</span>}
-                    {k === 'update_overdue' && stats.updateOverdue != null && (
-                      <span style={{ marginLeft: 5, opacity: 0.6 }}>{stats.updateOverdue}</span>
-                    )}
-                    {k === 'not_tapped' && stats.notTapped != null && (
-                      <span style={{ marginLeft: 5, opacity: 0.6 }}>{stats.notTapped}</span>
-                    )}
-                    {k === 'missing' && stats.missingChannel != null && (
-                      <span style={{ marginLeft: 5, opacity: 0.6 }}>{stats.missingChannel}</span>
-                    )}
-                    {k === 'letter_due' && stats.letterDue != null && (
-                      <span style={{ marginLeft: 5, opacity: 0.6 }}>{stats.letterDue}</span>
-                    )}
-                  </button>
-                ))}
-              </div>
-              <div className="dc-drawer-row">
-                <span className="dc-flabel">Stage</span>
-                {['Agreement Signed', 'Claim Filed', 'Paid'].map((k) => (
-                  <button key={k} className={`dc-tab${stageQ === k ? ' on' : ''}`} onClick={() => setStageQ(stageQ === k ? null : k)}>
-                    {k}
-                  </button>
-                ))}
+                <span className="dc-flabel">Narrow</span>
                 <Sel
                   v={stageQ || 'all'}
                   set={(v) => setStageQ(v === 'all' ? null : v)}
-                  opts={[['all', 'Any pipeline status'] as [string, string]].concat(
-                    SURPLUS_STAGES.map((x) => [x, x] as [string, string]),
-                  )}
+                  opts={[['all', 'Any stage'] as [string, string]].concat(SURPLUS_STAGES.map((x) => [x, x] as [string, string]))}
                 />
-              </div>
-              <div className="dc-drawer-row">
-                <span className="dc-flabel">Narrow</span>
                 <Sel v={county} set={setCounty} opts={countyOpts} />
-                <Sel v={band} set={setBand} opts={[['all', 'Any surplus'], ['15-25', '$15k to $25k'], ['25-50', '$25k to $50k'], ['50+', '$50k+']]} />
+                <Sel v={band} set={setBand} opts={BAND_OPTS} />
                 <Sel
                   v={ctype}
                   set={setCtype}
@@ -1627,26 +1668,22 @@ export default function SurplusFundsPage() {
                 <Sel
                   v={ageQ}
                   set={setAgeQ}
-                  opts={[
-                    ['all', 'Any claim age'],
-                    ['under-120', 'Under 120 days'],
-                    ['120-365', '120 to 365 days'],
-                    ['365+', 'Over 365 days'],
-                  ]}
+                  opts={AGE_OPTS.map(([k, l]) =>
+                    k === '0-7' && stats.newSevenDays != null ? [k, `${l} (${stats.newSevenDays})`] : [k, l],
+                  )}
                 />
-                <Sel
-                  v={lienWin}
-                  set={setLienWin}
-                  opts={[['all', 'Any claim window'], ['open', 'Other claims still possible'], ['closed', 'Other claims closed']]}
-                />
+                <Sel v={lienWin} set={setLienWin} opts={WINDOW_OPTS} />
+              </div>
+              <div className="dc-drawer-row">
+                <span className="dc-flabel">Hide</span>
                 <button className={`dc-danger${hideDead ? '' : ' off'}`} onClick={() => setHideDead(!hideDead)}>
                   Hide dead
                 </button>
                 <button className={`dc-danger${hideDnc ? '' : ' off'}`} onClick={() => setHideDnc(!hideDnc)}>
                   Hide Do-Not-Call
                 </button>
-                <button className="dc-btn sm" style={{ marginLeft: 'auto' }} onClick={reset}>
-                  Reset filters
+                <button className="dc-btn sm" style={{ marginLeft: 'auto' }} onClick={clearFilters}>
+                  Clear filters
                 </button>
               </div>
             </div>
