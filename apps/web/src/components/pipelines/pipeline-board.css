@@ -788,3 +788,29 @@ button.dc-or-btn:hover:not(:disabled), a.dc-or-btn:hover { background: var(--sur
 button.dc-or-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 button.dc-or-btn.on { border-color: var(--mint); color: var(--mint); background: var(--mintGhost); }
 button.dc-or-btn.ghost { background: transparent; border-color: transparent; color: var(--dim); padding-left: 0; }
+
+/* ── Case header: Stage, Next action, Owner, Due, and the four questions ──
+ *
+ * Buttons are element-qualified (`button.dc-wp-mini`) for the reason given at
+ * the top of the work panel section: `.dc-board button` strips a bare class.
+ */
+.dc-wp-fields {
+  display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: 8px 14px; align-items: start;
+  padding: 10px 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg2);
+}
+button.dc-wp-mini {
+  background: var(--surface2); border: 1px solid var(--border2); border-radius: 6px;
+  padding: 3px 8px; font-size: 11.5px; font-weight: 600; color: var(--text); white-space: nowrap; transition: 0.12s;
+}
+button.dc-wp-mini:hover:not(:disabled) { background: var(--surface3); }
+button.dc-wp-mini:disabled { opacity: 0.45; cursor: not-allowed; }
+button.dc-wp-mini.on { background: var(--mint); border-color: var(--mint); color: var(--mintInk); }
+.dc-wp-questions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.dc-wp-q { padding: 9px 11px; border: 1px solid var(--border); border-left-width: 3px; border-radius: 8px; background: var(--surface); }
+.dc-wp-q.known { border-left-color: var(--mint); }
+.dc-wp-q.unknown { border-left-color: var(--amber); }
+.dc-wp-q.problem { border-left-color: var(--red); }
+.dc-wp-suggest {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12.5px;
+  padding: 8px 10px; border: 1px dashed var(--border2); border-radius: 8px;
+}

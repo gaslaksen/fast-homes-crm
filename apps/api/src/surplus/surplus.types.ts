@@ -135,6 +135,8 @@ export interface SurplusListFilters {
    * the floor, retired cases) do not hide any of them.
    */
   batchId?: string;
+  /** Only cases this user owns (the board's Mine filter). */
+  ownerId?: string;
   /** 'notice' | 'surplus' | 'net' | 'tier' */
   sort?: string;
   page?: number;

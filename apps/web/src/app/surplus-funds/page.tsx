@@ -198,21 +198,51 @@ const QUEUE_CHIP: Record<string, { bg: string; fg: string }> = {
  */
 const SURPLUS_COLUMNS: PipelineColumn<any>[] = [
   {
-    // What to do with this one, first column and first read. Sorts on the
-    // work score so "Call now" rows arrive in call order rather than
-    // alphabetically by queue name.
+    // What happens next on this one, first column and first read. The team's
+    // own next action and its date when somebody has set one; the work queue
+    // the board computed when nobody has, so the column is never blank.
+    // Sorts on the work score so "Call now" rows arrive in call order.
     key: 'queue',
-    label: 'Next step',
-    width: '130px',
+    label: 'Next',
+    width: '170px',
     sortValue: (r) => r.workScore,
     render: (r) => {
       const c = QUEUE_CHIP[r.queue] || CHIP.slate;
       const others = Object.entries(r.queueCounts || {}).filter(([k]) => k !== r.queue);
+      const t = r.nextTask;
+      const chip = (
+        <span className="dc-tag" style={{ background: c.bg, color: c.fg, ...(t ? { fontSize: 10.5, padding: '2px 7px' } : {}) }}>
+          {r.queueLabel}
+        </span>
+      );
       return (
-        <div>
-          <span className="dc-tag" style={{ background: c.bg, color: c.fg }}>
-            {r.queueLabel}
-          </span>
+        <div style={{ minWidth: 0 }}>
+          {r.claimantUpdateOverdue && (
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--red)' }}>Monthly update owed</div>
+          )}
+          {t ? (
+            <>
+              <div
+                style={{ fontSize: 12, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 170 }}
+                title={t.title}
+              >
+                {t.title}
+              </div>
+              <div style={{ fontSize: 11, color: isOverdue(t.dueDate) ? 'var(--red)' : 'var(--faint)', marginBottom: 3 }}>
+                {dueLabel(t.dueDate)}
+                {r.ownerNames?.length ? ` · ${r.ownerNames.join(', ')}` : ''}
+                {r.openTaskCount > 1 ? ` · +${r.openTaskCount - 1} more` : ''}
+              </div>
+              {chip}
+            </>
+          ) : (
+            <>
+              {chip}
+              {r.ownerNames?.length > 0 && (
+                <div style={{ fontSize: 11, color: 'var(--faint)', marginTop: 2 }}>{r.ownerNames.join(', ')}</div>
+              )}
+            </>
+          )}
           {/* A property takes its best claimant's queue, so say when the others
               are somewhere else rather than implying the whole house is
               callable. */}
@@ -361,49 +391,6 @@ const SURPLUS_COLUMNS: PipelineColumn<any>[] = [
         ) : null}
       </div>
     ),
-  },
-  {
-    // What somebody has promised to do next, and whether it has slipped. The
-    // course's whole discipline is that every follow-up has a date; this is
-    // where the board shows whether the dates are being kept.
-    key: 'nextTask',
-    label: 'Next action',
-    width: '160px',
-    // Soonest first on the first click: the board sorts descending, so the
-    // nearest date gets the largest value and rows with nothing due go last.
-    sortValue: (r) => (r.nextTask?.dueDate ? -new Date(r.nextTask.dueDate).getTime() : -Infinity),
-    render: (r) =>
-      r.claimantUpdateOverdue ? (
-        <div style={{ fontSize: 12, minWidth: 0 }}>
-          <div style={{ fontWeight: 600, color: 'var(--red)' }}>Monthly update owed</div>
-          {r.nextTask && (
-            <div style={{ fontSize: 11, color: isOverdue(r.nextTask.dueDate) ? 'var(--red)' : 'var(--faint)' }}>
-              {r.nextTask.title}, {dueLabel(r.nextTask.dueDate)}
-            </div>
-          )}
-        </div>
-      ) : r.nextTask ? (
-        <div style={{ fontSize: 12, minWidth: 0 }}>
-          <div
-            style={{
-              fontWeight: 600,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-              maxWidth: 160,
-            }}
-            title={r.nextTask.title}
-          >
-            {r.nextTask.title}
-          </div>
-          <div style={{ fontSize: 11, color: isOverdue(r.nextTask.dueDate) ? 'var(--red)' : 'var(--faint)' }}>
-            {dueLabel(r.nextTask.dueDate)}
-            {r.openTaskCount > 1 ? ` · +${r.openTaskCount - 1} more` : ''}
-          </div>
-        </div>
-      ) : (
-        <span style={{ fontSize: 12, color: 'var(--faint)' }}>none</span>
-      ),
   },
   {
     // When we last tried, and whether anyone has ever answered. Tapped is
@@ -696,6 +683,8 @@ export default function SurplusFundsPage() {
   };
   const menuRef = useRef<HTMLDetailsElement>(null);
   const [chipQ, setChipQ] = useState<string | null>(null);
+  /** Only the cases I own. Combines with any queue, unlike the status chips. */
+  const [mineQ, setMineQ] = useState(false);
   const [stageQ, setStageQ] = useState<string | null>(null);
   const [county, setCounty] = useState('all');
   const [band, setBand] = useState('all');
@@ -823,6 +812,7 @@ export default function SurplusFundsPage() {
         letterDue: chipQ === 'letter_due' || undefined,
         updateOverdue: chipQ === 'update_overdue' || undefined,
         batch: batchQ?.id,
+        mine: mineQ || undefined,
         sort,
         pageSize: 200,
       });
@@ -845,7 +835,7 @@ export default function SurplusFundsPage() {
     } finally {
       setLoading(false);
     }
-  }, [q, searching, wide, queueQ, tierQ, stageQ, ctype, county, band, chipQ, ageQ, lienWin, hideDead, hideDnc, sort, underYear, hideEarly, batchQ]);
+  }, [q, searching, wide, queueQ, tierQ, stageQ, ctype, county, band, chipQ, ageQ, lienWin, hideDead, hideDnc, sort, underYear, hideEarly, batchQ, mineQ]);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -1095,6 +1085,7 @@ export default function SurplusFundsPage() {
     setQueueQ(null);
     setTierQ(null);
     setChipQ(null);
+    setMineQ(false);
     setStageQ(null);
     setCounty('all');
     setBand('all');
@@ -1523,6 +1514,14 @@ export default function SurplusFundsPage() {
                 )}
               </button>
             ))}
+            <button
+              className={`dc-tab${mineQ ? ' on' : ''}`}
+              onClick={() => setMineQ(!mineQ)}
+              title="Only the cases you own. Set the owner at the top of a case."
+              style={{ marginLeft: 'auto' }}
+            >
+              Mine
+            </button>
           </div>
 
           {filtersOpen && (

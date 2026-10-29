@@ -38,11 +38,15 @@ export function quickDueDates(): { label: string; value: string }[] {
 /** "3d overdue", "due today", "due in 5d", or "no date". */
 export function dueLabel(iso: string | null | undefined, now = Date.now()): string {
   if (!iso) return 'no date';
-  const diff = new Date(iso).getTime() - now;
-  const days = Math.round(diff / 86_400_000);
-  if (diff < 0 && days === 0) return 'due today';
-  if (diff < 0) return `${Math.abs(days)}d overdue`;
-  if (days === 0) return 'due today';
+  // Calendar days, not hours rounded to days: rounding called 9am tomorrow
+  // "due today" whenever it was read after 9pm.
+  const due = new Date(iso);
+  const today = new Date(now);
+  const dayOf = (d: Date) => Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
+  const days = Math.round((dayOf(due) - dayOf(today)) / 86_400_000);
+  if (days < 0) return `${-days}d overdue`;
+  if (days === 0) return due.getTime() < now ? 'overdue today' : 'due today';
+  if (days === 1) return 'due tomorrow';
   return `due in ${days}d`;
 }
 
