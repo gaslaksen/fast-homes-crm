@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import AppShell from '@/components/AppShell';
 import PipelineBoard, { inBoardOrder, type PipelineView } from '@/components/pipelines/PipelineBoard';
 import AddLeadSheet, { SURPLUS_FIELDS } from '@/components/pipelines/AddLeadSheet';
@@ -1357,6 +1358,17 @@ export default function SurplusFundsPage() {
                   >
                     IDI batches
                   </button>
+                  <Link
+                    className="dc-menu-item"
+                    href={
+                      batchQ
+                        ? `/surplus-funds/outreach?batch=${batchQ.id}`
+                        : `/surplus-funds/outreach?queue=${queueQ && queueQ !== 'closed' ? queueQ : 'call'}`
+                    }
+                    title="Every person on this queue or batch, one row each, with what has been tried and what is left."
+                  >
+                    Outreach list
+                  </Link>
                   <button
                     type="button"
                     className="dc-menu-item"

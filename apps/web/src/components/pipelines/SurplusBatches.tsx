@@ -314,6 +314,11 @@ export default function SurplusBatches({
           </div>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
             {ref && (
+              <a className="dc-btn xs" href={`/surplus-funds/outreach?batch=${ref.id}`}>
+                Outreach list
+              </a>
+            )}
+            {ref && (
               <button type="button" className="dc-btn xs pri" onClick={() => onShowOnBoard(ref)}>
                 Show on the board
               </button>

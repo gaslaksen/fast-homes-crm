@@ -1,5 +1,5 @@
 import {
-  Controller, Get, Post, Patch, Body, Param, Query, Headers,
+  Controller, Get, Post, Patch, Delete, Body, Param, Query, Headers,
   UseInterceptors, UploadedFile, BadRequestException, NotFoundException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -20,6 +20,7 @@ import { SurplusCountiesService, ACCEPTED_METHOD_LABEL } from './surplus-countie
 import { SurplusDocumentsService, DOCUMENT_MIME_TYPES, DOCUMENT_MAX_BYTES } from './surplus-documents.service';
 import { StorageService } from '../storage/storage.service';
 import { SurplusCadenceService } from './surplus-cadence.service';
+import { SurplusOutreachService } from './surplus-outreach.service';
 import { COMPLIANCE_RULES, DISCLOSURE_LABELS, FL_COUNTIES, SURPLUS_FLOOR } from './surplus-compliance';
 
 /**
@@ -84,6 +85,7 @@ export class SurplusController {
     private obituary: SurplusObituaryService,
     private social: SurplusSocialService,
     private idi: SurplusIdiService,
+    private outreach: SurplusOutreachService,
   ) {}
 
   private decodeToken(authHeader?: string): { userId?: string; organizationId?: string } {
@@ -955,6 +957,36 @@ export class SurplusController {
     const leadIds = Array.isArray(body?.leadIds) ? body.leadIds.filter((x: any) => typeof x === 'string') : [];
     if (!leadIds.length) throw new BadRequestException('Select at least one claimant to export.');
     return this.idi.exportBatch({ organizationId: organizationId || null, leadIds, userId: userId || null });
+  }
+
+  /**
+   * The outreach list: every person on a batch, a queue (Call now by
+   * default) or the claims with a letter due, with what has been tried.
+   * ?batch=<id> | ?queue=<queue> | ?letters=1
+   */
+  @Get('outreach')
+  async outreachList(
+    @Query('batch') batch?: string,
+    @Query('queue') queue?: string,
+    @Query('letters') letters?: string,
+    @Headers('authorization') authHeader?: string,
+  ) {
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.outreach.list({ batchId: batch || null, queue: queue || null, letters: letters === '1' || letters === 'true' }, organizationId || null);
+  }
+
+  /** Mark a person on the outreach list: { heirId, kind: called|texted|emailed|note|done, note }. */
+  @Post(':id/touches')
+  async addTouch(@Param('id') id: string, @Body() body: any, @Headers('authorization') authHeader?: string) {
+    const { organizationId, userId } = this.decodeToken(authHeader);
+    return this.outreach.addTouch(id, body || {}, organizationId || null, userId || null);
+  }
+
+  /** Take "done" off a person: ?heir=<id>, or none for the claimant. */
+  @Delete(':id/touches/done')
+  async clearDone(@Param('id') id: string, @Query('heir') heir?: string, @Headers('authorization') authHeader?: string) {
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.outreach.clearDone(id, heir || null, organizationId || null);
   }
 
   /** Saved IDI batches, newest first, and one batch row by row. */

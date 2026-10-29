@@ -30,6 +30,7 @@ import { SurplusCountiesService } from './surplus-counties.service';
 import { SurplusDocumentsService } from './surplus-documents.service';
 import { SurplusCadenceService } from './surplus-cadence.service';
 import { SurplusIdiService } from './surplus-idi.service';
+import { SurplusOutreachService } from './surplus-outreach.service';
 import { StorageModule } from '../storage/storage.module';
 import { MessagesModule } from '../messages/messages.module';
 
@@ -70,6 +71,7 @@ import { MessagesModule } from '../messages/messages.module';
     SurplusSocialService,
     SurplusHeirsService,
     SurplusIdiService,
+    SurplusOutreachService,
   ],
   exports: [
     SurplusService,

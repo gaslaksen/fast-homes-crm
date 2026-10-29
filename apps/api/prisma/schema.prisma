@@ -388,6 +388,7 @@ model Lead {
   offers            Offer[]
   dripSequence      DripSequence?
   callLogs          CallLog[]
+  surplusTouches    SurplusTouch[]
   campaignEnrollments CampaignEnrollment[]
   dealShares          DealShare[]
   dispositionPlan     DispositionPlan?
@@ -2503,6 +2504,8 @@ model SurplusHeir {
   callLogs CallLog[]
   emails   Email[]
   tasks    Task[]
+  /// Outreach list marks for this person. See SurplusTouch.
+  touches  SurplusTouch[]
   /// When this person's texts last carried the compliance footer. Lead's own
   /// column is the claimant's, so the first text to a son still says who is
   /// writing and how to stop it.
@@ -2767,6 +2770,29 @@ model SurplusExpense {
 
   @@index([surplusDetailId])
   @@map("surplus_expenses")
+}
+
+/// A mark on the outreach list: a call, text or email made outside Dealcore,
+/// a note, or "done with this person for now". What Dealcore sent itself is
+/// read off messages, call_logs, emails and surplus_letters instead, so this
+/// only holds what Dealcore could not see.
+model SurplusTouch {
+  id             String       @id @default(cuid())
+  organizationId String?
+  leadId         String
+  lead           Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  /// The person it was with. Null means the claimant.
+  heirId         String?
+  heir           SurplusHeir? @relation(fields: [heirId], references: [id], onDelete: Cascade)
+  /// 'called' | 'texted' | 'emailed' | 'note' | 'done'
+  kind           String
+  note           String?
+  userId         String?
+  createdAt      DateTime     @default(now())
+
+  @@index([leadId, createdAt])
+  @@index([heirId])
+  @@map("surplus_touches")
 }
 
 model SurplusLetter {
