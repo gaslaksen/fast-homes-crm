@@ -4,7 +4,7 @@ import { SurplusService } from './surplus.service';
 import { SurplusLeadInput, SurplusPhoneInput } from './surplus.types';
 import { SurplusLien, nameMatchesClaimant } from './surplus.util';
 import { SURPLUS_FLOOR } from './surplus-compliance';
-import { SurplusStage, SurplusDeadReason, SURPLUS_DEAD_REASON_LABEL } from '@fast-homes/shared';
+import { SurplusStage, SurplusClaimStatus, SurplusDeadReason, SURPLUS_DEAD_REASON_LABEL } from '@fast-homes/shared';
 import { cellText, parseNum, normalizePhoneDigits, phoneTypeOf, parseListDate } from '../probate/probate.util';
 
 function normH(h: any): string {
@@ -139,17 +139,31 @@ const LIEN_HEADERS = [
 /** The list's own banding, e.g. "A - Estate / heirs". Carried into the notes. */
 const SEGMENT_HEADERS = ['segment', 'band', 'tier'];
 
+/**
+ * The report a list import ends on, in the four buckets the list rules ask
+ * for: New, Already on file, Previously ruled out, Paid out. Every row that
+ * matched a case already in Dealcore lands in exactly one of the last three.
+ * `variantOf` is set when the row matched under a different spelling of the
+ * claimant on the same county and case.
+ */
 export interface SurplusImportResult {
   created: number;
+  /** Every row that matched a case already in Dealcore: on file, ruled out and paid out together. */
   duplicates: number;
+  /** Matched a live case: still being worked, or not yet started. */
+  alreadyOnFile: { row: number; leadId?: string | null; claimant: string; caseNumber: string | null; stage: string | null; variantOf?: string }[];
   /**
    * Duplicates that are already Dead on the board: previously worked and
    * retired. Named rather than folded into the duplicate count, so nobody
    * re-researches a case the team already closed.
    */
-  previouslyDead: { row: number; claimant: string; caseNumber: string | null; reason: string | null; deadAt: Date | null }[];
+  previouslyDead: { row: number; leadId?: string | null; claimant: string; caseNumber: string | null; reason: string | null; deadAt: Date | null; variantOf?: string }[];
   /** Rows for cases somebody deleted by hand. Not re-created, and named for the same reason. */
-  previouslyDeleted: { row: number; claimant: string; caseNumber: string | null; deletedAt: Date | null }[];
+  previouslyDeleted: { row: number; leadId?: string | null; claimant: string; caseNumber: string | null; deletedAt: Date | null; variantOf?: string }[];
+  /** Matched a case that is paid: ours (stage Paid) or the county's distribution filings say the money went out. */
+  paidOut: { row: number; leadId?: string | null; claimant: string; caseNumber: string | null; why: string; variantOf?: string }[];
+  /** How many of the matches above were a re-spelled claimant rather than the name as written. */
+  nameVariants: number;
   /** Rows dropped for sitting under the surplus floor, counted rather than errored. */
   belowFloor: number;
   /**
@@ -217,8 +231,11 @@ export class SurplusImportService {
     const result: SurplusImportResult = {
       created: 0,
       duplicates: 0,
+      alreadyOnFile: [],
       previouslyDead: [],
       previouslyDeleted: [],
+      paidOut: [],
+      nameVariants: 0,
       belowFloor: 0,
       contactMismatches: [],
       countyInferred: 0,
@@ -256,28 +273,38 @@ export class SurplusImportService {
         const res = await this.surplus.createSurplusLead(input, {
           organizationId: opts.organizationId,
           respectSuppression: true,
+          matchNameVariants: true,
         });
         if (!res.created) {
+          const base = {
+            row: rowNo,
+            // The case it matched, so the report can open it. Null for a deleted one.
+            leadId: res.leadId || null,
+            claimant: input.claimant || '',
+            caseNumber: input.caseNumber || null,
+            ...(res.variantOf ? { variantOf: res.variantOf } : {}),
+          };
+          if (res.variantOf && (res.reason === 'duplicate' || res.reason === 'suppressed')) result.nameVariants++;
           if (res.reason === 'duplicate') {
             result.duplicates++;
-            const ex = (res as any).existing;
+            const ex = res.existing;
             if (ex?.stage === SurplusStage.DEAD) {
               result.previouslyDead.push({
-                row: rowNo,
-                claimant: input.claimant || '',
-                caseNumber: input.caseNumber || null,
+                ...base,
                 reason: ex.deadReason ? SURPLUS_DEAD_REASON_LABEL[ex.deadReason as SurplusDeadReason] || ex.deadReason : null,
                 deadAt: ex.deadAt || null,
               });
+            } else if (ex?.stage === SurplusStage.PAID || ex?.claimStatus === SurplusClaimStatus.DISTRIBUTED) {
+              result.paidOut.push({
+                ...base,
+                why: ex.stage === SurplusStage.PAID ? 'paid to our client' : 'the county paid it out',
+              });
+            } else {
+              result.alreadyOnFile.push({ ...base, stage: ex?.stage || null });
             }
           }
           else if (res.reason === 'suppressed') {
-            result.previouslyDeleted.push({
-              row: rowNo,
-              claimant: input.claimant || '',
-              caseNumber: input.caseNumber || null,
-              deletedAt: res.suppressedAt || null,
-            });
+            result.previouslyDeleted.push({ ...base, deletedAt: res.suppressedAt || null });
           }
           else if (res.reason === 'below the surplus floor') result.belowFloor++;
           else result.errors.push({ row: rowNo, reason: res.reason || 'not created' });

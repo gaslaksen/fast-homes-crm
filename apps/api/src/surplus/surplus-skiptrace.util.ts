@@ -133,6 +133,53 @@ const CAPACITY =
   /\b(?:t\s*\/\s*c|c\s*\/\s*o|et\s+(?:al|ux|vir)|trustees?|tr|ttee|as\s+tenants?\s+in\s+common)\b/gi;
 
 /**
+ * Are two spellings of a claimant on the SAME case the same person?
+ *
+ * Bot lists and clerk exports write one owner several ways: "SMITH, JOHN A",
+ * "JOHN A SMITH", "John Alan Smith", "ESTATE OF JOHN SMITH". The dedupe key
+ * takes the name as written, so each spelling came in as a new lead. Only
+ * ever asked about two names already on one county and case number, so the
+ * question is "same person or a co-owner", and co-owners are the trap:
+ * spouses and siblings share a surname and often a case.
+ *
+ * Deliberately strict. Word order, punctuation, middle names and initials,
+ * and estate or capacity words are allowed to differ. Spelling is not: no
+ * fuzzy match on any word, because MARIO and MARIA GARCIA on one deed are two
+ * people. A generational suffix on one side only (JOHN SMITH and JOHN SMITH
+ * JR) is also two people, a father and son on the same title.
+ */
+export function sameClaimantName(a?: string | null, b?: string | null): boolean {
+  const parts = (raw?: string | null) => {
+    // "v" is kept as an initial here: as a suffix it would eat "JOHN V SMITH".
+    const words = tokens(String(raw || '').replace(CAPACITY, ' ')).filter((t) => !ESTATE_WORDS.has(t));
+    const suffix = words.filter((t) => SUFFIX.has(t) && t !== 'v');
+    const rest = words.filter((t) => !(SUFFIX.has(t) && t !== 'v'));
+    return { suffix: suffix.sort().join(' '), full: rest.filter((t) => t.length > 1), initials: rest.filter((t) => t.length === 1) };
+  };
+  const pa = parts(a);
+  const pb = parts(b);
+  if (pa.suffix !== pb.suffix) return false;
+  const [short, long] = pa.full.length <= pb.full.length ? [pa, pb] : [pb, pa];
+  // A given name and a surname at least, or every "SMITH" would match.
+  if (short.full.length < 2 || long.full.length - short.full.length > 1) return false;
+  const left = [...long.full];
+  for (const w of short.full) {
+    const i = left.indexOf(w);
+    if (i < 0) return false;
+    left.splice(i, 1);
+  }
+  // What is left over on each side (a middle initial, a middle name) has to
+  // agree where both sides have one: JOHN A SMITH is not JOHN B SMITH.
+  const lettersShort = new Set(short.initials.map((t) => t[0]));
+  const lettersLong = new Set([...long.initials, ...left].map((t) => t[0]));
+  if (lettersShort.size && lettersLong.size) {
+    const [few, many] = lettersShort.size <= lettersLong.size ? [lettersShort, lettersLong] : [lettersLong, lettersShort];
+    for (const l of few) if (!many.has(l)) return false;
+  }
+  return true;
+}
+
+/**
  * Split a county-style claimant string into given names and a surname.
  *
  * Counties write "DANNIE LESTER STEWART" and "EDGAR CLOWERS, JR." and
