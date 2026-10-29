@@ -47,6 +47,8 @@ interface Props {
   notes: NoteItem[];
   currentUser: any;
   onAddNote: (text: string) => Promise<void>;
+  /** Reload after a note is edited or deleted. Without it notes are read only. */
+  onNotesChanged?: () => unknown;
   /** Required when 'contact' is offered; merged into the host's lead state. */
   onLeadPatch?: (patch: any) => void;
   onMarkDead?: () => void;
@@ -64,6 +66,7 @@ export default function LeadSidePanel({
   notes,
   currentUser,
   onAddNote,
+  onNotesChanged,
   onLeadPatch,
   onMarkDead,
   hideRailNav,
@@ -155,7 +158,14 @@ export default function LeadSidePanel({
             </div>
           )
         ) : mode === 'notes' ? (
-          <NotesPanel notes={notes} canAdd={!!currentUser} onAddNote={onAddNote} />
+          <NotesPanel
+            notes={notes}
+            canAdd={!!currentUser}
+            onAddNote={onAddNote}
+            leadId={lead?.id}
+            currentUser={currentUser}
+            onNotesChanged={onNotesChanged}
+          />
         ) : (
           <PaneActivityLog activities={lead?.activities || []} />
         )}

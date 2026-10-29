@@ -536,6 +536,9 @@ export default function LeadDetailPage() {
                   await leadsAPI.addNote(leadId, text, currentUser.id);
                   await loadComms();
                 }}
+                leadId={leadId}
+                currentUser={currentUser}
+                onNotesChanged={() => loadComms()}
               />
             </div>
           </div>
@@ -557,6 +560,7 @@ export default function LeadDetailPage() {
           await leadsAPI.addNote(leadId, text, currentUser.id);
           await loadComms();
         }}
+        onNotesChanged={() => loadComms()}
       />
 
       </div>{/* end workspace */}

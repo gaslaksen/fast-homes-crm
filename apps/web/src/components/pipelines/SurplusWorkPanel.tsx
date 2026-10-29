@@ -2752,6 +2752,7 @@ export default function SurplusWorkPanel({
               onTrace={traceGated}
               notes={comms.notes}
               onAddNote={addNote}
+              onNotesChanged={() => loadComms()}
               onChanged={changed}
               say={say}
             />
@@ -2999,6 +3000,7 @@ function ResearchTab({
   onTrace,
   notes,
   onAddNote,
+  onNotesChanged,
   onChanged,
   say,
 }: {
@@ -3009,6 +3011,7 @@ function ResearchTab({
   onTrace: () => void;
   notes: NoteItem[];
   onAddNote: (text: string) => Promise<void>;
+  onNotesChanged: () => unknown;
   onChanged: () => void;
   say: (msg: string) => void;
 }) {
@@ -3029,7 +3032,14 @@ function ResearchTab({
       {lead.social && <SocialBlock lead={lead} currentUser={currentUser} paused={socialPaused} say={say} onChanged={onChanged} />}
       <div>
         <SubHead title="Notes" />
-        <NotesPanel notes={notes} canAdd={!!currentUser} onAddNote={onAddNote} />
+        <NotesPanel
+          notes={notes}
+          canAdd={!!currentUser}
+          onAddNote={onAddNote}
+          leadId={lead.id}
+          currentUser={currentUser}
+          onNotesChanged={onNotesChanged}
+        />
       </div>
     </div>
   );

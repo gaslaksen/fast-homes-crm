@@ -341,6 +341,11 @@ export class CommunicationsService {
         title: 'Note',
         body: n.content,
         transcript: null,
+        // Who wrote it, so the panel offers Edit and Delete to them, and when
+        // it was last changed. A save writes updatedAt a moment after
+        // createdAt, so only a real edit later on counts.
+        authorId: n.userId,
+        editedAt: n.updatedAt && n.updatedAt.getTime() - n.createdAt.getTime() > 5000 ? n.updatedAt : null,
       });
     }
     for (const c of callLogs as any[]) {
