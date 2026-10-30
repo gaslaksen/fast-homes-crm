@@ -2252,7 +2252,7 @@ export class SurplusService {
       const total = groups.length;
       const start = (page - 1) * pageSize;
       return {
-        data: groups.slice(start, start + pageSize),
+        data: sortByBoardColumn(groups, filters.sortColumn, filters.sortDir).slice(start, start + pageSize),
         grouped: true,
         total,
         // Claimants on the properties that passed, so the count matches the board.
@@ -3207,8 +3207,43 @@ export function mailReturnedToCurrentAddress(d: any): boolean {
   });
 }
 
+/**
+ * What each column header on the surplus board sorts on, by the column's key.
+ * Here and not in the browser because the board pages: a browser sort only
+ * reorders the page it has, so "lowest surplus" read $65K with $18K on page 3.
+ */
+const BOARD_COLUMN_SORTS = new Map<string, (g: any) => string | number>([
+  ['queue', (g) => g.workScore],
+  ['property', (g) => g.claimantNames?.[0] || g.address || ''],
+  ['surplus', (g) => g.grossSurplus ?? 0],
+  ['age', (g) => g.daysSinceSale ?? -1],
+  ['claimStatus', (g) => g.workScore],
+  ['reach', (g) => (g.needsHeirs ? 1 : g.anyContactable ? 3 : g.anyMismatch ? 0 : 2)],
+  // Never touched counts as the longest ago.
+  ['touches', (g) => (g.lastTouchedAt ? new Date(g.lastTouchedAt).getTime() : Number.MIN_SAFE_INTEGER)],
+  ['contactUpdated', (g) => (g.contactUpdatedAt ? new Date(g.contactUpdatedAt).getTime() : 0)],
+]);
+
+/**
+ * Sort the board's properties by a column header. An unknown column leaves the
+ * order alone. Ties go in call order, then by case, so a column with few values
+ * (Reach has four) cannot show a property on two pages or on none.
+ */
+export function sortByBoardColumn(groups: any[], column?: string, dir?: string): any[] {
+  const value = column ? BOARD_COLUMN_SORTS.get(column) : undefined;
+  if (!value) return groups;
+  const sign = dir === 'asc' ? 1 : -1;
+  return [...groups].sort((a, b) => {
+    const av = value(a);
+    const bv = value(b);
+    const byColumn =
+      typeof av === 'number' && typeof bv === 'number' ? av - bv : String(av).localeCompare(String(bv));
+    return byColumn * sign || b.workScore - a.workScore || String(a.key).localeCompare(String(b.key));
+  });
+}
+
 export function groupByProperty(rows: any[]): any[] {
-  const norm = (v: any) => String(v || '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
+  const norm =(v: any) => String(v || '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
   const byKey = new Map<string, any[]>();
 
   for (const r of rows) {

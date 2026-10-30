@@ -29,7 +29,6 @@ import {
   phoneDisplay,
   moneyShort,
   agoLabel,
-  agoDays,
 } from '@/components/pipelines/format';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -206,7 +205,7 @@ const SURPLUS_COLUMNS: PipelineColumn<any>[] = [
     key: 'queue',
     label: 'Next',
     width: '170px',
-    sortValue: (r) => r.workScore,
+    sortable: true,
     render: (r) => {
       const c = QUEUE_CHIP[r.queue] || CHIP.slate;
       const others = Object.entries(r.queueCounts || {}).filter(([k]) => k !== r.queue);
@@ -265,7 +264,7 @@ const SURPLUS_COLUMNS: PipelineColumn<any>[] = [
     // the same reason.
     key: 'property',
     label: 'Claimant and property',
-    sortValue: (r) => r.claimantNames?.[0] || r.address || '',
+    sortable: true,
     render: (r) => (
       <div style={{ minWidth: 0 }}>
         <div style={{ fontSize: 14, fontWeight: 700, lineHeight: 1.25, overflowWrap: 'anywhere' }}>
@@ -310,7 +309,7 @@ const SURPLUS_COLUMNS: PipelineColumn<any>[] = [
     align: 'right',
     width: '92px',
     nowrap: true,
-    sortValue: (r) => r.grossSurplus,
+    sortable: true,
     render: (r) => <b title={money(r.grossSurplus)}>{moneyShort(r.grossSurplus)}</b>,
   },
   {
@@ -324,7 +323,7 @@ const SURPLUS_COLUMNS: PipelineColumn<any>[] = [
     nowrap: true,
     // Oldest first on the first click: a stale case is either already worked
     // by somebody else or past the point where we can file it ourselves.
-    sortValue: (r) => r.daysSinceSale ?? -1,
+    sortable: true,
     render: (r) =>
       r.daysSinceSale == null ? (
         <span style={{ color: 'var(--faint)', fontSize: 12 }}>unknown</span>
@@ -363,7 +362,7 @@ const SURPLUS_COLUMNS: PipelineColumn<any>[] = [
     key: 'claimStatus',
     label: 'Claim',
     width: '120px',
-    sortValue: (r) => r.workScore,
+    sortable: true,
     render: (r) => {
       const c = CLAIM_STATUS_CHIP[r.claimStatus] || CHIP.slate;
       return (
@@ -382,7 +381,7 @@ const SURPLUS_COLUMNS: PipelineColumn<any>[] = [
     key: 'reach',
     label: 'Reach',
     width: '130px',
-    sortValue: (r) => (r.needsHeirs ? 1 : r.anyContactable ? 3 : r.anyMismatch ? 0 : 2),
+    sortable: true,
     render: (r) => (
       <div style={{ fontSize: 12 }}>
         {r.needsHeirs ? (
@@ -415,7 +414,7 @@ const SURPLUS_COLUMNS: PipelineColumn<any>[] = [
     label: 'Last touch',
     width: '110px',
     nowrap: true,
-    sortValue: (r) => -agoDays(r.lastTouchedAt),
+    sortable: true,
     render: (r) => {
       const status = r.contactStatus || 'not_tapped';
       return (
@@ -440,7 +439,7 @@ const SURPLUS_COLUMNS: PipelineColumn<any>[] = [
     label: 'Contact updated',
     width: '120px',
     nowrap: true,
-    sortValue: (r) => (r.contactUpdatedAt ? new Date(r.contactUpdatedAt).getTime() : 0),
+    sortable: true,
     render: (r) => {
       if (!r.contactUpdatedAt) return <span style={{ fontSize: 12, color: 'var(--faint)' }}>never</span>;
       const fresh =
@@ -778,6 +777,8 @@ export default function SurplusFundsPage() {
   // I ring first": it bands the dollars, and a big surplus whose owner already
   // signed with a competitor is worth less than a small one with a live number.
   const [sort, setSort] = useState('work');
+  /** A column header sort, which beats the toolbar's until the toolbar is next changed. */
+  const [colSort, setColSort] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null);
   /**
    * The work queue chip. Replaced the dollar tier as the board's primary cut,
    * and the board lands on Call now: the first screen of the day is the phone
@@ -935,7 +936,7 @@ export default function SurplusFundsPage() {
   // Paging. The filters as one key: any change to them goes back to page 1,
   // set during render rather than in an effect so the fetch never runs once
   // with the old page first.
-  const filterKey = JSON.stringify([q, queueQ, tierQ, stageQ, ctype, county, band, chipQ, ageQ, lienWin, hideDead, hideDnc, sort, underYear, hideEarly, batchQ?.id, mineQ]);
+  const filterKey = JSON.stringify([q, queueQ, tierQ, stageQ, ctype, county, band, chipQ, ageQ, lienWin, hideDead, hideDnc, sort, colSort?.key, colSort?.dir, underYear, hideEarly, batchQ?.id, mineQ]);
   const [pageAt, setPageAt] = useState<{ key: string; page: number }>({ key: filterKey, page: 1 });
   const page = pageAt.key === filterKey ? pageAt.page : 1;
   const setPage = (n: number) => setPageAt({ key: filterKey, page: n });
@@ -964,8 +965,12 @@ export default function SurplusFundsPage() {
   // in the panel, a touch logged) refreshes in the background instead of
   // blanking the list behind the panel while it reloads.
   const drawnFor = useRef<string | null>(null);
+  // Bumped per request, so a slow answer for a page somebody has already left
+  // cannot draw over the page they are on.
+  const fetchSeq = useRef(0);
 
   const fetchRows = useCallback(async () => {
+    const seq = ++fetchSeq.current;
     const loadKey = `${filterKey}|${page}|${pageSize}`;
     const quiet = drawnFor.current === loadKey;
     if (!quiet) setLoading(true);
@@ -1002,9 +1007,12 @@ export default function SurplusFundsPage() {
         competingLien: chipQ === 'lien' || undefined,
         underYear: (underYear && !wide) || undefined,
         sort,
+        sortColumn: colSort?.key,
+        sortDir: colSort?.dir,
         page,
         pageSize,
       });
+      if (seq !== fetchSeq.current) return;
       const data: any[] = res.data.data || [];
       // Past the last page, which a save that shrinks the list can cause.
       const pages = Math.max(1, Math.ceil((res.data.total ?? data.length) / pageSize));
@@ -1019,6 +1027,7 @@ export default function SurplusFundsPage() {
       setCounties(Array.isArray(res.data.counties) ? res.data.counties : []);
       setFloor(res.data.surplusFloor ?? 15000);
     } catch (err: any) {
+      if (seq !== fetchSeq.current) return;
       setError(err?.response?.data?.message || err.message || 'Could not load surplus leads.');
       // A background refresh that fails keeps what is on screen.
       if (!quiet) {
@@ -1027,10 +1036,10 @@ export default function SurplusFundsPage() {
         setTotal(0);
       }
     } finally {
-      setLoading(false);
+      if (seq === fetchSeq.current) setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterKey, q, searching, wide, queueQ, tierQ, stageQ, ctype, county, band, chipQ, ageQ, lienWin, hideDead, hideDnc, sort, underYear, hideEarly, batchQ, mineQ, page, pageSize]);
+  }, [filterKey, q, searching, wide, queueQ, tierQ, stageQ, ctype, county, band, chipQ, ageQ, lienWin, hideDead, hideDnc, sort, colSort, underYear, hideEarly, batchQ, mineQ, page, pageSize]);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -1236,11 +1245,12 @@ export default function SurplusFundsPage() {
   };
 
   // A picked card is a PROPERTY; bulk actions operate on the leads under it,
-  // since a claim is filed per claimant and not per house.
-  const chosenKeys = Object.keys(picked).filter((k) => picked[k]);
-  const chosen = rows
-    .filter((r) => picked[r.key])
-    .flatMap((r) => r.claimants.map((c: any) => c.id));
+  // since a claim is filed per claimant and not per house. Only what is on
+  // this page counts: a pick left on another page must not show in the count,
+  // the confirm or the CSV when the action would not touch it.
+  const chosenRows = rows.filter((r) => picked[r.key]);
+  const chosenKeys = chosenRows.map((r) => r.key);
+  const chosen = chosenRows.flatMap((r) => r.claimants.map((c: any) => c.id));
 
   /** Narrow the board to one batch, clearing the other cuts so nobody in it is hidden. */
   const showBatch = (b: BatchRef) => {
@@ -1405,7 +1415,7 @@ export default function SurplusFundsPage() {
   const csv = () => {
     // One row per CLAIMANT, not per property: a claim is filed per person, and
     // a downstream call list is dialled per person.
-    const source = chosenKeys.length ? rows.filter((r) => picked[r.key]) : rows;
+    const source = chosenRows.length ? chosenRows : rows;
     const list: any[] = source.flatMap((r: any) => r.claimants);
     downloadCsv(
       `surplus_funds_${new Date().toISOString().slice(0, 10)}.csv`,
@@ -1628,7 +1638,10 @@ export default function SurplusFundsPage() {
             </div>
             <Sel
               v={sort}
-              set={setSort}
+              set={(v: string) => {
+                setSort(v);
+                setColSort(null);
+              }}
               opts={[
                 ['work', 'Sort: Call first'],
                 ['surplus', 'Sort: Biggest surplus'],
@@ -1867,6 +1880,11 @@ export default function SurplusFundsPage() {
             rows={rows}
             keyOf={(r) => r.key}
             onOrderChange={setBoardOrder}
+            serverSort={{
+              key: colSort?.key ?? null,
+              dir: colSort?.dir ?? 'desc',
+              onChange: (key, dir) => setColSort({ key, dir }),
+            }}
             columns={SURPLUS_COLUMNS}
             stages={SURPLUS_KANBAN}
             stageOf={(r) => r.stage}
