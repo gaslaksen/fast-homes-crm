@@ -1,4 +1,4 @@
-import { groupByProperty } from './surplus.service';
+import { groupByProperty, sortByBoardColumn } from './surplus.service';
 
 const lead = (o: any) => ({
   id: o.id,
@@ -221,5 +221,68 @@ describe('property-level totals', () => {
     ] as any);
     expect(groups).toHaveLength(2);
     expect(groups.reduce((n: number, g: any) => n + g.netToClaimant, 0)).toBe(145);
+  });
+});
+
+describe('sortByBoardColumn', () => {
+  const keys = (rows: any[]) => rows.map((r) => r.key);
+  const g = (key: string, o: any = {}) => ({ key, workScore: 0, ...o });
+
+  it('orders the whole list, so the lowest surplus leads page one wherever it was', () => {
+    // The bug: the browser sorted the page it had, so ascending opened on $65K
+    // with $18K sitting on page 3.
+    const all = [g('a', { grossSurplus: 65000 }), g('b', { grossSurplus: 42000 }), g('c', { grossSurplus: 18000 })];
+    expect(keys(sortByBoardColumn(all, 'surplus', 'asc').slice(0, 1))).toEqual(['c']);
+    expect(keys(sortByBoardColumn(all, 'surplus', 'desc').slice(0, 1))).toEqual(['a']);
+  });
+
+  it('opens descending unless asked for ascending', () => {
+    const all = [g('a', { grossSurplus: 1 }), g('b', { grossSurplus: 2 })];
+    expect(keys(sortByBoardColumn(all, 'surplus'))).toEqual(['b', 'a']);
+    expect(keys(sortByBoardColumn(all, 'surplus', 'sideways'))).toEqual(['b', 'a']);
+  });
+
+  it('leaves the order alone with no column, or one it does not know', () => {
+    const all = [g('b', { grossSurplus: 1 }), g('a', { grossSurplus: 2 })];
+    expect(sortByBoardColumn(all)).toBe(all);
+    expect(sortByBoardColumn(all, 'nope', 'asc')).toBe(all);
+    // A query string can say anything, including a name every object inherits.
+    expect(sortByBoardColumn(all, 'constructor', 'asc')).toBe(all);
+  });
+
+  it('does not reorder the list it was given', () => {
+    const all = [g('a', { grossSurplus: 1 }), g('b', { grossSurplus: 2 })];
+    sortByBoardColumn(all, 'surplus', 'desc');
+    expect(keys(all)).toEqual(['a', 'b']);
+  });
+
+  it('breaks ties in call order and then by case, the same in both directions', () => {
+    // Reach has four values, so most of the board ties. The order has to be the
+    // same on every request or a property shows on two pages or on none.
+    const tied = [g('b', { workScore: 5 }), g('a', { workScore: 5 }), g('c', { workScore: 9 })];
+    expect(keys(sortByBoardColumn(tied, 'reach', 'asc'))).toEqual(['c', 'a', 'b']);
+    expect(keys(sortByBoardColumn([...tied].reverse(), 'reach', 'asc'))).toEqual(['c', 'a', 'b']);
+    expect(keys(sortByBoardColumn(tied, 'reach', 'desc'))).toEqual(['c', 'a', 'b']);
+  });
+
+  it('ranks reach the way the column reads: a live number, then nothing yet, then heirs, then a mismatch', () => {
+    const all = [
+      g('mismatch', { anyMismatch: true }),
+      g('heirs', { needsHeirs: true }),
+      g('nothing'),
+      g('number', { anyContactable: true }),
+    ];
+    expect(keys(sortByBoardColumn(all, 'reach', 'desc'))).toEqual(['number', 'nothing', 'heirs', 'mismatch']);
+  });
+
+  it('counts a property nobody has touched as the longest ago', () => {
+    const all = [g('never'), g('old', { lastTouchedAt: '2026-01-01' }), g('new', { lastTouchedAt: '2026-10-01' })];
+    expect(keys(sortByBoardColumn(all, 'touches', 'desc'))).toEqual(['new', 'old', 'never']);
+    expect(keys(sortByBoardColumn(all, 'touches', 'asc'))).toEqual(['never', 'old', 'new']);
+  });
+
+  it('sorts names as text, falling back to the address', () => {
+    const all = [g('z', { claimantNames: ['ZED'] }), g('a', { address: '1 ASH ST' }), g('m', { claimantNames: ['MAY'] })];
+    expect(keys(sortByBoardColumn(all, 'property', 'asc'))).toEqual(['a', 'm', 'z']);
   });
 });

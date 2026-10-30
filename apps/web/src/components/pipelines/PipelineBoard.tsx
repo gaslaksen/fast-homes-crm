@@ -65,6 +65,8 @@ export interface PipelineColumn<T> {
    * anything composite (a stack of chips, an action button).
    */
   sortValue?: (row: T) => string | number;
+  /** Sortable, with the values on the server. Goes with the `serverSort` prop. */
+  sortable?: boolean;
 }
 
 export interface PipelineStage {
@@ -114,6 +116,16 @@ interface Props<T> {
    * lead was not the one below on screen.
    */
   onOrderChange?: (keys: string[]) => void;
+  /**
+   * The caller owns the column sort, for a board whose `rows` are one page of a
+   * longer list. Sorting here would only reorder that page, so a click reports
+   * the column and the rows are drawn in the order they arrive.
+   */
+  serverSort?: {
+    key: string | null;
+    dir: 'asc' | 'desc';
+    onChange: (key: string, dir: 'asc' | 'desc') => void;
+  };
 }
 
 export default function PipelineBoard<T>({
@@ -137,9 +149,12 @@ export default function PipelineBoard<T>({
   loading,
   hideCards,
   onOrderChange,
+  serverSort,
 }: Props<T>) {
-  const [sortKey, setSortKey] = useState<string | null>(null);
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const [localSortKey, setSortKey] = useState<string | null>(null);
+  const [localSortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const sortKey = serverSort ? serverSort.key : localSortKey;
+  const sortDir = serverSort ? serverSort.dir : localSortDir;
 
   const sorted = useMemo(() => {
     const col = columns.find((c) => c.key === sortKey);
@@ -171,6 +186,10 @@ export default function PipelineBoard<T>({
   const chosenCount = rows.filter((r) => selected[keyOf(r)]).length;
 
   const toggleSort = (key: string) => {
+    if (serverSort) {
+      serverSort.onChange(key, sortKey === key && sortDir === 'desc' ? 'asc' : 'desc');
+      return;
+    }
     if (sortKey === key) {
       setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
       return;
@@ -254,10 +273,10 @@ export default function PipelineBoard<T>({
                   <th
                     key={c.key}
                     style={{ width: c.width, textAlign: c.align || 'left' }}
-                    className={[c.sortValue ? 'sortable' : '', c.nowrap ? 'nowrap' : '']
+                    className={[c.sortValue || c.sortable ? 'sortable' : '', c.nowrap ? 'nowrap' : '']
                       .filter(Boolean)
                       .join(' ') || undefined}
-                    onClick={c.sortValue ? () => toggleSort(c.key) : undefined}
+                    onClick={c.sortValue || c.sortable ? () => toggleSort(c.key) : undefined}
                   >
                     {c.label}
                     {sortKey === c.key && <span className="dir">{sortDir === 'asc' ? ' ▲' : ' ▼'}</span>}

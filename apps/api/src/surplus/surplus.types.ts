@@ -149,6 +149,13 @@ export interface SurplusListFilters {
   ownerId?: string;
   /** 'notice' | 'surplus' | 'net' | 'tier' */
   sort?: string;
+  /**
+   * A board column header, which beats `sort`. Applied to the properties before
+   * paging, so a header sort orders the whole list and not one page of it.
+   */
+  sortColumn?: string;
+  /** 'asc' | 'desc'. Anything else is 'desc', the way a header opens. */
+  sortDir?: string;
   page?: number;
   pageSize?: number;
 }

@@ -128,6 +128,8 @@ export class SurplusController {
     @Query('batch') batch?: string,
     @Query('mine') mine?: string,
     @Query('sort') sort?: string,
+    @Query('sortColumn') sortColumn?: string,
+    @Query('sortDir') sortDir?: string,
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
   ) {
@@ -162,6 +164,8 @@ export class SurplusController {
       underYear: underYear === 'true',
       batchId: batch || undefined,
       sort,
+      sortColumn,
+      sortDir,
       page: num(page),
       pageSize: num(pageSize),
     });
