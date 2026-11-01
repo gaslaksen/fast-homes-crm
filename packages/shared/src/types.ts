@@ -540,6 +540,10 @@ export enum SurplusDeadReason {
   COMPETING_CLAIM = 'competing_claim',
   UNRESPONSIVE = 'unresponsive',
   ALREADY_ASSIGNED = 'already_assigned',
+  /** The claimant, reached on the phone, said no. */
+  NOT_INTERESTED = 'not_interested',
+  /** The county docket says the money has been paid out. Set by the weekly pull. */
+  PAID_OUT = 'paid_out',
   OTHER = 'other',
 }
 
@@ -549,6 +553,8 @@ export const SURPLUS_DEAD_REASON_LABEL: Record<SurplusDeadReason, string> = {
   [SurplusDeadReason.COMPETING_CLAIM]: 'Competing claim already filed',
   [SurplusDeadReason.UNRESPONSIVE]: 'Unresponsive after the set attempts',
   [SurplusDeadReason.ALREADY_ASSIGNED]: 'Already signed with somebody else',
+  [SurplusDeadReason.NOT_INTERESTED]: 'Not interested, said so on the phone',
+  [SurplusDeadReason.PAID_OUT]: 'Paid out by the county',
   [SurplusDeadReason.OTHER]: 'Other',
 };
 

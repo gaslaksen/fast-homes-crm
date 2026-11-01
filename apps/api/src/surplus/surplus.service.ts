@@ -96,6 +96,8 @@ import { SurplusDocumentsService } from './surplus-documents.service';
 import { foreignCountry } from './surplus-address.util';
 import { NO_CONTACTS, claimantContacts, contactStampPatch } from './surplus-contact-stamp.util';
 import { SurplusTemplatesService } from './surplus-templates.service';
+import { SurplusProgressService } from './surplus-progress.service';
+import { LETTER_REPLY_TASK_PREFIX } from './surplus-progress.util';
 
 /** What toRow needs beyond the lead: per-request lookups fetched once. */
 interface RowContext {
@@ -261,6 +263,7 @@ export class SurplusService {
     private counties: SurplusCountiesService,
     private documents: SurplusDocumentsService,
     private templates: SurplusTemplatesService,
+    private progress?: SurplusProgressService,
   ) {}
 
   // ─── Writing ──────────────────────────────────────────────────────────────
@@ -1630,11 +1633,13 @@ export class SurplusService {
         'the claimant';
       await this.createTaskOnce(
         lead.id,
-        `Check for a reply to the letter to ${name}`,
+        `${LETTER_REPLY_TASK_PREFIX}${name}`,
         LETTER_FOLLOW_UP_DAYS,
         userId,
         heir?.id || null,
       );
+      // Mailing the first letter is a touch: an unowned case goes to the mailer.
+      await this.progress?.owned(lead.id, userId, 'first letter');
 
       if (userId) {
         const extra = (opts.note || '').trim();
@@ -1788,6 +1793,21 @@ export class SurplusService {
     if (!letter) throw new BadRequestException('Letter not found');
     const returnedAt = returned ? new Date() : null;
     await this.prisma.surplusLetter.update({ where: { id: letter.id }, data: { returnedAt } });
+    if (returned) {
+      // Nobody is going to reply to an envelope that came back. The follow-up
+      // the mailing opened is done; the next letter, to a better address, is
+      // the next action.
+      await this.prisma.task.updateMany({
+        where: {
+          leadId: letter.surplusDetail.leadId,
+          completed: false,
+          title: letter.recipientName
+            ? `${LETTER_REPLY_TASK_PREFIX}${letter.recipientName}`
+            : { startsWith: LETTER_REPLY_TASK_PREFIX },
+        },
+        data: { completed: true, completedAt: new Date() },
+      });
+    }
     if (returned && userId) {
       await this.prisma.note.create({
         data: {

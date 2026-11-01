@@ -141,6 +141,18 @@ export class CampaignExecutionService implements OnModuleInit {
     }
 
     for (const enrollment of enrollments) {
+      // A Dead lead gets no more drips. A surplus case the county paid out, or
+      // a claimant who said no, used to keep receiving "we may have found
+      // money that belongs to you" until the sequence ran out.
+      if (enrollment.lead?.status === 'DEAD') {
+        await this.prisma.campaignEnrollment.update({
+          where: { id: enrollment.id },
+          data: { status: 'REMOVED', nextSendAt: null },
+        });
+        this.logger.log(`Enrollment ${enrollment.id} removed: lead ${enrollment.leadId} is Dead`);
+        continue;
+      }
+
       // Optimistic lock: atomically claim this enrollment to prevent
       // duplicate sends when Railway runs multiple instances during deploy.
       // The claim sets nextSendAt to null; executeStep is responsible for

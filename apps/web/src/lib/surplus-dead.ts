@@ -10,6 +10,8 @@ export const SURPLUS_DEAD_REASONS: [string, string][] = [
   ['competing_claim', 'Competing claim already filed'],
   ['unresponsive', 'Unresponsive after the set attempts'],
   ['already_assigned', 'Already signed with somebody else'],
+  ['not_interested', 'Not interested, said so on the phone'],
+  ['paid_out', 'Paid out by the county'],
   ['other', 'Other'],
 ];
 

@@ -8,7 +8,6 @@ import {
   LeadSource,
   SurplusCallOutcome,
   SurplusObjection,
-  SurplusStage,
   SURPLUS_CALL_OUTCOME_LABEL,
   SURPLUS_OBJECTION_LABEL,
   surplusFollowUpRule,
@@ -58,6 +57,7 @@ function followUpTitle(outcome: SurplusCallOutcome | null, name: string): string
   }
 }
 import { PhoneNumbersService, numberKey, prettyNumber } from '../phone-numbers/phone-numbers.service';
+import { SurplusProgressService } from '../surplus/surplus-progress.service';
 import { LeadPhonesService } from '../phone-numbers/lead-phones.service';
 import { TouchService } from '../leads/touch.service';
 import { appendVoicemailTwiml, voicemailGreetingFor } from './voicemail.util';
@@ -90,6 +90,8 @@ export class TwilioVoiceService {
     private readonly phoneNumbers: PhoneNumbersService,
     private readonly leadPhones: LeadPhonesService,
     private readonly touch: TouchService,
+    /** Moves a surplus case's stage and owner as a side effect of the call. */
+    private readonly progress?: SurplusProgressService,
   ) {}
 
   /**
@@ -238,6 +240,8 @@ export class TwilioVoiceService {
         description: `Outbound call to ${to}`,
         metadata: { callSid, to, from: callerId },
       });
+      // The first teammate to pick up a surplus case owns it.
+      await this.progress?.owned(leadId, userId, 'first call');
     }
 
     const apiBase = this.callbackBase();
@@ -750,6 +754,8 @@ export class TwilioVoiceService {
           })
           .catch(() => undefined);
       }
+      // Anybody on the case ringing us is contact: a New case is Contacted.
+      await this.progress?.contacted(lead.id, { heirId, how: 'called us' });
     }
 
     const apiBase = this.callbackBase();
@@ -1128,6 +1134,8 @@ export class TwilioVoiceService {
 
     const lead = log?.lead;
     if (!log?.leadId || !lead) return;
+    // Saving the outcome is a touch too: an unowned case goes to whoever did.
+    await this.progress?.owned(lead.id, userId, 'first call outcome');
     // The person the call rang: stamped on the log when it was dialled, and
     // looked up from the number for a call logged before that was recorded.
     const personId =
@@ -1249,17 +1257,23 @@ export class TwilioVoiceService {
         where: { id: lead.id },
         data: { doNotContact: true, surplusDetail: { update: { doNotCall: true } } },
       });
-    } else if (
-      detail &&
-      detail.stage === SurplusStage.NEW &&
-      (outcome === SurplusCallOutcome.SPOKE_CLAIMANT ||
-        outcome === SurplusCallOutcome.WANTS_PACKET ||
-        outcome === SurplusCallOutcome.CALLBACK_SCHEDULED)
-    ) {
-      await this.prisma.surplusDetail.update({
-        where: { id: detail.id },
-        data: { stage: SurplusStage.CONTACTED },
+    } else if (detail && outcome && surplusCallConnected(outcome)) {
+      // Somebody on the case picked up: a New case is Contacted, and the
+      // letter follow-up waiting on that person is done. A "no" from the
+      // person who can sign closes the case with the reason, so Closed stops
+      // reading zero; a relative's no is passed along, not acted on.
+      const closed = await this.progress?.closedByOutcome(lead.id, outcome, {
+        heirId: personId,
+        userId,
+        note: notes || null,
       });
+      if (!closed) {
+        await this.progress?.contacted(lead.id, {
+          heirId: personId,
+          userId,
+          how: `picked up (${SURPLUS_CALL_OUTCOME_LABEL[outcome].toLowerCase()})`,
+        });
+      }
     }
   }
 

@@ -9,9 +9,10 @@ import { PhoneNumbersModule } from '../phone-numbers/phone-numbers.module';
 import { PushModule } from '../push/push.module';
 import { MailerModule } from '../mailer/mailer.module';
 import { VoicemailService } from './voicemail.service';
+import { SurplusProgressModule } from '../surplus/surplus-progress.module';
 
 @Module({
-  imports: [VapiModule, ScoringModule, PhoneNumbersModule, TouchModule, PushModule, MailerModule],
+  imports: [VapiModule, ScoringModule, PhoneNumbersModule, TouchModule, PushModule, MailerModule, SurplusProgressModule],
   controllers: [CallsController],
   providers: [CallsService, TwilioVoiceService, VoicemailService],
   exports: [CallsService],
