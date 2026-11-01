@@ -12,6 +12,7 @@ import SurplusImportReport, { SurplusImportResult } from '@/components/pipelines
 import SurplusPropertyCard, { STATUS_ACCENT } from '@/components/pipelines/SurplusPropertyCard';
 import type { PipelineColumn, PipelineStage } from '@/components/pipelines/PipelineBoard';
 import { authAPI, surplusAPI } from '@/lib/api';
+import { isRealPropertyAddress } from '@/lib/surplus-address';
 import { dueLabel, isOverdue } from '@/lib/dates';
 import { SURPLUS_DEAD_REASONS } from '@/lib/surplus-dead';
 import '@/components/pipelines/pipeline-board.css';
@@ -259,49 +260,68 @@ const SURPLUS_COLUMNS: PipelineColumn<any>[] = [
     // The people owed and the house they are owed on, one cell. The claimant
     // used to have a column of its own, which cost a row of height for every
     // property with a long name. The NAME leads: the team finds a file by
-    // who is owed, not by where the house was, so the name is the bold line
-    // and the address sits under it, smaller and unbolded. Sorts by name for
-    // the same reason.
+    // who is owed, not by where the house was, so the name is the bold line.
+    // Under it, where the claimant gets their mail (the city and state off
+    // the clerk's notice), then the county and case. The property address
+    // only when it is a real one: a fifth of rows carried "0 UNKNOWN" or "NO
+    // ADDRESS ON TAX ROLL" there, which said nothing, and the mailing city
+    // says where the person is. Sorts by name.
     key: 'property',
     label: 'Claimant and property',
     sortable: true,
-    render: (r) => (
-      <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: 14, fontWeight: 700, lineHeight: 1.25, overflowWrap: 'anywhere' }}>
-          <span style={r.allDeceased ? { textDecoration: 'line-through' } : undefined}>
-            {r.claimantNames.slice(0, 2).join(', ') || 'Unknown claimant'}
-          </span>
-          {r.claimantCount > 2 && (
-            <span style={{ fontWeight: 400, color: 'var(--faint)' }}> +{r.claimantCount - 2} more</span>
+    render: (r) => {
+      const names: string[] = r.claimantNames || [];
+      const mailing = [r.ownerMailingCity, r.ownerMailingState].filter(Boolean).join(', ');
+      const realAddress = isRealPropertyAddress(r.address);
+      return (
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, lineHeight: 1.25, overflowWrap: 'anywhere' }}>
+            <span style={r.allDeceased ? { textDecoration: 'line-through' } : undefined}>
+              {names.slice(0, 2).join(', ') || 'Unknown claimant'}
+            </span>
+            {names.length > 2 && (
+              <span style={{ fontWeight: 400, color: 'var(--faint)' }}> +{names.length - 2} more</span>
+            )}
+          </div>
+          <div style={{ fontSize: 11.5, color: 'var(--dim)', overflowWrap: 'anywhere', marginTop: 1 }}>
+            {mailing ? (
+              <span title="Where the clerk's notice was mailed">{mailing}</span>
+            ) : (
+              <span style={{ color: 'var(--faint)' }}>No mailing address</span>
+            )}
+            <span style={{ color: 'var(--faint)' }}>
+              {' · '}
+              {r.county}
+              {r.caseNumber ? ` · ${r.caseNumber}` : ''}
+            </span>
+          </div>
+          {realAddress && (
+            <div style={{ fontSize: 11, color: 'var(--faint)', overflowWrap: 'anywhere' }} title="The property that sold">
+              {r.address}
+              {r.city ? `, ${r.city}` : ''}
+            </div>
+          )}
+          {/* Found through somebody around the claim, not the claimant. */}
+          {r.searchMatches?.length > 0 && (
+            <div style={{ fontSize: 11.5, color: 'var(--mint)', overflowWrap: 'anywhere' }}>
+              Found: {r.searchMatches.slice(0, 3).join(', ')}
+              {r.searchMatches.length > 3 ? ` +${r.searchMatches.length - 3} more` : ''}
+            </div>
+          )}
+          {/* The whole point of the heirs work: say who can actually sign, so
+              nobody spends an afternoon on a dead claimant. */}
+          {r.anyDeceased && (
+            <div style={{ fontSize: 11.5, color: r.needsHeirs ? 'var(--red)' : 'var(--mint)' }}>
+              {r.needsHeirs
+                ? 'deceased, no heirs on file'
+                : `${r.livingHeirCount} heir${r.livingHeirCount === 1 ? '' : 's'}${
+                    r.callableHeirCount ? `, ${r.callableHeirCount} callable` : ', no number'
+                  }`}
+            </div>
           )}
         </div>
-        <div style={{ fontSize: 11.5, color: 'var(--dim)', overflowWrap: 'anywhere', marginTop: 1 }}>
-          {r.address}
-          <span style={{ color: 'var(--faint)' }}>
-            , {r.city} · {r.county}
-            {r.caseNumber ? ` · ${r.caseNumber}` : ''}
-          </span>
-        </div>
-        {/* Found through somebody around the claim, not the claimant. */}
-        {r.searchMatches?.length > 0 && (
-          <div style={{ fontSize: 11.5, color: 'var(--mint)', overflowWrap: 'anywhere' }}>
-            Found: {r.searchMatches.slice(0, 3).join(', ')}
-            {r.searchMatches.length > 3 ? ` +${r.searchMatches.length - 3} more` : ''}
-          </div>
-        )}
-        {/* The whole point of the heirs work: say who can actually sign, so
-            nobody spends an afternoon on a dead claimant. */}
-        {r.anyDeceased && (
-          <div style={{ fontSize: 11.5, color: r.needsHeirs ? 'var(--red)' : 'var(--mint)' }}>
-            {r.needsHeirs
-              ? 'deceased, no heirs on file'
-              : `${r.livingHeirCount} heir${r.livingHeirCount === 1 ? '' : 's'}${
-                  r.callableHeirCount ? `, ${r.callableHeirCount} callable` : ', no number'
-                }`}
-          </div>
-        )}
-      </div>
-    ),
+      );
+    },
   },
   {
     key: 'surplus',
@@ -768,6 +788,8 @@ export default function SurplusFundsPage() {
     claimantCount: 0,
     /** Property counts per work queue, keyed by SurplusQueue. */
     queues: {} as Record<string, number>,
+    /** Of those, how many the board hides as too early, per queue. */
+    queuesEarly: {} as Record<string, number>,
     complianceBlocked: 0,
     netInPipeline: 0,
     belowFloor: 0,
@@ -947,6 +969,11 @@ export default function SurplusFundsPage() {
   // past the queue and the cuts the board opens with, the same as a batch.
   const searching = q.trim().length > 0;
   const wide = searching || !!batchQ;
+  /**
+   * Whether the early ones are actually off the board right now. "New, last
+   * 7 days" and the under-120 look show them whatever the toggle says.
+   */
+  const earlyHidden = hideEarly && !wide && ageQ !== '0-7' && ageQ !== 'under-120';
 
   // Paging. The filters as one key: any change to them goes back to page 1,
   // set during render rather than in an effect so the fetch never runs once
@@ -1003,7 +1030,7 @@ export default function SurplusFundsPage() {
         // "New, last 7 days" is a deliberate look at what just landed, and
         // asking for the claims under 120 days is the same deliberate look.
         // Both show the early ones whatever this toggle says.
-        hideEarly: hideEarly && !wide && ageQ !== '0-7' && ageQ !== 'under-120' ? true : undefined,
+        hideEarly: earlyHidden ? true : undefined,
         lienWindow: lienWin === 'all' ? undefined : lienWin,
         hideDead: (hideDead && !wide) || undefined,
         hideDnc: (hideDnc && !wide) || undefined,
@@ -1602,7 +1629,7 @@ export default function SurplusFundsPage() {
                     href={
                       batchQ
                         ? `/surplus-funds/outreach?batch=${batchQ.id}`
-                        : `/surplus-funds/outreach?queue=${queueQ && queueQ !== 'closed' ? queueQ : 'call'}`
+                        : `/surplus-funds/outreach?queue=${queueQ || 'call'}`
                     }
                     title="Every person on this queue or batch, one row each, with what has been tried and what is left."
                   >
@@ -1780,9 +1807,18 @@ export default function SurplusFundsPage() {
                 title={QUEUE_HELP[k]}
               >
                 {label}
-                {stats.queues?.[k] != null && (
-                  <span style={{ marginLeft: 5, opacity: 0.6 }}>{stats.queues[k]}</span>
-                )}
+                {stats.queues?.[k] != null && (() => {
+                  // The chip counts what the board shows. The early ones it
+                  // hides are said out loud, so 140 against 101 on the list
+                  // is explained on the chip itself.
+                  const early = earlyHidden ? stats.queuesEarly?.[k] || 0 : 0;
+                  return (
+                    <span style={{ marginLeft: 5, opacity: 0.6 }}>
+                      {stats.queues[k] - early}
+                      {early > 0 && <span style={{ fontSize: 10.5 }}> ({early} too early)</span>}
+                    </span>
+                  );
+                })()}
               </button>
             ))}
             <button
