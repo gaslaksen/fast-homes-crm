@@ -418,6 +418,14 @@ function OutreachPage() {
                 {list
                   ? `${list.label} · ${list.caseCount} case${list.caseCount === 1 ? '' : 's'} · ${list.peopleCount} people · ${list.openCount} still to work`
                   : 'Loading...'}
+                {letters && (
+                  <>
+                    {' · '}
+                    <Link href="/surplus-funds/print-run" style={{ color: 'var(--teal, var(--dim))', fontWeight: 600 }}>
+                      Print the run
+                    </Link>
+                  </>
+                )}
               </div>
             </div>
             <div style={{ display: 'flex', gap: 9, flexWrap: 'wrap', alignItems: 'center' }}>

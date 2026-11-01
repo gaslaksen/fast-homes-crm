@@ -191,6 +191,18 @@ export class DigestRenderService {
       </td></tr>`;
   }
 
+  /** The print run, one line and a link. The letters go out as one batch. */
+  private renderPrintRun(b: DigestBrief): string {
+    if (!b.printRun) return '';
+    return `
+      ${this.divider()}
+      <tr><td class="px" style="padding:18px 36px 18px 36px;">
+        <div style="font-size:11px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:${MUTED};">Letters due</div>
+        <div style="font-size:14px;color:${BODY};line-height:1.6;padding-top:6px;">${this.esc(b.printRun.line)}</div>
+        <div style="font-size:13px;padding-top:6px;"><a href="${this.esc(b.appUrl)}/surplus-funds/print-run" style="color:${TEAL};font-weight:600;text-decoration:none;">Open the print run &rarr;</a></div>
+      </td></tr>`;
+  }
+
   private renderPromises(b: DigestBrief): string {
     if (!b.promises.length) return '';
     const rows = b.promises.map((p, i) => `
@@ -350,6 +362,7 @@ export class DigestRenderService {
   ${this.renderCalls(b)}
   ${this.renderTouchesDue(b)}
   ${this.renderPrune(b)}
+  ${this.renderPrintRun(b)}
   ${this.renderPromises(b)}
   ${this.renderNeedsTrace(b)}
   ${this.renderInFlight(b)}
@@ -424,6 +437,13 @@ export class DigestRenderService {
       out.push('WEEKLY PRUNE');
       out.push(`  ${b.prune.line}`);
       out.push(`  Prune list: ${b.appUrl}/surplus-funds/prune`);
+      out.push('');
+    }
+
+    if (b.printRun) {
+      out.push('LETTERS DUE');
+      out.push(`  ${b.printRun.line}`);
+      out.push(`  Print run: ${b.appUrl}/surplus-funds/print-run`);
       out.push('');
     }
 

@@ -663,6 +663,13 @@ export enum SurplusTemplateKind {
   /** What to say when a relative or neighbour answers instead. */
   RELATIVE_SCRIPT = 'relative_script',
   LETTER_CLAIMANT = 'letter_claimant',
+  /**
+   * The second and third letters to a claimant who has not replied. The
+   * print run rotates through the three by letter number, so the same
+   * envelope is never sent twice in a row and the fourth starts over.
+   */
+  LETTER_CLAIMANT_2 = 'letter_claimant_2',
+  LETTER_CLAIMANT_3 = 'letter_claimant_3',
   LETTER_FAMILY = 'letter_family',
   LETTER_ASSOCIATE = 'letter_associate',
   CREDIBILITY_SMS = 'credibility_sms',
@@ -686,6 +693,8 @@ export const SURPLUS_TEMPLATE_KIND_LABEL: Record<SurplusTemplateKind, string> = 
   [SurplusTemplateKind.VOICEMAIL]: 'Voicemail',
   [SurplusTemplateKind.RELATIVE_SCRIPT]: 'Relative or neighbour answered',
   [SurplusTemplateKind.LETTER_CLAIMANT]: 'Letter to the claimant',
+  [SurplusTemplateKind.LETTER_CLAIMANT_2]: 'Second letter to the claimant',
+  [SurplusTemplateKind.LETTER_CLAIMANT_3]: 'Third letter to the claimant',
   [SurplusTemplateKind.LETTER_FAMILY]: 'Letter to a family member',
   [SurplusTemplateKind.LETTER_ASSOCIATE]: 'Letter to a neighbour or associate',
   [SurplusTemplateKind.CREDIBILITY_SMS]: 'Credibility packet text',
@@ -697,6 +706,13 @@ export const SURPLUS_TEMPLATE_KIND_LABEL: Record<SurplusTemplateKind, string> = 
   [SurplusTemplateKind.DOC_LETTER_OF_DIRECTION]: 'Direction to pay surplus funds',
   [SurplusTemplateKind.DOC_CLAIMS_CHECKLIST]: 'Claims checklist',
 };
+
+/** The claimant letters in the order the print run sends them. Letter n uses the (n - 1) mod 3 entry. */
+export const SURPLUS_CLAIMANT_LETTER_ROTATION: SurplusTemplateKind[] = [
+  SurplusTemplateKind.LETTER_CLAIMANT,
+  SurplusTemplateKind.LETTER_CLAIMANT_2,
+  SurplusTemplateKind.LETTER_CLAIMANT_3,
+];
 
 /**
  * Kinds the process no longer uses. Kept in the enums so rows already

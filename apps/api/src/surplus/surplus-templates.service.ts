@@ -170,6 +170,48 @@ Sincerely,
 {{companyName}}
 {{callbackNumber}}`,
   },
+  [SurplusTemplateKind.LETTER_CLAIMANT_2]: {
+    name: 'Draft, second letter to the claimant',
+    body: `{{today}}
+
+{{recipientName}}
+{{recipientAddress}}
+
+Dear {{claimantFirstName}},
+
+I wrote to you a couple of weeks ago and have not heard back, so I am writing again in case the first letter went astray.
+
+Our firm does audit work on {{county}} County records, and your name came up in connection with {{propertyAddress}}. What I found is good news for you, it is time sensitive, and hearing it costs you nothing. It is not something I should put in writing to an address I cannot confirm is yours, which is why I keep asking you to ring me.
+
+Please call {{callbackNumber}} and ask for {{callerName}}. If a call is awkward, write your number on this page and post it back to us, or send an email, and I will call you at whatever time suits.
+
+Sincerely,
+
+{{callerName}}
+{{companyName}}
+{{callbackNumber}}`,
+  },
+  [SurplusTemplateKind.LETTER_CLAIMANT_3]: {
+    name: 'Draft, third letter to the claimant',
+    body: `{{today}}
+
+{{recipientName}}
+{{recipientAddress}}
+
+Dear {{claimantFirstName}},
+
+This is my third letter. I have been trying to reach you for {{daysSearching}} days now about {{propertyAddress}} in {{county}} County, and I would not keep writing if it did not matter.
+
+There is a deadline attached to what I need to tell you. Once it passes, the matter may be closed for good, and I would rather you heard about it from me while there is still time to act. There is no cost to you for the call and no obligation afterwards.
+
+Please call {{callbackNumber}} and ask for {{callerName}}. If I do not hear from you, I will assume this letter did not reach you and try the people who may know how to find you.
+
+Sincerely,
+
+{{callerName}}
+{{companyName}}
+{{callbackNumber}}`,
+  },
   [SurplusTemplateKind.LETTER_FAMILY]: {
     name: 'Draft, to a family member',
     body: `{{today}}

@@ -27,6 +27,7 @@ import { COMPLIANCE_RULES, DISCLOSURE_LABELS, FL_COUNTIES, SURPLUS_FLOOR } from 
 import { SurplusNumbersService } from './surplus-numbers.service';
 import { SurplusPruneService } from './surplus-prune.service';
 import { SurplusSessionService } from './surplus-session.service';
+import { SurplusPrintRunService } from './surplus-print-run.service';
 
 /**
  * A probate filing upload. PDFs only and capped, because this goes straight to
@@ -96,6 +97,7 @@ export class SurplusController {
     private notice: SurplusNoticeService,
     private prune: SurplusPruneService,
     private session: SurplusSessionService,
+    private printRun: SurplusPrintRunService,
   ) {}
 
   /**
@@ -1200,6 +1202,37 @@ export class SurplusController {
       add: Array.isArray(body?.add) ? body.add : [],
       remove: Array.isArray(body?.remove) ? body.remove : [],
     });
+  }
+
+  /**
+   * The print run: every letter due, rendered, claimant first then the
+   * relatives, the claimant's text rotating by letter number. Records
+   * nothing. ?county=&max=60
+   */
+  @Get('print-run')
+  async printRunBuild(
+    @Query('county') county?: string,
+    @Query('max') max?: string,
+    @Headers('authorization') authHeader?: string,
+  ) {
+    const { organizationId, userId } = this.decodeToken(authHeader);
+    return this.printRun.build({
+      organizationId: organizationId || null,
+      county: county || null,
+      max: max ? Number(max) : null,
+      userId: userId || null,
+    });
+  }
+
+  /**
+   * The run went out: one click records every envelope with its template
+   * version and logs the postage on each claim.
+   * Body: { items: [{ leadId, heirId?, kind, version?, recipientName?, address?, mailType?, trackingNumber?, letterNumber? }], postage?: { standard, priority, fedex }, mailedAt?, note? }
+   */
+  @Post('print-run/mailed')
+  async printRunMailed(@Body() body: any, @Headers('authorization') authHeader?: string) {
+    const { organizationId, userId } = this.decodeToken(authHeader);
+    return this.printRun.mailed(body || {}, organizationId || null, userId || null);
   }
 
   /**

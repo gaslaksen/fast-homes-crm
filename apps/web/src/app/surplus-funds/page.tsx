@@ -1631,6 +1631,13 @@ export default function SurplusFundsPage() {
                   >
                     Weekly prune
                   </Link>
+                  <Link
+                    className="dc-menu-item"
+                    href={`/surplus-funds/print-run${county !== 'all' ? `?county=${encodeURIComponent(county)}` : ''}`}
+                    title="Every letter due as one document: the claimant first, then the relatives, the text rotating by letter number. Print it, then one click records the run and logs the postage."
+                  >
+                    Print run{stats.letterDue ? ` (${stats.letterDue} due)` : ''}
+                  </Link>
                   <a className="dc-menu-item" href="/surplus-funds/references">
                     References{stats.recoveries ? ` (${stats.recoveries} paid)` : ''}
                   </a>

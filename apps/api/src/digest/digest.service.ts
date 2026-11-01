@@ -6,6 +6,7 @@ import { SurplusService } from '../surplus/surplus.service';
 import { SurplusIngestService } from '../surplus/surplus-ingest.service';
 import { SurplusOutreachService } from '../surplus/surplus-outreach.service';
 import { SurplusPruneService } from '../surplus/surplus-prune.service';
+import { SurplusPrintRunService } from '../surplus/surplus-print-run.service';
 import { TOUCH_EVERY_DAYS } from '../surplus/surplus-windows.util';
 import { estFee, SurplusLien } from '../surplus/surplus.util';
 import { describeCountyListDue, describeFeed, summarizeHealthyFeeds } from './digest-feeds.util';
@@ -85,6 +86,7 @@ export class DigestService {
     private surplusIngest: SurplusIngestService,
     private outreach: SurplusOutreachService,
     private pruneService?: SurplusPruneService,
+    private printRunService?: SurplusPrintRunService,
   ) {}
 
   private get appUrl(): string {
@@ -705,6 +707,7 @@ export class DigestService {
     const countyListsDue = await this.buildCountyListsDue(orgId, now);
     const touchesDue = await this.buildTouchesDue(orgId);
     const prune = this.pruneService ? await this.pruneService.briefLine(orgId) : null;
+    const printRun = this.printRunService ? await this.printRunService.briefLine(orgId) : null;
 
     // ── Wholesale, parked ───────────────────────────────────────────────────
     const oldestWholesale = wholesaleReplies[0]?.lastMessageAt
@@ -747,6 +750,7 @@ export class DigestService {
       countyListsDue,
       touchesDue,
       prune,
+      printRun,
       wholesale: wholesaleParts.length ? wholesaleParts.join(' · ') : null,
       appUrl: this.appUrl,
       // A failed county feed is never an empty day; that is the one morning
