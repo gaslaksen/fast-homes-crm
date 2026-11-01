@@ -2932,6 +2932,7 @@ export class SurplusService {
         ),
       },
       tappedAt: d.tappedAt,
+      rifleAt: d.rifleAt || null,
       contactStatus: !d.tappedAt
         ? 'not_tapped'
         : (lead.tasks || []).some((t: any) => t.dueDate)

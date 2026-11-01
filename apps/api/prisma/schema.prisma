@@ -904,6 +904,10 @@ model SurplusDetail {
   /// daily cadence releases it on this day and leaves a revisit task.
   /// Calendar day at noon UTC. Null on an ordinary hold, which has no end.
   holdUntil    DateTime?
+  /// On the rifle list: the 10 to 30 cases the team has committed to work
+  /// until each is a yes, a no or a maybe. Set from the Work today screen,
+  /// cleared when the case leaves the callable queues.
+  rifleAt      DateTime?
   doNotCall  Boolean @default(false)
   callNotes  String?
   touchDays  Json?

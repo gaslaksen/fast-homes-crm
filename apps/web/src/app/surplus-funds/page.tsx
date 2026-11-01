@@ -1619,6 +1619,13 @@ export default function SurplusFundsPage() {
                   </button>
                   <Link
                     className="dc-menu-item"
+                    href="/surplus-funds/session"
+                    title="The call session: the rifle list in the course's order, one case at a time, every number one click, the outcome before the next case, and today's count against the target."
+                  >
+                    Work today
+                  </Link>
+                  <Link
+                    className="dc-menu-item"
                     href="/surplus-funds/prune"
                     title="Cases the course says to stop working: sixty days of full effort, past the cutoff, below the floor, closed by the docket. Pause or close them in bulk."
                   >

@@ -32,6 +32,7 @@ import { SurplusCadenceService } from './surplus-cadence.service';
 import { SurplusIdiService } from './surplus-idi.service';
 import { SurplusOutreachService } from './surplus-outreach.service';
 import { SurplusPruneService } from './surplus-prune.service';
+import { SurplusSessionService } from './surplus-session.service';
 import { StorageModule } from '../storage/storage.module';
 import { MessagesModule } from '../messages/messages.module';
 import { SurplusProgressModule } from './surplus-progress.module';
@@ -75,6 +76,7 @@ import { SurplusProgressModule } from './surplus-progress.module';
     SurplusIdiService,
     SurplusOutreachService,
     SurplusPruneService,
+    SurplusSessionService,
   ],
   exports: [
     SurplusService,
