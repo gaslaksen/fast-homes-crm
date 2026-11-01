@@ -148,7 +148,7 @@ export default function ReferencesPage() {
                       Copy for a text
                     </button>
                   )}
-                  <Link href={`/leads/${r.leadId}`} className="text-gray-500 hover:underline">
+                  <Link href={`/surplus-funds?lead=${encodeURIComponent(r.leadId)}`} className="text-gray-500 hover:underline">
                     Open the claim
                   </Link>
                 </div>

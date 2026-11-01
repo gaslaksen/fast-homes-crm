@@ -89,6 +89,7 @@ describe('DigestService.build', () => {
     expect(b.bigThing?.headline).toBe('Priscilla A Burpee is owed $36,194 by Citrus County and nobody has called.');
     expect(b.bigThing?.flag).toContain('Likely match');
     expect(b.bigThing?.phone).toBe('(321) 555-0142');
+    expect(b.bigThing?.ctaUrl).toBe('https://mydealcore.com/surplus-funds?lead=p1');
     expect(b.subject).toBe('Dealcore Daily: Call Priscilla A Burpee ($36.2K), 2 more to call');
   });
 
@@ -121,6 +122,7 @@ describe('DigestService.build', () => {
     const b = await makeService({ unread }).build({ organizationId: 'org1', now: NOW });
     expect(b.bigThing?.key).toBe('lead:r1');
     expect(b.bigThing?.headline).toBe('David G Kelly replied 3h 00m ago and is still waiting on an answer.');
+    expect(b.bigThing?.ctaUrl).toBe('https://mydealcore.com/surplus-funds?lead=r1');
     expect(b.wholesale).toContain('1 reply waiting (oldest 7d 0h)');
     expect(b.wholesale).toContain('4 contracts past close date');
     expect(b.wholesale).toContain('6 foreclosures in the workable window');
@@ -130,14 +132,20 @@ describe('DigestService.build', () => {
   it('fills the scorecard, the trace count, and the coming-up note from surplus', async () => {
     const tasks = [{
       id: 't1', title: 'Check for a reply to the letter to DAVID G KELLY', dueDate: new Date(NOW.getTime() - 5 * DAY),
-      lead: { id: 'k1' }, user: { firstName: 'Ian' },
+      lead: { id: 'k1', source: 'SURPLUS' }, user: { firstName: 'Ian' },
     }];
-    const b = await makeService({ tasks }).build({ organizationId: 'org1', now: NOW });
+    const inFlight = [{
+      leadId: 'm1', stage: 'Claim Filed', submittedAt: new Date(NOW.getTime() - 38 * DAY), countyAcknowledgedAt: null,
+      grossSurplus: 41000, liens: [], lead: { source: 'SURPLUS', sellerFirstName: 'Mary', sellerLastName: 'Surdi' },
+    }];
+    const b = await makeService({ tasks, inFlight }).build({ organizationId: 'org1', now: NOW });
     const tile = (label: string) => b.scorecard.find((t) => t.label === label);
     expect(tile('Ready to call')?.value).toBe('3');
     expect(tile('Calls yesterday')).toMatchObject({ value: '1', subtext: '0 connected · target 25', urgency: 'critical' });
     expect(tile('Follow-ups due')).toMatchObject({ value: '1', subtext: 'oldest 5 days late' });
-    expect(b.promises[0]).toMatchObject({ when: '5 days late · Ian' });
+    expect(b.promises[0]).toMatchObject({ when: '5 days late · Ian', url: 'https://mydealcore.com/surplus-funds?lead=k1' });
+    expect(b.calls.map((c) => c.url)).toEqual(['https://mydealcore.com/surplus-funds?lead=g1', 'https://mydealcore.com/surplus-funds?lead=a1']);
+    expect(b.inFlight[0]).toMatchObject({ claimant: 'Mary Surdi', url: 'https://mydealcore.com/surplus-funds?lead=m1' });
     expect(b.needsTrace).toEqual({ total: 38, byCounty: 'Citrus 28 · Alachua 10' });
     expect(b.surplusOpeningSoonNote).toBe('1 claimant clears the lien window in the next 30 days, $20.0K between them. First: Nancy E Andrews, tomorrow.');
   });
@@ -175,6 +183,12 @@ describe('DigestService.build', () => {
 
 describe('DigestService helpers', () => {
   const svc = makeService();
+
+  it('sends a surplus claimant to the case panel and every other lead to its page', () => {
+    expect(svc.leadUrl('r1', 'SURPLUS')).toBe('https://mydealcore.com/surplus-funds?lead=r1');
+    expect(svc.leadUrl('w1', 'MANUAL')).toBe('https://mydealcore.com/leads/w1');
+    expect(svc.leadUrl('w2', null)).toBe('https://mydealcore.com/leads/w2');
+  });
 
   it('reads county names the way a person would say them', () => {
     expect(svc.displayName('Garcia, Douglas')).toBe('Douglas Garcia');

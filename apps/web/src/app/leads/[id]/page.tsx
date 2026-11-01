@@ -190,11 +190,19 @@ export default function LeadDetailPage() {
   const loadLead = async () => {
     try {
       const response = await leadsAPI.get(leadId);
+      // A surplus claimant is worked on the case panel. This page's Send
+      // Initial Text and Resume AI buttons would start outreach to them by
+      // accident, so any link that still points here lands on the case
+      // instead. Stays on the loading screen until the board takes over.
+      if (response.data?.source === 'SURPLUS') {
+        router.replace(`/surplus-funds?lead=${encodeURIComponent(leadId)}`);
+        return;
+      }
       setLead(response.data);
       loadComms();
+      setLoading(false);
     } catch (error) {
       console.error('Failed to load lead:', error);
-    } finally {
       setLoading(false);
     }
   };

@@ -19,6 +19,18 @@ export const SOURCE_LABELS: Record<string, string> = {
  */
 const INGESTED_SOURCES = new Set(['FORECLOSURE', 'PROBATE']);
 
+/**
+ * Where a lead opens. A surplus claimant is worked on the case panel, which
+ * /surplus-funds?lead= opens with the hiding filters off. The wholesale lead
+ * page offers Send Initial Text, Resume AI and Zillow, none of which belong on
+ * a claimant, and the first two can start automated outreach by accident.
+ */
+export function leadHref(lead: { id: string; source?: string | null }): string {
+  return lead.source === 'SURPLUS'
+    ? `/surplus-funds?lead=${encodeURIComponent(lead.id)}`
+    : `/leads/${encodeURIComponent(lead.id)}`;
+}
+
 export const ASSIGNABLE_SOURCE_LABELS: Record<string, string> = Object.fromEntries(
   Object.entries(SOURCE_LABELS).filter(([v]) => !INGESTED_SOURCES.has(v)),
 );
