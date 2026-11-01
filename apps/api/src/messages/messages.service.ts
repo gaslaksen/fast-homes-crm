@@ -869,6 +869,9 @@ You decide the right approach based on the conversation flow.${photoNudge}`.trim
         const person = await this.prisma.surplusHeir.findUnique({ where: { id: heirId }, select: { name: true, role: true } });
         if (person) {
           recipient = person.name;
+          // The county's own contact hears the county, the case and the
+          // amount: that is what writing to the clerk is for.
+          if (person.role === 'clerk') return;
           if (person.role !== 'heir') ctx = { ...ctx, audience: 'relative' };
         }
       }

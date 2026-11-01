@@ -576,6 +576,12 @@ export enum SurplusPersonRole {
   NEIGHBOR = 'neighbor',
   FRIEND = 'friend',
   ASSOCIATE = 'associate',
+  /**
+   * The county clerk, as a contact row on the case, so a letter or an email
+   * to the county is logged as county contact and never as a relative. Not
+   * outreach: never dripped, never traced, never on the outreach list.
+   */
+  CLERK = 'clerk',
 }
 
 export const SURPLUS_PERSON_ROLE_LABEL: Record<SurplusPersonRole, string> = {
@@ -584,7 +590,13 @@ export const SURPLUS_PERSON_ROLE_LABEL: Record<SurplusPersonRole, string> = {
   [SurplusPersonRole.NEIGHBOR]: 'Neighbor',
   [SurplusPersonRole.FRIEND]: 'Friend',
   [SurplusPersonRole.ASSOCIATE]: 'Associate',
+  [SurplusPersonRole.CLERK]: 'County clerk',
 };
+
+/** The county's contact on a case is not a person to reach the claimant through. */
+export function isCountyContactRole(role: string | null | undefined): boolean {
+  return role === SurplusPersonRole.CLERK;
+}
 
 /** Where the outreach to one person stands. */
 export enum SurplusContactStatus {

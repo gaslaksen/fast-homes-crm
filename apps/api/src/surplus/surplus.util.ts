@@ -490,6 +490,16 @@ export interface StageGateContext {
   complianceBlocks?: string[];
   /** Required document kinds not yet in hand, from the checklist. */
   docsMissing?: string[];
+  /**
+   * The county's five clerk answers. `countyOnList` false means the case's
+   * county is not on the county table at all; `countyUnknowns` lists what
+   * the clerk has not been asked yet. Either holds Agreement Signed: a
+   * claimant signed in a county we cannot file in is a promise we cannot
+   * keep inside the window.
+   */
+  countyOnList?: boolean;
+  countyName?: string | null;
+  countyUnknowns?: string[];
   /** This county (or this case) needs an attorney to file. */
   attorneyRequired?: boolean;
   /** One is engaged on the case. */
@@ -552,6 +562,13 @@ export function stageRequirementsMissing(
   if (!facts.noticeConfirmed) missing.push('notice date confirmed');
   if (!facts.titleSearchComplete) missing.push('title search complete');
   for (const b of ctx.complianceBlocks || []) missing.push(`compliance: ${b}`);
+  // The county has to be ready to file in before anyone signs: the course
+  // puts the clerk's five answers before the first signature.
+  if (ctx.countyOnList === false) {
+    missing.push(`${ctx.countyName || 'the county'} added to the county list, with the clerk's answers`);
+  } else if (ctx.countyUnknowns?.length) {
+    missing.push(`the ${ctx.countyName || 'county'} clerk's answers on ${ctx.countyUnknowns.join(', ')}`);
+  }
   if (!at(SurplusDocumentKind.FEE_AGREEMENT, SurplusDocumentStatus.SIGNED)) {
     missing.push(`${label(SurplusDocumentKind.FEE_AGREEMENT)} marked signed`);
   }

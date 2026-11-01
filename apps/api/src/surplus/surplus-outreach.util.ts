@@ -26,6 +26,8 @@ export function outreachRank(p: {
   // but at the bottom and never as somebody to try.
   if (p.deceased) return { rank: 90, label: 'Deceased' };
   if (p.doNotCall) return { rank: 80, label: 'Do not contact' };
+  // The county's contact on the case. Logged against, never tried.
+  if (p.role === 'clerk') return { rank: 70, label: 'County clerk' };
   if (p.isClaimant) return { rank: 0, label: 'Claimant' };
   const rel = String(p.relationship || '').toLowerCase();
   if (/spouse|wife|husband/.test(rel)) return { rank: 1, label: 'Spouse' };

@@ -7,6 +7,9 @@ import {
   isSignedStage,
   outcomeDeadReason,
 } from './surplus-progress.util';
+import { clerkTaskTitle, countyReadiness, practiceRunTaskTitle } from './surplus-county-readiness.util';
+
+const DAY = 86_400_000;
 
 /**
  * Moves the course's four fields on a surplus case (Stage, Next action,
@@ -144,6 +147,70 @@ export class SurplusProgressService {
       this.logger.warn(`Could not close ${leadId} from the call outcome: ${err.message}`);
       return false;
     }
+  }
+
+  /**
+   * The first yes or maybe in a county: the county has to be ready to file
+   * in before the signature, so one task asks the clerk the five questions
+   * (claim form, third party or POA, submission method, signature,
+   * attorney) and one books the course's practice run of the document set.
+   * Both are once per county across the org, keyed on the title, and land
+   * on the case that raised them, owned by whoever took the call. A county
+   * already ready, with its practice run done, opens nothing.
+   */
+  async countyPrep(leadId: string, opts: { userId?: string | null; how: string }): Promise<{ clerkTask: boolean; practiceTask: boolean }> {
+    const out = { clerkTask: false, practiceTask: false };
+    try {
+      const lead = await this.prisma.lead.findFirst({
+        where: { id: leadId, source: LeadSource.SURPLUS },
+        select: { id: true, organizationId: true, surplusDetail: { select: { county: true } } },
+      });
+      const county = String(lead?.surplusDetail?.county || '').trim();
+      if (!lead || !county) return out;
+      const row = await this.prisma.surplusCounty.findFirst({
+        where: { organizationId: lead.organizationId, name: { equals: county, mode: 'insensitive' } },
+      });
+      const readiness = countyReadiness(row);
+      const name = row?.name || county;
+      const open = async (title: string, days: number) => {
+        // Once per county for the whole org: a second maybe in Hernando
+        // does not ask the clerk twice.
+        const exists = await this.prisma.task.findFirst({
+          where: { title, lead: { organizationId: lead.organizationId } },
+          select: { id: true },
+        });
+        if (exists) return false;
+        const dueDate = new Date(Date.now() + days * DAY);
+        dueDate.setHours(9, 0, 0, 0);
+        await this.prisma.task.create({ data: { leadId, title, dueDate, userId: opts.userId || undefined } });
+        await this.prisma.activity.create({
+          data: {
+            leadId,
+            userId: opts.userId || undefined,
+            type: 'TASK_CREATED',
+            description: `Task created: ${title}`,
+            metadata: { title, dueDate: dueDate.toISOString(), auto: true, countyPrep: true, how: opts.how },
+          },
+        });
+        return true;
+      };
+      if (!readiness.ready) out.clerkTask = await open(clerkTaskTitle(name), 1);
+      if (!readiness.practiceRun) out.practiceTask = await open(practiceRunTaskTitle(name), 7);
+      if (out.clerkTask || out.practiceTask) {
+        await this.prisma.activity.create({
+          data: {
+            leadId,
+            userId: opts.userId || undefined,
+            type: 'NOTE_ADDED',
+            description: `${name} is not ready to file in (${readiness.unknowns.length ? `still to ask the clerk: ${readiness.unknowns.join(', ')}` : 'practice run not done'}). Opened by ${opts.how}.`,
+            metadata: { auto: true, countyPrep: true, unknowns: readiness.unknowns, practiceRun: readiness.practiceRun },
+          },
+        });
+      }
+    } catch (err: any) {
+      this.logger.warn(`Could not open the county prep tasks for ${leadId}: ${err.message}`);
+    }
+    return out;
   }
 
   /**

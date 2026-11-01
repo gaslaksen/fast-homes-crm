@@ -10,6 +10,7 @@ export const SURPLUS_PERSON_ROLES: [string, string][] = [
   ['neighbor', 'Neighbor'],
   ['friend', 'Friend'],
   ['associate', 'Associate'],
+  ['clerk', 'County clerk'],
 ];
 
 export const SURPLUS_CONTACT_STATUSES: [string, string][] = [

@@ -6,7 +6,9 @@ import { SurplusProgressService } from './surplus-progress.service';
  * exactly what was written, because these run as side effects of a text, a
  * call or the pull and nobody is watching them.
  */
-function harness(over: { stage?: string; assignedToUserId?: string | null; source?: string; heirRole?: string } = {}) {
+function harness(
+  over: { stage?: string; assignedToUserId?: string | null; source?: string; heirRole?: string; county?: any; openTasks?: string[] } = {},
+) {
   const writes: { model: string; op: string; args: any }[] = [];
   const record = (model: string, op: string) => async (args: any) => {
     writes.push({ model, op, args });
@@ -18,7 +20,7 @@ function harness(over: { stage?: string; assignedToUserId?: string | null; sourc
     sellerFirstName: 'Dorothy',
     sellerLastName: 'Kessler',
     assignedToUserId: over.assignedToUserId ?? null,
-    surplusDetail: { id: 'sd1', stage: over.stage ?? SurplusStage.NEW },
+    surplusDetail: { id: 'sd1', stage: over.stage ?? SurplusStage.NEW, county: 'Hernando' },
   };
   const prisma = {
     lead: {
@@ -28,7 +30,12 @@ function harness(over: { stage?: string; assignedToUserId?: string | null; sourc
     user: { findUnique: async () => ({ firstName: 'Ian', lastName: 'Shaw' }) },
     note: { create: record('note', 'create') },
     activity: { create: record('activity', 'create') },
-    task: { updateMany: record('task', 'updateMany') },
+    task: {
+      updateMany: record('task', 'updateMany'),
+      findFirst: async ({ where }: any) => (over.openTasks || []).includes(where.title) ? { id: 't1' } : null,
+      create: record('task', 'create'),
+    },
+    surplusCounty: { findFirst: async () => over.county === undefined ? null : over.county },
     surplusDetail: { update: record('surplusDetail', 'update') },
     surplusHeir: {
       findUnique: async ({ where }: any) =>
@@ -178,6 +185,60 @@ describe('SurplusProgressService.countyRetired', () => {
   it('writes nothing for a case already Dead', async () => {
     const { svc, writes } = harness();
     await svc.countyRetired('lead1', 'distributed', SurplusStage.DEAD);
+    expect(writes).toEqual([]);
+  });
+});
+
+describe('SurplusProgressService.countyPrep', () => {
+  const readyCounty = {
+    name: 'Hernando',
+    claimFormUrl: 'https://clerk.example/form.pdf',
+    acceptedMethods: 'usps',
+    signatureRequired: false,
+    attorneyRequired: false,
+    assignmentPreference: 'partial',
+    practiceRunAt: new Date('2026-10-01'),
+  };
+
+  it('opens the clerk task and the practice run on the first maybe in a county that is not ready', async () => {
+    const { svc, writes } = harness({ county: { ...readyCounty, attorneyRequired: null, practiceRunAt: null } });
+    const out = await svc.countyPrep('lead1', { userId: 'u1', how: 'wants the credibility packet on the phone' });
+    expect(out).toEqual({ clerkTask: true, practiceTask: true });
+    const tasks = writes.filter((w) => w.model === 'task' && w.op === 'create').map((w) => w.args.data);
+    expect(tasks.map((t) => t.title)).toEqual([
+      'Ask the Hernando clerk: claim form, third party or POA, submission method, signature, attorney',
+      'Practice run for Hernando: fill out the whole document set once',
+    ]);
+    expect(tasks[0].userId).toBe('u1');
+    const note = writes.find((w) => w.model === 'activity' && w.args.data.type === 'NOTE_ADDED')?.args.data;
+    expect(note.description).toContain('still to ask the clerk: whether an attorney is required');
+  });
+
+  it('opens each task once per county across the org', async () => {
+    const { svc, writes } = harness({
+      county: { ...readyCounty, attorneyRequired: null, practiceRunAt: null },
+      openTasks: ['Ask the Hernando clerk: claim form, third party or POA, submission method, signature, attorney'],
+    });
+    const out = await svc.countyPrep('lead1', { userId: 'u1', how: 'spoke to claimant on the phone' });
+    expect(out).toEqual({ clerkTask: false, practiceTask: true });
+    expect(writes.filter((w) => w.model === 'task' && w.op === 'create')).toHaveLength(1);
+  });
+
+  it('opens nothing for a county that is ready with its practice run done', async () => {
+    const { svc, writes } = harness({ county: readyCounty });
+    expect(await svc.countyPrep('lead1', { userId: 'u1', how: 'an appointment booked' })).toEqual({ clerkTask: false, practiceTask: false });
+    expect(writes).toEqual([]);
+  });
+
+  it('a county not on the list gets both tasks, named for the case county', async () => {
+    const { svc, writes } = harness({ county: null });
+    expect(await svc.countyPrep('lead1', { userId: null, how: 'the stage set to Agreement Signed' })).toEqual({ clerkTask: true, practiceTask: true });
+    expect(writes.filter((w) => w.model === 'task' && w.op === 'create')[0].args.data.title).toContain('Ask the Hernando clerk');
+  });
+
+  it('does nothing on a wholesale lead', async () => {
+    const { svc, writes } = harness({ source: 'ZILLOW', county: null });
+    await svc.countyPrep('lead1', { userId: 'u1', how: 'x' });
     expect(writes).toEqual([]);
   });
 });

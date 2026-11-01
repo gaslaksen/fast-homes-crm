@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { LeadSource, SurplusQueue, SURPLUS_QUEUE_LABEL } from '@fast-homes/shared';
+import { LeadSource, SurplusQueue, SURPLUS_QUEUE_LABEL, isCountyContactRole } from '@fast-homes/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { SurplusService } from './surplus.service';
 import { idiBatchCode } from './surplus-idi.util';
@@ -92,7 +92,8 @@ export class SurplusOutreachService {
         mailReturned: !!r.mailReturned,
         statusLabel: r.tappedAt ? 'Has replied' : 'Not heard from',
       };
-      const others = (r.heirs || []).map((h: any) => {
+      // The clerk contact is county correspondence, not outreach.
+      const others = (r.heirs || []).filter((h: any) => !isCountyContactRole(h.role)).map((h: any) => {
         const last = (r.letters || []).find((l: any) => l.heirId === h.id);
         return {
           heirId: h.id as string | null,

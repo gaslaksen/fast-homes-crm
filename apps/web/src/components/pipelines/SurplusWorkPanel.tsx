@@ -427,7 +427,13 @@ export interface SurplusPanelLead {
     lastVerifiedAt: string | null;
     stale: boolean;
     unknowns: string[];
+    /** Every one of the five clerk answers is in. The gate before Agreement Signed. */
+    ready: boolean;
+    /** The clerk call, question by question. */
+    script: { key: string; ask: string; field: string; answered: boolean }[];
   } | null;
+  /** The clerk's own row on this case, once added, so county mail is addressed to it. */
+  clerkContact: { id: string; name: string } | null;
 }
 
 interface PanelDocument {
@@ -2157,9 +2163,24 @@ const METHOD_LABEL: Record<string, string> = {
  * older than 180 days, because a filing built on a stale answer is the
  * expensive mistake.
  */
-function CountySection({ lead }: { lead: SurplusPanelLead }) {
+function CountySection({ lead, onChanged, say }: { lead: SurplusPanelLead; onChanged?: () => void; say?: (msg: string) => void }) {
   const c = lead.countyInfo;
   const name = lead.county || 'this county';
+  const [scriptOpen, setScriptOpen] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const addClerk = async () => {
+    if (adding) return;
+    setAdding(true);
+    try {
+      const r = await surplusAPI.addClerkContact(lead.id);
+      say?.(r.data?.created ? `${r.data.name} added as the county contact. Letters and emails to the clerk go on their row.` : `${r.data?.name} is already on the case.`);
+      onChanged?.();
+    } catch (err: any) {
+      say?.(err?.response?.data?.message || 'The clerk could not be added.');
+    } finally {
+      setAdding(false);
+    }
+  };
   const edit = (
     <a href="/settings/surplus/counties" target="_blank" rel="noopener noreferrer" className="dc-wp-link" style={{ fontSize: 11 }}>
       Edit counties
@@ -2180,7 +2201,34 @@ function CountySection({ lead }: { lead: SurplusPanelLead }) {
     : 'Never checked with the clerk';
   return (
     <Section title={`Filing in ${name}`} note={verified}>
-      {(c.stale || !c.lastVerifiedAt) && (
+      {!c.ready ? (
+        <div style={{ fontSize: 11.5, color: 'var(--amber)', fontWeight: 600 }}>
+          County not ready: the clerk has not answered on {c.unknowns.join(', ')}. Agreement Signed waits on it.{' '}
+          <button type="button" className="dc-wp-link" style={{ fontSize: 11.5 }} onClick={() => setScriptOpen((v) => !v)}>
+            {scriptOpen ? 'Hide the clerk script' : 'Show the clerk script'}
+          </button>
+        </div>
+      ) : (
+        <div style={{ fontSize: 11.5, color: 'var(--mint)' }}>
+          County ready to file in: all five clerk answers are on the card.{' '}
+          <button type="button" className="dc-wp-link" style={{ fontSize: 11.5 }} onClick={() => setScriptOpen((v) => !v)}>
+            {scriptOpen ? 'Hide the clerk script' : 'Clerk script'}
+          </button>
+        </div>
+      )}
+      {scriptOpen && (
+        <ol style={{ margin: 0, paddingLeft: 18, display: 'grid', gap: 4, fontSize: 12 }}>
+          {c.script.map((q) => (
+            <li key={q.key} style={{ color: q.answered ? 'var(--faint)' : 'var(--text)' }}>
+              {q.ask}
+              <div style={{ fontSize: 11, color: 'var(--faint)' }}>
+                {q.answered ? 'Answered' : 'Open'} · goes in {q.field}. {edit}
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+      {(c.stale || !c.lastVerifiedAt) && c.ready && (
         <div style={{ fontSize: 11.5, color: 'var(--amber)' }}>
           Confirm these with the clerk before filing. {edit}
         </div>
@@ -2217,6 +2265,21 @@ function CountySection({ lead }: { lead: SurplusPanelLead }) {
       {(c.clerkContactName || c.clerkContactPhone || c.clerkContactEmail) && (
         <Row k="Clerk contact" v={[c.clerkContactName, c.clerkContactPhone, c.clerkContactEmail].filter(Boolean).join(' · ')} />
       )}
+      <div style={{ fontSize: 11.5, color: 'var(--dim)' }}>
+        {lead.clerkContact ? (
+          <>
+            {lead.clerkContact.name} is on the case as the county contact, so a letter or an email to the county is logged against the clerk, never as a
+            relative.
+          </>
+        ) : (
+          <>
+            <button type="button" className="dc-wp-link" style={{ fontSize: 11.5 }} disabled={adding} onClick={addClerk}>
+              {adding ? 'Adding...' : 'Add the clerk as a contact on this case'}
+            </button>{' '}
+            so letters and emails to the county are logged as county contact, not as a relative.
+          </>
+        )}
+      </div>
       {c.clerkAddress && <Row k="Mail claims to" v={c.clerkAddress} />}
       {c.notes && <div style={{ fontSize: 11.5, color: 'var(--dim)', whiteSpace: 'pre-wrap' }}>{c.notes}</div>}
       <Row
@@ -2540,6 +2603,18 @@ export default function SurplusWorkPanel({
                 </span>
                 {property.anyDeceased && (
                   <span style={{ fontSize: 11, color: 'var(--amber)' }}>Estate</span>
+                )}
+                {lead.county && (!lead.countyInfo || !lead.countyInfo.ready) && (
+                  <span
+                    style={{ fontSize: 11, color: 'var(--amber)', fontWeight: 600 }}
+                    title={
+                      lead.countyInfo
+                        ? `Before anyone signs in ${lead.county}, the clerk has to answer: ${lead.countyInfo.unknowns.join(', ')}. The script is on the Claim tab.`
+                        : `${lead.county} is not on the county list yet, so nothing is known about how it takes a claim.`
+                    }
+                  >
+                    County not ready
+                  </span>
                 )}
                 {lead.shortWindow && (
                   <span
@@ -3042,6 +3117,8 @@ function PaperworkChecklist({ lead }: { lead: SurplusPanelLead }) {
     return { done: d.collected, at: d.signedAt || null };
   };
   const steps: { label: string; state: { done: boolean; at: string | null } | null }[] = [
+    // The course puts the clerk's five answers before the first signature.
+    { label: `${lead.county || 'County'} ready to file in`, state: lead.county ? { done: !!lead.countyInfo?.ready, at: null } : null },
     { label: 'Fee agreement signed', state: lead.notary?.retentionConfirmed ? { done: true, at: doc('fee_agreement')?.signedAt || null } : { done: false, at: null } },
     { label: 'Limited power of attorney', state: signed('limited_poa') },
     { label: 'Partial assignment', state: signed('assignment_of_rights') },
@@ -3189,7 +3266,7 @@ function DetailsTab({
           />
         )}
       </div>
-      <CountySection lead={lead} />
+      <CountySection lead={lead} onChanged={onChanged} say={say} />
       <DocketBlock property={property} ledger={ledger} />
       <HoldControl lead={lead} onChanged={onChanged} say={say} />
     </div>

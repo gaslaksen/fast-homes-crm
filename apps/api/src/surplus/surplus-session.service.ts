@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
-import { LeadSource, SurplusQueue, SurplusStage, surplusCallConnected } from '@fast-homes/shared';
+import { LeadSource, SurplusQueue, SurplusStage, isCountyContactRole, surplusCallConnected } from '@fast-homes/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { SurplusService } from './surplus.service';
 import { outreachRank } from './surplus-outreach.util';
@@ -194,7 +194,7 @@ export class SurplusSessionService {
         ? null
         : { heirId: null, name: r.claimant, isClaimant: true, relationship: null, rankLabel: 'Claimant', numbers: dialable(r.phones) };
     const others: SessionPerson[] = (r.heirs || [])
-      .filter((h: any) => !h.deceased && !h.doNotCall)
+      .filter((h: any) => !h.deceased && !h.doNotCall && !isCountyContactRole(h.role))
       .map((h: any) => ({
         heirId: h.id,
         name: h.name,

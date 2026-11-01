@@ -68,6 +68,7 @@ function followUpTitle(outcome: SurplusCallOutcome | null, name: string): string
 }
 import { PhoneNumbersService, numberKey, prettyNumber } from '../phone-numbers/phone-numbers.service';
 import { SurplusProgressService } from '../surplus/surplus-progress.service';
+import { isCountyPrepOutcome } from '../surplus/surplus-county-readiness.util';
 import { SurplusNumbersService } from '../surplus/surplus-numbers.service';
 import { LeadPhonesService } from '../phone-numbers/lead-phones.service';
 import { TouchService } from '../leads/touch.service';
@@ -1300,6 +1301,14 @@ export class TwilioVoiceService {
           heirId: personId,
           userId,
           how: `picked up (${SURPLUS_CALL_OUTCOME_LABEL[outcome].toLowerCase()})`,
+        });
+      }
+      // The first yes or maybe in a county: the clerk's five questions and
+      // the practice run have to happen before the signature it leads to.
+      if (!closed && isCountyPrepOutcome(outcome) && (!personId || outcome === SurplusCallOutcome.SPOKE_CLAIMANT)) {
+        await this.progress?.countyPrep(lead.id, {
+          userId,
+          how: `${SURPLUS_CALL_OUTCOME_LABEL[outcome].toLowerCase()} on the phone`,
         });
       }
     }
