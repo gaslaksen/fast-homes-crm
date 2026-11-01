@@ -235,9 +235,13 @@ export enum SurplusQueue {
    * amount of skip tracing a dead man produces somebody who can sign.
    */
   HEIRS = 'heirs',
-  /** Never submitted, and the address still looks live. Spend a credit. */
+  /**
+   * Not sent to IDI yet, and the address still looks live. Since 2026-11-01
+   * the only skip trace is the IDI batch, exported from the board, so this
+   * queue is the batch waiting to be built.
+   */
   TRACE = 'trace',
-  /** The address route is spent. Name search, obituary, official records. */
+  /** The address route is spent. Obituary, social, official records, by name. */
   NAME_SEARCH = 'name_search',
   /**
    * A letter went out to the address on file and nobody can be phoned. Parked
@@ -287,8 +291,8 @@ export const SURPLUS_QUEUE_LABEL: Record<SurplusQueue, string> = {
   [SurplusQueue.LIKELY]: 'Likely match',
   [SurplusQueue.ENTITY]: 'Entity, find the agent',
   [SurplusQueue.HEIRS]: 'Find the heirs',
-  [SurplusQueue.TRACE]: 'Skip trace',
-  [SurplusQueue.NAME_SEARCH]: 'Name search',
+  [SurplusQueue.TRACE]: 'Send to IDI',
+  [SurplusQueue.NAME_SEARCH]: 'Research by name',
   [SurplusQueue.MAILED]: 'Letter sent',
   [SurplusQueue.HOLD]: 'On hold',
   [SurplusQueue.CLOSED]: 'Closed',

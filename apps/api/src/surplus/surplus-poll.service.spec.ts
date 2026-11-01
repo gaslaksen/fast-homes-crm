@@ -231,3 +231,33 @@ describe('describeNoticeSweep', () => {
       .toBe('Notice sweep: 0 notices read, 1 could not be read');
   });
 });
+
+describe('the IDI-ready note', () => {
+  it('says on the run how many of the county\'s claimants are waiting for the batch', async () => {
+    const { svc, notes } = harness({ SURPLUS_AUTO_TRACE: 'false' });
+    const idi: any = { readyForIdi: jest.fn().mockResolvedValue({ leadIds: ['a', 'b', 'c'], waiting: 1, overAge: 0 }) };
+    const withIdi = new SurplusPollService(
+      (svc as any).config,
+      (svc as any).ingest,
+      (svc as any).lock,
+      (svc as any).skiptrace,
+      undefined,
+      idi,
+    );
+
+    await withIdi.pollWeekly();
+
+    expect(idi.readyForIdi).toHaveBeenCalled();
+    expect(notes).toContain('3 claimants ready to send to IDI');
+  });
+
+  it('writes nothing when nobody is ready', async () => {
+    const { svc, notes } = harness({ SURPLUS_AUTO_TRACE: 'false' });
+    const idi: any = { readyForIdi: jest.fn().mockResolvedValue({ leadIds: [], waiting: 0, overAge: 0 }) };
+    const withIdi = new SurplusPollService((svc as any).config, (svc as any).ingest, (svc as any).lock, (svc as any).skiptrace, undefined, idi);
+
+    await withIdi.pollWeekly();
+
+    expect(notes.filter((n) => n.includes('ready to send'))).toEqual([]);
+  });
+});

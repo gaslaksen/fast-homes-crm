@@ -99,6 +99,7 @@ import { NO_CONTACTS, claimantContacts, contactStampPatch } from './surplus-cont
 import { SurplusTemplatesService } from './surplus-templates.service';
 import { SurplusProgressService } from './surplus-progress.service';
 import { LETTER_REPLY_TASK_PREFIX } from './surplus-progress.util';
+import { idiBatchCode } from './surplus-idi.util';
 
 /** What toRow needs beyond the lead: per-request lookups fetched once. */
 interface RowContext {
@@ -128,6 +129,10 @@ const LEAD_INCLUDE = {
       reference: true,
       traceAttempts: { orderBy: { ranAt: 'desc' as const }, take: 50 },
       socialProfiles: { orderBy: { createdAt: 'asc' as const }, include: { heir: { select: { id: true, name: true } } } },
+      // The IDI batch this claimant is in and still waiting on, if any, so
+      // the Send to IDI queue can say "sent, waiting" and the one-click
+      // export leaves them out.
+      batchMembers: { where: { result: null }, select: { batch: { select: { number: true } } }, take: 1 },
     },
   },
   tasks: {
@@ -3154,9 +3159,10 @@ export class SurplusService {
       holdUntil: d.holdUntil || null,
       // A letter that came back is not one the claim is waiting on.
       letterMailed: !!d.letterMailedAt && !((d.letters || []).length && (d.letters || []).every((l: any) => l.returnedAt)),
+      idiPendingBatch: d.batchMembers?.[0]?.batch?.number != null ? idiBatchCode(d.batchMembers[0].batch.number) : null,
     };
     const queue = queueOf(f);
-    return { queue, queueLabel: SURPLUS_QUEUE_LABEL[queue], queueReason: queueReason(f) };
+    return { queue, queueLabel: SURPLUS_QUEUE_LABEL[queue], queueReason: queueReason(f), idiPendingBatch: f.idiPendingBatch };
   }
 
   /**

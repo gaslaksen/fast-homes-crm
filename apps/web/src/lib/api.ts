@@ -454,6 +454,8 @@ export const surplusAPI = {
     api.delete(`/surplus/${leadId}/touches/done`, { params: heirId ? { heir: heirId } : {} }),
   /** IDI batch skip trace: the upload file for the chosen claimants. */
   idiExport: (leadIds: string[]) => api.post('/surplus/idi/export', { leadIds }),
+  /** The whole Send to IDI queue, inside the trace window and not already waiting on a batch, as one file. */
+  idiExportReady: (county?: string | null) => api.post('/surplus/idi/export-ready', { county: county || null }),
   /** Read an IDI results file and match each row to a claimant. Writes nothing. */
   idiImportParse: (file: File) => {
     const formData = new FormData();

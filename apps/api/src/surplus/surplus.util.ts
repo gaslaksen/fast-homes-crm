@@ -289,6 +289,8 @@ export interface QueueFacts {
   holdReason?: string | null;
   /** A pause: the day the file comes back on its own. */
   holdUntil?: Date | string | null;
+  /** The IDI batch this claimant is in, waiting on the results: "B014". */
+  idiPendingBatch?: string | null;
 }
 
 export function queueOf(f: QueueFacts): SurplusQueue {
@@ -363,13 +365,14 @@ export function queueReason(f: QueueFacts): string {
         ? `Claimant is deceased and no heir is on file. ${f.callableAssociateCount} relative${f.callableAssociateCount === 1 ? ' has a number' : 's have numbers'}: ask who is handling the estate`
         : 'Claimant is deceased and no heirs are on file, so nobody can sign yet';
     case SurplusQueue.TRACE:
+      if (f.idiPendingBatch) return `Sent to IDI in ${f.idiPendingBatch}, waiting on the results`;
       return f.ownerMailingStreet
-        ? 'Never traced, and the notice address is live'
-        : 'Never traced, though only the property address is known';
+        ? 'Not sent to IDI yet, and the notice address is live'
+        : 'Not sent to IDI yet, though only the property address is known';
     default:
       return f.mailVerdict === 'undeliverable'
-        ? "The clerk's mail came back, so no address we hold is live"
-        : 'The address route is spent, search by name';
+        ? "The clerk's mail came back, so no address we hold is live. Research by name"
+        : 'The address route is spent. Research by name: obituary, social, county records';
   }
 }
 

@@ -1029,6 +1029,21 @@ export class SurplusController {
    * results come back over SFTP and are previewed, then applied against that
    * batch. Nothing is written by the preview.
    */
+  /**
+   * The Monday click: everybody in the Send to IDI queue who is inside the
+   * trace window and not already in a batch awaiting results, as one batch.
+   * Body: { county? }
+   */
+  @Post('idi/export-ready')
+  async idiExportReady(@Body() body: any, @Headers('authorization') authHeader?: string) {
+    const { organizationId, userId } = this.decodeToken(authHeader);
+    return this.idi.exportReady({
+      organizationId: organizationId || null,
+      county: typeof body?.county === 'string' && body.county ? body.county : null,
+      userId: userId || null,
+    });
+  }
+
   @Post('idi/export')
   async idiExport(@Body() body: any, @Headers('authorization') authHeader?: string) {
     const { organizationId, userId } = this.decodeToken(authHeader);

@@ -263,7 +263,7 @@ export function caseSuggestions(r: QuestionFacts, questions = caseQuestions(r)):
   }
 
   if (q.reach.state === 'problem' && !r.isDeceased && !r.isEntity && !r.doNotCall) {
-    out.push({ key: 'trace', text: `Skip trace ${r.claimant}` });
+    out.push({ key: 'trace', text: `Send ${r.claimant} to IDI in the next batch` });
   } else if (q.reach.state === 'unknown' && !r.isDeceased) {
     if (own.length && !r.channels?.called) {
       out.push({ key: 'call-claimant', text: `Call ${r.claimant} at ${phoneText(own[0].number)}` });

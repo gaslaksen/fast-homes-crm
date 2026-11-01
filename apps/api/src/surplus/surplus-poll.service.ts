@@ -6,6 +6,7 @@ import { SurplusSkiptraceService, SurplusTraceResult } from './surplus-skiptrace
 import { SurplusObituaryService } from './surplus-obituary.service';
 import { SurplusPollCadence } from './surplus-source.types';
 import { CronLockService } from '../common/cron-lock.service';
+import { SurplusIdiService } from './surplus-idi.service';
 
 /**
  * Scheduled polls of the county surplus dockets.
@@ -53,6 +54,8 @@ export class SurplusPollService {
     private lock: CronLockService,
     private skiptrace: SurplusSkiptraceService,
     private obituary?: SurplusObituaryService,
+    /** Counts the claimants a pull left ready for the IDI batch. */
+    private idi?: SurplusIdiService,
   ) {
     // Default on; set SURPLUS_POLL_ENABLED=false to disable in an env.
     this.enabled = (this.config.get<string>('SURPLUS_POLL_ENABLED') ?? 'true') !== 'false';
@@ -98,6 +101,10 @@ export class SurplusPollService {
               .maturedLeadIds({ organizationId: organizationId || null, county: adapter.county })
               .catch(() => [] as string[]);
             await this.traceNew(adapter.key, result.runId, matured, organizationId, 'now workable');
+            // The trace is the IDI batch now. Say on the run how many of this
+            // county's claimants are waiting to be exported, so Monday's
+            // brief says the batch is ready rather than that a vendor ran.
+            await this.noteIdiReady(adapter.county, result.runId, organizationId);
             // And the notices of the cases that have reached the read day
             // with no address yet. The pull itself no longer reads them.
             await this.readNotices(adapter.key, result.runId, organizationId);
@@ -187,6 +194,21 @@ export class SurplusPollService {
     } catch (e: any) {
       this.logger.error(`Surplus notice sweep ${source} failed: ${e.message}`);
       await this.ingest.noteRun(runId, `Notice sweep failed: ${e.message}`).catch(() => undefined);
+    }
+  }
+
+  private async noteIdiReady(county: string, runId: string, organizationId: string | undefined): Promise<void> {
+    if (!this.idi) return;
+    try {
+      const ready = await this.idi.readyForIdi({ organizationId: organizationId || null, county });
+      if (ready.leadIds.length) {
+        await this.ingest.noteRun(
+          runId,
+          `${ready.leadIds.length} claimant${ready.leadIds.length === 1 ? '' : 's'} ready to send to IDI`,
+        );
+      }
+    } catch (e: any) {
+      this.logger.warn(`Could not count the IDI-ready claimants for ${county}: ${e.message}`);
     }
   }
 

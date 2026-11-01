@@ -92,8 +92,8 @@ const QUEUES: [string, string][] = [
   ['call', 'Call now'],
   ['likely', 'Likely match'],
   ['heirs', 'Find the heirs'],
-  ['trace', 'Skip trace'],
-  ['name_search', 'Name search'],
+  ['trace', 'Send to IDI'],
+  ['name_search', 'Research by name'],
   ['mailed', 'Letter sent'],
   ['hold', 'On hold'],
 ];
