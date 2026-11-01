@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { ConfigService } from '@nestjs/config';
-import { SurplusIngestService } from './surplus-ingest.service';
+import { SurplusIngestService, SurplusNoticeSweepResult } from './surplus-ingest.service';
 import { SurplusSkiptraceService, SurplusTraceResult } from './surplus-skiptrace.service';
 import { SurplusObituaryService } from './surplus-obituary.service';
 import { SurplusPollCadence } from './surplus-source.types';
@@ -98,6 +98,9 @@ export class SurplusPollService {
               .maturedLeadIds({ organizationId: organizationId || null, county: adapter.county })
               .catch(() => [] as string[]);
             await this.traceNew(adapter.key, result.runId, matured, organizationId, 'now workable');
+            // And the notices of the cases that have reached the read day
+            // with no address yet. The pull itself no longer reads them.
+            await this.readNotices(adapter.key, result.runId, organizationId);
           } catch (e: any) {
             this.logger.error(`Surplus poll ${adapter.key} failed: ${e.message}`);
           } finally {
@@ -168,6 +171,25 @@ export class SurplusPollService {
     }
   }
 
+  /**
+   * The day 95 notice sweep for one county, written on the run. Never throws:
+   * a failed sweep is the sweep's problem, and the pull has already succeeded.
+   * Quiet when there was nothing to read and nothing waiting, so a county with
+   * no scanned notices (every RealTDM county) adds nothing to its run.
+   */
+  private async readNotices(source: string, runId: string, organizationId: string | undefined): Promise<void> {
+    try {
+      const r = await this.ingest.readMaturedNotices(source, { organizationId: organizationId || null });
+      const note = describeNoticeSweep(r);
+      if (!note) return;
+      this.logger.log(`Surplus notice sweep ${source}: ${note}`);
+      await this.ingest.noteRun(runId, note);
+    } catch (e: any) {
+      this.logger.error(`Surplus notice sweep ${source} failed: ${e.message}`);
+      await this.ingest.noteRun(runId, `Notice sweep failed: ${e.message}`).catch(() => undefined);
+    }
+  }
+
   /** Which org new surplus leads belong to (single-tenant default; optional env). */
   private defaultOrgId(): string | undefined {
     return (
@@ -198,4 +220,20 @@ export function describeTrace(newLeads: number, t: SurplusTraceResult, label = '
   ].filter(Boolean);
   const dead = t.deceased ? `, ${t.deceased} more found deceased` : '';
   return `Traced ${t.contacted} of ${newLeads} ${label} to a number${dead} (${bits.join(', ')})`;
+}
+
+/**
+ * One sentence on the notice sweep for the run row, or null when nothing was
+ * read, nothing is waiting and nothing stopped it.
+ */
+export function describeNoticeSweep(r: SurplusNoticeSweepResult): string | null {
+  if (!r.read && !r.tooYoung && !r.errors && !r.paused) return null;
+  const bits = [
+    `${r.read} notice${r.read === 1 ? '' : 's'} read`,
+    r.read ? `${r.addressed} claimant${r.addressed === 1 ? '' : 's'} given an address` : null,
+    r.tooYoung ? `${r.tooYoung} skipped as too young` : null,
+    r.errors ? `${r.errors} could not be read` : null,
+  ].filter(Boolean);
+  const paused = r.paused ? `. ${r.paused.charAt(0).toUpperCase()}${r.paused.slice(1)}` : '';
+  return `Notice sweep: ${bits.join(', ')}${paused}`;
 }

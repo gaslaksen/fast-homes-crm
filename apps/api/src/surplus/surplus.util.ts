@@ -1012,3 +1012,8 @@ export function surplusSearchPeopleHits(
       return `${p.name || 'Unnamed'}${what ? ` (${what.toLowerCase()})` : ''}`;
     });
 }
+
+/** The claimant part of a dedupe key, readable again: "JOHN_A_SMITH" to "JOHN A SMITH". */
+export function uidClaimant(uid: string): string {
+  return uid.split('|').slice(2).join('|').replace(/_/g, ' ').trim();
+}

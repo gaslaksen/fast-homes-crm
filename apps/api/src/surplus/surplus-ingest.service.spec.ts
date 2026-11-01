@@ -79,6 +79,10 @@ function harness(existing: any[], recipients = RECIPIENTS) {
   const notice: any = {
     // The service refuses to read when the vision key is absent.
     available: true,
+    // The day of the estimated clock the sweep first reads on, and the
+    // monthly budget gate. Both live on the notice service.
+    readDay: 95,
+    canSpend: jest.fn().mockResolvedValue({ ok: true }),
     readNotice: jest.fn().mockResolvedValue({
       recipients,
       recipient: recipients[0]?.name ?? null,
@@ -178,22 +182,35 @@ describe('re-reading notices to correct an address', () => {
 });
 
 /**
- * A notice read is a paid vision call. One that names nobody on the case leaves
- * every address blank, and Duval, Citrus and Hernando fetch every case every
- * week, so without a record of the read the same answer was bought every
- * Monday.
+ * A notice read is a paid vision call, and the address it yields is first
+ * needed when the case matures into the trace window at day 110. So the pull
+ * does not read a case that lands with no address: the clock is estimated from
+ * the sale date, noticeConfirmed stays false, and the weekly sweep reads the
+ * notice once the estimate reaches day 95 (readMaturedNotices). A case the
+ * county pays out before then is never read. Before this (2026-11-01) every
+ * workable case was read the week it landed.
  */
-describe('paying for a notice once', () => {
+describe('deferring the notice read', () => {
   const blank = () => [
     row({ id: 'd1', dedupeUid: uid('RICHARD MINTON') }),
     row({ id: 'd2', dedupeUid: uid('CECELIA W HARRIS') }),
   ];
   const marked = (updates: any[]) => updates.find((u) => u.data?.noticeReadDocId !== undefined);
 
-  it('records the notice it read on every row of the case', async () => {
+  it('does not read the notice when a case lands with no address', async () => {
     const { svc, notice, updates } = harness(blank(), []);
 
     await svc.ingestCounty('duval_taxdeed', {});
+
+    expect(notice.readNotice).not.toHaveBeenCalled();
+    expect(marked(updates)).toBeUndefined();
+  });
+
+  it('still reads on an explicit re-read, and records the read on every row of the case', async () => {
+    const rows = blank().map((r) => ({ ...r, noticeReadDocId: '103369' }));
+    const { svc, notice, updates } = harness(rows, []);
+
+    await svc.ingestCounty('duval_taxdeed', { reread: true });
 
     expect(notice.readNotice).toHaveBeenCalledTimes(1);
     const mark = marked(updates);
@@ -201,51 +218,169 @@ describe('paying for a notice once', () => {
     expect(mark.where.dedupeUid.in).toEqual([uid('RICHARD MINTON'), uid('CECELIA W HARRIS')]);
   });
 
-  it('does not read the same notice again when it named nobody on the case', async () => {
-    const rows = blank().map((r) => ({ ...r, noticeReadDocId: '103369' }));
-    const { svc, notice } = harness(rows, []);
-
-    await svc.ingestCounty('duval_taxdeed', {});
-
-    expect(notice.readNotice).not.toHaveBeenCalled();
-  });
-
-  it('reads a new notice when the case is re-noticed', async () => {
-    const rows = blank().map((r) => ({ ...r, noticeReadDocId: '99999' }));
-    const { svc, notice } = harness(rows, []);
-
-    await svc.ingestCounty('duval_taxdeed', {});
-
-    expect(notice.readNotice).toHaveBeenCalledTimes(1);
-  });
-
-  it('reads again when one row of the case has not had this notice', async () => {
-    const rows = blank();
-    rows[0] = { ...rows[0], noticeReadDocId: '103369' };
-    const { svc, notice } = harness(rows, []);
-
-    await svc.ingestCounty('duval_taxdeed', {});
-
-    expect(notice.readNotice).toHaveBeenCalledTimes(1);
-  });
-
-  it('does not record a read that failed, so the next poll tries again', async () => {
+  it('does not record a re-read that failed, so the next one tries again', async () => {
     const { svc, notice, updates } = harness(blank(), []);
     notice.readNotice.mockResolvedValue(null);
-
-    await svc.ingestCounty('duval_taxdeed', {});
-
-    expect(notice.readNotice).toHaveBeenCalledTimes(1);
-    expect(marked(updates)).toBeUndefined();
-  });
-
-  it('still reads on an explicit re-read', async () => {
-    const rows = blank().map((r) => ({ ...r, noticeReadDocId: '103369' }));
-    const { svc, notice } = harness(rows, []);
 
     await svc.ingestCounty('duval_taxdeed', { reread: true });
 
     expect(notice.readNotice).toHaveBeenCalledTimes(1);
+    expect(marked(updates)).toBeUndefined();
+  });
+});
+
+/**
+ * The sweep that reads what the pull deferred: this county's workable cases
+ * with no address and an unread notice on the docket, once their estimated
+ * clock has reached the read day. Recipients, the real notice date and the
+ * surplus at notice land exactly as a read at creation landed them.
+ */
+describe('reading matured notices', () => {
+  const NOW = new Date('2026-11-02T09:30:00Z');
+  const daysAgo = (n: number) => new Date(NOW.getTime() - n * 86400000);
+  const LEDGER = [{ title: 'Notice of Surplus Funds', kind: 'notice_surplus', docId: '103369', url: '/Home/Image/103369' }];
+
+  /** A held row of a case with a notice on its docket, no address, sold `age` days ago. */
+  const held = (id: string, claimant: string, over: any = {}) => ({
+    ...row({ id, dedupeUid: uid(claimant) }),
+    caseNumber: '2026-0011TD',
+    sourceCaseId: '1',
+    sourceSystem: 'duval_taxdeed',
+    claimLedger: LEDGER,
+    saleDate: daysAgo(over.age ?? 100),
+    noticeDate: over.noticeDate ?? daysAgo(over.age ?? 100),
+    ...over,
+  });
+  const patch = (updates: any[], id: string) => updates.find((u) => u.where?.id === id)?.data;
+
+  it('reads the notice once the estimated clock reaches day 95, and applies it to every row', async () => {
+    const rows = [held('d1', 'RICHARD MINTON'), held('d2', 'CECELIA W HARRIS')];
+    const { svc, notice, updates } = harness(rows);
+
+    const r = await svc.readMaturedNotices('duval_taxdeed', { now: NOW });
+
+    expect(notice.readNotice).toHaveBeenCalledTimes(1);
+    expect(notice.readNotice).toHaveBeenCalledWith('https://taxdeed.duvalclerk.com/Home/Image/103369');
+    expect(r).toMatchObject({ candidates: 1, read: 1, addressed: 2, tooYoung: 0, errors: 0 });
+    // Each claimant takes THEIR page, as at ingest.
+    expect(patch(updates, 'd1')).toMatchObject({
+      noticeRecipient: 'RICHARD MINTON',
+      ownerMailingStreet: '4027 BESSENT RD',
+      ownerMailingCity: 'JACKSONVILLE',
+      ownerAddressSource: 'notice_of_surplus_funds',
+      noticeConfirmed: true,
+      surplusAtNotice: 105670.33,
+      noticeReadDocId: '103369',
+    });
+    expect(patch(updates, 'd2')).toMatchObject({
+      noticeRecipient: 'CECELIA W HARRIS',
+      ownerMailingStreet: '1841 W 14TH ST',
+      noticeConfirmed: true,
+      noticeReadDocId: '103369',
+    });
+    // The real date replaces the estimate off the sale date.
+    expect(patch(updates, 'd1').noticeDate).toEqual(new Date('2026-06-25T00:00:00'));
+  });
+
+  it('leaves a case under day 95 alone and counts it as too young', async () => {
+    const { svc, notice, updates } = harness([held('d1', 'RICHARD MINTON', { age: 60 }), held('d2', 'CECELIA W HARRIS', { age: 60 })]);
+
+    const r = await svc.readMaturedNotices('duval_taxdeed', { now: NOW });
+
+    expect(notice.readNotice).not.toHaveBeenCalled();
+    expect(r).toMatchObject({ candidates: 1, read: 0, tooYoung: 1 });
+    expect(updates).toHaveLength(0);
+  });
+
+  it('honours SURPLUS_NOTICE_READ_DAY', async () => {
+    const { svc, notice } = harness([held('d1', 'RICHARD MINTON', { age: 60 })]);
+    notice.readDay = 50;
+
+    const r = await svc.readMaturedNotices('duval_taxdeed', { now: NOW });
+
+    expect(notice.readNotice).toHaveBeenCalledTimes(1);
+    expect(r.read).toBe(1);
+  });
+
+  it('never reads a case where any claimant already has an address', async () => {
+    const { svc, notice } = harness([
+      held('d1', 'RICHARD MINTON', { street: '4027 BESSENT RD', ownerMailingStreet: '4027 BESSENT RD' }),
+      held('d2', 'CECELIA W HARRIS'),
+    ]);
+
+    const r = await svc.readMaturedNotices('duval_taxdeed', { now: NOW });
+
+    expect(notice.readNotice).not.toHaveBeenCalled();
+    expect(r.candidates).toBe(0);
+  });
+
+  it('does not buy the same notice again when it named nobody on the case', async () => {
+    const { svc, notice } = harness([
+      held('d1', 'RICHARD MINTON', { noticeReadDocId: '103369' }),
+      held('d2', 'CECELIA W HARRIS', { noticeReadDocId: '103369' }),
+    ]);
+
+    const r = await svc.readMaturedNotices('duval_taxdeed', { now: NOW });
+
+    expect(notice.readNotice).not.toHaveBeenCalled();
+    expect(r.candidates).toBe(0);
+  });
+
+  it('reads a new notice when the case is re-noticed', async () => {
+    const { svc, notice } = harness([held('d1', 'RICHARD MINTON', { noticeReadDocId: '99999' })]);
+
+    await svc.readMaturedNotices('duval_taxdeed', { now: NOW });
+
+    expect(notice.readNotice).toHaveBeenCalledTimes(1);
+  });
+
+  it('hands a co-owner nothing when no page is addressed to them, but still confirms the date', async () => {
+    const { svc, updates } = harness(
+      [held('d1', 'RICHARD MINTON'), held('d2', 'CECELIA W HARRIS')],
+      [RECIPIENTS[0]],
+    );
+
+    const r = await svc.readMaturedNotices('duval_taxdeed', { now: NOW });
+
+    expect(r.addressed).toBe(1);
+    expect(patch(updates, 'd1').ownerMailingStreet).toBe('4027 BESSENT RD');
+    const d2 = patch(updates, 'd2');
+    expect(d2.ownerMailingStreet).toBeUndefined();
+    expect(d2).toMatchObject({ noticeConfirmed: true, noticeReadDocId: '103369' });
+  });
+
+  it('does not stamp a read that failed, so next week tries again', async () => {
+    const { svc, notice, updates } = harness([held('d1', 'RICHARD MINTON')]);
+    notice.readNotice.mockResolvedValue(null);
+
+    const r = await svc.readMaturedNotices('duval_taxdeed', { now: NOW });
+
+    expect(r).toMatchObject({ read: 0, errors: 1 });
+    expect(updates).toHaveLength(0);
+  });
+
+  it('stops when the month cannot cover another read, and says so', async () => {
+    const { svc, notice } = harness([held('d1', 'RICHARD MINTON')]);
+    notice.canSpend.mockResolvedValue({ ok: false, reason: 'notice reads paused, $19.9 of the $20 SURPLUS_NOTICE_MONTHLY_BUDGET spent in 2026-11' });
+
+    const r = await svc.readMaturedNotices('duval_taxdeed', { now: NOW });
+
+    expect(notice.readNotice).not.toHaveBeenCalled();
+    expect(r.read).toBe(0);
+    expect(r.paused).toMatch(/paused/);
+  });
+
+  it('skips a case the county has paid out or the team has marked Dead', async () => {
+    // The query excludes them; the harness returns everything, so pin the
+    // filter the service sends.
+    const { svc, prisma } = harness([]);
+
+    await svc.readMaturedNotices('duval_taxdeed', { now: NOW });
+
+    const where = prisma.surplusDetail.findMany.mock.calls[0][0].where;
+    expect(where.sourceSystem).toBe('duval_taxdeed');
+    expect(where.claimStatus.notIn).toEqual(['distributed', 'assigned']);
+    expect(where.OR).toEqual([{ stage: null }, { stage: { not: 'Dead' } }]);
   });
 });
 

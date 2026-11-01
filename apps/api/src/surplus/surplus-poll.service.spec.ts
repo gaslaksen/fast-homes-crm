@@ -1,4 +1,4 @@
-import { SurplusPollService, describeTrace } from './surplus-poll.service';
+import { SurplusPollService, describeNoticeSweep, describeTrace } from './surplus-poll.service';
 
 /**
  * The cron poll's one job after the pull: run the BatchData trace on the
@@ -27,6 +27,8 @@ function harness(env: Record<string, string> = {}) {
       createdLeadIds: ['lead-a', 'lead-b'],
     }),
     noteRun: jest.fn(async (_id: string, note: string) => { notes.push(note); }),
+    // The day 95 notice sweep. Nothing to read unless a test says otherwise.
+    readMaturedNotices: jest.fn().mockResolvedValue({ candidates: 0, read: 0, addressed: 0, tooYoung: 0, errors: 0 }),
   };
   const lock: any = { run: jest.fn((_k: string, fn: () => Promise<unknown>) => fn()) };
   const skiptrace: any = {
@@ -135,6 +137,45 @@ describe('SurplusPollService', () => {
     expect(notes).toEqual(['Trace skipped on the 2 new: skip tracing runs through IDI batches']);
   });
 
+  it('runs the notice sweep on each county after its pull, and notes what it did', async () => {
+    const { svc, ingest, notes } = harness({ SURPLUS_DEFAULT_ORG_ID: 'org1', SURPLUS_AUTO_TRACE: 'false' });
+    ingest.readMaturedNotices.mockResolvedValue({ candidates: 6, read: 2, addressed: 3, tooYoung: 4, errors: 0 });
+
+    await svc.pollWeekly();
+
+    expect(ingest.readMaturedNotices).toHaveBeenCalledWith('realtdm_lee', { organizationId: 'org1' });
+    expect(notes[1]).toBe('Notice sweep: 2 notices read, 3 claimants given an address, 4 skipped as too young');
+  });
+
+  it('says nothing on the run when nothing was read and nothing is waiting', async () => {
+    const { svc, notes } = harness({ SURPLUS_AUTO_TRACE: 'false' });
+
+    await svc.pollWeekly();
+
+    expect(notes).toEqual(['Trace skipped on the 2 new: skip tracing runs through IDI batches']);
+  });
+
+  it('writes a paused sweep on the run', async () => {
+    const { svc, ingest, notes } = harness({ SURPLUS_AUTO_TRACE: 'false' });
+    ingest.readMaturedNotices.mockResolvedValue({
+      candidates: 3, read: 1, addressed: 1, tooYoung: 0, errors: 0,
+      paused: 'notice reads paused, $19.9 of the $20 SURPLUS_NOTICE_MONTHLY_BUDGET spent in 2026-11',
+    });
+
+    await svc.pollWeekly();
+
+    expect(notes[1]).toBe('Notice sweep: 1 notice read, 1 claimant given an address. Notice reads paused, $19.9 of the $20 SURPLUS_NOTICE_MONTHLY_BUDGET spent in 2026-11');
+  });
+
+  it('a sweep failure is written on the run and does not fail the poll', async () => {
+    const { svc, ingest, notes } = harness({ SURPLUS_AUTO_TRACE: 'false' });
+    ingest.readMaturedNotices.mockRejectedValue(new Error('the county timed out'));
+
+    await expect(svc.pollWeekly()).resolves.toBeUndefined();
+
+    expect(notes[1]).toBe('Notice sweep failed: the county timed out');
+  });
+
   it('with nothing set, the retired BatchData rung stays off', async () => {
     const env: Record<string, string> = {};
     const config: any = { get: (k: string) => env[k] };
@@ -170,5 +211,23 @@ describe('describeTrace', () => {
   it('counts errors on the line', () => {
     expect(describeTrace(5, { ...base, submitted: 4, contacted: 2, nameSearch: { searched: 3, verified: 1, namesakes: 4 }, errors: 1 }))
       .toBe('Traced 2 of 5 new to a number (4 address lookups, 3 name searches, 1 error)');
+  });
+});
+
+describe('describeNoticeSweep', () => {
+  const base = { candidates: 0, read: 0, addressed: 0, tooYoung: 0, errors: 0 };
+
+  it('is silent when there was nothing to say', () => {
+    expect(describeNoticeSweep(base)).toBeNull();
+  });
+
+  it('counts the reads, the addresses and the too young', () => {
+    expect(describeNoticeSweep({ ...base, candidates: 3, read: 1, addressed: 1, tooYoung: 2 }))
+      .toBe('Notice sweep: 1 notice read, 1 claimant given an address, 2 skipped as too young');
+  });
+
+  it('counts the failures, which are tried again next week', () => {
+    expect(describeNoticeSweep({ ...base, candidates: 1, errors: 1 }))
+      .toBe('Notice sweep: 0 notices read, 1 could not be read');
   });
 });

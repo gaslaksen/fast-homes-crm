@@ -40,8 +40,8 @@ import { countyRetirement } from './surplus-progress.util';
 import { normalizeMailing } from './surplus-address.util';
 import { matchRecipient } from './surplus-name-search.util';
 import { SurplusSourceAdapter, SurplusCaseDetail, SurplusCaseSummary } from './surplus-source.types';
-import { classifyCase, collapseClaimants, isWorkable } from './surplus-classify.util';
-import { surplusUidOf } from './surplus.util';
+import { ClassifiedDoc, classifyCase, collapseClaimants, isWorkable } from './surplus-classify.util';
+import { surplusUidOf, uidClaimant } from './surplus.util';
 import { SURPLUS_FLOOR } from './surplus-compliance';
 
 export type SurplusPollTrigger = 'cron' | 'manual';
@@ -62,6 +62,22 @@ export interface SurplusIngestResult {
   message?: string;
   /** "case: reason" for each case that threw, so the run row says why without the logs. */
   failures?: string[];
+}
+
+/** What one county's day 95 notice sweep did. */
+export interface SurplusNoticeSweepResult {
+  /** Workable cases with no address and an unread notice on the docket. */
+  candidates: number;
+  /** Notices read this run. */
+  read: number;
+  /** Claimant rows that took an address off those reads. */
+  addressed: number;
+  /** Cases not yet at the read day, left for a later week. */
+  tooYoung: number;
+  /** Fetch or API failures, tried again next week. */
+  errors: number;
+  /** Set when the monthly budget stopped the sweep, with the reason. */
+  paused?: string;
 }
 
 interface IngestOpts {
@@ -265,9 +281,11 @@ function noticeFromSource(detail: SurplusCaseDetail): NoticeExtract | null {
 /**
  * The notice that counts on this case. When a case carries several, the LAST
  * is the operative one, since a re-noticed case supersedes its earlier letter.
+ * Takes the ledger as classified today or as persisted on the row.
  */
-function latestNotice(verdict: ReturnType<typeof classifyCase>) {
-  const notices = verdict.ledger.filter((d) => d.kind === 'notice_surplus' && (d.url || d.docId));
+function latestNoticeIn(ledger: unknown): ClassifiedDoc | null {
+  if (!Array.isArray(ledger)) return null;
+  const notices = (ledger as ClassifiedDoc[]).filter((d) => d && d.kind === 'notice_surplus' && (d.url || d.docId));
   return notices[notices.length - 1] ?? null;
 }
 
@@ -529,6 +547,145 @@ export class SurplusIngestService {
   }
 
   /**
+   * Read the notices of this county's cases that have matured to the read day.
+   *
+   * The deferred half of the notice read. A case lands with its clock estimated
+   * from the sale date; once that estimate reaches SURPLUS_NOTICE_READ_DAY
+   * (default 95), and only then, the notice is fetched and read, and the
+   * recipients, the real notice date and the surplus at notice are applied to
+   * every row of the case exactly as a read during the pull applied them. The
+   * sale date is always earlier than the true notice date, so estimated day 95
+   * lands before the real day 110 the trace window opens on.
+   *
+   * A case is in scope when it is still workable, no claimant on it has an
+   * address, and its docket carries a notice this exact document id has not
+   * been read for. A read that returned nothing recoverable (a fetch or API
+   * failure) is not stamped and is tried again next week; a billed read that
+   * named nobody is stamped and never bought again. Runs inside each county's
+   * weekly pull, after the pull itself, so the ledger it reads is this week's.
+   */
+  async readMaturedNotices(
+    adapterKey: string,
+    opts: { organizationId?: string | null; now?: Date; limit?: number } = {},
+  ): Promise<SurplusNoticeSweepResult> {
+    const out: SurplusNoticeSweepResult = { candidates: 0, read: 0, addressed: 0, tooYoung: 0, errors: 0 };
+    const adapter = this.adapterFor(adapterKey);
+    if (!adapter) return out;
+    const organizationId = opts.organizationId || null;
+    const now = opts.now || new Date();
+    const readAt = new Date(now.getTime() - this.notice.readDay * 86400000);
+
+    const rows = await this.prisma.surplusDetail.findMany({
+      where: {
+        organizationId,
+        sourceSystem: adapter.key,
+        claimStatus: { notIn: [SurplusClaimStatus.DISTRIBUTED, SurplusClaimStatus.ASSIGNED] },
+        // Never a case the team has marked Dead. Null stage is a row older
+        // than the default and is still in scope.
+        OR: [{ stage: null }, { stage: { not: SurplusStage.DEAD } }],
+      },
+      select: {
+        id: true,
+        dedupeUid: true,
+        caseNumber: true,
+        sourceCaseId: true,
+        claimLedger: true,
+        noticeReadDocId: true,
+        ownerMailingStreet: true,
+        noticeDate: true,
+        saleDate: true,
+      },
+    });
+
+    // One case at a time: the notice is per case, and every claimant on it
+    // takes their own page off the one read.
+    const cases = new Map<string, typeof rows>();
+    for (const r of rows) {
+      const key = r.sourceCaseId || r.caseNumber || r.id;
+      cases.set(key, [...(cases.get(key) || []), r]);
+    }
+
+    for (const caseRows of cases.values()) {
+      if (caseRows.some((r) => r.ownerMailingStreet)) continue;
+      const doc = latestNoticeIn(caseRows[0].claimLedger);
+      const key = noticeDocKey(doc);
+      if (!doc || !key) continue;
+      if (caseRows.every((r) => r.noticeReadDocId === key)) continue;
+      out.candidates += 1;
+
+      // The clock as the row holds it: the estimate off the sale date until a
+      // read confirms it. A case with no date at all cannot mature, so it is
+      // read now rather than never.
+      const clock = caseRows.find((r) => r.noticeDate || r.saleDate);
+      const at = clock?.noticeDate || clock?.saleDate || null;
+      if (at && at.getTime() > readAt.getTime()) {
+        out.tooYoung += 1;
+        continue;
+      }
+      if (opts.limit && out.read >= opts.limit) continue;
+
+      const spend = await this.notice.canSpend();
+      if (!spend.ok) {
+        out.paused = spend.reason;
+        break;
+      }
+
+      const caseNumber = caseRows[0].caseNumber || caseRows[0].sourceCaseId || caseRows[0].id;
+      let extract: NoticeExtract | null = null;
+      try {
+        extract = await this.readNoticeDoc(adapter, doc);
+      } catch (e: any) {
+        this.logger.warn(`Surplus ${caseNumber}: notice read failed: ${e.message}`);
+      }
+      if (!extract) {
+        out.errors += 1;
+        await this.pause(adapter.detailDelayMs);
+        continue;
+      }
+      out.read += 1;
+
+      for (const row of caseRows) {
+        const mine = this.addressFor(uidClaimant(row.dedupeUid || ''), extract, {}, caseRows.length);
+        if (mine?.street) out.addressed += 1;
+        await this.prisma.surplusDetail.update({
+          where: { id: row.id },
+          data: {
+            // THIS claimant's own page, as at ingest: a co-owner's page is
+            // never handed to them, and no page means the address stays blank
+            // and visible rather than wrong and invisible.
+            ...(mine?.street
+              ? {
+                  noticeRecipient: mine.name,
+                  ownerMailingStreet: mine.street,
+                  ownerMailingCity: mine.city,
+                  ownerMailingState: mine.state,
+                  ownerMailingZip: mine.zip,
+                  ownerMailingCountry: mine.country ?? null,
+                  ownerAddressSource: mine.source,
+                }
+              : {}),
+            // The notice date and the surplus at notice belong to the case,
+            // so every claimant takes them, as every claimant did when the
+            // read happened at creation.
+            ...(extract.noticeDate
+              ? { noticeDate: new Date(`${extract.noticeDate}T00:00:00`), noticeConfirmed: true }
+              : {}),
+            ...(extract.surplusAtNotice ? { surplusAtNotice: extract.surplusAtNotice } : {}),
+            noticeReadDocId: key,
+          },
+        });
+      }
+      this.logger.log(
+        `Surplus ${caseNumber}: notice ${key} read at estimated day ${this.notice.readDay}, ` +
+          `${extract.recipients.length} recipient${extract.recipients.length === 1 ? '' : 's'}`,
+      );
+      await this.pause(adapter.detailDelayMs);
+    }
+
+    return out;
+  }
+
+  /**
    * One case into zero or more leads.
    *
    * The grain is one lead per CLAIMANT, not per case and not per address. A
@@ -574,27 +731,18 @@ export class SurplusIngestService {
       }),
     );
     const free = noticeIsFree(detail);
-    const noticeKey = noticeDocKey(latestNotice(verdict));
+    const noticeKey = noticeDocKey(latestNoticeIn(verdict.ledger));
 
-    // Read the notice only when it will actually be used: the case is worth
-    // working AND at least one of its claimants still has no owner address.
-    // A paid-out case does not need one, and a case already carrying one must
-    // not be re-read, because every read is a billed API call. A source that
-    // publishes the recipients as data costs nothing and is always taken.
-    const needsNotice =
-      workable &&
-      (free ||
-        // A re-read is asked for explicitly and always reads. Otherwise the
-        // read is skipped once any claimant on the case has an address, since
-        // the notice does not change between polls and the call is not free.
-        reread ||
-        ((await this.prisma.surplusDetail.count({
-          where: { organizationId, dedupeUid: { in: uids }, ownerMailingStreet: { not: null } },
-        })) === 0 &&
-          // Nor when this exact notice was already read and named nobody on
-          // the case. Pioneer counties fetch every case every week, so that
-          // answer used to be bought again every Monday.
-          !(await this.noticeAlreadyRead(organizationId, uids, noticeKey))));
+    // A source that publishes the recipients as data costs nothing and is
+    // always taken. A scanned notice is NOT read here: every read is a billed
+    // vision call, and the address is first needed when the case matures into
+    // the trace window, so the weekly pull reads it then (readMaturedNotices,
+    // at estimated day SURPLUS_NOTICE_READ_DAY). A case the county pays out
+    // before that day is never read at all. Until then the clock is estimated
+    // from the sale date and noticeConfirmed stays false, exactly as when a
+    // read failed. The one exception is an explicit re-read, which always
+    // reads, on a workable case.
+    const needsNotice = workable && (free || reread);
     const notice = needsNotice ? await this.readNotice(adapter, verdict, detail) : null;
 
     for (const claimant of claimants) {
@@ -745,24 +893,6 @@ export class SurplusIngestService {
   }
 
   /**
-   * Whether this exact notice has already been read for every row the case
-   * holds. A claimant with no row yet (new on the docket, or deleted by hand)
-   * does not force another read: the manual re-read is there for that.
-   */
-  private async noticeAlreadyRead(
-    organizationId: string | null,
-    uids: string[],
-    noticeKey: string | null,
-  ): Promise<boolean> {
-    if (!noticeKey) return false;
-    const rows = await this.prisma.surplusDetail.findMany({
-      where: { organizationId, dedupeUid: { in: uids } },
-      select: { noticeReadDocId: true },
-    });
-    return rows.length > 0 && rows.every((r) => r.noticeReadDocId === noticeKey);
-  }
-
-  /**
    * The mailing address for one claimant, and where it came from.
    *
    * The notice (or the county's mailing record standing in for it) wins. When
@@ -774,7 +904,7 @@ export class SurplusIngestService {
   private addressFor(
     claimant: string,
     notice: NoticeExtract | null,
-    detail: SurplusCaseDetail,
+    detail: Pick<SurplusCaseDetail, 'parties' | 'noticeRecipients'>,
     claimantCount: number,
   ): FoundAddress | null {
     // The attention line ("C/O GLENN BROWN") travels with the recipient's name
@@ -952,7 +1082,22 @@ export class SurplusIngestService {
     verdict: ReturnType<typeof classifyCase>,
     detail: SurplusCaseDetail,
   ): Promise<NoticeExtract | null> {
-    const extract = await this.fetchNotice(adapter, verdict, detail);
+    const fromSource = noticeFromSource(detail);
+    if (fromSource) return fromSource;
+    return this.readNoticeDoc(adapter, latestNoticeIn(verdict.ledger));
+  }
+
+  /**
+   * Fetch and read one notice document by vision, with the addressees named
+   * the way the adapter names its owners. The one path both the re-read during
+   * a pull and the day 95 sweep go through, so Charlotte's viewer session and
+   * Pioneer's relative links are handled in one place.
+   */
+  private async readNoticeDoc(
+    adapter: SurplusSourceAdapter,
+    doc: ClassifiedDoc | null,
+  ): Promise<NoticeExtract | null> {
+    const extract = await this.fetchNotice(adapter, doc);
     if (!extract || !adapter.ownerName) return extract;
     // Addressees as the adapter names its owners, or the match finds nobody.
     const clean = (name: string | null) => (name ? adapter.ownerName!(name) || name : name);
@@ -962,14 +1107,9 @@ export class SurplusIngestService {
 
   private async fetchNotice(
     adapter: SurplusSourceAdapter,
-    verdict: ReturnType<typeof classifyCase>,
-    detail: SurplusCaseDetail,
+    doc: ClassifiedDoc | null,
   ): Promise<NoticeExtract | null> {
-    const fromSource = noticeFromSource(detail);
-    if (fromSource) return fromSource;
-
     if (!this.notice.available) return null;
-    const doc = latestNotice(verdict);
     if (!doc) return null;
 
     // A source whose files sit behind a viewer session hands over the bytes.

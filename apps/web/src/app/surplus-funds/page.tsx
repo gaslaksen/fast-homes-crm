@@ -635,9 +635,12 @@ function feedItems(runs: any[], sources: FeedSource[]) {
  * The call numbers only show once there are enough calls to say anything; a
  * best window off four calls is noise dressed as advice.
  */
-function StatusMenu({ runs, sources, calls }: { runs: any[]; sources: FeedSource[]; calls: any }) {
+/** GET /surplus/notice-usage: the notice reader's month. */
+type NoticeUsage = { period: string; checks: number; spent: number; budget: number; paused: boolean; left: number | null };
+
+function StatusMenu({ runs, sources, calls, notice }: { runs: any[]; sources: FeedSource[]; calls: any; notice: NoticeUsage | null }) {
   const items = feedItems(runs, sources);
-  if (!items.length && !(calls && calls.calls >= 10)) return null;
+  if (!items.length && !(calls && calls.calls >= 10) && !notice) return null;
   const late = items.filter((i) => i.late);
   const rate = calls ? Math.round((calls.connectRate || 0) * 100) : 0;
   return (
@@ -667,6 +670,15 @@ function StatusMenu({ runs, sources, calls }: { runs: any[]; sources: FeedSource
                   {i.late && <div style={{ color: 'var(--dim)', fontSize: 11.5, marginLeft: 14 }}>{i.detail}</div>}
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+        {notice && (
+          <div>
+            <div className="dc-flabel" style={{ marginBottom: 6 }}>Notice reads, {notice.period}</div>
+            <div style={{ fontSize: 12.5, lineHeight: 1.5 }} title="Scanned Notices of Surplus Funds read by Claude for the owner's mailing address, from day 95 of the claim clock">
+              {notice.checks} read, ${notice.spent.toFixed(2)} spent{notice.budget ? ` of $${notice.budget}` : ''}.
+              {notice.paused && <span style={{ color: 'var(--amber)' }}> Paused.</span>}
             </div>
           </div>
         )}
@@ -873,6 +885,8 @@ export default function SurplusFundsPage() {
   const [source, setSource] = useState<string>('');
   /** Connect rate by weekday and hour, off the call log. */
   const [callStats, setCallStats] = useState<any>(null);
+  /** The notice reader's month: reads, dollars, paused. Null until answered. */
+  const [noticeUsage, setNoticeUsage] = useState<NoticeUsage | null>(null);
   /** The dollar band chip. A sort more than a cut, but the course filters on it. */
   const [tierQ, setTierQ] = useState<string | null>(null);
   /** The bulk Mark dead form: a reason is required. */
@@ -1131,6 +1145,10 @@ export default function SurplusFundsPage() {
       .callStats()
       .then((r) => setCallStats(r.data || null))
       .catch(() => setCallStats(null));
+    surplusAPI
+      .noticeUsage()
+      .then((r) => setNoticeUsage(r.data || null))
+      .catch(() => setNoticeUsage(null));
   }, []);
 
   useEffect(() => {
@@ -1507,7 +1525,7 @@ export default function SurplusFundsPage() {
               {/* Everything a caller does not do on a normal day sits behind
                   More: the county pull, the import, the references. One
                   primary button remains. */}
-              <StatusMenu runs={runs} sources={sources} calls={callStats} />
+              <StatusMenu runs={runs} sources={sources} calls={callStats} notice={noticeUsage} />
               <details className="dc-menu" ref={menuRef}>
                 <summary className="dc-btn">More</summary>
                 <div className="dc-menu-list" onClick={() => menuRef.current?.removeAttribute('open')}>
