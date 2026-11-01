@@ -22,6 +22,7 @@ import { StorageService } from '../storage/storage.service';
 import { SurplusCadenceService } from './surplus-cadence.service';
 import { SurplusOutreachService } from './surplus-outreach.service';
 import { COMPLIANCE_RULES, DISCLOSURE_LABELS, FL_COUNTIES, SURPLUS_FLOOR } from './surplus-compliance';
+import { SurplusNumbersService } from './surplus-numbers.service';
 
 /**
  * A probate filing upload. PDFs only and capped, because this goes straight to
@@ -86,6 +87,7 @@ export class SurplusController {
     private social: SurplusSocialService,
     private idi: SurplusIdiService,
     private outreach: SurplusOutreachService,
+    private numbers: SurplusNumbersService,
   ) {}
 
   private decodeToken(authHeader?: string): { userId?: string; organizationId?: string } {
@@ -866,7 +868,29 @@ export class SurplusController {
   @Get(':id/heirs')
   async listHeirs(@Param('id') id: string, @Headers('authorization') authHeader?: string) {
     const { organizationId } = this.decodeToken(authHeader);
-    return { heirs: await this.heirs.list(id, organizationId) };
+    return { heirs: await this.heirs.list(id, organizationId), claimant: await this.heirs.claimantOf(id, organizationId) };
+  }
+
+  /**
+   * A number reaches somebody other than the row it sits on: the son's cell
+   * filed under the father. Move it to the right person (or a new one), and
+   * re-file the texts and calls already on it under them.
+   * Body: { number, to: { claimant: true } | { heirId } | { newPerson: { name, role?, relationship? } } }
+   */
+  @Post(':id/numbers/reassign')
+  async reassignNumber(@Param('id') id: string, @Body() body: any, @Headers('authorization') authHeader?: string) {
+    const { organizationId, userId } = this.decodeToken(authHeader);
+    const to = body?.to;
+    if (!to || typeof to !== 'object' || !(to.claimant === true || typeof to.heirId === 'string' || to.newPerson)) {
+      throw new BadRequestException('Say who the number reaches: the claimant, a person on the case, or a new person.');
+    }
+    return this.numbers.reassign({
+      leadId: id,
+      number: String(body?.number || ''),
+      to,
+      userId: userId || null,
+      organizationId: organizationId || null,
+    });
   }
 
   /**

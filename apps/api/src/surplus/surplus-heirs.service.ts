@@ -149,6 +149,15 @@ export class SurplusHeirsService {
     return rows.map((h) => heirRow(h, bad));
   }
 
+  /** The claimant the people are filed under, for a picker that offers them beside the people. */
+  async claimantOf(leadId: string, organizationId?: string | null): Promise<{ name: string; deceased: boolean }> {
+    const detail = await this.detailForLead(leadId, organizationId);
+    return {
+      name: `${detail.lead.sellerFirstName || ''} ${detail.lead.sellerLastName || ''}`.trim() || 'the claimant',
+      deceased: !!detail.deceased,
+    };
+  }
+
   /**
    * One person added by hand: an heir the filing missed, or somebody who is
    * not an heir at all but may know where the claimant is. The course's
@@ -313,6 +322,7 @@ export class SurplusHeirsService {
       select: {
         id: true,
         organizationId: true,
+        deceased: true,
         lead: { select: { sellerFirstName: true, sellerLastName: true, badContacts: true } },
       },
     });

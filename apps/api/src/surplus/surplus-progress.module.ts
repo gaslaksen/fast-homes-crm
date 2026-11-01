@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { SurplusProgressService } from './surplus-progress.service';
+import { SurplusNumbersService } from './surplus-numbers.service';
 
 /**
  * Deliberately tiny, like TouchModule: the dialer, the inbox and the pull all
@@ -7,7 +8,7 @@ import { SurplusProgressService } from './surplus-progress.service';
  * without closing a cycle (SurplusModule imports MessagesModule).
  */
 @Module({
-  providers: [SurplusProgressService],
-  exports: [SurplusProgressService],
+  providers: [SurplusProgressService, SurplusNumbersService],
+  exports: [SurplusProgressService, SurplusNumbersService],
 })
 export class SurplusProgressModule {}

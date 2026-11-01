@@ -403,6 +403,14 @@ export const surplusAPI = {
 
   // ── Heirs of a deceased claimant ──
   heirs: (id: string) => api.get(`/surplus/${id}/heirs`),
+  /** A number reaches somebody other than the row it sits on: move it, and re-file the thread. */
+  reassignNumber: (
+    id: string,
+    body: {
+      number: string;
+      to: { claimant: true } | { heirId: string } | { newPerson: { name: string; role?: string | null; relationship?: string | null } };
+    },
+  ) => api.post(`/surplus/${id}/numbers/reassign`, body),
   /**
    * Read a probate filing and get the heirs back for confirmation. Does not
    * save: whether this case belongs to this claimant is a human judgement.
@@ -793,6 +801,15 @@ export interface CallDispositionInput {
   voicemailVersion?: string | null;
   /** ISO datetime. The API turns it into a follow-up task on the lead. */
   followUpAt?: string | null;
+  /**
+   * Who picked up, when it was not the person the number is filed under. The
+   * API moves the number to them and re-files the thread.
+   */
+  answeredBy?:
+    | { claimant: true }
+    | { heirId: string }
+    | { newPerson: { name: string; role?: string | null; relationship?: string | null } }
+    | null;
 }
 
 // Calls API

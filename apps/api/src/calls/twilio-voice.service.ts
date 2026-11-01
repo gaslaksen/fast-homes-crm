@@ -26,6 +26,16 @@ export interface CallDispositionInput {
   voicemailVersion?: string | null;
   /** ISO datetime the caller committed to. Becomes a Task. */
   followUpAt?: string | null;
+  /**
+   * Who picked up, when it was not the person the number is filed under. The
+   * number moves to them (or to a new person on the case) and the texts and
+   * calls already on it are re-filed, so the thread reads true.
+   */
+  answeredBy?:
+    | { claimant: true }
+    | { heirId: string }
+    | { newPerson: { name: string; role?: string | null; relationship?: string | null } }
+    | null;
 }
 
 function surplusOutcomeOf(raw?: string | null): SurplusCallOutcome | null {
@@ -58,6 +68,7 @@ function followUpTitle(outcome: SurplusCallOutcome | null, name: string): string
 }
 import { PhoneNumbersService, numberKey, prettyNumber } from '../phone-numbers/phone-numbers.service';
 import { SurplusProgressService } from '../surplus/surplus-progress.service';
+import { SurplusNumbersService } from '../surplus/surplus-numbers.service';
 import { LeadPhonesService } from '../phone-numbers/lead-phones.service';
 import { TouchService } from '../leads/touch.service';
 import { appendVoicemailTwiml, voicemailGreetingFor } from './voicemail.util';
@@ -92,6 +103,8 @@ export class TwilioVoiceService {
     private readonly touch: TouchService,
     /** Moves a surplus case's stage and owner as a side effect of the call. */
     private readonly progress?: SurplusProgressService,
+    /** Moves a number to the person who actually answered it. */
+    private readonly numbers?: SurplusNumbersService,
   ) {}
 
   /**
@@ -1138,11 +1151,26 @@ export class TwilioVoiceService {
     await this.progress?.owned(lead.id, userId, 'first call outcome');
     // The person the call rang: stamped on the log when it was dialled, and
     // looked up from the number for a call logged before that was recorded.
-    const personId =
+    let personId =
       log.heirId ||
       (lead.source === LeadSource.SURPLUS && log.toNumber
         ? await this.leadPhones.heirIdForNumber(lead.id, log.toNumber).catch(() => null)
         : null);
+    // The caller said who picked up. If that is not whose row the number is
+    // on, the number moves to them and this call is filed under them too.
+    if (input.answeredBy && lead.source === LeadSource.SURPLUS && log.toNumber && this.numbers) {
+      const wanted = 'heirId' in input.answeredBy ? input.answeredBy.heirId : 'claimant' in input.answeredBy ? null : undefined;
+      if (wanted === undefined || wanted !== personId) {
+        const moved = await this.numbers.reassign({
+          leadId: lead.id,
+          number: log.toNumber,
+          to: input.answeredBy,
+          userId: userId || null,
+        });
+        personId = moved.heirId;
+        await this.prisma.callLog.updateMany({ where: { twilioCallSid: callSid }, data: { heirId: personId } });
+      }
+    }
     const person = personId
       ? await this.prisma.surplusHeir.findUnique({ where: { id: personId }, select: { name: true } }).catch(() => null)
       : null;

@@ -282,7 +282,14 @@ export class MessagesService {
     });
     await this.syncThreadSummary(leadId, outboundBody, 'OUTBOUND');
     await this.markSurplusUpdated(leadId, lead.source);
-    if (lead.source === 'SURPLUS') await this.progress?.owned(leadId, userId, 'first text');
+    if (lead.source === 'SURPLUS') {
+      await this.progress?.owned(leadId, userId, 'first text');
+      // A teammate has stepped into this conversation: the drip to the same
+      // person pauses, the way the wholesale inbox pauses the AI when a
+      // human replies. A relative's drip pauses when the relative is texted;
+      // the claimant's keeps going. Resume from the campaign page.
+      if (userId) await this.pauseDripFor(leadId, heirId || null, userId);
+    }
 
     try {
       const sent = await this.smsProvider.sendSms(to, from, outboundBody);
@@ -839,6 +846,28 @@ You decide the right approach based on the conversation flow.${photoNudge}`.trim
    * Every outbound counts, whether or not there was news, because the
    * course's point is that silence is what loses trust.
    */
+  private async pauseDripFor(leadId: string, heirId: string | null, userId: string) {
+    try {
+      const paused = await this.prisma.campaignEnrollment.updateMany({
+        where: { leadId, heirId, status: 'ACTIVE' },
+        data: { status: 'PAUSED' },
+      });
+      if (paused.count) {
+        await this.prisma.activity.create({
+          data: {
+            leadId,
+            userId,
+            type: 'CAMPAIGN_PAUSED',
+            description: `Paused ${paused.count} drip${paused.count === 1 ? '' : 's'}: a teammate texted this person by hand.`,
+            metadata: { heirId },
+          },
+        });
+      }
+    } catch (err: any) {
+      this.logger.warn(`Could not pause the drip on ${leadId}: ${err.message}`);
+    }
+  }
+
   private async markSurplusUpdated(leadId: string, source?: string | null) {
     if (source !== 'SURPLUS') return;
     await this.prisma.surplusDetail
@@ -985,7 +1014,16 @@ You decide the right approach based on the conversation flow.${photoNudge}`.trim
 
     const summaryText = (data.bodyText || data.subject || '').trim().substring(0, 500);
     await this.syncThreadSummary(lead.id, summaryText, 'INBOUND');
-    await this.markSurplusTapped(lead.id, lead.source);
+    // A relative's email is their contact, not the claimant's reply.
+    let heirRole: string | null = null;
+    if (heirId) {
+      try {
+        heirRole = (await this.prisma.surplusHeir.findFirst({ where: { id: heirId }, select: { role: true } }))?.role || null;
+      } catch {
+        heirRole = null;
+      }
+    }
+    if (!heirId || heirRole === 'heir') await this.markSurplusTapped(lead.id, lead.source);
     if (lead.source === 'SURPLUS') await this.progress?.contacted(lead.id, { heirId, how: 'emailed back' });
 
     // Push notify the assigned user (or the whole org) about the inbound reply
@@ -1146,7 +1184,12 @@ You decide the right approach based on the conversation flow.${photoNudge}`.trim
       },
     });
     await this.syncThreadSummary(lead.id, body, 'INBOUND');
-    await this.markSurplusTapped(lead.id, lead.source, match.heirId ? null : from);
+    // Only the person who can sign taps the file. A son texting back from
+    // his own number used to mark the father as having replied, which
+    // switched the father's letters off.
+    if (!match.heirId || match.heirRole === 'heir') {
+      await this.markSurplusTapped(lead.id, lead.source, match.heirId ? null : from);
+    }
     if (lead.source === 'SURPLUS') {
       await this.progress?.contacted(lead.id, { heirId: match.heirId || null, how: 'texted back' });
     }

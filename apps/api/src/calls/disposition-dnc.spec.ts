@@ -10,7 +10,7 @@ const SON_NUMBER = '+13525550141';
  * the line. A son saying it opts out the son, the way his STOP would, and
  * leaves the claimant reachable.
  */
-function harness(toNumber: string, heirId: string | null = null, progress?: any) {
+function harness(toNumber: string, heirId: string | null = null, progress?: any, numbers?: any) {
   const writes: { model: string; op: string; args: any }[] = [];
   const record = (model: string, op: string) => async (args: any) => {
     writes.push({ model, op, args });
@@ -62,9 +62,42 @@ function harness(toNumber: string, heirId: string | null = null, progress?: any)
     leadPhones,
     { record: async () => {} } as any,
     progress,
+    numbers,
   );
   return { svc, writes };
 }
+
+describe('TwilioVoiceService.setDisposition who answered', () => {
+  it('moves the number to the person who picked up and files the call and the contact under them', async () => {
+    const progress = progressFake();
+    const numbers = { reassign: jest.fn().mockResolvedValue({ moved: true, heirId: 'heir-son', name: 'ROBERT KESSLER', reattributed: { messages: 6, calls: 1 } }) };
+    // The claimant's own number was dialled, and the son answered.
+    const { svc, writes } = harness(CLAIMANT_NUMBER, null, progress, numbers);
+    await svc.setDisposition(
+      CALL_SID,
+      { disposition: 'Follow Up', outcome: SurplusCallOutcome.SPOKE_RELATIVE, followUpAt: '2026-11-03T14:00:00Z', answeredBy: { heirId: 'heir-son' } },
+      'u1',
+    );
+    expect(numbers.reassign).toHaveBeenCalledWith({ leadId: 'lead1', number: CLAIMANT_NUMBER, to: { heirId: 'heir-son' }, userId: 'u1' });
+    const refiled = writes.find((w) => w.model === 'callLog' && w.args.data?.heirId !== undefined);
+    expect(refiled?.args.data).toEqual({ heirId: 'heir-son' });
+    expect(progress.contacted).toHaveBeenCalledWith('lead1', expect.objectContaining({ heirId: 'heir-son' }));
+    const task = writes.find((w) => w.model === 'task');
+    expect(task?.args.data.heirId).toBe('heir-son');
+    expect(task?.args.data.title).toContain('ROBERT KESSLER');
+  });
+
+  it('leaves the number alone when the person it is filed under answered', async () => {
+    const numbers = { reassign: jest.fn() };
+    const { svc } = harness(SON_NUMBER, null, progressFake(), numbers);
+    await svc.setDisposition(
+      CALL_SID,
+      { disposition: 'Follow Up', outcome: SurplusCallOutcome.SPOKE_RELATIVE, followUpAt: '2026-11-03T14:00:00Z', answeredBy: { heirId: 'heir-son' } },
+      'u1',
+    );
+    expect(numbers.reassign).not.toHaveBeenCalled();
+  });
+});
 
 function progressFake() {
   return {

@@ -14,7 +14,7 @@ import { SURPLUS_TRACE_CHANNELS, SURPLUS_TIER1_CHANNELS, TRACE_RESULTS, channelF
 import { useDialer } from '@/components/dialer/DialerContext';
 import { DNC_STATE, SURPLUS_STAGES } from './format';
 import ContactEditor from './ContactEditor';
-import SurplusHeirs, { PersonLine, contactSummary, courtRecordsSearch, personConfidence } from './SurplusHeirs';
+import SurplusHeirs, { MoveNumber, PersonLine, contactSummary, courtRecordsSearch, personConfidence } from './SurplusHeirs';
 import { AddSocialProfile, FindProfilesButton, SocialProfileList } from './SurplusSocial';
 import { SOCIAL_LEAD_LABEL, rememberSocialTarget, saveToDealcoreBookmarklet, socialOpener, type SocialProfile } from '@/lib/surplus-social';
 import { fmtDate, fmtDay, money, phoneDisplay } from './format';
@@ -204,6 +204,8 @@ export interface SurplusPanelLead {
     evidence: string;
   } | null;
   totalTouches: number;
+  /** Every attempt on record: calls, texts, emails, letters and hand marks, in one number. */
+  touchesLogged?: number;
   /** One of us mailed a letter. Date and the address on the envelope. */
   letterMailedAt: string | null;
   letterMailedTo: string | null;
@@ -2865,8 +2867,11 @@ export default function SurplusWorkPanel({
               >
                 Open conversation
               </button>
-              <span style={{ fontSize: 12, color: 'var(--faint)', marginLeft: 'auto' }}>
-                {lead.totalTouches} touch{lead.totalTouches === 1 ? '' : 'es'} logged
+              <span
+                style={{ fontSize: 12, color: 'var(--faint)', marginLeft: 'auto' }}
+                title="Calls placed, texts and emails sent, letters mailed and hand marks, together"
+              >
+                {lead.touchesLogged ?? lead.totalTouches} touch{(lead.touchesLogged ?? lead.totalTouches) === 1 ? '' : 'es'} logged
               </span>
             </div>
           )}
@@ -3679,6 +3684,16 @@ function ContactsBlock({
               <button type="button" className="dc-wp-btn" onClick={() => onText(p.number)}>
                 Text
               </button>
+              <MoveNumber
+                leadId={lead.id}
+                number={p.number}
+                currentHeirId={null}
+                people={(lead.heirs || []).map((h) => ({ id: h.id, name: h.name, deceased: !!h.deceased }))}
+                claimant={lead.claimant}
+                claimantDeceased={!!lead.isDeceased}
+                say={say}
+                onChanged={onChanged}
+              />
             </div>
           </div>
         );

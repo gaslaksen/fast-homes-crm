@@ -146,6 +146,9 @@ const LEAD_INCLUDE = {
       callLogs: { where: { type: { in: ['twilio_browser', 'ai_outbound'] } } },
       messages: { where: { direction: 'OUTBOUND' } },
       emails: { where: { direction: 'outbound' } },
+      // Hand marks from the outreach list: a call or text made off-system
+      // and ticked, or a note. Part of the one touches counter.
+      surplusTouches: true,
     },
   },
 };
@@ -2724,6 +2727,18 @@ export class SurplusService {
       plannedTouches: totalTouches,
       totalTouches,
       touches: lead.touchCount || 0,
+      /**
+       * Every attempt on record, in one number: calls placed, texts and
+       * emails sent, letters mailed and hand marks. The footer used to show
+       * the planner's ticked boxes ("0 touches logged") under an Activity tab
+       * holding eighteen items.
+       */
+      touchesLogged:
+        (lead._count?.callLogs || 0) +
+        (lead._count?.messages || 0) +
+        (lead._count?.emails || 0) +
+        (lead._count?.surplusTouches || 0) +
+        (d.letters || []).length,
       lastTouchedAt: lead.lastTouchedAt,
       // When the claimant last gained a phone or email, and the newest such
       // date across the claimant and everyone filed under them. The board
