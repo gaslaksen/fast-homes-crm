@@ -26,6 +26,7 @@ import { SurplusOutreachService } from './surplus-outreach.service';
 import { COMPLIANCE_RULES, DISCLOSURE_LABELS, FL_COUNTIES, SURPLUS_FLOOR } from './surplus-compliance';
 import { SurplusNumbersService } from './surplus-numbers.service';
 import { SurplusPruneService } from './surplus-prune.service';
+import { SurplusSessionService } from './surplus-session.service';
 
 /**
  * A probate filing upload. PDFs only and capped, because this goes straight to
@@ -94,6 +95,7 @@ export class SurplusController {
     private config: ConfigService,
     private notice: SurplusNoticeService,
     private prune: SurplusPruneService,
+    private session: SurplusSessionService,
   ) {}
 
   /**
@@ -1172,6 +1174,32 @@ export class SurplusController {
     const res = await this.surplus.createSurplusLead(body, { organizationId });
     if (!res.created) throw new BadRequestException(res.reason || 'Lead was not created');
     return this.surplus.get(res.leadId!, organizationId);
+  }
+
+  /**
+   * The Work today session: the rifle list in the course's order with every
+   * number to dial, the next candidates, and today's calls against the
+   * target. ?size=25&county=
+   */
+  @Get('session')
+  async workSession(
+    @Query('size') size?: string,
+    @Query('county') county?: string,
+    @Headers('authorization') authHeader?: string,
+  ) {
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.session.session({ organizationId: organizationId || null, size: size ? Number(size) : null, county: county || null });
+  }
+
+  /** Add to and take off the rifle list. Body: { add?: ids, remove?: ids } */
+  @Post('rifle')
+  async setRifle(@Body() body: any, @Headers('authorization') authHeader?: string) {
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.session.setRifle({
+      organizationId: organizationId || null,
+      add: Array.isArray(body?.add) ? body.add : [],
+      remove: Array.isArray(body?.remove) ? body.remove : [],
+    });
   }
 
   /**

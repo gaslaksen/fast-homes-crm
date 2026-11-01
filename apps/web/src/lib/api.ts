@@ -247,6 +247,11 @@ export const surplusAPI = {
     api.post('/surplus/bulk-hold', { ids, reason, until: until || null }),
   /** The weekly prune: four buckets of cases the course says to stop working, each with its action. */
   prune: () => api.get('/surplus/prune'),
+  /** The Work today session: the rifle list in the course's order, candidates, and today's calls against the target. */
+  session: (size: number, county?: string | null) =>
+    api.get('/surplus/session', { params: { size, county: county || undefined } }),
+  /** Add to and take off the rifle list. */
+  setRifle: (change: { add?: string[]; remove?: string[] }) => api.post('/surplus/rifle', change),
   /** Who on the team owns the case; null clears it. */
   setOwner: (id: string, userId: string | null) => api.post(`/surplus/${id}/owner`, { userId }),
   /** Set the next action, or rewrite the current one in place with its taskId. */
