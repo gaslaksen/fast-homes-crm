@@ -7,6 +7,7 @@ import AppShell from '@/components/AppShell';
 import ActionCard, { ActionItemProps, ActionCategory } from '@/components/ActionCard';
 import ScheduleFollowUpModal from '@/components/ScheduleFollowUpModal';
 import { actionsAPI, authAPI, dashboardAPI } from '@/lib/api';
+import { leadHref } from '@/lib/leadSources';
 
 type SortMode = 'priority' | 'oldest' | 'newest';
 
@@ -138,7 +139,7 @@ function UpcomingFollowUps({ tasks }: { tasks: any[] }) {
         {tasks.slice(0, 5).map((t: any) => (
           <Link
             key={t.id}
-            href={`/leads/${t.leadId}`}
+            href={leadHref({ id: t.leadId, source: t.lead?.source })}
             className="block text-xs hover:bg-gray-50 dark:hover:bg-gray-800 rounded px-2 py-1.5 -mx-2"
           >
             <div className="font-medium text-gray-800 dark:text-gray-200 truncate">

@@ -92,8 +92,15 @@ export class DigestService {
       .replace(/\/$/, '');
   }
 
-  private leadUrl(id: string, sub = ''): string {
-    return `${this.appUrl}/leads/${id}${sub}`;
+  /**
+   * Where a lead opens in the app. A surplus claimant is worked on the case
+   * panel, which /surplus-funds?lead= opens with the hiding filters off. The
+   * wholesale lead page offers Send Initial Text and Resume AI, and either
+   * one can start automated outreach to a claimant by accident.
+   */
+  leadUrl(id: string, source: string | null | undefined): string {
+    if (source === LeadSource.SURPLUS) return `${this.appUrl}/surplus-funds?lead=${id}`;
+    return `${this.appUrl}/leads/${id}`;
   }
 
   // ── Formatting helpers ───────────────────────────────────────────────────
@@ -266,7 +273,7 @@ export class DigestService {
         likely: recs.some((c) => c.queue === 'likely'),
         cleanPhones: best.cleanPhoneCount || 0,
         phone: this.fmtPhone(clean?.number),
-        url: this.leadUrl(cases[0].id),
+        url: this.leadUrl(cases[0].id, LeadSource.SURPLUS),
         denied: cases.some((c) => c.claimStatus === 'denied'),
       });
     }
@@ -431,7 +438,7 @@ export class DigestService {
           fundLocation: true, checkAmount: true, feePercent: true, submittedAt: true,
           countyAcknowledgedAt: true, additionalDocsRequested: true, expectedDisbursementAt: true,
           checkReceivedAt: true, disbursementReportSignedAt: true, clearingDueAt: true, checkSentAt: true,
-          lead: { select: { sellerFirstName: true, sellerLastName: true } },
+          lead: { select: { source: true, sellerFirstName: true, sellerLastName: true } },
         },
       }),
 
@@ -466,7 +473,7 @@ export class DigestService {
           orderBy: { dueDate: 'asc' },
           take: 50,
           include: {
-            lead: { select: { id: true, sellerFirstName: true, sellerLastName: true } },
+            lead: { select: { id: true, source: true, sellerFirstName: true, sellerLastName: true } },
             user: { select: { firstName: true } },
           },
         })
@@ -573,7 +580,7 @@ export class DigestService {
         title: `${this.displayName(`${l.sellerFirstName || ''} ${l.sellerLastName || ''}`)} replied`,
         detail: l.lastMessagePreview ? `"${this.truncate(l.lastMessagePreview)}"` : null,
         when: `waiting ${this.fmtWait(now.getTime() - (l.lastMessageAt?.getTime() ?? now.getTime()))}`,
-        url: this.leadUrl(l.id),
+        url: this.leadUrl(l.id, l.source),
         urgency: 'critical' as DigestUrgency,
       }));
     const taskRows: PromiseRow[] = surplusOverdueTasks
@@ -584,7 +591,7 @@ export class DigestService {
           title: t.title,
           detail: null,
           when: `${this.plural(days, 'day')} late${t.user?.firstName ? ` · ${t.user.firstName}` : ''}`,
-          url: this.leadUrl(t.lead?.id || t.leadId),
+          url: this.leadUrl(t.lead?.id || t.leadId, t.lead?.source),
           urgency: (days >= 3 ? 'critical' : 'warn') as DigestUrgency,
         };
       });
@@ -592,7 +599,7 @@ export class DigestService {
       title: `Monthly update owed to ${this.displayName(c.claimant)}`,
       detail: c.stage || null,
       when: c.claimantUpdate?.daysSince != null ? `${c.claimantUpdate.daysSince} days since the last word` : 'never updated',
-      url: this.leadUrl(c.id),
+      url: this.leadUrl(c.id, LeadSource.SURPLUS),
       urgency: 'warn' as DigestUrgency,
     }));
     const allPromises = [...replyRows, ...taskRows, ...updateRows];
@@ -625,7 +632,7 @@ export class DigestService {
           stage: d.stage || '',
           note: stuck.note,
           fee: fee ? this.money(fee) : '-',
-          url: this.leadUrl(d.leadId),
+          url: this.leadUrl(d.leadId, d.lead?.source),
           urgency: stuck.urgency,
         };
       })
@@ -843,7 +850,7 @@ export class DigestService {
         flag: null,
         repeatNote: this.repeatNote(this.streak(key, ctx.recentKeys), 'still has no answer'),
         ctaLabel: 'Open the thread',
-        ctaUrl: this.leadUrl(reply.id),
+        ctaUrl: this.leadUrl(reply.id, reply.source),
         phone: this.fmtPhone(reply.sellerPhone),
       };
     }
@@ -884,7 +891,7 @@ export class DigestService {
         flag: null,
         repeatNote: this.repeatNote(this.streak(key, ctx.recentKeys), 'is still open'),
         ctaLabel: 'Open claimant',
-        ctaUrl: this.leadUrl(task.lead?.id || task.leadId),
+        ctaUrl: this.leadUrl(task.lead?.id || task.leadId, task.lead?.source),
         phone: null,
       };
     }

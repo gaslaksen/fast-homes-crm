@@ -7,6 +7,7 @@ import { formatDistanceToNow, format } from 'date-fns';
 import PropertyPhoto from '@/components/PropertyPhoto';
 import AppShell from '@/components/AppShell';
 import ActionQueueDashboard from './ActionQueueDashboard';
+import { leadHref } from '@/lib/leadSources';
 
 const DASHBOARD_V2 = process.env.NEXT_PUBLIC_DASHBOARD_V2 === 'actionqueue';
 
@@ -67,7 +68,7 @@ function LeadRow({ lead, showLastTouched = false }: { lead: any; showLastTouched
 
   return (
     <Link
-      href={`/leads/${lead.id}`}
+      href={leadHref(lead)}
       className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors rounded-lg group overflow-hidden"
     >
       <PropertyPhoto src={lead.primaryPhoto} scoreBand={lead.scoreBand} address={lead.propertyAddress} size="sm" />
@@ -302,7 +303,7 @@ function MetricsDashboard() {
                     return (
                       <Link
                         key={lead.id}
-                        href={`/leads/${lead.id}`}
+                        href={leadHref(lead)}
                         className="flex items-center justify-between px-5 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
                       >
                         <div className="min-w-0 flex-1">
@@ -370,7 +371,7 @@ function MetricsDashboard() {
                         className="mt-1 w-4 h-4 rounded border-2 border-gray-300 dark:border-gray-600 hover:border-green-500 hover:bg-green-50 dark:hover:bg-green-900/30 flex-shrink-0 transition-colors"
                         title="Mark complete"
                       />
-                      <Link href={`/leads/${task.lead.id}`} className="flex-1 min-w-0">
+                      <Link href={leadHref(task.lead)} className="flex-1 min-w-0">
                         <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{task.title}</div>
                         {task.description && (
                           <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate">{task.description}</div>

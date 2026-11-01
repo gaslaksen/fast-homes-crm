@@ -137,6 +137,7 @@ export class DashboardService {
         lead: {
           select: {
             id: true,
+            source: true,
             propertyAddress: true,
             sellerFirstName: true,
             sellerLastName: true,
@@ -214,6 +215,7 @@ export class DashboardService {
         totalScore: true,
         createdAt: true,
         primaryPhoto: true,
+        source: true,
       },
     });
   }
@@ -244,6 +246,7 @@ export class DashboardService {
         askingPrice: true,
         lastTouchedAt: true,
         primaryPhoto: true,
+        source: true,
       },
     });
   }
