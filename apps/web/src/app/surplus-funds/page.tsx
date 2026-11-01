@@ -12,7 +12,7 @@ import SurplusImportReport, { SurplusImportResult } from '@/components/pipelines
 import SurplusPropertyCard, { STATUS_ACCENT } from '@/components/pipelines/SurplusPropertyCard';
 import type { PipelineColumn, PipelineStage } from '@/components/pipelines/PipelineBoard';
 import { authAPI, surplusAPI } from '@/lib/api';
-import { isRealPropertyAddress } from '@fast-homes/shared';
+import { isRealPropertyAddress } from '@/lib/surplus-address';
 import { dueLabel, isOverdue } from '@/lib/dates';
 import { SURPLUS_DEAD_REASONS } from '@/lib/surplus-dead';
 import '@/components/pipelines/pipeline-board.css';
