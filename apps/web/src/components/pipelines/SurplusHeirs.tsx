@@ -256,30 +256,6 @@ export default function SurplusHeirs({
     }
   };
 
-  const trace = async (heirId: string, name: string) => {
-    setBusy(true);
-    say(`Skip tracing ${name}...`);
-    try {
-      const res = await surplusAPI.skipTraceHeirs({ heirIds: [heirId] });
-      const r = res.data;
-      say(
-        r.contacted
-          ? `Found contacts for ${name}.`
-          : r.mismatched
-            ? `The trace returned somebody else, so nothing was attached to ${name}.`
-            : r.errors
-              ? r.message || 'The trace failed.'
-              : `Nothing found for ${name}.`,
-      );
-      load();
-      onChanged();
-    } catch (err: any) {
-      say(err?.response?.data?.message || 'The trace failed.');
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const setDnc = async (h: Heir) => {
     setBusy(true);
     try {
@@ -378,7 +354,6 @@ export default function SurplusHeirs({
       onCall={(n) => onCall(n, h.name)}
       onText={onText}
       onEmail={onEmail}
-      onTrace={() => trace(h.id, h.name)}
       onDnc={() => setDnc(h)}
       onRemove={() => remove(h)}
       onStatus={(v) => setStatus(h, v)}
@@ -571,7 +546,6 @@ function HeirRow({
   onCall,
   onText,
   onEmail,
-  onTrace,
   onDnc,
   onRemove,
   onStatus,
@@ -596,7 +570,6 @@ function HeirRow({
   onCall: (n: string) => void;
   onText: (n: string) => void;
   onEmail: (a: string) => void;
-  onTrace: () => void;
   onDnc: () => void;
   onRemove: () => void;
   onStatus: (status: string) => void;
@@ -778,24 +751,6 @@ function HeirRow({
       />
 
       <div style={{ display: 'flex', gap: 6, marginTop: 5, flexWrap: 'wrap' }}>
-        {/* Offered only while a submission could still tell us something. The
-            heir's address comes off a recent filing, which is far better input
-            than a claimant address the clerk's mail came back from. */}
-        {h.traceable && (
-          <button
-            type="button"
-            className="dc-wp-btn"
-            disabled={busy || h.trace?.actionable === false}
-            title={
-              h.trace?.actionable === false
-                ? 'Already submitted. The same address returns the same answer.'
-                : `Traces ${h.address}`
-            }
-            onClick={onTrace}
-          >
-            Skip trace {h.name}
-          </button>
-        )}
         {/* The rarely used controls behind one button, so the card reads as
             the person and their numbers rather than a row of switches. */}
         <button type="button" className="dc-wp-btn" aria-expanded={moreOpen} onClick={() => setMoreOpen((v) => !v)}>

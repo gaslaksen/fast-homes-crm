@@ -3,6 +3,7 @@ import {
   UseInterceptors, UploadedFile, BadRequestException, NotFoundException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { ConfigService } from '@nestjs/config';
 import { memoryStorage } from 'multer';
 import * as jwt from 'jsonwebtoken';
 import { SurplusHeirsService } from './surplus-heirs.service';
@@ -88,7 +89,21 @@ export class SurplusController {
     private idi: SurplusIdiService,
     private outreach: SurplusOutreachService,
     private numbers: SurplusNumbersService,
+    private config: ConfigService,
   ) {}
+
+  /**
+   * BatchData and Endato (EnformionGo) were dropped on 2026-10-31: neither
+   * produced usable contacts, and skip tracing runs through IDI batches now.
+   * Their endpoints stay for the one-off repair runs, behind a switch, so a
+   * stale button or a saved request cannot quietly start spending again.
+   */
+  private retiredVendors(): void {
+    if (this.config.get<string>('SURPLUS_LEGACY_VENDORS') === 'true') return;
+    throw new BadRequestException(
+      'BatchData and EnformionGo are retired. Skip tracing runs through IDI batches: select the claimants on the board and use Export for IDI. Set SURPLUS_LEGACY_VENDORS=true to run the old vendors.',
+    );
+  }
 
   private decodeToken(authHeader?: string): { userId?: string; organizationId?: string } {
     try {
@@ -638,6 +653,7 @@ export class SurplusController {
     if (nameSearchLimit != null && (!Number.isFinite(nameSearchLimit) || nameSearchLimit < 1)) {
       throw new BadRequestException('nameSearchLimit must be a positive number');
     }
+    this.retiredVendors();
     return this.skiptrace.traceLeads({
       organizationId: organizationId || null,
       leadIds: Array.isArray(body?.leadIds) ? body.leadIds : undefined,
@@ -667,6 +683,7 @@ export class SurplusController {
     if (limit != null && (!Number.isFinite(limit) || limit < 1)) {
       throw new BadRequestException('limit must be a positive number');
     }
+    this.retiredVendors();
     return this.skiptrace.recheckDeaths({
       organizationId: organizationId || null,
       county: typeof body?.county === 'string' && body.county ? body.county : undefined,
@@ -687,6 +704,7 @@ export class SurplusController {
     if (limit != null && (!Number.isFinite(limit) || limit < 1)) {
       throw new BadRequestException('limit must be a positive number');
     }
+    this.retiredVendors();
     return this.skiptrace.relativeBacklog({
       organizationId: organizationId || null,
       county: typeof body?.county === 'string' && body.county ? body.county : undefined,
@@ -707,6 +725,7 @@ export class SurplusController {
     if (limit != null && (!Number.isFinite(limit) || limit < 1)) {
       throw new BadRequestException('limit must be a positive number');
     }
+    this.retiredVendors();
     return this.skiptrace.estateRelatives({
       organizationId: organizationId || null,
       county: typeof body?.county === 'string' && body.county ? body.county : undefined,
@@ -753,6 +772,7 @@ export class SurplusController {
   async enformionSearch(@Param('id') id: string, @Headers('authorization') authHeader?: string) {
     const { organizationId } = this.decodeToken(authHeader);
     try {
+      this.retiredVendors();
       return await this.skiptrace.enformionSearch({ leadId: id, organizationId: organizationId || null });
     } catch (e: any) {
       throw new BadRequestException(e.message);
@@ -982,6 +1002,7 @@ export class SurplusController {
     if (limit != null && (!Number.isFinite(limit) || limit < 1)) {
       throw new BadRequestException('limit must be a positive number');
     }
+    this.retiredVendors();
     return this.skiptrace.traceHeirs({
       organizationId,
       heirIds: Array.isArray(body?.heirIds) ? body.heirIds : undefined,

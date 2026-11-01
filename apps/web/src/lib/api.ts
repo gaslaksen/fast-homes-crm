@@ -255,19 +255,6 @@ export const surplusAPI = {
   /** A rendered letter for the print view. Records nothing. */
   letter: (id: string, kind: string, heirId?: string | null) =>
     api.get(`/surplus/${id}/letter`, { params: { kind, heirId: heirId || undefined } }),
-  // `limit` caps the ADDRESSES submitted, which is what costs BatchData credits.
-  // Co-owners at one property share a submission because the vendor matches on
-  // address and ignores names.
-  // `nameSearch` (default on) runs the Endato name-first rung on whatever the
-  // address rung could not place; `nameSearchLimit` caps those searches.
-  skipTrace: (body: { leadIds?: string[]; limit?: number; includeTraced?: boolean; nameSearch?: boolean; nameSearchLimit?: number; addressSearch?: boolean }) =>
-    api.post('/surplus/skip-trace', body),
-  /**
-   * EnformionGo on one claimant: the card's Skip trace button. A name search
-   * for a living claimant, the estate search for a dead one, and their
-   * relatives looked up. Paid per search; the county pull never runs it.
-   */
-  enformionSearch: (id: string) => api.post(`/surplus/${id}/enformion-search`),
   /** Confirm or reject a possible obituary match for one claimant. */
   resolveObituary: (leadId: string, answer: 'confirm' | 'reject') =>
     api.post(`/surplus/${leadId}/obituary`, { answer }),
@@ -446,8 +433,6 @@ export const surplusAPI = {
   ) => api.post(`/surplus/${id}/heirs/add`, body),
   updateHeir: (heirId: string, body: any) => api.patch(`/surplus/heirs/${heirId}`, body),
   deleteHeir: (heirId: string) => api.post(`/surplus/heirs/${heirId}/delete`),
-  skipTraceHeirs: (body: { heirIds?: string[]; limit?: number; includeTraced?: boolean }) =>
-    api.post('/surplus/heirs/skip-trace', body),
   /** Saved IDI batches, newest first, and one batch row by row with the relatives it filed. */
   batches: () => api.get('/surplus/batches'),
   batch: (id: string) => api.get(`/surplus/batches/${id}`),
