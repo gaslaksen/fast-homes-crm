@@ -17,7 +17,7 @@ import { SurplusNoticeService } from './surplus-notice.service';
 import { SurplusSocialService } from './surplus-social.service';
 import { SurplusIdiService } from './surplus-idi.service';
 import { SurplusTemplatesService } from './surplus-templates.service';
-import { SurplusCredibilityService, CredibilityChannel } from './surplus-credibility.service';
+import { SurplusCredibilityService, CredibilitySendInput } from './surplus-credibility.service';
 import { SurplusCountiesService, ACCEPTED_METHOD_LABEL } from './surplus-counties.service';
 import { SurplusDocumentsService, DOCUMENT_MIME_TYPES, DOCUMENT_MAX_BYTES } from './surplus-documents.service';
 import { StorageService } from '../storage/storage.service';
@@ -561,12 +561,13 @@ export class SurplusController {
 
   /**
    * Send the credibility packet (website, Sunbiz filing, one-pager, callback
-   * number) to one claimant by text, email, or both, as Dig Deeper.
+   * number) by text, email, or both, as Dig Deeper. To the claimant, or to
+   * the person on the case named by `heirId` or by the number being texted.
    */
   @Post(':id/credibility')
   async sendCredibility(
     @Param('id') id: string,
-    @Body() body: { channels: CredibilityChannel[]; phone?: string | null; email?: string | null },
+    @Body() body: CredibilitySendInput,
     @Headers('authorization') authHeader?: string,
   ) {
     const { organizationId, userId } = this.decodeToken(authHeader);
