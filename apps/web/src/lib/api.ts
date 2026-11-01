@@ -391,10 +391,13 @@ export const surplusAPI = {
   // ── Credibility packet ──
   /** Whether the packet's links are configured, and which are missing. */
   credibilityStatus: () => api.get('/surplus/credibility/status'),
-  /** Send the packet by text, email, or both, as Dig Deeper. */
+  /**
+   * Send the packet by text, email, or both, as Dig Deeper. To the claimant,
+   * or to the person on the case named by heirId (or owning the number).
+   */
   sendCredibility: (
     id: string,
-    body: { channels: ('sms' | 'email')[]; phone?: string | null; email?: string | null },
+    body: { channels: ('sms' | 'email')[]; phone?: string | null; email?: string | null; heirId?: string | null },
   ) => api.post(`/surplus/${id}/credibility`, body),
   // A fresh link to a county document whose stored link expires (RealTDM).
   documentLink: (source: string, docId: string, docType?: string | null) =>
