@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { messagesAPI, leadsAPI } from '@/lib/api';
 import RichEmailEditor from './RichEmailEditor';
 import { formatPhoneDisplay } from '@/lib/format';
+import { relativeDraftWarning } from '@/lib/surplus-disclosure';
 
 type Channel = 'sms' | 'email' | 'comment';
 
@@ -23,11 +24,13 @@ interface FromOption {
  */
 interface ToOption {
   number: string;
-  /** "Primary", "Phone 2", ... */
+  /** "Primary", "Phone 2", "Heir: NAME" ... */
   label: string;
   /** 'Mobile' | 'Landline' | null */
   type: string | null;
   isPrimary: boolean;
+  /** Set when the number belongs to a person on a surplus case, not the claimant. */
+  heirId?: string | null;
 }
 
 const prettyPhone = (raw?: string | null) => (raw ? formatPhoneDisplay(raw) : '');
@@ -89,6 +92,7 @@ function resolveTo(requested: string, options: ToOption[]): string {
 
 export default function MessageComposer({
   leadId,
+  surplusCase,
   sellerPhone,
   sellerEmail,
   gmailConnected,
@@ -102,6 +106,8 @@ export default function MessageComposer({
   onSent,
 }: {
   leadId: string;
+  /** A surplus claim: drafts to a relative are checked for the amount and the source as they are typed. */
+  surplusCase?: boolean;
   sellerPhone?: string | null;
   sellerEmail?: string | null;
   gmailConnected?: boolean;
@@ -401,6 +407,12 @@ export default function MessageComposer({
   }, [composeIntent?.nonce]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const selectedTo = toOptions.find((o) => o.number === toNumber);
+  // A text to somebody on the case who is not the claimant must not name the
+  // amount or the source. The API holds it; this says so before Send.
+  const draftWarning =
+    surplusCase && channel === 'sms' && selectedTo?.heirId
+      ? relativeDraftWarning(body, selectedTo.label.replace(/^Heir:\s*/, ''))
+      : null;
   const blockedBySms = channel === 'sms' && doNotContact;
   const isComment = channel === 'comment';
 
@@ -703,6 +715,11 @@ export default function MessageComposer({
         </div>
       )}
 
+      {draftWarning && (
+        <div className="text-xs text-amber-700 dark:text-amber-400" role="status">
+          {draftWarning}
+        </div>
+      )}
       {error && <div className="text-xs text-red-600 dark:text-red-400">{error}</div>}
 
       {/* `composer-actions` lets the pipeline work panel pin this row to its

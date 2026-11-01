@@ -13,6 +13,8 @@ import { ComplianceService } from './compliance.service';
 import { PhoneNumbersService } from '../phone-numbers/phone-numbers.service';
 import { LeadPhonesService } from '../phone-numbers/lead-phones.service';
 import { SurplusProgressService } from '../surplus/surplus-progress.service';
+import { isSignedStage } from '../surplus/surplus-progress.util';
+import { DisclosureContext, DisclosureHoldException, disclosureHolds } from '../surplus/surplus-disclosure.util';
 import { formatPhoneNumber, isOptOutMessage } from '@fast-homes/shared';
 import { dealFitFlags, propertyContextForPrompt } from '../leads/property-fit.util';
 import { htmlToText, normalizeEditorHtml } from './html-to-text.util';
@@ -229,6 +231,9 @@ export class MessagesService {
     const heirFooter = heirId
       ? await this.prisma.surplusHeir.findUnique({ where: { id: heirId }, select: { complianceFooterSentAt: true } })
       : null;
+    // What may be said depends on who is reading it. A relative never hears
+    // the amount or the source; the claimant hears the source once signed.
+    if (lead.source === 'SURPLUS') await this.holdIfDisclosing(leadId, body, heirId);
     const from =
       (await this.phoneNumbers.resolveForLead(leadId, fromNumber).catch(() => null)) ||
       this.twilioNumber;
@@ -846,6 +851,35 @@ You decide the right approach based on the conversation flow.${photoNudge}`.trim
    * Every outbound counts, whether or not there was news, because the
    * course's point is that silence is what loses trust.
    */
+  /**
+   * Refuse a surplus message that tells the wrong person too much. The
+   * reader is the claimant (or an heir who can sign), or a relative, by the
+   * row the number or address sits on; the stage says whether the agreement
+   * is signed. Throws a 400 the composer shows and the drip records as
+   * skipped. Fails open on a lookup error: the rule must not take the
+   * messaging down with it.
+   */
+  private async holdIfDisclosing(leadId: string, text: string, heirId: string | null): Promise<void> {
+    let ctx: DisclosureContext = { audience: 'claimant', signed: false };
+    let recipient = 'the claimant';
+    try {
+      const d = await this.prisma.surplusDetail.findUnique({ where: { leadId }, select: { stage: true } });
+      ctx.signed = isSignedStage(d?.stage);
+      if (heirId) {
+        const person = await this.prisma.surplusHeir.findUnique({ where: { id: heirId }, select: { name: true, role: true } });
+        if (person) {
+          recipient = person.name;
+          if (person.role !== 'heir') ctx = { ...ctx, audience: 'relative' };
+        }
+      }
+    } catch (err: any) {
+      this.logger.warn(`Disclosure check skipped on ${leadId}: ${err.message}`);
+      return;
+    }
+    const holds = disclosureHolds(text, ctx);
+    if (holds.length) throw new DisclosureHoldException(recipient, holds);
+  }
+
   private async pauseDripFor(leadId: string, heirId: string | null, userId: string) {
     try {
       const paused = await this.prisma.campaignEnrollment.updateMany({
@@ -1656,6 +1690,22 @@ You decide the right approach based on the conversation flow.${photoNudge}`.trim
     const bodyText =
       params.body?.trim() || (bodyHtml ? htmlToText(bodyHtml) : '');
     if (!bodyText && !bodyHtml) throw new BadRequestException('Empty message');
+    if (lead.source === 'SURPLUS') {
+      // The address says who is reading: a person on the case has their own.
+      const onCase = await this.prisma.surplusHeir
+        .findFirst({
+          where: {
+            surplusDetail: { leadId: lead.id },
+            OR: [
+              { email1: { equals: recipient, mode: 'insensitive' } },
+              { email2: { equals: recipient, mode: 'insensitive' } },
+            ],
+          },
+          select: { id: true },
+        })
+        .catch(() => null);
+      await this.holdIfDisclosing(lead.id, `${subject}\n${bodyText}`, onCase?.id || null);
+    }
 
     let res: { mailgunId: string | null };
     try {

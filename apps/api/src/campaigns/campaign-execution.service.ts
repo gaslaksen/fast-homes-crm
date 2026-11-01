@@ -19,6 +19,7 @@ import {
 } from '../mailer/mailer.service';
 import { brandForLeadSource, businessNameForLead } from '../common/company.constants';
 import { splitOwnerName } from '../foreclosures/foreclosure-scoring.util';
+import { DisclosureHoldException } from '../surplus/surplus-disclosure.util';
 import {
   HEIR_CONTACT_SELECT,
   LEAD_EMAILS_SELECT,
@@ -624,6 +625,14 @@ export class CampaignExecutionService implements OnModuleInit {
         return { kind: 'SENT', externalId };
       } catch (err) {
         lastErr = err;
+
+        // A step that would tell a relative the amount, or the claimant the
+        // source before signing, is not going out on any attempt. Skipped,
+        // with the reason on the log row, and the sequence moves on.
+        if (err instanceof DisclosureHoldException) {
+          this.logger.warn(`Held [${currentStep.channel}] enrollment=${enrollment.id}: ${err.message}`);
+          return { kind: 'SKIPPED', reason: err.message };
+        }
 
         // A sending limit is not a failure to retry into. Retrying burns more
         // of the very quota that is exhausted (Mailgun counts requests, not
