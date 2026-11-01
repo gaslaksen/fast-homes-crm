@@ -110,12 +110,13 @@ describe('DigestRenderService', () => {
     expect(render.renderText(b)).toContain('PROMISES DUE (11)');
   });
 
-  it('surfaces the claimants nobody has traced', () => {
+  it('surfaces the claimants waiting for the IDI batch', () => {
     const b = brief({ needsTrace: { total: 42, byCounty: 'Citrus 28 · Alachua 10 · Lee 2 · Santa Rosa 2' } });
     const html = render.renderHtml(b);
-    expect(html).toContain('42 live claimants have never been traced');
+    expect(html).toContain('42 live claimants are waiting to be sent to IDI');
     expect(html).toContain('Citrus 28');
-    expect(render.renderText(b)).toContain('NEEDS A SKIP TRACE');
+    expect(html).toContain('/surplus-funds?queue=trace');
+    expect(render.renderText(b)).toContain('READY FOR THE IDI BATCH');
   });
 
   it('shows stuck claims in flight, or one line when nothing is stuck', () => {
@@ -182,7 +183,7 @@ describe('DigestRenderService', () => {
 
   it('drops every section when there is nothing to say', () => {
     const html = render.renderHtml(brief());
-    for (const label of ['1 big thing', 'Surplus scorecard', 'Call these', 'Promises due', 'Needs a skip trace', 'Claims in flight', 'Coming up', 'Wholesale, parked']) {
+    for (const label of ['1 big thing', 'Surplus scorecard', 'Call these', 'Promises due', 'Ready for the IDI batch', 'Claims in flight', 'Coming up', 'Wholesale, parked']) {
       expect(html).not.toContain(label);
     }
   });

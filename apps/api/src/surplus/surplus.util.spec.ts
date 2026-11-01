@@ -1031,3 +1031,24 @@ describe('a file on hold', () => {
     expect(queueOf({ claimStatus: 'open', cleanPhoneCount: 3, onHold: false })).toBe('call');
   });
 });
+
+describe('the Send to IDI queue', () => {
+  const base = { claimStatus: 'open', cleanPhoneCount: 0, traceState: 'never', ownerMailingStreet: '12 Elm St' };
+
+  it('files a never-sent claimant with a live address under Send to IDI', () => {
+    expect(queueOf(base)).toBe(SurplusQueue.TRACE);
+    expect(queueReason(base)).toBe('Not sent to IDI yet, and the notice address is live');
+  });
+
+  it('says so when they are already in a batch waiting on IDI', () => {
+    const f = { ...base, idiPendingBatch: 'B014' };
+    expect(queueOf(f)).toBe(SurplusQueue.TRACE);
+    expect(queueReason(f)).toBe('Sent to IDI in B014, waiting on the results');
+  });
+
+  it('sends a spent address route to research by name', () => {
+    const f = { ...base, traceState: 'nothing', mailVerdict: 'undeliverable' };
+    expect(queueOf(f)).toBe(SurplusQueue.NAME_SEARCH);
+    expect(queueReason(f)).toContain('Research by name');
+  });
+});

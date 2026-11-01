@@ -476,8 +476,8 @@ const QUEUES: [string, string][] = [
   ['call', 'Call now'],
   ['likely', 'Likely match'],
   ['heirs', 'Find the heirs'],
-  ['trace', 'Skip trace'],
-  ['name_search', 'Name search'],
+  ['trace', 'Send to IDI'],
+  ['name_search', 'Research by name'],
   ['entity', 'Entity'],
   ['mailed', 'Letter sent'],
   ['hold', 'On hold'],
@@ -491,9 +491,10 @@ const QUEUE_HELP: Record<string, string> = {
     'Numbers from a likely but unconfirmed match: the only person with that name in the state the clerk wrote to, with no address tie to the case. Usual for out-of-town owners of vacant lots. Call, but confirm who you are speaking to before discussing the claim.',
   heirs:
     'The claimant is deceased and no living heir is on file. Only a person with standing can file, so no amount of skip tracing helps: find the probate case and add the filing.',
-  trace: 'Nothing submitted yet and the notice address still looks live. Costs a credit.',
+  trace:
+    'Not sent to IDI yet and the notice address still looks live. This queue is the next batch: More, Export everyone ready for IDI builds the file in one click.',
   name_search:
-    'The address route is spent, either the clerk mail came back or a trace found nobody. Search by name and confirm against the property that sold.',
+    'The address route is spent, either the clerk mail came back or IDI found nobody. Research by name: obituary, social, county records, and confirm against the property that sold.',
   entity: 'An LLC, estate or trust. No consumer record exists; the registered agent on Sunbiz is who can sign.',
   mailed:
     'A letter went out to the address on file and nobody can be phoned. Parked until they reply, so the address is not traced or searched again. A claimant with a callable number stays in Call now even after a letter.',
@@ -1315,9 +1316,25 @@ export default function SurplusFundsPage() {
    */
   const exportIdi = async () => {
     if (!chosen.length || busy) return;
+    await runIdiExport(() => surplusAPI.idiExport(chosen), 'Nobody selected can be sent to IDI.');
+  };
+
+  /**
+   * The Monday click: the whole Send to IDI queue, inside the trace window
+   * and not already waiting on a batch, as one file. No selection needed.
+   */
+  const exportIdiReady = async () => {
+    if (busy) return;
+    await runIdiExport(
+      () => surplusAPI.idiExportReady(county !== 'all' ? county : null),
+      'Nobody is ready to send to IDI right now.',
+    );
+  };
+
+  const runIdiExport = async (call: () => Promise<any>, nobody: string) => {
     setBusy(true);
     try {
-      const r = (await surplusAPI.idiExport(chosen)).data;
+      const r = (await call()).data;
       if (r.included) {
         const blob = new Blob([r.csv], { type: 'text/csv' });
         const url = URL.createObjectURL(blob);
@@ -1328,10 +1345,11 @@ export default function SurplusFundsPage() {
         URL.revokeObjectURL(url);
       }
       const left = r.skipped?.length || 0;
+      const waiting = r.waiting ? ` ${r.waiting} more already sent and waiting on IDI.` : '';
       say(
         (r.included
-          ? `${r.batch ? `Batch ${r.batch.code}: ` : ''}${r.included} claimant${r.included === 1 ? '' : 's'} in ${r.fileName}. Upload it to the IDI profile folder, beside the out folder.`
-          : 'Nobody selected can be sent to IDI.') +
+          ? `${r.batch ? `Batch ${r.batch.code}: ` : ''}${r.included} claimant${r.included === 1 ? '' : 's'} in ${r.fileName}. Upload it to the IDI profile folder, beside the out folder.${waiting}`
+          : nobody + waiting) +
           (left
             ? ` Left out ${left}: ${r.skipped
                 .slice(0, 3)
@@ -1552,6 +1570,15 @@ export default function SurplusFundsPage() {
                   </button>
                   <button type="button" className="dc-menu-item" onClick={() => fileRef.current?.click()} disabled={busy}>
                     {busy ? 'Importing...' : 'Import county list'}
+                  </button>
+                  <button
+                    type="button"
+                    className="dc-menu-item"
+                    onClick={exportIdiReady}
+                    disabled={busy}
+                    title="Everyone in the Send to IDI queue who is inside the trace window and not already waiting on a batch, as one file. The county filter narrows it."
+                  >
+                    {busy ? 'Building the file...' : 'Export everyone ready for IDI'}
                   </button>
                   <button
                     type="button"

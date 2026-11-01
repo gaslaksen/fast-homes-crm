@@ -36,6 +36,9 @@ interface BatchItem {
   deceased: number;
   relativesFiled: number;
   touchedSince: number;
+  reached: number;
+  signed: number;
+  cost: number | null;
 }
 
 interface Relative {
@@ -140,6 +143,8 @@ export default function SurplusBatches({
             <th style={head}>Came back</th>
             <th style={head}>Relatives</th>
             <th style={head}>Worked since</th>
+            <th style={head} title="Claimants, or somebody on their case, who got back to us after the results came in">Reached</th>
+            <th style={head} title="At Agreement Signed or later">Signed</th>
           </tr>
         </thead>
         <tbody>
@@ -163,6 +168,7 @@ export default function SurplusBatches({
                 <div style={{ color: 'var(--dim)' }}>
                   {b.rowCount} claimant{b.rowCount === 1 ? '' : 's'}
                   {b.skippedCount ? `, ${b.skippedCount} left out` : ''}
+                  {b.cost != null ? ` · $${b.cost.toFixed(2)}` : ''}
                 </div>
               </td>
               <td style={cell}>
@@ -185,6 +191,10 @@ export default function SurplusBatches({
               <td style={cell}>{b.relativesFiled}</td>
               <td style={cell}>
                 {b.touchedSince} of {b.rowCount}
+              </td>
+              <td style={cell}>{b.reached}</td>
+              <td style={cell} title={b.cost != null && b.signed ? `$${(b.cost / b.signed).toFixed(2)} per signed claim` : undefined}>
+                {b.signed}
               </td>
             </tr>
           ))}

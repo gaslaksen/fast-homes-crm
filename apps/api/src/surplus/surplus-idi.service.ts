@@ -1,9 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { LeadSource, SurplusClaimantType, SurplusTraceChannel } from '@fast-homes/shared';
+import { LeadSource, SurplusClaimantType, SurplusQueue, SurplusTraceChannel } from '@fast-homes/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { candidateOf } from './surplus-skiptrace.service';
-import { displayName } from './surplus-skiptrace.util';
+import { TRACE_MAX_AGE_DAYS, TRACE_MIN_AGE_DAYS, displayName, traceCriteria } from './surplus-skiptrace.util';
+import { SurplusService } from './surplus.service';
+import { isSignedStage } from './surplus-progress.util';
 import { tierOf } from './surplus.util';
 import {
   buildIdiBatchCsv,
@@ -78,6 +80,12 @@ export interface IdiBatchListItem {
   relativesFiled: number;
   /** Claimants somebody has called, texted, emailed or written to since the results came in. */
   touchedSince: number;
+  /** Claimants (or somebody on their case) who got back to us since the results came in. */
+  reached: number;
+  /** Claimants at Agreement Signed or later. */
+  signed: number;
+  /** Rows sent times IDI_COST_PER_SEARCH, or null when no price is set. */
+  cost: number | null;
 }
 
 /** A person IDI filed as a relative of a batch claimant. */
@@ -188,9 +196,84 @@ export class SurplusIdiService {
   constructor(
     private prisma: PrismaService,
     private config: ConfigService,
+    /** The board's own list, so "ready for IDI" is exactly the Send to IDI queue. */
+    private surplus?: SurplusService,
   ) {}
 
   // ─── Export ───────────────────────────────────────────────────────────────
+
+  /**
+   * Who is ready to go in the next IDI batch: everybody the board files
+   * under Send to IDI, inside the trace window (day 110 to day 365 off the
+   * notice, the same gate every paid lookup used), not already sitting in
+   * a batch that has not come back. The pull reports this count on its run
+   * and the board exports it in one click, which is what "the pull stages
+   * the batch" means without a second table to keep in step with the queue.
+   */
+  async readyForIdi(opts: {
+    organizationId?: string | null;
+    county?: string | null;
+    now?: Date;
+  }): Promise<{ leadIds: string[]; waiting: number; overAge: number }> {
+    if (!this.surplus) return { leadIds: [], waiting: 0, overAge: 0 };
+    const minAge = Number(this.config.get<string>('SURPLUS_TRACE_MIN_AGE_DAYS'));
+    const maxAge = Number(this.config.get<string>('SURPLUS_TRACE_MAX_AGE_DAYS'));
+    const gate = {
+      now: opts.now,
+      minAgeDays: Number.isFinite(minAge) && minAge >= 0 ? minAge : TRACE_MIN_AGE_DAYS,
+      maxAgeDays: Number.isFinite(maxAge) && maxAge > 0 ? maxAge : TRACE_MAX_AGE_DAYS,
+    };
+    const filters: any = {
+      organizationId: opts.organizationId || undefined,
+      group: 'lead',
+      queue: SurplusQueue.TRACE,
+      pageSize: 200,
+      ...(opts.county ? { county: opts.county } : {}),
+    };
+    const rows: any[] = [];
+    for (let page = 1; page <= 50; page += 1) {
+      const res: any = await this.surplus.list({ ...filters, page });
+      rows.push(...(res.data || []));
+      if (page * res.pageSize >= res.total) break;
+    }
+    let waiting = 0;
+    let overAge = 0;
+    const leadIds: string[] = [];
+    for (const r of rows) {
+      if (r.idiPendingBatch) {
+        waiting += 1;
+        continue;
+      }
+      const ok = traceCriteria(
+        { claimStatus: r.claimStatus, stage: r.stage, noticeDate: r.noticeDate, saleDate: r.saleDate, deceased: r.isDeceased },
+        gate,
+      );
+      if (!ok.ok) {
+        overAge += 1;
+        continue;
+      }
+      leadIds.push(r.id);
+    }
+    return { leadIds, waiting, overAge };
+  }
+
+  /** The one-click Monday export: the whole Send to IDI queue as one batch. */
+  async exportReady(opts: { organizationId?: string | null; county?: string | null; userId?: string | null }) {
+    const ready = await this.readyForIdi(opts);
+    if (!ready.leadIds.length) {
+      return {
+        csv: '',
+        fileName: '',
+        included: 0,
+        skipped: [],
+        batch: null,
+        waiting: ready.waiting,
+        overAge: ready.overAge,
+      };
+    }
+    const out = await this.exportBatch({ organizationId: opts.organizationId || null, leadIds: ready.leadIds, userId: opts.userId || null });
+    return { ...out, waiting: ready.waiting, overAge: ready.overAge };
+  }
 
   /**
    * The upload file for the chosen claimants, at the address a trace should
@@ -324,7 +407,14 @@ export class SurplusIdiService {
             result: true,
             deceased: true,
             relativesFiled: true,
-            surplusDetail: { select: { lead: { select: { lastTouchedAt: true } } } },
+            surplusDetail: {
+              select: {
+                tappedAt: true,
+                stage: true,
+                lead: { select: { lastTouchedAt: true } },
+                heirs: { select: { lastContactedAt: true } },
+              },
+            },
           },
         },
       },
@@ -339,6 +429,7 @@ export class SurplusIdiService {
       ? await this.prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, firstName: true, lastName: true } })
       : [];
     const nameOf = new Map(users.map((u) => [u.id, `${u.firstName || ''} ${u.lastName || ''}`.trim() || null]));
+    const costPerSearch = Number(this.config.get<string>('IDI_COST_PER_SEARCH') || 0) || 0;
 
     return batches.map((b) => {
       const since = b.resultsAppliedAt || b.createdAt;
@@ -363,6 +454,14 @@ export class SurplusIdiService {
           const t = m.surplusDetail?.lead?.lastTouchedAt;
           return !!t && new Date(t).getTime() > new Date(since).getTime();
         }),
+        // The case for the paid API tier is in these two columns: what the
+        // batch cost against who it reached and who signed.
+        reached: count((m) => {
+          const after = (t: any) => !!t && new Date(t).getTime() > new Date(since).getTime();
+          return after(m.surplusDetail?.tappedAt) || (m.surplusDetail?.heirs || []).some((h: any) => after(h.lastContactedAt));
+        }),
+        signed: count((m) => isSignedStage(m.surplusDetail?.stage)),
+        cost: costPerSearch > 0 ? Math.round(b.rowCount * costPerSearch * 100) / 100 : null,
       };
     });
   }

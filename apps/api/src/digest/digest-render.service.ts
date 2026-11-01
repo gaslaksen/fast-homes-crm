@@ -205,12 +205,12 @@ export class DigestRenderService {
     const t = b.needsTrace;
     return `
       ${this.divider()}
-      ${this.sectionLabel('Needs a skip trace')}
+      ${this.sectionLabel('Ready for the IDI batch')}
       <tr><td class="px" style="padding:0 36px 6px 36px;">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${PALETTE.warn.bg};border:1px solid ${PALETTE.warn.border};border-radius:10px;"><tr><td style="padding:13px 15px;">
-          <div style="font-size:14px;font-weight:700;color:${INK};">${t.total} live claimant${t.total === 1 ? ' has' : 's have'} never been traced</div>
-          <div style="font-size:13px;color:${BODY};padding-top:4px;line-height:1.5;">${this.esc(t.byCounty)}. Until they are traced they cannot reach the call list.</div>
-          <a href="${this.esc(b.appUrl)}/surplus-funds" style="font-size:13px;font-weight:600;color:${TEAL};display:inline-block;padding-top:6px;text-decoration:none;">Trace them on the board &rarr;</a>
+          <div style="font-size:14px;font-weight:700;color:${INK};">${t.total} live claimant${t.total === 1 ? ' is' : 's are'} waiting to be sent to IDI</div>
+          <div style="font-size:13px;color:${BODY};padding-top:4px;line-height:1.5;">${this.esc(t.byCounty)}. Until the batch goes out they cannot reach the call list.</div>
+          <a href="${this.esc(b.appUrl)}/surplus-funds?queue=trace" style="font-size:13px;font-weight:600;color:${TEAL};display:inline-block;padding-top:6px;text-decoration:none;">Export the batch from the board &rarr;</a>
         </td></tr></table>
       </td></tr>`;
   }
@@ -420,8 +420,8 @@ export class DigestRenderService {
     }
 
     if (b.needsTrace) {
-      out.push('NEEDS A SKIP TRACE');
-      out.push(`  ${b.needsTrace.total} live claimant${b.needsTrace.total === 1 ? ' has' : 's have'} never been traced: ${b.needsTrace.byCounty}.`);
+      out.push('READY FOR THE IDI BATCH');
+      out.push(`  ${b.needsTrace.total} live claimant${b.needsTrace.total === 1 ? ' is' : 's are'} waiting to be sent to IDI: ${b.needsTrace.byCounty}.`);
       out.push('');
     }
 

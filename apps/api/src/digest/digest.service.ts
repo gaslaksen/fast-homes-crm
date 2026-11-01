@@ -451,8 +451,11 @@ export class DigestService {
           ...org,
           tracedAt: null,
           doNotCall: false,
+          heldAt: null,
           stage: { notIn: [SurplusStage.DEAD, SurplusStage.PAID] },
           claimStatus: { notIn: ['distributed', 'assigned'] },
+          // Already in an IDI batch and waiting on the results: sent, not owed.
+          batchMembers: { none: { result: null } },
         },
         _count: { _all: true },
       }),
