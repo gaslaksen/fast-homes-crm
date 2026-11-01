@@ -7,8 +7,14 @@ import { SurplusPollService, describeTrace } from './surplus-poll.service';
  * that would re-buy every miss on it.
  */
 
+/**
+ * The BatchData rung is off by default since 2026-10-31 (the vendor was
+ * dropped; IDI batches are the trace). These tests pin the rung itself, so
+ * they switch it on; the two at the end pin the default.
+ */
 function harness(env: Record<string, string> = {}) {
-  const config: any = { get: (k: string) => env[k] };
+  const vars: Record<string, string> = { SURPLUS_AUTO_TRACE: 'true', ...env };
+  const config: any = { get: (k: string) => vars[k] };
   const notes: string[] = [];
   const ingest: any = {
     adapters: () => [
@@ -120,13 +126,25 @@ describe('SurplusPollService', () => {
     expect(notes).toEqual(['Trace failed on the 2 new: Endato rejected the credentials']);
   });
 
-  it('SURPLUS_AUTO_TRACE=false leaves new leads for a manual trace', async () => {
+  it('SURPLUS_AUTO_TRACE=false leaves new leads for the IDI batch, and says so on the run', async () => {
     const { svc, skiptrace, notes } = harness({ SURPLUS_AUTO_TRACE: 'false' });
 
     await svc.pollWeekly();
 
     expect(skiptrace.traceLeads).not.toHaveBeenCalled();
-    expect(notes).toEqual([]);
+    expect(notes).toEqual(['Trace skipped on the 2 new: skip tracing runs through IDI batches']);
+  });
+
+  it('with nothing set, the retired BatchData rung stays off', async () => {
+    const env: Record<string, string> = {};
+    const config: any = { get: (k: string) => env[k] };
+    const { svc, skiptrace } = harness();
+    // Rebuild with a config that says nothing about the trace.
+    const quiet = new SurplusPollService(config, (svc as any).ingest, (svc as any).lock, skiptrace);
+
+    await quiet.pollWeekly();
+
+    expect(skiptrace.traceLeads).not.toHaveBeenCalled();
   });
 });
 

@@ -56,7 +56,10 @@ export class SurplusPollService {
   ) {
     // Default on; set SURPLUS_POLL_ENABLED=false to disable in an env.
     this.enabled = (this.config.get<string>('SURPLUS_POLL_ENABLED') ?? 'true') !== 'false';
-    this.autoTrace = (this.config.get<string>('SURPLUS_AUTO_TRACE') ?? 'true') !== 'false';
+    // Off unless asked for. BatchData and Endato were dropped on 2026-10-31
+    // (neither produced usable contacts); skip tracing runs through IDI
+    // batches now. "true" turns the old BatchData rung back on.
+    this.autoTrace = this.config.get<string>('SURPLUS_AUTO_TRACE') === 'true';
   }
 
   @Cron('45 5 * * *', { timeZone: 'America/New_York' })
@@ -120,19 +123,20 @@ export class SurplusPollService {
     /** What this batch is, for the run note. The pull's own leads are "new". */
     label = 'new',
   ): Promise<SurplusTraceResult | null> {
-    if (!this.autoTrace || !leadIds.length) return null;
+    if (!leadIds.length) return null;
     try {
-      // BatchData only. EnformionGo (Endato) is never called from here: not
-      // the name search, not the relative lookups after a death, not the
-      // estate search. Its answers were not worth paying for on every new
-      // lead, so it runs only from the card, one claimant at a time.
-      const trace = await this.skiptrace.traceLeads({
-        organizationId: organizationId || null,
-        leadIds,
-        nameSearch: false,
-        addressSearch: true,
-        relativeLookups: false,
-      });
+      // The BatchData address rung, only when SURPLUS_AUTO_TRACE is "true".
+      // Retired by default: skip tracing is the IDI batch, exported by hand
+      // from the board. EnformionGo (Endato) is never called from here.
+      const trace = this.autoTrace
+        ? await this.skiptrace.traceLeads({
+            organizationId: organizationId || null,
+            leadIds,
+            nameSearch: false,
+            addressSearch: true,
+            relativeLookups: false,
+          })
+        : null;
       // Then the obituary search on the new estates with nobody reachable:
       // the obituary names the children. Paused unless OBITUARY_MONTHLY_BUDGET
       // is set. The survivors it names are filed, not looked up, since that
@@ -148,7 +152,10 @@ export class SurplusPollService {
       // every claimant a trace left without a number, including ones never
       // traced because the Endato budget was spent: the 2026-09-21 Citrus pull
       // sent 148 Opus web-search checks, about $61, with nobody asking.
-      const note = describeTrace(leadIds.length, trace, label) + obitNote;
+      const note =
+        (trace
+          ? describeTrace(leadIds.length, trace, label)
+          : `Trace skipped on the ${leadIds.length} ${label}: skip tracing runs through IDI batches`) + obitNote;
       this.logger.log(`Surplus trace ${source}: ${note}`);
       await this.ingest.noteRun(runId, note);
       return trace;

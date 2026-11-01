@@ -2336,7 +2336,6 @@ export default function SurplusWorkPanel({
   // the Case tab and each card on the People tab. Reloads with the lead row,
   // so a change made elsewhere on the panel shows here too.
   const drips = useSurplusDrips(lead.id, lead, say);
-  const [tracing, setTracing] = useState(false);
   /** Raised by clicking a number or an email, consumed by the composer. */
   const [composeIntent, setComposeIntent] = useState<any>(null);
   const dialer = useDialer();
@@ -2454,52 +2453,6 @@ export default function SurplusWorkPanel({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose, onPrev, onNext]);
-
-  /**
-   * EnformionGo on this one claimant. A name search for a living claimant,
-   * verified on the server by address history; the estate search for one
-   * known to be dead. Either way the relatives are looked up in the same
-   * call. BatchData is not part of this button: it runs on the county pull.
-   */
-  const trace = async () => {
-    if (tracing) return;
-    setTracing(true);
-    try {
-      const res = await surplusAPI.enformionSearch(lead.id);
-      say(res.data?.summary || 'EnformionGo search done');
-      onChanged();
-    } catch (e: any) {
-      say(e?.response?.data?.message || 'EnformionGo search failed');
-    } finally {
-      setTracing(false);
-    }
-  };
-
-  /**
-   * Cheapest first. A paid search before any free route is logged is the
-   * thing the course's escalation rule exists to stop, so the button asks.
-   * It asks again before buying a search this claimant already had.
-   */
-  const traceGated = () => {
-    if (
-      lead.enformionSearchedAt &&
-      !window.confirm(
-        `EnformionGo already searched ${lead.claimant} on ${fmtDate(lead.enformionSearchedAt)}. The same search usually returns the same answer. Search again?`,
-      )
-    ) {
-      return;
-    }
-    if (
-      !lead.enformionSearchedAt &&
-      !lead.tracing?.tier1Done &&
-      !window.confirm(
-        `No free search has been logged for ${lead.claimant} yet. The course says Google, social and the county records come before a paid database. Spend the credit anyway?`,
-      )
-    ) {
-      return;
-    }
-    trace();
-  };
 
   /**
    * Call a number straight from the panel. The dialer is app-wide, so this is
@@ -2768,8 +2721,6 @@ export default function SurplusWorkPanel({
               lead={lead}
               property={property}
               currentUser={currentUser}
-              tracing={tracing}
-              onTrace={traceGated}
               notes={comms.notes}
               onAddNote={addNote}
               onNotesChanged={() => loadComms()}
@@ -3020,8 +2971,6 @@ function ResearchTab({
   lead,
   property,
   currentUser,
-  tracing,
-  onTrace,
   notes,
   onAddNote,
   onNotesChanged,
@@ -3031,8 +2980,6 @@ function ResearchTab({
   lead: SurplusPanelLead;
   property: any;
   currentUser: any;
-  tracing: boolean;
-  onTrace: () => void;
   notes: NoteItem[];
   onAddNote: (text: string) => Promise<void>;
   onNotesChanged: () => unknown;
@@ -3050,7 +2997,7 @@ function ResearchTab({
   }, []);
   return (
     <div style={{ display: 'grid', gap: 14 }}>
-      {lead.phones.length === 0 && <TraceBlock lead={lead} tracing={tracing} onTrace={onTrace} />}
+      {lead.phones.length === 0 && <TraceBlock lead={lead} />}
       <SearchLog lead={lead} say={say} onChanged={onChanged} />
       {lead.nameSearch && <NameSearchBlock lead={lead} property={property} say={say} onChanged={onChanged} />}
       {lead.social && <SocialBlock lead={lead} currentUser={currentUser} paused={socialPaused} say={say} onChanged={onChanged} />}
@@ -3744,7 +3691,7 @@ function ContactsBlock({
  * both render as an empty contact list, and they want opposite next actions:
  * one costs a credit, the other a name search.
  */
-function TraceBlock({ lead, tracing, onTrace }: { lead: SurplusPanelLead; tracing: boolean; onTrace: () => void }) {
+function TraceBlock({ lead }: { lead: SurplusPanelLead }) {
   return (
     <div>
       {lead.trace && (
@@ -3767,22 +3714,20 @@ function TraceBlock({ lead, tracing, onTrace }: { lead: SurplusPanelLead; tracin
         </div>
       )}
       <div style={{ fontSize: 12, color: 'var(--faint)' }}>
-        {/* EnformionGo, on this claimant only. The button asks before a
-            repeat, since the same search usually returns the same answer. */}
-        <button type="button" className="dc-wp-btn" onClick={onTrace} disabled={tracing}>
-          {tracing ? 'Searching EnformionGo...' : `Skip trace ${lead.claimant}`}
-        </button>
+        {/* BatchData and EnformionGo were retired on 2026-10-31: neither
+            produced usable contacts. The trace is the IDI batch, exported
+            from the board, so the card points there instead of buying a
+            search by itself. */}
+        <div>
+          Skip tracing runs through IDI: select {lead.claimant} on the board and use <b>Export for IDI</b>, then import
+          the results under <b>More, IDI batches</b>.
+        </div>
         {lead.enformionSearchedAt && (
-          <span style={{ marginLeft: 8, fontSize: 11 }}>EnformionGo searched {fmtDate(lead.enformionSearchedAt)}.</span>
+          <span style={{ fontSize: 11 }}>Last people search {fmtDate(lead.enformionSearchedAt)}.</span>
         )}
         {lead.contactInfoUpdatedAt && (
           <span style={{ marginLeft: 8, fontSize: 11 }}>Contact updated {fmtDate(lead.contactInfoUpdatedAt)}.</span>
         )}
-        <div style={{ marginTop: 4, fontSize: 11 }}>
-          {lead.isDeceased
-            ? `Searches EnformionGo for ${lead.claimant} by name, files the relatives it lists and looks up the spouse and likely children. Paid per search.`
-            : `Searches EnformionGo for ${lead.claimant} by name and keeps a result only when their address history includes the property or ${lead.ownerMailingStreet ? `${lead.ownerMailingStreet}, where the clerk wrote to them` : "the clerk's address"}. Paid per search.`}
-        </div>
       </div>
     </div>
   );
