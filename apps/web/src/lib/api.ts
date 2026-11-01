@@ -355,6 +355,8 @@ export const surplusAPI = {
   socialSearch: (body: { leadIds?: string[]; county?: string; limit?: number; dryRun?: boolean }) =>
     api.post('/surplus/social-search', body),
   socialUsage: () => api.get('/surplus/social-usage'),
+  /** The notice reader (Claude vision on scanned notices) month to date: reads, dollars, paused. */
+  noticeUsage: () => api.get('/surplus/notice-usage'),
 
   // ── References ──
   references: (county?: string | null) => api.get('/surplus/references', { params: { county: county || undefined } }),

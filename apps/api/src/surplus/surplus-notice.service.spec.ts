@@ -1,8 +1,44 @@
 import { ConfigService } from '@nestjs/config';
 import sharp from 'sharp';
-import { SurplusNoticeService, isClerkAddress } from './surplus-notice.service';
+import {
+  SurplusNoticeService,
+  dropBlankPages,
+  isClerkAddress,
+  isNearBlank,
+  noticeReadCost,
+  usageOf,
+} from './surplus-notice.service';
 
-const svc = () => new SurplusNoticeService({ get: () => undefined } as unknown as ConfigService);
+/** A prisma with just the meter, recording every upsert. */
+function meter(row: { calls: number; spend: number } | null = null) {
+  const upserts: any[] = [];
+  const prisma: any = {
+    vendorUsage: {
+      findUnique: jest.fn().mockResolvedValue(row),
+      upsert: jest.fn(async (a: any) => { upserts.push(a); return {}; }),
+    },
+  };
+  return { prisma, upserts };
+}
+
+const svc = () => new SurplusNoticeService({ get: () => undefined } as unknown as ConfigService, meter().prisma);
+
+/**
+ * A live service with the API behind a fake NoticeReaderClient. `reply` is
+ * what the model says; `usage` what the API bills.
+ */
+function live(
+  env: Record<string, string> = {},
+  reply: any = { text: '{"recipients":[]}', usage: { inputTokens: 10000, outputTokens: 500 } },
+  row: { calls: number; spend: number } | null = null,
+) {
+  const vars: Record<string, string> = { ANTHROPIC_API_KEY: 'test', ...env };
+  const { prisma, upserts } = meter(row);
+  const s = new SurplusNoticeService({ get: (k: string) => vars[k] } as any, prisma);
+  const read = typeof reply === 'function' ? jest.fn(reply) : jest.fn().mockResolvedValue(reply);
+  (s as any).client = { model: s.model, read };
+  return { s, read, prisma, upserts };
+}
 
 /**
  * The golden fixture: exactly what Duval document 85553 says. Read off the page
@@ -243,15 +279,15 @@ describe('Charlotte notices', () => {
   });
 
   it('sends a scanned TIFF as one PNG per page, since the API takes no TIFF', async () => {
-    const page = () => sharp({ create: { width: 850, height: 1100, channels: 3, background: '#ffffff' } }).png().toBuffer();
+    // Two PRINTED pages: a white page would be dropped as blank, rightly.
+    const svg = Buffer.from('<svg width="850" height="1100" xmlns="http://www.w3.org/2000/svg"><rect x="80" y="120" width="690" height="400" fill="#000"/></svg>');
+    const page = () => sharp({ create: { width: 850, height: 1100, channels: 3, background: '#ffffff' } }).composite([{ input: svg }]).png().toBuffer();
     const tiff = await sharp([await page(), await page()], { join: { animated: true } }).tiff().toBuffer();
-    const create = jest.fn().mockResolvedValue({ content: [{ type: 'text', text: '{"recipients":[]}' }] });
-    const s = new SurplusNoticeService({ get: (k: string) => (k === 'ANTHROPIC_API_KEY' ? 'test' : undefined) } as any);
-    (s as any).anthropic = { messages: { create } };
+    const { s, read } = live();
 
     await s.readNoticeFile({ data: tiff, contentType: 'image/tiff' }, 'test');
 
-    const content = create.mock.calls[0][0].messages[0].content;
+    const content = read.mock.calls[0][0];
     const images = content.filter((b: any) => b.type === 'image');
     expect(images).toHaveLength(2);
     expect(images[0].source.media_type).toBe('image/png');
@@ -260,9 +296,7 @@ describe('Charlotte notices', () => {
 
   it('counts a billed reply with no JSON as a read that named nobody', async () => {
     // Null would mean "try again next poll", and this reply was paid for.
-    const create = jest.fn().mockResolvedValue({ content: [{ type: 'text', text: 'I could not read this document.' }] });
-    const s = new SurplusNoticeService({ get: (k: string) => (k === 'ANTHROPIC_API_KEY' ? 'test' : undefined) } as any);
-    (s as any).anthropic = { messages: { create } };
+    const { s } = live({}, { text: 'I could not read this document.', usage: { inputTokens: 10000, outputTokens: 50 } });
 
     const r = await s.readNoticeFile({ data: Buffer.from('%PDF-1.4 test'), contentType: 'application/pdf' }, 'test');
 
@@ -272,24 +306,197 @@ describe('Charlotte notices', () => {
   });
 
   it('returns null when the API call itself fails, so it is tried again', async () => {
-    const create = jest.fn().mockRejectedValue(new Error('overloaded'));
-    const s = new SurplusNoticeService({ get: (k: string) => (k === 'ANTHROPIC_API_KEY' ? 'test' : undefined) } as any);
-    (s as any).anthropic = { messages: { create } };
+    const { s, upserts } = live({}, () => Promise.reject(new Error('overloaded')));
 
     const r = await s.readNoticeFile({ data: Buffer.from('%PDF-1.4 test'), contentType: 'application/pdf' }, 'test');
 
     expect(r).toBeNull();
+    // And nothing was billed, so nothing is metered.
+    expect(upserts).toHaveLength(0);
   });
 
   it('still sends a PDF as a document', async () => {
-    const create = jest.fn().mockResolvedValue({ content: [{ type: 'text', text: '{"recipients":[]}' }] });
-    const s = new SurplusNoticeService({ get: (k: string) => (k === 'ANTHROPIC_API_KEY' ? 'test' : undefined) } as any);
-    (s as any).anthropic = { messages: { create } };
+    const { s, read } = live();
 
     await s.readNoticeFile({ data: Buffer.from('%PDF-1.4 test'), contentType: 'application/octet-stream' }, 'test');
 
-    const content = create.mock.calls[0][0].messages[0].content;
+    const content = read.mock.calls[0][0];
     expect(content[0].type).toBe('document');
     expect(content[0].source.media_type).toBe('application/pdf');
+  });
+});
+
+/**
+ * Fewer pixels. A duplex scan's empty backs carry no addressee, so they are
+ * dropped before upload. A printed page, even a blank Proof of Claim FORM,
+ * carries ink and is kept: the prompt's one-page-per-recipient rule needs it.
+ */
+describe('dropping near-blank pages', () => {
+  const W = 850;
+  const H = 1100;
+  const white = () => sharp({ create: { width: W, height: H, channels: 3, background: '#ffffff' } }).png().toBuffer();
+  /** Eight black bars across the page, the way lines of text read to a scanner. */
+  const printed = async () => {
+    const bars = Array.from({ length: 8 }, (_, i) => `<rect x="80" y="${120 + i * 60}" width="690" height="14" fill="#000"/>`);
+    const svg = Buffer.from(`<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${bars.join('')}</svg>`);
+    return sharp(await white()).composite([{ input: svg }]).png().toBuffer();
+  };
+  /** A speck of dust on an otherwise empty page. */
+  const smudged = async () => {
+    const svg = Buffer.from(`<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg"><rect x="400" y="500" width="6" height="6" fill="#000"/></svg>`);
+    return sharp(await white()).composite([{ input: svg }]).png().toBuffer();
+  };
+
+  it('tells a blank page from a printed one by its greyscale statistics', async () => {
+    expect(await isNearBlank(await white())).toBe(true);
+    expect(await isNearBlank(await smudged())).toBe(true);
+    expect(await isNearBlank(await printed())).toBe(false);
+  });
+
+  it('drops the blank pages and keeps the printed ones in order', async () => {
+    const pages = [await printed(), await white(), await printed(), await smudged()];
+
+    const { kept, dropped } = await dropBlankPages(pages);
+
+    expect(dropped).toBe(2);
+    expect(kept).toEqual([pages[0], pages[2]]);
+  });
+
+  it('always keeps at least one page, so an all-blank scan is still a billed read that is not bought again', async () => {
+    const pages = [await white(), await white()];
+
+    const { kept, dropped } = await dropBlankPages(pages);
+
+    expect(kept).toHaveLength(1);
+    expect(dropped).toBe(1);
+  });
+
+  it('sends only the printed pages of a scanned TIFF', async () => {
+    const tiff = await sharp([await printed(), await white(), await printed()], { join: { animated: true } }).tiff().toBuffer();
+    const { s, read } = live();
+
+    await s.readNoticeFile({ data: tiff, contentType: 'image/tiff' }, 'test');
+
+    expect(read.mock.calls[0][0].filter((b: any) => b.type === 'image')).toHaveLength(2);
+  });
+});
+
+/**
+ * Metering. Every read is a call and its dollars on vendor_usage, costed from
+ * the tokens the API reports at the configured per-million prices.
+ */
+describe('metering a read', () => {
+  it('prices a read from its tokens', () => {
+    expect(noticeReadCost({ inputTokens: 1_000_000, outputTokens: 0 }, { input: 5, output: 25 })).toBe(5);
+    expect(noticeReadCost({ inputTokens: 20000, outputTokens: 400 }, { input: 5, output: 25 })).toBeCloseTo(0.11, 6);
+  });
+
+  it('bills cache writes and reads as input, erring high', () => {
+    expect(usageOf({ input_tokens: 100, cache_creation_input_tokens: 50, cache_read_input_tokens: 25, output_tokens: 7 }))
+      .toEqual({ inputTokens: 175, outputTokens: 7 });
+    expect(usageOf(undefined)).toEqual({ inputTokens: 0, outputTokens: 0 });
+  });
+
+  it('records every read under vendor "notice" with its cost at the default prices', async () => {
+    const { s, upserts } = live({}, { text: '{"recipients":[]}', usage: { inputTokens: 20000, outputTokens: 400 } });
+
+    await s.readNoticeFile({ data: Buffer.from('%PDF-1.4 test'), contentType: 'application/pdf' }, 'test');
+
+    expect(upserts).toHaveLength(1);
+    expect(upserts[0].where.vendor_period.vendor).toBe('notice');
+    expect(upserts[0].create.calls).toBe(1);
+    expect(upserts[0].create.spend).toBeCloseTo(0.11, 6);
+    expect(upserts[0].update.spend.increment).toBeCloseTo(0.11, 6);
+  });
+
+  it('takes the per-million prices from the environment', async () => {
+    const { s, upserts } = live(
+      { SURPLUS_NOTICE_INPUT_PRICE: '4', SURPLUS_NOTICE_OUTPUT_PRICE: '20' },
+      { text: '{"recipients":[]}', usage: { inputTokens: 1_000_000, outputTokens: 100_000 } },
+    );
+
+    await s.readNoticeFile({ data: Buffer.from('%PDF-1.4 test'), contentType: 'application/pdf' }, 'test');
+
+    expect(upserts[0].create.spend).toBeCloseTo(6, 6);
+  });
+
+  it('still counts a billed reply that named nobody', async () => {
+    const { s, upserts } = live({}, { text: 'Sorry.', usage: { inputTokens: 5000, outputTokens: 10 } });
+
+    await s.readNoticeFile({ data: Buffer.from('%PDF-1.4 test'), contentType: 'application/pdf' }, 'test');
+
+    expect(upserts).toHaveLength(1);
+  });
+
+  it('reports the month in the shape the obituary search does', async () => {
+    const { s } = live({}, undefined, { calls: 12, spend: 1.2345 });
+
+    const u = await s.usage();
+
+    expect(u).toMatchObject({ checks: 12, spent: 1.23, budget: 0, paused: false, left: null });
+    expect(u.period).toMatch(/^\d{4}-\d{2}$/);
+  });
+});
+
+/**
+ * The monthly budget. Unset means no cap, which is how the reader always ran.
+ * Set, it pauses reads when the month cannot cover one more at the worst case.
+ */
+describe('the monthly budget', () => {
+  it('reads without limit when no budget is set', async () => {
+    const { s, read } = live({}, undefined, { calls: 500, spend: 900 });
+
+    await s.readNoticeFile({ data: Buffer.from('%PDF-1.4 test'), contentType: 'application/pdf' }, 'test');
+
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(await s.canSpend()).toEqual({ ok: true });
+  });
+
+  it('pauses, without calling the API, when the month cannot cover one more read', async () => {
+    const { s, read, upserts } = live({ SURPLUS_NOTICE_MONTHLY_BUDGET: '20' }, undefined, { calls: 90, spend: 19.9 });
+
+    const r = await s.readNoticeFile({ data: Buffer.from('%PDF-1.4 test'), contentType: 'application/pdf' }, 'test');
+
+    expect(r).toBeNull();
+    expect(read).not.toHaveBeenCalled();
+    expect(upserts).toHaveLength(0);
+    const check = await s.canSpend();
+    expect(check.ok).toBe(false);
+    expect(check.reason).toMatch(/paused.*\$19\.9 of the \$20/);
+    expect((await s.usage()).paused).toBe(true);
+    expect((await s.usage()).left).toBeCloseTo(0.1, 6);
+  });
+
+  it('reads while the month has room', async () => {
+    const { s, read } = live({ SURPLUS_NOTICE_MONTHLY_BUDGET: '20' }, undefined, { calls: 10, spend: 2 });
+
+    await s.readNoticeFile({ data: Buffer.from('%PDF-1.4 test'), contentType: 'application/pdf' }, 'test');
+
+    expect(read).toHaveBeenCalledTimes(1);
+    expect((await s.usage()).paused).toBe(false);
+  });
+
+  it('says why when the key is missing', async () => {
+    const check = await svc().canSpend();
+    expect(check.ok).toBe(false);
+    expect(check.reason).toMatch(/ANTHROPIC_API_KEY/);
+  });
+});
+
+describe('settings', () => {
+  it('reads claude-opus-5 unless SURPLUS_NOTICE_MODEL says otherwise', () => {
+    expect(live().s.model).toBe('claude-opus-5');
+    expect(live({ SURPLUS_NOTICE_MODEL: 'claude-opus-5-5' }).s.model).toBe('claude-opus-5-5');
+  });
+
+  it('reads at estimated day 95 unless SURPLUS_NOTICE_READ_DAY says otherwise', () => {
+    expect(live().s.readDay).toBe(95);
+    expect(live({ SURPLUS_NOTICE_READ_DAY: '80' }).s.readDay).toBe(80);
+    expect(live({ SURPLUS_NOTICE_READ_DAY: 'soon' }).s.readDay).toBe(95);
+  });
+
+  it('prices at the claude-opus-5 list prices unless told otherwise', () => {
+    expect(live().s.prices).toEqual({ input: 5, output: 25 });
+    expect(live({ SURPLUS_NOTICE_INPUT_PRICE: '0', SURPLUS_NOTICE_OUTPUT_PRICE: '-1' }).s.prices).toEqual({ input: 5, output: 25 });
   });
 });

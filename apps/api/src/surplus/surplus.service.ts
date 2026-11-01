@@ -80,6 +80,7 @@ import {
   calendarDayToDate,
   surplusSearchWhere,
   surplusSearchPeopleHits,
+  uidClaimant,
 } from './surplus.util';
 import { caseQuestions, caseSuggestions } from './surplus-questions.util';
 import {
@@ -240,11 +241,6 @@ export interface CreateSurplusResult {
    * of the same person on the same case rather than the name as written.
    */
   variantOf?: string;
-}
-
-/** The claimant part of a dedupe key, readable again: "JOHN_A_SMITH" to "JOHN A SMITH". */
-function uidClaimant(uid: string): string {
-  return uid.split('|').slice(2).join('|').replace(/_/g, ' ').trim();
 }
 
 /**

@@ -13,6 +13,7 @@ import { SurplusIngestService } from './surplus-ingest.service';
 import { SurplusSkiptraceService } from './surplus-skiptrace.service';
 import { SurplusEndatoService } from './surplus-endato.service';
 import { SurplusObituaryService } from './surplus-obituary.service';
+import { SurplusNoticeService } from './surplus-notice.service';
 import { SurplusSocialService } from './surplus-social.service';
 import { SurplusIdiService } from './surplus-idi.service';
 import { SurplusTemplatesService } from './surplus-templates.service';
@@ -90,6 +91,7 @@ export class SurplusController {
     private outreach: SurplusOutreachService,
     private numbers: SurplusNumbersService,
     private config: ConfigService,
+    private notice: SurplusNoticeService,
   ) {}
 
   /**
@@ -760,6 +762,16 @@ export class SurplusController {
   @Get('obituary-usage')
   async obituaryUsage() {
     return this.obituary.usage();
+  }
+
+  /**
+   * The notice reader (Claude vision on the scanned Notice of Surplus Funds)
+   * month to date: reads, dollars, and whether SURPLUS_NOTICE_MONTHLY_BUDGET
+   * has paused it. Same shape as obituary-usage.
+   */
+  @Get('notice-usage')
+  async noticeUsage() {
+    return this.notice.usage();
   }
 
   /**
