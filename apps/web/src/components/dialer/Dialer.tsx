@@ -1011,6 +1011,14 @@ const SURPLUS_OUTCOMES: SurplusCallOutcome[] = [
  * the course: an outcome in recovery vocabulary, the objection heard, and a
  * follow-up that must carry a date before the call can be closed.
  */
+/** The last ten digits, which is how every row stores a US number. */
+function tail10(v: string | null | undefined): string | null {
+  const digits = String(v || '').replace(/\D/g, '');
+  return digits.length >= 10 ? digits.slice(-10) : null;
+}
+
+type CasePerson = { id: string; name: string; deceased: boolean; phones?: { number: string }[] };
+
 function SurplusSummary() {
   const d = useDialer();
   const [outcome, setOutcome] = useState<SurplusCallOutcome | null>(null);
@@ -1019,9 +1027,51 @@ function SurplusSummary() {
   const [followUp, setFollowUp] = useState('');
   const [saving, setSaving] = useState(false);
 
+  // Who answered. The number sits on somebody's row; when a different person
+  // picked up, the API moves the number to them and re-files the thread, so
+  // a son's callback stops being logged as his father replying.
+  const [people, setPeople] = useState<CasePerson[]>([]);
+  const [claimant, setClaimant] = useState<{ name: string; deceased: boolean } | null>(null);
+  const [who, setWho] = useState<string | null>(null);
+  const [newName, setNewName] = useState('');
+  const [newRel, setNewRel] = useState('');
+  const leadId = d.contact?.leadId;
+  useEffect(() => {
+    if (!leadId) return;
+    let cancelled = false;
+    surplusAPI
+      .heirs(leadId)
+      .then((r) => {
+        if (cancelled) return;
+        setPeople(r.data?.heirs || []);
+        setClaimant(r.data?.claimant || null);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [leadId]);
+  const dialed = tail10(d.contact?.phone);
+  const ownerId = people.find((p) => (p.phones || []).some((ph) => tail10(ph.number) === dialed))?.id || 'claimant';
+  const answered = who ?? ownerId;
+  const whoOptions: { id: string; label: string }[] = [
+    ...(claimant && !claimant.deceased ? [{ id: 'claimant', label: claimant.name }] : []),
+    ...people.filter((p) => !p.deceased).map((p) => ({ id: p.id, label: p.name })),
+    { id: 'new', label: 'Someone new' },
+  ];
+  const answeredBy =
+    answered === ownerId
+      ? undefined
+      : answered === 'claimant'
+        ? ({ claimant: true } as const)
+        : answered === 'new'
+          ? { newPerson: { name: newName.trim(), relationship: newRel.trim() || null } }
+          : { heirId: answered };
+
   const rule = surplusFollowUpRule(outcome);
   const connected = surplusCallConnected(outcome);
-  const canSave = !!outcome && (rule !== 'required' || !!followUp) && !saving;
+  const canSave =
+    !!outcome && (rule !== 'required' || !!followUp) && !saving && !(connected && answered === 'new' && !newName.trim());
   const picks = useMemo(quickDueDates, [outcome]);
 
   const save = async () => {
@@ -1036,6 +1086,7 @@ function SurplusSummary() {
       objection: connected && objection ? objection : null,
       notes: notes.trim() || undefined,
       followUpAt: followUp ? new Date(followUp).toISOString() : null,
+      answeredBy: connected ? answeredBy : undefined,
       scriptVersion: d.script?.scripts.phone.versionLabel || null,
       voicemailVersion:
         outcome === SurplusCallOutcome.NO_ANSWER_VOICEMAIL ? d.script?.scripts.voicemail.versionLabel || null : null,
@@ -1061,6 +1112,49 @@ function SurplusSummary() {
           </button>
         ))}
       </div>
+
+      {connected && leadId && (
+        <div className="mt-3">
+          <label className="text-xs font-medium text-gray-500">Who answered?</label>
+          <div className="mt-1 flex flex-wrap gap-1.5">
+            {whoOptions.map((o) => (
+              <button
+                key={o.id}
+                onClick={() => setWho(o.id)}
+                className={`px-2 py-1 text-[11px] rounded-md border ${
+                  answered === o.id
+                    ? 'border-primary-500 text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-900/20'
+                    : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300'
+                }`}
+              >
+                {o.label}
+                {o.id === ownerId ? ' (this number)' : ''}
+              </button>
+            ))}
+          </div>
+          {answered === 'new' && (
+            <div className="mt-1.5 flex gap-1.5">
+              <input
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                placeholder="Their name"
+                className="flex-1 h-9 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-xs text-gray-800 dark:text-gray-200 px-2"
+              />
+              <input
+                value={newRel}
+                onChange={(e) => setNewRel(e.target.value)}
+                placeholder="Relationship"
+                className="w-28 h-9 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-xs text-gray-800 dark:text-gray-200 px-2"
+              />
+            </div>
+          )}
+          {answeredBy && (
+            <p className="mt-1 text-[11px] text-gray-500">
+              The number moves to them, and the texts and calls on it are re-filed under their name.
+            </p>
+          )}
+        </div>
+      )}
 
       {connected && (
         <div className="mt-3">

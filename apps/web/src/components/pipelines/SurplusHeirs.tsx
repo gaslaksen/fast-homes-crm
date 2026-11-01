@@ -387,6 +387,9 @@ export default function SurplusHeirs({
       profiles={(social || []).filter((p) => p.heirId === h.id)}
       socialPaused={socialPaused ?? null}
       say={say}
+      people={(heirs || []).map((x) => ({ id: x.id, name: x.name, deceased: x.deceased }))}
+      claimant={claimant}
+      claimantDeceased={claimantDeceased}
       onChanged={() => {
         load();
         onChanged();
@@ -578,8 +581,15 @@ function HeirRow({
   socialPaused,
   say,
   onChanged,
+  people,
+  claimant,
+  claimantDeceased,
 }: {
   h: Heir;
+  /** Everybody on the case, so a number can be moved to the person it reaches. */
+  people: { id: string; name: string; deceased: boolean }[];
+  claimant: string;
+  claimantDeceased: boolean;
   /** Fold the card back to its one line. */
   onCollapse?: () => void;
   busy: boolean;
@@ -666,6 +676,16 @@ function HeirRow({
               <button type="button" className="dc-wp-btn" disabled={h.doNotCall} onClick={() => onText(p.number)}>
                 Text
               </button>
+              <MoveNumber
+                leadId={leadId}
+                number={p.number}
+                currentHeirId={h.id}
+                people={people}
+                claimant={claimant}
+                claimantDeceased={claimantDeceased}
+                say={say}
+                onChanged={onChanged}
+              />
             </div>
           </div>
         );
@@ -1100,5 +1120,119 @@ function AddPerson({
         onAdded();
       }}
     />
+  );
+}
+
+/**
+ * "This number reaches someone else." A skip trace files numbers on the case,
+ * not on the person, so the son's cell sits on the father's row and every
+ * text from it is logged as the father. Picking who it really reaches moves
+ * the number to their row (or a new person) and re-files the thread.
+ */
+export function MoveNumber({
+  leadId,
+  number,
+  currentHeirId,
+  people,
+  claimant,
+  claimantDeceased,
+  say,
+  onChanged,
+}: {
+  leadId: string;
+  number: string;
+  /** Whose row the number sits on now; null for the claimant's. */
+  currentHeirId: string | null;
+  people: { id: string; name: string; deceased: boolean }[];
+  claimant: string;
+  claimantDeceased: boolean;
+  say: (msg: string) => void;
+  onChanged: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [choice, setChoice] = useState('');
+  const [newName, setNewName] = useState('');
+  const [newRel, setNewRel] = useState('');
+  const [busy, setBusy] = useState(false);
+  const field: React.CSSProperties = {
+    flex: 1,
+    minWidth: 0,
+    boxSizing: 'border-box',
+    fontSize: 12.5,
+    padding: '6px 8px',
+    border: '1px solid var(--border)',
+    borderRadius: 6,
+    background: 'var(--surface2)',
+    color: 'inherit',
+  };
+
+  const options: { id: string; label: string }[] = [
+    ...(currentHeirId && !claimantDeceased ? [{ id: 'claimant', label: `${claimant} (the claimant)` }] : []),
+    ...people.filter((p) => p.id !== currentHeirId && !p.deceased).map((p) => ({ id: p.id, label: p.name })),
+    { id: 'new', label: 'Someone new on the case' },
+  ];
+  const canMove = !!choice && (choice !== 'new' || !!newName.trim()) && !busy;
+
+  const move = async () => {
+    if (!canMove) return;
+    const to =
+      choice === 'claimant'
+        ? ({ claimant: true } as const)
+        : choice === 'new'
+          ? { newPerson: { name: newName.trim(), relationship: newRel.trim() || null } }
+          : { heirId: choice };
+    setBusy(true);
+    try {
+      const r = await surplusAPI.reassignNumber(leadId, { number, to });
+      const n = r.data?.reattributed || { messages: 0, calls: 0 };
+      say(
+        `${phoneDisplay(number)} now reaches ${r.data?.name || 'them'}.` +
+          (n.messages || n.calls ? ` ${n.messages} text${n.messages === 1 ? '' : 's'} and ${n.calls} call${n.calls === 1 ? '' : 's'} re-filed.` : ''),
+      );
+      setOpen(false);
+      setChoice('');
+      setNewName('');
+      setNewRel('');
+      onChanged();
+    } catch (e: any) {
+      say(e?.response?.data?.message || 'The number could not be moved.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!open) {
+    return (
+      <button type="button" className="dc-wp-btn" title="This number reaches someone else on the case" onClick={() => setOpen(true)}>
+        Reaches someone else
+      </button>
+    );
+  }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: '100%', marginTop: 4 }}>
+      <label style={{ fontSize: 11, color: 'var(--dim)' }}>Who does {phoneDisplay(number)} actually reach?</label>
+      <select style={field} value={choice} onChange={(e) => setChoice(e.target.value)}>
+        <option value="">Pick a person</option>
+        {options.map((o) => (
+          <option key={o.id} value={o.id}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+      {choice === 'new' && (
+        <div style={{ display: 'flex', gap: 4 }}>
+          <input style={field} placeholder="Their name" value={newName} onChange={(e) => setNewName(e.target.value)} />
+          <input style={field} placeholder="Relationship (son, neighbor)" value={newRel} onChange={(e) => setNewRel(e.target.value)} />
+        </div>
+      )}
+      <div style={{ display: 'flex', gap: 4 }}>
+        <button type="button" className="dc-wp-btn on" disabled={!canMove} onClick={move}>
+          {busy ? 'Moving' : 'Move the number'}
+        </button>
+        <button type="button" className="dc-wp-btn" disabled={busy} onClick={() => setOpen(false)}>
+          Cancel
+        </button>
+      </div>
+    </div>
   );
 }
