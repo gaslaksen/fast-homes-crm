@@ -39,6 +39,8 @@ interface Person {
   address: string | null;
   mailReturned: boolean;
   statusLabel: string;
+  /** The person's own note, kept on their row. Null for the claimant. */
+  callNotes: string | null;
   reachable: boolean;
   ticks: Record<Channel, Tick | null>;
   done: { at: string; by: string | null } | null;
@@ -94,8 +96,10 @@ const QUEUES: [string, string][] = [
   ['heirs', 'Find the heirs'],
   ['trace', 'Send to IDI'],
   ['name_search', 'Research by name'],
+  ['entity', 'Entity'],
   ['mailed', 'Letter sent'],
   ['hold', 'On hold'],
+  ['closed', 'Closed'],
 ];
 
 const CHANNELS: [Channel, string][] = [
@@ -146,6 +150,9 @@ function OutreachPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [noteFor, setNoteFor] = useState<string | null>(null);
   const [noteText, setNoteText] = useState('');
+  /** The relative row whose own note is being edited, and its draft. */
+  const [aboutFor, setAboutFor] = useState<string | null>(null);
+  const [aboutText, setAboutText] = useState('');
   const [flash, setFlash] = useState<string | null>(null);
 
   const load = useCallback(() => {
@@ -202,6 +209,41 @@ function OutreachPage() {
       );
       setNoteFor(null);
       setNoteText('');
+      load();
+    } catch (err: any) {
+      say(err?.response?.data?.message || 'That could not be saved.');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  /**
+   * The relative's own note, on the heir row itself, so "Son (in Texas, call
+   * after 5)" stops being typed into the relationship field.
+   */
+  const saveAbout = async (c: OutreachCase, p: Person) => {
+    if (busy || !p.heirId) return;
+    setBusy(`${key(c, p)}:about`);
+    try {
+      await surplusAPI.updateHeir(p.heirId, { callNotes: aboutText.trim() });
+      say(aboutText.trim() ? `Note on ${p.name} saved` : `Note on ${p.name} cleared`);
+      setAboutFor(null);
+      setAboutText('');
+      load();
+    } catch (err: any) {
+      say(err?.response?.data?.message || 'That could not be saved.');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const markDeceased = async (c: OutreachCase, p: Person) => {
+    if (busy || !p.heirId) return;
+    if (!window.confirm(`Mark ${p.name} deceased?\n\nTheir drips stop and they are never dialled again.`)) return;
+    setBusy(`${key(c, p)}:deceased`);
+    try {
+      await surplusAPI.updateHeir(p.heirId, { deceased: true });
+      say(`${p.name} marked deceased`);
       load();
     } catch (err: any) {
       say(err?.response?.data?.message || 'That could not be saved.');
@@ -308,6 +350,66 @@ function OutreachPage() {
               : `${p.rankLabel}${p.relationship ? ` · ${p.relationship}` : ''}`}
           </div>
           <div style={{ color: 'var(--faint)', fontSize: 11.5 }}>{p.statusLabel}</div>
+          {/* A relative's own row: a note about them, and a deceased mark,
+              without opening the case. */}
+          {!p.isClaimant && p.heirId && (
+            aboutFor === k ? (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  saveAbout(c, p);
+                }}
+                style={{ display: 'flex', gap: 4, marginTop: 4 }}
+              >
+                <input
+                  className="dc-input"
+                  autoFocus
+                  value={aboutText}
+                  onChange={(e) => setAboutText(e.target.value)}
+                  placeholder="About this person"
+                  aria-label={`About ${p.name}`}
+                  style={{ minWidth: 0, flex: 1 }}
+                />
+                <button type="submit" className="dc-or-btn" disabled={!!busy}>
+                  Save
+                </button>
+                <button type="button" className="dc-or-btn ghost" onClick={() => setAboutFor(null)}>
+                  Cancel
+                </button>
+              </form>
+            ) : (
+              <div style={{ marginTop: 3 }}>
+                {p.callNotes && (
+                  <div style={{ fontSize: 11.5, fontStyle: 'italic', color: 'var(--dim)', overflowWrap: 'anywhere' }}>{p.callNotes}</div>
+                )}
+                <span style={{ display: 'inline-flex', gap: 4, flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    className="dc-or-btn ghost"
+                    disabled={!!busy}
+                    title="A note about this person, kept on their row"
+                    onClick={() => {
+                      setAboutFor(k);
+                      setAboutText(p.callNotes || '');
+                    }}
+                  >
+                    {p.callNotes ? 'Edit note' : '+ About'}
+                  </button>
+                  {!p.deceased && (
+                    <button
+                      type="button"
+                      className="dc-or-btn ghost"
+                      disabled={!!busy}
+                      title="Mark this person deceased. Their drips stop and they are never dialled."
+                      onClick={() => markDeceased(c, p)}
+                    >
+                      Deceased
+                    </button>
+                  )}
+                </span>
+              </div>
+            )
+          )}
           {p.dueToday && (
             <div style={{ color: 'var(--amber)', fontSize: 11.5, fontWeight: 600 }}>
               {p.lastTouchAt ? `Due: last tried ${fmtDate(p.lastTouchAt)}` : 'Due: never tried'}

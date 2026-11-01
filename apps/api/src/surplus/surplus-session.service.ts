@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { LeadSource, SurplusQueue, SurplusStage, isCountyContactRole, surplusCallConnected } from '@fast-homes/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { SurplusService } from './surplus.service';
+import { courseOrder } from './surplus-call-order.util';
 import { outreachRank } from './surplus-outreach.util';
 import { isSignedStage } from './surplus-progress.util';
 
@@ -234,16 +235,10 @@ export class SurplusSessionService {
 }
 
 /**
- * The course sort: short-window cases always on top, then the biggest
- * surplus, then the nearest cutoff.
+ * The course sort, shared with the board's "Call first". Re-exported so the
+ * session keeps its name for it.
  */
-export function courseOrder(a: SessionCase, b: SessionCase): number {
-  if (a.shortWindow !== b.shortWindow) return a.shortWindow ? -1 : 1;
-  if ((b.netToClaimant || 0) !== (a.netToClaimant || 0)) return (b.netToClaimant || 0) - (a.netToClaimant || 0);
-  const ac = a.daysToCutoff ?? Number.MAX_SAFE_INTEGER;
-  const bc = b.daysToCutoff ?? Number.MAX_SAFE_INTEGER;
-  return ac - bc;
-}
+export { courseOrder };
 
 /** Midnight in New York for the day `now` falls on, as an instant. */
 export function startOfDayEastern(now: Date): Date {

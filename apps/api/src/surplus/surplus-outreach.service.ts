@@ -91,6 +91,7 @@ export class SurplusOutreachService {
         address: mailing || r.letterMailedTo || null,
         mailReturned: !!r.mailReturned,
         statusLabel: r.tappedAt ? 'Has replied' : 'Not heard from',
+        callNotes: null as string | null,
       };
       // The clerk contact is county correspondence, not outreach.
       const others = (r.heirs || []).filter((h: any) => !isCountyContactRole(h.role)).map((h: any) => {
@@ -108,6 +109,8 @@ export class SurplusOutreachService {
           address: h.address || null,
           mailReturned: !!last?.returnedAt,
           statusLabel: h.contactStatusLabel,
+          /** The person's own note, editable on the row, so the relationship field stops being the notebook. */
+          callNotes: (h.callNotes as string) || null,
         };
       });
 
@@ -143,6 +146,7 @@ export class SurplusOutreachService {
             address: p.address,
             mailReturned: p.mailReturned,
             statusLabel: p.statusLabel,
+            callNotes: p.callNotes,
             reachable: personReachable(p),
             ticks: personTicks,
             /** Can be tried and nothing has been tried in a week (or ever). */

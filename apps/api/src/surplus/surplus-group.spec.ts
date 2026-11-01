@@ -1,4 +1,5 @@
-import { groupByProperty, sortByBoardColumn } from './surplus.service';
+import { isRealPropertyAddress } from '@fast-homes/shared';
+import { distinctNames, groupByProperty, isTooEarly, sortByBoardColumn } from './surplus.service';
 
 const lead = (o: any) => ({
   id: o.id,
@@ -284,5 +285,45 @@ describe('sortByBoardColumn', () => {
   it('sorts names as text, falling back to the address', () => {
     const all = [g('z', { claimantNames: ['ZED'] }), g('a', { address: '1 ASH ST' }), g('m', { claimantNames: ['MAY'] })];
     expect(keys(sortByBoardColumn(all, 'property', 'asc'))).toEqual(['a', 'm', 'z']);
+  });
+});
+
+describe('the card names', () => {
+  it('says a duplicated claimant once, keeping both leads', () => {
+    // Two leads for the same person on one case read as "Douglas G., Douglas G."
+    const groups = groupByProperty([
+      lead({ id: 'a', claimant: 'DOUGLAS G. SMITH', caseNumber: '1' }),
+      lead({ id: 'b', claimant: 'Douglas G Smith', caseNumber: '1' }),
+      lead({ id: 'c', claimant: 'ANNA SMITH', caseNumber: '1' }),
+    ]);
+    expect(groups[0].claimantNames).toEqual(['DOUGLAS G. SMITH', 'ANNA SMITH']);
+    expect(groups[0].claimantCount).toBe(3);
+    expect(groups[0].claimants).toHaveLength(3);
+  });
+
+  it('drops blanks and keeps the first spelling', () => {
+    expect(distinctNames(['Al Ross', '', null, 'AL ROSS', 'Bea'])).toEqual(['Al Ross', 'Bea']);
+  });
+});
+
+describe('too early for the chip split', () => {
+  it('reads the notice, falls back to the sale, and treats no date as not early', () => {
+    expect(isTooEarly({ noticeAge: 30, daysSinceSale: 400 })).toBe(true);
+    expect(isTooEarly({ noticeAge: 110 })).toBe(false);
+    expect(isTooEarly({ noticeAge: null, daysSinceSale: 50 })).toBe(true);
+    expect(isTooEarly({ noticeAge: null, daysSinceSale: null })).toBe(false);
+  });
+});
+
+describe('a real property address', () => {
+  it('rejects the placeholders the roll and the ingest write', () => {
+    for (const a of ['0 UNKNOWN', 'NO ADDRESS ON TAX ROLL', 'Charlotte County surplus claim', 'NO SITUS', '0', 'N/A', '', null, 'VACANT LAND']) {
+      expect(isRealPropertyAddress(a)).toBe(false);
+    }
+  });
+  it('accepts a street line, even a zero-numbered one with a street', () => {
+    for (const a of ['1624 W 35TH ST', '0 HARDEE ST', '2319 CHIQUITA BLVD N']) {
+      expect(isRealPropertyAddress(a)).toBe(true);
+    }
   });
 });

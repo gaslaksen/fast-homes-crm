@@ -31,6 +31,7 @@ import { nameSearchPlan } from './surplus-name-search.util';
 import { leadSearchUrl, messageUrl, platformLabel, socialSearchLinks } from './surplus-social.util';
 import { sameClaimantName, traceState } from './surplus-skiptrace.util';
 import { pauseOffer, shortWindow } from './surplus-windows.util';
+import { callOrder } from './surplus-call-order.util';
 import { heirRow, phoneTail } from './surplus-heirs.util';
 import { badPhonesOf } from '../phone-numbers/lead-phones.service';
 import {
@@ -2322,10 +2323,12 @@ export class SurplusService {
     }
     if (filters.sort === 'net') rows.sort((a, b) => b.netToClaimant - a.netToClaimant);
     if (filters.sort === 'surplus') rows.sort((a, b) => b.grossSurplus - a.grossSurplus);
-    // The default the board opens on: who to call first.
-    if (!filters.sort || filters.sort === 'work') {
-      rows.sort((a, b) => b.workScore - a.workScore || b.netToClaimant - a.netToClaimant);
-    }
+    // The default the board opens on: who to call first. The course order,
+    // queue first: a short window, then the biggest surplus, then the nearest
+    // cutoff. The work score used to lead here, and it let an entity with
+    // eight touches and an overdue task sit above a claimant 27 days from
+    // the cutoff.
+    if (!filters.sort || filters.sort === 'work') rows.sort(callOrder);
     if (filters.sort === 'tier') {
       const order = [SurplusTier.A, SurplusTier.B, SurplusTier.C, SurplusTier.UNBANDED];
       rows.sort((a, b) => order.indexOf(a.tier) - order.indexOf(b.tier));
@@ -2470,6 +2473,15 @@ export class SurplusService {
       // filters properties.
       queues: Object.values(SurplusQueue).reduce((acc: Record<string, number>, q) => {
         acc[q] = props.filter((p: any) => p.queue === q).length;
+        return acc;
+      }, {}),
+      /**
+       * How many of each queue's properties the board hides as too early.
+       * The chip said 140 while the list said 101, and the 39 between them
+       * were never explained on screen. Same rule as the list's hideEarly.
+       */
+      queuesEarly: Object.values(SurplusQueue).reduce((acc: Record<string, number>, q) => {
+        acc[q] = props.filter((p: any) => p.queue === q && isTooEarly(p)).length;
         return acc;
       }, {}),
       /** One pot per sale. See the note above. */
@@ -2887,8 +2899,6 @@ export class SurplusService {
           channelsTried,
           tier1Done,
           paidRuns: paidRuns.length,
-          /** A credit was spent before any free route was logged. */
-          tierSkipped: paidRuns.length > 0 && !tier1Done,
           /** The course reserves a professional tracer for the big claims. */
           proTracerEligible: tier === SurplusTier.A || tier === SurplusTier.B,
           lastTier1At: lastTier1At ? new Date(lastTier1At) : null,
@@ -3336,7 +3346,8 @@ export function mailReturnedToCurrentAddress(d: any): boolean {
  * reorders the page it has, so "lowest surplus" read $65K with $18K on page 3.
  */
 const BOARD_COLUMN_SORTS = new Map<string, (g: any) => string | number>([
-  ['queue', (g) => g.workScore],
+  // Call now first, then the research queues; inside a queue, call order.
+  ['queue', (g) => SURPLUS_QUEUE_RANK[g.queue as SurplusQueue] ?? 0],
   ['property', (g) => g.claimantNames?.[0] || g.address || ''],
   ['surplus', (g) => g.grossSurplus ?? 0],
   ['age', (g) => g.daysSinceSale ?? -1],
@@ -3361,8 +3372,36 @@ export function sortByBoardColumn(groups: any[], column?: string, dir?: string):
     const bv = value(b);
     const byColumn =
       typeof av === 'number' && typeof bv === 'number' ? av - bv : String(av).localeCompare(String(bv));
-    return byColumn * sign || b.workScore - a.workScore || String(a.key).localeCompare(String(b.key));
+    return byColumn * sign || callOrder(a, b) || String(a.key).localeCompare(String(b.key));
   });
+}
+
+/**
+ * Names with the duplicates dropped, case and punctuation aside. The first
+ * spelling wins, so the card shows the name as the best-ranked lead has it.
+ */
+export function distinctNames(names: (string | null | undefined)[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const n of names) {
+    const name = String(n || '').trim();
+    if (!name) continue;
+    const key = name.toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(name);
+  }
+  return out;
+}
+
+/**
+ * Too early to approach: the notice, or the sale where no notice has been
+ * read, is under SURPLUS_EARLY_DAYS old. The same rule the list's hideEarly
+ * applies in SQL, so the chip's split matches what the board hides.
+ */
+export function isTooEarly(r: { noticeAge?: number | null; daysSinceSale?: number | null }): boolean {
+  const age = r.noticeAge ?? r.daysSinceSale;
+  return age != null && age < SURPLUS_EARLY_DAYS;
 }
 
 export function groupByProperty(rows: any[]): any[] {
@@ -3411,6 +3450,8 @@ export function groupByProperty(rows: any[]): any[] {
       saleDate: head.saleDate,
       daysSinceSale: head.daysSinceSale,
       noticeDate: head.noticeDate,
+      /** Days since the notice. Was missing from the group, so the stats' "new, 7 days" and early counts fell back to the sale. */
+      noticeAge: head.noticeAge,
       noticeConfirmed: head.noticeConfirmed,
       daysRemaining: head.daysRemaining,
       windowElapsedPct: head.windowElapsedPct,
@@ -3434,8 +3475,13 @@ export function groupByProperty(rows: any[]): any[] {
       // ── Per person ──
       claimants: ranked,
       claimantCount: ranked.length,
-      /** Names for the card, so the group reads as one property with N owners. */
-      claimantNames: ranked.map((m) => m.claimant),
+      /**
+       * Names for the card, so the group reads as one property with N owners.
+       * Distinct: the clerk lists a co-owner once per deed line, so one person
+       * can be two leads on one case, and "Douglas G., Douglas G." read as a
+       * bug. Both leads stay in `claimants`; the card says the name once.
+       */
+      claimantNames: distinctNames(ranked.map((m) => m.claimant)),
       /** The people around these claims the search box found, when it found any. */
       searchMatches: ranked.flatMap((m: any) => m.searchMatches || []),
       /** Rolled up so the card can show contact state without opening. */
