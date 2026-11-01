@@ -33,12 +33,13 @@ import { SurplusIdiService } from './surplus-idi.service';
 import { SurplusOutreachService } from './surplus-outreach.service';
 import { StorageModule } from '../storage/storage.module';
 import { MessagesModule } from '../messages/messages.module';
+import { SurplusProgressModule } from './surplus-progress.module';
 
 @Module({
   // MessagesModule for the credibility packet, which goes out over the same
   // SMS and email paths as a hand-typed message so it lands on the timeline
   // and sends as Dig Deeper.
-  imports: [MessagesModule, StorageModule],
+  imports: [MessagesModule, StorageModule, SurplusProgressModule],
   controllers: [SurplusController],
   providers: [
     SurplusService,

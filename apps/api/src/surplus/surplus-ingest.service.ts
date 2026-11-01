@@ -35,6 +35,8 @@ import {
   OWNER_ROLES,
 } from './realtdm.adapter';
 import { SurplusNoticeService, NoticeExtract } from './surplus-notice.service';
+import { SurplusProgressService } from './surplus-progress.service';
+import { countyRetirement } from './surplus-progress.util';
 import { normalizeMailing } from './surplus-address.util';
 import { matchRecipient } from './surplus-name-search.util';
 import { SurplusSourceAdapter, SurplusCaseDetail, SurplusCaseSummary } from './surplus-source.types';
@@ -193,6 +195,7 @@ interface FoundAddress {
 /** What the tiered refresh needs to know about a row we already hold. */
 interface HeldRow {
   id: string;
+  leadId: string;
   sourceCaseId: string | null;
   stage: string | null;
   claimStatus: string | null;
@@ -295,6 +298,8 @@ export class SurplusIngestService {
     private citrus?: CitrusTaxSmartAdapter,
     private hernando?: HernandoTaxSmartAdapter,
     private charlotte?: CharlotteTaxDeedAdapter,
+    /** Bookkeeping when the docket retires a case: lead status, timeline, tasks, drips. */
+    private progress?: SurplusProgressService,
   ) {}
 
   /** Every adapter wired up, all weekly: Lee, Polk, Brevard, Pinellas, Sarasota, Lake, Alachua, Santa Rosa and Flagler (RealTDM); Duval, Citrus and Hernando (Pioneer TaxSmart); Charlotte (the clerk's own app). */
@@ -847,6 +852,7 @@ export class SurplusIngestService {
     reread = false,
   ): Promise<void> {
     const changed = existing.claimStatus !== verdict.claimStatus;
+    const retirement = countyRetirement(existing.stage, verdict.claimStatus, workable);
 
     // The address this claimant's own notice page carries. Null when no page is
     // addressed to them, which on a co-owned case is the honest answer.
@@ -913,12 +919,17 @@ export class SurplusIngestService {
         lastPolledAt: new Date(),
         ...backfill,
         // Retire, but never un-retire: a case the team has already marked Dead
-        // stays Dead whatever the docket says today.
-        ...(workable || existing.stage === SurplusStage.DEAD
-          ? {}
-          : { stage: SurplusStage.DEAD }),
+        // stays Dead whatever the docket says today. And never retire a case a
+        // client has signed: once we file, our own claim reads as "assigned".
+        ...(retirement.action === 'retire' ? retirement.data : {}),
       },
     });
+
+    // The bookkeeping around a retirement (lead status, timeline, open tasks,
+    // drips), and the note on a signed case whose docket just changed.
+    if (retirement.action === 'retire' || (retirement.action === 'keep' && changed)) {
+      await this.progress?.countyRetired(existing.leadId, verdict.claimStatus, existing.stage);
+    }
 
     if (changed) {
       this.logger.log(
@@ -988,7 +999,7 @@ export class SurplusIngestService {
   ): Promise<Map<string, HeldRow[]>> {
     const rows = await this.prisma.surplusDetail.findMany({
       where: { organizationId, sourceSystem: adapter.key, sourceCaseId: { not: null } },
-      select: { id: true, sourceCaseId: true, stage: true, claimStatus: true, claimLedger: true },
+      select: { id: true, leadId: true, sourceCaseId: true, stage: true, claimStatus: true, claimLedger: true },
     });
     const map = new Map<string, HeldRow[]>();
     for (const r of rows) {
@@ -1031,15 +1042,21 @@ export class SurplusIngestService {
     let retired = 0;
     for (const row of rows) {
       if (row.stage === SurplusStage.DEAD && row.claimStatus === SurplusClaimStatus.DISTRIBUTED) continue;
+      // A signed case is not retired on the list's say-so: the stage stays,
+      // the docket status is recorded, and the timeline says to check.
+      const retirement = countyRetirement(row.stage, SurplusClaimStatus.DISTRIBUTED, false);
       await this.prisma.surplusDetail.update({
         where: { id: row.id },
         data: {
           claimStatus: SurplusClaimStatus.DISTRIBUTED,
-          stage: SurplusStage.DEAD,
+          ...(retirement.action === 'retire' ? retirement.data : {}),
           lastPolledAt: new Date(),
           ...(summary.surplus != null ? { grossSurplus: summary.surplus } : {}),
         },
       });
+      if (retirement.action === 'retire' || (retirement.action === 'keep' && row.claimStatus !== SurplusClaimStatus.DISTRIBUTED)) {
+        await this.progress?.countyRetired(row.leadId, SurplusClaimStatus.DISTRIBUTED, row.stage);
+      }
       retired += 1;
     }
     if (retired) {

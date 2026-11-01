@@ -10,7 +10,7 @@ const SON_NUMBER = '+13525550141';
  * the line. A son saying it opts out the son, the way his STOP would, and
  * leaves the claimant reachable.
  */
-function harness(toNumber: string, heirId: string | null = null) {
+function harness(toNumber: string, heirId: string | null = null, progress?: any) {
   const writes: { model: string; op: string; args: any }[] = [];
   const record = (model: string, op: string) => async (args: any) => {
     writes.push({ model, op, args });
@@ -61,9 +61,63 @@ function harness(toNumber: string, heirId: string | null = null) {
     {} as any,
     leadPhones,
     { record: async () => {} } as any,
+    progress,
   );
   return { svc, writes };
 }
+
+function progressFake() {
+  return {
+    owned: jest.fn().mockResolvedValue(undefined),
+    contacted: jest.fn().mockResolvedValue(undefined),
+    closedByOutcome: jest.fn().mockResolvedValue(false),
+    countyRetired: jest.fn().mockResolvedValue(undefined),
+  };
+}
+
+describe('TwilioVoiceService.setDisposition moves the four fields', () => {
+  it('a connected call claims the owner and marks the case contacted, in the name of who picked up', async () => {
+    const progress = progressFake();
+    const { svc } = harness(SON_NUMBER, null, progress);
+    await svc.setDisposition(
+      CALL_SID,
+      { disposition: 'Follow Up', outcome: SurplusCallOutcome.SPOKE_RELATIVE, followUpAt: '2026-11-03T14:00:00Z' },
+      'u1',
+    );
+    expect(progress.owned).toHaveBeenCalledWith('lead1', 'u1', 'first call outcome');
+    expect(progress.closedByOutcome).toHaveBeenCalledWith(
+      'lead1',
+      SurplusCallOutcome.SPOKE_RELATIVE,
+      expect.objectContaining({ heirId: 'heir-son', userId: 'u1' }),
+    );
+    expect(progress.contacted).toHaveBeenCalledWith(
+      'lead1',
+      expect.objectContaining({ heirId: 'heir-son', userId: 'u1', how: expect.stringContaining('picked up') }),
+    );
+  });
+
+  it('"not interested" from the claimant closes the case instead of marking it contacted', async () => {
+    const progress = progressFake();
+    progress.closedByOutcome.mockResolvedValue(true);
+    const { svc } = harness(CLAIMANT_NUMBER, null, progress);
+    await svc.setDisposition(CALL_SID, { disposition: 'Not Interested', outcome: SurplusCallOutcome.NOT_INTERESTED }, 'u1');
+    expect(progress.closedByOutcome).toHaveBeenCalledWith(
+      'lead1',
+      SurplusCallOutcome.NOT_INTERESTED,
+      expect.objectContaining({ heirId: null }),
+    );
+    expect(progress.contacted).not.toHaveBeenCalled();
+  });
+
+  it('no answer moves nothing but the owner', async () => {
+    const progress = progressFake();
+    const { svc } = harness(CLAIMANT_NUMBER, null, progress);
+    await svc.setDisposition(CALL_SID, { disposition: 'No Answer', outcome: SurplusCallOutcome.NO_ANSWER }, 'u1');
+    expect(progress.owned).toHaveBeenCalled();
+    expect(progress.contacted).not.toHaveBeenCalled();
+    expect(progress.closedByOutcome).not.toHaveBeenCalled();
+  });
+});
 
 describe('TwilioVoiceService.setDisposition do not call', () => {
   it("opts out only the relative whose number was dialed", async () => {

@@ -279,6 +279,72 @@ describe('a refresh preserves the work', () => {
     expect(patch.stage).toBeUndefined();
   });
 
+  it('records why and when the docket retired an unsigned case', async () => {
+    const { svc, updates, prisma } = harness([
+      row({ id: 'd1', dedupeUid: uid('RICHARD MINTON'), street: '4027 BESSENT RD', source: 'notice_of_surplus_funds' }),
+    ]);
+    // The docket now carries a competing claim that the clerk has paid.
+    (svc as any).adapterFor().fetchCase.mockResolvedValue({
+      caseNumber: '2026-0011TD',
+      parcelId: '0123456789',
+      owners: ['RICHARD MINTON', 'CECELIA W HARRIS'],
+      surplus: 105670.33,
+      documents: [
+        { title: 'Notice of Surplus Funds', docId: '103369', url: '/Home/Image/103369' },
+        { title: 'Surplus Distribution', docId: '103400', url: '/Home/Image/103400', filedAt: '2026-10-01' },
+      ],
+      propertyAddress: '4027 BESSENT RD',
+    });
+    const progress = { countyRetired: jest.fn().mockResolvedValue(undefined) };
+    (svc as any).progress = progress;
+
+    await svc.ingestCounty('duval_taxdeed', {});
+
+    const patch = updates.find((u) => u.where?.id === 'd1')?.data;
+    expect(patch.stage).toBe('Dead');
+    expect(patch.deadReason).toBe('paid_out');
+    expect(patch.deadAt).toBeInstanceOf(Date);
+    expect(patch.deadNote).toContain('County docket');
+    expect(progress.countyRetired).toHaveBeenCalledWith('lead-d1', 'distributed', 'New');
+    expect(prisma.surplusDetail.update).toHaveBeenCalled();
+  });
+
+  it('never retires a case a client has signed, whatever the docket says', async () => {
+    const { svc, updates } = harness([
+      row({ id: 'd1', dedupeUid: uid('RICHARD MINTON'), street: '4027 BESSENT RD', source: 'notice_of_surplus_funds' }),
+    ]);
+    (svc as any).prisma.surplusDetail.findFirst = jest.fn(async () => ({
+      id: 'd1',
+      leadId: 'lead-d1',
+      stage: 'Claim Filed',
+      claimStatus: 'open',
+      ownerMailingStreet: '4027 BESSENT RD',
+      ownerAddressSource: 'notice_of_surplus_funds',
+    }));
+    // Our own filing, which the classifier reads as "assigned".
+    (svc as any).adapterFor().fetchCase.mockResolvedValue({
+      caseNumber: '2026-0011TD',
+      parcelId: '0123456789',
+      owners: ['RICHARD MINTON', 'CECELIA W HARRIS'],
+      surplus: 105670.33,
+      documents: [
+        { title: 'Notice of Surplus Funds', docId: '103369', url: '/Home/Image/103369' },
+        { title: 'Surplus Distribution', docId: '103400', url: '/Home/Image/103400', filedAt: '2026-10-01' },
+      ],
+      propertyAddress: '4027 BESSENT RD',
+    });
+    const progress = { countyRetired: jest.fn().mockResolvedValue(undefined) };
+    (svc as any).progress = progress;
+
+    await svc.ingestCounty('duval_taxdeed', {});
+
+    const patch = updates.find((u) => u.where?.id === 'd1')?.data;
+    expect(patch.stage).toBeUndefined();
+    expect(patch.deadReason).toBeUndefined();
+    // The docket changed under a filed claim, so the timeline gets a note.
+    expect(progress.countyRetired).toHaveBeenCalledWith('lead-d1', 'distributed', 'Claim Filed');
+  });
+
   it('does not touch notes, phones, emails or the do-not-call flag', async () => {
     const { svc, updates } = harness([
       row({ id: 'd1', dedupeUid: uid('RICHARD MINTON'), street: '4027 BESSENT RD', source: 'notice_of_surplus_funds' }),
@@ -402,6 +468,20 @@ describe('tiered refresh', () => {
     const patch = updates.find((u) => u.where?.id === 'd1')?.data;
     expect(patch.stage).toBe('Dead');
     expect(patch.claimStatus).toBe('distributed');
+    expect(patch.deadReason).toBe('paid_out');
+    expect(patch.deadAt).toBeInstanceOf(Date);
+  });
+
+  it('the list saying paid out does not retire a signed case', async () => {
+    const { svc, updates, prisma } = lee('COMPLETED - SOLD BIDDER');
+    prisma.surplusDetail.findMany = jest.fn().mockResolvedValue([{ ...held, stage: 'Agreement Signed' }]);
+
+    const res = await svc.ingestCounty('realtdm_lee', {});
+
+    expect(res.retiredFromList).toBe(1);
+    const patch = updates.find((u) => u.where?.id === 'd1')?.data;
+    expect(patch.claimStatus).toBe('distributed');
+    expect(patch.stage).toBeUndefined();
   });
 
   it('a case the county already resolved is remembered and never fetched again', async () => {

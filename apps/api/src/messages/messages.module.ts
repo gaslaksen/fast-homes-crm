@@ -9,9 +9,10 @@ import { CampaignsModule } from '../campaigns/campaigns.module';
 import { LeadsModule } from '../leads/leads.module';
 import { MailerModule } from '../mailer/mailer.module';
 import { PushModule } from '../push/push.module';
+import { SurplusProgressModule } from '../surplus/surplus-progress.module';
 
 @Module({
-  imports: [ScoringModule, forwardRef(() => DripModule), forwardRef(() => CampaignsModule), forwardRef(() => LeadsModule), MailerModule, PushModule, PhoneNumbersModule],
+  imports: [ScoringModule, forwardRef(() => DripModule), forwardRef(() => CampaignsModule), forwardRef(() => LeadsModule), MailerModule, PushModule, PhoneNumbersModule, SurplusProgressModule],
   controllers: [MessagesController],
   providers: [MessagesService, ComplianceService],
   exports: [MessagesService, ComplianceService],

@@ -12,6 +12,7 @@ import { PushService } from '../push/push.service';
 import { ComplianceService } from './compliance.service';
 import { PhoneNumbersService } from '../phone-numbers/phone-numbers.service';
 import { LeadPhonesService } from '../phone-numbers/lead-phones.service';
+import { SurplusProgressService } from '../surplus/surplus-progress.service';
 import { formatPhoneNumber, isOptOutMessage } from '@fast-homes/shared';
 import { dealFitFlags, propertyContextForPrompt } from '../leads/property-fit.util';
 import { htmlToText, normalizeEditorHtml } from './html-to-text.util';
@@ -118,6 +119,8 @@ export class MessagesService {
     private complianceService: ComplianceService,
     private phoneNumbers: PhoneNumbersService,
     private leadPhones: LeadPhonesService,
+    /** Moves a surplus case's stage and owner as a side effect of a text or email. */
+    private progress?: SurplusProgressService,
   ) {
     this.smsProvider = createSmsProvider(this.config);
     this.twilioNumber = this.config.get<string>('TWILIO_PHONE_NUMBER') || '';
@@ -279,6 +282,7 @@ export class MessagesService {
     });
     await this.syncThreadSummary(leadId, outboundBody, 'OUTBOUND');
     await this.markSurplusUpdated(leadId, lead.source);
+    if (lead.source === 'SURPLUS') await this.progress?.owned(leadId, userId, 'first text');
 
     try {
       const sent = await this.smsProvider.sendSms(to, from, outboundBody);
@@ -982,6 +986,7 @@ You decide the right approach based on the conversation flow.${photoNudge}`.trim
     const summaryText = (data.bodyText || data.subject || '').trim().substring(0, 500);
     await this.syncThreadSummary(lead.id, summaryText, 'INBOUND');
     await this.markSurplusTapped(lead.id, lead.source);
+    if (lead.source === 'SURPLUS') await this.progress?.contacted(lead.id, { heirId, how: 'emailed back' });
 
     // Push notify the assigned user (or the whole org) about the inbound reply
     this.pushService.notifyNewMessage(lead, summaryText).catch((err) =>
@@ -1142,6 +1147,9 @@ You decide the right approach based on the conversation flow.${photoNudge}`.trim
     });
     await this.syncThreadSummary(lead.id, body, 'INBOUND');
     await this.markSurplusTapped(lead.id, lead.source, match.heirId ? null : from);
+    if (lead.source === 'SURPLUS') {
+      await this.progress?.contacted(lead.id, { heirId: match.heirId || null, how: 'texted back' });
+    }
 
     // Push notify the assigned user (or the whole org) about the inbound reply
     this.pushService.notifyNewMessage(lead, body).catch((err) =>
@@ -1631,6 +1639,7 @@ You decide the right approach based on the conversation flow.${photoNudge}`.trim
 
     await this.syncThreadSummary(lead.id, bodyText || subject, 'OUTBOUND');
     await this.markSurplusUpdated(lead.id, lead.source);
+    if (lead.source === 'SURPLUS') await this.progress?.owned(lead.id, userId, 'first email');
     await this.leadsService.recordTouch(lead.id, 'EMAIL_SENT', {
       description: `Email sent to ${recipient} from ${user.email}`,
       metadata: { subject, mailgunId: res.mailgunId, sentByUserId: userId },
