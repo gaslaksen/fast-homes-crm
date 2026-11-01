@@ -33,6 +33,7 @@ import { SurplusIdiService } from './surplus-idi.service';
 import { SurplusOutreachService } from './surplus-outreach.service';
 import { SurplusPruneService } from './surplus-prune.service';
 import { SurplusSessionService } from './surplus-session.service';
+import { SurplusPrintRunService } from './surplus-print-run.service';
 import { StorageModule } from '../storage/storage.module';
 import { MessagesModule } from '../messages/messages.module';
 import { SurplusProgressModule } from './surplus-progress.module';
@@ -77,6 +78,7 @@ import { SurplusProgressModule } from './surplus-progress.module';
     SurplusOutreachService,
     SurplusPruneService,
     SurplusSessionService,
+    SurplusPrintRunService,
   ],
   exports: [
     SurplusService,
@@ -88,6 +90,8 @@ import { SurplusProgressModule } from './surplus-progress.module';
     SurplusOutreachService,
     // And its weekly prune line reads the same four buckets the prune page shows.
     SurplusPruneService,
+    // And its letters line counts the same envelopes the print run holds.
+    SurplusPrintRunService,
   ],
 })
 export class SurplusModule {}

@@ -464,6 +464,26 @@ export const surplusAPI = {
     api.delete(`/surplus/${leadId}/touches/done`, { params: heirId ? { heir: heirId } : {} }),
   /** IDI batch skip trace: the upload file for the chosen claimants. */
   idiExport: (leadIds: string[]) => api.post('/surplus/idi/export', { leadIds }),
+  /** The print run: every letter due, rendered, claimant first then the relatives. Records nothing. */
+  printRun: (county?: string | null, max?: number | null) =>
+    api.get('/surplus/print-run', { params: { county: county || undefined, max: max || undefined } }),
+  /** The run went out: record every envelope and log the postage on each claim. */
+  printRunMailed: (body: {
+    items: {
+      leadId: string;
+      heirId: string | null;
+      kind: string;
+      version: number | null;
+      recipientName: string | null;
+      address: string | null;
+      mailType: string;
+      trackingNumber: string | null;
+      letterNumber: number | null;
+    }[];
+    postage?: Record<string, number | null>;
+    mailedAt?: string | null;
+    note?: string | null;
+  }) => api.post('/surplus/print-run/mailed', body),
   /** The whole Send to IDI queue, inside the trace window and not already waiting on a batch, as one file. */
   idiExportReady: (county?: string | null) => api.post('/surplus/idi/export-ready', { county: county || null }),
   /** Read an IDI results file and match each row to a claimant. Writes nothing. */

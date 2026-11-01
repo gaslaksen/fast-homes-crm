@@ -4125,6 +4125,8 @@ const MAIL_TYPE_LABEL: Record<string, string> = {
 
 const LETTER_KINDS: [string, string][] = [
   ['letter_claimant', 'To the claimant'],
+  ['letter_claimant_2', 'To the claimant, second letter'],
+  ['letter_claimant_3', 'To the claimant, third letter'],
   ['letter_family', 'To a family member'],
   ['letter_associate', 'To a neighbour or associate'],
 ];
