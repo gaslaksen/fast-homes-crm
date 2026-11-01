@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SurplusService } from '../surplus/surplus.service';
 import { SurplusIngestService } from '../surplus/surplus-ingest.service';
 import { SurplusOutreachService } from '../surplus/surplus-outreach.service';
+import { SurplusPruneService } from '../surplus/surplus-prune.service';
 import { TOUCH_EVERY_DAYS } from '../surplus/surplus-windows.util';
 import { estFee, SurplusLien } from '../surplus/surplus.util';
 import { describeCountyListDue, describeFeed, summarizeHealthyFeeds } from './digest-feeds.util';
@@ -83,6 +84,7 @@ export class DigestService {
     private surplusService: SurplusService,
     private surplusIngest: SurplusIngestService,
     private outreach: SurplusOutreachService,
+    private pruneService?: SurplusPruneService,
   ) {}
 
   private get appUrl(): string {
@@ -702,6 +704,7 @@ export class DigestService {
     const feeds = await this.buildFeeds(orgId, now);
     const countyListsDue = await this.buildCountyListsDue(orgId, now);
     const touchesDue = await this.buildTouchesDue(orgId);
+    const prune = this.pruneService ? await this.pruneService.briefLine(orgId) : null;
 
     // ── Wholesale, parked ───────────────────────────────────────────────────
     const oldestWholesale = wholesaleReplies[0]?.lastMessageAt
@@ -743,6 +746,7 @@ export class DigestService {
       feedSummary: summarizeHealthyFeeds(feeds),
       countyListsDue,
       touchesDue,
+      prune,
       wholesale: wholesaleParts.length ? wholesaleParts.join(' · ') : null,
       appUrl: this.appUrl,
       // A failed county feed is never an empty day; that is the one morning

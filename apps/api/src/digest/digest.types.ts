@@ -137,6 +137,8 @@ export interface DigestBrief {
   countyListsDue: FeedRow[];
   /** People on workable files with nothing tried in a week: the outreach list's Due today. */
   touchesDue: { people: number; cases: number; line: string } | null;
+  /** Cases the course says to stop working, waiting on the weekly prune. */
+  prune?: { total: number; line: string } | null;
   /** One line of wholesaling counts, or null when there is nothing to say. */
   wholesale: string | null;
 

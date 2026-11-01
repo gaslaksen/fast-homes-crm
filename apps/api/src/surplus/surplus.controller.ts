@@ -25,6 +25,7 @@ import { SurplusCadenceService } from './surplus-cadence.service';
 import { SurplusOutreachService } from './surplus-outreach.service';
 import { COMPLIANCE_RULES, DISCLOSURE_LABELS, FL_COUNTIES, SURPLUS_FLOOR } from './surplus-compliance';
 import { SurplusNumbersService } from './surplus-numbers.service';
+import { SurplusPruneService } from './surplus-prune.service';
 
 /**
  * A probate filing upload. PDFs only and capped, because this goes straight to
@@ -92,6 +93,7 @@ export class SurplusController {
     private numbers: SurplusNumbersService,
     private config: ConfigService,
     private notice: SurplusNoticeService,
+    private prune: SurplusPruneService,
   ) {}
 
   /**
@@ -1170,6 +1172,24 @@ export class SurplusController {
     const res = await this.surplus.createSurplusLead(body, { organizationId });
     if (!res.created) throw new BadRequestException(res.reason || 'Lead was not created');
     return this.surplus.get(res.leadId!, organizationId);
+  }
+
+  /**
+   * The weekly prune: the four kinds of case the course says to stop working,
+   * each with its one action. Reads the board's own rows; writes nothing.
+   */
+  @Get('prune')
+  async pruneList(@Headers('authorization') authHeader?: string) {
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.prune.list(organizationId || null);
+  }
+
+  /** Pause several cases with one reason and one revisit date. Body: { ids, reason, until? } */
+  @Post('bulk-hold')
+  async bulkHold(@Body() body: any, @Headers('authorization') authHeader?: string) {
+    const { organizationId, userId } = this.decodeToken(authHeader);
+    const ids = Array.isArray(body?.ids) ? body.ids.filter((x: any) => typeof x === 'string') : [];
+    return this.prune.bulkHold(ids, { reason: body?.reason, until: body?.until || null }, organizationId || null, userId || null);
   }
 
   @Post('bulk-delete')

@@ -548,6 +548,8 @@ export enum SurplusDeadReason {
   NOT_INTERESTED = 'not_interested',
   /** The county docket says the money has been paid out. Set by the weekly pull. */
   PAID_OUT = 'paid_out',
+  /** The day-340 cutoff went by with nobody signed. Set on the weekly prune. */
+  PAST_CUTOFF = 'past_cutoff',
   OTHER = 'other',
 }
 
@@ -559,6 +561,7 @@ export const SURPLUS_DEAD_REASON_LABEL: Record<SurplusDeadReason, string> = {
   [SurplusDeadReason.ALREADY_ASSIGNED]: 'Already signed with somebody else',
   [SurplusDeadReason.NOT_INTERESTED]: 'Not interested, said so on the phone',
   [SurplusDeadReason.PAID_OUT]: 'Paid out by the county',
+  [SurplusDeadReason.PAST_CUTOFF]: 'Past the filing cutoff',
   [SurplusDeadReason.OTHER]: 'Other',
 };
 

@@ -179,6 +179,18 @@ export class DigestRenderService {
       </td></tr>`;
   }
 
+  /** The weekly prune, one line and a link. Monday's housekeeping. */
+  private renderPrune(b: DigestBrief): string {
+    if (!b.prune) return '';
+    return `
+      ${this.divider()}
+      <tr><td class="px" style="padding:18px 36px 18px 36px;">
+        <div style="font-size:11px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:${MUTED};">Weekly prune</div>
+        <div style="font-size:14px;color:${BODY};line-height:1.6;padding-top:6px;">${this.esc(b.prune.line)}</div>
+        <div style="font-size:13px;padding-top:6px;"><a href="${this.esc(b.appUrl)}/surplus-funds/prune" style="color:${TEAL};font-weight:600;text-decoration:none;">Open the prune list &rarr;</a></div>
+      </td></tr>`;
+  }
+
   private renderPromises(b: DigestBrief): string {
     if (!b.promises.length) return '';
     const rows = b.promises.map((p, i) => `
@@ -337,6 +349,7 @@ export class DigestRenderService {
   ${this.renderScorecard(b)}
   ${this.renderCalls(b)}
   ${this.renderTouchesDue(b)}
+  ${this.renderPrune(b)}
   ${this.renderPromises(b)}
   ${this.renderNeedsTrace(b)}
   ${this.renderInFlight(b)}
@@ -404,6 +417,13 @@ export class DigestRenderService {
       out.push('TOUCHES DUE TODAY');
       out.push(`  ${b.touchesDue.line}`);
       out.push(`  Outreach list: ${b.appUrl}/surplus-funds/outreach?due=1`);
+      out.push('');
+    }
+
+    if (b.prune) {
+      out.push('WEEKLY PRUNE');
+      out.push(`  ${b.prune.line}`);
+      out.push(`  Prune list: ${b.appUrl}/surplus-funds/prune`);
       out.push('');
     }
 

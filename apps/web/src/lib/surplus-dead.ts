@@ -12,6 +12,7 @@ export const SURPLUS_DEAD_REASONS: [string, string][] = [
   ['already_assigned', 'Already signed with somebody else'],
   ['not_interested', 'Not interested, said so on the phone'],
   ['paid_out', 'Paid out by the county'],
+  ['past_cutoff', 'Past the filing cutoff'],
   ['other', 'Other'],
 ];
 
