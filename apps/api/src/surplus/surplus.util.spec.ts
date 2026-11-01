@@ -492,6 +492,26 @@ describe('stageGateError', () => {
     expect(stageGateError(clean, SurplusStage.AGREEMENT_SIGNED, { docs: { fee_agreement: 'signed' } })).toBeNull();
   });
 
+  it('holds Agreement Signed until the county is ready to file in', () => {
+    const docs = { fee_agreement: 'signed' };
+    expect(
+      stageGateError(clean, SurplusStage.AGREEMENT_SIGNED, { docs, countyOnList: true, countyName: 'Hernando', countyUnknowns: [] }),
+    ).toBeNull();
+    expect(
+      stageGateError(clean, SurplusStage.AGREEMENT_SIGNED, {
+        docs,
+        countyOnList: true,
+        countyName: 'Hernando',
+        countyUnknowns: ['claim form', 'whether an attorney is required'],
+      }),
+    ).toBe("Agreement Signed needs the Hernando clerk's answers on claim form, whether an attorney is required.");
+    expect(stageGateError(clean, SurplusStage.AGREEMENT_SIGNED, { docs, countyOnList: false, countyName: 'Glades' })).toBe(
+      "Agreement Signed needs Glades added to the county list, with the clerk's answers.",
+    );
+    // A case with no county named has nothing to look up and is not held.
+    expect(stageGateError(clean, SurplusStage.AGREEMENT_SIGNED, { docs })).toBeNull();
+  });
+
   it('names only what is missing, qualification first, then the agreement', () => {
     expect(
       stageGateError({ ...clean, noticeConfirmed: false }, SurplusStage.AGREEMENT_SIGNED, {

@@ -63,6 +63,7 @@ export function campaignEmailFor(toEmail: string | null | undefined, emails: str
 export const HEIR_CONTACT_SELECT = {
   id: true,
   name: true,
+  role: true,
   deceased: true,
   doNotCall: true,
   phone1: true,
@@ -81,6 +82,8 @@ export const HEIR_CONTACT_SELECT = {
 export type HeirContact = {
   id: string;
   name: string;
+  /** SurplusPersonRole. The clerk's row is never enrolled. */
+  role?: string | null;
   deceased?: boolean | null;
   doNotCall?: boolean | null;
   phone1?: string | null;
@@ -127,5 +130,6 @@ export function heirTextNumber(heir: HeirContact | null | undefined): string | n
 export function heirBlockedReason(heir: HeirContact): string | null {
   if (heir.deceased) return `${heir.name} is marked deceased`;
   if (heir.doNotCall) return `${heir.name} is marked do not call`;
+  if (heir.role === 'clerk') return `${heir.name} is the county clerk, not outreach`;
   return null;
 }

@@ -17,6 +17,7 @@ import { StorageService } from '../storage/storage.service';
 import { FL_COUNTIES, FL_COUNTY_SEED, RULE_MAX_AGE_DAYS, CountySeed } from './surplus-compliance';
 import { calendarDayToDate } from './surplus.util';
 import { LIST_SOURCES, addDays, listDue, todayNoonUtc } from './surplus-county-lists.util';
+import { ClerkScriptLine, clerkScript, countyReadiness } from './surplus-county-readiness.util';
 
 export const ACCEPTED_METHODS = ['usps', 'fedex', 'ups', 'in_person', 'efile'] as const;
 export const ACCEPTED_METHOD_LABEL: Record<string, string> = {
@@ -147,6 +148,10 @@ export interface CountyRow {
   stale: boolean;
   /** How many of the filing facts are still unanswered. */
   unknowns: string[];
+  /** Every one of the five clerk questions answered. The gate before Agreement Signed. */
+  ready: boolean;
+  /** The clerk call, question by question, with the answered ones marked. */
+  script: ClerkScriptLine[];
   updatedAt: Date;
 }
 
@@ -330,12 +335,9 @@ export class SurplusCountiesService {
     const ageDays = r.lastVerifiedAt
       ? (Date.now() - new Date(r.lastVerifiedAt).getTime()) / 86_400_000
       : Infinity;
-    const unknowns: string[] = [];
-    if (!r.claimFormUrl && !r.claimFormKey) unknowns.push('claim form');
-    if (!r.acceptedMethods) unknowns.push('how claims are submitted');
-    if (r.signatureRequired == null) unknowns.push('whether a signature is required');
-    if (r.attorneyRequired == null) unknowns.push('whether an attorney is required');
-    if (!r.assignmentPreference) unknowns.push('full or partial assignment');
+    // The five clerk questions, in the order the call asks them.
+    const readiness = countyReadiness(r);
+    const unknowns = readiness.unknowns;
     const due = listDue(r.listNextRequestAt);
     return {
       id: r.id,
@@ -366,6 +368,8 @@ export class SurplusCountiesService {
       listDueInDays: due.days,
       stale: ageDays > RULE_MAX_AGE_DAYS,
       unknowns,
+      ready: readiness.ready,
+      script: clerkScript(r),
       updatedAt: r.updatedAt,
     };
   }

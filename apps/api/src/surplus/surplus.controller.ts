@@ -471,6 +471,13 @@ export class SurplusController {
 
   // ── Disbursement ──────────────────────────────────────────────────────────
 
+  /** Put the county clerk on the case as a contact row, from the county card. Returns the row either way. */
+  @Post(':id/clerk-contact')
+  async addClerkContact(@Param('id') id: string, @Headers('authorization') authHeader?: string) {
+    const { organizationId, userId } = this.decodeToken(authHeader);
+    return this.surplus.addClerkContact(id, organizationId, userId);
+  }
+
   @Get(':id/expenses')
   async listExpenses(@Param('id') id: string, @Headers('authorization') authHeader?: string) {
     const { organizationId } = this.decodeToken(authHeader);

@@ -38,6 +38,9 @@ interface County {
   lastVerifiedAt: string | null;
   stale: boolean;
   unknowns: string[];
+  /** All five clerk answers in. The gate before the first signature in the county. */
+  ready: boolean;
+  script: { key: string; ask: string; field: string; answered: boolean }[];
   /** The county list tracker. Dates are calendar days at noon UTC. */
   listSource: string | null;
   listUpdateEveryDays: number | null;
@@ -375,7 +378,7 @@ export default function SurplusCountiesPage() {
                     <div className="text-[11px] text-gray-500 mt-0.5">
                       {c.active ? 'Active' : 'Candidate'}
                       {c.feedKey ? ' · automated feed' : ''}
-                      {c.unknowns.length ? ` · ${c.unknowns.length} unanswered` : ' · complete'}
+                      {c.ready ? ' · ready to file in' : ` · not ready, ${c.unknowns.length} to ask`}
                     </div>
                   </button>
                 ))}
@@ -416,11 +419,32 @@ export default function SurplusCountiesPage() {
                   </div>
                 </div>
 
-                {current.unknowns.length > 0 && (
+                {current.unknowns.length > 0 ? (
                   <div className="mb-4 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
-                    Still to find out: {current.unknowns.join(', ')}.
+                    <div className="font-semibold">County not ready. Still to ask the clerk: {current.unknowns.join(', ')}.</div>
+                    <div className="mt-1">
+                      Agreement Signed is held in {current.name} until these are in. The first yes or maybe there opens one task to make the call; this is
+                      the script.
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mb-4 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 px-3 py-2 text-xs text-green-800 dark:text-green-300">
+                    Ready to file in: all five clerk answers are on the card.
                   </div>
                 )}
+                <details className="mb-4 text-xs" open={current.unknowns.length > 0}>
+                  <summary className="cursor-pointer font-medium text-gray-700 dark:text-gray-300">Clerk call script</summary>
+                  <ol className="mt-2 list-decimal pl-5 space-y-1.5">
+                    {(current.script || []).map((q) => (
+                      <li key={q.key} className={q.answered ? 'text-gray-400 dark:text-gray-500' : 'text-gray-800 dark:text-gray-200'}>
+                        {q.ask}
+                        <div className="text-[11px] text-gray-500">
+                          {q.answered ? 'Answered' : 'Open'} · goes in {q.field}
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                </details>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="md:col-span-2">

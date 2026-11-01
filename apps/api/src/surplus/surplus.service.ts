@@ -21,6 +21,7 @@ import {
   SURPLUS_TRACE_CHANNEL_LABEL,
   SURPLUS_TIER1_CHANNELS,
   SurplusPersonRole,
+  isCountyContactRole,
   SurplusDocumentKind,
   SurplusDocumentStatus,
   surplusDocumentAtLeast,
@@ -98,6 +99,8 @@ import { foreignCountry } from './surplus-address.util';
 import { NO_CONTACTS, claimantContacts, contactStampPatch } from './surplus-contact-stamp.util';
 import { SurplusTemplatesService } from './surplus-templates.service';
 import { SurplusProgressService } from './surplus-progress.service';
+import { isSignedStage } from './surplus-progress.util';
+import { clerkContactName } from './surplus-county-readiness.util';
 import { LETTER_REPLY_TASK_PREFIX } from './surplus-progress.util';
 import { idiBatchCode } from './surplus-idi.util';
 
@@ -874,6 +877,18 @@ export class SurplusService {
     if (detailPatch.notarySignedInOrderAt) {
       await this.recordSignedInOrder(id, organizationId, userId);
     }
+    // A yes: the notary's sheet signed, an appointment booked, or the stage
+    // moved to a signed one. The county has to be ready before it happens.
+    if (
+      detailPatch.notaryAgreementSignedAt ||
+      detailPatch.notaryAppointmentAt ||
+      (detailPatch.stage && detailPatch.stage !== d.stage && isSignedStage(detailPatch.stage))
+    ) {
+      await this.progress?.countyPrep(id, {
+        userId,
+        how: detailPatch.notaryAppointmentAt ? 'an appointment booked' : detailPatch.notaryAgreementSignedAt ? 'the notary sheet signed' : `the stage set to ${detailPatch.stage}`,
+      });
+    }
 
     // The county's check arriving is what Check Received means. The
     // clearing clock starts, the claimant is told within a day, and the
@@ -1095,6 +1110,54 @@ export class SurplusService {
       expensesFromClaimantShare: !!d.expensesFromClaimantShare,
       capPct: rule?.feeCap ?? null,
     });
+  }
+
+  /**
+   * Put the county clerk on the case as a contact row, from the county
+   * card, so a letter or an email to the county is addressed to the clerk
+   * and logged as county contact rather than as a relative. One per case;
+   * calling it again returns the row that is there.
+   */
+  async addClerkContact(leadId: string, organizationId?: string | null, userId?: string | null) {
+    const lead = await this.prisma.lead.findFirst({
+      where: { id: leadId, source: LeadSource.SURPLUS, ...(organizationId ? { organizationId } : {}) },
+      select: { id: true, organizationId: true, surplusDetail: { select: { id: true, county: true, heirs: { select: { id: true, name: true, role: true } } } } },
+    });
+    const d = lead?.surplusDetail;
+    if (!lead || !d) throw new BadRequestException('Surplus lead not found');
+    const existing = d.heirs.find((h) => isCountyContactRole(h.role));
+    if (existing) return { id: existing.id, name: existing.name, created: false };
+    if (!d.county) throw new BadRequestException('The case has no county, so there is no clerk to add.');
+    const county = (await this.counties.mapFor(lead.organizationId)).get(String(d.county).toLowerCase()) || null;
+    const name = clerkContactName(county, d.county);
+    // The clerk address is one line on the card; it goes in the street slot
+    // whole so the envelope reads as typed.
+    const row = await this.prisma.surplusHeir.create({
+      data: {
+        surplusDetailId: d.id,
+        organizationId: lead.organizationId,
+        name,
+        role: SurplusPersonRole.CLERK,
+        relationship: `${d.county} County Clerk of Court`,
+        street: county?.clerkAddress || null,
+        phone1: county?.clerkContactPhone ? normalizePhoneDigits(county.clerkContactPhone) || null : null,
+        phone1Type: county?.clerkContactPhone ? 'Office' : null,
+        email1: county?.clerkContactEmail || null,
+        contactStatus: 'not_contacted',
+        sourceKind: 'manual',
+        addedByUserId: userId || null,
+      },
+    });
+    await this.prisma.activity.create({
+      data: {
+        leadId,
+        userId: userId || undefined,
+        type: 'NOTE_ADDED',
+        description: `${name} added as the county contact on the case.`,
+        metadata: { heirId: row.id, role: SurplusPersonRole.CLERK },
+      },
+    });
+    return { id: row.id, name: row.name, created: true };
   }
 
   /** Every expense on a claim, oldest first. */
@@ -1432,6 +1495,7 @@ export class SurplusService {
       complianceBlocks: complianceGate(facts).blocks,
       docsMissing: checklist.missing,
       ...this.attorneyGate(d, lead),
+      ...this.countyGate(d, countyRow),
       submissionMethod: d.submissionMethod,
       submissionTrackingNumber: d.submissionTrackingNumber,
       countyAcknowledgedAt: d.countyAcknowledgedAt,
@@ -1440,6 +1504,17 @@ export class SurplusService {
       clearingDueAt: d.clearingDueAt,
       checkSentAt: d.checkSentAt,
     };
+  }
+
+  /**
+   * The county's readiness as the stage gate reads it. A case with no county
+   * named is not held (there is nothing to look up); a county not on the
+   * list, or one with clerk questions open, holds Agreement Signed.
+   */
+  private countyGate(d: any, county: CountyRow | null): Pick<StageGateContext, 'countyOnList' | 'countyName' | 'countyUnknowns'> {
+    if (!d.county) return {};
+    if (!county) return { countyOnList: false, countyName: d.county };
+    return { countyOnList: true, countyName: county.name, countyUnknowns: county.unknowns };
   }
 
   /**
@@ -2458,7 +2533,8 @@ export class SurplusService {
     // route to the claimant, not somebody who can file.
     const livingHeirs = heirRows.filter((h: any) => !h.deceased && h.isHeir);
     const callableHeirs = livingHeirs.filter((h: any) => h.callable);
-    const associates = heirRows.filter((h: any) => !h.deceased && !h.isHeir);
+    // The clerk's row is county correspondence, not a route to the claimant.
+    const associates = heirRows.filter((h: any) => !h.deceased && !h.isHeir && !isCountyContactRole(h.role));
 
     const week = isoWeekKey();
     const staleWeek = d.touchWeek && d.touchWeek !== week;
@@ -2529,8 +2605,15 @@ export class SurplusService {
             lastVerifiedAt: county.lastVerifiedAt,
             stale: county.stale,
             unknowns: county.unknowns,
+            ready: county.ready,
+            script: county.script,
           }
         : null,
+      /** The clerk's row on this case, when one has been added, so county correspondence can be addressed to it. */
+      clerkContact: (() => {
+        const c = heirRows.find((h: any) => isCountyContactRole(h.role));
+        return c ? { id: c.id, name: c.name } : null;
+      })(),
 
       deceased: d.deceased,
       heirsRequired: d.heirsRequired,
@@ -2622,6 +2705,7 @@ export class SurplusService {
             complianceBlocks: gate.blocks,
             docsMissing: checklist.missing,
             ...this.attorneyGate(d, { _countyRow: county }),
+            ...this.countyGate(d, county),
             submissionMethod: d.submissionMethod,
             submissionTrackingNumber: d.submissionTrackingNumber,
             countyAcknowledgedAt: d.countyAcknowledgedAt,

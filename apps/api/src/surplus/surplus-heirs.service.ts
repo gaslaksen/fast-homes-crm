@@ -187,7 +187,7 @@ export class SurplusHeirsService {
     if (!name) throw new BadRequestException('A person needs a name.');
     const role = String(input.role || SurplusPersonRole.HEIR);
     if (!(Object.values(SurplusPersonRole) as string[]).includes(role)) {
-      throw new BadRequestException('Pick a role: heir, relative, neighbor, friend, or associate.');
+      throw new BadRequestException('Pick a role: heir, relative, neighbor, friend, associate, or clerk.');
     }
     const created = await this.prisma.surplusHeir.create({
       data: {
@@ -228,7 +228,7 @@ export class SurplusHeirsService {
     if (patch.role !== undefined) {
       const role = String(patch.role || '');
       if (!(Object.values(SurplusPersonRole) as string[]).includes(role)) {
-        throw new BadRequestException('Pick a role: heir, relative, neighbor, friend, or associate.');
+        throw new BadRequestException('Pick a role: heir, relative, neighbor, friend, associate, or clerk.');
       }
       data.role = role;
     }
