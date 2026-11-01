@@ -2100,7 +2100,8 @@ export class SurplusService {
 
     // The floor is enforced at ingestion, but a lead whose surplus was later
     // revised down should drop out of the feed too.
-    if (!filters.batchId) detailWhere.grossSurplus = { gte: SURPLUS_FLOOR };
+    // The weekly prune asks for the ones that fell below the floor on purpose.
+    if (!filters.batchId && !filters.includeBelowFloor) detailWhere.grossSurplus = { gte: SURPLUS_FLOOR };
     if (filters.band === '15-25') detailWhere.grossSurplus = { gte: 15000, lt: 25000 };
     if (filters.band === '25-50') detailWhere.grossSurplus = { gte: 25000, lt: 50000 };
     if (filters.band === '50+') detailWhere.grossSurplus = { gte: 50000 };

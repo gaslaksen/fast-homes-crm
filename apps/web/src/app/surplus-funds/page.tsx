@@ -1617,6 +1617,13 @@ export default function SurplusFundsPage() {
                   >
                     Find profiles for the unreachable
                   </button>
+                  <Link
+                    className="dc-menu-item"
+                    href="/surplus-funds/prune"
+                    title="Cases the course says to stop working: sixty days of full effort, past the cutoff, below the floor, closed by the docket. Pause or close them in bulk."
+                  >
+                    Weekly prune
+                  </Link>
                   <a className="dc-menu-item" href="/surplus-funds/references">
                     References{stats.recoveries ? ` (${stats.recoveries} paid)` : ''}
                   </a>

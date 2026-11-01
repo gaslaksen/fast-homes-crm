@@ -31,6 +31,7 @@ import { SurplusDocumentsService } from './surplus-documents.service';
 import { SurplusCadenceService } from './surplus-cadence.service';
 import { SurplusIdiService } from './surplus-idi.service';
 import { SurplusOutreachService } from './surplus-outreach.service';
+import { SurplusPruneService } from './surplus-prune.service';
 import { StorageModule } from '../storage/storage.module';
 import { MessagesModule } from '../messages/messages.module';
 import { SurplusProgressModule } from './surplus-progress.module';
@@ -73,6 +74,7 @@ import { SurplusProgressModule } from './surplus-progress.module';
     SurplusHeirsService,
     SurplusIdiService,
     SurplusOutreachService,
+    SurplusPruneService,
   ],
   exports: [
     SurplusService,
@@ -82,6 +84,8 @@ import { SurplusProgressModule } from './surplus-progress.module';
     SurplusHeirsService,
     // The Daily Brief's touches-due line reads the same list the outreach page shows.
     SurplusOutreachService,
+    // And its weekly prune line reads the same four buckets the prune page shows.
+    SurplusPruneService,
   ],
 })
 export class SurplusModule {}

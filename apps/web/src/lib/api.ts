@@ -242,6 +242,11 @@ export const surplusAPI = {
   /** A revisit date ("2027-04-29") makes the hold a pause, which the daily cadence ends. */
   hold: (id: string, on: boolean, reason?: string, until?: string) =>
     api.post(`/surplus/${id}/hold`, { on, reason, ...(until ? { until } : {}) }),
+  /** Pause several cases with one reason and one revisit date. */
+  bulkHold: (ids: string[], reason: string, until?: string | null) =>
+    api.post('/surplus/bulk-hold', { ids, reason, until: until || null }),
+  /** The weekly prune: four buckets of cases the course says to stop working, each with its action. */
+  prune: () => api.get('/surplus/prune'),
   /** Who on the team owns the case; null clears it. */
   setOwner: (id: string, userId: string | null) => api.post(`/surplus/${id}/owner`, { userId }),
   /** Set the next action, or rewrite the current one in place with its taskId. */
