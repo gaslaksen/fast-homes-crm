@@ -72,7 +72,20 @@ interface Scripts {
 const SIZES = [10, 25, 40];
 const SIZE_KEY = 'surplus.session.size';
 
+/**
+ * The dialer context lives inside AppShell, so the page itself only mounts
+ * the shell; the session hooks run in a child, where the provider exists.
+ * Calling useDialer at the page level breaks the static prerender.
+ */
 export default function WorkTodayPage() {
+  return (
+    <AppShell>
+      <WorkToday />
+    </AppShell>
+  );
+}
+
+function WorkToday() {
   const dialer = useDialer();
   const [size, setSize] = useState<number>(25);
   const [session, setSession] = useState<WorkSession | null>(null);
@@ -225,7 +238,7 @@ export default function WorkTodayPage() {
   const flatNumbers = useMemo(() => (current ? current.people.flatMap((p) => p.numbers.map((n) => ({ p, n }))) : []), [current]);
 
   return (
-    <AppShell>
+    <>
       <div className="dc-board" style={{ background: 'var(--bg)', minHeight: '100vh', padding: 26 }}>
         <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
           <div>
@@ -390,7 +403,7 @@ export default function WorkTodayPage() {
           </>
         ) : null}
       </div>
-    </AppShell>
+    </>
   );
 }
 
