@@ -54,6 +54,9 @@ function harness(existing: any[], recipients = RECIPIENTS) {
       update: jest.fn(async (a: any) => { updates.push(a); return {}; }),
       updateMany: jest.fn(async (a: any) => { updates.push(a); return { count: 1 }; }),
     },
+    surplusAddress: {
+      upsert: jest.fn().mockResolvedValue({}),
+    },
   };
 
   const adapter: any = {
@@ -603,6 +606,30 @@ describe('tiered refresh', () => {
     jest.spyOn(svc, 'adapterFor').mockReturnValue(adapter);
     return { svc, prisma, updates, adapter };
   }
+
+  it('keeps every address the clerk mailed the claimant at, not just the card\'s', async () => {
+    const { svc, prisma, adapter } = lee('ACTIVE - SOLD BIDDER', '9999999');
+    const base = await adapter.fetchCase();
+    adapter.fetchCase.mockResolvedValue({
+      ...base,
+      documents: base.documents.filter((d: any) => !d.claimant),
+      noticeRecipients: [
+        { name: 'BEVERLY F KONOPKA', street: '130 WOODIN STREET', city: 'HAMDEN', state: 'CT', zip: '06489', delivery: 'Certified Mail' },
+        { name: 'BEVERLY F. KONOPKA', street: 'RT 1 BOX 61', city: 'PULLMAN', state: 'WV', zip: '26421', delivery: 'Certified Mail' },
+        { name: 'JOHN KONOPKA', street: '9 ELM ST', city: 'HAMDEN', state: 'CT', zip: '06489' },
+      ],
+    });
+
+    await svc.ingestCounty('realtdm_lee', {});
+
+    const saved = prisma.surplusAddress.upsert.mock.calls.map((c: any[]) => c[0]);
+    expect(saved.map((u: any) => u.create.street)).toEqual(['130 WOODIN STREET', 'RT 1 BOX 61']);
+    expect(saved[1]).toMatchObject({
+      where: { surplusDetailId_addressKey: { surplusDetailId: 'd1', addressKey: 'RT1BOX61|26421' } },
+      update: { lastSeenAt: expect.any(Date) },
+      create: { source: 'surplus_letter_notifications', delivery: 'Certified Mail', nameOnRecord: 'BEVERLY F. KONOPKA' },
+    });
+  });
 
   it('an unchanged docket is one probe request and no fetch', async () => {
     const { svc, updates, adapter } = lee();

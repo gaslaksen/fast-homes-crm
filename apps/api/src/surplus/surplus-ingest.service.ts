@@ -37,8 +37,8 @@ import {
 import { SurplusNoticeService, NoticeExtract } from './surplus-notice.service';
 import { SurplusProgressService } from './surplus-progress.service';
 import { countyRetirement } from './surplus-progress.util';
-import { normalizeMailing } from './surplus-address.util';
-import { matchRecipient } from './surplus-name-search.util';
+import { normalizeMailing, surplusAddressKey } from './surplus-address.util';
+import { matchRecipient, matchRecipients } from './surplus-name-search.util';
 import { SurplusSourceAdapter, SurplusCaseDetail, SurplusCaseSummary } from './surplus-source.types';
 import { ClassifiedDoc, classifyCase, collapseClaimants, isWorkable } from './surplus-classify.util';
 import { surplusUidOf, uidClaimant } from './surplus.util';
@@ -212,6 +212,8 @@ interface FoundAddress {
   /** Null for a US address. */
   country?: string | null;
   source: string;
+  /** How the clerk sent it, where the source records it. */
+  delivery?: string | null;
 }
 
 /** What the tiered refresh needs to know about a row we already hold. */
@@ -264,6 +266,7 @@ function noticeFromSource(detail: SurplusCaseDetail): NoticeExtract | null {
       state: r.state,
       zip: r.zip,
       attention: r.attention ?? null,
+      delivery: r.delivery ?? null,
     }),
   );
   const first = recipients[0];
@@ -653,6 +656,7 @@ export class SurplusIngestService {
       for (const row of caseRows) {
         const mine = this.addressFor(uidClaimant(row.dedupeUid || ''), extract, {}, caseRows.length);
         if (mine?.street) out.addressed += 1;
+        await this.saveAddresses(row.id, organizationId, this.addressesFor(uidClaimant(row.dedupeUid || ''), extract, {}, caseRows.length));
         await this.prisma.surplusDetail.update({
           where: { id: row.id },
           data: {
@@ -804,6 +808,7 @@ export class SurplusIngestService {
           claimants.length,
           reread,
         );
+        await this.saveAddresses(existing.id, organizationId, this.addressesFor(claimant.name, notice, detail, claimants.length));
         out.updated += 1;
         continue;
       }
@@ -895,7 +900,10 @@ export class SurplusIngestService {
 
       if (res.created) {
         out.created += 1;
-        if (res.leadId) out.createdLeadIds.push(res.leadId);
+        if (res.leadId) {
+          out.createdLeadIds.push(res.leadId);
+          await this.saveAddressesForLead(res.leadId, organizationId, this.addressesFor(claimant.name, notice, detail, claimants.length));
+        }
       } else out.skipped += 1;
     }
 
@@ -956,6 +964,112 @@ export class SurplusIngestService {
       };
     }
     return null;
+  }
+
+  /**
+   * Every address the county holds for one claimant, where addressFor picks
+   * one for the card. The clerk mails the same owner at each address it knows
+   * and the one addressFor drops is often where they are: Lee 2025001687 went
+   * to San Diego and to "RT 1 BOX 61, PULLMAN, WV", and IDI later placed the
+   * owner at the route box. Kept on the claimant's address list for the skip
+   * trace rounds to work through.
+   */
+  private addressesFor(
+    claimant: string,
+    notice: NoticeExtract | null,
+    detail: Pick<SurplusCaseDetail, 'parties' | 'noticeRecipients'>,
+    claimantCount: number,
+  ): FoundAddress[] {
+    const withAttention = (name: string | null, attention?: string | null) =>
+      attention ? `${name || ''}${name ? ', ' : ''}${attention}` : name;
+    const out: FoundAddress[] = [];
+    const recipients = (notice?.recipients || []).filter((r) => r.street);
+    let fromNotice = matchRecipients(claimant, recipients);
+    if (!fromNotice.length) {
+      const one = recipientFor(claimant, recipients, claimantCount);
+      fromNotice = one ? [one] : [];
+    }
+    for (const r of fromNotice) {
+      out.push({
+        name: withAttention(r.name, r.attention),
+        street: r.street,
+        city: r.city,
+        state: r.state,
+        zip: r.zip,
+        country: r.country ?? null,
+        delivery: r.delivery ?? null,
+        source: detail.noticeRecipients?.length ? ADDRESS_SOURCE.notifications : ADDRESS_SOURCE.notice,
+      });
+    }
+    const owners = (detail.parties || []).filter((p) => OWNER_ROLES.test(p.role) && p.street);
+    let fromParties = matchRecipients(claimant, owners);
+    if (!fromParties.length && !out.length) {
+      const one = recipientFor(claimant, owners, claimantCount);
+      fromParties = one ? [one] : [];
+    }
+    for (const p of fromParties) {
+      const a = withCountry(p);
+      out.push({
+        name: withAttention(p.name, p.attention),
+        street: a.street,
+        city: a.city,
+        state: a.state,
+        zip: a.zip,
+        country: a.country,
+        source: ADDRESS_SOURCE.parties,
+      });
+    }
+    return out;
+  }
+
+  /** saveAddresses for a lead just created, which is known by its lead id. */
+  private async saveAddressesForLead(leadId: string, organizationId: string | null, found: FoundAddress[]): Promise<void> {
+    if (!found.length) return;
+    try {
+      const made = await this.prisma.surplusDetail.findUnique({ where: { leadId }, select: { id: true } });
+      if (made) await this.saveAddresses(made.id, organizationId, found);
+    } catch (e: any) {
+      this.logger.warn(`Could not save addresses for lead ${leadId}: ${e.message}`);
+    }
+  }
+
+  /**
+   * Add each address to the claimant's list, or mark one already there as
+   * seen again. Never edits what a row says or what came of it. A failure is
+   * logged and the pull carries on: the list is extra, the card is not.
+   */
+  private async saveAddresses(surplusDetailId: string, organizationId: string | null, found: FoundAddress[]): Promise<void> {
+    const now = new Date();
+    const seen = new Set<string>();
+    for (const a of found) {
+      if (!a.street?.trim()) continue;
+      const addressKey = surplusAddressKey(a.street, a.zip);
+      if (seen.has(addressKey)) continue;
+      seen.add(addressKey);
+      try {
+        await this.prisma.surplusAddress.upsert({
+          where: { surplusDetailId_addressKey: { surplusDetailId, addressKey } },
+          update: { lastSeenAt: now },
+          create: {
+            surplusDetailId,
+            organizationId,
+            street: a.street.trim(),
+            city: a.city,
+            state: a.state,
+            zip: a.zip,
+            country: a.country ?? null,
+            nameOnRecord: a.name,
+            source: a.source,
+            delivery: a.delivery ?? null,
+            addressKey,
+            firstSeenAt: now,
+            lastSeenAt: now,
+          },
+        });
+      } catch (e: any) {
+        this.logger.warn(`Could not save address ${a.street} for ${surplusDetailId}: ${e.message}`);
+      }
+    }
   }
 
   /**

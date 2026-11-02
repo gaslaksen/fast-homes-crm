@@ -1,4 +1,4 @@
-import { normalizeMailing, foreignCountry, usStateCode, cityLine } from './surplus-address.util';
+import { normalizeMailing, foreignCountry, usStateCode, cityLine, surplusAddressKey } from './surplus-address.util';
 
 /** The addresses the first Charlotte pull (2026-10-15) stored wrong, as the reader returned them. */
 describe('normalizeMailing', () => {
@@ -89,5 +89,13 @@ describe('the helpers', () => {
       'MISSISSAUGA, ONTARIO L4T 1M9, CANADA',
     );
     expect(cityLine({ city: 'PUNTA GORDA', state: 'FL', zip: '33950', country: null })).toBe('PUNTA GORDA, FL 33950');
+  });
+});
+
+describe('surplusAddressKey', () => {
+  it('keys one address the same however it is punctuated', () => {
+    expect(surplusAddressKey('576 EASTERN PKWY #3G', '11225')).toBe('576EASTERNPKWY3G|11225');
+    expect(surplusAddressKey('576 Eastern Pkwy 3G', '11225-4410')).toBe('576EASTERNPKWY3G|11225');
+    expect(surplusAddressKey('30 GUILDWOOD DR', null)).toBe('30GUILDWOODDR|');
   });
 });
