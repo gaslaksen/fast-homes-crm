@@ -34,6 +34,7 @@ import { SurplusOutreachService } from './surplus-outreach.service';
 import { SurplusPruneService } from './surplus-prune.service';
 import { SurplusSessionService } from './surplus-session.service';
 import { SurplusPrintRunService } from './surplus-print-run.service';
+import { SurplusRatingService } from './surplus-rating.service';
 import { StorageModule } from '../storage/storage.module';
 import { MessagesModule } from '../messages/messages.module';
 import { SurplusProgressModule } from './surplus-progress.module';
@@ -79,6 +80,7 @@ import { SurplusProgressModule } from './surplus-progress.module';
     SurplusPruneService,
     SurplusSessionService,
     SurplusPrintRunService,
+    SurplusRatingService,
   ],
   exports: [
     SurplusService,

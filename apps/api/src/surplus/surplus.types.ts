@@ -89,6 +89,11 @@ export interface SurplusListFilters {
   tier?: string;
   /** Comma-separated SurplusQueue values: what to do with the claimant next. */
   queue?: string;
+  /**
+   * Comma-separated review ratings: 'A', 'B', or 'none' for cases nobody has
+   * rated. The A Tier and B Tier buttons on the board.
+   */
+  rating?: string;
   stage?: string;
   claimantType?: string;
   /** 'all' (default) or one county name we hold leads for. */

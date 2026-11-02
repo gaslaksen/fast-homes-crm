@@ -491,6 +491,25 @@ export const surplusAPI = {
   }) => api.post('/surplus/print-run/mailed', body),
   /** The whole Send to IDI queue, inside the trace window and not already waiting on a batch, as one file. */
   idiExportReady: (county?: string | null) => api.post('/surplus/idi/export-ready', { county: county || null }),
+  /** Read an A Tier / B Tier ratings file and match each row to a case. Writes nothing. */
+  ratingsParse: (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.post('/surplus/ratings/import/parse', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+  /** Apply a ratings file: every claimant row on each matched case takes its rating. */
+  ratingsImport: (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.post('/surplus/ratings/import', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+  /** Rate one case by hand, or clear it with null. Moves every claimant on the case. */
+  setRating: (id: string, rating: 'A' | 'B' | null, reason?: string | null) =>
+    api.post(`/surplus/${id}/rating`, { rating, ...(reason !== undefined ? { reason } : {}) }),
   /** Read an IDI results file and match each row to a claimant. Writes nothing. */
   idiImportParse: (file: File) => {
     const formData = new FormData();

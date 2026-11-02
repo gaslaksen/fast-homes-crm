@@ -2158,6 +2158,21 @@ export class SurplusService {
     const tiers = asList(filters.tier);
     if (tiers.length) detailWhere.tier = { in: tiers };
 
+    // The review rating is stored, not computed, so it narrows in SQL.
+    const ratings = asList(filters.rating).map((r) => r.toUpperCase());
+    if (ratings.length) {
+      const named = ratings.filter((r) => r !== 'NONE');
+      detailWhere.AND = [
+        ...(detailWhere.AND || []),
+        {
+          OR: [
+            ...(named.length ? [{ reviewRating: { in: named } }] : []),
+            ...(ratings.includes('NONE') ? [{ reviewRating: null }] : []),
+          ],
+        },
+      ];
+    }
+
     const stages = asList(filters.stage);
     if (stages.length) detailWhere.stage = { in: stages };
     else if (filters.hideDead) detailWhere.stage = { not: SurplusStage.DEAD };
@@ -2468,6 +2483,19 @@ export class SurplusService {
       claimantCount: live.length,
       newSevenDays: props.filter((p: any) => p.noticeAge !== null && p.noticeAge <= 7).length,
       tierA: props.filter((p: any) => p.tier === SurplusTier.A).length,
+      /**
+       * Properties per review rating, for the A Tier and B Tier buttons, and
+       * how many of each the board hides as too early. Same counting as the
+       * queues beside them.
+       */
+      ratings: {
+        A: props.filter((p: any) => p.reviewRating === 'A').length,
+        B: props.filter((p: any) => p.reviewRating === 'B').length,
+      },
+      ratingsEarly: {
+        A: props.filter((p: any) => p.reviewRating === 'A' && isTooEarly(p)).length,
+        B: props.filter((p: any) => p.reviewRating === 'B' && isTooEarly(p)).length,
+      },
       // Counts per work queue, so the quick filters can show what they hold
       // without the board guessing. Property counts, because clicking a chip
       // filters properties.
@@ -2651,6 +2679,10 @@ export class SurplusService {
 
       stage: d.stage,
       tier: tierOf(facts),
+      reviewRating: d.reviewRating ?? null,
+      reviewReason: d.reviewReason ?? null,
+      reviewRatedBy: d.reviewRatedBy ?? null,
+      reviewRatedAt: d.reviewRatedAt ?? null,
       dripTrack: dripTrack(facts),
 
       saleDate: d.saleDate,
@@ -3463,6 +3495,17 @@ export function groupByProperty(rows: any[]): any[] {
       mailVerdict: head.mailVerdict,
       claimLedger: head.claimLedger,
       tier: head.tier,
+      // One rating per case, so the members agree; the best one wins if a
+      // hand edit ever left them apart.
+      ...(() => {
+        const rated = members.find((m) => m.reviewRating === 'A') || members.find((m) => m.reviewRating === 'B');
+        return {
+          reviewRating: rated?.reviewRating ?? null,
+          reviewReason: rated?.reviewReason ?? null,
+          reviewRatedBy: rated?.reviewRatedBy ?? null,
+          reviewRatedAt: rated?.reviewRatedAt ?? null,
+        };
+      })(),
       dripTrack: head.dripTrack,
       surplusType: head.surplusType,
       fundLocation: head.fundLocation,

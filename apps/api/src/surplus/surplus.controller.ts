@@ -28,6 +28,7 @@ import { SurplusNumbersService } from './surplus-numbers.service';
 import { SurplusPruneService } from './surplus-prune.service';
 import { SurplusSessionService } from './surplus-session.service';
 import { SurplusPrintRunService } from './surplus-print-run.service';
+import { SurplusRatingService } from './surplus-rating.service';
 
 /**
  * A probate filing upload. PDFs only and capped, because this goes straight to
@@ -98,6 +99,7 @@ export class SurplusController {
     private prune: SurplusPruneService,
     private session: SurplusSessionService,
     private printRun: SurplusPrintRunService,
+    private ratings: SurplusRatingService,
   ) {}
 
   /**
@@ -129,6 +131,7 @@ export class SurplusController {
     @Query('search') search?: string,
     @Query('tier') tier?: string,
     @Query('queue') queue?: string,
+    @Query('rating') rating?: string,
     @Query('stage') stage?: string,
     @Query('claimantType') claimantType?: string,
     @Query('county') county?: string,
@@ -166,6 +169,7 @@ export class SurplusController {
       search,
       tier,
       queue,
+      rating,
       stage,
       claimantType,
       county,
@@ -1109,6 +1113,35 @@ export class SurplusController {
     const found = await this.idi.getBatch(batchId, organizationId || null);
     if (!found) throw new NotFoundException('That batch was not found.');
     return found;
+  }
+
+  /**
+   * The A Tier / B Tier ratings file: read it and say what each row would
+   * do, writing nothing. Rating, County and Case number columns, the shape of
+   * the docket review sheets.
+   */
+  @Post('ratings/import/parse')
+  @UseInterceptors(FileInterceptor('file', IMPORT_UPLOAD_OPTIONS))
+  async ratingsParse(@UploadedFile() file: Express.Multer.File, @Headers('authorization') authHeader?: string) {
+    if (!file) throw new BadRequestException('No file uploaded');
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.ratings.preview(file.buffer, organizationId || null);
+  }
+
+  /** Apply a ratings file: every claimant row on each matched case takes its rating. */
+  @Post('ratings/import')
+  @UseInterceptors(FileInterceptor('file', IMPORT_UPLOAD_OPTIONS))
+  async ratingsImport(@UploadedFile() file: Express.Multer.File, @Headers('authorization') authHeader?: string) {
+    if (!file) throw new BadRequestException('No file uploaded');
+    const { organizationId, userId } = this.decodeToken(authHeader);
+    return this.ratings.apply(file.buffer, organizationId || null, userId || null);
+  }
+
+  /** Rate one case by hand, or clear it: { rating: 'A' | 'B' | null, reason? }. */
+  @Post(':id/rating')
+  async setRating(@Param('id') id: string, @Body() body: any, @Headers('authorization') authHeader?: string) {
+    const { organizationId, userId } = this.decodeToken(authHeader);
+    return this.ratings.setForLead(id, body || {}, organizationId || null, userId || null);
   }
 
   @Post('idi/import/parse')
