@@ -21,7 +21,6 @@ import {
   CLAIMANT_TYPE_LABEL,
   SURPLUS_STAGES,
   SURPLUS_STAGE_COLOR,
-  TIER,
   downloadCsv,
   fmtDate,
   fmtDay,
@@ -276,6 +275,15 @@ const SURPLUS_COLUMNS: PipelineColumn<any>[] = [
       return (
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: 14, fontWeight: 700, lineHeight: 1.25, overflowWrap: 'anywhere' }}>
+            {r.reviewRating && RATING_CHIP[r.reviewRating] && (
+              <span
+                className="dc-tag"
+                style={{ background: RATING_CHIP[r.reviewRating].bg, color: RATING_CHIP[r.reviewRating].fg, fontSize: 10.5, padding: '1px 6px', marginRight: 6, verticalAlign: 2 }}
+                title={[r.reviewReason, r.reviewRatedBy && `Rated by ${r.reviewRatedBy}`].filter(Boolean).join(' · ') || undefined}
+              >
+                {r.reviewRating}
+              </span>
+            )}
             <span style={r.allDeceased ? { textDecoration: 'line-through' } : undefined}>
               {names.slice(0, 2).join(', ') || 'Unknown claimant'}
             </span>
@@ -504,6 +512,23 @@ const QUEUES: [string, string][] = [
   ['closed', 'Closed'],
 ];
 const QUEUE_LABEL: Record<string, string> = Object.fromEntries(QUEUES);
+/**
+ * The queues with a button of their own on the front row. The rest (Likely
+ * match, Find the heirs, Send to IDI, Research by name, Entity) were not being
+ * clicked and are one pick away in the Filters drawer's queue menu.
+ */
+const FRONT_QUEUES = ['call', 'mailed', 'hold', 'closed'];
+
+/**
+ * The A Tier and B Tier buttons: the rating a docket review gave the case,
+ * imported from the review sheets under More. They replaced the dollar tier,
+ * which only restated the surplus column.
+ */
+const RATINGS: [string, string, string][] = [
+  ['A', 'A Tier', 'Rated A off the live docket: no claim, waiver or payout on file. Work these first.'],
+  ['B', 'B Tier', 'Rated B off the live docket: somebody has a claim on file that may be denied. Lower priority.'],
+];
+const RATING_CHIP: Record<string, { bg: string; fg: string }> = { A: CHIP.red, B: CHIP.amber };
 
 const QUEUE_HELP: Record<string, string> = {
   call: 'A callable number and a claim still open. Pick up the phone.',
@@ -540,12 +565,6 @@ const STATUS_CHIPS: [string, string, string | undefined][] = [
   ['estate', 'Estate or probate', undefined],
   ['lien', 'Competing lien filed', 'Informational. Does not block outreach, but the payout may land under the posted surplus.'],
 ];
-
-const TIER_HELP: Record<string, string> = {
-  A: '$25k and up, living owner, no competing lien',
-  B: '$10k to $25k, living owner',
-  C: '$25k and up, owner deceased',
-};
 
 const BAND_OPTS: [string, string][] = [
   ['all', 'Any surplus'],
@@ -790,6 +809,9 @@ export default function SurplusFundsPage() {
     queues: {} as Record<string, number>,
     /** Of those, how many the board hides as too early, per queue. */
     queuesEarly: {} as Record<string, number>,
+    /** Property counts per review rating, and how many of each are too early. */
+    ratings: {} as Record<string, number>,
+    ratingsEarly: {} as Record<string, number>,
     complianceBlocked: 0,
     netInPipeline: 0,
     belowFloor: 0,
@@ -910,8 +932,8 @@ export default function SurplusFundsPage() {
   const [callStats, setCallStats] = useState<any>(null);
   /** The notice reader's month: reads, dollars, paused. Null until answered. */
   const [noticeUsage, setNoticeUsage] = useState<NoticeUsage | null>(null);
-  /** The dollar band chip. A sort more than a cut, but the course filters on it. */
-  const [tierQ, setTierQ] = useState<string | null>(null);
+  /** The A Tier / B Tier button: the docket review rating. */
+  const [ratingQ, setRatingQ] = useState<string | null>(null);
   /** The bulk Mark dead form: a reason is required. */
   const [deadOpen, setDeadOpen] = useState(false);
   const [deadReason, setDeadReason] = useState('');
@@ -948,7 +970,7 @@ export default function SurplusFundsPage() {
         const row = res.data || {};
         setQueueQ(null);
         setChipQ(null);
-        setTierQ(null);
+        setRatingQ(null);
         setStageQ(null);
         setCounty('all');
         setBand('all');
@@ -978,7 +1000,7 @@ export default function SurplusFundsPage() {
   // Paging. The filters as one key: any change to them goes back to page 1,
   // set during render rather than in an effect so the fetch never runs once
   // with the old page first.
-  const filterKey = JSON.stringify([q, queueQ, tierQ, stageQ, ctype, county, band, chipQ, ageQ, lienWin, hideDead, hideDnc, sort, colSort?.key, colSort?.dir, underYear, hideEarly, batchQ?.id, mineQ]);
+  const filterKey = JSON.stringify([q, queueQ, ratingQ, stageQ, ctype, county, band, chipQ, ageQ, lienWin, hideDead, hideDnc, sort, colSort?.key, colSort?.dir, underYear, hideEarly, batchQ?.id, mineQ]);
   const [pageAt, setPageAt] = useState<{ key: string; page: number }>({ key: filterKey, page: 1 });
   const page = pageAt.key === filterKey ? pageAt.page : 1;
   const setPage = (n: number) => setPageAt({ key: filterKey, page: n });
@@ -1021,7 +1043,7 @@ export default function SurplusFundsPage() {
       const res = await surplusAPI.list({
         search: q || undefined,
         queue: (!searching && queueQ) || undefined,
-        tier: tierQ || undefined,
+        rating: (!searching && ratingQ) || undefined,
         stage: stageQ || undefined,
         claimantType: ctype === 'all' ? undefined : ctype,
         county,
@@ -1081,7 +1103,7 @@ export default function SurplusFundsPage() {
       if (seq === fetchSeq.current) setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterKey, q, searching, wide, queueQ, tierQ, stageQ, ctype, county, band, chipQ, ageQ, lienWin, hideDead, hideDnc, sort, colSort, underYear, hideEarly, batchQ, mineQ, page, pageSize]);
+  }, [filterKey, q, searching, wide, queueQ, ratingQ, stageQ, ctype, county, band, chipQ, ageQ, lienWin, hideDead, hideDnc, sort, colSort, underYear, hideEarly, batchQ, mineQ, page, pageSize]);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -1309,7 +1331,7 @@ export default function SurplusFundsPage() {
     setQ('');
     setBatchQ(null);
     setQueueQ(null);
-    setTierQ(null);
+    setRatingQ(null);
     setChipQ(null);
     setMineQ(false);
     setStageQ(null);
@@ -1324,7 +1346,9 @@ export default function SurplusFundsPage() {
 
   /** Take off the drawer's filters, leaving the queue, the search and the batch alone. */
   const clearFilters = () => {
-    setTierQ(null);
+    // A queue picked from the drawer's menu is a drawer filter; one on the
+    // front row stays.
+    if (queueQ && !FRONT_QUEUES.includes(queueQ)) setQueueQ(null);
     setChipQ(null);
     setStageQ(null);
     setCounty('all');
@@ -1486,7 +1510,7 @@ export default function SurplusFundsPage() {
         'County', 'Case', 'Address', 'City', 'Zip', 'Parcel', 'Claimant', 'Claimant type',
         'Surplus type', 'Fund location', 'Sale date', 'Sale price', 'Notice date',
         'Notice confirmed', 'Claim deadline', 'Days remaining', 'Gross surplus', 'Total liens',
-        'Net to claimant', 'Tier', 'Drip track', 'Stage', 'Arrangement', 'Total consideration',
+        'Net to claimant', 'Rating', 'Rating reason', 'Drip track', 'Stage', 'Arrangement', 'Total consideration',
         '% of gross', '% of net', 'Fee cap', 'Cap confidence', 'Compliance', 'Blocks',
         'Cert of disbursements', 'Assignment deadline', 'Phones', 'Emails', 'Touches', 'Notes',
         'Letter mailed', 'Letter address',
@@ -1498,7 +1522,7 @@ export default function SurplusFundsPage() {
         r.fundLocation === 'clerk' ? 'Held by clerk' : 'Escheated to DFS',
         fmtDay(r.saleDate), r.salePrice, fmtDay(r.noticeDate), r.noticeConfirmed ? 'Yes' : 'No',
         fmtDay(r.claimDeadline), r.daysRemaining, r.grossSurplus, r.totalLiens, r.netToClaimant,
-        r.tier, r.dripTrack, r.stage,
+        r.reviewRating || '', r.reviewReason || '', r.dripTrack, r.stage,
         r.arrangement === 'assignment' ? 'Assignment of rights' : 'Limited power of attorney',
         r.totalConsideration, pct(r.pctOfGross), pct(r.pctOfNet),
         r.compliance.rule ? (r.compliance.rule.feeCap == null ? 'none' : `${r.compliance.rule.feeCap}%`) : 'no rule',
@@ -1522,7 +1546,9 @@ export default function SurplusFundsPage() {
   const filterChips: { key: string; label: string; clear: () => void }[] = [];
   const optLabel = (opts: [string, string][], v: string) => opts.find(([k]) => k === v)?.[1] ?? v;
   if (chipQ) filterChips.push({ key: 'status', label: optLabel(STATUS_CHIPS.map(([k, l]) => [k, l]), chipQ), clear: () => setChipQ(null) });
-  if (tierQ) filterChips.push({ key: 'tier', label: `Tier: ${TIER[tierQ as keyof typeof TIER]?.label ?? tierQ}`, clear: () => setTierQ(null) });
+  if (queueQ && !FRONT_QUEUES.includes(queueQ) && !searching) {
+    filterChips.push({ key: 'queue', label: `Queue: ${QUEUE_LABEL[queueQ] || queueQ}`, clear: () => setQueueQ(null) });
+  }
   if (stageQ) filterChips.push({ key: 'stage', label: `Stage: ${stageQ}`, clear: () => setStageQ(null) });
   if (county !== 'all') filterChips.push({ key: 'county', label: county, clear: () => setCounty('all') });
   if (band !== 'all') filterChips.push({ key: 'band', label: optLabel(BAND_OPTS, band), clear: () => setBand('all') });
@@ -1616,6 +1642,13 @@ export default function SurplusFundsPage() {
                   >
                     Import IDI results
                   </button>
+                  <Link
+                    className="dc-menu-item"
+                    href="/surplus-funds/ratings"
+                    title="Upload an A Tier / B Tier review sheet: Rating, County and Case number columns. Every row is matched to a case and shown before anything is written."
+                  >
+                    Import A/B ratings
+                  </Link>
                   <button
                     type="button"
                     className="dc-menu-item"
@@ -1760,7 +1793,7 @@ export default function SurplusFundsPage() {
               className={`dc-btn${filtersOpen ? ' on' : ''}`}
               onClick={() => setFiltersOpen((v) => !v)}
               aria-expanded={filtersOpen}
-              title="Tier, contact status, stage, county, amount, claim age and the lienholder window"
+              title="Contact status, queue, stage, county, amount, claim age and the lienholder window"
             >
               Filters
               {activeFilters > 0 && <span className="dc-count">{activeFilters}</span>}
@@ -1792,35 +1825,73 @@ export default function SurplusFundsPage() {
                 </button>
               </span>
             )}
-            {QUEUES.map(([k, label]) => (
-              <button
-                key={k}
-                className={`dc-tab${queueQ === k && !searching ? ' on' : ''}`}
-                onClick={() => {
-                  // Picking a queue while a search is in the box means "this
-                  // queue", so the search gives way to it.
-                  if (searching) {
-                    setQ('');
-                    setQueueQ(k);
-                  } else setQueueQ(queueQ === k ? null : k);
-                }}
-                title={QUEUE_HELP[k]}
-              >
-                {label}
-                {stats.queues?.[k] != null && (() => {
-                  // The chip counts what the board shows. The early ones it
-                  // hides are said out loud, so 140 against 101 on the list
-                  // is explained on the chip itself.
-                  const early = earlyHidden ? stats.queuesEarly?.[k] || 0 : 0;
+            {/* Call now, then the A Tier and B Tier ratings beside it, then
+                the queues that end the work. A button here is one look at the
+                board: picking a rating clears the queue and the other way
+                round, so A Tier shows every A file. The drawer's queue menu
+                narrows inside a rating when both are wanted. */}
+            {FRONT_QUEUES.flatMap((k) => {
+              const queueChip = (
+                <button
+                  key={k}
+                  className={`dc-tab${queueQ === k && !searching ? ' on' : ''}`}
+                  onClick={() => {
+                    // Picking a queue while a search is in the box means "this
+                    // queue", so the search gives way to it.
+                    if (searching) {
+                      setQ('');
+                      setQueueQ(k);
+                    } else setQueueQ(queueQ === k ? null : k);
+                    setRatingQ(null);
+                  }}
+                  title={QUEUE_HELP[k]}
+                >
+                  {QUEUE_LABEL[k]}
+                  {stats.queues?.[k] != null && (() => {
+                    // The chip counts what the board shows. The early ones it
+                    // hides are said out loud, so 140 against 101 on the list
+                    // is explained on the chip itself.
+                    const early = earlyHidden ? stats.queuesEarly?.[k] || 0 : 0;
+                    return (
+                      <span style={{ marginLeft: 5, opacity: 0.6 }}>
+                        {stats.queues[k] - early}
+                        {early > 0 && <span style={{ fontSize: 10.5 }}> ({early} too early)</span>}
+                      </span>
+                    );
+                  })()}
+                </button>
+              );
+              if (k !== 'call') return [queueChip];
+              return [
+                queueChip,
+                ...RATINGS.map(([r, label, help]) => {
+                  const n = stats.ratings?.[r];
+                  const early = earlyHidden ? stats.ratingsEarly?.[r] || 0 : 0;
                   return (
-                    <span style={{ marginLeft: 5, opacity: 0.6 }}>
-                      {stats.queues[k] - early}
-                      {early > 0 && <span style={{ fontSize: 10.5 }}> ({early} too early)</span>}
-                    </span>
+                    <button
+                      key={`rating-${r}`}
+                      className={`dc-tab${ratingQ === r && !searching ? ' on' : ''}`}
+                      onClick={() => {
+                        if (searching) {
+                          setQ('');
+                          setRatingQ(r);
+                        } else setRatingQ(ratingQ === r ? null : r);
+                        setQueueQ(null);
+                      }}
+                      title={help}
+                    >
+                      {label}
+                      {n != null && (
+                        <span style={{ marginLeft: 5, opacity: 0.6 }}>
+                          {n - early}
+                          {early > 0 && <span style={{ fontSize: 10.5 }}> ({early} too early)</span>}
+                        </span>
+                      )}
+                    </button>
                   );
-                })()}
-              </button>
-            ))}
+                }),
+              ];
+            })}
             <button
               className={`dc-tab${mineQ ? ' on' : ''}`}
               onClick={() => setMineQ(!mineQ)}
@@ -1872,26 +1943,26 @@ export default function SurplusFundsPage() {
                   </button>
                 ))}
               </div>
-              {/* The dollar band. Computed on every row and kept as a sort, but
-                  the course's first quick filter is tier and a caller working
-                  the big ones first should not need the dropdowns. */}
-              <div className="dc-drawer-row">
-                <span className="dc-flabel">Tier</span>
-                {(['A', 'B', 'C'] as const).map((t) => (
-                  <button
-                    key={t}
-                    className={`dc-tab${tierQ === t ? ' on' : ''}`}
-                    onClick={() => setTierQ(tierQ === t ? null : t)}
-                    title={TIER_HELP[t]}
-                  >
-                    {TIER[t].icon} {TIER[t].label}
-                  </button>
-                ))}
-              </div>
               {/* One menu per question. The stage used to be three buttons and
                   a menu that held the same three. */}
               <div className="dc-drawer-row">
                 <span className="dc-flabel">Narrow</span>
+                {/* Every work queue, the ones without a front-row button
+                    included. Picking one here is the same cut as a button. */}
+                <Sel
+                  v={queueQ || 'all'}
+                  set={(v) => {
+                    if (searching) setQ('');
+                    setQueueQ(v === 'all' ? null : v);
+                  }}
+                  opts={[['all', 'Any queue'] as [string, string]].concat(
+                    QUEUES.map(([k, l]) => {
+                      const n = stats.queues?.[k];
+                      const early = earlyHidden ? stats.queuesEarly?.[k] || 0 : 0;
+                      return [k, n != null ? `${l} (${n - early})` : l] as [string, string];
+                    }),
+                  )}
+                />
                 <Sel
                   v={stageQ || 'all'}
                   set={(v) => setStageQ(v === 'all' ? null : v)}
@@ -2044,10 +2115,18 @@ export default function SurplusFundsPage() {
                 'No surplus leads yet. Import a county list (under More) to get started.'
               ) : searching ? (
                 `Nothing in Dealcore matches "${q.trim()}".`
-              ) : queueQ ? (
+              ) : queueQ || ratingQ ? (
                 <span>
-                  Nothing in {QUEUE_LABEL[queueQ] || queueQ} right now.{' '}
-                  <button className="dc-btn sm" onClick={() => setQueueQ(null)}>
+                  Nothing in{' '}
+                  {[ratingQ && `${ratingQ} Tier`, queueQ && (QUEUE_LABEL[queueQ] || queueQ)].filter(Boolean).join(', ')} right
+                  now.{' '}
+                  <button
+                    className="dc-btn sm"
+                    onClick={() => {
+                      setQueueQ(null);
+                      setRatingQ(null);
+                    }}
+                  >
                     Show all {stats.openClaims} open
                   </button>
                 </span>
@@ -2070,9 +2149,13 @@ export default function SurplusFundsPage() {
                     {total} propert{total === 1 ? 'y' : 'ies'} match <b>&quot;{q.trim()}&quot;</b> across every
                     claim
                   </>
-                ) : queueQ ? (
+                ) : queueQ || ratingQ ? (
                   <>
-                    {total} in <b>{QUEUE_LABEL[queueQ] || queueQ}</b> · {stats.openClaims} open
+                    {total} in{' '}
+                    <b>
+                      {[ratingQ && `${ratingQ} Tier`, queueQ && (QUEUE_LABEL[queueQ] || queueQ)].filter(Boolean).join(', ')}
+                    </b>{' '}
+                    · {stats.openClaims} open
                   </>
                 ) : (
                   <>

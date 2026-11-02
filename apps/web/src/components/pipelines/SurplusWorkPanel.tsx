@@ -2313,6 +2313,70 @@ const TRACE_TONE: Record<string, string> = {
   idle: 'var(--dim)',
 };
 
+/**
+ * The case's A Tier / B Tier rating, set by the ratings import or here. One
+ * rating per case, so a change moves every claimant on it. The reason the
+ * review gave sits in the tooltip.
+ */
+function RatingPicker({
+  property,
+  leadId,
+  onChanged,
+  say,
+}: {
+  property: any;
+  leadId: string;
+  onChanged: () => void;
+  say: (msg: string) => void;
+}) {
+  const saved: string = property.reviewRating || '';
+  const [value, setValue] = useState(saved);
+  const [busy, setBusy] = useState(false);
+  // Follow the case when the panel moves to another one or the board refreshes.
+  const [seen, setSeen] = useState(saved);
+  if (seen !== saved) {
+    setSeen(saved);
+    setValue(saved);
+  }
+  const tip = [
+    property.reviewReason,
+    property.reviewRatedBy && `Rated by ${property.reviewRatedBy}${property.reviewRatedAt ? ` on ${fmtDay(property.reviewRatedAt)}` : ''}`,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const color = value === 'A' ? 'var(--red)' : value === 'B' ? 'var(--amber)' : 'var(--dim)';
+  return (
+    <select
+      className="dc-wp-sel"
+      value={value}
+      disabled={busy}
+      aria-label="A Tier or B Tier rating"
+      title={tip || 'The docket review rating. A: work it now. B: a claim on file that may be denied.'}
+      style={{ padding: '1px 6px', fontSize: 11, fontWeight: 700, color, borderColor: value ? color : undefined }}
+      onChange={async (e) => {
+        const next = e.target.value;
+        setValue(next);
+        setBusy(true);
+        try {
+          const res = await surplusAPI.setRating(leadId, (next || null) as 'A' | 'B' | null);
+          const n = res.data?.updated ?? 1;
+          say(`${next ? `${next} Tier` : 'Rating cleared'} on ${n} claimant${n === 1 ? '' : 's'} on this case.`);
+          onChanged();
+        } catch (err: any) {
+          setValue(saved);
+          say(err?.response?.data?.message || 'The rating did not save.');
+        } finally {
+          setBusy(false);
+        }
+      }}
+    >
+      <option value="">Not rated</option>
+      <option value="A">A Tier</option>
+      <option value="B">B Tier</option>
+    </select>
+  );
+}
+
 interface Props {
   /** The subject property, with every claimant owed on it. */
   property: any;
@@ -2595,6 +2659,7 @@ export default function SurplusWorkPanel({
                 >
                   {property.claimStatusLabel}
                 </span>
+                <RatingPicker property={property} leadId={lead.id} onChanged={onChanged} say={say} />
                 {property.anyDeceased && (
                   <span style={{ fontSize: 11, color: 'var(--amber)' }}>Estate</span>
                 )}

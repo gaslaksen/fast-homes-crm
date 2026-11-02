@@ -820,6 +820,18 @@ model SurplusDetail {
   /// Cached band so the board can sort and count without recomputing over
   /// every row. Derived from gross surplus, deceased/heirs, competing lien.
   tier  String? @default("U") // SurplusTier
+  /// The A Tier / B Tier rating: a person or a review bot read the live docket
+  /// and said how worth working the case is. "A" is work it now, "B" is a
+  /// claim on file that may be denied, null is not reviewed. Set by hand or by
+  /// the ratings import, never computed, and kept apart from `tier`, which is
+  /// recomputed from the dollars on every change and would overwrite it. One
+  /// rating per case: every claimant row on the county and case carries it.
+  reviewRating  String?
+  /// Why the reviewer rated it so, shown beside the rating.
+  reviewReason  String?
+  /// Who rated it: a person's name, or the bot named in the import file.
+  reviewRatedBy String?
+  reviewRatedAt DateTime?
 
   // ── Qualification gate ────────────────────────────────────────────────────
   // All three must be true before the stage can advance to Agreement Signed.
