@@ -836,6 +836,24 @@ button.dc-wp-person {
 }
 button.dc-wp-person:hover { background: var(--surface2); border-color: var(--border2); }
 .dc-wp-person-card { margin-top: 6px; padding: 4px 10px 8px; border: 1px solid var(--border2); border-radius: 8px; background: var(--surface); }
+/*
+ * Inside an open person card every control is one size, the size of the
+ * Call and Text buttons on the number rows, so the card reads as one piece.
+ * The footer is the last line: the drip picker and the outreach buttons on
+ * the left, the record's own controls on the right, Remove quiet and red.
+ */
+.dc-wp-person-card button.dc-wp-btn { padding: 4px 10px; font-size: 11.5px; }
+.dc-wp-person-card select.dc-wp-sel { padding: 4px 8px; font-size: 11.5px; line-height: 18px; }
+.dc-wp-person-foot {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border);
+}
+.dc-wp-person-foot .grow { flex: 1 1 auto; }
+.dc-wp-person-foot .group { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.dc-wp-person-card button.dc-wp-btn.quiet { background: transparent; border-color: transparent; color: var(--dim); }
+.dc-wp-person-card button.dc-wp-btn.quiet:hover:not(:disabled) { background: var(--surface3); color: var(--text); }
+.dc-wp-person-card button.dc-wp-btn.danger { color: var(--red); }
+.dc-wp-person-card button.dc-wp-btn.danger:hover:not(:disabled) { color: var(--red); }
 .dc-wp-conf {
   display: inline-block; margin-left: 6px; padding: 0 6px; border: 1px solid; border-radius: 10px;
   font-size: 10.5px; font-weight: 700; line-height: 16px; vertical-align: 1px;
