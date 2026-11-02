@@ -1,0 +1,9 @@
+{
+  "name": "dealcore-railway-iac",
+  "private": true,
+  "type": "module",
+  "description": "Railway infrastructure as code for the API service. Outside the pnpm workspace on purpose, so the Docker build's lockfile never changes. See railway.ts.",
+  "devDependencies": {
+    "railway": "3.16.0"
+  }
+}
