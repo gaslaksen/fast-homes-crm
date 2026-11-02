@@ -206,7 +206,16 @@ export default function SurplusHeirs({
   const [editingId, setEditingId] = useState<string | null>(null);
   /** The person whose full card is open. Everyone else is one line. */
   const [openId, setOpenId] = useState<string | null>(null);
+  /** Whether the credibility packet's links are configured. Fetched once for every card. */
+  const [packet, setPacket] = useState<PacketStatus | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    surplusAPI
+      .credibilityStatus()
+      .then((r) => setPacket(r.data || null))
+      .catch(() => setPacket({ ready: false, missing: ['status unavailable'] }));
+  }, []);
 
   const load = () => {
     surplusAPI
@@ -359,6 +368,7 @@ export default function SurplusHeirs({
       onStatus={(v) => setStatus(h, v)}
       onEdit={() => setEditingId(h.id)}
       leadId={leadId}
+      packet={packet}
       profiles={(social || []).filter((p) => p.heirId === h.id)}
       socialPaused={socialPaused ?? null}
       say={say}
@@ -539,6 +549,81 @@ export default function SurplusHeirs({
   );
 }
 
+/** The credibility packet's readiness, from the API. */
+interface PacketStatus {
+  ready: boolean;
+  missing: string[];
+}
+
+/**
+ * Send the credibility packet to this person, by text or email, from their
+ * own card. The packet used to be the claimant's alone; the son who asked
+ * "who are you" had to be told to wait for a text to his father.
+ */
+function PersonPacketButtons({
+  leadId,
+  h,
+  packet,
+  say,
+  onChanged,
+}: {
+  leadId: string;
+  h: Heir;
+  packet: PacketStatus | null;
+  say: (msg: string) => void;
+  onChanged: () => void;
+}) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const phone = h.phones.find((p) => !p.dnc && !p.bad)?.number || null;
+  const email = h.emails[0] || null;
+  const blocked = h.deceased ? 'marked deceased' : h.doNotCall ? 'marked do not call' : null;
+  const ready = !!packet?.ready;
+  const why = packet ? `Packet links not set up yet: ${packet.missing.join(', ')}` : 'Checking...';
+
+  const send = async (channel: 'sms' | 'email') => {
+    setBusy(channel);
+    try {
+      const r = await surplusAPI.sendCredibility(leadId, {
+        channels: [channel],
+        heirId: h.id,
+        phone: channel === 'sms' ? phone : undefined,
+        email: channel === 'email' ? email : undefined,
+      });
+      say(`Credibility packet ${channel === 'sms' ? 'texted' : 'emailed'} to ${h.name}.` + (r.data?.errors?.length ? ` ${r.data.errors.join(' ')}` : ''));
+      onChanged();
+    } catch (err: any) {
+      say(err?.response?.data?.message || 'The packet could not be sent.');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        className="dc-wp-btn"
+        disabled={!ready || !phone || !!busy || !!blocked}
+        onClick={() => send('sms')}
+        title={blocked ? `${h.name} is ${blocked}` : !ready ? why : !phone ? 'No callable number' : `Text ${h.name} the website, Sunbiz filing, one-pager and callback number`}
+      >
+        {busy === 'sms' ? 'Sending...' : 'Text packet'}
+      </button>
+      {email && (
+        <button
+          type="button"
+          className="dc-wp-btn"
+          disabled={!ready || !!busy || !!blocked}
+          onClick={() => send('email')}
+          title={blocked ? `${h.name} is ${blocked}` : !ready ? why : `Email ${h.name} the packet`}
+        >
+          {busy === 'email' ? 'Sending...' : 'Email packet'}
+        </button>
+      )}
+    </>
+  );
+}
+
 function HeirRow({
   h,
   onCollapse,
@@ -551,6 +636,7 @@ function HeirRow({
   onStatus,
   onEdit,
   leadId,
+  packet,
   profiles,
   socialPaused,
   say,
@@ -575,13 +661,14 @@ function HeirRow({
   onStatus: (status: string) => void;
   onEdit: () => void;
   leadId: string;
+  /** Whether the credibility packet can be sent. Null while unknown. */
+  packet: PacketStatus | null;
   profiles: SocialProfile[];
   socialPaused: boolean | null;
   say: (msg: string) => void;
   onChanged: () => void;
 }) {
   const [findOpen, setFindOpen] = useState(false);
-  const [moreOpen, setMoreOpen] = useState(false);
   const statusTone =
     h.contactStatus === 'message_passed' ? 'var(--mint)' : h.contactStatus === 'dead_end' ? 'var(--red)' : h.contactStatus === 'contacted' ? 'var(--amber)' : 'var(--faint)';
   return (
@@ -750,25 +837,20 @@ function HeirRow({
         blocked={h.deceased ? 'marked deceased' : h.doNotCall ? 'marked do not call' : null}
       />
 
+      {/* The packet and the person's own controls, in the open. They used to
+          sit behind a More button, which hid "do not call" from the person
+          who had just been asked to stop calling. */}
       <div style={{ display: 'flex', gap: 6, marginTop: 5, flexWrap: 'wrap' }}>
-        {/* The rarely used controls behind one button, so the card reads as
-            the person and their numbers rather than a row of switches. */}
-        <button type="button" className="dc-wp-btn" aria-expanded={moreOpen} onClick={() => setMoreOpen((v) => !v)}>
-          {moreOpen ? 'Less' : 'More ⋯'}
+        {!h.deceased && <PersonPacketButtons leadId={leadId} h={h} packet={packet} say={say} onChanged={onChanged} />}
+        <button type="button" className="dc-wp-btn" disabled={busy} onClick={onEdit}>
+          Edit
         </button>
-        {moreOpen && (
-          <>
-            <button type="button" className="dc-wp-btn" disabled={busy} onClick={onEdit}>
-              Edit
-            </button>
-            <button type="button" className="dc-wp-btn" disabled={busy} onClick={onDnc}>
-              {h.doNotCall ? 'Allow calls' : 'Do not call'}
-            </button>
-            <button type="button" className="dc-wp-btn" disabled={busy} onClick={onRemove}>
-              Remove
-            </button>
-          </>
-        )}
+        <button type="button" className="dc-wp-btn" disabled={busy} onClick={onDnc}>
+          {h.doNotCall ? 'Allow calls' : 'Do not call'}
+        </button>
+        <button type="button" className="dc-wp-btn" disabled={busy} onClick={onRemove}>
+          Remove
+        </button>
       </div>
     </div>
   );

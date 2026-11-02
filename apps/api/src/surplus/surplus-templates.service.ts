@@ -42,6 +42,7 @@ import { DIG_DEEPER_BRAND } from '../common/company.constants';
 import { ruleFor } from './surplus-compliance';
 import { CLAIM_STATUS_LABEL } from './surplus-classify.util';
 import { relativeOutreachScript } from './surplus-name-search.util';
+import { splitOwnerName } from '../foreclosures/foreclosure-scoring.util';
 import { NOTARY_COVER, LIMITED_POA, DIRECTION_TO_PAY, NOTARY_PACKAGE_NAME } from './surplus-notary-package';
 
 /** Every merge field a template may use, with what it fills in. */
@@ -75,7 +76,8 @@ export const MERGE_FIELDS: { key: string; meaning: string }[] = [
   { key: 'notaryName', meaning: 'The mobile notary on the claim, for the instruction sheet' },
   { key: 'recoveriesCount', meaning: 'How many claims have paid out, the milestone counter' },
   { key: 'referenceLine', meaning: 'The nearest consented reference with their quote, or the recoveries count, or "References available on request". Never blank.' },
-  { key: 'recipientName', meaning: 'Who the letter is addressed to: the claimant, or the heir or relative chosen' },
+  { key: 'recipientName', meaning: 'Who the letter or packet is addressed to: the claimant, or the heir or relative chosen' },
+  { key: 'recipientFirstName', meaning: 'Their first name. The claimant\'s when the packet goes to the claimant, the relative\'s when it goes to a relative' },
   { key: 'recipientAddress', meaning: 'Their mailing address, one line' },
 ];
 
@@ -256,12 +258,12 @@ With thanks,
   },
   [SurplusTemplateKind.CREDIBILITY_SMS]: {
     name: 'Course packet',
-    body: `{{claimantFirstName}}, this is {{callerName}} with {{companyName}}. As promised, so you can check us yourself: our website {{websiteUrl}} and our Florida state filing {{sunbizLink}}. Our one-page overview: {{onePagerLink}}. Call me back any time on {{callbackNumber}}.`,
+    body: `{{recipientFirstName}}, this is {{callerName}} with {{companyName}}. As promised, so you can check us yourself: our website {{websiteUrl}} and our Florida state filing {{sunbizLink}}. Our one-page overview: {{onePagerLink}}. Call me back any time on {{callbackNumber}}.`,
   },
   [SurplusTemplateKind.CREDIBILITY_EMAIL]: {
     name: 'Course packet',
     subject: 'Who we are, from {{callerName}} at {{companyName}}',
-    body: `Hi {{claimantFirstName}},
+    body: `Hi {{recipientFirstName}},
 
 Thank you for taking my call. As promised, here is where you can check us out for yourself.
 
@@ -502,15 +504,29 @@ export class SurplusTemplatesService {
    * the app could not fill named so the send can refuse rather than ship a
    * blank.
    */
-  async credibilityFor(leadId: string, organizationId?: string | null, userId?: string | null) {
+  async credibilityFor(leadId: string, organizationId?: string | null, userId?: string | null, heirId?: string | null) {
     const built = await this.fieldsFor(leadId, organizationId, userId);
     if (!built) throw new BadRequestException('Surplus lead not found');
     const readiness = this.credibilityReadiness();
     const active = await this.list(organizationId, built.facts.county);
+
+    // Who is reading it. The packet used to address the claimant whoever
+    // held the phone, so a son who asked "who are you" got a text that
+    // opened with his father's name. A relative on the case is addressed as
+    // themselves; the packet itself carries no amount and no source, so it
+    // is safe for anyone on the case to receive.
+    const heir = heirId
+      ? await this.prisma.surplusHeir.findFirst({ where: { id: heirId, surplusDetailId: built.detail.id } })
+      : null;
+    if (heirId && !heir) throw new BadRequestException('That person is not on this claim.');
+    const recipientName = heir ? heir.name : built.facts.claimant;
+    const recipientFirstName = heir ? splitOwnerName(heir.name).firstName || heir.name : built.facts.claimantFirstName;
+    const fields = { ...built.fields, recipientName, recipientFirstName };
+
     const render = (kind: SurplusTemplateKind) => {
       const t = active.kinds.find((k) => k.kind === kind)!;
-      const body = renderTemplate(t.body, built.fields);
-      const subject = t.subject ? renderTemplate(t.subject, built.fields) : '';
+      const body = renderTemplate(t.body, fields);
+      const subject = t.subject ? renderTemplate(t.subject, fields) : '';
       return {
         version: t.version,
         versionLabel: t.version ? `v${t.version}` : 'built-in',
@@ -521,6 +537,16 @@ export class SurplusTemplatesService {
     };
     return {
       ...readiness,
+      recipient: {
+        heirId: heir?.id || null,
+        name: recipientName,
+        role: heir?.role || null,
+        relationship: heir?.relationship || null,
+        deceased: !!heir?.deceased,
+        doNotCall: !!heir?.doNotCall,
+        phones: heir ? [heir.phone1, heir.phone2, heir.phone3, heir.phone4].filter(Boolean) as string[] : [],
+        emails: heir ? [heir.email1, heir.email2].filter(Boolean) as string[] : [],
+      },
       sms: render(SurplusTemplateKind.CREDIBILITY_SMS),
       email: render(SurplusTemplateKind.CREDIBILITY_EMAIL),
     };
