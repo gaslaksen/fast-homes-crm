@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import { campaignsAPI } from '@/lib/api';
 import { useCompanies } from '@/lib/companies';
 import { fmtDate } from './format';
@@ -127,6 +127,7 @@ export function PersonDrips({
   name,
   emails,
   blocked,
+  actions,
 }: {
   /** Null for the claimant. */
   heirId: string | null;
@@ -135,6 +136,11 @@ export function PersonDrips({
   emails: string[];
   /** Why this person cannot be enrolled, e.g. "marked do not call". */
   blocked?: string | null;
+  /**
+   * The person's other controls, laid out in one footer row beside the
+   * campaign picker so a card ends in a single tidy line of actions.
+   */
+  actions?: ReactNode;
 }) {
   const ctx = useContext(DripContext);
   const [busy, setBusy] = useState(false);
@@ -142,7 +148,7 @@ export function PersonDrips({
   // somebody chooses which address it goes to.
   const [pickEmailFor, setPickEmailFor] = useState<string | null>(null);
   const [pickedEmail, setPickedEmail] = useState('');
-  if (!ctx) return null;
+  if (!ctx) return <>{actions ? <div className="dc-wp-person-foot">{actions}</div> : null}</>;
   const { leadId, campaigns, enrollments, reload, say } = ctx;
 
   const mine = enrollments.filter((e) => (e.heirId || null) === heirId && e.status !== 'REMOVED');
@@ -267,9 +273,11 @@ export function PersonDrips({
             </button>
           </div>
         </div>
-      ) : (
-        offered.length > 0 && (
-          <div>
+      ) : null}
+
+      {(actions || (!pickEmailFor && offered.length > 0)) && (
+        <div className={actions ? 'dc-wp-person-foot' : undefined}>
+          {!pickEmailFor && offered.length > 0 && (
             <select
               className="dc-wp-sel"
               value=""
@@ -277,7 +285,7 @@ export function PersonDrips({
               onChange={(ev) => enroll(ev.target.value)}
               aria-label={`Add ${name} to a drip campaign`}
               title={blocked ? `${name} is ${blocked}` : `Add ${name} to a drip campaign`}
-              style={{ fontSize: 12, padding: '3px 8px' }}
+              style={actions ? undefined : { fontSize: 12, padding: '3px 8px' }}
             >
               <option value="">{mine.length ? 'Add to another drip...' : 'Add to drip campaign...'}</option>
               {offered.map((c) => (
@@ -286,8 +294,9 @@ export function PersonDrips({
                 </option>
               ))}
             </select>
-          </div>
-        )
+          )}
+          {actions}
+        </div>
       )}
     </div>
   );

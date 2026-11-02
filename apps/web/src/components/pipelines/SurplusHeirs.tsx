@@ -696,7 +696,7 @@ function HeirRow({
         )}
         {h.doNotCall && <span style={{ fontSize: 11.5, color: 'var(--red)' }}>do not call</span>}
         {onCollapse && (
-          <button type="button" className="dc-wp-btn" style={{ marginLeft: 'auto', padding: '2px 8px', fontSize: 11 }} onClick={onCollapse}>
+          <button type="button" className="dc-wp-btn quiet" style={{ marginLeft: 'auto' }} onClick={onCollapse}>
             Close
           </button>
         )}
@@ -768,54 +768,18 @@ function HeirRow({
       {/* Their profiles: the route when the numbers are dead or there were
           none. A candidate the search offered waits for the identification. */}
       {!h.deceased && <SocialProfileList profiles={profiles} say={say} onChanged={onChanged} />}
-      {!h.deceased && (
-        <div style={{ marginTop: 4 }}>
-          <button type="button" className="dc-wp-btn" style={{ padding: '2px 8px', fontSize: 11 }} onClick={() => setFindOpen((v) => !v)}>
-            {findOpen ? 'Done' : profiles.length ? 'Find more online' : 'Find online'}
-          </button>
-          {findOpen && (
-            <div
-              style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 6 }}
-              onClickCapture={() => rememberSocialTarget({ leadId, heirId: h.id, label: h.name, sub: h.relationship || h.roleLabel || null })}
-            >
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                {socialSearchLinks(h.name, h.city, h.state).map((l) => (
-                  <a key={l.site} href={l.url} target="_blank" rel="noopener noreferrer" className="dc-wp-searchlink">
-                    {l.site}
-                  </a>
-                ))}
-              </div>
-              <FindProfilesButton
-                leadId={leadId}
-                heirId={h.id}
-                who={h.name}
-                searchedAt={h.socialSearchedAt || null}
-                paused={socialPaused}
-                say={say}
-                onChanged={onChanged}
-              />
-              <AddSocialProfile leadId={leadId} heirId={h.id} say={say} onChanged={onChanged} />
-            </div>
-          )}
-        </div>
-      )}
 
       {/* Where the outreach to this person stands. "Passed a message on" is
-          the win with a neighbor or a relative: the claimant now knows to call. */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 5, fontSize: 11.5 }}>
+          the win with a neighbor or a relative: the claimant now knows to call.
+          Find online sits at the end of the same line; its links open below. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, fontSize: 11.5, flexWrap: 'wrap' }}>
         <select
+          className="dc-wp-sel"
           value={h.contactStatus}
           disabled={busy}
           onChange={(e) => onStatus(e.target.value)}
           aria-label={`Contact status for ${h.name}`}
-          style={{
-            fontSize: 11.5,
-            padding: '2px 6px',
-            border: '1px solid var(--border)',
-            borderRadius: 6,
-            background: 'var(--surface2)',
-            color: statusTone,
-          }}
+          style={{ color: statusTone }}
         >
           {SURPLUS_CONTACT_STATUSES.map(([k, l]) => (
             <option key={k} value={k}>
@@ -827,31 +791,65 @@ function HeirRow({
         {h.contactInfoUpdatedAt && (
           <span style={{ color: 'var(--faint)' }}>contact updated {fmtDate(h.contactInfoUpdatedAt)}</span>
         )}
+        {!h.deceased && (
+          <button type="button" className="dc-wp-btn quiet" style={{ marginLeft: 'auto' }} onClick={() => setFindOpen((v) => !v)}>
+            {findOpen ? 'Done' : profiles.length ? 'Find more online' : 'Find online'}
+          </button>
+        )}
       </div>
+      {!h.deceased && findOpen && (
+        <div
+          style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 6 }}
+          onClickCapture={() => rememberSocialTarget({ leadId, heirId: h.id, label: h.name, sub: h.relationship || h.roleLabel || null })}
+        >
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {socialSearchLinks(h.name, h.city, h.state).map((l) => (
+              <a key={l.site} href={l.url} target="_blank" rel="noopener noreferrer" className="dc-wp-searchlink">
+                {l.site}
+              </a>
+            ))}
+          </div>
+          <FindProfilesButton
+            leadId={leadId}
+            heirId={h.id}
+            who={h.name}
+            searchedAt={h.socialSearchedAt || null}
+            paused={socialPaused}
+            say={say}
+            onChanged={onChanged}
+          />
+          <AddSocialProfile leadId={leadId} heirId={h.id} say={say} onChanged={onChanged} />
+        </div>
+      )}
 
-      {/* This person's own drips, on their own number and email. */}
+      {/* This person's own drips, on their own number and email, and the
+          card's footer: the campaign picker and the packet on the left (ways
+          to reach them), the record's own controls on the right. They used
+          to sit behind a More button, which hid "do not call" from the
+          person who had just been asked to stop calling. */}
       <PersonDrips
         heirId={h.id}
         name={h.name}
         emails={h.emails}
         blocked={h.deceased ? 'marked deceased' : h.doNotCall ? 'marked do not call' : null}
+        actions={
+          <>
+            {!h.deceased && <PersonPacketButtons leadId={leadId} h={h} packet={packet} say={say} onChanged={onChanged} />}
+            <span className="grow" />
+            <span className="group">
+              <button type="button" className="dc-wp-btn" disabled={busy} onClick={onEdit}>
+                Edit
+              </button>
+              <button type="button" className="dc-wp-btn" disabled={busy} onClick={onDnc}>
+                {h.doNotCall ? 'Allow calls' : 'Do not call'}
+              </button>
+              <button type="button" className="dc-wp-btn quiet danger" disabled={busy} onClick={onRemove}>
+                Remove
+              </button>
+            </span>
+          </>
+        }
       />
-
-      {/* The packet and the person's own controls, in the open. They used to
-          sit behind a More button, which hid "do not call" from the person
-          who had just been asked to stop calling. */}
-      <div style={{ display: 'flex', gap: 6, marginTop: 5, flexWrap: 'wrap' }}>
-        {!h.deceased && <PersonPacketButtons leadId={leadId} h={h} packet={packet} say={say} onChanged={onChanged} />}
-        <button type="button" className="dc-wp-btn" disabled={busy} onClick={onEdit}>
-          Edit
-        </button>
-        <button type="button" className="dc-wp-btn" disabled={busy} onClick={onDnc}>
-          {h.doNotCall ? 'Allow calls' : 'Do not call'}
-        </button>
-        <button type="button" className="dc-wp-btn" disabled={busy} onClick={onRemove}>
-          Remove
-        </button>
-      </div>
     </div>
   );
 }
