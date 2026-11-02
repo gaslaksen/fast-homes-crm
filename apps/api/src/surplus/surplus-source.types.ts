@@ -159,6 +159,13 @@ export interface SurplusSourceAdapter {
   /** No dates on the docket, but it arrives in filing order. Charlotte. Passed to classifyCase. */
   readonly docketInFilingOrder?: boolean;
   /**
+   * The adapter rewrites surname-first owner lines given-first, so a case
+   * pulled before that rule names its claimant the other way round. Ingest
+   * then finds the existing lead by the same name in any order rather than
+   * opening a second one. Sarasota.
+   */
+  readonly reordersOwnerNames?: boolean;
+  /**
    * Every case the county currently flags as carrying a surplus. Adapters
    * return everything and let the ingest apply the floor, so a run can report
    * how many it dropped rather than silently narrowing.

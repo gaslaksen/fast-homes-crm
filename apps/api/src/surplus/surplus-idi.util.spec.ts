@@ -4,6 +4,7 @@ import {
   idiEchoKey,
   pairBatchRows,
   idiFirstName,
+  idiNameOf,
   idiRelationshipLabel,
   matchIdiRow,
   mergeEmails,
@@ -32,6 +33,25 @@ describe('IDI batch upload', () => {
   it('quotes a cell that carries a comma', () => {
     const csv = buildIdiBatchCsv([{ first: 'A', last: 'B', street: '1 Main St, Apt 2', city: 'X', state: 'FL', zip: '32909' }]);
     expect(csv).toContain('"1 Main St, Apt 2"');
+  });
+
+  it('moves a middle name stored in the last name field across as an initial', () => {
+    // The splitter keeps "Rosa" alone for the greeting and puts the rest in
+    // the last name; IDI must get the surname alone.
+    expect(idiNameOf('Rosa', 'B Davis')).toEqual({ first: 'Rosa B', last: 'Davis' });
+    expect(idiNameOf('Frances', 'L. Henry')).toEqual({ first: 'Frances L', last: 'Henry' });
+    expect(idiNameOf('Gemma', 'Galgani Ryan')).toEqual({ first: 'Gemma G', last: 'Ryan' });
+    expect(idiNameOf('Jane', 'A. Holmok')).toEqual({ first: 'Jane A', last: 'Holmok' });
+    expect(idiNameOf('Winston', 'E. Malcolm, Jr.')).toEqual({ first: 'Winston E', last: 'Malcolm Jr.' });
+  });
+
+  it('keeps every surname word it can recognise', () => {
+    expect(idiNameOf('Alma', 'A. Ponce De Leon')).toEqual({ first: 'Alma A', last: 'Ponce De Leon' });
+    expect(idiNameOf('Angelica A', 'De Jesus')).toEqual({ first: 'Angelica A', last: 'De Jesus' });
+    expect(idiNameOf('Luis', 'Atilio Ramirez Vidaurre')).toEqual({ first: 'Luis A', last: 'Ramirez Vidaurre' });
+    expect(idiNameOf('Esther', 'Leavitt-Azulay')).toEqual({ first: 'Esther', last: 'Leavitt-Azulay' });
+    expect(idiNameOf('Elgene', 'Brown')).toEqual({ first: 'Elgene', last: 'Brown' });
+    expect(idiNameOf('Mary Therese', 'Spieckerman')).toEqual({ first: 'Mary T', last: 'Spieckerman' });
   });
 
   it('leaves a single given name alone', () => {

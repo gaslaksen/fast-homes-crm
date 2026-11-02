@@ -10,7 +10,7 @@ import { tierOf } from './surplus.util';
 import {
   buildIdiBatchCsv,
   IdiBatchRow,
-  idiFirstName,
+  idiNameOf,
   idiRelationshipLabel,
   idiSurname,
   IdiMatch,
@@ -278,6 +278,11 @@ export class SurplusIdiService {
   /**
    * The upload file for the chosen claimants, at the address a trace should
    * use: the clerk's notice address when we have one, the property otherwise.
+   * A notice the post office returned is still sent: IDI matches the name
+   * against everyone who has ever lived at the address, and a place the
+   * claimant once lived beats the lot that sold, which in a vacant lot
+   * county they never lived on. The 2026-11-02 batch sent 43 people at the
+   * property and got 2 hits; at the notice address it was 7 of 33.
    * Entities, claimants without a usable name, and foreign addresses are left
    * out and named, because IDI can do nothing useful with them.
    */
@@ -298,7 +303,7 @@ export class SurplusIdiService {
     const rows: (IdiBatchRow & { detailId: string })[] = [];
     for (const l of leads as any[]) {
       if (!l.surplusDetail) continue;
-      const c = candidateOf(l);
+      const c = candidateOf(l, { keepReturnedNotice: true });
       const claimant = c.claimant || '(no name)';
       if (c.isEntity) {
         skipped.push({ leadId: l.id, claimant, reason: 'An entity, not a person. Sunbiz is the route.' });
@@ -316,9 +321,10 @@ export class SurplusIdiService {
         skipped.push({ leadId: l.id, claimant, reason: 'No street, city and state on file.' });
         continue;
       }
+      const name = idiNameOf(l.sellerFirstName, l.sellerLastName);
       rows.push({
-        first: idiFirstName(l.sellerFirstName),
-        last: String(l.sellerLastName).trim(),
+        first: name.first,
+        last: name.last,
         street: String(c.street).trim(),
         city: String(c.city).trim(),
         state: String(c.state).trim().toUpperCase(),

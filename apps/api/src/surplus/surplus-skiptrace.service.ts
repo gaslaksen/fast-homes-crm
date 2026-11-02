@@ -2438,7 +2438,7 @@ export function batchDeath(
 }
 
 /** A surplus lead as the trace sees it: whose name, which address to submit. */
-export function candidateOf(l: any): Candidate {
+export function candidateOf(l: any, opts: { keepReturnedNotice?: boolean } = {}): Candidate {
   const d = l.surplusDetail!;
   const claimant = `${l.sellerFirstName || ''} ${l.sellerLastName || ''}`.trim();
 
@@ -2456,7 +2456,10 @@ export function candidateOf(l: any): Candidate {
   // that sold, so a claimant with a dead address and a known name is
   // traced by name plus property instead of being written off. Polk
   // carries returned letters on 116 of 141 properties.
-  const mailDead = d.mailVerdict === 'undeliverable';
+  // The IDI batch passes keepReturnedNotice: IDI matches on residence
+  // history, so a returned address the claimant once lived at still finds
+  // them, and the property usually does not.
+  const mailDead = d.mailVerdict === 'undeliverable' && !opts.keepReturnedNotice;
   const useMailing = hasMailing && !(mailDead && nameKnown);
   // A foreign mailing address is kept, not swapped for the property, so the
   // eligibility check sees the country and refuses it rather than buying a

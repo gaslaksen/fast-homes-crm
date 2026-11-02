@@ -497,6 +497,44 @@ describe('a refresh preserves the work', () => {
     }
   });
 
+  it('finds a claimant pulled before the names were turned given-first', async () => {
+    // Sarasota's roll gave "HOLMOK JANE A." and the adapter now says "JANE A.
+    // HOLMOK". The uid differs only in word order; without the any-order
+    // lookup the weekly pull would open a second lead for her.
+    const held = [
+      row({ id: 'd1', dedupeUid: uid('MINTON RICHARD'), street: '4027 BESSENT RD', source: 'notice' }),
+      row({ id: 'd2', dedupeUid: uid('HARRIS CECELIA W'), street: '1841 W 14TH ST', source: 'notice' }),
+    ];
+    const { svc, prisma } = harness(held);
+    (svc as any).adapterFor('duval_taxdeed').reordersOwnerNames = true;
+    prisma.surplusDetail.findMany = jest.fn(async ({ where }: any) =>
+      where?.dedupeUid?.startsWith
+        ? held.filter((e) => e.dedupeUid.startsWith(where.dedupeUid.startsWith))
+        : where?.dedupeUid?.in
+          ? held.filter((e) => where.dedupeUid.in.includes(e.dedupeUid))
+          : [],
+    );
+
+    const res = await svc.ingestCounty('duval_taxdeed', {});
+
+    expect(res.created).toBe(0);
+    expect(res.updated).toBe(2);
+  });
+
+  it('keeps a deleted claimant deleted under the new word order', async () => {
+    const { svc, prisma } = harness([]);
+    (svc as any).adapterFor('duval_taxdeed').reordersOwnerNames = true;
+    prisma.surplusSuppression.findMany = jest.fn(async ({ where }: any) =>
+      where?.dedupeUid?.startsWith
+        ? [{ id: 'sup-1', dedupeUid: uid('MINTON RICHARD') }, { id: 'sup-2', dedupeUid: uid('HARRIS CECELIA W') }]
+        : [],
+    );
+
+    const res = await svc.ingestCounty('duval_taxdeed', {});
+
+    expect(res.created).toBe(0);
+  });
+
   it('will not recreate a case somebody deleted', async () => {
     // No existing row, so this would normally be a create. The tombstone stops
     // it: without this the case comes back every morning with the work gone.
