@@ -1,5 +1,6 @@
 import {
   matchRecipient,
+  matchRecipients,
   nameSearchLinks,
   nameSearchPlan,
   relativeOutreachScript,
@@ -163,5 +164,37 @@ describe('matchRecipient', () => {
 
   it('handles an empty recipient list', () => {
     expect(matchRecipient('RICHARD MINTON', [])).toBeNull();
+  });
+});
+
+describe('matchRecipients', () => {
+  // Recipient lists as lee.realtdm.com and sarasota.realtdm.com published
+  // them on 2026-11-02.
+  const goff = [
+    { name: 'JIMMIE L GOFF', street: '10958 CAMINO RUIZ APT C' },
+    { name: 'JIMMIE L GOFF', street: 'RT 1 BOX 61' },
+    { name: 'PATRICIA K GOFF', street: '10958 CAMINO RUIZ APT C' },
+    { name: 'PATRICIA K GOFF', street: 'RT 1 BOX 61' },
+  ];
+
+  it('keeps every address the clerk mailed one owner at, and none of the co-owner\'s', () => {
+    expect(matchRecipients('JIMMIE L GOFF', goff).map((r) => r.street)).toEqual(['10958 CAMINO RUIZ APT C', 'RT 1 BOX 61']);
+    expect(matchRecipients('Patricia K Goff', goff).map((r) => r.name)).toEqual(['PATRICIA K GOFF', 'PATRICIA K GOFF']);
+  });
+
+  it('matches a surname-first line, and leaves a relative at their own address out', () => {
+    const holmok = [
+      { name: 'HOLMOK JANE A', street: '15055 STATION RD' },
+      { name: 'HOLMOK JANE A.', street: '16110 REMURA BLVD' },
+      { name: 'LEE ANNA M', street: '15055 STATION RD' },
+      { name: 'ROBERT MICHAEL HOLMOK', street: 'PO BOX 654' },
+    ];
+    expect(matchRecipients('JANE A. HOLMOK', holmok).map((r) => r.street)).toEqual(['15055 STATION RD', '16110 REMURA BLVD']);
+    expect(matchRecipients('ROBERT MICHAEL HOLMOK', holmok).map((r) => r.street)).toEqual(['PO BOX 654']);
+  });
+
+  it('returns nothing rather than guess', () => {
+    expect(matchRecipients('KATHLEEN ARISS', [{ name: 'HARVEY T ARISS', street: '21 DURHAM ST.' }])).toEqual([]);
+    expect(matchRecipients('', goff)).toEqual([]);
   });
 });

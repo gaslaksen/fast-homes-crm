@@ -1143,6 +1143,10 @@ model SurplusDetail {
   traceAttempts SurplusTraceAttempt[]
   /// Every skip-trace batch this claimant was sent out in.
   batchMembers SurplusBatchMember[]
+  /// Every address on record for the claimant, not just the one on the card:
+  /// the clerk mails one person at two or three addresses and the card shows
+  /// one of them.
+  addresses SurplusAddress[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2702,6 +2706,51 @@ model SurplusBatchMember {
 /// A row is a CANDIDATE until a person confirms it. The search returns
 /// namesakes as readily as it returns the claimant, and messaging the wrong
 /// Aleric Clark about money he is not owed is the failure this guards.
+/// An address on record for one claimant, and what we know about it.
+///
+/// The clerk often mails the surplus letter to the same owner at two or three
+/// addresses (Lee 2025001687: San Diego and a West Virginia route box). The
+/// card keeps one in ownerMailing*; this keeps them all, so a skip trace that
+/// misses at one can try the next, and each address carries what came of it.
+model SurplusAddress {
+  id              String        @id @default(cuid())
+  surplusDetailId String
+  surplusDetail   SurplusDetail @relation(fields: [surplusDetailId], references: [id], onDelete: Cascade)
+  organizationId  String?
+
+  street  String
+  city    String?
+  state   String?
+  zip     String?
+  /// Null for a US address. See normalizeMailing.
+  country String?
+  /// The name the county printed above it, "HOLMOK JANE A.", with any
+  /// attention line ("C/O GLENN BROWN").
+  nameOnRecord String?
+  /// Where it came from: the ownerAddressSource values
+  /// ('surplus_letter_notifications', 'notice_of_surplus_funds',
+  /// 'case_parties', 'manual').
+  source   String
+  /// How the clerk sent it, as the county records it: "Certified Mail".
+  delivery String?
+  /// Street and five digit zip, upper case, letters and digits only. Written
+  /// by surplusAddressKey and by the migration that created this table; the
+  /// two must agree or the same address is stored twice.
+  addressKey String
+  /// 'untried' until something is learned about it. The skip trace rounds
+  /// record their result here.
+  status String @default("untried")
+
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([surplusDetailId, addressKey])
+  @@index([surplusDetailId, status])
+  @@map("surplus_addresses")
+}
+
 model SurplusSocialProfile {
   id              String        @id @default(cuid())
   surplusDetailId String

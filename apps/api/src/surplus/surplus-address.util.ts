@@ -134,3 +134,16 @@ export function cityLine(a: Pick<MailingAddress, 'city' | 'state' | 'zip' | 'cou
   const head = [a.city, [a.state, a.zip].filter(Boolean).join(' ')].filter(Boolean).join(', ');
   return a.country ? [head, a.country].filter(Boolean).join(', ') : head;
 }
+
+/**
+ * The identity of an address on one claimant's address list: the street upper
+ * case with everything but letters and digits removed, a bar, and the first
+ * five digits of the zip. "576 EASTERN PKWY #3G" and "576 Eastern Pkwy 3G"
+ * are one row. The migration that created surplus_addresses computes the same
+ * key in SQL, so a change here needs a matching data migration.
+ */
+export function surplusAddressKey(street?: string | null, zip?: string | null): string {
+  const s = String(street || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const z = String(zip || '').replace(/[^0-9]/g, '').slice(0, 5);
+  return `${s}|${z}`;
+}

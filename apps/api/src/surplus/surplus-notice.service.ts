@@ -112,6 +112,8 @@ export interface NoticeRecipient {
   attention?: string | null;
   /** Null for a US address. See normalizeMailing. */
   country?: string | null;
+  /** How the clerk sent it ("Certified Mail"), where the source records it. RealTDM. */
+  delivery?: string | null;
 }
 
 export interface NoticeExtract {

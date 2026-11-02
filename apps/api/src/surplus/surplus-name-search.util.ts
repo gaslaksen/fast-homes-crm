@@ -235,3 +235,24 @@ export function matchRecipient<T extends { name?: string | null; zip?: string | 
   }
   return best?.r ?? null;
 }
+
+/**
+ * EVERY notice recipient that is this claimant, where matchRecipient keeps
+ * one. The clerk mails the same owner at each address it knows ("JIMMIE L
+ * GOFF" at San Diego and again at a West Virginia route box), and the address
+ * matchRecipient drops is often the one a skip trace finds them at. Both the
+ * surname and a given name must match: a relative at their own address
+ * ("ROBERT MICHAEL HOLMOK" beside "HOLMOK JANE A") is not hers.
+ */
+export function matchRecipients<T extends { name?: string | null }>(claimant: string, recipients: T[]): T[] {
+  if (!recipients?.length) return [];
+  const want = splitClaimantName(claimant);
+  if (!want.surname) return [];
+  const all = [...want.given, want.surname];
+  return recipients.filter((r) => {
+    const got = splitClaimantName(r.name);
+    if (!got.surname) return false;
+    const surnameHit = got.surname === want.surname || all.includes(got.surname);
+    return surnameHit && got.given.some((g) => want.given.includes(g) || g === want.surname);
+  });
+}
