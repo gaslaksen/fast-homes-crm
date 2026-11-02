@@ -42,6 +42,12 @@ import { matchRecipient } from './surplus-name-search.util';
 import { SurplusSourceAdapter, SurplusCaseDetail, SurplusCaseSummary } from './surplus-source.types';
 import { ClassifiedDoc, classifyCase, collapseClaimants, isWorkable } from './surplus-classify.util';
 import { surplusUidOf, uidClaimant } from './surplus.util';
+import { sameClaimantName } from './surplus-skiptrace.util';
+
+/** "SARASOTA|2026_TD_000053|" from a dedupe uid: the county and case, claimant left off. */
+function sameCasePrefix(uid: string): string {
+  return uid.split('|').slice(0, 2).join('|') + '|';
+}
 import { SURPLUS_FLOOR } from './surplus-compliance';
 
 export type SurplusPollTrigger = 'cron' | 'manual';
@@ -753,22 +759,36 @@ export class SurplusIngestService {
         claimant: claimant.name,
       });
 
-      const existing = await this.prisma.surplusDetail.findFirst({
+      const existingSelect = {
+        id: true,
+        leadId: true,
+        stage: true,
+        claimStatus: true,
+        ownerMailingStreet: true,
+        ownerAddressSource: true,
+        dedupeUid: true,
+      } as const;
+      let existing = await this.prisma.surplusDetail.findFirst({
         where: { organizationId, dedupeUid },
-        select: {
-          id: true,
-          leadId: true,
-          stage: true,
-          claimStatus: true,
-          ownerMailingStreet: true,
-          ownerAddressSource: true,
-        },
+        select: existingSelect,
       });
+      // An adapter that rewrites names given-first meets its own earlier
+      // pulls under the old order ("HOLMOK JANE A." is now "JANE A. HOLMOK"),
+      // so the same case is searched for the same name in any order.
+      const anyOrder = !!adapter.reordersOwnerNames && !!(detail.caseNumber || detail.parcelId);
+      if (!existing && anyOrder) {
+        const sameCase = await this.prisma.surplusDetail.findMany({
+          where: { organizationId, dedupeUid: { startsWith: sameCasePrefix(dedupeUid) } },
+          select: existingSelect,
+          take: 50,
+        });
+        existing = sameCase.find((d) => sameClaimantName(uidClaimant(d.dedupeUid || ''), claimant.name)) || null;
+      }
 
       // A case the team deleted must stay deleted. The tombstone outlives the
       // cascade that takes dedupeUid away with the lead, which is what let the
       // next morning's poll recreate it with every note and edit gone.
-      if (!existing && (await this.isSuppressed(organizationId, dedupeUid))) {
+      if (!existing && (await this.isSuppressed(organizationId, dedupeUid, anyOrder ? claimant.name : null))) {
         out.skipped += 1;
         continue;
       }
@@ -953,11 +973,20 @@ export class SurplusIngestService {
   private async isSuppressed(
     organizationId: string | null,
     dedupeUid: string,
+    anyOrderName: string | null = null,
   ): Promise<boolean> {
-    const hit = await this.prisma.surplusSuppression.findFirst({
+    let hit: { id: string } | null = await this.prisma.surplusSuppression.findFirst({
       where: { organizationId, dedupeUid },
       select: { id: true },
     });
+    if (!hit && anyOrderName) {
+      const sameCase = await this.prisma.surplusSuppression.findMany({
+        where: { organizationId, dedupeUid: { startsWith: sameCasePrefix(dedupeUid) } },
+        select: { id: true, dedupeUid: true },
+        take: 50,
+      });
+      hit = sameCase.find((d) => sameClaimantName(uidClaimant(d.dedupeUid), anyOrderName)) || null;
+    }
     if (hit) {
       this.logger.log(`Skipping suppressed surplus case ${dedupeUid}`);
     }

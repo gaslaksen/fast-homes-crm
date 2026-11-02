@@ -82,6 +82,12 @@ export interface RealTdmCountySpec {
    * Rock Hall, MD 21661"); taken as owners, each claimant became a lead.
    */
   ownersFromRollOnly?: boolean;
+  /**
+   * The roll prints owners surname-first ("HOLMOK JANE A") and the clerk's
+   * own lines given-first ("ROBERT MICHAEL HOLMOK"), often both for one
+   * person. See givenFirstOwners. Sarasota.
+   */
+  ownersSurnameFirst?: boolean;
 }
 
 export const REALTDM_USER_AGENT =
@@ -687,6 +693,82 @@ export function cleanOwnerLine(raw: string): string | null {
   return s;
 }
 
+// "D ALESSANDRO VITO" is D'Alessandro written apart, as collapseClaimants knows.
+const OWNER_PARTICLE = /^(?:VAN|VON|DER|DEN|DE|DEL|DELA|LA|LE|DI|DA|DU|DOS|DAS|ST|D|O)\.?$/i;
+const OWNER_SUFFIX = /^(?:JR|SR|II|III|IV|ESQ)\.?$/i;
+
+/**
+ * Owner lines turned given-first where the case itself shows which word is
+ * the surname, on a county whose roll prints surname-first.
+ *
+ * Sarasota lists "HOLMOK JANE A" beside "ROBERT MICHAEL HOLMOK", and "HOAR
+ * RICHARD W" beside "RICHARD W. HOAR". Taken as written, the name splitter
+ * stored "Holmok" as Jane's first name, and IDI was sent a woman called
+ * Holmok Jane (2026 TD 000053). A line is surname-first when it ends in an
+ * initial ("HOLMOK JANE A."), or when its first word is a surname the case
+ * shows elsewhere: the last word of another owner ("TRUMAN WILFRED" beside
+ * "ANNE TRUMAN"), the first word of a line already known surname-first
+ * ("HUTSON LOUISE" beside "HUTSON JOHN P"), or the first word of another
+ * owner too ("STEPHENS KENNETH", "STEPHENS GLORIA"). Two lines that are the
+ * same words in another order ("ZHU GUANYING", "GUANYING ZHU") say nothing
+ * by themselves, and a lone line with no initial ("DAVYDOVA OLGA") is left
+ * as printed: the roll also carries given-first lines ("DIANE TESAR") and
+ * there is no telling them apart.
+ */
+export function givenFirstOwners(owners: string[]): string[] {
+  const words = (o: string) => o.trim().split(/\s+/).filter(Boolean);
+  const bare = (w: string) => w.toUpperCase().replace(/[.,]/g, '');
+  const isInitial = (w: string) => /^[A-Z]$/.test(bare(w));
+  const core = (o: string) => {
+    const w = words(o);
+    while (w.length > 2 && OWNER_SUFFIX.test(w[w.length - 1].replace(/,$/, ''))) w.pop();
+    return w;
+  };
+  const sortedKey = (o: string) => core(o).map(bare).sort().join(' ');
+  /** Leading surname words: "PONCE DE LEON", "VAN DER LEE", or one word. */
+  const surnameLength = (w: string[]) => {
+    let i = 0;
+    while (i < w.length - 2 && OWNER_PARTICLE.test(w[i])) i += 1;
+    i += 1;
+    while (i < w.length - 2 && OWNER_PARTICLE.test(w[i])) i += 2;
+    return i;
+  };
+  const people = owners.filter((o) => !ENTITY_WORD.test(o) && !/^ESTATE\s+OF\b/i.test(o) && core(o).length >= 2);
+
+  const surnames = new Set<string>();
+  const surnameFirst = new Set<string>();
+  for (const o of people) {
+    const w = core(o);
+    const lastWord = w[w.length - 1];
+    if (isInitial(lastWord) && !isInitial(w[0])) {
+      surnameFirst.add(o);
+      surnames.add(bare(w[0]));
+    } else if (w.length >= 3 && isInitial(w[w.length - 2]) && !isInitial(lastWord)) {
+      // "RICHARD W. HOAR", "IRINA F VLASENKO": the initial sits mid name.
+      surnames.add(bare(lastWord));
+    }
+  }
+  for (const o of people) {
+    const w = core(o);
+    const others = people.filter((p) => p !== o && sortedKey(p) !== sortedKey(o));
+    if (others.some((p) => bare(core(p)[core(p).length - 1]) === bare(w[0]))) surnames.add(bare(w[0]));
+    if (others.some((p) => bare(core(p)[0]) === bare(w[0]))) surnames.add(bare(w[0]));
+  }
+  for (const o of people) {
+    const w = core(o);
+    if (surnames.has(bare(w[0])) && !surnames.has(bare(w[w.length - 1]))) surnameFirst.add(o);
+  }
+
+  return owners.map((o) => {
+    if (!surnameFirst.has(o)) return o;
+    const all = words(o);
+    const w = core(o);
+    const suffix = all.slice(w.length);
+    const n = surnameLength(w);
+    return [...w.slice(n), ...w.slice(0, n), ...suffix].join(' ');
+  });
+}
+
 export function splitCompoundOwner(name: string): string[] {
   // Brevard lists the registered agent as an OWNER party, "REGISTERED AGENT
   // O/B/O FLORIDAIM LLC". The owner is the entity; the prefix is dropped so
@@ -761,6 +843,9 @@ export class RealTdmAdapter implements SurplusSourceAdapter {
   readonly receiptsImplyClaim: boolean;
   readonly payoutsArePartial: boolean;
   private readonly ownersFromRollOnly: boolean;
+  private readonly ownersSurnameFirst: boolean;
+  /** See SurplusSourceAdapter.reordersOwnerNames. */
+  readonly reordersOwnerNames: boolean;
   readonly baseUrl: string;
 
   private readonly logger: Logger;
@@ -781,6 +866,8 @@ export class RealTdmAdapter implements SurplusSourceAdapter {
     this.receiptsImplyClaim = !!spec.receiptsImplyClaim;
     this.payoutsArePartial = !!spec.payoutsArePartial;
     this.ownersFromRollOnly = !!spec.ownersFromRollOnly;
+    this.ownersSurnameFirst = !!spec.ownersSurnameFirst;
+    this.reordersOwnerNames = this.ownersSurnameFirst;
     this.logger = new Logger(`RealTdmAdapter:${spec.county}`);
     this.baseUrl = (
       this.config.get<string>(`REALTDM_${spec.subdomain.toUpperCase()}_BASE_URL`) ||
@@ -926,7 +1013,7 @@ export class RealTdmAdapter implements SurplusSourceAdapter {
     // Owners of record, in the order the county lists them. Spelling variants
     // ("BEVERLY F. KONOPKA" beside "BEVERLY F KONOPKA") are left for
     // collapseClaimants, which is where that rule lives.
-    const owners: string[] = [];
+    let owners: string[] = [];
     for (const p of parties) {
       if (!OWNER_ROLES.test(p.role)) continue;
       if (this.ownersFromRollOnly && /[a-z]/.test(p.name)) continue;
@@ -936,6 +1023,7 @@ export class RealTdmAdapter implements SurplusSourceAdapter {
         if (!owners.some((o) => o.toUpperCase() === name.toUpperCase())) owners.push(name);
       }
     }
+    if (this.ownersSurnameFirst) owners = givenFirstOwners(owners);
 
     // The operative surplus letter is the LAST one filed; the docket is now in
     // filing order so that is the last match.
@@ -1135,7 +1223,13 @@ export class PinellasRealTdmAdapter extends RealTdmAdapter {
 @Injectable()
 export class SarasotaRealTdmAdapter extends RealTdmAdapter {
   constructor(config: ConfigService) {
-    super(config, { key: 'realtdm_sarasota', county: 'Sarasota', subdomain: 'sarasota', receiptsImplyClaim: true });
+    super(config, {
+      key: 'realtdm_sarasota',
+      county: 'Sarasota',
+      subdomain: 'sarasota',
+      receiptsImplyClaim: true,
+      ownersSurnameFirst: true,
+    });
   }
 }
 

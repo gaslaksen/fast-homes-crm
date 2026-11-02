@@ -90,6 +90,40 @@ export function idiFirstName(raw: string | null | undefined): string {
   return [parts[0], ...parts.slice(1).map((p) => p.replace(/[^A-Za-z]/g, '').charAt(0)).filter(Boolean)].join(' ');
 }
 
+/** Words that start a surname rather than end a given name: "De Leon", "Van Der Lee". */
+const SURNAME_PARTICLE = /^(?:VAN|VON|DER|DEN|DE|DEL|DELA|LA|LE|DI|DA|DU|DOS|DAS|ST)\.?$/i;
+const NAME_SUFFIX_WORD = /^(?:JR|SR|II|III|IV|ESQ)\.?,?$/i;
+
+/**
+ * The first and last name as IDI wants them, from the lead's two fields.
+ *
+ * The name splitter keeps the greeting name alone in the first field and
+ * puts everything after it in the last: "ROSA B DAVIS" is stored as "Rosa" /
+ * "B Davis" and "GEMMA GALGANI RYAN" as "Gemma" / "Galgani Ryan". Sent that
+ * way IDI looks for a surname of "B Davis" and finds nobody; 729 surplus
+ * leads had an initial at the front of the last name on 2026-11-02. Leading
+ * initials, and one leading middle name, move across as initials. A surname
+ * that opens with a particle ("De Leon") or has two words after a middle
+ * name ("Atilio Ramirez Vidaurre") keeps the words that are surname.
+ */
+export function idiNameOf(firstRaw: string | null | undefined, lastRaw: string | null | undefined): { first: string; last: string } {
+  const words = String(lastRaw || '').trim().split(/\s+/).filter(Boolean);
+  const suffix: string[] = [];
+  while (words.length > 1 && NAME_SUFFIX_WORD.test(words[words.length - 1])) suffix.unshift(words.pop()!);
+  const middle: string[] = [];
+  while (words.length > 1 && /^[A-Za-z]\.?$/.test(words[0])) middle.push(words.shift()!);
+  if (
+    words.length > 1 &&
+    !SURNAME_PARTICLE.test(words[0]) &&
+    !SURNAME_PARTICLE.test(words[1]) &&
+    /^[A-Za-z]{2,}$/.test(words[0].replace(/\.$/, ''))
+  ) {
+    middle.push(words.shift()!);
+  }
+  const last = [...words, ...suffix].join(' ').replace(/,(?=\s|$)/g, '').trim();
+  return { first: idiFirstName([String(firstRaw || '').trim(), ...middle].join(' ')), last };
+}
+
 function csvCell(v: string): string {
   const s = String(v ?? '');
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;

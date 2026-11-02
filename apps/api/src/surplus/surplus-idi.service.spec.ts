@@ -278,6 +278,26 @@ describe('SurplusIdiService.exportBatch', () => {
     });
   });
 
+  it('sends the notice address even when the letter came back, and the surname alone', async () => {
+    // 2026-11-02: the property got 2 hits in 43, the notice address 7 in 33.
+    // A place the claimant once lived is what IDI matches on.
+    const { service } = setup([
+      lead('1', 'Elgene', 'B Brown', '4808 4th St W', {
+        propertyCity: 'Lehigh Acres',
+        propertyZip: '33971',
+        surplusDetail: {
+          ownerMailingStreet: '576 Eastern Pkwy #3G',
+          ownerMailingCity: 'Brooklyn',
+          ownerMailingState: 'NY',
+          ownerMailingZip: '11225',
+          mailVerdict: 'undeliverable',
+        },
+      }),
+    ]);
+    const r = await service.exportBatch({ organizationId: 'org1', leadIds: ['1'] });
+    expect(r.csv.split('\r\n')[1]).toBe('Elgene B,Brown,576 Eastern Pkwy #3G,Brooklyn,NY,11225');
+  });
+
   it('saves no batch when nobody can be sent', async () => {
     const { service, batches } = setup([lead('2', 'ACME HOLDINGS', 'LLC', '1 Main St')]);
     const r = await service.exportBatch({ organizationId: 'org1', leadIds: ['2'] });

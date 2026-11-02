@@ -15,6 +15,7 @@ import {
   splitCompoundOwner,
   surplusFromLetter,
   cleanOwnerLine,
+  givenFirstOwners,
 } from './realtdm.adapter';
 import { classifyCase, collapseClaimants } from './surplus-classify.util';
 
@@ -1392,5 +1393,52 @@ describe('Flagler', () => {
       { owners: ['Dean P Spriggs', 'Dein P Spriggs'] },
     );
     expect(v.claimStatus).toBe('assigned');
+  });
+});
+
+describe('givenFirstOwners (Sarasota)', () => {
+  // Verbatim owner lists read off sarasota.realtdm.com on 2026-11-02.
+  it('turns the roll lines round where the case shows the surname', () => {
+    expect(
+      givenFirstOwners(['DIANE TESAR', 'LEE RONALD S', 'ROBERT MICHAEL HOLMOK', 'LEE RONALD S.', 'LEE ANNA M', 'HOLMOK JANE A', 'LEE ANNA M.', 'HOLMOK JANE A.']),
+    ).toEqual(['DIANE TESAR', 'RONALD S LEE', 'ROBERT MICHAEL HOLMOK', 'RONALD S. LEE', 'ANNA M LEE', 'JANE A HOLMOK', 'ANNA M. LEE', 'JANE A. HOLMOK']);
+    expect(givenFirstOwners(['HOAR RICHARD W', 'RAYMOND WALKER', 'RICHARD W. HOAR', 'WALKER RAY', 'RAYMOND B. HOAR'])).toEqual([
+      'RICHARD W HOAR',
+      'RAYMOND WALKER',
+      'RICHARD W. HOAR',
+      'RAY WALKER',
+      'RAYMOND B. HOAR',
+    ]);
+    expect(givenFirstOwners(['ANNE TRUMAN', 'TRUMAN WILFRED', 'TRUMAN ANNE'])).toEqual(['ANNE TRUMAN', 'WILFRED TRUMAN', 'ANNE TRUMAN']);
+    expect(givenFirstOwners(['HUDSON THOMAS E', 'HUTSON JOHN P', 'HUTSON LOUISE', 'HUTSON THOMAS EDWARD'])).toEqual([
+      'THOMAS E HUDSON',
+      'JOHN P HUTSON',
+      'LOUISE HUTSON',
+      'THOMAS EDWARD HUTSON',
+    ]);
+    expect(givenFirstOwners(['STEPHENS KENNETH', 'STEPHENS GLORIA'])).toEqual(['KENNETH STEPHENS', 'GLORIA STEPHENS']);
+  });
+
+  it('keeps a surname that opens with a particle whole, and a suffix last', () => {
+    expect(givenFirstOwners(['PONCE DE LEON ALMA A.'])).toEqual(['ALMA A. PONCE DE LEON']);
+    expect(givenFirstOwners(['VAN DER LEE ELMA A.', 'VANDERLEE ELMA A'])).toEqual(['ELMA A. VAN DER LEE', 'ELMA A VANDERLEE']);
+    expect(givenFirstOwners(['SMITH JOHN A JR'])).toEqual(['JOHN A SMITH JR']);
+    expect(givenFirstOwners(['D ALESSANDRO VITO', 'D ALESSANDRO DOMENICA'])).toEqual(['VITO D ALESSANDRO', 'DOMENICA D ALESSANDRO']);
+  });
+
+  it('leaves a line alone when nothing on the case says which word is the surname', () => {
+    expect(givenFirstOwners(['ZHU GUANYING', 'GUANYING ZHU', 'KUIYU CHEN', 'CHEN KUIYU'])).toEqual([
+      'ZHU GUANYING',
+      'GUANYING ZHU',
+      'KUIYU CHEN',
+      'CHEN KUIYU',
+    ]);
+    expect(givenFirstOwners(['DAVYDOVA OLGA', 'IRINA F VLASENKO', 'DRONOV ALEXEY'])).toEqual(['DAVYDOVA OLGA', 'IRINA F VLASENKO', 'DRONOV ALEXEY']);
+    expect(givenFirstOwners(['PALLADIO DEVELOPMENT LLC', 'ESTATE OF JOHN A'])).toEqual(['PALLADIO DEVELOPMENT LLC', 'ESTATE OF JOHN A']);
+  });
+
+  it('collapses the two spellings of one person onto the given-first one', () => {
+    const names = collapseClaimants(givenFirstOwners(['HOLMOK JANE A', 'HOLMOK JANE A.', 'ROBERT MICHAEL HOLMOK'])).map((c) => c.name);
+    expect(names).toEqual(['JANE A. HOLMOK', 'ROBERT MICHAEL HOLMOK']);
   });
 });
