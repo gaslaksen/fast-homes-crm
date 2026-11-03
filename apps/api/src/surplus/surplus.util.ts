@@ -295,6 +295,8 @@ export interface QueueFacts {
   idiMissed?: boolean | null;
   /** Untried addresses IDI could still be sent: the next retry round. */
   idiAddressesLeft?: number | null;
+  /** IDI has searched this claimant at least once. False is a claimant only an older vendor ever looked for. */
+  idiSearched?: boolean | null;
 }
 
 export function queueOf(f: QueueFacts): SurplusQueue {
@@ -342,6 +344,12 @@ export function queueOf(f: QueueFacts): SurplusQueue {
   // too, so the file does not drop to name search before IDI answers.
   if (f.idiMissed && ((f.idiAddressesLeft || 0) > 0 || f.idiPendingBatch)) return SurplusQueue.TRACE;
 
+  // Never searched at IDI, which is now the only trace, with an address to
+  // send. An old Endato or BatchData miss parked 90 A Tier claimants in name
+  // search on 2026-11-03, and a returned clerk letter kept 17 more out though
+  // their other addresses were never tried.
+  if (f.idiSearched === false && ((f.idiAddressesLeft || 0) > 0 || f.idiPendingBatch)) return SurplusQueue.TRACE;
+
   return SurplusQueue.NAME_SEARCH;
 }
 
@@ -378,6 +386,14 @@ export function queueReason(f: QueueFacts): string {
       if (f.idiMissed) {
         const n = f.idiAddressesLeft || 0;
         return `IDI missed them, ${n} more address${n === 1 ? '' : 'es'} to try in the next batch`;
+      }
+      if (f.idiSearched === false && f.traceState && f.traceState !== 'never') {
+        const n = f.idiAddressesLeft || 0;
+        return `An older search missed them and IDI never has: ${n} address${n === 1 ? '' : 'es'} to try`;
+      }
+      if (f.idiSearched === false && f.mailVerdict === 'undeliverable') {
+        const n = f.idiAddressesLeft || 0;
+        return `The clerk's letter came back, but IDI has never been sent: ${n} address${n === 1 ? '' : 'es'} to try`;
       }
       return f.ownerMailingStreet
         ? 'Not sent to IDI yet, and the notice address is live'

@@ -1377,8 +1377,9 @@ export default function SurplusFundsPage() {
   const exportIdiReady = async () => {
     if (busy) return;
     await runIdiExport(
-      () => surplusAPI.idiExportReady(county !== 'all' ? county : null),
-      'Nobody is ready to send to IDI right now.',
+      // The county and the A Tier / B Tier filter both narrow the batch.
+      () => surplusAPI.idiExportReady(county !== 'all' ? county : null, ratingQ),
+      ratingQ ? `Nobody in ${ratingQ} Tier is ready to send to IDI right now.` : 'Nobody is ready to send to IDI right now.',
     );
   };
 
@@ -1629,9 +1630,9 @@ export default function SurplusFundsPage() {
                     className="dc-menu-item"
                     onClick={exportIdiReady}
                     disabled={busy}
-                    title="Everyone in the Send to IDI queue who is inside the trace window and not already waiting on a batch, as one file. The county filter narrows it."
+                    title="Everyone in the Send to IDI queue who is inside the trace window and not already waiting on a batch, as one file. The county filter and the A Tier / B Tier filter narrow it."
                   >
-                    {busy ? 'Building the file...' : 'Export everyone ready for IDI'}
+                    {busy ? 'Building the file...' : ratingQ ? `Export ${ratingQ} Tier ready for IDI` : 'Export everyone ready for IDI'}
                   </button>
                   <button
                     type="button"

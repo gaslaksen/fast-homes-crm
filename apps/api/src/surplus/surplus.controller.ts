@@ -1058,6 +1058,8 @@ export class SurplusController {
     return this.idi.exportReady({
       organizationId: organizationId || null,
       county: typeof body?.county === 'string' && body.county ? body.county : null,
+      // The board's A Tier / B Tier filter, so the batch can be one tier.
+      rating: typeof body?.rating === 'string' && /^(A|B|none)$/i.test(body.rating) ? body.rating : null,
       userId: userId || null,
     });
   }

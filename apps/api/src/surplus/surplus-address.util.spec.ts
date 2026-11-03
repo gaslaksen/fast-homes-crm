@@ -144,6 +144,17 @@ describe('the IDI round order', () => {
     ]);
   });
 
+  it('counts the property as the last round when it is a house no batch has sent', () => {
+    const lead = { propertyAddress: '12 Oak St', propertyCity: 'Inverness', propertyState: 'FL', propertyZip: '34450' };
+    expect(idiAddressesLeft({ addresses: [] }, lead)).toBe(1);
+    expect(idiAddressesLeft({ addresses: [] }, { ...lead, propertyAddress: '0 Lot Rd' })).toBe(0);
+    expect(
+      idiAddressesLeft({ addresses: [{ street: '12 Oak St', city: 'Inverness', state: 'FL', zip: '34450', source: 'property', status: 'miss' }] }, lead),
+    ).toBe(0);
+    // Without the lead, only the list counts.
+    expect(idiAddressesLeft({ addresses: [] })).toBe(0);
+  });
+
   it('counts the card address as left when the list does not hold it yet', () => {
     expect(idiAddressesLeft({ ownerMailingStreet: '1 Card Ct', ownerMailingCity: 'X', ownerMailingState: 'FL', addresses: [] })).toBe(1);
     expect(

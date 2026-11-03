@@ -295,9 +295,13 @@ export function roundAddressesOf(d: any): { list: RoundAddress[]; cardKey: strin
 }
 
 /** How many addresses a person has left for the IDI rounds. */
-export function idiAddressesLeft(d: any): number {
+export function idiAddressesLeft(d: any, lead?: any): number {
   const { list, cardKey } = roundAddressesOf(d);
-  return untriedForIdi(list, cardKey).length;
+  const left = untriedForIdi(list, cardKey).length;
+  // The property is the last round when it is a house no batch has sent.
+  if (!lead) return left;
+  const next = nextIdiAddress({ ...lead, surplusDetail: { ...d, addresses: list } });
+  return left + ('address' in next && next.address.source === SURPLUS_ADDRESS_SOURCE.property ? 1 : 0);
 }
 
 /**

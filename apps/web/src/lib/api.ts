@@ -490,7 +490,8 @@ export const surplusAPI = {
     note?: string | null;
   }) => api.post('/surplus/print-run/mailed', body),
   /** The whole Send to IDI queue, inside the trace window and not already waiting on a batch, as one file. */
-  idiExportReady: (county?: string | null) => api.post('/surplus/idi/export-ready', { county: county || null }),
+  idiExportReady: (county?: string | null, rating?: string | null) =>
+    api.post('/surplus/idi/export-ready', { county: county || null, rating: rating || null }),
   /** Read an A Tier / B Tier ratings file and match each row to a case. Writes nothing. */
   ratingsParse: (file: File) => {
     const formData = new FormData();
