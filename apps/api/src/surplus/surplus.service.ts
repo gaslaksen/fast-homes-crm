@@ -96,7 +96,7 @@ import { DIG_DEEPER_BRAND } from '../common/company.constants';
 import { SurplusLeadInput, SurplusListFilters, SurplusPhoneInput } from './surplus.types';
 import { SurplusCountiesService, CountyRow } from './surplus-counties.service';
 import { SurplusDocumentsService } from './surplus-documents.service';
-import { foreignCountry } from './surplus-address.util';
+import { foreignCountry, idiAddressesLeft } from './surplus-address.util';
 import { NO_CONTACTS, claimantContacts, contactStampPatch } from './surplus-contact-stamp.util';
 import { SurplusTemplatesService } from './surplus-templates.service';
 import { SurplusProgressService } from './surplus-progress.service';
@@ -137,6 +137,9 @@ const LEAD_INCLUDE = {
       // the Send to IDI queue can say "sent, waiting" and the one-click
       // export leaves them out.
       batchMembers: { where: { result: null }, select: { batch: { select: { number: true } } }, take: 1 },
+      // Every address on the claimant's list, so a person IDI missed returns
+      // to Send to IDI while one is left untried.
+      addresses: true,
     },
   },
   tasks: {
@@ -3288,6 +3291,11 @@ export class SurplusService {
       // A letter that came back is not one the claim is waiting on.
       letterMailed: !!d.letterMailedAt && !((d.letters || []).length && (d.letters || []).every((l: any) => l.returnedAt)),
       idiPendingBatch: d.batchMembers?.[0]?.batch?.number != null ? idiBatchCode(d.batchMembers[0].batch.number) : null,
+      // The newest IDI search came back empty and nothing found them since.
+      idiMissed:
+        trace.state === 'no_person' &&
+        (d.traceAttempts || []).find((a: any) => a.source === 'IDI')?.result === 'nothing',
+      idiAddressesLeft: idiAddressesLeft(d),
     };
     const queue = queueOf(f);
     return { queue, queueLabel: SURPLUS_QUEUE_LABEL[queue], queueReason: queueReason(f), idiPendingBatch: f.idiPendingBatch };

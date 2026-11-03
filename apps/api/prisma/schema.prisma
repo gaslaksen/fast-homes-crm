@@ -2729,7 +2729,8 @@ model SurplusAddress {
   nameOnRecord String?
   /// Where it came from: the ownerAddressSource values
   /// ('surplus_letter_notifications', 'notice_of_surplus_funds',
-  /// 'case_parties', 'manual').
+  /// 'case_parties', 'manual'), or 'property', 'idi_relative' and 'idi_sent'
+  /// (SURPLUS_ADDRESS_SOURCE).
   source   String
   /// How the clerk sent it, as the county records it: "Certified Mail".
   delivery String?
@@ -2737,8 +2738,8 @@ model SurplusAddress {
   /// by surplusAddressKey and by the migration that created this table; the
   /// two must agree or the same address is stored twice.
   addressKey String
-  /// 'untried' until something is learned about it. The skip trace rounds
-  /// record their result here.
+  /// The IDI retry rounds: 'untried' until a batch carries it, 'sent' while
+  /// that batch is out, then 'hit' or 'miss' (SURPLUS_ADDRESS_STATUS).
   status String @default("untried")
 
   firstSeenAt DateTime @default(now())

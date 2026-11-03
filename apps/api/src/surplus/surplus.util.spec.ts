@@ -804,6 +804,19 @@ describe('daysSinceSale', () => {
 describe('queueOf', () => {
   const base = { claimStatus: 'open', cleanPhoneCount: 0 };
 
+  it('sends a person IDI missed back to Send to IDI while an untried address is left', () => {
+    const missed = { ...base, traceState: 'no_person', idiMissed: true };
+    expect(queueOf({ ...missed, idiAddressesLeft: 2 })).toBe(SurplusQueue.TRACE);
+    expect(queueReason({ ...missed, idiAddressesLeft: 2 })).toBe('IDI missed them, 2 more addresses to try in the next batch');
+    // Out on a retry with nothing more behind it: still waiting on IDI, not name search yet.
+    expect(queueOf({ ...missed, idiAddressesLeft: 0, idiPendingBatch: 'B007' })).toBe(SurplusQueue.TRACE);
+    expect(queueOf({ ...missed, idiAddressesLeft: 0 })).toBe(SurplusQueue.NAME_SEARCH);
+    // A miss from another vendor is not a retry round.
+    expect(queueOf({ ...base, traceState: 'no_person', idiMissed: false, idiAddressesLeft: 3 })).toBe(SurplusQueue.NAME_SEARCH);
+    // A number found since outranks another round.
+    expect(queueOf({ ...missed, idiAddressesLeft: 2, cleanPhoneCount: 1 })).toBe(SurplusQueue.CALL);
+  });
+
   it('puts a callable open claim in Call now', () => {
     expect(queueOf({ ...base, cleanPhoneCount: 2 })).toBe(SurplusQueue.CALL);
   });

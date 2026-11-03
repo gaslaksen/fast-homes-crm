@@ -147,3 +147,162 @@ export function surplusAddressKey(street?: string | null, zip?: string | null): 
   const z = String(zip || '').replace(/[^0-9]/g, '').slice(0, 5);
   return `${s}|${z}`;
 }
+
+// ─── IDI retry rounds ───────────────────────────────────────────────────────
+
+/**
+ * What the IDI rounds have learned about one address. 'untried' until a batch
+ * carries it, 'sent' while that batch is out, then 'hit' (IDI placed the
+ * person there) or 'miss' (it could not).
+ */
+export const SURPLUS_ADDRESS_STATUS = {
+  untried: 'untried',
+  sent: 'sent',
+  hit: 'hit',
+  miss: 'miss',
+} as const;
+
+/**
+ * Sources an address list row can carry beyond the ownerAddressSource values.
+ * 'property' is the parcel that sold, written when a batch had nothing better
+ * to send. 'idi_relative' is IDI listing the claimant as a relative of a
+ * co-owner at an address. 'idi_sent' is an address an earlier batch was sent
+ * with, recorded by the migration that started the rounds.
+ */
+export const SURPLUS_ADDRESS_SOURCE = {
+  property: 'property',
+  idiRelative: 'idi_relative',
+  idiSent: 'idi_sent',
+} as const;
+
+/** The clerk's own record of where the surplus letter went. */
+const CLERK_LETTER_SOURCES = new Set(['surplus_letter_notifications', 'notice_of_surplus_funds']);
+
+const PO_BOX = /\b(?:P\.?\s*O\.?\s*BOX|POST\s+OFFICE\s+BOX|P\.?\s*O\.?\s*DRAWER)\b/i;
+/**
+ * A rural route or highway contract box is a home, not a post office box:
+ * the 2026-11-02 resend placed a Lee claimant at a West Virginia "RT 1 BOX"
+ * address the ingest had dropped.
+ */
+const RURAL_ROUTE = /^\s*(?:R\.?\s*R\.?|RT\.?|RTE\.?|ROUTE|RURAL\s+ROUTE|H\.?\s*C\.?|HCR)\s*\d+/i;
+/** A street that starts with a house number, and not a lot's "0 MAIN ST". */
+const HOUSE_NUMBER = /^\s*(?!0+\s)\d+[A-Z]?(?:-\d+)?\s+\S/i;
+
+export function isPoBox(street?: string | null): boolean {
+  return PO_BOX.test(String(street || ''));
+}
+
+/** A street someone can live at: a house number, or a rural route box. */
+export function hasHouseNumber(street?: string | null): boolean {
+  const s = String(street || '');
+  return HOUSE_NUMBER.test(s) || RURAL_ROUTE.test(s);
+}
+
+export interface RoundAddress {
+  id?: string;
+  street: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  country?: string | null;
+  source: string;
+  status: string;
+  addressKey?: string | null;
+  firstSeenAt?: Date | string | null;
+}
+
+/** An address IDI can be sent: a US street, city and state. */
+export function sendableToIdi(a: Pick<RoundAddress, 'street' | 'city' | 'state' | 'country'>): boolean {
+  return !a.country && !!String(a.street || '').trim() && !!String(a.city || '').trim() && !!String(a.state || '').trim();
+}
+
+/**
+ * The order a person's untried addresses are sent in, one per batch. Lower is
+ * sooner: the address on the card when it has a house number (what DealCore
+ * already judged best for this person), then the clerk's letter, then any
+ * other street address, then PO boxes and streets with no house number. IDI
+ * matches the name against who has lived at the address, so a box, which
+ * nobody lives at, rarely places anyone and goes last.
+ */
+export function idiAddressRank(a: RoundAddress, cardKey?: string | null): number {
+  if (isPoBox(a.street) || !hasHouseNumber(a.street)) return 3;
+  const key = a.addressKey || surplusAddressKey(a.street, a.zip);
+  if (cardKey && key === cardKey) return 0;
+  return CLERK_LETTER_SOURCES.has(a.source) ? 1 : 2;
+}
+
+/** The untried addresses IDI can be sent, best first. */
+export function untriedForIdi<T extends RoundAddress>(addresses: T[], cardKey?: string | null): T[] {
+  const seen = (a: T) => (a.firstSeenAt ? new Date(a.firstSeenAt).getTime() : 0);
+  return addresses
+    .filter((a) => a.status === SURPLUS_ADDRESS_STATUS.untried && sendableToIdi(a))
+    .sort((a, b) => idiAddressRank(a, cardKey) - idiAddressRank(b, cardKey) || seen(a) - seen(b));
+}
+
+/** The address a batch row is sent with; `id` is its row on the address list, when it has one yet. */
+export type SentAddress = Pick<RoundAddress, 'id' | 'street' | 'city' | 'state' | 'zip' | 'source'>;
+
+/**
+ * Every address a person could be sent to IDI at: their address list, plus
+ * the card's address when the list does not hold it yet (typed in by hand
+ * after the list was filled). The card address is what DealCore already
+ * judged best for this person, so it is tried first.
+ */
+export function roundAddressesOf(d: any): { list: RoundAddress[]; cardKey: string | null } {
+  const list: RoundAddress[] = [...(d?.addresses || [])];
+  const cardKey = d?.ownerMailingStreet ? surplusAddressKey(d.ownerMailingStreet, d.ownerMailingZip) : null;
+  if (cardKey && !list.some((a) => (a.addressKey || surplusAddressKey(a.street, a.zip)) === cardKey)) {
+    list.push({
+      street: d.ownerMailingStreet,
+      city: d.ownerMailingCity || null,
+      state: d.ownerMailingState || null,
+      zip: d.ownerMailingZip || null,
+      country: d.ownerMailingCountry || null,
+      source: d.ownerAddressSource || 'manual',
+      status: SURPLUS_ADDRESS_STATUS.untried,
+      addressKey: cardKey,
+    });
+  }
+  return { list, cardKey };
+}
+
+/** How many addresses a person has left for the IDI rounds. */
+export function idiAddressesLeft(d: any): number {
+  const { list, cardKey } = roundAddressesOf(d);
+  return untriedForIdi(list, cardKey).length;
+}
+
+/**
+ * The one address this person goes into the next batch at, or why they
+ * cannot go. Their best untried address first (idiAddressRank), and the
+ * property as the last round, but only a real house: IDI matches on who has
+ * lived at an address, and nobody has lived on a vacant lot.
+ */
+export function nextIdiAddress(l: any): { address: SentAddress } | { reason: string } {
+  const d = l.surplusDetail;
+  const { list, cardKey } = roundAddressesOf(d);
+  const best = untriedForIdi(list, cardKey)[0];
+  if (best) return { address: best };
+
+  const property = {
+    street: l.propertyAddress || null,
+    city: l.propertyCity || null,
+    state: l.propertyState || null,
+    zip: l.propertyZip || null,
+    source: SURPLUS_ADDRESS_SOURCE.property,
+  };
+  const propertyKey = surplusAddressKey(property.street, property.zip);
+  const propertyTried = list.some((a) => (a.addressKey || surplusAddressKey(a.street, a.zip)) === propertyKey);
+  const propertyLived = sendableToIdi(property) && hasHouseNumber(property.street);
+  if (propertyLived && !propertyTried) return { address: property };
+
+  if (list.some((a) => sendableToIdi(a)) || propertyTried) {
+    return { reason: 'Every address on file has been sent to IDI. Research by name.' };
+  }
+  const foreign = list.find((a) => a.country);
+  if (foreign) return { reason: `Address is outside the US (${foreign.country}).` };
+  if (sendableToIdi(property)) {
+    return { reason: 'Only the property is known, and it has no house number. Research by name.' };
+  }
+  return { reason: 'No street, city and state on file.' };
+}

@@ -1,5 +1,6 @@
 import { SurplusIdiService } from './surplus-idi.service';
 import { IDI_RESULTS_CSV } from './surplus-idi.fixtures';
+import { surplusAddressKey } from './surplus-address.util';
 
 /**
  * Applying an IDI results file to the board. Prisma is an in-memory stand-in
@@ -8,6 +9,27 @@ import { IDI_RESULTS_CSV } from './surplus-idi.fixtures';
 function setup(leadsIn: any[], heirsIn: any[] = []) {
   const leads = leadsIn.map((l) => ({ ...l, surplusDetail: { ...l.surplusDetail } }));
   const heirs = heirsIn.map((h) => ({ ...h }));
+  // The address list, one shared store behind every detail's `addresses`.
+  const addresses: any[] = leads.flatMap((l) =>
+    (l.surplusDetail.addresses || []).map((a: any, i: number) => ({
+      id: `a${l.id}-${i + 1}`,
+      surplusDetailId: l.surplusDetail.id,
+      status: 'untried',
+      ...a,
+      addressKey: a.addressKey || surplusAddressKey(a.street, a.zip),
+    })),
+  );
+  for (const l of leads) {
+    Object.defineProperty(l.surplusDetail, 'addresses', {
+      get: () => addresses.filter((a) => a.surplusDetailId === l.surplusDetail.id),
+      enumerable: true,
+      configurable: true,
+    });
+  }
+  const addressWhere = (a: any, where: any) =>
+    (!where.surplusDetailId || a.surplusDetailId === where.surplusDetailId) &&
+    (!where.addressKey || a.addressKey === where.addressKey) &&
+    (!where.status?.not || a.status !== where.status.not);
   const attempts: any[] = [];
   const batches: any[] = [];
   const detailOf = (id: string) => leads.find((l) => l.surplusDetail.id === id)!.surplusDetail;
@@ -26,7 +48,38 @@ function setup(leadsIn: any[], heirsIn: any[] = []) {
       findFirst: jest.fn(async ({ where }: any) => leads.find((l) => matchesWhere(l, where)) || null),
       update: jest.fn(async ({ where, data }: any) => Object.assign(leads.find((l) => l.id === where.id)!, data)),
     },
+    surplusAddress: {
+      findMany: jest.fn(async ({ where }: any) => addresses.filter((a) => addressWhere(a, where))),
+      update: jest.fn(async ({ where, data }: any) => Object.assign(addresses.find((a) => a.id === where.id)!, data)),
+      findUnique: jest.fn(async ({ where }: any) => {
+        const k = where.surplusDetailId_addressKey;
+        return addresses.find((a) => a.surplusDetailId === k.surplusDetailId && a.addressKey === k.addressKey) || null;
+      }),
+      create: jest.fn(async ({ data }: any) => {
+        const made = { id: `a${addresses.length + 1}`, ...data };
+        addresses.push(made);
+        return made;
+      }),
+      updateMany: jest.fn(async ({ where, data }: any) => {
+        const hit = addresses.filter((a) => addressWhere(a, where));
+        hit.forEach((a) => Object.assign(a, data));
+        return { count: hit.length };
+      }),
+      upsert: jest.fn(async ({ where, create, update }: any) => {
+        const k = where.surplusDetailId_addressKey;
+        const had = addresses.find((a) => a.surplusDetailId === k.surplusDetailId && a.addressKey === k.addressKey);
+        if (had) return Object.assign(had, update);
+        const made = { id: `a${addresses.length + 1}`, status: 'untried', ...create };
+        addresses.push(made);
+        return made;
+      }),
+    },
     surplusDetail: {
+      findMany: jest.fn(async ({ where }: any) =>
+        leads
+          .filter((l) => l.surplusDetail.id !== where.id?.not && l.surplusDetail.caseNumber === where.caseNumber && l.surplusDetail.county === where.county)
+          .map((l) => ({ id: l.surplusDetail.id, organizationId: l.surplusDetail.organizationId, lead: l })),
+      ),
       findUnique: jest.fn(async ({ where }: any) => detailOf(where.id)),
       update: jest.fn(async ({ where, data }: any) => Object.assign(detailOf(where.id), data)),
     },
@@ -92,7 +145,7 @@ function setup(leadsIn: any[], heirsIn: any[] = []) {
     },
   };
   const config: any = { get: () => undefined };
-  return { service: new SurplusIdiService(prisma, config), leads, heirs, attempts, batches };
+  return { service: new SurplusIdiService(prisma, config), leads, heirs, attempts, batches, addresses };
 }
 
 const lead = (id: string, first: string, last: string, street: string, over: any = {}) => ({
@@ -262,7 +315,11 @@ describe('SurplusIdiService.exportBatch', () => {
   });
 
   it('saves every row exactly as sent, and numbers batches in order', async () => {
-    const { service, batches } = setup([lead('1', 'JANE Q', 'SAMPLE', '100 Example Rd SE')]);
+    const { service, batches } = setup([
+      lead('1', 'JANE Q', 'SAMPLE', '100 Example Rd SE', {
+        surplusDetail: { addresses: [{ street: '9 Second Pl', city: 'Akron', state: 'OH', zip: '44301', source: 'case_parties' }] },
+      }),
+    ]);
     await service.exportBatch({ organizationId: 'org1', leadIds: ['1'], userId: 'u1' });
     const second = await service.exportBatch({ organizationId: 'org1', leadIds: ['1'], userId: 'u1' });
 
@@ -273,9 +330,10 @@ describe('SurplusIdiService.exportBatch', () => {
       rowNumber: 1,
       sentFirst: 'JANE Q',
       sentLast: 'SAMPLE',
-      sentStreet: '100 Example Rd SE',
-      sentState: 'FL',
+      sentStreet: '9 Second Pl',
+      sentState: 'OH',
     });
+    expect(batches[1].members[0]).toMatchObject({ sentStreet: '100 Example Rd SE', sentState: 'FL' });
   });
 
   it('sends the notice address even when the letter came back, and the surname alone', async () => {
@@ -296,6 +354,72 @@ describe('SurplusIdiService.exportBatch', () => {
     ]);
     const r = await service.exportBatch({ organizationId: 'org1', leadIds: ['1'] });
     expect(r.csv.split('\r\n')[1]).toBe('Elgene B,Brown,576 Eastern Pkwy #3G,Brooklyn,NY,11225');
+  });
+
+  it('sends one address per person per batch, best first, until none is left', async () => {
+    const { service, addresses } = setup([
+      lead('1', 'JANE Q', 'SAMPLE', '100 Example Rd SE', {
+        surplusDetail: {
+          ownerMailingStreet: '48 Village Ct',
+          ownerMailingCity: 'Nashotah',
+          ownerMailingState: 'WI',
+          ownerMailingZip: '53058',
+          ownerAddressSource: 'surplus_letter_notifications',
+          addresses: [
+            { street: 'PO Box 12', city: 'Nashotah', state: 'WI', zip: '53058', source: 'surplus_letter_notifications' },
+            { street: '48 Village Ct', city: 'Nashotah', state: 'WI', zip: '53058', source: 'surplus_letter_notifications' },
+            { street: '7 Lake St', city: 'Akron', state: 'OH', zip: '44301', source: 'case_parties' },
+            { street: 'RT 1 Box 15', city: 'Pullman', state: 'WV', zip: '26421', source: 'surplus_letter_notifications' },
+            { street: '1 Rue de Paris', city: 'Paris', state: null, zip: '75001', country: 'FRANCE', source: 'surplus_letter_notifications' },
+          ],
+        },
+      }),
+    ]);
+    const sent: string[] = [];
+    for (let round = 0; round < 5; round += 1) {
+      const r = await service.exportBatch({ organizationId: 'org1', leadIds: ['1'] });
+      sent.push(r.csv.split('\r\n')[1].split(',')[2]);
+    }
+    // The card first, then the clerk's other letter, then any street, then the box, then the house that sold.
+    expect(sent).toEqual(['48 Village Ct', 'RT 1 Box 15', '7 Lake St', 'PO Box 12', '100 Example Rd SE']);
+    expect(addresses.filter((a) => a.status === 'sent')).toHaveLength(5);
+
+    const done = await service.exportBatch({ organizationId: 'org1', leadIds: ['1'] });
+    expect(done.batch).toBeNull();
+    expect(done.skipped[0].reason).toBe('Every address on file has been sent to IDI. Research by name.');
+  });
+
+  it('sends a US address on the list ahead of a foreign card address', async () => {
+    // Lee 2025001309: the card kept Canada and dropped Key West, so the claimant was never sent.
+    const { service } = setup([
+      lead('1', 'JANE Q', 'SAMPLE', '0 Lot Rd', {
+        surplusDetail: {
+          ownerMailingStreet: '12 King St',
+          ownerMailingCity: 'Toronto',
+          ownerMailingState: 'ON',
+          ownerMailingCountry: 'CANADA',
+          addresses: [{ street: '3 Duval St', city: 'Key West', state: 'FL', zip: '33040', source: 'surplus_letter_notifications' }],
+        },
+      }),
+    ]);
+    const r = await service.exportBatch({ organizationId: 'org1', leadIds: ['1'] });
+    expect(r.csv.split('\r\n')[1]).toBe('JANE Q,SAMPLE,3 Duval St,Key West,FL,33040');
+  });
+
+  it('falls back to the property only when it is a real house, and records it as sent', async () => {
+    const { service, addresses } = setup([
+      lead('1', 'JANE Q', 'SAMPLE', '100 Example Rd SE'),
+      lead('2', 'PAUL G', 'EXAMPLE', '0 Sample Ct'),
+    ]);
+    const r = await service.exportBatch({ organizationId: 'org1', leadIds: ['1', '2'] });
+    expect(r.included).toBe(1);
+    expect(r.skipped).toEqual([
+      { leadId: '2', claimant: 'PAUL G EXAMPLE', reason: 'Only the property is known, and it has no house number. Research by name.' },
+    ]);
+    expect(addresses).toEqual([expect.objectContaining({ surplusDetailId: 'd1', street: '100 Example Rd SE', source: 'property', status: 'sent' })]);
+
+    const again = await service.exportBatch({ organizationId: 'org1', leadIds: ['1'] });
+    expect(again.skipped[0].reason).toBe('Every address on file has been sent to IDI. Research by name.');
   });
 
   it('saves no batch when nobody can be sent', async () => {
@@ -360,6 +484,78 @@ describe('SurplusIdiService batches on import', () => {
     expect(batches[0].members[0]).toMatchObject({ result: 'no_person' });
     expect(batches[0].resultsFileName).toBe('x_out.csv');
     expect(leads[0].surplusDetail.tracedAt).toBeUndefined();
+  });
+
+  it('marks the address that hit and the one that missed, and says what is left', async () => {
+    const { service, addresses, leads } = setup([
+      lead('1', 'JANE Q', 'SAMPLE', '100 Example Rd SE'),
+      lead('4', 'GLEN A', 'NOBODY', '0 Lot Rd', {
+        surplusDetail: {
+          addresses: [
+            { street: '1 Vacant Lot Rd', city: 'Palm Bay', state: 'FL', zip: '32909', source: 'case_parties', firstSeenAt: new Date('2026-01-01') },
+            { street: '22 Next St', city: 'Ocala', state: 'FL', zip: '34470', source: 'case_parties', firstSeenAt: new Date('2026-02-01') },
+          ],
+        },
+      }),
+    ]);
+    await service.exportBatch({ organizationId: 'org1', leadIds: ['1', '4'] });
+    await service.applyImport(file, { organizationId: 'org1', fileName: 'x_out.csv' });
+
+    const status = (detail: string) => addresses.filter((a) => a.surplusDetailId === detail).map((a) => [a.street, a.status]);
+    expect(status('d1')).toEqual([['100 Example Rd SE', 'hit']]);
+    expect(status('d4')).toEqual([
+      ['1 Vacant Lot Rd', 'miss'],
+      ['22 Next St', 'untried'],
+    ]);
+    expect(leads[1].surplusDetail.traceOutcome).toBe('no_person');
+    expect(leads[1].surplusDetail.traceDetail).toContain('1 more address on file, so the next batch tries the next one.');
+
+    // Round two sends Glen at the next address.
+    const round2 = await service.exportBatch({ organizationId: 'org1', leadIds: ['4'] });
+    expect(round2.csv.split('\r\n')[1]).toBe('GLEN A,NOBODY,22 Next St,Ocala,FL,34470');
+  });
+
+  it('marks the list from a results file no saved batch sent, so the next round moves on', async () => {
+    // The 2026-11-02 files were built outside DealCore and match no saved batch.
+    const { service, addresses } = setup([
+      lead('4', 'GLEN A', 'NOBODY', '0 Lot Rd', {
+        surplusDetail: { addresses: [{ street: '1 Vacant Lot Rd', city: 'Palm Bay', state: 'FL', zip: '32909', source: 'case_parties' }] },
+      }),
+      lead('1', 'JANE Q', 'SAMPLE', '0 Lot Rd'),
+    ]);
+    await service.applyImport(file, { organizationId: 'org1', assignments: { '1': '4' } });
+    expect(addresses.map((a) => [a.surplusDetailId, a.street, a.source, a.status])).toEqual([
+      ['d4', '1 Vacant Lot Rd', 'case_parties', 'miss'],
+      ['d1', '100 Example Rd SE', 'idi_sent', 'hit'],
+    ]);
+  });
+
+  it('never lets a miss undo a person already found', async () => {
+    const found = lead('4', 'GLEN A', 'NOBODY', '1 Vacant Lot Rd', {
+      surplusDetail: { traceOutcome: 'matched', traceDetail: 'IDI matched GLEN A NOBODY at 9 Old Rd', tracedAt: new Date('2026-10-01'), callNotes: 'IDI batch matched Glen.' },
+    });
+    const { service, leads, attempts } = setup([found]);
+    await service.applyImport(file, { organizationId: 'org1', assignments: { '1': '4' } });
+    expect(leads[0].surplusDetail).toMatchObject({
+      traceOutcome: 'matched',
+      traceDetail: 'IDI matched GLEN A NOBODY at 9 Old Rd',
+      callNotes: 'IDI batch matched Glen.',
+    });
+    expect(attempts[0]).toMatchObject({ source: 'IDI', result: 'nothing' });
+  });
+
+  it('puts a co-owner IDI lists as a relative on that co-owner\'s address list', async () => {
+    // Jane's row lists John P Sample Jr at 48 Village Ct Apt 2; John is on the same case.
+    const { service, addresses } = setup([
+      lead('1', 'JANE Q', 'SAMPLE', '100 Example Rd SE', { surplusDetail: { caseNumber: 'case-S' } }),
+      lead('5', 'JOHN P', 'SAMPLE', '100 Example Rd SE', { surplusDetail: { caseNumber: 'case-S' } }),
+    ]);
+    await service.applyImport(file, { organizationId: 'org1', assignments: { '0': '1' } });
+    expect(addresses.filter((a) => a.surplusDetailId === 'd5')).toEqual([
+      expect.objectContaining({ street: '48 VILLAGE CT APT 2', city: 'SPRINGFIELD', state: 'WI', source: 'idi_relative', status: 'untried', nameOnRecord: 'JOHN P SAMPLE JR' }),
+    ]);
+    // Jane's own list holds only where she was found: a relative's address is not hers.
+    expect(addresses.filter((a) => a.surplusDetailId === 'd1').map((a) => [a.street, a.status])).toEqual([['100 Example Rd SE', 'hit']]);
   });
 
   it('leaves a batch row alone when a person re-points the result', async () => {

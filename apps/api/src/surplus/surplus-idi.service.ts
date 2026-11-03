@@ -8,6 +8,16 @@ import { SurplusService } from './surplus.service';
 import { isSignedStage } from './surplus-progress.util';
 import { tierOf } from './surplus.util';
 import {
+  idiAddressesLeft,
+  nextIdiAddress,
+  SentAddress,
+  sendableToIdi,
+  SURPLUS_ADDRESS_SOURCE,
+  SURPLUS_ADDRESS_STATUS,
+  surplusAddressKey,
+} from './surplus-address.util';
+import { matchRecipients } from './surplus-name-search.util';
+import {
   buildIdiBatchCsv,
   IdiBatchRow,
   idiNameOf,
@@ -276,15 +286,20 @@ export class SurplusIdiService {
   }
 
   /**
-   * The upload file for the chosen claimants, at the address a trace should
-   * use: the clerk's notice address when we have one, the property otherwise.
+   * The upload file for the chosen claimants, one row per person at the best
+   * address on their list that no batch has carried yet (see nextIdiAddress).
+   * A person IDI missed goes back into Send to IDI while an untried address
+   * is left, so each later batch is a retry round at the next address and
+   * nobody is ever paid for twice: one file holding every address could hit
+   * the same person at two of them.
+   *
    * A notice the post office returned is still sent: IDI matches the name
    * against everyone who has ever lived at the address, and a place the
    * claimant once lived beats the lot that sold, which in a vacant lot
    * county they never lived on. The 2026-11-02 batch sent 43 people at the
    * property and got 2 hits; at the notice address it was 7 of 33.
-   * Entities, claimants without a usable name, and foreign addresses are left
-   * out and named, because IDI can do nothing useful with them.
+   * Entities, claimants without a usable name, and people with nothing left
+   * to send are left out and named.
    */
   async exportBatch(opts: {
     organizationId?: string | null;
@@ -297,10 +312,10 @@ export class SurplusIdiService {
         ...(opts.organizationId ? { organizationId: opts.organizationId } : {}),
         id: { in: opts.leadIds },
       },
-      include: { surplusDetail: true },
+      include: { surplusDetail: { include: { addresses: true } } },
     });
     const skipped: IdiExportResult['skipped'] = [];
-    const rows: (IdiBatchRow & { detailId: string })[] = [];
+    const rows: (IdiBatchRow & { detailId: string; address: SentAddress })[] = [];
     for (const l of leads as any[]) {
       if (!l.surplusDetail) continue;
       const c = candidateOf(l, { keepReturnedNotice: true });
@@ -313,29 +328,31 @@ export class SurplusIdiService {
         skipped.push({ leadId: l.id, claimant, reason: 'No first and last name to send.' });
         continue;
       }
-      if (c.country) {
-        skipped.push({ leadId: l.id, claimant, reason: `Address is outside the US (${c.country}).` });
+      const next = nextIdiAddress(l);
+      if ('reason' in next) {
+        skipped.push({ leadId: l.id, claimant, reason: next.reason });
         continue;
       }
-      if (!c.street || !c.city || !c.state) {
-        skipped.push({ leadId: l.id, claimant, reason: 'No street, city and state on file.' });
-        continue;
-      }
+      const a = next.address;
       const name = idiNameOf(l.sellerFirstName, l.sellerLastName);
       rows.push({
         first: name.first,
         last: name.last,
-        street: String(c.street).trim(),
-        city: String(c.city).trim(),
-        state: String(c.state).trim().toUpperCase(),
-        zip: String(c.zip || '').replace(/[^0-9]/g, '').slice(0, 5),
+        street: String(a.street).trim(),
+        city: String(a.city).trim(),
+        state: String(a.state).trim().toUpperCase(),
+        zip: String(a.zip || '').replace(/[^0-9]/g, '').slice(0, 5),
         detailId: l.surplusDetail.id,
+        address: a,
       });
     }
     const day = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
     const batch = rows.length
       ? await this.saveBatch({ organizationId: opts.organizationId || null, userId: opts.userId || null, rows, skipped: skipped.length, day })
       : null;
+    if (batch) {
+      for (const r of rows) await this.markSent(r.detailId, opts.organizationId || null, r.address);
+    }
     return {
       csv: buildIdiBatchCsv(rows),
       fileName: batch ? batch.fileName : `${day}_IDI_Batch_Surplus.csv`,
@@ -346,6 +363,40 @@ export class SurplusIdiService {
   }
 
   /**
+   * The address a batch carried is no longer untried. One the list did not
+   * hold yet (the property, or a card address typed in since the list was
+   * filled) is added, so the next round knows it has been sent. A failure is
+   * logged and never undoes the export: the batch row still records what went.
+   */
+  private async markSent(detailId: string, organizationId: string | null, a: SentAddress): Promise<void> {
+    try {
+      if (a.id) {
+        await this.prisma.surplusAddress.update({ where: { id: a.id }, data: { status: SURPLUS_ADDRESS_STATUS.sent } });
+        return;
+      }
+      const addressKey = surplusAddressKey(a.street, a.zip);
+      await this.prisma.surplusAddress.upsert({
+        where: { surplusDetailId_addressKey: { surplusDetailId: detailId, addressKey } },
+        create: {
+          surplusDetailId: detailId,
+          organizationId,
+          street: String(a.street).trim(),
+          city: a.city,
+          state: a.state,
+          zip: a.zip,
+          country: null,
+          source: a.source,
+          addressKey,
+          status: SURPLUS_ADDRESS_STATUS.sent,
+        },
+        update: { status: SURPLUS_ADDRESS_STATUS.sent },
+      });
+    } catch (err: any) {
+      this.logger.warn(`Could not mark the IDI address sent on ${detailId}: ${err?.message || err}`);
+    }
+  }
+
+  /**
    * Save the batch and every row exactly as sent. The number counts up per
    * organization; two exports in the same instant collide on the unique
    * index, and the second simply takes the next number.
@@ -353,7 +404,7 @@ export class SurplusIdiService {
   private async saveBatch(opts: {
     organizationId: string | null;
     userId: string | null;
-    rows: (IdiBatchRow & { detailId: string })[];
+    rows: (IdiBatchRow & { detailId: string; address: SentAddress })[];
     skipped: number;
     day: string;
   }): Promise<{ id: string; number: number; fileName: string }> {
@@ -640,6 +691,9 @@ export class SurplusIdiService {
       }
       try {
         const out = await this.applyRow(row, lead, opts.userId || null);
+        // The address this row was sent at, from the row itself, so a file
+        // built outside DealCore marks the list too and the next round moves on.
+        await this.recordAddress(lead.surplusDetail.id, lead.surplusDetail.organizationId || null, row.input, row.matched);
         // Recorded on the batch row only when the result went to the claimant
         // that row was sent for. A row a person re-pointed belongs elsewhere.
         const member = batch?.pairs.get(row.index);
@@ -674,6 +728,7 @@ export class SurplusIdiService {
     for (const row of rows) {
       const member = batch?.pairs.get(row.index);
       if (!member || row.matched || recorded.has(member.id)) continue;
+      await this.recordAddress(member.candidate.detailId, opts.organizationId || null, row.input, false);
       await this.prisma.surplusBatchMember.update({
         where: { id: member.id },
         data: { result: 'no_person', appliedAt: emptyAt },
@@ -809,6 +864,52 @@ export class SurplusIdiService {
     return out;
   }
 
+  /**
+   * What IDI said about one address on one claimant's list: a hit when it
+   * placed the person there, a miss when it could not. A miss never replaces
+   * a hit, so a re-sent address keeps the better answer. An address the list
+   * does not hold yet (the property, or a file built outside DealCore) is
+   * added, so no later round sends it again. Logged, never fatal: the
+   * claimant's own result has already been written.
+   */
+  private async recordAddress(
+    detailId: string,
+    organizationId: string | null,
+    a: { street: string; city: string; state: string; zip: string },
+    hit: boolean,
+  ): Promise<void> {
+    if (!String(a.street || '').trim()) return;
+    const status = hit ? SURPLUS_ADDRESS_STATUS.hit : SURPLUS_ADDRESS_STATUS.miss;
+    try {
+      const addressKey = surplusAddressKey(a.street, a.zip);
+      const had = await this.prisma.surplusAddress.findUnique({
+        where: { surplusDetailId_addressKey: { surplusDetailId: detailId, addressKey } },
+      });
+      if (had) {
+        if (had.status !== SURPLUS_ADDRESS_STATUS.hit && had.status !== status) {
+          await this.prisma.surplusAddress.update({ where: { id: had.id }, data: { status } });
+        }
+        return;
+      }
+      await this.prisma.surplusAddress.create({
+        data: {
+          surplusDetailId: detailId,
+          organizationId,
+          street: String(a.street).trim(),
+          city: String(a.city || '').trim() || null,
+          state: String(a.state || '').trim().toUpperCase() || null,
+          zip: String(a.zip || '').replace(/[^0-9]/g, '').slice(0, 5) || null,
+          country: null,
+          source: SURPLUS_ADDRESS_SOURCE.idiSent,
+          addressKey,
+          status,
+        },
+      });
+    } catch (err: any) {
+      this.logger.warn(`Could not record the IDI result on an address of ${detailId}: ${err?.message || err}`);
+    }
+  }
+
   /** Write one returned row onto one claimant. */
   private async applyRow(
     row: IdiResultRow,
@@ -822,7 +923,18 @@ export class SurplusIdiService {
     const now = new Date();
 
     if (!row.matched) {
-      const detail = `IDI returned no match for ${row.input.first} ${row.input.last} at ${sent}. Re-sending the same address returns the same nothing; try the clerk's notice address or a newer one.`;
+      // A miss at one address never undoes a person found at another, in this
+      // file or an earlier round. Only the search is logged.
+      if (d.traceOutcome === 'matched' || d.traceOutcome === 'no_contact') {
+        await this.logAttempt(d, 'nothing', `IDI returned no match for ${row.input.first} ${row.input.last} at ${sent}. Already found, so the earlier result stands.`, userId);
+        return { contact: false, deceased: false, relativesFiled: 0 };
+      }
+      const left = idiAddressesLeft(await this.addressesOf(d.id, d));
+      const detail =
+        `IDI returned no match for ${row.input.first} ${row.input.last} at ${sent}. ` +
+        (left
+          ? `${left} more address${left === 1 ? '' : 'es'} on file, so the next batch tries the next one.`
+          : 'Every address on file has now been tried. Research by name.');
       await this.prisma.surplusDetail.update({
         where: { id: d.id },
         data: {
@@ -906,6 +1018,7 @@ export class SurplusIdiService {
 
     // ── Relatives ──
     const relativesFiled = await this.fileRelatives(d, row.relatives, who, markedDead || !!d.deceased);
+    await this.addressesFromRelatives(d, row.relatives);
     return { contact, deceased: markedDead, relativesFiled };
   }
 
@@ -1019,6 +1132,68 @@ export class SurplusIdiService {
     return filed;
   }
 
+  /** The detail with its address list, for counting what is left. */
+  private async addressesOf(detailId: string, d: any): Promise<any> {
+    try {
+      const addresses = await this.prisma.surplusAddress.findMany({ where: { surplusDetailId: detailId } });
+      return { ...d, addresses };
+    } catch {
+      return d;
+    }
+  }
+
+  /**
+   * IDI's relatives of one claimant sometimes include a co-owner on the same
+   * case, with the address IDI has them at: Jane A Holmok, a relative on a
+   * co-owner's row, listed on Marview Dr. That address goes on the co-owner's
+   * own list as untried, so their next round can be sent there. The name
+   * must carry the co-owner's surname and a given name, as the notice
+   * matcher requires. Never fatal.
+   */
+  private async addressesFromRelatives(d: any, relatives: IdiRelative[]): Promise<number> {
+    const placed = relatives.filter((r) => sendableToIdi({ street: r.street, city: r.city, state: r.state, country: null }));
+    if (!placed.length || !d.caseNumber) return 0;
+    let added = 0;
+    try {
+      const others = await this.prisma.surplusDetail.findMany({
+        where: {
+          id: { not: d.id },
+          organizationId: d.organizationId ?? null,
+          county: d.county ?? null,
+          caseNumber: d.caseNumber,
+        },
+        select: { id: true, organizationId: true, lead: { select: { sellerFirstName: true, sellerLastName: true } } },
+      });
+      const now = new Date();
+      for (const o of others as any[]) {
+        const name = `${o.lead?.sellerFirstName || ''} ${o.lead?.sellerLastName || ''}`.trim();
+        for (const r of matchRecipients(name, placed)) {
+          const addressKey = surplusAddressKey(r.street, r.zip);
+          await this.prisma.surplusAddress.upsert({
+            where: { surplusDetailId_addressKey: { surplusDetailId: o.id, addressKey } },
+            create: {
+              surplusDetailId: o.id,
+              organizationId: o.organizationId || null,
+              street: String(r.street).trim(),
+              city: r.city,
+              state: r.state,
+              zip: r.zip,
+              country: null,
+              nameOnRecord: r.name,
+              source: SURPLUS_ADDRESS_SOURCE.idiRelative,
+              addressKey,
+            },
+            update: { lastSeenAt: now },
+          });
+          added += 1;
+        }
+      }
+    } catch (err: any) {
+      this.logger.warn(`Could not add relative addresses from ${d.id}: ${err?.message || err}`);
+    }
+    return added;
+  }
+
   private async logAttempt(d: any, result: 'found' | 'nothing', summary: string, userId: string | null): Promise<void> {
     const cost = Number(this.config.get<string>('IDI_COST_PER_SEARCH') || 0) || null;
     try {
@@ -1066,3 +1241,4 @@ function personKey(n: string | null | undefined): string {
     .sort()
     .join(' ');
 }
+

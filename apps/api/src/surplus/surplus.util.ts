@@ -291,6 +291,10 @@ export interface QueueFacts {
   holdUntil?: Date | string | null;
   /** The IDI batch this claimant is in, waiting on the results: "B014". */
   idiPendingBatch?: string | null;
+  /** IDI's last answer on this claimant was no match. */
+  idiMissed?: boolean | null;
+  /** Untried addresses IDI could still be sent: the next retry round. */
+  idiAddressesLeft?: number | null;
 }
 
 export function queueOf(f: QueueFacts): SurplusQueue {
@@ -333,6 +337,11 @@ export function queueOf(f: QueueFacts): SurplusQueue {
   const untried = !f.traceState || f.traceState === 'never';
   if (untried && f.mailVerdict !== 'undeliverable') return SurplusQueue.TRACE;
 
+  // IDI missed them at one address and the list holds another nobody has
+  // sent, so the next batch is a retry round. Kept here while a retry is out
+  // too, so the file does not drop to name search before IDI answers.
+  if (f.idiMissed && ((f.idiAddressesLeft || 0) > 0 || f.idiPendingBatch)) return SurplusQueue.TRACE;
+
   return SurplusQueue.NAME_SEARCH;
 }
 
@@ -366,6 +375,10 @@ export function queueReason(f: QueueFacts): string {
         : 'Claimant is deceased and no heirs are on file, so nobody can sign yet';
     case SurplusQueue.TRACE:
       if (f.idiPendingBatch) return `Sent to IDI in ${f.idiPendingBatch}, waiting on the results`;
+      if (f.idiMissed) {
+        const n = f.idiAddressesLeft || 0;
+        return `IDI missed them, ${n} more address${n === 1 ? '' : 'es'} to try in the next batch`;
+      }
       return f.ownerMailingStreet
         ? 'Not sent to IDI yet, and the notice address is live'
         : 'Not sent to IDI yet, though only the property address is known';
