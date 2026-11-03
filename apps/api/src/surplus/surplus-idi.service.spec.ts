@@ -422,6 +422,26 @@ describe('SurplusIdiService.exportBatch', () => {
     expect(again.skipped[0].reason).toBe('Every address on file has been sent to IDI. Research by name.');
   });
 
+  it('leaves out anyone IDI has already found, so nobody is paid for twice', async () => {
+    // B001 re-sent 52 people found the day before and 25 hit again.
+    const { service } = setup([
+      lead('1', 'JANE Q', 'SAMPLE', '100 Example Rd SE', {
+        surplusDetail: { traceAttempts: [{ source: 'IDI', result: 'found', ranAt: new Date('2026-11-02T18:00:00Z') }] },
+      }),
+      lead('2', 'PAUL G', 'EXAMPLE', '7500 E Sample Ct', {
+        surplusDetail: { addresses: [{ street: '7500 E Sample Ct', city: 'Inverness', state: 'FL', zip: '34453', source: 'property', status: 'hit' }] },
+      }),
+      lead('3', 'GLEN A', 'NOBODY', '1 Vacant Lot Rd'),
+    ]);
+    const r = await service.exportBatch({ organizationId: 'org1', leadIds: ['1', '2', '3'] });
+    expect(r.included).toBe(1);
+    expect(r.csv.split('\r\n')[1]).toBe('GLEN A,NOBODY,1 Vacant Lot Rd,Palm Bay,FL,32909');
+    expect(r.skipped).toEqual([
+      { leadId: '1', claimant: 'JANE Q SAMPLE', reason: 'Already found by IDI on Nov 2, 2026. Call the numbers on the card.' },
+      { leadId: '2', claimant: 'PAUL G EXAMPLE', reason: 'Already found by IDI. Call the numbers on the card.' },
+    ]);
+  });
+
   it('saves no batch when nobody can be sent', async () => {
     const { service, batches } = setup([lead('2', 'ACME HOLDINGS', 'LLC', '1 Main St')]);
     const r = await service.exportBatch({ organizationId: 'org1', leadIds: ['2'] });

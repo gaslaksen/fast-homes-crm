@@ -314,7 +314,15 @@ export class SurplusIdiService {
         ...(opts.organizationId ? { organizationId: opts.organizationId } : {}),
         id: { in: opts.leadIds },
       },
-      include: { surplusDetail: { include: { addresses: true } } },
+      include: {
+        surplusDetail: {
+          include: {
+            addresses: true,
+            // The last time IDI placed this person, if it ever has.
+            traceAttempts: { where: { source: 'IDI', result: 'found' }, orderBy: { ranAt: 'desc' }, take: 1 },
+          },
+        },
+      },
     });
     const skipped: IdiExportResult['skipped'] = [];
     const rows: (IdiBatchRow & { detailId: string; address: SentAddress })[] = [];
@@ -329,6 +337,14 @@ export class SurplusIdiService {
       }
       if (!c.nameKnown || !l.sellerLastName) {
         skipped.push({ leadId: l.id, claimant, reason: 'No first and last name to send.' });
+        continue;
+      }
+      // IDI charges per hit, so a person it has already placed is a second
+      // charge for numbers already on the card. B001 (2026-11-03) re-sent 52
+      // people found the day before, picked by hand, and 25 hit again.
+      const found = foundByIdi(l.surplusDetail);
+      if (found) {
+        skipped.push({ leadId: l.id, claimant, reason: found });
         continue;
       }
       const next = nextIdiAddress(l);
@@ -1313,3 +1329,18 @@ function personKey(n: string | null | undefined): string {
     .join(' ');
 }
 
+/**
+ * Why a claimant must not go to IDI again, or null: IDI placed them at an
+ * address on their list, or an earlier import logged a match.
+ */
+function foundByIdi(d: any): string | null {
+  const at = d?.traceAttempts?.[0]?.ranAt;
+  if (at) {
+    const day = new Date(at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'America/New_York' });
+    return `Already found by IDI on ${day}. Call the numbers on the card.`;
+  }
+  if ((d?.addresses || []).some((a: any) => a.status === SURPLUS_ADDRESS_STATUS.hit)) {
+    return 'Already found by IDI. Call the numbers on the card.';
+  }
+  return null;
+}
