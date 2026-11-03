@@ -32,6 +32,12 @@ const row = (id: string, over: any = {}) => ({
 });
 
 describe('SurplusIdiService.readyForIdi', () => {
+  it('narrows to the tier the board is filtered to', async () => {
+    const { svc, list } = harness([row('a')]);
+    await svc.readyForIdi({ organizationId: 'org1', rating: 'A', now: NOW });
+    expect(list).toHaveBeenCalledWith(expect.objectContaining({ queue: 'trace', rating: 'A' }));
+  });
+
   it('asks the board for the Send to IDI queue, one lead per row, in the county asked for', async () => {
     const { svc, list } = harness([row('a'), row('b')]);
     const r = await svc.readyForIdi({ organizationId: 'org1', county: 'Hernando', now: NOW });

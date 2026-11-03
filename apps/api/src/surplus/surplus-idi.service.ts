@@ -225,6 +225,8 @@ export class SurplusIdiService {
   async readyForIdi(opts: {
     organizationId?: string | null;
     county?: string | null;
+    /** The board's rating filter: 'A', 'B' or 'none'. */
+    rating?: string | null;
     now?: Date;
   }): Promise<{ leadIds: string[]; waiting: number; overAge: number }> {
     if (!this.surplus) return { leadIds: [], waiting: 0, overAge: 0 };
@@ -241,6 +243,7 @@ export class SurplusIdiService {
       queue: SurplusQueue.TRACE,
       pageSize: 200,
       ...(opts.county ? { county: opts.county } : {}),
+      ...(opts.rating ? { rating: opts.rating } : {}),
     };
     const rows: any[] = [];
     for (let page = 1; page <= 50; page += 1) {
@@ -270,7 +273,7 @@ export class SurplusIdiService {
   }
 
   /** The one-click Monday export: the whole Send to IDI queue as one batch. */
-  async exportReady(opts: { organizationId?: string | null; county?: string | null; userId?: string | null }) {
+  async exportReady(opts: { organizationId?: string | null; county?: string | null; rating?: string | null; userId?: string | null }) {
     const ready = await this.readyForIdi(opts);
     if (!ready.leadIds.length) {
       return {
@@ -1016,7 +1019,7 @@ export class SurplusIdiService {
         await this.logAttempt(d, 'nothing', `IDI returned no match for ${row.input.first} ${row.input.last} at ${sent}. Already found, so the earlier result stands.`, userId);
         return { contact: false, deceased: false, relativesFiled: 0 };
       }
-      const left = idiAddressesLeft(await this.addressesOf(d.id, d));
+      const left = idiAddressesLeft(await this.addressesOf(d.id, d), lead);
       const detail =
         `IDI returned no match for ${row.input.first} ${row.input.last} at ${sent}. ` +
         (left

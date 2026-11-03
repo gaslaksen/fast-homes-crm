@@ -817,6 +817,23 @@ describe('queueOf', () => {
     expect(queueOf({ ...missed, idiAddressesLeft: 2, cleanPhoneCount: 1 })).toBe(SurplusQueue.CALL);
   });
 
+  it('sends anyone IDI has never searched to Send to IDI while an address is left', () => {
+    // 2026-11-03: an old Endato miss parked 90 A Tier claimants in name search.
+    const endato = { ...base, traceState: 'no_person', idiMissed: false, idiSearched: false };
+    expect(queueOf({ ...endato, idiAddressesLeft: 2 })).toBe(SurplusQueue.TRACE);
+    expect(queueReason({ ...endato, idiAddressesLeft: 2 })).toBe('An older search missed them and IDI never has: 2 addresses to try');
+    expect(queueOf({ ...endato, idiAddressesLeft: 0 })).toBe(SurplusQueue.NAME_SEARCH);
+    // A returned clerk letter no longer keeps out their other addresses.
+    const returned = { ...base, traceState: 'never', mailVerdict: 'undeliverable', idiSearched: false };
+    expect(queueOf({ ...returned, idiAddressesLeft: 1 })).toBe(SurplusQueue.TRACE);
+    expect(queueReason({ ...returned, idiAddressesLeft: 1 })).toBe("The clerk's letter came back, but IDI has never been sent: 1 address to try");
+    expect(queueOf({ ...returned, idiAddressesLeft: 0 })).toBe(SurplusQueue.NAME_SEARCH);
+    // A dead claimant still goes to the heir search, never to IDI.
+    expect(queueOf({ ...endato, idiAddressesLeft: 2, isDeceased: true })).toBe(SurplusQueue.HEIRS);
+    // Unknown (a caller that does not say) changes nothing.
+    expect(queueOf({ ...base, traceState: 'no_person', idiAddressesLeft: 2 })).toBe(SurplusQueue.NAME_SEARCH);
+  });
+
   it('puts a callable open claim in Call now', () => {
     expect(queueOf({ ...base, cleanPhoneCount: 2 })).toBe(SurplusQueue.CALL);
   });

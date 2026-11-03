@@ -3321,7 +3321,8 @@ export class SurplusService {
       idiMissed:
         trace.state === 'no_person' &&
         (d.traceAttempts || []).find((a: any) => a.source === 'IDI')?.result === 'nothing',
-      idiAddressesLeft: idiAddressesLeft(d),
+      idiAddressesLeft: idiAddressesLeft(d, lead),
+      idiSearched: (d.traceAttempts || []).some((a: any) => a.source === 'IDI'),
     };
     const queue = queueOf(f);
     return { queue, queueLabel: SURPLUS_QUEUE_LABEL[queue], queueReason: queueReason(f), idiPendingBatch: f.idiPendingBatch };
