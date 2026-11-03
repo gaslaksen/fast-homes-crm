@@ -1,4 +1,14 @@
-import { normalizeMailing, foreignCountry, usStateCode, cityLine, surplusAddressKey } from './surplus-address.util';
+import {
+  normalizeMailing,
+  foreignCountry,
+  usStateCode,
+  cityLine,
+  surplusAddressKey,
+  isPoBox,
+  hasHouseNumber,
+  untriedForIdi,
+  idiAddressesLeft,
+} from './surplus-address.util';
 
 /** The addresses the first Charlotte pull (2026-10-15) stored wrong, as the reader returned them. */
 describe('normalizeMailing', () => {
@@ -97,5 +107,51 @@ describe('surplusAddressKey', () => {
     expect(surplusAddressKey('576 EASTERN PKWY #3G', '11225')).toBe('576EASTERNPKWY3G|11225');
     expect(surplusAddressKey('576 Eastern Pkwy 3G', '11225-4410')).toBe('576EASTERNPKWY3G|11225');
     expect(surplusAddressKey('30 GUILDWOOD DR', null)).toBe('30GUILDWOODDR|');
+  });
+});
+
+describe('the IDI round order', () => {
+  it('tells a post office box from a rural route box, which is a home', () => {
+    expect(isPoBox('PO Box 12')).toBe(true);
+    expect(isPoBox('P.O. BOX 881')).toBe(true);
+    expect(isPoBox('Post Office Box 4')).toBe(true);
+    expect(isPoBox('RT 1 BOX 15')).toBe(false);
+    expect(isPoBox('12 Box Elder Dr')).toBe(false);
+    expect(hasHouseNumber('RR 2 BOX 15')).toBe(true);
+    expect(hasHouseNumber('HC 65 Box 10')).toBe(true);
+    expect(hasHouseNumber('4808 4th St W')).toBe(true);
+    expect(hasHouseNumber('0 Sample Ct')).toBe(false);
+    expect(hasHouseNumber('Lot 7 Pine Ridge')).toBe(false);
+  });
+
+  it('puts the card first, then the clerk letter, then other streets, then boxes and foreign never', () => {
+    const at = (street: string, source: string, extra: any = {}) => ({ street, city: 'X', state: 'FL', zip: '33901', source, status: 'untried', ...extra });
+    const list = [
+      at('PO Box 9', 'surplus_letter_notifications'),
+      at('5 Party St', 'case_parties'),
+      at('9 Letter Ave', 'notice_of_surplus_funds'),
+      at('1 Card Ct', 'surplus_letter_notifications'),
+      at('2 Tried Rd', 'surplus_letter_notifications', { status: 'miss' }),
+      at('3 Rue', 'surplus_letter_notifications', { country: 'FRANCE' }),
+    ];
+    expect(untriedForIdi(list, surplusAddressKey('1 Card Ct', '33901')).map((a) => a.street)).toEqual([
+      '1 Card Ct',
+      '9 Letter Ave',
+      '5 Party St',
+      'PO Box 9',
+    ]);
+  });
+
+  it('counts the card address as left when the list does not hold it yet', () => {
+    expect(idiAddressesLeft({ ownerMailingStreet: '1 Card Ct', ownerMailingCity: 'X', ownerMailingState: 'FL', addresses: [] })).toBe(1);
+    expect(
+      idiAddressesLeft({
+        ownerMailingStreet: '1 Card Ct',
+        ownerMailingCity: 'X',
+        ownerMailingState: 'FL',
+        ownerMailingZip: '33901',
+        addresses: [{ street: '1 CARD CT', city: 'X', state: 'FL', zip: '33901', source: 'manual', status: 'miss' }],
+      }),
+    ).toBe(0);
   });
 });
