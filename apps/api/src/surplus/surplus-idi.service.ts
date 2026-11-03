@@ -148,6 +148,8 @@ interface LoadedBatch {
   summary: IdiBatchSummary;
   /** Returned row index to the sent row it echoes. */
   pairs: Map<number, LoadedBatchMember>;
+  /** Every saved row, the twins after the file's own rows included. */
+  members: LoadedBatchMember[];
 }
 
 export interface IdiPreviewRow {
@@ -316,6 +318,7 @@ export class SurplusIdiService {
     });
     const skipped: IdiExportResult['skipped'] = [];
     const rows: (IdiBatchRow & { detailId: string; address: SentAddress })[] = [];
+    const twins: (IdiBatchRow & { detailId: string; address: SentAddress })[] = [];
     for (const l of leads as any[]) {
       if (!l.surplusDetail) continue;
       const c = candidateOf(l, { keepReturnedNotice: true });
@@ -335,7 +338,7 @@ export class SurplusIdiService {
       }
       const a = next.address;
       const name = idiNameOf(l.sellerFirstName, l.sellerLastName);
-      rows.push({
+      const row = {
         first: name.first,
         last: name.last,
         street: String(a.street).trim(),
@@ -344,14 +347,30 @@ export class SurplusIdiService {
         zip: String(a.zip || '').replace(/[^0-9]/g, '').slice(0, 5),
         detailId: l.surplusDetail.id,
         address: a,
-      });
+      };
+      // One owner on two cases at one address goes in the file once. IDI
+      // charges per hit, so a second row is the same person paid for twice
+      // (Douglas Garcia in B001). The other case rides along on the batch
+      // and the import gives it the same result.
+      const echo = idiEchoKey(row);
+      const first = rows.findIndex((r) => idiEchoKey(r) === echo);
+      if (first >= 0) {
+        twins.push(row);
+        skipped.push({
+          leadId: l.id,
+          claimant,
+          reason: `Same person at the same address as row ${first + 1}, for another case. Sent once; the result goes to both.`,
+        });
+        continue;
+      }
+      rows.push(row);
     }
     const day = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
     const batch = rows.length
-      ? await this.saveBatch({ organizationId: opts.organizationId || null, userId: opts.userId || null, rows, skipped: skipped.length, day })
+      ? await this.saveBatch({ organizationId: opts.organizationId || null, userId: opts.userId || null, rows, twins, skipped: skipped.length, day })
       : null;
     if (batch) {
-      for (const r of rows) await this.markSent(r.detailId, opts.organizationId || null, r.address);
+      for (const r of [...rows, ...twins]) await this.markSent(r.detailId, opts.organizationId || null, r.address);
     }
     return {
       csv: buildIdiBatchCsv(rows),
@@ -405,6 +424,8 @@ export class SurplusIdiService {
     organizationId: string | null;
     userId: string | null;
     rows: (IdiBatchRow & { detailId: string; address: SentAddress })[];
+    /** Rows for a second case of someone already in the file: saved after the file's rows, never written to it. */
+    twins?: (IdiBatchRow & { detailId: string; address: SentAddress })[];
     skipped: number;
     day: string;
   }): Promise<{ id: string; number: number; fileName: string }> {
@@ -427,7 +448,7 @@ export class SurplusIdiService {
             rowCount: opts.rows.length,
             skippedCount: opts.skipped,
             members: {
-              create: opts.rows.map((r, i) => ({
+              create: [...opts.rows, ...(opts.twins || [])].map((r, i) => ({
                 surplusDetailId: r.detailId,
                 organizationId: opts.organizationId,
                 rowNumber: i + 1,
@@ -657,6 +678,8 @@ export class SurplusIdiService {
     };
     const assignments = opts.assignments || {};
     const recorded = new Set<string>();
+    /** Batch rows whose result was written to their own claimant. */
+    const applied = new Set<string>();
 
     for (let i = 0; i < rows.length; i += 1) {
       const row = rows[i];
@@ -699,6 +722,7 @@ export class SurplusIdiService {
         const member = batch?.pairs.get(row.index);
         if (member && member.candidate.leadId === lead.id) {
           recorded.add(member.id);
+          applied.add(member.id);
           await this.prisma.surplusBatchMember.update({
             where: { id: member.id },
             data: {
@@ -734,6 +758,52 @@ export class SurplusIdiService {
         data: { result: 'no_person', appliedAt: emptyAt },
       });
       recorded.add(member.id);
+    }
+    // The other cases of a person sent once take the same answer: written to
+    // the claimant when the file's own row was, recorded on the batch either way.
+    if (batch) {
+      for (const row of rows) {
+        const member = batch.pairs.get(row.index);
+        if (!member || !recorded.has(member.id)) continue;
+        const twins = batch.members.filter(
+          (m) => m.key === member.key && m.rowNumber > batch.summary.rowCount && !recorded.has(m.id),
+        );
+        for (const t of twins) {
+          recorded.add(t.id);
+          const name = `${row.input.first} ${row.input.last}`.trim();
+          try {
+            let out = { contact: false, deceased: false, relativesFiled: 0 };
+            if (applied.has(member.id)) {
+              const twinLead: any = await this.prisma.lead.findFirst({
+                where: { id: t.candidate.leadId, source: LeadSource.SURPLUS, ...(opts.organizationId ? { organizationId: opts.organizationId } : {}) },
+                include: { surplusDetail: true },
+              });
+              if (!twinLead?.surplusDetail) continue;
+              out = await this.applyRow(row, twinLead, opts.userId || null);
+              result.applied += 1;
+              if (!row.matched) result.noMatch += 1;
+              if (out.contact) result.withContact += 1;
+              if (out.deceased) result.deceased += 1;
+              result.relativesFiled += out.relativesFiled;
+            }
+            await this.recordAddress(t.candidate.detailId, opts.organizationId || null, row.input, row.matched);
+            await this.prisma.surplusBatchMember.update({
+              where: { id: t.id },
+              data: {
+                result: !row.matched ? 'no_person' : out.contact || row.phones.length || row.emails.length ? 'matched' : 'no_contact',
+                deceased: row.deceased === 'Y',
+                phonesReturned: row.phones.length,
+                emailsReturned: row.emails.length,
+                relativesFiled: out.relativesFiled,
+                appliedAt: new Date(),
+              },
+            });
+          } catch (err: any) {
+            this.logger.warn(`IDI row ${row.index} (${name}) failed on a second case: ${err?.message || err}`);
+            result.errors.push({ index: row.index, name, message: err?.message || String(err) });
+          }
+        }
+      }
     }
     if (batch && recorded.size) {
       await this.prisma.surplusBatch.update({
@@ -803,6 +873,7 @@ export class SurplusIdiService {
         paired: pairs.size,
       },
       pairs,
+      members,
     };
   }
 

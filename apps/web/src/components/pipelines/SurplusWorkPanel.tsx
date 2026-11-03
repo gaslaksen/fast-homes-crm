@@ -97,6 +97,9 @@ interface LedgerDoc {
 export interface SurplusPanelLead {
   id: string;
   claimant: string;
+  /** The two halves of the claimant name, for correcting the order. */
+  firstName?: string;
+  lastName?: string;
   address: string;
   city: string;
   state: string;
@@ -3507,6 +3510,133 @@ function peopleNote(lead: SurplusPanelLead): string {
 }
 
 /**
+ * The claimant's name as the board holds it, and where to correct it. Some
+ * counties print the surname first (Sarasota: "HALLAUER CINDY"), and a lone
+ * owner line gives nothing to tell the order by, so a person fixes it here.
+ * The IDI batch searches on this name; misses under the old one go back to
+ * untried when it is saved.
+ */
+function ClaimantName({
+  lead,
+  onChanged,
+  say,
+}: {
+  lead: SurplusPanelLead;
+  onChanged: () => void;
+  say: (msg: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [first, setFirst] = useState(lead.firstName || '');
+  const [last, setLast] = useState(lead.lastName || '');
+
+  const reset = () => {
+    setFirst(lead.firstName || '');
+    setLast(lead.lastName || '');
+  };
+
+  // Another claimant's name must never sit in this form.
+  useEffect(() => {
+    setEditing(false);
+    reset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lead.id]);
+
+  const save = async () => {
+    if (!last.trim()) {
+      say('The claimant needs a last name.');
+      return;
+    }
+    setBusy(true);
+    try {
+      await surplusAPI.update(lead.id, { claimantName: { first: first.trim(), last: last.trim() } });
+      say('Name updated. The next IDI batch uses it.');
+      setEditing(false);
+      onChanged();
+    } catch (err: any) {
+      say(err?.response?.data?.message || 'That could not be saved.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const field: React.CSSProperties = {
+    width: '100%',
+    boxSizing: 'border-box',
+    fontSize: 12.5,
+    padding: '6px 8px',
+    border: '1px solid var(--border)',
+    borderRadius: 6,
+    background: 'var(--surface2)',
+    color: 'inherit',
+  };
+  const lbl: React.CSSProperties = { fontSize: 11, color: 'var(--dim)' };
+
+  if (editing) {
+    return (
+      <div style={{ display: 'grid', gap: 6, padding: 8, marginTop: 4, border: '1px solid var(--border)', borderRadius: 8 }}>
+        <div style={{ fontSize: 12, fontWeight: 600 }}>Claimant name</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+          <label style={lbl}>
+            First and middle
+            <input style={field} value={first} onChange={(e) => setFirst(e.target.value)} autoFocus />
+          </label>
+          <label style={lbl}>
+            Last name (surname)
+            <input style={field} value={last} onChange={(e) => setLast(e.target.value)} />
+          </label>
+        </div>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'space-between', alignItems: 'center' }}>
+          <button
+            type="button"
+            className="dc-wp-btn"
+            disabled={busy}
+            onClick={() => {
+              setFirst(last);
+              setLast(first);
+            }}
+          >
+            Swap
+          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              type="button"
+              className="dc-wp-btn"
+              disabled={busy}
+              onClick={() => {
+                reset();
+                setEditing(false);
+              }}
+            >
+              Cancel
+            </button>
+            <button type="button" className="dc-wp-btn on" disabled={busy} onClick={save}>
+              Save
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="dc-wp-contact">
+      <div className="dc-wp-contact-main">
+        <span className="num">
+          {lead.firstName || lead.lastName ? `${lead.firstName || ''} ${lead.lastName || ''}`.trim() : lead.claimant}
+        </span>
+        <span className="meta">Name{lead.lastName ? `, surname ${lead.lastName}` : ''}</span>
+      </div>
+      <div className="dc-wp-contact-actions">
+        <button type="button" className="dc-wp-btn" onClick={() => setEditing(true)}>
+          Edit name
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
  * The claimant's mailing address, and where to correct it.
  *
  * Off the county it is where the clerk wrote to them. Once somebody confirms
@@ -3795,6 +3925,7 @@ function ContactsBlock({
           </div>
         </div>
       ))}
+      <ClaimantName lead={lead} onChanged={onChanged} say={say} />
       <MailingAddress lead={lead} variant="contact" onChanged={onChanged} say={say} />
       {/* Research turns up numbers the vendor never had. This is where they
           go, and where a number that turned out to be somebody else gets

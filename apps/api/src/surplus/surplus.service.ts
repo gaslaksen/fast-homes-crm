@@ -96,7 +96,7 @@ import { DIG_DEEPER_BRAND } from '../common/company.constants';
 import { SurplusLeadInput, SurplusListFilters, SurplusPhoneInput } from './surplus.types';
 import { SurplusCountiesService, CountyRow } from './surplus-counties.service';
 import { SurplusDocumentsService } from './surplus-documents.service';
-import { foreignCountry, idiAddressesLeft } from './surplus-address.util';
+import { foreignCountry, idiAddressesLeft, splitOneLineUsAddress, SURPLUS_ADDRESS_STATUS } from './surplus-address.util';
 import { NO_CONTACTS, claimantContacts, contactStampPatch } from './surplus-contact-stamp.util';
 import { SurplusTemplatesService } from './surplus-templates.service';
 import { SurplusProgressService } from './surplus-progress.service';
@@ -797,10 +797,13 @@ export class SurplusService {
       const m = patch.ownerMailing || {};
       const street = cellText(m.street);
       if (!street) throw new BadRequestException('The mailing address needs a street.');
-      detailPatch.ownerMailingStreet = street;
-      detailPatch.ownerMailingCity = cellText(m.city) || null;
-      detailPatch.ownerMailingState = (cellText(m.state) || '').toUpperCase() || null;
-      detailPatch.ownerMailingZip = cellText(m.zip) || null;
+      // A whole US address pasted into the street box, with the city left
+      // blank, is split so the skip trace and letters can use it.
+      const oneLine = !cellText(m.city) ? splitOneLineUsAddress(street) : null;
+      detailPatch.ownerMailingStreet = oneLine?.street || street;
+      detailPatch.ownerMailingCity = oneLine?.city || cellText(m.city) || null;
+      detailPatch.ownerMailingState = (oneLine?.state || cellText(m.state) || '').toUpperCase() || null;
+      detailPatch.ownerMailingZip = oneLine?.zip || cellText(m.zip) || null;
       // Only when the edit says: an older client that sends no country must
       // not turn a Canadian address American.
       if (m.country !== undefined) detailPatch.ownerMailingCountry = foreignCountry(cellText(m.country));
@@ -822,6 +825,18 @@ export class SurplusService {
       leadPatch.sellerFirstName = firstName;
       leadPatch.sellerLastName = lastName;
     }
+    // The card's name edit: given names and surname as the person typed them,
+    // for a county that printed the name in the wrong order.
+    if (patch.claimantName !== undefined) {
+      const first = cellText(patch.claimantName?.first);
+      const last = cellText(patch.claimantName?.last);
+      if (!last) throw new BadRequestException('The claimant needs a last name.');
+      leadPatch.sellerFirstName = first;
+      leadPatch.sellerLastName = last;
+    }
+    const renamed =
+      (leadPatch.sellerFirstName !== undefined && leadPatch.sellerFirstName !== lead.sellerFirstName) ||
+      (leadPatch.sellerLastName !== undefined && leadPatch.sellerLastName !== lead.sellerLastName);
 
     if (patch.touchDays !== undefined) {
       const week = isoWeekKey();
@@ -843,6 +858,14 @@ export class SurplusService {
       where: { id },
       data: { ...leadPatch, surplusDetail: { update: detailPatch } },
     });
+
+    // IDI matches on the name, so a miss under the wrong one says nothing
+    // about the address. Those go back to untried for the next batch.
+    if (renamed) {
+      await this.prisma.surplusAddress
+        .updateMany({ where: { surplusDetailId: d.id, status: SURPLUS_ADDRESS_STATUS.miss }, data: { status: SURPLUS_ADDRESS_STATUS.untried } })
+        .catch((e: any) => this.logger.warn(`Could not reset IDI misses on ${d.id}: ${e?.message || e}`));
+    }
 
     if (replacedAddress) {
       const content = `Mailing address changed. Previous address: ${replacedAddress}`;
@@ -2611,6 +2634,9 @@ export class SurplusService {
     const row = {
       id: lead.id,
       claimant: `${lead.sellerFirstName} ${lead.sellerLastName}`.trim(),
+      /** The two halves, so the card can correct a name printed in the wrong order. */
+      firstName: lead.sellerFirstName || '',
+      lastName: lead.sellerLastName || '',
       isEntity: ENTITY_NAME.test(`${lead.sellerFirstName || ''} ${lead.sellerLastName || ''}`),
       /** The teammate who owns this claimant's case, or null. */
       ownerId: lead.assignedToUserId || null,
