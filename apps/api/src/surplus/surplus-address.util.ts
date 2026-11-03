@@ -188,8 +188,35 @@ const RURAL_ROUTE = /^\s*(?:R\.?\s*R\.?|RT\.?|RTE\.?|ROUTE|RURAL\s+ROUTE|H\.?\s*
 /** A street that starts with a house number, and not a lot's "0 MAIN ST". */
 const HOUSE_NUMBER = /^\s*(?!0+\s)\d+[A-Z]?(?:-\d+)?\s+\S/i;
 
+/**
+ * A suite or private mailbox: an office or a mail drop nobody lives at. B001
+ * (2026-11-03) sent four unrelated Charlotte owners to one Las Vegas suite
+ * and IDI placed none of them.
+ */
+const MAIL_DROP = /\b(?:SUITE|STE|PMB)\b/i;
+
 export function isPoBox(street?: string | null): boolean {
   return PO_BOX.test(String(street || ''));
+}
+
+export function isMailDrop(street?: string | null): boolean {
+  return MAIL_DROP.test(String(street || ''));
+}
+
+/**
+ * "320 N 40TH ST APT 1, PHILADELPHIA, PA, 19104": a whole US address typed
+ * into the street box, split into its parts. Null for anything else, a
+ * foreign address on one line included.
+ */
+export function splitOneLineUsAddress(
+  line?: string | null,
+): { street: string; city: string; state: string; zip: string } | null {
+  const m = /^(.+?),\s*([^,]+?),?\s+([A-Za-z]{2})\.?,?\s+(\d{5})(?:-\d{4})?\s*$/.exec(String(line || '').trim()) ||
+    /^(.+?),\s*([^,]+?),\s*([A-Za-z]{2})\.?,?\s*(\d{5})(?:-\d{4})?\s*$/.exec(String(line || '').trim());
+  if (!m) return null;
+  const state = usStateCode(m[3]);
+  if (!state) return null;
+  return { street: m[1].trim(), city: m[2].trim(), state, zip: m[4] };
 }
 
 /** A street someone can live at: a house number, or a rural route box. */
@@ -220,12 +247,13 @@ export function sendableToIdi(a: Pick<RoundAddress, 'street' | 'city' | 'state' 
  * The order a person's untried addresses are sent in, one per batch. Lower is
  * sooner: the address on the card when it has a house number (what DealCore
  * already judged best for this person), then the clerk's letter, then any
- * other street address, then PO boxes and streets with no house number. IDI
- * matches the name against who has lived at the address, so a box, which
- * nobody lives at, rarely places anyone and goes last.
+ * other street address, then PO boxes, suites and streets with no house
+ * number. IDI matches the name against who has lived at the address, so a
+ * box or a mail drop, which nobody lives at, rarely places anyone and goes
+ * last.
  */
 export function idiAddressRank(a: RoundAddress, cardKey?: string | null): number {
-  if (isPoBox(a.street) || !hasHouseNumber(a.street)) return 3;
+  if (isPoBox(a.street) || isMailDrop(a.street) || !hasHouseNumber(a.street)) return 3;
   const key = a.addressKey || surplusAddressKey(a.street, a.zip);
   if (cardKey && key === cardKey) return 0;
   return CLERK_LETTER_SOURCES.has(a.source) ? 1 : 2;

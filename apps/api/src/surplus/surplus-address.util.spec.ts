@@ -8,6 +8,8 @@ import {
   hasHouseNumber,
   untriedForIdi,
   idiAddressesLeft,
+  isMailDrop,
+  splitOneLineUsAddress,
 } from './surplus-address.util';
 
 /** The addresses the first Charlotte pull (2026-10-15) stored wrong, as the reader returned them. */
@@ -153,5 +155,38 @@ describe('the IDI round order', () => {
         addresses: [{ street: '1 CARD CT', city: 'X', state: 'FL', zip: '33901', source: 'manual', status: 'miss' }],
       }),
     ).toBe(0);
+  });
+});
+
+describe('splitOneLineUsAddress', () => {
+  it('splits a whole US address typed into the street box', () => {
+    // The shapes B001 found on cards: comma between state and zip, or none.
+    expect(splitOneLineUsAddress('320 N 40TH ST APT 1, PHILADELPHIA, PA, 19104')).toEqual({
+      street: '320 N 40TH ST APT 1',
+      city: 'PHILADELPHIA',
+      state: 'PA',
+      zip: '19104',
+    });
+    expect(splitOneLineUsAddress('100 Cypress Ln, Mars, PA 16046-1234')).toEqual({ street: '100 Cypress Ln', city: 'Mars', state: 'PA', zip: '16046' });
+  });
+
+  it('leaves a foreign one-line address and a plain street alone', () => {
+    expect(splitOneLineUsAddress("999 WILLIBRORD AVE, VERDUN, Quebec H9G 9T9")).toBeNull();
+    expect(splitOneLineUsAddress('99 BRETT CRESCENT, HALLETT COVE SA 5158,')).toBeNull();
+    expect(splitOneLineUsAddress('48 Village Ct')).toBeNull();
+  });
+});
+
+describe('mail drops', () => {
+  it('sends a suite after every street someone could live at', () => {
+    expect(isMailDrop('6900 WESTCLIFF DRIVE SUITE 603')).toBe(true);
+    expect(isMailDrop('5775 NW 7th St Ste 200')).toBe(true);
+    expect(isMailDrop('12 Sweet Ln')).toBe(false);
+    const at = (street: string) => ({ street, city: 'X', state: 'NV', zip: '89145', source: 'notice_of_surplus_funds', status: 'untried' });
+    const card = surplusAddressKey('6900 WESTCLIFF DRIVE SUITE 603', '89145');
+    expect(untriedForIdi([at('6900 WESTCLIFF DRIVE SUITE 603'), at('7 Home Rd')], card).map((a) => a.street)).toEqual([
+      '7 Home Rd',
+      '6900 WESTCLIFF DRIVE SUITE 603',
+    ]);
   });
 });

@@ -96,7 +96,7 @@ import { DIG_DEEPER_BRAND } from '../common/company.constants';
 import { SurplusLeadInput, SurplusListFilters, SurplusPhoneInput } from './surplus.types';
 import { SurplusCountiesService, CountyRow } from './surplus-counties.service';
 import { SurplusDocumentsService } from './surplus-documents.service';
-import { foreignCountry, idiAddressesLeft } from './surplus-address.util';
+import { foreignCountry, idiAddressesLeft, splitOneLineUsAddress } from './surplus-address.util';
 import { NO_CONTACTS, claimantContacts, contactStampPatch } from './surplus-contact-stamp.util';
 import { SurplusTemplatesService } from './surplus-templates.service';
 import { SurplusProgressService } from './surplus-progress.service';
@@ -797,10 +797,13 @@ export class SurplusService {
       const m = patch.ownerMailing || {};
       const street = cellText(m.street);
       if (!street) throw new BadRequestException('The mailing address needs a street.');
-      detailPatch.ownerMailingStreet = street;
-      detailPatch.ownerMailingCity = cellText(m.city) || null;
-      detailPatch.ownerMailingState = (cellText(m.state) || '').toUpperCase() || null;
-      detailPatch.ownerMailingZip = cellText(m.zip) || null;
+      // A whole US address pasted into the street box, with the city left
+      // blank, is split so the skip trace and letters can use it.
+      const oneLine = !cellText(m.city) ? splitOneLineUsAddress(street) : null;
+      detailPatch.ownerMailingStreet = oneLine?.street || street;
+      detailPatch.ownerMailingCity = oneLine?.city || cellText(m.city) || null;
+      detailPatch.ownerMailingState = (oneLine?.state || cellText(m.state) || '').toUpperCase() || null;
+      detailPatch.ownerMailingZip = oneLine?.zip || cellText(m.zip) || null;
       // Only when the edit says: an older client that sends no country must
       // not turn a Canadian address American.
       if (m.country !== undefined) detailPatch.ownerMailingCountry = foreignCountry(cellText(m.country));

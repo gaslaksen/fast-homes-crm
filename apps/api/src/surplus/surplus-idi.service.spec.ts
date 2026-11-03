@@ -558,6 +558,34 @@ describe('SurplusIdiService batches on import', () => {
     expect(addresses.filter((a) => a.surplusDetailId === 'd1').map((a) => [a.street, a.status])).toEqual([['100 Example Rd SE', 'hit']]);
   });
 
+  it('sends one owner on two cases once, and gives both cases the result', async () => {
+    // Douglas Garcia went out twice in B001 and IDI charged for both hits.
+    const { service, batches, leads, addresses } = setup([
+      lead('1', 'JANE Q', 'SAMPLE', '100 Example Rd SE', { surplusDetail: { caseNumber: 'case-A' } }),
+      lead('3', 'JANE Q', 'SAMPLE', '100 Example Rd SE', { surplusDetail: { caseNumber: 'case-B' } }),
+    ]);
+    const out = await service.exportBatch({ organizationId: 'org1', leadIds: ['1', '3'] });
+    expect(out.included).toBe(1);
+    expect(out.csv.split('\r\n').filter(Boolean)).toHaveLength(2);
+    expect(out.skipped).toEqual([
+      { leadId: '3', claimant: 'JANE Q SAMPLE', reason: 'Same person at the same address as row 1, for another case. Sent once; the result goes to both.' },
+    ]);
+    expect(batches[0]).toMatchObject({ rowCount: 1 });
+    expect(batches[0].members.map((m: any) => [m.rowNumber, m.surplusDetailId])).toEqual([
+      [1, 'd1'],
+      [2, 'd3'],
+    ]);
+
+    const res = await service.applyImport(file, { organizationId: 'org1', fileName: 'x_out.csv' });
+    expect(res.applied).toBe(2);
+    expect(leads.map((l) => l.sellerPhone)).toEqual(['+12625550101', '+12625550101']);
+    expect(batches[0].members.map((m: any) => m.result)).toEqual(['matched', 'matched']);
+    expect(addresses.map((a) => [a.surplusDetailId, a.status])).toEqual([
+      ['d1', 'hit'],
+      ['d3', 'hit'],
+    ]);
+  });
+
   it('leaves a batch row alone when a person re-points the result', async () => {
     const { service, batches } = setup(twins());
     await service.exportBatch({ organizationId: 'org1', leadIds: ['3', '2'] });
