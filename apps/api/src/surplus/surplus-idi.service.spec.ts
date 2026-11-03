@@ -442,6 +442,39 @@ describe('SurplusIdiService.exportBatch', () => {
     ]);
   });
 
+  it('holds a second case under the same name at another address for the next batch', async () => {
+    // One owner went into B003 twice, at two cities.
+    const { service, addresses } = setup([
+      lead('1', 'MARA G', 'SAMPLE', '10 First Ct', { propertyCity: 'Ocala', propertyZip: '34470' }),
+      lead('2', 'MARA G', 'SAMPLE', '20 Second St W', { propertyCity: 'Lehigh Acres', propertyZip: '33971' }),
+    ]);
+    const r = await service.exportBatch({ organizationId: 'org1', leadIds: ['1', '2'] });
+    expect(r.included).toBe(1);
+    expect(r.skipped).toEqual([
+      {
+        leadId: '2',
+        claimant: 'MARA G SAMPLE',
+        reason: 'Same name as row 1, at another address. Held for the next batch so one person is not paid for twice.',
+      },
+    ]);
+    // Nothing of the held case is marked sent, so the next batch can carry it.
+    expect(addresses.filter((a) => a.surplusDetailId === 'd2')).toEqual([]);
+  });
+
+  it('sends the cleaned name, leaves out a placeholder, and takes the state from the ZIP', async () => {
+    const { service } = setup([
+      lead('1', 'Ann', '& Rose Sample', '199 Example Dr', { propertyCity: 'Somers', propertyState: 'NY', propertyZip: '10585' }),
+      lead('2', 'Occupant', 'Occupant', '111 Example Rd', { propertyCity: 'Manchester', propertyState: 'CT', propertyZip: '06042' }),
+      lead('3', 'Lena M', 'Example', '12 Example Street', { propertyCity: 'Jersey City', propertyState: 'NH', propertyZip: '07302' }),
+    ]);
+    const r = await service.exportBatch({ organizationId: 'org1', leadIds: ['1', '2', '3'] });
+    expect(r.csv.split('\r\n').slice(1, 3)).toEqual([
+      'Ann,Sample,199 Example Dr,Somers,NY,10585',
+      'Lena M,Example,12 Example Street,Jersey City,NJ,07302',
+    ]);
+    expect(r.skipped.map((x) => x.leadId)).toEqual(['2']);
+  });
+
   it('saves no batch when nobody can be sent', async () => {
     const { service, batches } = setup([lead('2', 'ACME HOLDINGS', 'LLC', '1 Main St')]);
     const r = await service.exportBatch({ organizationId: 'org1', leadIds: ['2'] });

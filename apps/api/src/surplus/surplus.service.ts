@@ -3649,6 +3649,14 @@ export function groupByProperty(rows: any[]): any[] {
        * search, when the actual next step is finding the probate case.
        */
       needsHeirs: ranked.some((m: any) => m.isDeceased && !(m.livingHeirCount || 0)),
+      /**
+       * Relatives with a number on those estates. IDI files a dead claimant's
+       * family as relatives, not heirs, so "no heir confirmed" is usually a
+       * list of people to call, not an empty file.
+       */
+      heirSearchRelatives: ranked
+        .filter((m: any) => m.isDeceased && !(m.livingHeirCount || 0))
+        .reduce((n: number, m: any) => n + (m.callableAssociateCount || 0), 0),
       // The stage the property is furthest along on.
       stage: head.stage,
     };

@@ -2797,13 +2797,22 @@ export default function SurplusWorkPanel({
                   {c.isDeceased ? (
                     <span
                       className="sub"
-                      style={{ color: c.callableHeirCount > 0 ? 'var(--mint)' : 'var(--red)' }}
+                      style={{
+                        color:
+                          c.callableHeirCount > 0
+                            ? 'var(--mint)'
+                            : !c.livingHeirCount && c.callableAssociateCount > 0
+                              ? 'var(--amber)'
+                              : 'var(--red)',
+                      }}
                     >
                       {c.callableHeirCount > 0
                         ? `deceased · ${c.callableHeirCount} callable heir${c.callableHeirCount === 1 ? '' : 's'}`
                         : c.livingHeirCount > 0
                           ? `deceased · ${c.livingHeirCount} heir${c.livingHeirCount === 1 ? '' : 's'}, no number`
-                          : 'deceased · no heirs on file'}
+                          : c.callableAssociateCount > 0
+                            ? `deceased · no heir confirmed, ${c.callableAssociateCount} relative${c.callableAssociateCount === 1 ? '' : 's'} to call`
+                            : 'deceased · nobody on file'}
                     </span>
                   ) : (
                     <span className="sub" style={{ color: TRACE_TONE[c.trace?.tone || 'idle'] }}>

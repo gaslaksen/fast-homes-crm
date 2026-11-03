@@ -1,4 +1,5 @@
 import {
+  cleanIdiClaimant,
   buildIdiBatchCsv,
   idiBatchCode,
   idiEchoKey,
@@ -246,5 +247,39 @@ describe('IDI batches', () => {
     expect(pairs.get(0)?.id).toBe('first');
     expect(pairs.has(1)).toBe(false);
     expect(pairs.get(2)?.id).toBe('second');
+  });
+});
+
+describe('cleanIdiClaimant', () => {
+  // The garbled rows in B003 (2026-11-03), as the lead stored them.
+  it('leaves a clean name exactly as stored', () => {
+    expect(cleanIdiClaimant('Jane A.', 'Sample')).toEqual({ first: 'Jane A.', last: 'Sample' });
+    expect(cleanIdiClaimant('Ana', 'A. De La Cruz')).toEqual({ first: 'Ana', last: 'A. De La Cruz' });
+  });
+
+  it('refuses a placeholder and an estate', () => {
+    expect(cleanIdiClaimant('Occupant', 'Occupant')).toEqual({ reason: 'Not a person ("Occupant Occupant"). Research the owner by name.' });
+    expect(cleanIdiClaimant('Edna W', 'Est Of')).toEqual({
+      reason: 'An estate, so the claimant is deceased. Mark them deceased and find the heirs.',
+    });
+    expect(cleanIdiClaimant('Estate', 'Of John H Sample')).toHaveProperty('reason');
+  });
+
+  it('takes out a custodian and leaves no surname as a reason', () => {
+    expect(cleanIdiClaimant('Dale G', '(Custodian)')).toEqual({ reason: "No last name to send once the county's wording is taken out." });
+  });
+
+  it('keeps the first person of a joint name with the surname they share', () => {
+    expect(cleanIdiClaimant('Ann', '& Rose Sample')).toEqual({ first: 'Ann', last: 'Sample' });
+  });
+
+  it('cuts at ET AL, also split across the two fields', () => {
+    expect(cleanIdiClaimant('Peter A E', 'Al Example')).toEqual({ first: 'Peter', last: 'A Example' });
+    expect(cleanIdiClaimant('Peter A D', 'Et Al Edna Mae Example')).toEqual({ first: 'Peter', last: 'A D Example' });
+    expect(cleanIdiClaimant('William W', 'Sample Et Al')).toEqual({ first: 'William', last: 'W Sample' });
+  });
+
+  it('starts at the given name when it is printed twice', () => {
+    expect(cleanIdiClaimant('Carl M C', 'Carl M Sample II')).toEqual({ first: 'Carl', last: 'M Sample II' });
   });
 });

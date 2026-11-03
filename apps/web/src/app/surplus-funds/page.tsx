@@ -319,9 +319,11 @@ const SURPLUS_COLUMNS: PipelineColumn<any>[] = [
           {/* The whole point of the heirs work: say who can actually sign, so
               nobody spends an afternoon on a dead claimant. */}
           {r.anyDeceased && (
-            <div style={{ fontSize: 11.5, color: r.needsHeirs ? 'var(--red)' : 'var(--mint)' }}>
+            <div style={{ fontSize: 11.5, color: r.needsHeirs ? (r.heirSearchRelatives ? 'var(--amber)' : 'var(--red)') : 'var(--mint)' }}>
               {r.needsHeirs
-                ? 'deceased, no heirs on file'
+                ? r.heirSearchRelatives
+                  ? `deceased, no heir confirmed, ${r.heirSearchRelatives} relative${r.heirSearchRelatives === 1 ? '' : 's'} to call`
+                  : 'deceased, nobody on file'
                 : `${r.livingHeirCount} heir${r.livingHeirCount === 1 ? '' : 's'}${
                     r.callableHeirCount ? `, ${r.callableHeirCount} callable` : ', no number'
                   }`}
@@ -413,7 +415,13 @@ const SURPLUS_COLUMNS: PipelineColumn<any>[] = [
     render: (r) => (
       <div style={{ fontSize: 12 }}>
         {r.needsHeirs ? (
-          <span style={{ color: 'var(--red)' }}>no heirs on file</span>
+          r.heirSearchRelatives ? (
+            <span style={{ color: 'var(--amber)' }}>
+              {r.heirSearchRelatives} relative{r.heirSearchRelatives === 1 ? '' : 's'} to call
+            </span>
+          ) : (
+            <span style={{ color: 'var(--red)' }}>nobody on file</span>
+          )
         ) : r.anyContactable ? (
           <span style={{ color: 'var(--mint)' }}>☏ callable</span>
         ) : r.anyMismatch ? (
