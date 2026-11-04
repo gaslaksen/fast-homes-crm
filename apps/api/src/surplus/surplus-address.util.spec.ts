@@ -10,6 +10,7 @@ import {
   idiAddressesLeft,
   isMailDrop,
   splitOneLineUsAddress,
+  stateForZip,
 } from './surplus-address.util';
 
 /** The addresses the first Charlotte pull (2026-10-15) stored wrong, as the reader returned them. */
@@ -199,5 +200,23 @@ describe('mail drops', () => {
       '7 Home Rd',
       '6900 WESTCLIFF DRIVE SUITE 603',
     ]);
+  });
+});
+
+describe('stateForZip', () => {
+  it('names the state a ZIP belongs to', () => {
+    expect(stateForZip('07302')).toBe('NJ');
+    expect(stateForZip('03301')).toBe('NH');
+    expect(stateForZip('33971')).toBe('FL');
+    expect(stateForZip('00927')).toBe('PR');
+    expect(stateForZip('89145')).toBe('NV');
+    expect(stateForZip('20191')).toBe('VA');
+  });
+
+  it('says nothing for a military or short ZIP', () => {
+    expect(stateForZip('09841')).toBeNull();
+    expect(stateForZip('34002')).toBeNull();
+    expect(stateForZip('123')).toBeNull();
+    expect(stateForZip(null)).toBeNull();
   });
 });

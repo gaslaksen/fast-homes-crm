@@ -8,6 +8,7 @@ import { SurplusService } from './surplus.service';
 import { isSignedStage } from './surplus-progress.util';
 import { tierOf } from './surplus.util';
 import {
+  stateForZip,
   idiAddressesLeft,
   nextIdiAddress,
   SentAddress,
@@ -19,6 +20,7 @@ import {
 import { matchRecipients } from './surplus-name-search.util';
 import {
   buildIdiBatchCsv,
+  cleanIdiClaimant,
   IdiBatchRow,
   idiNameOf,
   idiRelationshipLabel,
@@ -356,14 +358,24 @@ export class SurplusIdiService {
         continue;
       }
       const a = next.address;
-      const name = idiNameOf(l.sellerFirstName, l.sellerLastName);
+      const cleaned = cleanIdiClaimant(l.sellerFirstName, l.sellerLastName);
+      if ('reason' in cleaned) {
+        skipped.push({ leadId: l.id, claimant, reason: cleaned.reason });
+        continue;
+      }
+      const name = idiNameOf(cleaned.first, cleaned.last);
+      const zip = String(a.zip || '').replace(/[^0-9]/g, '').slice(0, 5);
+      const typedState = String(a.state).trim().toUpperCase();
+      // The ZIP wins when the two disagree: a scanned notice misreads one
+      // letter of a state more often than five digits of a ZIP.
+      const zipState = stateForZip(zip);
       const row = {
         first: name.first,
         last: name.last,
         street: String(a.street).trim(),
         city: String(a.city).trim(),
-        state: String(a.state).trim().toUpperCase(),
-        zip: String(a.zip || '').replace(/[^0-9]/g, '').slice(0, 5),
+        state: zipState && zipState !== typedState ? zipState : typedState,
+        zip,
         detailId: l.surplusDetail.id,
         address: a,
       };
@@ -379,6 +391,20 @@ export class SurplusIdiService {
           leadId: l.id,
           claimant,
           reason: `Same person at the same address as row ${first + 1}, for another case. Sent once; the result goes to both.`,
+        });
+        continue;
+      }
+      // The same name at another address on another case is most likely the
+      // same person, and two hits would be two charges (one owner went into B003 twice).
+      // It is not merged, because two people can share a name: it waits for
+      // the next batch, when this one has said whether row N is them.
+      const nameKey = idiEchoKey({ first: row.first, last: row.last, street: '' });
+      const sameName = rows.findIndex((r) => idiEchoKey({ first: r.first, last: r.last, street: '' }) === nameKey);
+      if (sameName >= 0) {
+        skipped.push({
+          leadId: l.id,
+          claimant,
+          reason: `Same name as row ${sameName + 1}, at another address. Held for the next batch so one person is not paid for twice.`,
         });
         continue;
       }

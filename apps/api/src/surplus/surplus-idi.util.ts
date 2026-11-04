@@ -90,6 +90,76 @@ export function idiFirstName(raw: string | null | undefined): string {
   return [parts[0], ...parts.slice(1).map((p) => p.replace(/[^A-Za-z]/g, '').charAt(0)).filter(Boolean)].join(' ');
 }
 
+/** Every word is a placeholder, not a name: "OCCUPANT OCCUPANT", "CURRENT RESIDENT". */
+const PLACEHOLDER_WORD = /^(?:OCCUPANT|RESIDENT|CURRENT|UNKNOWN|OWNER|HEIRS?)$/i;
+/** The claimant is an estate: "EDNA SAMPLE EST OF", "ESTATE OF JOHN H SAMPLE". */
+const ESTATE = /\bEST(?:ATE)?\.?\s+OF\b|\bEST(?:ATE)?\.?$|\bDEC'?D\.?$|\bDECEASED$/i;
+/** Words the county adds to a name that are not part of it. */
+const NAME_NOISE = /\((?:CUSTODIAN|TRUSTEE|TTEE|TR)\)|\b(?:CUSTODIAN|TRUSTEE|TTEE|ET\s*UX|ET\s*VIR|JTWROS|LIFE\s+EST(?:ATE)?)\b/gi;
+/** "ET AL", also as it comes out of the name splitter split across the two fields ("A E" / "AL EXAMPLE"). */
+const ET_AL = /\bE(?:T)?\.?\s+AL\b\.?/i;
+const INITIAL = /^[A-Za-z]\.?$/;
+
+/**
+ * The claimant's name cleaned of what the county printed around it, so IDI
+ * searches a person. B003 (2026-11-03) carried rows shaped like "Occupant / Occupant",
+ * "Dale G / (Custodian)", "Ann / & Rose Sample", "Peter A E / Al Example"
+ * and "Carl M C / Carl M Sample II". IDI matches the name against who
+ * lived at the address, so each of those was a search for nobody.
+ *
+ * Returns the two fields unchanged when there is nothing to clean, so the
+ * surname rules in idiNameOf still see them as stored. A placeholder, an
+ * estate, or a name with no surname left is a reason instead.
+ */
+export function cleanIdiClaimant(firstRaw: string | null | undefined, lastRaw: string | null | undefined): { first: string; last: string } | { reason: string } {
+  const first = String(firstRaw || '').trim();
+  const last = String(lastRaw || '').trim();
+  const full = `${first} ${last}`.replace(/\s+/g, ' ').trim();
+  const words = full.split(' ').filter(Boolean);
+  if (!words.length || words.every((w) => PLACEHOLDER_WORD.test(w.replace(/[^A-Za-z]/g, '')))) {
+    return { reason: `Not a person ("${full || 'blank'}"). Research the owner by name.` };
+  }
+  if (ESTATE.test(full)) {
+    return { reason: 'An estate, so the claimant is deceased. Mark them deceased and find the heirs.' };
+  }
+
+  let name = full.replace(NAME_NOISE, ' ').replace(/\s+/g, ' ').trim();
+  const lastWordOf = (t: string) => t.trim().split(/\s+/).filter(Boolean).pop() || '';
+  const needsSurname = (t: string) => {
+    const w = t.trim().split(/\s+/).filter(Boolean);
+    return w.length < 2 || INITIAL.test(w[w.length - 1]);
+  };
+
+  // "PETER A EXAMPLE ET AL": everyone after ET AL is somebody else. When what
+  // is left before it ends in an initial, the surname is the last word after.
+  const etAl = ET_AL.exec(name);
+  if (etAl) {
+    const before = name.slice(0, etAl.index).trim();
+    const after = name.slice(etAl.index + etAl[0].length).trim();
+    name = needsSurname(before) && after ? `${before} ${lastWordOf(after)}` : before;
+  }
+  // Two people in one claimant, "ANN & ROSE SAMPLE": the first of them,
+  // with the surname they share when only a given name comes before the &.
+  const amp = /\s*(?:&|\bAND\b)\s*/i.exec(name);
+  if (amp) {
+    const before = name.slice(0, amp.index).trim();
+    const after = name.slice(amp.index + amp[0].length).trim();
+    name = needsSurname(before) && after ? `${before} ${lastWordOf(after)}` : before;
+  }
+  // The given name printed twice, "CARL M C CARL M SAMPLE II": the
+  // second time it starts the whole name.
+  const w = name.split(' ').filter(Boolean);
+  const again = w.findIndex((x, i) => i > 0 && x.toUpperCase() === w[0].toUpperCase());
+  if (again > 0 && w.length - again >= 2) name = w.slice(again).join(' ');
+
+  if (name.toUpperCase() === full.toUpperCase()) return { first, last };
+  const out = name.replace(/^[,\s]+|[,\s]+$/g, '').split(/\s+/).filter(Boolean);
+  if (out.length < 2 || INITIAL.test(out[out.length - 1])) {
+    return { reason: 'No last name to send once the county\'s wording is taken out.' };
+  }
+  return { first: out[0], last: out.slice(1).join(' ') };
+}
+
 /** Words that start a surname rather than end a given name: "De Leon", "Van Der Lee". */
 const SURNAME_PARTICLE = /^(?:VAN|VON|DER|DEN|DE|DEL|DELA|LA|LE|DI|DA|DU|DOS|DAS|ST)\.?$/i;
 const NAME_SUFFIX_WORD = /^(?:JR|SR|II|III|IV|ESQ)\.?,?$/i;
