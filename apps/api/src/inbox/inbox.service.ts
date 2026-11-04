@@ -1,10 +1,37 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { numberKey } from '../phone-numbers/phone-numbers.service';
+import { numberKey, prettyNumber } from '../phone-numbers/phone-numbers.service';
+import { LeadPhonesService, phoneDigitsWhere, phoneSearchDigits } from '../phone-numbers/lead-phones.service';
+import { SurplusPersonRole, SURPLUS_PERSON_ROLE_LABEL } from '@fast-homes/shared';
 import { callOutcome } from '../calls/call-outcome.util';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** A lead or a person on its case that an unknown call may belong to. */
+export interface AttachSuggestion {
+  leadId: string;
+  heirId: string | null;
+  name: string;
+  label: string;
+  leadName: string;
+  propertyAddress: string | null;
+  source: string | null;
+  /** The near number we hold for them, formatted. */
+  numberOnFile: string;
+}
+
+function fullName(l: { sellerFirstName?: string | null; sellerLastName?: string | null }): string {
+  return `${l.sellerFirstName || ''} ${l.sellerLastName || ''}`.trim();
+}
+
+/** "Other relative", "Spouse", or the role when no relationship is on file. */
+function personLabel(h: { role?: string | null; relationship?: string | null }): string {
+  const rel = (h.relationship || '').trim();
+  if (rel) return rel.charAt(0).toUpperCase() + rel.slice(1);
+  const role = (h.role || SurplusPersonRole.HEIR) as SurplusPersonRole;
+  return SURPLUS_PERSON_ROLE_LABEL[role] || role;
+}
 /** How long a missed or answered call from an unknown number stays listed. */
 const UNKNOWN_CALL_DAYS = 30;
 
@@ -64,7 +91,11 @@ const UNREAD_SQL = Prisma.sql`l."lastMessageDirection" = 'INBOUND'
 export class InboxService {
   private readonly logger = new Logger(InboxService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    /** Finds who holds a number close to a caller's. Optional so tests can leave it out. */
+    @Optional() private readonly leadPhones?: LeadPhonesService,
+  ) {}
 
   // ─── Per-user read state ──────────────────────────────────────────────────
 
@@ -378,20 +409,153 @@ export class InboxService {
       }),
       this.knownNonLeadNumbers(),
     ]);
+    // An answered call's transcript is shown too: what was said is usually
+    // the quickest way to tell who rang.
     return rows
       .filter((r) => !known.has(numberKey(r.fromNumber || '')))
       .map(({ status, endedReason, type, ...r }) => ({
         ...r,
         kind: callOutcome({ type, status, endedReason, voicemail: r.voicemail, createdAt: r.createdAt }, now),
-        // Only a voicemail's words are shown here. An answered call's
-        // recording and transcript belong on the lead once it is attached.
-        transcript: r.voicemail ? r.transcript : null,
-        recordingUrl: r.voicemail ? r.recordingUrl : null,
       }));
   }
 
   async listOpenVoicemails() {
-    return { items: await this.openUnknownCalls(50) };
+    const items = await this.openUnknownCalls(50);
+    const suggestions = await Promise.all(items.map((c) => this.suggestionsFor(c.fromNumber)));
+    return { items: items.map((c, i) => ({ ...c, suggestions: suggestions[i] })) };
+  }
+
+  /**
+   * People and leads holding a number a few digits off the caller's: the
+   * (352) 467-8427 that rang is likely whoever we have at 467-8424. Offered
+   * for one click, never attached on its own, because a near number is as
+   * often a neighbor's line.
+   */
+  private async suggestionsFor(fromNumber: string | null): Promise<AttachSuggestion[]> {
+    if (!this.leadPhones || !fromNumber) return [];
+    try {
+      const holders = (await this.leadPhones.nearNumberHolders(fromNumber)).slice(0, 3);
+      if (!holders.length) return [];
+      const heirIds = holders.map((h) => h.heirId).filter(Boolean) as string[];
+      const [leads, heirs] = await Promise.all([
+        this.prisma.lead.findMany({
+          where: { id: { in: holders.map((h) => h.leadId) } },
+          select: { id: true, sellerFirstName: true, sellerLastName: true, propertyAddress: true, source: true },
+        }),
+        heirIds.length
+          ? this.prisma.surplusHeir.findMany({
+              where: { id: { in: heirIds } },
+              select: { id: true, name: true, role: true, relationship: true },
+            })
+          : Promise.resolve([] as { id: string; name: string; role: string | null; relationship: string | null }[]),
+      ]);
+      const leadById = new Map(leads.map((l) => [l.id, l]));
+      const heirById = new Map(heirs.map((h) => [h.id, h]));
+      return holders.flatMap((h) => {
+        const lead = leadById.get(h.leadId);
+        if (!lead) return [];
+        const heir = h.heirId ? heirById.get(h.heirId) : null;
+        const leadName = fullName(lead) || lead.propertyAddress || 'this lead';
+        return [
+          {
+            leadId: lead.id,
+            heirId: heir?.id || null,
+            name: heir?.name || leadName,
+            label: heir ? personLabel(heir) : 'Claimant',
+            leadName,
+            propertyAddress: lead.propertyAddress || null,
+            source: lead.source || null,
+            numberOnFile: prettyNumber(h.number),
+          },
+        ];
+      });
+    } catch (err: any) {
+      this.logger.warn(`Near number lookup for ${fromNumber} failed: ${err.message}`);
+      return [];
+    }
+  }
+
+  /**
+   * What the inbox's attach picker searches: leads by name, address or any
+   * number on file, and the people on a surplus case by name or number. A
+   * caller is often a relative, and their name was not searchable at all,
+   * so typing "Tina" never found the case she belongs to.
+   */
+  async searchAttachTargets(q: string, organizationId?: string) {
+    const query = (q || '').trim();
+    if (query.length < 2) return { results: [] };
+    const digits = phoneSearchDigits(query);
+    const words = query.split(/\s+/).filter(Boolean).slice(0, 5);
+    const org = organizationId ? { organizationId } : {};
+
+    const heirWhere: Prisma.SurplusHeirWhereInput = digits
+      ? { OR: [1, 2, 3, 4].map((i) => ({ [`phone${i}`]: { contains: digits } })) }
+      : { AND: words.map((w) => ({ name: { contains: w, mode: 'insensitive' as const } })) };
+    const leadWhere: Prisma.LeadWhereInput = digits
+      ? { OR: phoneDigitsWhere(digits) as Prisma.LeadWhereInput[] }
+      : {
+          AND: words.map((w) => ({
+            OR: [
+              { sellerFirstName: { contains: w, mode: 'insensitive' as const } },
+              { sellerLastName: { contains: w, mode: 'insensitive' as const } },
+              { propertyAddress: { contains: w, mode: 'insensitive' as const } },
+            ],
+          })),
+        };
+
+    const [heirs, leads] = await Promise.all([
+      this.prisma.surplusHeir.findMany({
+        where: { ...heirWhere, surplusDetail: { lead: org } },
+        orderBy: { updatedAt: 'desc' },
+        take: 8,
+        select: {
+          id: true,
+          name: true,
+          role: true,
+          relationship: true,
+          deceased: true,
+          surplusDetail: {
+            select: {
+              lead: { select: { id: true, sellerFirstName: true, sellerLastName: true, propertyAddress: true, source: true } },
+            },
+          },
+        },
+      }),
+      this.prisma.lead.findMany({
+        where: { ...leadWhere, ...org },
+        orderBy: { updatedAt: 'desc' },
+        take: 8,
+        select: { id: true, sellerFirstName: true, sellerLastName: true, propertyAddress: true, source: true },
+      }),
+    ]);
+
+    const people = heirs.flatMap((h) => {
+      const lead = h.surplusDetail?.lead;
+      if (!lead) return [];
+      return [
+        {
+          kind: 'person' as const,
+          leadId: lead.id,
+          heirId: h.id,
+          name: h.name,
+          label: personLabel(h) + (h.deceased ? ', deceased' : ''),
+          leadName: fullName(lead) || lead.propertyAddress || '',
+          propertyAddress: lead.propertyAddress || null,
+          source: lead.source || null,
+        },
+      ];
+    });
+    const claimants = leads.map((l) => ({
+      kind: 'lead' as const,
+      leadId: l.id,
+      heirId: null,
+      name: fullName(l) || l.propertyAddress || '',
+      label: l.source === 'SURPLUS' ? 'Claimant' : 'Lead',
+      leadName: fullName(l) || l.propertyAddress || '',
+      propertyAddress: l.propertyAddress || null,
+      source: l.source || null,
+    }));
+    return { results: [...people, ...claimants] };
   }
 
   async countOpenVoicemails(): Promise<number> {

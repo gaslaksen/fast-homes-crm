@@ -19,7 +19,9 @@ import { PushService } from '../push/push.service';
 import { LeadStatus, LeadSource, formatPhoneNumber, toTitleCase } from '@fast-homes/shared';
 import { Prisma } from '@prisma/client';
 import { enrichAddressFromZip, cleanStreetAddress, lookupCityStateFromZip } from '../webhooks/address-parser';
+import { phoneDigitsWhere, phoneSearchDigits } from '../phone-numbers/lead-phones.service';
 import * as XLSX from 'xlsx';
+
 
 const INITIAL_OUTREACH_DELAY_MS = 60_000; // 1 minute
 const DEMO_OUTREACH_DELAY_MS = 3_000;     // 3 seconds in demo mode
@@ -512,6 +514,10 @@ export class LeadsService {
             { sellerLastName: { contains: filters.search, mode: 'insensitive' } },
             { sellerPhone: { contains: filters.search, mode: 'insensitive' } },
             { sellerEmail: { contains: filters.search, mode: 'insensitive' } },
+            // A number typed any way, "(352) 467-8424" included, matched
+            // against every number on the lead and the people on its case,
+            // not just the primary as it happens to be stored.
+            ...phoneDigitsWhere(phoneSearchDigits(filters.search)),
           ],
         },
       ];

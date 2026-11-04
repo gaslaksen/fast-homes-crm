@@ -619,6 +619,8 @@ export const inboxAPI = {
   // Calls from numbers that matched no lead: voicemails, missed and answered calls.
   voicemails: () => api.get('/inbox/voicemails'),
   dismissVoicemail: (id: string) => api.post(`/inbox/voicemails/${id}/dismiss`),
+  /** Leads and the people on their cases, by name, address or any number on file. */
+  attachSearch: (q: string) => api.get('/inbox/attach-search', { params: { q } }),
   attachVoicemail: (id: string, leadId: string, heirId?: string | null) =>
     api.post(`/inbox/voicemails/${id}/attach`, { leadId, heirId: heirId || null }),
 };
