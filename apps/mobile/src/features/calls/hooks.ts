@@ -26,6 +26,31 @@ export interface RecentCall {
     sellerLastName: string | null;
     sellerPhone: string | null;
   } | null;
+  /** twilio_browser (we dialled) or twilio_inbound (they rang us). */
+  type?: string | null;
+  /** Older API builds send none of the fields below. */
+  direction?: 'INBOUND' | 'OUTBOUND';
+  callResult?: 'voicemail' | 'missed' | 'answered' | 'ringing' | 'outbound';
+  /** The other end of the call: who rang us, or who we rang. */
+  number?: string | null;
+  /** The person on a surplus case, when it was not the claimant. */
+  personName?: string | null;
+  /** "Tina Lynn Davis (re David G Kelly)", or the lead's name. */
+  displayName?: string | null;
+}
+
+/** A voicemail left on any of our lines, matched to a lead or not. */
+export interface Voicemail {
+  id: string;
+  fromNumber: string | null;
+  toNumber: string | null;
+  createdAt: string;
+  duration: number | null;
+  recordingUrl: string | null;
+  transcript: string | null;
+  lead: { id: string; sellerFirstName: string | null; sellerLastName: string | null } | null;
+  heir: { id: string; name: string } | null;
+  displayName: string | null;
 }
 
 export function useLead(leadId: string) {
@@ -72,9 +97,22 @@ export function useRecentCalls() {
   return useQuery({
     queryKey: ['calls', 'recents'],
     queryFn: async () => {
-      const { data } = await api.get<{ calls: RecentCall[] }>('/calls/twilio/recents');
+      const { data } = await api.get<{ calls: RecentCall[] }>('/calls/twilio/recents', { params: { limit: 40 } });
       return data.calls;
     },
+    refetchInterval: 30_000,
+  });
+}
+
+export function useVoicemails(enabled: boolean) {
+  return useQuery({
+    queryKey: ['calls', 'voicemails'],
+    queryFn: async () => {
+      const { data } = await api.get<{ voicemails: Voicemail[] }>('/calls/twilio/voicemails');
+      return data.voicemails;
+    },
+    enabled,
+    refetchInterval: 60_000,
   });
 }
 
