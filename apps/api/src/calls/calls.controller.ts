@@ -278,7 +278,19 @@ export class CallsController {
     res.send(media.buffer);
   }
 
-  /** Recent dialer calls for the Recents tab. */
+  /** Recent voicemails on every line, for the dialer's Voicemail tab. */
+  @Get('twilio/voicemails')
+  async twilioVoicemails(
+    @Query('limit') limit?: string,
+    @Headers('authorization') authHeader?: string,
+  ) {
+    const { userId } = this.decodeToken(authHeader);
+    if (!userId) throw new UnauthorizedException('Not authenticated');
+    const voicemails = await this.twilioVoiceService.recentVoicemails(limit ? parseInt(limit, 10) || 30 : 30);
+    return { voicemails };
+  }
+
+  /** Recent dialer calls for the Recents tab, inbound and outbound. */
   @Get('twilio/recents')
   async twilioRecents(
     @Query('limit') limit?: string,
@@ -287,7 +299,7 @@ export class CallsController {
     const { userId } = this.decodeToken(authHeader);
     if (!userId) throw new UnauthorizedException('Not authenticated');
     const calls = await this.twilioVoiceService.recentCalls(
-      limit ? parseInt(limit, 10) : 25,
+      limit ? parseInt(limit, 10) || 25 : 25,
     );
     return { calls };
   }

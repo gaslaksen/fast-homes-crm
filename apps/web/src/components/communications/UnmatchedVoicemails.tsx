@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { formatDistanceToNowStrict } from 'date-fns';
-import { inboxAPI, leadsAPI } from '@/lib/api';
+import { inboxAPI, leadsAPI, surplusAPI } from '@/lib/api';
 import { formatPhoneDisplay } from '@/lib/format';
 import { recordingSrc } from './CommunicationsTimeline';
 
@@ -14,15 +14,25 @@ interface Voicemail {
   duration: number | null;
   recordingUrl: string | null;
   transcript: string | null;
+  /** How the call went. Older API builds send only voicemails, with no kind. */
+  kind?: 'voicemail' | 'missed' | 'answered' | 'ringing';
 }
 
+const KIND_LABEL: Record<string, string> = {
+  voicemail: 'Voicemail',
+  missed: 'Missed call',
+  answered: 'Answered',
+  ringing: 'Ringing now',
+};
+
 /**
- * Voicemails from numbers that matched no lead. A voicemail from a known
- * number already sits on that lead's thread; these have nowhere to go until
- * someone attaches them to the right lead or dismisses them.
+ * Calls from numbers that matched no lead: voicemails, missed calls and calls
+ * someone answered. A call from a known number already sits on that lead's
+ * thread; these have nowhere to go until someone attaches them to the right
+ * lead (and person on the case) or dismisses them.
  *
- * `refreshKey` is the open-voicemail count from the inbox's own poll, so the
- * list reloads when a new one arrives without a second poller.
+ * `refreshKey` is the open count from the inbox's own poll, so the list
+ * reloads when a new one arrives without a second poller.
  */
 export default function UnmatchedVoicemails({
   refreshKey,
@@ -56,25 +66,32 @@ export default function UnmatchedVoicemails({
       setItems((prev) => prev.filter((x) => x.id !== vm.id));
       onChanged();
     } catch {
-      alert('Could not dismiss that voicemail.');
+      alert('Could not dismiss that call.');
     } finally {
       setBusyId(null);
     }
   };
 
-  const attach = async (vm: Voicemail, leadId: string) => {
+  const attach = async (vm: Voicemail, target: AttachTarget) => {
     setBusyId(vm.id);
     try {
-      await inboxAPI.attachVoicemail(vm.id, leadId);
-      setItems((prev) => prev.filter((x) => x.id !== vm.id));
-      setAttachingId(null);
-      onChanged();
-      onAttached(leadId);
+      await inboxAPI.attachVoicemail(vm.id, target.leadId, target.heirId);
     } catch {
-      alert('Could not attach that voicemail.');
-    } finally {
+      alert('Could not attach that call.');
       setBusyId(null);
+      return;
     }
+    // The call is filed either way; a number that cannot be saved is said so
+    // plainly rather than undoing the attach.
+    if (target.saveNumber && vm.fromNumber) {
+      const problem = await saveNumber(target, vm.fromNumber);
+      if (problem) alert(`The call is attached, but the number was not saved: ${problem}`);
+    }
+    setItems((prev) => prev.filter((x) => x.id !== vm.id));
+    setAttachingId(null);
+    setBusyId(null);
+    onChanged();
+    onAttached(target.leadId);
   };
 
   if (items.length === 0) return null;
@@ -87,7 +104,7 @@ export default function UnmatchedVoicemails({
         className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-amber-800 dark:text-amber-400"
       >
         <span>
-          Voicemails from unknown callers{' '}
+          Calls from numbers not on file{' '}
           <span className="ml-1 px-1.5 py-0.5 rounded-full bg-amber-200 dark:bg-amber-900 text-[10px]">
             {items.length}
           </span>
@@ -104,13 +121,25 @@ export default function UnmatchedVoicemails({
                   {vm.fromNumber ? formatPhoneDisplay(vm.fromNumber) : 'Unknown number'}
                 </span>
                 <span className="text-[10px] text-gray-500 dark:text-gray-400">
+                  <span className={vm.kind === 'missed' ? 'text-red-600 dark:text-red-400 font-medium' : ''}>
+                    {KIND_LABEL[vm.kind || 'voicemail'] || 'Call'}
+                  </span>
+                  {' · '}
                   {formatDistanceToNowStrict(new Date(vm.createdAt), { addSuffix: true })}
-                  {vm.duration != null ? ` · ${vm.duration}s` : ''}
+                  {vm.duration != null && vm.kind !== 'missed' ? ` · ${vm.duration}s` : ''}
                 </span>
               </div>
-              <p className="mt-1 text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
-                {vm.transcript || <span className="text-gray-400">No transcript</span>}
-              </p>
+              {(vm.kind || 'voicemail') === 'voicemail' ? (
+                <p className="mt-1 text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
+                  {vm.transcript || <span className="text-gray-400">No transcript</span>}
+                </p>
+              ) : (
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  {vm.kind === 'missed'
+                    ? 'Rang and hung up without leaving a message.'
+                    : 'Someone took this call. Attach it to see the recording on the lead.'}
+                </p>
+              )}
               {vm.recordingUrl && (
                 <audio
                   controls
@@ -138,7 +167,11 @@ export default function UnmatchedVoicemails({
                 </button>
               </div>
               {attachingId === vm.id && (
-                <LeadPicker disabled={busyId === vm.id} onPick={(leadId) => attach(vm, leadId)} />
+                <AttachPicker
+                  number={vm.fromNumber}
+                  disabled={busyId === vm.id}
+                  onPick={(target) => attach(vm, target)}
+                />
               )}
             </li>
           ))}
@@ -148,14 +181,72 @@ export default function UnmatchedVoicemails({
   );
 }
 
-/** Search box over every lead, pipelines included: these are mostly surplus claimants. */
-function LeadPicker({ onPick, disabled }: { onPick: (leadId: string) => void; disabled: boolean }) {
+interface AttachTarget {
+  leadId: string;
+  /** The person on a surplus case, or null for the claimant / the lead itself. */
+  heirId: string | null;
+  saveNumber: boolean;
+}
+
+/**
+ * Add the caller's number to whoever the call turned out to be from. Returns
+ * a sentence saying why it was not saved, or null when it was (or was already
+ * there). The whole list is sent, primary first, because the slots are
+ * positional; a full set of slots is refused rather than silently dropping
+ * the new number.
+ */
+async function saveNumber(target: AttachTarget, number: string): Promise<string | null> {
+  const key = number.replace(/\D/g, '').slice(-10);
+  try {
+    if (target.heirId) {
+      const res = await surplusAPI.heirs(target.leadId);
+      const heir = (res.data?.heirs || []).find((h: any) => h.id === target.heirId);
+      if (!heir) return 'that person is no longer on the case.';
+      const phones: { number: string; type?: string | null }[] = (heir.phones || []).map((p: any) => ({
+        number: p.number,
+        type: p.type ?? null,
+      }));
+      if (phones.some((p) => String(p.number).replace(/\D/g, '').slice(-10) === key)) return null;
+      if (phones.length >= 4) return `${heir.name} already has four numbers. Remove one first.`;
+      await surplusAPI.updateHeir(target.heirId, { phones: [...phones, { number: key, type: null }] });
+      return null;
+    }
+    const res = await leadsAPI.contacts(target.leadId);
+    // The list includes the heirs' numbers too; only the lead's own go back.
+    const own = (res.data?.numbers || []).filter((n: any) => !n.heirId);
+    if (own.some((n: any) => String(n.number).replace(/\D/g, '').slice(-10) === key)) return null;
+    await leadsAPI.setContacts(target.leadId, {
+      phones: [...own.map((n: any) => ({ number: n.number, type: n.type ?? null })), { number: key, type: null }],
+    });
+    return null;
+  } catch (err: any) {
+    return err?.response?.data?.message || 'the save failed.';
+  }
+}
+
+/**
+ * Pick the lead, then on a surplus case the person who called, then attach.
+ * Searches every lead, pipelines included: these are mostly surplus calls.
+ */
+function AttachPicker({
+  number,
+  onPick,
+  disabled,
+}: {
+  number: string | null;
+  onPick: (target: AttachTarget) => void;
+  disabled: boolean;
+}) {
   const [q, setQ] = useState('');
   const [results, setResults] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [lead, setLead] = useState<any | null>(null);
+  const [people, setPeople] = useState<any[] | null>(null);
+  const [heirId, setHeirId] = useState<string>('');
+  const [save, setSave] = useState(true);
 
   useEffect(() => {
-    if (q.trim().length < 2) {
+    if (lead || q.trim().length < 2) {
       setResults([]);
       return;
     }
@@ -181,7 +272,80 @@ function LeadPicker({ onPick, disabled }: { onPick: (leadId: string) => void; di
       cancelled = true;
       clearTimeout(t);
     };
-  }, [q]);
+  }, [q, lead]);
+
+  // On a surplus case the caller is often a relative, not the claimant.
+  useEffect(() => {
+    setPeople(null);
+    setHeirId('');
+    if (!lead || lead.source !== 'SURPLUS') return;
+    let cancelled = false;
+    surplusAPI
+      .heirs(lead.id)
+      .then((res) => {
+        if (!cancelled) setPeople(res.data?.heirs || []);
+      })
+      .catch(() => {
+        if (!cancelled) setPeople([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [lead]);
+
+  const inputCls =
+    'w-full px-2.5 py-1.5 text-xs rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 outline-none';
+
+  if (lead) {
+    const leadName = `${lead.sellerFirstName || ''} ${lead.sellerLastName || ''}`.trim() || lead.propertyAddress;
+    return (
+      <div className="mt-2 space-y-1.5">
+        <div className="flex items-center justify-between gap-2 text-xs">
+          <span className="font-medium text-gray-900 dark:text-gray-100 truncate">{leadName}</span>
+          <button
+            type="button"
+            onClick={() => setLead(null)}
+            className="text-gray-500 dark:text-gray-400 hover:underline shrink-0"
+          >
+            Change
+          </button>
+        </div>
+        {lead.source === 'SURPLUS' && (
+          <label className="block text-[11px] text-gray-600 dark:text-gray-300">
+            Who called
+            <select
+              value={heirId}
+              onChange={(e) => setHeirId(e.target.value)}
+              disabled={people === null}
+              className={`${inputCls} mt-0.5`}
+            >
+              <option value="">{leadName} (claimant)</option>
+              {(people || []).map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                  {p.roleLabel ? ` · ${p.roleLabel}` : ''}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        {number && (
+          <label className="flex items-center gap-1.5 text-[11px] text-gray-600 dark:text-gray-300">
+            <input type="checkbox" checked={save} onChange={(e) => setSave(e.target.checked)} />
+            Save {formatPhoneDisplay(number)} on them, so their next call shows their name
+          </label>
+        )}
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => onPick({ leadId: lead.id, heirId: heirId || null, saveNumber: save && !!number })}
+          className="px-2.5 py-1 rounded-md bg-teal-600 hover:bg-teal-700 text-white text-xs font-medium disabled:opacity-50"
+        >
+          Attach
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="mt-2">
@@ -190,28 +354,28 @@ function LeadPicker({ onPick, disabled }: { onPick: (leadId: string) => void; di
         value={q}
         onChange={(e) => setQ(e.target.value)}
         placeholder="Search by name, address or phone"
-        className="w-full px-2.5 py-1.5 text-xs rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 outline-none"
+        className={inputCls}
       />
       {loading && <p className="text-[11px] text-gray-400 mt-1">Searching…</p>}
       {!loading && q.trim().length >= 2 && results.length === 0 && (
         <p className="text-[11px] text-gray-400 mt-1">No matches</p>
       )}
       <ul className="mt-1">
-        {results.map((lead) => {
-          const name = `${lead.sellerFirstName || ''} ${lead.sellerLastName || ''}`.trim();
+        {results.map((r) => {
+          const name = `${r.sellerFirstName || ''} ${r.sellerLastName || ''}`.trim();
           return (
-            <li key={lead.id}>
+            <li key={r.id}>
               <button
                 type="button"
                 disabled={disabled}
-                onClick={() => onPick(lead.id)}
+                onClick={() => setLead(r)}
                 className="w-full text-left px-2 py-1.5 rounded hover:bg-white dark:hover:bg-gray-800 disabled:opacity-50"
               >
                 <div className="text-xs font-medium text-gray-900 dark:text-gray-100 truncate">
-                  {name || lead.propertyAddress}
+                  {name || r.propertyAddress}
                 </div>
                 <div className="text-[11px] text-gray-500 dark:text-gray-400 truncate">
-                  {lead.propertyAddress}
+                  {r.propertyAddress}
                 </div>
               </button>
             </li>

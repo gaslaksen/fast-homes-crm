@@ -1,6 +1,12 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { numberKey } from '../phone-numbers/phone-numbers.service';
+import { callOutcome } from '../calls/call-outcome.util';
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+/** How long a missed or answered call from an unknown number stays listed. */
+const UNKNOWN_CALL_DAYS = 30;
 
 export type InboxFilter = 'all' | 'unread' | 'starred' | 'recent';
 
@@ -310,68 +316,122 @@ export class InboxService {
     return { success: true };
   }
 
-  // ─── Voicemails from callers who are not a lead ───────────────────────────
+  // ─── Calls from numbers not on file ───────────────────────────────────────
   //
-  // A voicemail from a known number lands on that lead's thread. One from a
-  // number we have never seen has no thread to land on, so it waits here
-  // until someone dismisses it or attaches it to the right lead. CallLog has
-  // no organization of its own; like the inbound ring itself, this is
-  // team-wide.
+  // A call from a known number lands on that lead's thread. One from a number
+  // we have never seen has no thread to land on, so it waits here until
+  // someone dismisses it or attaches it to the right lead. That used to be
+  // voicemails only, so a stranger who rang and hung up, or one an agent
+  // spoke to, left nothing anyone could find; every inbound call from an
+  // unknown number is listed now. Voicemails stay until dealt with; other
+  // calls drop off after UNKNOWN_CALL_DAYS so the list does not fill with
+  // old hang-ups. CallLog has no organization of its own; like the inbound
+  // ring itself, this is team-wide. The column `voicemailReviewedAt` predates
+  // the wider list and now means "dealt with" for any of these calls.
 
-  private readonly openVoicemailWhere: Prisma.CallLogWhereInput = {
-    voicemail: true,
-    leadId: null,
-    voicemailReviewedAt: null,
-  };
-
-  async listOpenVoicemails() {
-    const rows = await this.prisma.callLog.findMany({
-      where: this.openVoicemailWhere,
-      orderBy: { createdAt: 'desc' },
-      take: 50,
-      select: {
-        id: true,
-        fromNumber: true,
-        toNumber: true,
-        createdAt: true,
-        duration: true,
-        recordingUrl: true,
-        transcript: true,
-      },
-    });
-    return { items: rows };
+  private openUnknownWhere(now = new Date()): Prisma.CallLogWhereInput {
+    return {
+      type: 'twilio_inbound',
+      leadId: null,
+      voicemailReviewedAt: null,
+      OR: [{ voicemail: true }, { createdAt: { gte: new Date(now.getTime() - UNKNOWN_CALL_DAYS * DAY_MS) } }],
+    };
   }
 
-  countOpenVoicemails(): Promise<number> {
-    return this.prisma.callLog.count({ where: this.openVoicemailWhere });
+  /**
+   * Teammates and partners ring in without a lead too. They already get a
+   * name on the ring screen and are not strangers to file, so their calls are
+   * left out. Both tables are small and keep phones however they were typed.
+   */
+  private async knownNonLeadNumbers(): Promise<Set<string>> {
+    const [users, partners] = await Promise.all([
+      this.prisma.user.findMany({ where: { phone: { not: null } }, select: { phone: true } }).catch((): any[] => []),
+      this.prisma.partner
+        .findMany({ where: { isActive: true, phone: { not: null } }, select: { phone: true } })
+        .catch((): any[] => []),
+    ]);
+    return new Set(
+      [...users, ...partners].map((r: any) => numberKey(r.phone || '')).filter((k) => k.length === 10),
+    );
+  }
+
+  private async openUnknownCalls(take: number) {
+    const now = new Date();
+    const [rows, known] = await Promise.all([
+      this.prisma.callLog.findMany({
+        where: this.openUnknownWhere(now),
+        orderBy: { createdAt: 'desc' },
+        take,
+        select: {
+          id: true,
+          fromNumber: true,
+          toNumber: true,
+          createdAt: true,
+          duration: true,
+          recordingUrl: true,
+          transcript: true,
+          voicemail: true,
+          status: true,
+          endedReason: true,
+          type: true,
+        },
+      }),
+      this.knownNonLeadNumbers(),
+    ]);
+    return rows
+      .filter((r) => !known.has(numberKey(r.fromNumber || '')))
+      .map(({ status, endedReason, type, ...r }) => ({
+        ...r,
+        kind: callOutcome({ type, status, endedReason, voicemail: r.voicemail, createdAt: r.createdAt }, now),
+        // Only a voicemail's words are shown here. An answered call's
+        // recording and transcript belong on the lead once it is attached.
+        transcript: r.voicemail ? r.transcript : null,
+        recordingUrl: r.voicemail ? r.recordingUrl : null,
+      }));
+  }
+
+  async listOpenVoicemails() {
+    return { items: await this.openUnknownCalls(50) };
+  }
+
+  async countOpenVoicemails(): Promise<number> {
+    return (await this.openUnknownCalls(200)).length;
   }
 
   /** Dealt with: drop it from the list. The call log keeps the recording. */
   async dismissVoicemail(callLogId: string) {
     const res = await this.prisma.callLog.updateMany({
-      where: { id: callLogId, voicemail: true },
+      where: { id: callLogId, type: 'twilio_inbound' },
       data: { voicemailReviewedAt: new Date() },
     });
-    if (!res.count) throw new NotFoundException('Voicemail not found');
+    if (!res.count) throw new NotFoundException('Call not found');
     return { success: true };
   }
 
   /**
-   * File a voicemail under the lead it turned out to be from, so it shows on
-   * that lead's timeline. The lead's phone numbers are left alone: whether the
-   * number they called from belongs on the record is the caller's call.
+   * File a call under the lead it turned out to be from, and the person on
+   * the case when it was not the claimant, so it shows on that lead's
+   * timeline with the right name. The numbers on file are left alone here:
+   * the inbox saves the number separately, only when asked to.
    */
-  async attachVoicemail(callLogId: string, leadId: string, organizationId?: string) {
+  async attachVoicemail(callLogId: string, leadId: string, organizationId?: string, heirId?: string | null) {
     const lead = await this.prisma.lead.findFirst({
       where: { id: leadId, ...(organizationId ? { organizationId } : {}) },
       select: { id: true },
     });
     if (!lead) throw new NotFoundException('Lead not found');
+    if (heirId) {
+      const heir = await this.prisma.surplusHeir.findFirst({
+        where: { id: heirId, surplusDetail: { leadId: lead.id } },
+        select: { id: true },
+      });
+      if (!heir) throw new NotFoundException('That person is not on this lead');
+    }
     const res = await this.prisma.callLog.updateMany({
-      where: { id: callLogId, voicemail: true, leadId: null },
-      data: { leadId: lead.id, voicemailReviewedAt: new Date() },
+      where: { id: callLogId, type: 'twilio_inbound', leadId: null },
+      data: { leadId: lead.id, heirId: heirId || null, voicemailReviewedAt: new Date() },
     });
-    if (!res.count) throw new NotFoundException('Voicemail not found or already attached');
+    if (!res.count) throw new NotFoundException('Call not found or already attached');
     return { success: true };
   }
 

@@ -12,6 +12,8 @@ import {
   surplusCallConnected,
 } from '@/lib/surplus-calls';
 import { quickDueDates } from '@/lib/dates';
+import { formatDistanceToNowStrict } from 'date-fns';
+import { recordingSrc } from '@/components/communications/CommunicationsTimeline';
 
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '0', '#'];
 const KEY_SUB: Record<string, string> = {
@@ -38,11 +40,10 @@ function prettyPhone(raw?: string) {
 }
 
 function initials(name?: string, phone?: string) {
-  if (name && name.trim()) {
-    const parts = name.trim().split(/\s+/);
-    return (parts[0][0] + (parts[1]?.[0] || '')).toUpperCase();
-  }
-  return phone ? phone.replace(/\D/g, '').slice(-2) : '#';
+  // A row with no name shows the number in the name slot; "(5" is not initials.
+  const words = (name || '').trim().split(/\s+/).filter((w) => /^[a-z]/i.test(w));
+  if (words.length) return (words[0][0] + (words[1]?.[0] || '')).toUpperCase();
+  return '#';
 }
 
 export default function Dialer() {
@@ -489,22 +490,90 @@ function Tabs() {
 }
 
 /**
- * Voicemail and Queue are placeholders. Neither exists on the backend yet:
- * there is no <Record> fallback on unanswered inbound calls and no
- * <Enqueue>/TaskRouter, so there is nothing real to list. The tabs are here so
- * the dialer matches the layout agents expect, and each says plainly that it is
- * not wired up rather than showing a misleading empty list.
+ * Voicemails left on every line, newest first, matched to a lead or not. A
+ * voicemail from a known caller is also on that lead's inbox thread, and one
+ * from an unknown number waits in the inbox to be attached; this is the
+ * phone-style list of all of them with playback and callback.
  */
 function VoicemailTab() {
+  const d = useDialer();
+  const [items, setItems] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    callsAPI
+      .twilioVoicemails(30)
+      .then((res) => {
+        if (!cancelled) setItems(res.data?.voicemails || []);
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (!loading && !failed && items.length === 0) {
+    return (
+      <EmptyTab
+        icon={<VoicemailIcon />}
+        title="No voicemails"
+        body="When a caller leaves a message on the greeting, it shows up here with playback and one-tap callback."
+      />
+    );
+  }
+
   return (
-    <EmptyTab
-      icon={<VoicemailIcon />}
-      title="Voicemail is not set up yet"
-      body="Unanswered calls are not recorded to a voicemail box. Once inbound voicemail is enabled, messages will show up here with playback and one-tap callback."
-    />
+    <div className="px-3 pt-3 pb-1 h-[320px] overflow-y-auto">
+      {loading && <p className="text-xs text-gray-400 px-3 py-2">Loading…</p>}
+      {failed && <p className="text-xs text-red-500 px-3 py-2">Could not load voicemails.</p>}
+      {items.map((v) => {
+        const phone = v.fromNumber || '';
+        const name = v.displayName || '';
+        return (
+          <div key={v.id} className="px-3 py-2.5 border-b border-gray-100 dark:border-gray-800 last:border-0">
+            <div className="flex items-start gap-2">
+              <div className="min-w-0 flex-1">
+                <p className="text-sm text-gray-900 dark:text-gray-100 truncate">
+                  {name || prettyPhone(phone) || 'Unknown caller'}
+                </p>
+                <p className="text-xs text-gray-400 truncate">
+                  {name ? `${prettyPhone(phone)} · ` : ''}
+                  {timeAgo(v.createdAt)}
+                  {v.duration != null ? ` · ${fmtDuration(v.duration)}` : ''}
+                  {!v.lead ? ' · not on file' : ''}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => d.startCall({ name, phone, leadId: v.lead?.id })}
+                disabled={!phone}
+                title="Call back"
+                className="shrink-0 h-8 w-8 rounded-full flex items-center justify-center hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-40"
+              >
+                <PhoneIcon className="h-4 w-4 text-green-500" />
+              </button>
+            </div>
+            {v.transcript && (
+              <p className="mt-1 text-xs text-gray-600 dark:text-gray-300 line-clamp-3">{v.transcript}</p>
+            )}
+            {v.recordingUrl && (
+              <audio controls preload="none" src={recordingSrc(v.recordingUrl)} className="w-full h-8 mt-1.5" />
+            )}
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
+/** Queue is still a placeholder: there is no <Enqueue> or TaskRouter behind it yet. */
 function QueueTab() {
   return (
     <EmptyTab
@@ -589,6 +658,11 @@ function ContactsTab() {
   );
 }
 
+/**
+ * Calls both ways, newest first. An inbound row names who rang (the relative
+ * or heir on a surplus case, not just the claimant), and a missed one is red,
+ * so a caller who rang and hung up is visible here as well as in the inbox.
+ */
 function RecentsTab() {
   const d = useDialer();
   const [calls, setCalls] = useState<any[]>([]);
@@ -597,7 +671,7 @@ function RecentsTab() {
   useEffect(() => {
     let cancelled = false;
     callsAPI
-      .twilioRecents(25)
+      .twilioRecents(30)
       .then((res) => {
         if (!cancelled) setCalls(res.data?.calls || []);
       })
@@ -617,18 +691,22 @@ function RecentsTab() {
         <p className="text-xs text-gray-400 px-3 py-2">No recent calls</p>
       )}
       {calls.map((c) => {
-        const name =
+        const leadName =
           `${c.lead?.sellerFirstName || ''} ${c.lead?.sellerLastName || ''}`.trim();
-        const phone = c.toNumber || c.lead?.sellerPhone || '';
+        const name: string = c.displayName || leadName;
+        const inbound = c.direction === 'INBOUND';
+        const phone = c.number || (inbound ? c.fromNumber : c.toNumber) || c.lead?.sellerPhone || '';
         return (
           <ContactRow
             key={c.id}
             name={name || prettyPhone(phone) || 'Unknown'}
             phone={phone}
-            sub={c.disposition || c.status}
+            sub={recentSub(c)}
+            missed={c.callResult === 'missed'}
+            direction={inbound ? 'in' : 'out'}
             disabled={!phone}
             onCall={() =>
-              d.startCall({ name, phone, leadId: c.lead?.id })
+              d.startCall({ name: c.personName || leadName, phone, leadId: c.lead?.id })
             }
           />
         );
@@ -637,10 +715,35 @@ function RecentsTab() {
   );
 }
 
+/** "Missed call · 5m ago", "Incoming · 2:25 · 1h ago", "No answer · 3h ago". */
+function recentSub(c: any): string {
+  const when = timeAgo(c.createdAt);
+  const length = c.duration ? fmtDuration(c.duration) : '';
+  let what: string;
+  if (c.direction !== 'INBOUND') what = c.disposition || c.status || 'Outgoing';
+  else if (c.callResult === 'missed') what = 'Missed call';
+  else if (c.callResult === 'voicemail') what = 'Voicemail';
+  else if (c.callResult === 'ringing') what = 'Ringing';
+  else what = c.disposition || 'Incoming';
+  return [what, c.callResult === 'missed' ? '' : length, when].filter(Boolean).join(' · ');
+}
+
+function timeAgo(at?: string): string {
+  if (!at) return '';
+  try {
+    return formatDistanceToNowStrict(new Date(at), { addSuffix: true });
+  } catch {
+    return '';
+  }
+}
+
 function ContactRow({
-  name, phone, sub, disabled, onCall,
+  name, phone, sub, disabled, onCall, missed, direction,
 }: {
   name: string; phone?: string; sub?: string; disabled?: boolean; onCall: () => void;
+  /** An inbound call nobody answered: the name turns red, as on a phone. */
+  missed?: boolean;
+  direction?: 'in' | 'out';
 }) {
   return (
     <button
@@ -652,8 +755,19 @@ function ContactRow({
         {initials(name, phone)}
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block text-sm text-gray-900 dark:text-gray-100 truncate">{name}</span>
+        <span
+          className={`block text-sm truncate ${
+            missed ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-gray-100'
+          }`}
+        >
+          {name}
+        </span>
         <span className="block text-xs text-gray-400 truncate">
+          {direction && (
+            <span aria-label={direction === 'in' ? 'Incoming' : 'Outgoing'} className={missed ? 'text-red-500' : ''}>
+              {direction === 'in' ? '↙ ' : '↗ '}
+            </span>
+          )}
           {prettyPhone(phone)}{sub ? ` · ${sub}` : ''}
         </span>
       </span>

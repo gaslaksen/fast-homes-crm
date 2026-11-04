@@ -410,12 +410,18 @@ export default function CommunicationsTimeline({
             <div className="w-full max-w-md rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-sm p-3">
               <div className="flex items-center gap-1.5 mb-1.5">
                 <ChannelBadge kind="call" />
-                <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                  {item.payload.voicemail ? 'Voicemail' : 'Call'}
+                <span
+                  className={`text-sm font-semibold whitespace-nowrap ${
+                    item.payload.missed ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-gray-100'
+                  }`}
+                >
+                  {item.payload.voicemail ? 'Voicemail' : item.payload.missed ? 'Missed call' : 'Call'}
                 </span>
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300">
-                  {item.payload.status}
-                </span>
+                {!item.payload.missed && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300">
+                    {item.payload.status}
+                  </span>
+                )}
                 {item.person && <PersonChip person={item.person} outbound={outbound} />}
                 {item.payload.duration != null && (
                   <span className="text-[10px] text-gray-500 dark:text-gray-400">
@@ -442,6 +448,8 @@ export default function CommunicationsTimeline({
               )}
               {item.payload.recordingUrl ? (
                 <audio controls preload="none" src={recordingSrc(item.payload.recordingUrl)} className="w-full h-8" />
+              ) : item.payload.missed ? (
+                <div className="text-[11px] text-gray-400 dark:text-gray-500">Rang and hung up, no voicemail</div>
               ) : (
                 <div className="text-[11px] text-gray-400 dark:text-gray-500">No recording</div>
               )}

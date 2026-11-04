@@ -117,7 +117,11 @@ describe('TwilioVoiceService inbound claimant with several claims', () => {
         findUnique: async () => ({ id: match.leadId, sellerFirstName: 'Jean', sellerLastName: 'Fleurinor', source: 'SURPLUS' }),
       },
       surplusDetail: { updateMany: tapped },
-      surplusHeir: { update: jest.fn(async () => ({})), updateMany: jest.fn(async () => ({})) },
+      surplusHeir: {
+        update: jest.fn(async () => ({})),
+        updateMany: jest.fn(async () => ({})),
+        findUnique: jest.fn(async () => ({ name: 'Tina Lynn Davis' })),
+      },
       $queryRaw: jest.fn(async () => []),
     } as any;
     const liveClaimIdsOnNumber = jest.fn(async () => ['claim-1319', 'claim-1321']);
@@ -155,5 +159,18 @@ describe('TwilioVoiceService inbound claimant with several claims', () => {
 
     expect(liveClaimIdsOnNumber).not.toHaveBeenCalled();
     expect((tapped.mock.calls[0] as any)[0].where.leadId).toEqual({ in: ['claim-1319'] });
+  });
+
+  it('rings as the relative who is calling, with the claim they are calling about', async () => {
+    const { svc } = claimantHarness({
+      leadId: 'claim-1319',
+      isPrimary: false,
+      heirId: 'heir-1',
+      heirRole: 'relative',
+    });
+    const twiml = await svc.generateIncomingTwiml({ From: '+13524678424', To: '+19045959620', CallSid: 'CAtina' });
+
+    expect(twiml).toContain('name="DisplayName" value="Tina Lynn Davis (re Jean Fleurinor)"');
+    expect(twiml).toContain('name="callerName" value="Tina Lynn Davis (re Jean Fleurinor)"');
   });
 });

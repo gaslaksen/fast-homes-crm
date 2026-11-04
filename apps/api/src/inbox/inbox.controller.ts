@@ -64,7 +64,10 @@ export class InboxController {
     return this.inboxService.markRead(leadId, userId);
   }
 
-  /** Voicemails from numbers that matched no lead, newest first. */
+  /**
+   * Calls from numbers that matched no lead, newest first: voicemails, missed
+   * calls and answered ones. The route keeps its old name for older clients.
+   */
   @Get('voicemails')
   async voicemails(@Headers('authorization') authHeader?: string) {
     this.requireUser(authHeader);
@@ -80,12 +83,12 @@ export class InboxController {
   @Post('voicemails/:id/attach')
   async attachVoicemail(
     @Param('id') id: string,
-    @Body() body: { leadId?: string },
+    @Body() body: { leadId?: string; heirId?: string | null },
     @Headers('authorization') authHeader?: string,
   ) {
     const { organizationId } = this.requireUser(authHeader);
     if (!body?.leadId) throw new BadRequestException('leadId is required');
-    return this.inboxService.attachVoicemail(id, body.leadId, organizationId);
+    return this.inboxService.attachVoicemail(id, body.leadId, organizationId, body.heirId || null);
   }
 
   /**

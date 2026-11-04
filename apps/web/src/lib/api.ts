@@ -616,11 +616,11 @@ export const inboxAPI = {
   markRead: (leadId: string) => api.post(`/inbox/threads/${leadId}/read`),
   star: (leadId: string, starred: boolean) =>
     api.post(`/inbox/threads/${leadId}/star`, { starred }),
-  // Voicemails from numbers that matched no lead.
+  // Calls from numbers that matched no lead: voicemails, missed and answered calls.
   voicemails: () => api.get('/inbox/voicemails'),
   dismissVoicemail: (id: string) => api.post(`/inbox/voicemails/${id}/dismiss`),
-  attachVoicemail: (id: string, leadId: string) =>
-    api.post(`/inbox/voicemails/${id}/attach`, { leadId }),
+  attachVoicemail: (id: string, leadId: string, heirId?: string | null) =>
+    api.post(`/inbox/voicemails/${id}/attach`, { leadId, heirId: heirId || null }),
 };
 
 // Comps API
@@ -866,6 +866,8 @@ export const callsAPI = {
     api.post('/calls/twilio/disposition', { callSid, ...input }),
   twilioRecents: (limit = 25) =>
     api.get('/calls/twilio/recents', { params: { limit } }),
+  twilioVoicemails: (limit = 30) =>
+    api.get('/calls/twilio/voicemails', { params: { limit } }),
   twilioNumbers: () => api.get('/calls/twilio/numbers'),
   // In-call controls. All address the call by the browser leg's CallSid.
   twilioHold: (callSid: string, hold: boolean) =>

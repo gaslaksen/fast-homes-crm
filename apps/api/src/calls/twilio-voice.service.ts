@@ -1,5 +1,6 @@
 import { Injectable, Logger, forwardRef, Inject, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import Twilio from 'twilio';
 import { PrismaService } from '../prisma/prisma.service';
 import { CallsService } from './calls.service';
@@ -73,10 +74,30 @@ import { SurplusNumbersService } from '../surplus/surplus-numbers.service';
 import { LeadPhonesService } from '../phone-numbers/lead-phones.service';
 import { TouchService } from '../leads/touch.service';
 import { appendVoicemailTwiml, voicemailGreetingFor } from './voicemail.util';
+import {
+  MISSED_DIAL_OUTCOMES,
+  STUCK_INBOUND_MS,
+  callOutcome,
+  callerDisplayName,
+  isInboundCall,
+} from './call-outcome.util';
 
 const AccessToken = Twilio.jwt.AccessToken;
 const VoiceGrant = AccessToken.VoiceGrant;
 const VoiceResponse = Twilio.twiml.VoiceResponse;
+
+/** Twilio call and dial statuses to the CallLog status we keep. */
+const STATUS_MAP: Record<string, string> = {
+  completed: 'completed',
+  answered: 'completed',
+  busy: 'completed',
+  'no-answer': 'completed',
+  failed: 'failed',
+  canceled: 'completed',
+};
+
+/** CallStatus values that mean the call itself is over. */
+const FINAL_CALL_STATUSES = new Set(['completed', 'busy', 'no-answer', 'failed', 'canceled']);
 
 /**
  * Browser-based softphone on Twilio Programmable Voice.
@@ -702,8 +723,14 @@ export class TwilioVoiceService {
     // Not a lead: a teammate or a buyer still gets a name on the ring screen,
     // but is never attached to a lead.
     const other = lead ? null : await this.findNonLeadCaller(from);
+    // A relative or heir ringing from their own number is named, with the
+    // claim they are calling about: ringing as the deceased claimant told the
+    // agent nothing about who was actually on the line.
     const callerName = lead
-      ? `${lead.sellerFirstName || ''} ${lead.sellerLastName || ''}`.trim()
+      ? callerDisplayName(
+          lead.heirName,
+          `${lead.sellerFirstName || ''} ${lead.sellerLastName || ''}`.trim(),
+        )
       : other?.name || '';
 
     // Without this line a caller showing up as a bare number left nothing in
@@ -854,11 +881,26 @@ export class TwilioVoiceService {
     if (!phone) return null;
     const match = await this.leadPhones.findLeadByPhone(phone, dialled);
     if (!match) return null;
-    const lead = await this.prisma.lead.findUnique({
-      where: { id: match.leadId },
-      select: { id: true, sellerFirstName: true, sellerLastName: true, source: true },
-    });
-    return lead ? { ...lead, heirId: match.heirId || null, heirRole: match.heirRole || null } : null;
+    const [lead, heir] = await Promise.all([
+      this.prisma.lead.findUnique({
+        where: { id: match.leadId },
+        select: { id: true, sellerFirstName: true, sellerLastName: true, source: true },
+      }),
+      match.heirId ? this.heirName(match.heirId) : Promise.resolve(null),
+    ]);
+    return lead
+      ? { ...lead, heirId: match.heirId || null, heirRole: match.heirRole || null, heirName: heir?.name || null }
+      : null;
+  }
+
+  /** A name on the ring screen is a nicety; a failed lookup must not stop the call ringing. */
+  private async heirName(heirId: string): Promise<{ name: string } | null> {
+    try {
+      return await this.prisma.surplusHeir.findUnique({ where: { id: heirId }, select: { name: true } });
+    } catch (err: any) {
+      this.logger.warn(`Heir name lookup for ${heirId} failed: ${err.message}`);
+      return null;
+    }
   }
 
   /**
@@ -913,15 +955,15 @@ export class TwilioVoiceService {
     const rawStatus = body.DialCallStatus || body.CallStatus || '';
     const duration = parseInt(body.DialCallDuration || body.CallDuration || '0', 10);
 
-    const statusMap: Record<string, string> = {
-      completed: 'completed',
-      answered: 'completed',
-      busy: 'completed',
-      'no-answer': 'completed',
-      failed: 'failed',
-      canceled: 'completed',
-    };
-    const status = statusMap[rawStatus] || 'in-progress';
+    const row = await this.prisma.callLog
+      .findUnique({ where: { twilioCallSid: callSid }, select: { id: true, type: true, endedReason: true } })
+      .catch((): null => null);
+    if (row && isInboundCall(row)) {
+      await this.recordInboundOutcome(callSid, row, body, duration);
+      return;
+    }
+
+    const status = STATUS_MAP[rawStatus] || 'in-progress';
 
     try {
       const result = await this.prisma.callLog.updateMany({
@@ -938,6 +980,111 @@ export class TwilioVoiceService {
     } catch (err: any) {
       this.logger.error(`Failed to update CallLog ${callSid}: ${err.message}`);
     }
+  }
+
+  /**
+   * How an inbound call ended. Only the <Dial>'s own status says whether an
+   * agent picked up: the parent call's CallStatus is "completed" whether
+   * somebody answered or the caller gave up while it rang. So the first dial
+   * outcome is kept, a later CallStatus never overwrites it, and a call that
+   * ends with no dial outcome at all is a caller who hung up while ringing.
+   */
+  private async recordInboundOutcome(
+    callSid: string,
+    row: { id: string; endedReason: string | null },
+    body: Record<string, string>,
+    duration: number,
+  ): Promise<void> {
+    if (row.endedReason) {
+      this.logger.log(`📞 Status callback ${callSid}: outcome already ${row.endedReason}, kept`);
+      return;
+    }
+    let reason = body.DialCallStatus || '';
+    if (!reason) {
+      // Ringing and in-progress updates say nothing about how it ended.
+      if (!FINAL_CALL_STATUSES.has(body.CallStatus || '')) return;
+      reason = 'caller-hangup';
+    }
+    await this.closeInboundCall(row.id, reason, duration);
+  }
+
+  /**
+   * Write an inbound call's outcome once. The `endedReason: null` guard makes
+   * this safe to race: the Dial action, a per-call status callback and the
+   * sweep (on every replica) can all try, and only the first one writes, so a
+   * missed call marks the thread exactly once.
+   */
+  private async closeInboundCall(callLogId: string, reason: string, duration = 0): Promise<void> {
+    const status = reason === 'caller-hangup' ? 'completed' : STATUS_MAP[reason] || 'completed';
+    try {
+      const result = await this.prisma.callLog.updateMany({
+        where: { id: callLogId, endedReason: null },
+        data: { status, endedReason: reason, ...(duration ? { duration } : {}) },
+      });
+      this.logger.log(`📞 Inbound call ${callLogId} ended: ${reason} -> ${status} (${duration}s)`);
+      if (result.count && MISSED_DIAL_OUTCOMES.has(reason)) await this.noteMissedCall(callLogId);
+    } catch (err: any) {
+      this.logger.error(`Failed to close inbound CallLog ${callLogId}: ${err.message}`);
+    }
+  }
+
+  /**
+   * A missed call from somebody on file is the newest unread item on their
+   * lead's thread, the same as a text from them would be. Without this a
+   * caller who rang and hung up left no trace anywhere anyone looks. A
+   * voicemail left after the greeting overwrites this preview with its own.
+   * A missed call from an unknown number has no thread; it waits in the
+   * inbox's list of calls from numbers not on file.
+   */
+  private async noteMissedCall(callLogId: string): Promise<void> {
+    const call = await this.prisma.callLog.findUnique({
+      where: { id: callLogId },
+      select: { leadId: true, fromNumber: true, heir: { select: { name: true } } },
+    });
+    if (!call?.leadId) return;
+    const who = call.heir?.name || '';
+    const num = call.fromNumber ? prettyNumber(call.fromNumber) : '';
+    const preview = who && num ? `Missed call from ${who} at ${num}` : `Missed call from ${who || num || 'this lead'}`;
+    await this.prisma.lead
+      .update({
+        where: { id: call.leadId },
+        data: {
+          lastMessageAt: new Date(),
+          lastMessagePreview: preview.slice(0, 160),
+          lastMessageDirection: 'INBOUND',
+          threadUnread: true,
+        },
+      })
+      .catch((err) => this.logger.warn(`Missed call on ${call.leadId} not put on the thread: ${err.message}`));
+  }
+
+  /**
+   * Close out inbound calls that never got an outcome: the caller hung up
+   * while it rang and Twilio sent nothing to say so. Looks back two days so a
+   * restart does not strand any, and no further so old rows are left alone.
+   */
+  @Cron(CronExpression.EVERY_5_MINUTES)
+  async sweepStuckInboundCalls(): Promise<number> {
+    const now = Date.now();
+    const stuck = await this.prisma.callLog
+      .findMany({
+        where: {
+          type: 'twilio_inbound',
+          status: 'in-progress',
+          endedReason: null,
+          voicemail: false,
+          createdAt: { lt: new Date(now - STUCK_INBOUND_MS), gt: new Date(now - 2 * 24 * 60 * 60 * 1000) },
+        },
+        select: { id: true },
+        take: 100,
+      })
+      .catch((err) => {
+        this.logger.warn(`Stuck inbound call sweep failed: ${err.message}`);
+        return [] as { id: string }[];
+      });
+    for (const row of stuck) await this.closeInboundCall(row.id, 'caller-hangup');
+    if (stuck.length) this.logger.log(`📞 Closed ${stuck.length} inbound call(s) that rang out with no outcome`);
+    return stuck.length;
   }
 
   /**
@@ -1314,12 +1461,16 @@ export class TwilioVoiceService {
     }
   }
 
-  /** Recent calls for the dialer "Recents" tab. */
+  /**
+   * Recent calls for the dialer "Recents" tab, both directions. Each row says
+   * who the other end was (the person on a surplus case when it was not the
+   * claimant), their number, and whether an inbound call was missed.
+   */
   async recentCalls(limit = 25) {
-    return this.prisma.callLog.findMany({
-      where: { type: 'twilio_browser' },
+    const rows = await this.prisma.callLog.findMany({
+      where: { type: { in: ['twilio_browser', 'twilio_inbound'] } },
       orderBy: { createdAt: 'desc' },
-      take: limit,
+      take: Math.min(Math.max(limit, 1), 100),
       include: {
         lead: {
           select: {
@@ -1329,7 +1480,46 @@ export class TwilioVoiceService {
             sellerPhone: true,
           },
         },
+        heir: { select: { id: true, name: true, role: true, relationship: true } },
       },
+    });
+    const now = new Date();
+    return rows.map((c) => {
+      const inbound = isInboundCall(c);
+      const leadName = c.lead ? `${c.lead.sellerFirstName || ''} ${c.lead.sellerLastName || ''}`.trim() : '';
+      return {
+        ...c,
+        direction: inbound ? 'INBOUND' : 'OUTBOUND',
+        callResult: callOutcome(c, now),
+        /** The other end of the call: who rang us, or who we rang. */
+        number: (inbound ? c.fromNumber : c.toNumber) || null,
+        personName: c.heir?.name || null,
+        displayName: callerDisplayName(c.heir?.name, leadName) || null,
+      };
+    });
+  }
+
+  /** Recent voicemails on every line, matched to a lead or not, for the dialer. */
+  async recentVoicemails(limit = 30) {
+    const rows = await this.prisma.callLog.findMany({
+      where: { voicemail: true },
+      orderBy: { createdAt: 'desc' },
+      take: Math.min(Math.max(limit, 1), 100),
+      select: {
+        id: true,
+        fromNumber: true,
+        toNumber: true,
+        createdAt: true,
+        duration: true,
+        recordingUrl: true,
+        transcript: true,
+        lead: { select: { id: true, sellerFirstName: true, sellerLastName: true } },
+        heir: { select: { id: true, name: true } },
+      },
+    });
+    return rows.map((v) => {
+      const leadName = v.lead ? `${v.lead.sellerFirstName || ''} ${v.lead.sellerLastName || ''}`.trim() : '';
+      return { ...v, displayName: callerDisplayName(v.heir?.name, leadName) || null };
     });
   }
 }
