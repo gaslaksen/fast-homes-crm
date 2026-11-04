@@ -134,6 +134,7 @@ export class VoicemailService {
         toNumber: true,
         duration: true,
         createdAt: true,
+        heir: { select: { name: true } },
         lead: {
           select: {
             id: true,
@@ -150,7 +151,10 @@ export class VoicemailService {
 
     const lead = call.lead;
     const caller = prettyNumber(call.fromNumber || '') || call.fromNumber || 'an unknown number';
-    const preview = `Voicemail: ${transcript || '(no transcript)'}`;
+    // The thread and the push carry the claimant's name, so a relative's
+    // message says whose it is.
+    const from = call.heir?.name ? ` from ${call.heir.name}` : '';
+    const preview = `Voicemail${from}: ${transcript || '(no transcript)'}`;
 
     if (lead) {
       // Same summary an inbound text writes, so the voicemail shows as the

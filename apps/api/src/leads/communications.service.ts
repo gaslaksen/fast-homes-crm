@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { isMissedInbound } from '../calls/call-outcome.util';
 import { LeadPhonesService, type LeadPhone } from '../phone-numbers/lead-phones.service';
 
 // Activity types that surface as inline timeline events. Excludes noisy types
@@ -288,6 +289,10 @@ export class CommunicationsService {
           sellerNumber,
           numberLabel: sellerNumber ? phoneLabels.get(phoneKey(sellerNumber)) ?? null : null,
           voicemail: !!c.voicemail,
+          // An inbound call nobody picked up, voicemails aside. The status
+          // alone reads "completed" for those, which looked like a call that
+          // happened.
+          missed: isMissedInbound(c),
           // A voicemail is read as much as heard; other calls keep their
           // transcripts off the timeline as before.
           transcript: c.voicemail ? c.transcript ?? null : null,
