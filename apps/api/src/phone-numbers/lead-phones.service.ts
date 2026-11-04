@@ -121,6 +121,48 @@ const DETAIL_RELATIONS = [
 
 type DetailRelation = (typeof DETAIL_RELATIONS)[number];
 
+/**
+ * Lead filters matching a run of digits anywhere in a lead's numbers: the
+ * primary, every pipeline's extra slots, and the people on a surplus case.
+ * For searches typed as a phone number. Slots are stored as bare digits, so
+ * a partial number matches; sellerPhone is E.164, which contains its digits.
+ */
+export function phoneDigitsWhere(digits: string): Record<string, any>[] {
+  if (digits.length < 7) return [];
+  const contains = { contains: digits };
+  const out: Record<string, any>[] = [{ sellerPhone: contains }];
+  for (const r of DETAIL_RELATIONS) {
+    const slots: Record<string, any>[] = [];
+    for (let i = 2; i <= r.slots; i++) slots.push({ [`phone${i}`]: contains });
+    out.push({ [r.relation]: { OR: slots } });
+  }
+  out.push({
+    surplusDetail: {
+      heirs: { some: { OR: [1, 2, 3, 4].map((i) => ({ [`phone${i}`]: contains })) } },
+    },
+  });
+  return out;
+}
+
+/**
+ * The digits of a search typed as a phone number, without a leading country
+ * 1, or '' when it is not one. "34132 HYATT RD" is an address, not a number.
+ */
+export function phoneSearchDigits(q: string): string {
+  const d = (q || '').replace(/\D/g, '');
+  if (d.length < 7 || d.length < (q || '').replace(/\s/g, '').length - 4) return '';
+  return d.length === 11 && d.startsWith('1') ? d.slice(1) : d;
+}
+
+/** A number on file within a few digits of a caller's, and who holds it. */
+export interface NearNumberHolder {
+  number: string;
+  /** How far the last four digits are from the caller's. */
+  gap: number;
+  leadId: string;
+  heirId: string | null;
+}
+
 @Injectable()
 export class LeadPhonesService {
   private readonly logger = new Logger(LeadPhonesService.name);
@@ -564,6 +606,84 @@ export class LeadPhonesService {
   async findLeadIdsByPhone(phone: string): Promise<string[]> {
     const { leadIds, heirs } = await this.phoneHolders(phone);
     return Array.from(new Set([...leadIds, ...heirs.map((h) => h.leadId).filter(Boolean) as string[]]));
+  }
+
+  /**
+   * Numbers on file in the same exchange as `phone` whose last four digits
+   * are within `maxGap` of it, but not equal. A household's lines are often
+   * consecutive, so a caller on (352) 467-8427 is likely the person we have
+   * at 467-8424. Only ever a suggestion: a near number is as often a
+   * neighbor. Every comparison is an exact match on a short candidate list,
+   * so the slot lookups stay indexed.
+   */
+  async nearNumberHolders(phone: string, maxGap = 5): Promise<NearNumberHolder[]> {
+    const ten = numberKey(phone);
+    if (ten.length !== 10) return [];
+    const prefix = ten.slice(0, 6);
+    const last = parseInt(ten.slice(6), 10);
+    const candidates: string[] = [];
+    for (let d = -maxGap; d <= maxGap; d++) {
+      const n = last + d;
+      if (d === 0 || n < 0 || n > 9999) continue;
+      candidates.push(prefix + String(n).padStart(4, '0'));
+    }
+    const gapOf = (num: string) => Math.abs(parseInt(numberKey(num).slice(6), 10) - last);
+    const inList = { in: candidates };
+
+    const [leads, heirs] = await Promise.all([
+      this.prisma.lead.findMany({
+        where: {
+          OR: [
+            { sellerPhone: { in: candidates.flatMap((c) => [`+1${c}`, c, `1${c}`]) } },
+            ...DETAIL_RELATIONS.map((r) => {
+              const slots: Record<string, any>[] = [];
+              for (let i = 2; i <= r.slots; i++) slots.push({ [`phone${i}`]: inList });
+              return { [r.relation]: { OR: slots } };
+            }),
+          ],
+        },
+        select: {
+          id: true,
+          sellerPhone: true,
+          ...Object.fromEntries(
+            DETAIL_RELATIONS.map((r) => [
+              r.relation,
+              {
+                select: Object.fromEntries(
+                  Array.from({ length: r.slots - 1 }, (_, k) => [`phone${k + 2}`, true]),
+                ),
+              },
+            ]),
+          ),
+        } as any,
+        take: 20,
+      }),
+      this.prisma.surplusHeir.findMany({
+        where: { OR: [1, 2, 3, 4].map((i) => ({ [`phone${i}`]: inList })) },
+        select: {
+          id: true,
+          phone1: true,
+          phone2: true,
+          phone3: true,
+          phone4: true,
+          surplusDetail: { select: { leadId: true } },
+        },
+        take: 20,
+      }),
+    ]);
+
+    const wanted = new Set(candidates);
+    const out: NearNumberHolder[] = [];
+    for (const l of leads as any[]) {
+      const nums = [l.sellerPhone, ...DETAIL_RELATIONS.flatMap((r) => Object.values(l[r.relation] || {}))];
+      const hit = nums.map((n) => numberKey(String(n || ''))).find((k) => wanted.has(k));
+      if (hit) out.push({ number: hit, gap: gapOf(hit), leadId: l.id, heirId: null });
+    }
+    for (const h of heirs) {
+      const hit = [h.phone1, h.phone2, h.phone3, h.phone4].map((n) => numberKey(n || '')).find((k) => wanted.has(k));
+      if (hit && h.surplusDetail?.leadId) out.push({ number: hit, gap: gapOf(hit), leadId: h.surplusDetail.leadId, heirId: h.id });
+    }
+    return out.sort((a, b) => a.gap - b.gap);
   }
 
   /** Leads whose own number this is, and case people who hold it. */

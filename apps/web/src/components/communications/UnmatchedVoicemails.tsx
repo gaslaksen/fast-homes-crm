@@ -16,6 +16,23 @@ interface Voicemail {
   transcript: string | null;
   /** How the call went. Older API builds send only voicemails, with no kind. */
   kind?: 'voicemail' | 'missed' | 'answered' | 'ringing';
+  /** People holding a number a few digits off this one, nearest first. */
+  suggestions?: AttachOption[];
+}
+
+/** A lead, or a person on its case, that a call can be filed under. */
+interface AttachOption {
+  kind?: 'lead' | 'person';
+  leadId: string;
+  heirId: string | null;
+  name: string;
+  /** "Other relative", "Claimant", "Lead". */
+  label: string;
+  leadName: string;
+  propertyAddress: string | null;
+  source: string | null;
+  /** Suggestions only: the near number we hold for them. */
+  numberOnFile?: string;
 }
 
 const KIND_LABEL: Record<string, string> = {
@@ -129,17 +146,33 @@ export default function UnmatchedVoicemails({
                   {vm.duration != null && vm.kind !== 'missed' ? ` · ${vm.duration}s` : ''}
                 </span>
               </div>
-              {(vm.kind || 'voicemail') === 'voicemail' ? (
-                <p className="mt-1 text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
-                  {vm.transcript || <span className="text-gray-400">No transcript</span>}
+              {vm.kind === 'missed' ? (
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  Rang and hung up without leaving a message.
                 </p>
               ) : (
-                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                  {vm.kind === 'missed'
-                    ? 'Rang and hung up without leaving a message.'
-                    : 'Someone took this call. Attach it to see the recording on the lead.'}
-                </p>
+                <Transcript text={vm.transcript} answered={vm.kind === 'answered'} />
               )}
+              {(vm.suggestions || []).map((sg) => (
+                <div
+                  key={`${sg.leadId}:${sg.heirId || ''}`}
+                  className="mt-2 rounded-md border border-amber-200 dark:border-amber-800 bg-white/70 dark:bg-gray-900/60 px-2.5 py-2"
+                >
+                  <p className="text-xs text-gray-700 dark:text-gray-300">
+                    Possibly <span className="font-semibold text-gray-900 dark:text-gray-100">{sg.name}</span>
+                    {sg.heirId ? ` · ${sg.label} on ${sg.leadName}` : ` · ${sg.label}`}. We have{' '}
+                    <span className="font-medium">{sg.numberOnFile}</span> for them, a few digits off this number.
+                  </p>
+                  <button
+                    type="button"
+                    disabled={busyId === vm.id}
+                    onClick={() => attach(vm, { leadId: sg.leadId, heirId: sg.heirId, saveNumber: true })}
+                    className="mt-1.5 px-2.5 py-1 rounded-md bg-teal-600 hover:bg-teal-700 text-white text-xs font-medium disabled:opacity-50"
+                  >
+                    Attach and save number
+                  </button>
+                </div>
+              ))}
               {vm.recordingUrl && (
                 <audio
                   controls
@@ -224,9 +257,45 @@ async function saveNumber(target: AttachTarget, number: string): Promise<string 
   }
 }
 
+/** What was said on the call, three lines until opened. */
+function Transcript({ text, answered }: { text: string | null; answered: boolean }) {
+  const [open, setOpen] = useState(false);
+  if (!text) {
+    return (
+      <p className="mt-1 text-xs text-gray-400">
+        {answered ? 'Someone took this call. No transcript.' : 'No transcript'}
+      </p>
+    );
+  }
+  const long = text.length > 220;
+  return (
+    <div className="mt-1">
+      {answered && <p className="text-[11px] text-gray-500 dark:text-gray-400">Someone took this call. What was said:</p>}
+      <p
+        className={`text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap ${
+          long && !open ? 'line-clamp-3' : ''
+        }`}
+      >
+        {text}
+      </p>
+      {long && (
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          className="text-[11px] text-teal-700 dark:text-teal-400 hover:underline"
+        >
+          {open ? 'Show less' : 'Show all'}
+        </button>
+      )}
+    </div>
+  );
+}
+
 /**
- * Pick the lead, then on a surplus case the person who called, then attach.
- * Searches every lead, pipelines included: these are mostly surplus calls.
+ * Find who the call was from, then attach. Searches claimants and the people
+ * on their cases by name, address or any number on file, so typing a
+ * relative's name finds the case they belong to. Picking a person fills in
+ * both the lead and who called.
  */
 function AttachPicker({
   number,
@@ -238,15 +307,15 @@ function AttachPicker({
   disabled: boolean;
 }) {
   const [q, setQ] = useState('');
-  const [results, setResults] = useState<any[]>([]);
+  const [results, setResults] = useState<AttachOption[]>([]);
   const [loading, setLoading] = useState(false);
-  const [lead, setLead] = useState<any | null>(null);
+  const [picked, setPicked] = useState<AttachOption | null>(null);
   const [people, setPeople] = useState<any[] | null>(null);
   const [heirId, setHeirId] = useState<string>('');
   const [save, setSave] = useState(true);
 
   useEffect(() => {
-    if (lead || q.trim().length < 2) {
+    if (picked || q.trim().length < 2) {
       setResults([]);
       return;
     }
@@ -254,14 +323,8 @@ function AttachPicker({
     setLoading(true);
     const t = setTimeout(async () => {
       try {
-        const res = await leadsAPI.list({
-          search: q.trim(),
-          limit: 8,
-          includePipelines: 'true',
-          showInactive: 'true',
-        });
-        const leads = res.data?.leads || res.data || [];
-        if (!cancelled) setResults(Array.isArray(leads) ? leads : []);
+        const res = await inboxAPI.attachSearch(q.trim());
+        if (!cancelled) setResults(res.data?.results || []);
       } catch {
         if (!cancelled) setResults([]);
       } finally {
@@ -272,16 +335,15 @@ function AttachPicker({
       cancelled = true;
       clearTimeout(t);
     };
-  }, [q, lead]);
+  }, [q, picked]);
 
   // On a surplus case the caller is often a relative, not the claimant.
   useEffect(() => {
     setPeople(null);
-    setHeirId('');
-    if (!lead || lead.source !== 'SURPLUS') return;
+    if (!picked || picked.source !== 'SURPLUS') return;
     let cancelled = false;
     surplusAPI
-      .heirs(lead.id)
+      .heirs(picked.leadId)
       .then((res) => {
         if (!cancelled) setPeople(res.data?.heirs || []);
       })
@@ -291,26 +353,31 @@ function AttachPicker({
     return () => {
       cancelled = true;
     };
-  }, [lead]);
+  }, [picked]);
+
+  const choose = (r: AttachOption) => {
+    setPicked(r);
+    setHeirId(r.heirId || '');
+  };
 
   const inputCls =
     'w-full px-2.5 py-1.5 text-xs rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 outline-none';
 
-  if (lead) {
-    const leadName = `${lead.sellerFirstName || ''} ${lead.sellerLastName || ''}`.trim() || lead.propertyAddress;
+  if (picked) {
+    const leadName = picked.leadName || picked.propertyAddress || 'this lead';
     return (
       <div className="mt-2 space-y-1.5">
         <div className="flex items-center justify-between gap-2 text-xs">
           <span className="font-medium text-gray-900 dark:text-gray-100 truncate">{leadName}</span>
           <button
             type="button"
-            onClick={() => setLead(null)}
+            onClick={() => setPicked(null)}
             className="text-gray-500 dark:text-gray-400 hover:underline shrink-0"
           >
             Change
           </button>
         </div>
-        {lead.source === 'SURPLUS' && (
+        {picked.source === 'SURPLUS' && (
           <label className="block text-[11px] text-gray-600 dark:text-gray-300">
             Who called
             <select
@@ -320,10 +387,12 @@ function AttachPicker({
               className={`${inputCls} mt-0.5`}
             >
               <option value="">{leadName} (claimant)</option>
+              {/* The picked person stays listed while the case's people load. */}
+              {people === null && picked.heirId && <option value={picked.heirId}>{picked.name}</option>}
               {(people || []).map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}
-                  {p.roleLabel ? ` · ${p.roleLabel}` : ''}
+                  {p.relationship ? ` · ${p.relationship}` : p.roleLabel ? ` · ${p.roleLabel}` : ''}
                 </option>
               ))}
             </select>
@@ -338,7 +407,7 @@ function AttachPicker({
         <button
           type="button"
           disabled={disabled}
-          onClick={() => onPick({ leadId: lead.id, heirId: heirId || null, saveNumber: save && !!number })}
+          onClick={() => onPick({ leadId: picked.leadId, heirId: heirId || null, saveNumber: save && !!number })}
           className="px-2.5 py-1 rounded-md bg-teal-600 hover:bg-teal-700 text-white text-xs font-medium disabled:opacity-50"
         >
           Attach
@@ -353,7 +422,7 @@ function AttachPicker({
         autoFocus
         value={q}
         onChange={(e) => setQ(e.target.value)}
-        placeholder="Search by name, address or phone"
+        placeholder="Search a name, relative, address or phone"
         className={inputCls}
       />
       {loading && <p className="text-[11px] text-gray-400 mt-1">Searching…</p>}
@@ -361,26 +430,24 @@ function AttachPicker({
         <p className="text-[11px] text-gray-400 mt-1">No matches</p>
       )}
       <ul className="mt-1">
-        {results.map((r) => {
-          const name = `${r.sellerFirstName || ''} ${r.sellerLastName || ''}`.trim();
-          return (
-            <li key={r.id}>
-              <button
-                type="button"
-                disabled={disabled}
-                onClick={() => setLead(r)}
-                className="w-full text-left px-2 py-1.5 rounded hover:bg-white dark:hover:bg-gray-800 disabled:opacity-50"
-              >
-                <div className="text-xs font-medium text-gray-900 dark:text-gray-100 truncate">
-                  {name || r.propertyAddress}
-                </div>
-                <div className="text-[11px] text-gray-500 dark:text-gray-400 truncate">
-                  {r.propertyAddress}
-                </div>
-              </button>
-            </li>
-          );
-        })}
+        {results.map((r) => (
+          <li key={`${r.leadId}:${r.heirId || ''}`}>
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={() => choose(r)}
+              className="w-full text-left px-2 py-1.5 rounded hover:bg-white dark:hover:bg-gray-800 disabled:opacity-50"
+            >
+              <div className="text-xs font-medium text-gray-900 dark:text-gray-100 truncate">
+                {r.name || r.propertyAddress}
+                <span className="font-normal text-gray-500 dark:text-gray-400"> · {r.label}</span>
+              </div>
+              <div className="text-[11px] text-gray-500 dark:text-gray-400 truncate">
+                {r.kind === 'person' ? `on ${r.leadName}${r.propertyAddress ? `, ${r.propertyAddress}` : ''}` : r.propertyAddress}
+              </div>
+            </button>
+          </li>
+        ))}
       </ul>
     </div>
   );

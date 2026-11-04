@@ -74,6 +74,13 @@ export class InboxController {
     return this.inboxService.listOpenVoicemails();
   }
 
+  /** Leads and the people on their cases, for attaching a call. */
+  @Get('attach-search')
+  async attachSearch(@Query('q') q?: string, @Headers('authorization') authHeader?: string) {
+    const { organizationId } = this.requireUser(authHeader);
+    return this.inboxService.searchAttachTargets(q || '', organizationId);
+  }
+
   @Post('voicemails/:id/dismiss')
   async dismissVoicemail(@Param('id') id: string, @Headers('authorization') authHeader?: string) {
     this.requireUser(authHeader);
