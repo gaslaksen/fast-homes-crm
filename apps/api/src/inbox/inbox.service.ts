@@ -1,9 +1,17 @@
-import { Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { numberKey, prettyNumber } from '../phone-numbers/phone-numbers.service';
 import { LeadPhonesService, phoneDigitsWhere, phoneSearchDigits } from '../phone-numbers/lead-phones.service';
-import { SurplusPersonRole, SURPLUS_PERSON_ROLE_LABEL } from '@fast-homes/shared';
+import {
+  SurplusCallOutcome,
+  SurplusPersonRole,
+  SURPLUS_CALL_OUTCOME_LABEL,
+  SURPLUS_PERSON_ROLE_LABEL,
+} from '@fast-homes/shared';
+import { badPhonesOf } from '../phone-numbers/lead-phones.service';
+import { normalizePhoneDigits } from '../foreclosures/foreclosure-scoring.util';
+import { contactStampPatch, heirContacts } from '../surplus/surplus-contact-stamp.util';
 import { callOutcome } from '../calls/call-outcome.util';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -19,6 +27,48 @@ export interface AttachSuggestion {
   source: string | null;
   /** The near number we hold for them, formatted. */
   numberOnFile: string;
+}
+
+/** One number already on file, with how calling it has gone, for choosing which to replace. */
+export interface NumberSlot {
+  number: string;
+  type: string | null;
+  /** Marked wrong or disconnected. */
+  bad: boolean;
+  dnc: string | null;
+  /** The lead's primary: drips and automation text it, so it is never replaced here. */
+  isPrimary: boolean;
+  calls: number;
+  lastCallAt: string | null;
+  /** "No answer", "Spoke to relative", "Connected" and so on. */
+  lastResult: string | null;
+}
+
+export type SaveNumberResult =
+  | { saved: true; already?: boolean }
+  | { saved: false; reason: 'full'; name: string; capacity: number; slots: NumberSlot[] };
+
+/** How a call on one of our numbers went, in a few words. */
+function callResultLabel(c: { outcome?: string | null; disposition?: string | null; endedReason?: string | null; voicemail?: boolean | null }): string {
+  if (c.outcome && SURPLUS_CALL_OUTCOME_LABEL[c.outcome as SurplusCallOutcome]) {
+    return SURPLUS_CALL_OUTCOME_LABEL[c.outcome as SurplusCallOutcome];
+  }
+  if (c.disposition) return c.disposition;
+  if (c.voicemail) return 'Left us a voicemail';
+  switch (c.endedReason) {
+    case 'no-answer':
+    case 'caller-hangup':
+    case 'canceled':
+      return 'No answer';
+    case 'busy':
+      return 'Busy';
+    case 'failed':
+      return 'Did not connect';
+    case 'completed':
+      return 'Connected';
+    default:
+      return c.endedReason || 'Called';
+  }
 }
 
 function fullName(l: { sellerFirstName?: string | null; sellerLastName?: string | null }): string {
@@ -597,6 +647,132 @@ export class InboxService {
     });
     if (!res.count) throw new NotFoundException('Call not found or already attached');
     return { success: true };
+  }
+
+  /**
+   * Save the number a call came from on the person it turned out to be, so
+   * their next call rings in by name. A person on a surplus case holds four
+   * numbers and a lead as many as its pipeline allows. When they are full
+   * nothing is dropped quietly: the answer lists what is on file with how
+   * calling each has gone, and the caller sends `replace` to swap one out.
+   */
+  async saveCallerNumber(args: {
+    leadId: string;
+    heirId?: string | null;
+    number: string;
+    replace?: string | null;
+    organizationId?: string;
+  }): Promise<SaveNumberResult> {
+    const key = numberKey(args.number || '');
+    if (key.length !== 10) throw new BadRequestException(`"${args.number}" is not a valid phone number`);
+    const replaceKey = args.replace ? numberKey(args.replace) : '';
+    const lead = await this.prisma.lead.findFirst({
+      where: { id: args.leadId, ...(args.organizationId ? { organizationId: args.organizationId } : {}) },
+      select: { id: true, sellerFirstName: true, sellerLastName: true, badContacts: true },
+    });
+    if (!lead) throw new NotFoundException('Lead not found');
+    const bad = new Set(badPhonesOf(lead.badContacts).map((n) => numberKey(n)));
+
+    if (args.heirId) {
+      const heir = await this.prisma.surplusHeir.findFirst({
+        where: { id: args.heirId, surplusDetail: { leadId: lead.id } },
+      });
+      if (!heir) throw new NotFoundException('That person is not on this lead');
+      const slots = [1, 2, 3, 4]
+        .map((i) => ({
+          number: normalizePhoneDigits((heir as any)[`phone${i}`]) || '',
+          type: ((heir as any)[`phone${i}Type`] as string | null) || null,
+          dnc: ((heir as any)[`phone${i}Dnc`] as string | null) || null,
+        }))
+        .filter((p) => p.number.length === 10);
+      if (slots.some((p) => p.number === key)) return { saved: true, already: true };
+
+      let next = slots;
+      if (slots.length >= 4) {
+        const at = replaceKey ? slots.findIndex((p) => p.number === replaceKey) : -1;
+        if (at < 0) {
+          return { saved: false, reason: 'full', name: heir.name, capacity: 4, slots: await this.describeSlots(lead.id, slots, bad, null) };
+        }
+        // In place, so the rest keep their order and their own type and DNC result.
+        next = slots.map((p, i) => (i === at ? { number: key, type: null, dnc: null } : p));
+      } else {
+        next = [...slots, { number: key, type: null, dnc: null }];
+      }
+      const data: any = {};
+      for (let i = 0; i < 4; i += 1) {
+        data[`phone${i + 1}`] = next[i]?.number || null;
+        data[`phone${i + 1}Type`] = next[i]?.type || null;
+        data[`phone${i + 1}Dnc`] = next[i]?.dnc || null;
+      }
+      Object.assign(data, contactStampPatch(heirContacts(heir), heirContacts({ ...heir, ...data })));
+      await this.prisma.surplusHeir.update({ where: { id: heir.id }, data });
+      return { saved: true };
+    }
+
+    if (!this.leadPhones) throw new BadRequestException('Saving numbers on a lead is not available here');
+    // The list includes the case people's numbers too; only the lead's own go back.
+    const own = (await this.leadPhones.listForLead(lead.id)).filter((n) => !n.heirId);
+    if (own.some((n) => numberKey(n.number) === key)) return { saved: true, already: true };
+    const asSlots = own.map((n) => ({ number: numberKey(n.number), type: n.type ?? null, isPrimary: !!n.isPrimary }));
+    const name = fullName(lead) || 'This lead';
+
+    if (replaceKey) {
+      const at = asSlots.findIndex((p) => p.number === replaceKey);
+      if (at < 0) throw new BadRequestException('That number is not on this lead');
+      if (asSlots[at].isPrimary) throw new BadRequestException('The primary number cannot be replaced here');
+      const next = asSlots.map((p, i) => (i === at ? { number: key, type: null, isPrimary: false } : p));
+      await this.leadPhones.setPhones(lead.id, next.map(({ number, type }) => ({ number, type })));
+      return { saved: true };
+    }
+    try {
+      await this.leadPhones.setPhones(lead.id, [...asSlots.map(({ number, type }) => ({ number, type })), { number: key, type: null }]);
+      return { saved: true };
+    } catch (err: any) {
+      // setPhones refuses past the pipeline's slot count; that is "full".
+      if (!(err instanceof BadRequestException) || !/at most/.test(err.message)) throw err;
+      return {
+        saved: false,
+        reason: 'full',
+        name,
+        capacity: asSlots.length,
+        slots: await this.describeSlots(lead.id, asSlots, bad, asSlots.find((p) => p.isPrimary)?.number || null),
+      };
+    }
+  }
+
+  /** Each number with its call count and the latest call's result on this lead. */
+  private async describeSlots(
+    leadId: string,
+    slots: { number: string; type: string | null; dnc?: string | null }[],
+    bad: Set<string>,
+    primary: string | null,
+  ): Promise<NumberSlot[]> {
+    const variants = slots.flatMap((p) => [`+1${p.number}`, p.number, `1${p.number}`]);
+    const calls = await this.prisma.callLog
+      .findMany({
+        where: { leadId, OR: [{ toNumber: { in: variants } }, { fromNumber: { in: variants } }] },
+        orderBy: { createdAt: 'desc' },
+        take: 200,
+        select: { toNumber: true, fromNumber: true, type: true, createdAt: true, outcome: true, disposition: true, endedReason: true, voicemail: true },
+      })
+      .catch((): any[] => []);
+    return slots.map((p) => {
+      const mine = calls.filter((c: any) => {
+        const other = String(c.type || '').includes('inbound') ? c.fromNumber : c.toNumber;
+        return numberKey(other || '') === p.number;
+      });
+      const last = mine[0];
+      return {
+        number: p.number,
+        type: p.type,
+        bad: bad.has(p.number),
+        dnc: p.dnc || null,
+        isPrimary: primary === p.number,
+        calls: mine.length,
+        lastCallAt: last ? new Date(last.createdAt).toISOString() : null,
+        lastResult: last ? callResultLabel(last) : null,
+      };
+    });
   }
 
   async setStarred(leadId: string, starred: boolean) {

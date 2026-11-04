@@ -619,6 +619,12 @@ export const inboxAPI = {
   // Calls from numbers that matched no lead: voicemails, missed and answered calls.
   voicemails: () => api.get('/inbox/voicemails'),
   dismissVoicemail: (id: string) => api.post(`/inbox/voicemails/${id}/dismiss`),
+  /**
+   * Save a caller's number on the lead or person a call was attached to. When
+   * their slots are full the answer lists them; send `replace` to swap one.
+   */
+  saveNumber: (body: { leadId: string; heirId?: string | null; number: string; replace?: string | null }) =>
+    api.post('/inbox/save-number', body),
   /** Leads and the people on their cases, by name, address or any number on file. */
   attachSearch: (q: string) => api.get('/inbox/attach-search', { params: { q } }),
   attachVoicemail: (id: string, leadId: string, heirId?: string | null) =>

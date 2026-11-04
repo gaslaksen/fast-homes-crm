@@ -25,6 +25,8 @@ export interface CallPayload {
   recordingUrl: string | null;
   /** The caller left a message on our greeting; recordingUrl is the message. */
   voicemail?: boolean;
+  /** An inbound call nobody picked up, voicemails aside. */
+  missed?: boolean;
   /** Set for voicemails only. */
   transcript?: string | null;
 }

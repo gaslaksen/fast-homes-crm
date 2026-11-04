@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useThreads } from '@/features/inbox/hooks';
+import { UnknownCalls } from '@/features/inbox/UnknownCalls';
 import type { InboxFilter, InboxThread } from '@/features/inbox/types';
 import { SearchIcon } from '@/components/icons';
 import { useCompany } from '@/features/companies/companies';
@@ -102,6 +103,9 @@ export default function InboxScreen() {
         data={threads}
         keyExtractor={(t) => t.leadId}
         keyboardShouldPersistTaps="handled"
+        // Calls from numbers not on file sit above the threads, as on the web,
+        // and stay out of the way of a search or the Unread filter.
+        ListHeaderComponent={filter === 'all' && !search.trim() ? <UnknownCalls /> : null}
         refreshControl={
           <RefreshControl refreshing={isRefetching} onRefresh={() => refetch()} tintColor={colors.textMuted} />
         }

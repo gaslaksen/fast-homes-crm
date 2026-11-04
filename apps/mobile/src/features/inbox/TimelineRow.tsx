@@ -98,21 +98,21 @@ export const TimelineRow = memo(function TimelineRow({
   }
 
   if (item.kind === 'call') {
-    const { recordingUrl, duration, status, voicemail, transcript } = item.payload;
+    const { recordingUrl, duration, status, voicemail, transcript, missed } = item.payload;
     const dur = durationLabel(duration);
     return (
       <View style={wrap}>
         <Meta name={item.actor.name} channel="Call" at={item.at} right={outbound} />
         <View style={styles.callCard}>
-          <Text style={styles.callTitle}>
-            {voicemail ? 'Voicemail' : outbound ? 'Outgoing call' : 'Incoming call'}
-            {dur ? ` · ${dur}` : ''}
-            {status && status !== 'completed' ? ` · ${status}` : ''}
+          <Text style={[styles.callTitle, missed && { color: colors.danger }]}>
+            {voicemail ? 'Voicemail' : missed ? 'Missed call' : outbound ? 'Outgoing call' : 'Incoming call'}
+            {dur && !missed ? ` · ${dur}` : ''}
+            {status && status !== 'completed' && !missed ? ` · ${status}` : ''}
           </Text>
           {recordingUrl ? (
             <RecordingPlayer url={recordingUrl} durationSec={duration} />
           ) : (
-            <Text style={styles.muted}>No recording</Text>
+            <Text style={styles.muted}>{missed ? 'Rang and hung up, no voicemail' : 'No recording'}</Text>
           )}
           {voicemail ? (
             <Text style={transcript ? styles.voicemailText : styles.muted}>
