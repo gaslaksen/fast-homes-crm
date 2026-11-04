@@ -1,8 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { formatDistanceToNowStrict } from 'date-fns';
-import { inboxAPI, leadsAPI, surplusAPI } from '@/lib/api';
+import { inboxAPI, surplusAPI } from '@/lib/api';
 import { formatPhoneDisplay } from '@/lib/format';
 import { recordingSrc } from './CommunicationsTimeline';
 
@@ -64,11 +64,25 @@ export default function UnmatchedVoicemails({
   const [open, setOpen] = useState(true);
   const [attachingId, setAttachingId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  /** A call that was attached, waiting on which full slot its number replaces. */
+  const [replacing, setReplacing] = useState<Replacing | null>(null);
+
+  // Attaching drops the call from the server's list, and the inbox's count
+  // poll reloads it, which would close a replace prompt mid-choice. The card
+  // being asked about stays until the choice is made.
+  const replacingRef = useRef<Replacing | null>(null);
+  useEffect(() => {
+    replacingRef.current = replacing;
+  }, [replacing]);
 
   const load = useCallback(() => {
     inboxAPI
       .voicemails()
-      .then((res) => setItems(res.data?.items || []))
+      .then((res) => {
+        const list: Voicemail[] = res.data?.items || [];
+        const r = replacingRef.current;
+        setItems(r && !list.some((x) => x.id === r.vm.id) ? [r.vm, ...list] : list);
+      })
       .catch(() => {});
   }, []);
 
@@ -89,6 +103,15 @@ export default function UnmatchedVoicemails({
     }
   };
 
+  const finish = (vm: Voicemail, leadId: string) => {
+    setItems((prev) => prev.filter((x) => x.id !== vm.id));
+    setAttachingId(null);
+    setReplacing(null);
+    setBusyId(null);
+    onChanged();
+    onAttached(leadId);
+  };
+
   const attach = async (vm: Voicemail, target: AttachTarget) => {
     setBusyId(vm.id);
     try {
@@ -98,17 +121,36 @@ export default function UnmatchedVoicemails({
       setBusyId(null);
       return;
     }
-    // The call is filed either way; a number that cannot be saved is said so
-    // plainly rather than undoing the attach.
-    if (target.saveNumber && vm.fromNumber) {
-      const problem = await saveNumber(target, vm.fromNumber);
-      if (problem) alert(`The call is attached, but the number was not saved: ${problem}`);
+    if (!target.saveNumber || !vm.fromNumber) return finish(vm, target.leadId);
+    // The call is filed either way; the number is a second step that may
+    // need a choice when the person already holds as many as fit.
+    try {
+      const res = await inboxAPI.saveNumber({ leadId: target.leadId, heirId: target.heirId, number: vm.fromNumber });
+      if (res.data?.saved === false && res.data?.reason === 'full') {
+        setReplacing({ vm, target, full: res.data });
+        setAttachingId(null);
+        setBusyId(null);
+        return;
+      }
+    } catch (err: any) {
+      alert(`The call is attached, but the number was not saved: ${err?.response?.data?.message || 'the save failed.'}`);
     }
-    setItems((prev) => prev.filter((x) => x.id !== vm.id));
-    setAttachingId(null);
-    setBusyId(null);
-    onChanged();
-    onAttached(target.leadId);
+    finish(vm, target.leadId);
+  };
+
+  const replace = async (number: string | null) => {
+    if (!replacing) return;
+    const { vm, target } = replacing;
+    if (!number) return finish(vm, target.leadId);
+    setBusyId(vm.id);
+    try {
+      await inboxAPI.saveNumber({ leadId: target.leadId, heirId: target.heirId, number: vm.fromNumber || '', replace: number });
+    } catch (err: any) {
+      alert(`The number was not saved: ${err?.response?.data?.message || 'the save failed.'}`);
+      setBusyId(null);
+      return;
+    }
+    finish(vm, target.leadId);
   };
 
   if (items.length === 0) return null;
@@ -153,7 +195,7 @@ export default function UnmatchedVoicemails({
               ) : (
                 <Transcript text={vm.transcript} answered={vm.kind === 'answered'} />
               )}
-              {(vm.suggestions || []).map((sg) => (
+              {replacing?.vm.id !== vm.id && (vm.suggestions || []).map((sg) => (
                 <div
                   key={`${sg.leadId}:${sg.heirId || ''}`}
                   className="mt-2 rounded-md border border-amber-200 dark:border-amber-800 bg-white/70 dark:bg-gray-900/60 px-2.5 py-2"
@@ -181,6 +223,7 @@ export default function UnmatchedVoicemails({
                   className="w-full h-8 mt-1.5"
                 />
               )}
+              {replacing?.vm.id !== vm.id && (
               <div className="mt-1.5 flex items-center gap-3 text-xs">
                 <button
                   type="button"
@@ -199,6 +242,15 @@ export default function UnmatchedVoicemails({
                   Dismiss
                 </button>
               </div>
+              )}
+              {replacing?.vm.id === vm.id && (
+                <ReplacePrompt
+                  number={vm.fromNumber || ''}
+                  full={replacing.full}
+                  busy={busyId === vm.id}
+                  onPick={replace}
+                />
+              )}
               {attachingId === vm.id && (
                 <AttachPicker
                   number={vm.fromNumber}
@@ -221,40 +273,89 @@ interface AttachTarget {
   saveNumber: boolean;
 }
 
+/** The attached call's number, its person, and what the save said about their full slots. */
+interface Replacing {
+  vm: Voicemail;
+  target: AttachTarget;
+  full: { name: string; capacity: number; slots: NumberSlot[] };
+}
+
+interface NumberSlot {
+  number: string;
+  type: string | null;
+  bad: boolean;
+  dnc: string | null;
+  isPrimary: boolean;
+  calls: number;
+  lastCallAt: string | null;
+  lastResult: string | null;
+}
+
+/** "Called 3 times, last: No answer, 2 days ago" or "Never called". */
+function slotHistory(p: NumberSlot): string {
+  if (!p.calls) return 'Never called';
+  const when = p.lastCallAt ? formatDistanceToNowStrict(new Date(p.lastCallAt), { addSuffix: true }) : '';
+  return `Called ${p.calls === 1 ? 'once' : `${p.calls} times`}, last: ${p.lastResult || 'called'}${when ? `, ${when}` : ''}`;
+}
+
 /**
- * Add the caller's number to whoever the call turned out to be from. Returns
- * a sentence saying why it was not saved, or null when it was (or was already
- * there). The whole list is sent, primary first, because the slots are
- * positional; a full set of slots is refused rather than silently dropping
- * the new number.
+ * The person already holds as many numbers as fit. List them with how each
+ * has gone so a dead one can go, worst first in the eye: marked bad, then do
+ * not call, then the rest. The primary on a lead is never offered.
  */
-async function saveNumber(target: AttachTarget, number: string): Promise<string | null> {
-  const key = number.replace(/\D/g, '').slice(-10);
-  try {
-    if (target.heirId) {
-      const res = await surplusAPI.heirs(target.leadId);
-      const heir = (res.data?.heirs || []).find((h: any) => h.id === target.heirId);
-      if (!heir) return 'that person is no longer on the case.';
-      const phones: { number: string; type?: string | null }[] = (heir.phones || []).map((p: any) => ({
-        number: p.number,
-        type: p.type ?? null,
-      }));
-      if (phones.some((p) => String(p.number).replace(/\D/g, '').slice(-10) === key)) return null;
-      if (phones.length >= 4) return `${heir.name} already has four numbers. Remove one first.`;
-      await surplusAPI.updateHeir(target.heirId, { phones: [...phones, { number: key, type: null }] });
-      return null;
-    }
-    const res = await leadsAPI.contacts(target.leadId);
-    // The list includes the heirs' numbers too; only the lead's own go back.
-    const own = (res.data?.numbers || []).filter((n: any) => !n.heirId);
-    if (own.some((n: any) => String(n.number).replace(/\D/g, '').slice(-10) === key)) return null;
-    await leadsAPI.setContacts(target.leadId, {
-      phones: [...own.map((n: any) => ({ number: n.number, type: n.type ?? null })), { number: key, type: null }],
-    });
-    return null;
-  } catch (err: any) {
-    return err?.response?.data?.message || 'the save failed.';
-  }
+function ReplacePrompt({
+  number,
+  full,
+  busy,
+  onPick,
+}: {
+  number: string;
+  full: Replacing['full'];
+  busy: boolean;
+  onPick: (replace: string | null) => void;
+}) {
+  return (
+    <div className="mt-2 rounded-md border border-amber-300 dark:border-amber-700 bg-white/80 dark:bg-gray-900/70 px-2.5 py-2">
+      <p className="text-xs text-gray-800 dark:text-gray-200">
+        The call is attached. <span className="font-semibold">{full.name}</span> already has {full.capacity} numbers.
+        Replace one with <span className="font-medium">{formatPhoneDisplay(number)}</span>?
+      </p>
+      <ul className="mt-1.5 space-y-1">
+        {full.slots.map((p) => (
+          <li key={p.number} className="flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <div className="text-xs font-medium text-gray-900 dark:text-gray-100">
+                {formatPhoneDisplay(p.number)}
+                {p.type ? <span className="font-normal text-gray-500 dark:text-gray-400"> · {p.type}</span> : null}
+                {p.bad && <span className="ml-1 text-red-600 dark:text-red-400">· marked wrong</span>}
+                {p.dnc && <span className="ml-1 text-red-600 dark:text-red-400">· do not call</span>}
+                {p.isPrimary && <span className="ml-1 text-gray-500 dark:text-gray-400">· primary</span>}
+              </div>
+              <div className="text-[11px] text-gray-500 dark:text-gray-400 truncate">{slotHistory(p)}</div>
+            </div>
+            {!p.isPrimary && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => onPick(p.number)}
+                className="shrink-0 px-2 py-0.5 rounded border border-gray-300 dark:border-gray-600 text-[11px] font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+              >
+                Replace
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => onPick(null)}
+        className="mt-1.5 text-[11px] text-gray-500 dark:text-gray-400 hover:underline disabled:opacity-50"
+      >
+        Keep their numbers, do not save this one
+      </button>
+    </div>
+  );
 }
 
 /** What was said on the call, three lines until opened. */

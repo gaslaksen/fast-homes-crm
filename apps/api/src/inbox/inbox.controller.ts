@@ -74,6 +74,26 @@ export class InboxController {
     return this.inboxService.listOpenVoicemails();
   }
 
+  /**
+   * Save a caller's number on the lead or person a call was attached to.
+   * When their slots are full the answer lists them so one can be replaced.
+   */
+  @Post('save-number')
+  async saveNumber(
+    @Body() body: { leadId?: string; heirId?: string | null; number?: string; replace?: string | null },
+    @Headers('authorization') authHeader?: string,
+  ) {
+    const { organizationId } = this.requireUser(authHeader);
+    if (!body?.leadId || !body?.number) throw new BadRequestException('leadId and number are required');
+    return this.inboxService.saveCallerNumber({
+      leadId: body.leadId,
+      heirId: body.heirId || null,
+      number: body.number,
+      replace: body.replace || null,
+      organizationId,
+    });
+  }
+
   /** Leads and the people on their cases, for attaching a call. */
   @Get('attach-search')
   async attachSearch(@Query('q') q?: string, @Headers('authorization') authHeader?: string) {
