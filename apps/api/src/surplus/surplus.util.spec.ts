@@ -817,6 +817,30 @@ describe('queueOf', () => {
     expect(queueOf({ ...missed, idiAddressesLeft: 2, cleanPhoneCount: 1 })).toBe(SurplusQueue.CALL);
   });
 
+  it('keeps out of Send to IDI anyone the export would skip, and says why', () => {
+    // 2026-11-05: 21 A Tier claimants sat under Send to IDI that the export always skipped.
+    const never = { ...base, traceState: 'never' };
+    expect(queueOf({ ...never, idiBlockReason: 'Address is outside the US (FRANCE).' })).toBe(SurplusQueue.NAME_SEARCH);
+    expect(queueReason({ ...never, idiBlockReason: 'Address is outside the US (FRANCE).' })).toBe(
+      'Only addresses outside the US (France), and IDI searches the US only. Research by name',
+    );
+    expect(queueReason({ ...never, idiBlockReason: 'No street, city and state on file.' })).toBe('No address IDI can use. Research by name');
+    expect(queueReason({ ...never, idiBlockReason: 'An estate, so the claimant is deceased. Mark them deceased and find the heirs.' })).toBe(
+      'An estate, so the claimant is deceased. Mark them deceased and find the heirs',
+    );
+    // Out on a batch still reads as waiting on IDI.
+    expect(queueOf({ ...never, idiBlockReason: 'Every address on file has been sent to IDI. Research by name.', idiPendingBatch: 'B005' })).toBe(
+      SurplusQueue.TRACE,
+    );
+    // A number still comes first.
+    expect(queueOf({ ...never, cleanPhoneCount: 1, idiBlockReason: 'No street, city and state on file.' })).toBe(SurplusQueue.CALL);
+  });
+
+  it('says when a claimant not yet at day 110 joins the batch', () => {
+    const r = queueReason({ ...base, traceState: 'never', idiBlockReason: null, idiFrom: new Date('2026-11-08T16:00:00Z') });
+    expect(r).toBe('Joins the IDI batch on Nov 8, day 110 off the notice');
+  });
+
   it('sends anyone IDI has never searched to Send to IDI while an address is left', () => {
     // 2026-11-03: an old Endato miss parked 90 A Tier claimants in name search.
     const endato = { ...base, traceState: 'no_person', idiMissed: false, idiSearched: false };

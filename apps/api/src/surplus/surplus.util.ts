@@ -297,6 +297,14 @@ export interface QueueFacts {
   idiAddressesLeft?: number | null;
   /** IDI has searched this claimant at least once. False is a claimant only an older vendor ever looked for. */
   idiSearched?: boolean | null;
+  /**
+   * Why the IDI export would skip this claimant: no US address left, a name
+   * it cannot search. Null when it can be sent; unset by a caller that does
+   * not know, which leaves the queue as it was.
+   */
+  idiBlockReason?: string | null;
+  /** The day the claimant reaches day 110 off the notice, when that is still ahead. */
+  idiFrom?: Date | string | null;
 }
 
 export function queueOf(f: QueueFacts): SurplusQueue {
@@ -336,6 +344,13 @@ export function queueOf(f: QueueFacts): SurplusQueue {
   // Nothing submitted yet. Worth a credit only if there is a live address to
   // submit: the clerk's own mail coming back is that address being declared
   // dead by the only party who tested it.
+  // Out on a batch: waiting on IDI whatever its list now says.
+  if (f.idiPendingBatch) return SurplusQueue.TRACE;
+
+  // Nothing IDI can be sent (only foreign addresses, no address, a name that
+  // is a placeholder or an estate): name search, with the reason on the card.
+  if (f.idiBlockReason) return SurplusQueue.NAME_SEARCH;
+
   const untried = !f.traceState || f.traceState === 'never';
   if (untried && f.mailVerdict !== 'undeliverable') return SurplusQueue.TRACE;
 
@@ -351,6 +366,17 @@ export function queueOf(f: QueueFacts): SurplusQueue {
   if (f.idiSearched === false && ((f.idiAddressesLeft || 0) > 0 || f.idiPendingBatch)) return SurplusQueue.TRACE;
 
   return SurplusQueue.NAME_SEARCH;
+}
+
+/** The export's skip reason as a card line: what is wrong, then what to do. */
+function idiBlockLine(reason: string): string {
+  const abroad = /^Address is outside the US \((.+)\)\.?$/.exec(reason);
+  if (abroad) {
+    const where = abroad[1].charAt(0) + abroad[1].slice(1).toLowerCase();
+    return `Only addresses outside the US (${where}), and IDI searches the US only. Research by name`;
+  }
+  if (/^No street, city and state on file/.test(reason)) return 'No address IDI can use. Research by name';
+  return reason.replace(/\.$/, '');
 }
 
 /** One line saying what to do, shown beside the queue on the card. */
@@ -383,6 +409,10 @@ export function queueReason(f: QueueFacts): string {
         : 'Claimant is deceased and no heirs are on file, so nobody can sign yet';
     case SurplusQueue.TRACE:
       if (f.idiPendingBatch) return `Sent to IDI in ${f.idiPendingBatch}, waiting on the results`;
+      if (f.idiFrom) {
+        const day = new Date(f.idiFrom).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'America/New_York' });
+        return `Joins the IDI batch on ${day}, day 110 off the notice`;
+      }
       if (f.idiMissed) {
         const n = f.idiAddressesLeft || 0;
         return `IDI missed them, ${n} more address${n === 1 ? '' : 'es'} to try in the next batch`;
@@ -399,6 +429,7 @@ export function queueReason(f: QueueFacts): string {
         ? 'Not sent to IDI yet, and the notice address is live'
         : 'Not sent to IDI yet, though only the property address is known';
     default:
+      if (f.idiBlockReason) return idiBlockLine(f.idiBlockReason);
       return f.mailVerdict === 'undeliverable'
         ? "The clerk's mail came back, so no address we hold is live. Research by name"
         : 'The address route is spent. Research by name: obituary, social, county records';

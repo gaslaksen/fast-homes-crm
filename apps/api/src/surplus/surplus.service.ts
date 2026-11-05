@@ -29,7 +29,7 @@ import {
 import { CLAIM_STATUS_LABEL } from './surplus-classify.util';
 import { nameSearchPlan } from './surplus-name-search.util';
 import { leadSearchUrl, messageUrl, platformLabel, socialSearchLinks } from './surplus-social.util';
-import { sameClaimantName, traceState } from './surplus-skiptrace.util';
+import { sameClaimantName, traceState, TRACE_MIN_AGE_DAYS } from './surplus-skiptrace.util';
 import { pauseOffer, shortWindow } from './surplus-windows.util';
 import { callOrder } from './surplus-call-order.util';
 import { heirRow, phoneTail } from './surplus-heirs.util';
@@ -96,14 +96,14 @@ import { DIG_DEEPER_BRAND } from '../common/company.constants';
 import { SurplusLeadInput, SurplusListFilters, SurplusPhoneInput } from './surplus.types';
 import { SurplusCountiesService, CountyRow } from './surplus-counties.service';
 import { SurplusDocumentsService } from './surplus-documents.service';
-import { foreignCountry, idiAddressesLeft, splitOneLineUsAddress, SURPLUS_ADDRESS_STATUS } from './surplus-address.util';
+import { foreignCountry, idiAddressesLeft, nextIdiAddress, splitOneLineUsAddress, SURPLUS_ADDRESS_STATUS } from './surplus-address.util';
 import { NO_CONTACTS, claimantContacts, contactStampPatch } from './surplus-contact-stamp.util';
 import { SurplusTemplatesService } from './surplus-templates.service';
 import { SurplusProgressService } from './surplus-progress.service';
 import { isSignedStage } from './surplus-progress.util';
 import { clerkContactName } from './surplus-county-readiness.util';
 import { LETTER_REPLY_TASK_PREFIX } from './surplus-progress.util';
-import { idiBatchCode } from './surplus-idi.util';
+import { cleanIdiClaimant, idiBatchCode } from './surplus-idi.util';
 
 /** What toRow needs beyond the lead: per-request lookups fetched once. */
 interface RowContext {
@@ -3323,9 +3323,28 @@ export class SurplusService {
         (d.traceAttempts || []).find((a: any) => a.source === 'IDI')?.result === 'nothing',
       idiAddressesLeft: idiAddressesLeft(d, lead),
       idiSearched: (d.traceAttempts || []).some((a: any) => a.source === 'IDI'),
+      ...this.idiReadiness(d, lead),
     };
     const queue = queueOf(f);
     return { queue, queueLabel: SURPLUS_QUEUE_LABEL[queue], queueReason: queueReason(f), idiPendingBatch: f.idiPendingBatch };
+  }
+
+  /**
+   * Whether the IDI export could send this claimant, the way exportBatch
+   * decides it: a name it can search and a US address (or a house) nobody has
+   * sent. And the day they join the batch when they are not yet day 110 off
+   * the notice. Without this the queue said Send to IDI for 21 A Tier
+   * claimants on 2026-11-05 that the export was always going to skip.
+   */
+  private idiReadiness(d: any, lead: any): { idiBlockReason: string | null; idiFrom: Date | null } {
+    const name = cleanIdiClaimant(lead.sellerFirstName, lead.sellerLastName);
+    const next = 'reason' in name ? name : nextIdiAddress({ ...lead, surplusDetail: d });
+    const clock = d.noticeDate || d.saleDate;
+    const from = clock ? new Date(new Date(clock).getTime() + TRACE_MIN_AGE_DAYS * 86_400_000) : null;
+    return {
+      idiBlockReason: 'reason' in next ? next.reason : null,
+      idiFrom: from && from.getTime() > Date.now() ? from : null,
+    };
   }
 
   /**
