@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { LobAddress, LobMode, lobModeOf } from './lob.util';
+import { LobAddress, LobMode, lobErrorMessage, lobModeOf } from './lob.util';
 
 const LOB_API = 'https://api.lob.com/v1';
 const TIMEOUT_MS = 30_000;
@@ -105,7 +105,8 @@ export class LobService {
       const json: any = await res.json().catch(() => null);
       if (!res.ok) {
         const err = json?.error || {};
-        throw new LobError(String(err.message || `Lob answered ${res.status}`), res.status, err.code ? String(err.code) : null);
+        const code = err.code ? String(err.code) : null;
+        throw new LobError(lobErrorMessage(String(err.message || `Lob answered ${res.status}`), code), res.status, code);
       }
       return {
         id: String(json.id),

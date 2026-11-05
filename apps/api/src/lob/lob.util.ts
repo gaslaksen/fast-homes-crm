@@ -97,9 +97,21 @@ function esc(s: string): string {
  * the top, over whatever is there, and the window shows 0.63in to 4.63in
  * across down to 2.71in. So the first page keeps its top 3.2in empty on the
  * left, the letterhead sits to the right of the window, and the text starts
- * below it. A 0.5in box in the bottom left corner carries Lob's barcode.
+ * below it. A 0.5in box in the bottom left corner carries Lob's barcode,
+ * with a serial number strip running up the left edge above it.
+ *
+ * Lob prints the page edge to edge and ignores @page margins (the first
+ * proof on 2026-11-05 ran the text from the left edge of the paper into
+ * the serial strip). So every margin is in the page itself: the text sits
+ * in a table whose cells are padded 1in each side, and an empty header and
+ * footer row, which a browser repeats on every printed page, give a second
+ * page its top and bottom margin. Each paragraph is its own row so a long
+ * letter breaks between paragraphs.
  */
 export const LOB_BODY_TOP_IN = 3.2;
+export const LOB_SIDE_IN = 1;
+export const LOB_PAGE_TOP_IN = 0.75;
+export const LOB_PAGE_BOTTOM_IN = 0.9;
 
 export interface LobLetterInput {
   companyName: string;
@@ -111,19 +123,44 @@ export interface LobLetterInput {
 
 export function lobLetterHtml(l: LobLetterInput): string {
   const contact = [l.phone, l.website].filter(Boolean).map((s) => esc(String(s))).join(' &middot; ');
+  // Paragraphs on blank lines; single line breaks inside one (an address block) stay.
+  const paragraphs = String(l.body ?? '')
+    .replace(/\r\n?/g, '\n')
+    .split(/\n[ \t]*\n+/)
+    .map((p) => p.replace(/^\n+|\n+$/g, ''))
+    .filter((p) => p.trim().length > 0);
+  const rows = paragraphs.map((p) => `<tr><td><div class="p">${esc(p)}</div></td></tr>`).join('');
   return `<html><head><meta charset="UTF-8"><style>
-@page{size:8.5in 11in;margin:0.75in 1in 0.9in 1in}
-@page :first{margin:0 1in 0.9in 1in}
-body{margin:0;font-family:Georgia,'Times New Roman',serif;font-size:11.5pt;line-height:1.45;color:#111}
-.head{height:${LOB_BODY_TOP_IN}in;position:relative}
-.lh{position:absolute;top:0.6in;right:0;width:2.6in;text-align:right}
+@page{size:8.5in 11in;margin:0}
+html,body{margin:0;padding:0}
+body{position:relative;width:8.5in;font-family:Georgia,'Times New Roman',serif;font-size:11.5pt;line-height:1.45;color:#111}
+.lh{position:absolute;top:0.6in;right:${LOB_SIDE_IN}in;width:2.6in;text-align:right}
 .co{font-size:14pt;font-weight:bold}
 .sm{font-size:9pt;color:#444}
 .re{font-size:9pt;color:#444;margin-top:0.12in}
-.body{white-space:pre-wrap}
-</style></head><body><div class="head"><div class="lh"><div class="co">${esc(l.companyName)}</div><div class="sm">${contact}</div>${
+table{width:8.5in;border-collapse:collapse;table-layout:fixed}
+td{padding:0 ${LOB_SIDE_IN}in;vertical-align:top}
+tr{page-break-inside:avoid;break-inside:avoid}
+.top{height:${LOB_PAGE_TOP_IN}in}
+.bot{height:${LOB_PAGE_BOTTOM_IN}in}
+.first{height:${Math.round((LOB_BODY_TOP_IN - LOB_PAGE_TOP_IN) * 100) / 100}in}
+.p{white-space:pre-wrap;margin:0 0 0.16in 0}
+</style></head><body><div class="lh"><div class="co">${esc(l.companyName)}</div><div class="sm">${contact}</div>${
     l.propertyAddress ? `<div class="re">Re: ${esc(l.propertyAddress)}</div>` : ''
-  }</div></div><div class="body">${esc(l.body)}</div></body></html>`;
+  }</div><table><thead><tr><td><div class="top"></div></td></tr></thead><tfoot><tr><td><div class="bot"></div></td></tr></tfoot><tbody><tr><td><div class="first"></div></td></tr>${rows}</tbody></table></body></html>`;
+}
+
+/**
+ * Lob's refusal, in words the team can act on. An address below the
+ * account's deliverability strictness is one USPS does not list as a place
+ * it delivers: in the tax deed counties that is usually a vacant lot.
+ */
+export function lobErrorMessage(message: string, code?: string | null): string {
+  const text = `${code || ''} ${message || ''}`;
+  if (/deliverability/i.test(text)) {
+    return 'USPS does not list this as a deliverable address (Lob checked it). It is often a vacant lot or a missing unit number. Find a better address for this person.';
+  }
+  return message;
 }
 
 /** Lob's limit on an inline HTML file. Past it the letter is refused before the call. */
