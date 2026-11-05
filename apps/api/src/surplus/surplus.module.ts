@@ -35,6 +35,8 @@ import { SurplusPruneService } from './surplus-prune.service';
 import { SurplusSessionService } from './surplus-session.service';
 import { SurplusPrintRunService } from './surplus-print-run.service';
 import { SurplusRatingService } from './surplus-rating.service';
+import { SurplusLobWebhookController } from './surplus-lob-webhook.controller';
+import { LobService } from '../lob/lob.service';
 import { StorageModule } from '../storage/storage.module';
 import { MessagesModule } from '../messages/messages.module';
 import { SurplusProgressModule } from './surplus-progress.module';
@@ -44,7 +46,7 @@ import { SurplusProgressModule } from './surplus-progress.module';
   // SMS and email paths as a hand-typed message so it lands on the timeline
   // and sends as Dig Deeper.
   imports: [MessagesModule, StorageModule, SurplusProgressModule],
-  controllers: [SurplusController],
+  controllers: [SurplusController, SurplusLobWebhookController],
   providers: [
     SurplusService,
     SurplusTemplatesService,
@@ -80,6 +82,7 @@ import { SurplusProgressModule } from './surplus-progress.module';
     SurplusPruneService,
     SurplusSessionService,
     SurplusPrintRunService,
+    LobService,
     SurplusRatingService,
   ],
   exports: [

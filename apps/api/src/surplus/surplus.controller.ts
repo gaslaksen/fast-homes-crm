@@ -1294,6 +1294,24 @@ export class SurplusController {
    * version and logs the postage on each claim.
    * Body: { items: [{ leadId, heirId?, kind, version?, recipientName?, address?, mailType?, trackingNumber?, letterNumber? }], postage?: { standard, priority, fedex }, mailedAt?, note? }
    */
+  /** Whether Send through Lob is on, test or live, and how much of the month is left. */
+  @Get('print-run/lob')
+  async printRunLob(@Headers('authorization') authHeader?: string) {
+    this.decodeToken(authHeader);
+    return this.printRun.lobState();
+  }
+
+  /**
+   * Send the picked letters through Lob. A test key makes proof PDFs and
+   * records nothing; a live key mails and records each letter as mailed.
+   * Body: { items: [{ leadId, heirId? }], county? }
+   */
+  @Post('print-run/lob')
+  async printRunSendLob(@Body() body: any, @Headers('authorization') authHeader?: string) {
+    const { organizationId, userId } = this.decodeToken(authHeader);
+    return this.printRun.sendViaLob(body || {}, organizationId || null, userId || null);
+  }
+
   @Post('print-run/mailed')
   async printRunMailed(@Body() body: any, @Headers('authorization') authHeader?: string) {
     const { organizationId, userId } = this.decodeToken(authHeader);

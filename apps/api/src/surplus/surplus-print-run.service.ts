@@ -3,6 +3,10 @@ import { ConfigService } from '@nestjs/config';
 import { SURPLUS_CLAIMANT_LETTER_ROTATION, SURPLUS_TEMPLATE_KIND_LABEL, SurplusTemplateKind } from '@fast-homes/shared';
 import { SurplusService } from './surplus.service';
 import { SurplusTemplatesService } from './surplus-templates.service';
+import { PrismaService } from '../prisma/prisma.service';
+import { LobService } from '../lob/lob.service';
+import { LOB_HTML_MAX, LobAddress, lobAddressFrom, lobLetterEvent, lobLetterHtml, lobReturnAddress, lobStatusLabel } from '../lob/lob.util';
+import { DIG_DEEPER_BRAND } from '../common/company.constants';
 
 /**
  * Letters as a print run.
@@ -246,6 +250,8 @@ export class SurplusPrintRunService {
     private config: ConfigService,
     private surplus: SurplusService,
     private templates: SurplusTemplatesService,
+    private lob?: LobService,
+    private prisma?: PrismaService,
   ) {}
 
   /** Dollars per envelope by mail type. Unset means the page has to be told. */
@@ -485,6 +491,229 @@ export class SurplusPrintRunService {
       }
     }
     return { mailed, byType, postageTotal: Math.round(postageTotal * 100) / 100, failed };
+  }
+
+  /** Live Lob letters this calendar month (UTC), against the account's monthly limit. */
+  private async lobSentThisMonth(now: Date): Promise<number> {
+    if (!this.prisma) return 0;
+    const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    return this.prisma.surplusLetter.count({ where: { lobLetterId: { not: null }, createdAt: { gte: start } } });
+  }
+
+  /** Whether the page offers Send through Lob, in which mode, and how much of the month is left. */
+  async lobState(now = new Date()) {
+    const mode = this.lob?.mode() || null;
+    if (!this.lob || !mode) return { configured: false as const, mode: null, monthlyLimit: null, sentThisMonth: 0, remaining: null, cost: null };
+    const limit = this.lob.monthlyLimit();
+    const sent = mode === 'live' ? await this.lobSentThisMonth(now) : 0;
+    return {
+      configured: true as const,
+      mode,
+      monthlyLimit: limit,
+      sentThisMonth: sent,
+      remaining: Math.max(0, limit - sent),
+      cost: this.lob.letterCost(),
+      returnAddress: !!lobReturnAddress(DIG_DEEPER_BRAND.companyName, DIG_DEEPER_BRAND.address),
+    };
+  }
+
+  /**
+   * Send the letters the page chose through Lob instead of the printer.
+   *
+   * The picks are rendered again here, from the active templates, so what
+   * Lob prints is what the server holds and a letter that stopped being due
+   * since the page loaded is not sent. Priority Mail stays on paper: Lob has
+   * no Priority, and the course's point of the fourth letter is that it is
+   * different.
+   *
+   * A test key makes proofs: Lob renders each letter as a PDF and mails
+   * nothing, and nothing is written to the claims. A live key mails, and
+   * each letter goes into the claim's history exactly as a printed one does
+   * (follow-up task, note, postage expense), carrying Lob's letter id so the
+   * tracking webhooks can find it.
+   */
+  async sendViaLob(
+    body: { items?: RenderItem[]; county?: string | null } | null,
+    organizationId?: string | null,
+    userId?: string | null,
+    now = new Date(),
+  ) {
+    const lob = this.lob;
+    const mode = lob?.mode() || null;
+    if (!lob || !mode) throw new BadRequestException('Lob is not set up. Put the secret API key in LOB_API_KEY on the API service.');
+    const from = lobReturnAddress(DIG_DEEPER_BRAND.companyName, DIG_DEEPER_BRAND.address);
+    if (!from) throw new BadRequestException('The return address on the company record could not be read as a US address.');
+
+    const run = await this.render(body, organizationId, userId, now);
+    type Out = { leadId: string; heirId: string | null; recipientName: string; letterNumber: number };
+    const sent: (Out & { lobLetterId: string; url: string | null; expectedDeliveryDate: string | null })[] = [];
+    const heldBack: (Out & { reason: string })[] = [];
+    const failed: (Out & { error: string; lobLetterId?: string | null })[] = [];
+    const out = (l: PrintRunLetter): Out => ({ leadId: l.leadId, heirId: l.heirId, recipientName: l.recipientName, letterNumber: l.letterNumber });
+
+    const ready: { letter: PrintRunLetter; to: LobAddress; html: string }[] = [];
+    for (const l of run.letters) {
+      if (!l.hasText || l.unfilled.length) {
+        heldBack.push({ ...out(l), reason: l.hasText ? `could not fill ${l.unfilled.join(', ')}` : 'no template text' });
+        continue;
+      }
+      if (l.mailType !== 'standard') {
+        heldBack.push({ ...out(l), reason: `${MAIL_TYPE_LABEL[l.mailType]} stays on paper, Lob has no Priority Mail` });
+        continue;
+      }
+      const to = lobAddressFrom(l.recipientName, l.address);
+      if ('reason' in to) {
+        heldBack.push({ ...out(l), reason: to.reason });
+        continue;
+      }
+      const html = lobLetterHtml({
+        companyName: l.sender.companyName,
+        phone: l.sender.phone,
+        website: l.sender.website,
+        propertyAddress: l.propertyAddress,
+        body: l.body,
+      });
+      if (html.length > LOB_HTML_MAX) {
+        heldBack.push({ ...out(l), reason: `the letter is longer than Lob takes in one file (${LOB_HTML_MAX.toLocaleString()} characters)` });
+        continue;
+      }
+      ready.push({ letter: l, to: to.address, html });
+    }
+
+    // The Developer edition stops at 500 a month. Past the cap the rest wait
+    // for next month or the printer, rather than failing one by one at Lob.
+    let queue = ready;
+    if (mode === 'live') {
+      const remaining = Math.max(0, lob.monthlyLimit() - (await this.lobSentThisMonth(now)));
+      for (const r of ready.slice(remaining)) heldBack.push({ ...out(r.letter), reason: `over the ${lob.monthlyLimit()} a month Lob allows` });
+      queue = ready.slice(0, remaining);
+    }
+
+    const cost = lob.letterCost();
+    const day = now.toISOString().slice(0, 10);
+    let postageTotal = 0;
+    const sendOne = async ({ letter: l, to, html }: (typeof ready)[number]) => {
+      let created: Awaited<ReturnType<LobService['createLetter']>>;
+      try {
+        created = await lob.createLetter({
+          to,
+          from,
+          html,
+          description: `Surplus letter ${l.letterNumber}${l.heirId ? ' to a relative' : ''}`,
+          metadata: { leadId: l.leadId, ...(l.heirId ? { heirId: l.heirId } : {}), letter: String(l.letterNumber), kind: l.kind },
+          // The same envelope asked twice in a day is one letter at Lob.
+          idempotencyKey: ['dealcore', mode, l.leadId, l.heirId || 'claimant', l.letterNumber, l.kind, l.version, day].join(':'),
+        });
+      } catch (err: any) {
+        failed.push({ ...out(l), error: err?.message || String(err) });
+        return;
+      }
+      if (mode === 'test') {
+        sent.push({ ...out(l), lobLetterId: created.id, url: created.url, expectedDeliveryDate: created.expectedDeliveryDate });
+        return;
+      }
+      try {
+        const res = await this.surplus.markLetterMailed(
+          [l.leadId],
+          {
+            heirId: l.heirId || null,
+            templateKind: l.kind,
+            templateVersion: l.version ?? null,
+            recipientName: l.recipientName,
+            address: l.address,
+            mailType: 'standard',
+            note: `Sent through Lob ${day}`,
+            lob: {
+              letterId: created.id,
+              expectedDeliveryAt: created.expectedDeliveryDate ? new Date(`${created.expectedDeliveryDate.slice(0, 10)}T12:00:00Z`) : null,
+            },
+          },
+          userId,
+          organizationId,
+        );
+        if (!res?.updated) throw new Error('not a surplus lead');
+        if (cost > 0) {
+          await this.surplus.addExpense(
+            l.leadId,
+            { kind: 'postage', amount: cost, incurredAt: null, note: `Lob ${day}: letter ${l.letterNumber} to ${l.recipientName}` },
+            organizationId,
+            userId,
+          );
+          postageTotal += cost;
+        }
+        sent.push({ ...out(l), lobLetterId: created.id, url: created.url, expectedDeliveryDate: created.expectedDeliveryDate });
+      } catch (err: any) {
+        // Lob has it and will mail it. Say so, so nobody prints it as well.
+        this.logger.error(`Lob letter ${created.id} for ${l.leadId} was created but not recorded: ${err?.message || err}`);
+        failed.push({ ...out(l), lobLetterId: created.id, error: `Lob is mailing it (${created.id}) but it was not recorded on the claim: ${err?.message || err}` });
+      }
+    };
+
+    // A few at a time: Lob renders each one, and a run can be 200 letters.
+    const pool = [...queue];
+    const workers = Array.from({ length: Math.min(4, pool.length) }, async () => {
+      for (let next = pool.shift(); next; next = pool.shift()) await sendOne(next);
+    });
+    await Promise.all(workers);
+
+    return {
+      mode,
+      sent,
+      heldBack,
+      failed,
+      notDue: run.notDue,
+      postageTotal: Math.round(postageTotal * 100) / 100,
+    };
+  }
+
+  /**
+   * One Lob webhook event, already verified. Lob tracks the envelope through
+   * the post: the step lands on the letter, a delivery dates it, a return
+   * marks it returned exactly as the team's own Returned button does, and a
+   * letter cancelled at Lob before it printed comes out of the history.
+   * Events for letters Dealcore never recorded (test proofs) are ignored.
+   */
+  async applyLobEvent(event: any): Promise<{ applied: boolean; reason?: string }> {
+    const { step, event: what } = lobLetterEvent(event?.event_type?.id);
+    if (what.kind === 'ignore') return { applied: false, reason: 'not a letter tracking event' };
+    const ref = String(event?.reference_id || event?.body?.id || '');
+    if (!ref || !this.prisma) return { applied: false, reason: 'no letter id' };
+    const letter = await this.prisma.surplusLetter.findUnique({
+      where: { lobLetterId: ref },
+      include: { surplusDetail: { select: { leadId: true } } },
+    });
+    if (!letter) return { applied: false, reason: 'letter not in Dealcore' };
+    const at = event?.date_created ? new Date(event.date_created) : new Date();
+    const when = Number.isNaN(at.getTime()) ? new Date() : at;
+    const leadId = letter.surplusDetail.leadId;
+    const log = (content: string) =>
+      letter.sentByUserId
+        ? this.prisma!.note.create({ data: { leadId, userId: letter.sentByUserId, content } })
+        : this.prisma!.activity.create({ data: { leadId, type: 'LETTER_TRACKING', description: content } });
+    const to = letter.recipientName ? ` to ${letter.recipientName}` : '';
+
+    if (what.kind === 'cancelled') {
+      await this.surplus.removeLetter(letter.id, null);
+      await log(`Lob letter ${ref}${to} was cancelled before it was mailed and is out of the letter history. Its postage expense is still on the claim.`);
+      return { applied: true };
+    }
+    if (what.kind === 'returned') {
+      if (!letter.returnedAt) await this.surplus.markLetterReturned(letter.id, true, null, letter.sentByUserId || null);
+      await this.prisma.surplusLetter.update({ where: { id: letter.id }, data: { lobStatus: step, lobEventAt: when } });
+      return { applied: true };
+    }
+    // Lob retries and can deliver out of order. An older step never
+    // overwrites a newer one, and nothing comes after delivered or returned.
+    const final = letter.lobStatus === 'delivered' || letter.lobStatus === 'returned_to_sender';
+    const older = letter.lobEventAt && when.getTime() < letter.lobEventAt.getTime();
+    const data: any = {};
+    if (!final && !older) Object.assign(data, { lobStatus: step, lobEventAt: when });
+    if (what.kind === 'delivered' && !letter.deliveredAt) Object.assign(data, { deliveredAt: when, lobStatus: step, lobEventAt: when });
+    if (Object.keys(data).length) await this.prisma.surplusLetter.update({ where: { id: letter.id }, data });
+    if (what.kind === 'failed') {
+      await log(`Lob could not mail letter ${ref}${to} (${lobStatusLabel(step)}). It needs to go out another way.`);
+    }
+    return { applied: Object.keys(data).length > 0 };
   }
 
   /** One line for the Daily Brief, or null when nothing is due. */
