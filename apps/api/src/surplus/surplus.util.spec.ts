@@ -34,6 +34,7 @@ import {
   SurplusFacts,
   queueOf,
   queueReason,
+  queueLabelOf,
   calendarDayToDate,
   surplusSearchWhere,
   surplusSearchDigits,
@@ -834,6 +835,18 @@ describe('queueOf', () => {
     );
     // A number still comes first.
     expect(queueOf({ ...never, cleanPhoneCount: 1, idiBlockReason: 'No street, city and state on file.' })).toBe(SurplusQueue.CALL);
+  });
+
+  it('labels the Send to IDI button with which kind of send it is', () => {
+    // A third address read as plain "Send to IDI" on 2026-11-05 and looked like a bug.
+    const trace = SurplusQueue.TRACE;
+    expect(queueLabelOf({ ...base, traceState: 'never' }, trace)).toBe('Send to IDI');
+    expect(queueLabelOf({ ...base, idiMissed: true, idiTried: 2, idiAddressesLeft: 1 }, trace)).toBe('IDI retry, 3rd address');
+    expect(queueLabelOf({ ...base, idiMissed: true, idiTried: 1, idiAddressesLeft: 1 }, trace)).toBe('IDI retry, 2nd address');
+    expect(queueLabelOf({ ...base, idiTried: 3, idiPendingBatch: 'B007' }, trace)).toBe('At IDI, B007');
+    expect(queueLabelOf({ ...base, idiFrom: new Date('2026-11-08T16:00:00Z') }, trace)).toBe('IDI from Nov 8');
+    // Every other queue keeps its own label.
+    expect(queueLabelOf({ ...base, idiTried: 2 }, SurplusQueue.CALL)).toBe('Call now');
   });
 
   it('says when a claimant not yet at day 110 joins the batch', () => {

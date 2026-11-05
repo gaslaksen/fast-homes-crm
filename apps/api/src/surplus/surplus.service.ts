@@ -53,6 +53,7 @@ import {
   tierOf,
   queueOf,
   queueReason,
+  queueLabelOf,
   dripTrack,
   isDeceased,
   noticeAge,
@@ -3324,9 +3325,10 @@ export class SurplusService {
       idiAddressesLeft: idiAddressesLeft(d, lead),
       idiSearched: (d.traceAttempts || []).some((a: any) => a.source === 'IDI'),
       ...this.idiReadiness(d, lead),
+      idiTried: (d.addresses || []).filter((a: any) => a.status === SURPLUS_ADDRESS_STATUS.hit || a.status === SURPLUS_ADDRESS_STATUS.miss).length,
     };
     const queue = queueOf(f);
-    return { queue, queueLabel: SURPLUS_QUEUE_LABEL[queue], queueReason: queueReason(f), idiPendingBatch: f.idiPendingBatch };
+    return { queue, queueLabel: queueLabelOf(f, queue), queueReason: queueReason(f), idiPendingBatch: f.idiPendingBatch };
   }
 
   /**

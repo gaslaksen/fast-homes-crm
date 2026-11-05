@@ -13,6 +13,7 @@ import {
   SurplusStage,
   SurplusTier,
   SurplusQueue,
+  SURPLUS_QUEUE_LABEL,
   SurplusDocumentKind,
   SurplusDocumentStatus,
   SURPLUS_DOCUMENT_LABEL,
@@ -305,6 +306,8 @@ export interface QueueFacts {
   idiBlockReason?: string | null;
   /** The day the claimant reaches day 110 off the notice, when that is still ahead. */
   idiFrom?: Date | string | null;
+  /** Addresses IDI has already answered for: the next send is address idiTried + 1. */
+  idiTried?: number | null;
 }
 
 export function queueOf(f: QueueFacts): SurplusQueue {
@@ -366,6 +369,25 @@ export function queueOf(f: QueueFacts): SurplusQueue {
   if (f.idiSearched === false && ((f.idiAddressesLeft || 0) > 0 || f.idiPendingBatch)) return SurplusQueue.TRACE;
 
   return SurplusQueue.NAME_SEARCH;
+}
+
+const ORDINAL = ['', '1st', '2nd', '3rd'];
+const ordinal = (n: number) => ORDINAL[n] || `${n}th`;
+
+/**
+ * The button on the board for a Send to IDI claimant, saying which kind of
+ * send it is. "Send to IDI" on a claimant IDI had already searched twice read
+ * as a bug (2026-11-05): it was the third address, and nothing said so.
+ */
+export function queueLabelOf(f: QueueFacts, queue: SurplusQueue): string {
+  if (queue !== SurplusQueue.TRACE) return SURPLUS_QUEUE_LABEL[queue];
+  if (f.idiPendingBatch) return `At IDI, ${f.idiPendingBatch}`;
+  if (f.idiFrom) {
+    const day = new Date(f.idiFrom).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'America/New_York' });
+    return `IDI from ${day}`;
+  }
+  if ((f.idiTried || 0) > 0) return `IDI retry, ${ordinal((f.idiTried || 0) + 1)} address`;
+  return SURPLUS_QUEUE_LABEL[queue];
 }
 
 /** The export's skip reason as a card line: what is wrong, then what to do. */
