@@ -472,6 +472,11 @@ export const surplusAPI = {
   /** The print run: every letter due, rendered, claimant first then the relatives. Records nothing. */
   printRun: (county?: string | null, max?: number | null) =>
     api.get('/surplus/print-run', { params: { county: county || undefined, max: max || undefined } }),
+  /** Every letter due, unrendered, for the chooser to filter and pick from. Records nothing. */
+  printRunPlan: (county?: string | null) => api.get('/surplus/print-run/plan', { params: { county: county || undefined } }),
+  /** Render the letters picked. Anything no longer due comes back in notDue. Records nothing. */
+  printRunRender: (items: { leadId: string; heirId: string | null }[], county?: string | null) =>
+    api.post('/surplus/print-run/render', { items, county: county || null }),
   /** The run went out: record every envelope and log the postage on each claim. */
   printRunMailed: (body: {
     items: {

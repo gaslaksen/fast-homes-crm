@@ -85,6 +85,18 @@ export default function SurplusTemplatesPage() {
       .catch(() => setCounties([]));
   }, []);
 
+  // A link from a letter (the print run's "Edit this text") opens on that
+  // kind, and on its county when the letter was for one county:
+  // /settings/surplus?kind=letter_claimant&county=Duval. Read once from the
+  // address rather than useSearchParams, which would need a Suspense boundary.
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    const k = q.get('kind');
+    const c = q.get('county');
+    if (k) setSelected(k);
+    if (c) setCounty(c);
+  }, []);
+
   useEffect(() => {
     load();
   }, [load]);

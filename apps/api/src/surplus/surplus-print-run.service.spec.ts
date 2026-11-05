@@ -149,6 +149,62 @@ describe('SurplusPrintRunService', () => {
     expect(run.postage).toEqual({ standard: 0.78, priority: 10.4, fedex: null });
   });
 
+  it('plans every envelope due without rendering one, carrying what the chooser filters on', async () => {
+    const { svc, letterFor } = harness([
+      row('a', { reviewRating: 'a', netToClaimant: 41000, daysToCutoff: 40, shortWindow: true, heirs: [heir('h')] }),
+      row('b', { reviewRating: null, netToClaimant: 9000, daysToCutoff: 200 }),
+    ]);
+    const plan = await svc.plan({ organizationId: 'org1', now: NOW });
+    expect(letterFor).not.toHaveBeenCalled();
+    expect(plan.total).toBe(3);
+    expect(plan.cases).toBe(2);
+    expect(plan.maxPerRun).toBe(200);
+    expect(plan.envelopes[0]).toMatchObject({
+      leadId: 'a',
+      heirId: null,
+      rating: 'A',
+      netToClaimant: 41000,
+      daysToCutoff: 40,
+      shortWindow: true,
+      kindLabel: 'Letter to the claimant',
+    });
+    // The relative carries the case's rating, so an A Tier filter keeps the family letters too.
+    expect(plan.envelopes[1]).toMatchObject({ heirId: 'h', rating: 'A', kindLabel: 'Letter to a family member' });
+    expect(plan.envelopes[2]).toMatchObject({ leadId: 'b', rating: null, shortWindow: false });
+  });
+
+  it('renders only the envelopes picked, and names the ones no longer due instead of printing them', async () => {
+    const { svc, letterFor } = harness([row('a', { heirs: [heir('h')] }), row('b')]);
+    const run = await svc.render(
+      {
+        items: [
+          { leadId: 'b', heirId: null },
+          { leadId: 'a', heirId: 'h' },
+          { leadId: 'a', heirId: 'h' },
+          { leadId: 'gone', heirId: null },
+        ],
+      },
+      'org1',
+      'u1',
+      NOW,
+    );
+    expect(run.letters.map((l) => [l.leadId, l.heirId])).toEqual([
+      ['b', null],
+      ['a', 'h'],
+    ]);
+    expect(run.notDue).toEqual([{ leadId: 'gone', heirId: null }]);
+    expect(letterFor).toHaveBeenCalledTimes(2);
+    expect(run.toClaimants).toBe(1);
+    expect(run.toRelatives).toBe(1);
+  });
+
+  it('refuses an empty pick and a pick over one run', async () => {
+    const { svc } = harness([]);
+    await expect(svc.render({ items: [] }, 'org1')).rejects.toThrow('Pick at least one');
+    const many = Array.from({ length: 201 }, (_, i) => ({ leadId: `l${i}` }));
+    await expect(svc.render({ items: many }, 'org1')).rejects.toThrow('at most 200');
+  });
+
   it('reads the postage from the settings', () => {
     const { svc } = harness([], { SURPLUS_POSTAGE_STANDARD: '0.80', SURPLUS_POSTAGE_FEDEX: '12.5', SURPLUS_POSTAGE_PRIORITY: 'nonsense' });
     expect(svc.postage()).toEqual({ standard: 0.8, priority: 10.4, fedex: 12.5 });

@@ -970,6 +970,8 @@ export class SurplusTemplatesService {
       label: t.label,
       version: t.version,
       versionLabel: t.version ? `v${t.version}` : 'built-in',
+      /** The county whose own text this is, or null for the all-counties text. Where "Edit this text" should open. */
+      templateCounty: t.countySpecific ? built.facts.county || null : null,
       hasText: !!t.body.trim(),
       body,
       unfilled: unfilledFields(body),
