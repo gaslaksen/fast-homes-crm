@@ -11,6 +11,10 @@ import {
   isMailDrop,
   splitOneLineUsAddress,
   stateForZip,
+  addressCore,
+  sameAddress,
+  splitStreetCity,
+  nextIdiAddress,
 } from './surplus-address.util';
 
 /** The addresses the first Charlotte pull (2026-10-15) stored wrong, as the reader returned them. */
@@ -218,5 +222,43 @@ describe('stateForZip', () => {
     expect(stateForZip('34002')).toBeNull();
     expect(stateForZip('123')).toBeNull();
     expect(stateForZip(null)).toBeNull();
+  });
+});
+
+describe('sameAddress', () => {
+  // Retyped copies of addresses IDI had already missed, from 2026-11-05.
+  it('sees a care-of line, a rural route spelling and a cut-off copy as one address', () => {
+    expect(addressCore('C/O MARINE BARTLE 123 N ELM AVE')).toBe('123NELMAVE');
+    expect(addressCore('CO EXAMPLE ENTERPRISES INC 8101 BISCAYNE BLVD 401')).toBe('8101BISCAYNEBLVD401');
+    expect(sameAddress({ street: 'C/O MARINE BARTLE 123 N ELM AVE', state: 'IL' }, { street: '123 N ELM AVE', state: 'IL' })).toBe(true);
+    expect(sameAddress({ street: 'RR 1 BOX 61', state: 'WV' }, { street: 'RT 1 BOX 61', state: 'WV' })).toBe(true);
+    expect(sameAddress({ street: 'A-7 URB CARIBE C/O EXAMPLE COR', state: 'PR' }, { street: 'A-7 URB CARIBE C/O EXAMPLE CORP.', state: 'PR' })).toBe(true);
+    expect(sameAddress({ street: 'C/O PAT SAMPLE, 3209 E KENDALL LANE', state: 'IN' }, { street: '3209 E KENDALL LANE', state: 'IN' })).toBe(true);
+  });
+
+  it('keeps different places apart', () => {
+    expect(sameAddress({ street: 'C/O LES SAMPLE P.O. BOX 216', state: 'TX' }, { street: '232 BLANCO DRIVE', state: 'TX' })).toBe(false);
+    expect(sameAddress({ street: '123 N ELM AVE', state: 'IL' }, { street: '123 N ELM AVE', state: 'OH' })).toBe(false);
+    expect(sameAddress({ street: '12 OAK ST', state: 'FL' }, { street: '12 OAK STREET APT 4', state: 'FL' })).toBe(false);
+  });
+
+  it('does not count a retyped copy of a tried address as untried', () => {
+    const at = (street: string, status: string) => ({ street, city: 'Elmhurst', state: 'IL', zip: '60126', source: 'case_parties', status });
+    expect(untriedForIdi([at('123 N ELM AVE', 'miss'), at('C/O MARINE BARTLE 123 N ELM AVE', 'untried')])).toEqual([]);
+  });
+});
+
+describe('splitStreetCity', () => {
+  it('splits the one-line property Citrus stores', () => {
+    expect(splitStreetCity('4016 E SANDERS ST, INVERNESS, FL')).toEqual({ street: '4016 E SANDERS ST', city: 'INVERNESS', state: 'FL', zip: null });
+    expect(splitStreetCity('12 Oak St, Ocala, FL 34470')).toEqual({ street: '12 Oak St', city: 'Ocala', state: 'FL', zip: '34470' });
+    expect(splitStreetCity('12 Oak St')).toBeNull();
+  });
+
+  it('lets the export send a Citrus property as the last round', () => {
+    const lead = { propertyAddress: '4016 E SANDERS ST, INVERNESS, FL', propertyCity: '', propertyState: 'FL', surplusDetail: { addresses: [] } };
+    expect(nextIdiAddress(lead)).toEqual({
+      address: { street: '4016 E SANDERS ST', city: 'INVERNESS', state: 'FL', zip: null, source: 'property' },
+    });
   });
 });

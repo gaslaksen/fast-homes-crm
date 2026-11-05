@@ -262,9 +262,41 @@ export function idiAddressRank(a: RoundAddress, cardKey?: string | null): number
 /** The untried addresses IDI can be sent, best first. */
 export function untriedForIdi<T extends RoundAddress>(addresses: T[], cardKey?: string | null): T[] {
   const seen = (a: T) => (a.firstSeenAt ? new Date(a.firstSeenAt).getTime() : 0);
+  const tried = addresses.filter((a) => a.status !== SURPLUS_ADDRESS_STATUS.untried);
   return addresses
     .filter((a) => a.status === SURPLUS_ADDRESS_STATUS.untried && sendableToIdi(a))
+    .filter((a) => !tried.some((t) => sameAddress(a, t)))
     .sort((a, b) => idiAddressRank(a, cardKey) - idiAddressRank(b, cardKey) || seen(a) - seen(b));
+}
+
+/**
+ * The part of a street that says where it is: no care-of name in front, a
+ * rural route spelled one way, letters and digits only. "C/O MARINE BARTLE 123
+ * N ELM AVE" and "123 N ELM AVE" are one place; so are "RR 1 BOX 61" and "RT 1
+ * BOX 61". On 2026-11-05 six A Tier claimants looked untried only because a
+ * retyped copy of an address IDI had already missed was on their list.
+ */
+export function addressCore(street?: string | null): string {
+  let s = String(street || '').toUpperCase().trim();
+  // A care-of line in front: drop everything up to where the address starts.
+  s = s.replace(/^(?:C\/O|CO|ATTN:?)\s+.*?(?=(?:\b\d|\bP\.?\s*O\.?\s*BOX\b|\bR\.?\s*R\.?\s*\d|\bRTE?\.?\s*\d|\bROUTE\s*\d))/, '');
+  s = s.replace(/^(?:RURAL\s+ROUTE|ROUTE|RTE|RT|R\.?\s*R\.?)\.?\s*(?=\d)/, 'RR ');
+  return s.replace(/[^A-Z0-9]/g, '');
+}
+
+/**
+ * Two list rows that are one address: the same core, or one a cut-off copy of
+ * the other ("...SALADMASTER COR" and "...SALADMASTER CORP."). A different
+ * state on both rows keeps them apart.
+ */
+export function sameAddress(a: Pick<RoundAddress, 'street' | 'state'>, b: Pick<RoundAddress, 'street' | 'state'>): boolean {
+  if (a.state && b.state && String(a.state).toUpperCase() !== String(b.state).toUpperCase()) return false;
+  const x = addressCore(a.street);
+  const y = addressCore(b.street);
+  if (!x || !y) return false;
+  if (x === y) return true;
+  const [short, long] = x.length <= y.length ? [x, y] : [y, x];
+  return short.length >= 12 && long.startsWith(short);
 }
 
 /** The address a batch row is sent with; `id` is its row on the address list, when it has one yet. */
@@ -305,6 +337,16 @@ export function idiAddressesLeft(d: any, lead?: any): number {
 }
 
 /**
+ * "4016 E SANDERS ST, INVERNESS, FL" (a ZIP on the end or not) split into its
+ * parts, or null when the line has no city after a comma.
+ */
+export function splitStreetCity(line?: string | null): { street: string; city: string; state: string | null; zip: string | null } | null {
+  const m = /^(.+?),\s*([^,]+?)(?:,\s*([A-Za-z]{2}))?(?:,?\s+(\d{5})(?:-\d{4})?)?\s*$/.exec(String(line || '').trim());
+  if (!m || /\d/.test(m[2])) return null;
+  return { street: m[1].trim(), city: m[2].trim(), state: m[3] ? usStateCode(m[3]) : null, zip: m[4] || null };
+}
+
+/**
  * The one address this person goes into the next batch at, or why they
  * cannot go. Their best untried address first (idiAddressRank), and the
  * property as the last round, but only a real house: IDI matches on who has
@@ -316,15 +358,20 @@ export function nextIdiAddress(l: any): { address: SentAddress } | { reason: str
   const best = untriedForIdi(list, cardKey)[0];
   if (best) return { address: best };
 
+  // Citrus stores the parcel as one line, "4016 E SANDERS ST, INVERNESS, FL",
+  // with the city blank, which left every Citrus property unsendable.
+  const oneLine = !l.propertyCity ? splitStreetCity(l.propertyAddress) : null;
   const property = {
-    street: l.propertyAddress || null,
-    city: l.propertyCity || null,
-    state: l.propertyState || null,
-    zip: l.propertyZip || null,
+    street: oneLine?.street || l.propertyAddress || null,
+    city: oneLine?.city || l.propertyCity || null,
+    state: oneLine?.state || l.propertyState || null,
+    zip: oneLine?.zip || l.propertyZip || null,
     source: SURPLUS_ADDRESS_SOURCE.property,
   };
   const propertyKey = surplusAddressKey(property.street, property.zip);
-  const propertyTried = list.some((a) => (a.addressKey || surplusAddressKey(a.street, a.zip)) === propertyKey);
+  const propertyTried = list.some(
+    (a) => (a.addressKey || surplusAddressKey(a.street, a.zip)) === propertyKey || (a.status !== SURPLUS_ADDRESS_STATUS.untried && sameAddress(a, property)),
+  );
   const propertyLived = sendableToIdi(property) && hasHouseNumber(property.street);
   if (propertyLived && !propertyTried) return { address: property };
 
