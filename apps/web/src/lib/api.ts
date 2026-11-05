@@ -265,6 +265,9 @@ export const surplusAPI = {
   /** A rendered letter for the print view. Records nothing. */
   letter: (id: string, kind: string, heirId?: string | null) =>
     api.get(`/surplus/${id}/letter`, { params: { kind, heirId: heirId || undefined } }),
+  /** Send this one letter through Lob. A test key makes a proof PDF and records nothing; a live key mails and records it. */
+  letterViaLob: (id: string, kind: string, heirId?: string | null, mailType?: string | null) =>
+    api.post(`/surplus/${id}/letter/lob`, { kind, heirId: heirId || null, mailType: mailType || 'standard' }, { timeout: 120_000 }),
   /** Confirm or reject a possible obituary match for one claimant. */
   resolveObituary: (leadId: string, answer: 'confirm' | 'reject') =>
     api.post(`/surplus/${leadId}/obituary`, { answer }),
