@@ -1268,6 +1268,28 @@ export class SurplusController {
   }
 
   /**
+   * Every letter due, unrendered, with what the chooser filters on (rating,
+   * claimant or relative, letter number, mail type, net, cutoff). Records
+   * nothing. ?county=
+   */
+  @Get('print-run/plan')
+  async printRunPlan(@Query('county') county?: string, @Headers('authorization') authHeader?: string) {
+    const { organizationId } = this.decodeToken(authHeader);
+    return this.printRun.plan({ organizationId: organizationId || null, county: county || null });
+  }
+
+  /**
+   * Render the letters the team picked. Anything no longer due is left out
+   * and listed. Records nothing.
+   * Body: { items: [{ leadId, heirId? }], county? }
+   */
+  @Post('print-run/render')
+  async printRunRender(@Body() body: any, @Headers('authorization') authHeader?: string) {
+    const { organizationId, userId } = this.decodeToken(authHeader);
+    return this.printRun.render(body || {}, organizationId || null, userId || null);
+  }
+
+  /**
    * The run went out: one click records every envelope with its template
    * version and logs the postage on each claim.
    * Body: { items: [{ leadId, heirId?, kind, version?, recipientName?, address?, mailType?, trackingNumber?, letterNumber? }], postage?: { standard, priority, fedex }, mailedAt?, note? }

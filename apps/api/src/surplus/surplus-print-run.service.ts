@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { SURPLUS_CLAIMANT_LETTER_ROTATION, SurplusTemplateKind } from '@fast-homes/shared';
+import { SURPLUS_CLAIMANT_LETTER_ROTATION, SURPLUS_TEMPLATE_KIND_LABEL, SurplusTemplateKind } from '@fast-homes/shared';
 import { SurplusService } from './surplus.service';
 import { SurplusTemplatesService } from './surplus-templates.service';
 
@@ -52,12 +52,41 @@ export interface PlannedEnvelope {
   mailType: MailType;
   /** Why this envelope is in the run, for the strip above the letter. */
   why: string;
+  /** The template's name, so the chooser can say which text goes out without a lookup. */
+  kindLabel: string;
+  /** Grok's docket review, 'A' or 'B', or null when the case is not rated. */
+  rating: string | null;
+  /** What the claimant stands to receive, for sorting the chooser. */
+  netToClaimant: number | null;
+  /** Days left to the team's cutoff, and whether that is under two months. */
+  daysToCutoff: number | null;
+  shortWindow: boolean;
+}
+
+/** An envelope the page chose, sent back to be rendered: the claim and the person on it. */
+export interface RenderItem {
+  leadId: string;
+  heirId?: string | null;
+}
+
+export interface PrintRunPlan {
+  generatedAt: Date;
+  county: string | null;
+  /** Every envelope due, unrendered, in board order. The page filters and picks. */
+  envelopes: PlannedEnvelope[];
+  total: number;
+  cases: number;
+  /** The most one render (one printed run) holds. */
+  maxPerRun: number;
+  postage: Record<MailType, number | null>;
 }
 
 export interface PrintRunLetter extends PlannedEnvelope {
   label: string;
   version: number;
   versionLabel: string;
+  /** The county whose own text this letter uses, or null for the all-counties text. */
+  templateCounty: string | null;
   hasText: boolean;
   body: string;
   unfilled: string[];
@@ -111,6 +140,10 @@ export function claimantAddress(row: any): string | null {
   );
 }
 
+export function kindLabel(kind: string): string {
+  return (SURPLUS_TEMPLATE_KIND_LABEL as Record<string, string>)[kind] || kind;
+}
+
 /** Which text the nth letter to a claimant uses. The fourth starts over. */
 export function claimantLetterKind(letterNumber: number): SurplusTemplateKind {
   const n = Math.max(1, Math.floor(letterNumber));
@@ -130,6 +163,13 @@ export function claimantLetterKind(letterNumber: number): SurplusTemplateKind {
 export function envelopesFor(row: any, now = new Date()): PlannedEnvelope[] {
   const out: PlannedEnvelope[] = [];
   if (!row || row.heldAt) return out;
+  const num = (v: any) => (v === null || v === undefined || !Number.isFinite(Number(v)) ? null : Number(v));
+  const caseFacts = {
+    rating: row.reviewRating ? String(row.reviewRating).toUpperCase() : null,
+    netToClaimant: num(row.netToClaimant),
+    daysToCutoff: num(row.daysToCutoff),
+    shortWindow: !!row.shortWindow,
+  };
   const cadence = Number(row.letterCadenceDays) || DEFAULT_CADENCE_DAYS;
   const letters: any[] = Array.isArray(row.letters) ? row.letters : [];
   const lettersTo = (heirId: string | null) =>
@@ -161,6 +201,8 @@ export function envelopesFor(row: any, now = new Date()): PlannedEnvelope[] {
         // one goes Priority, so it is actually opened.
         mailType: row.escalateMail ? 'priority' : 'standard',
         why: mine.length ? `Letter ${letterNumber}, last one ${Math.round((now.getTime() - new Date(mine[0].mailedAt).getTime()) / DAY)} days ago` : 'First letter',
+        kindLabel: kindLabel(claimantLetterKind(letterNumber)),
+        ...caseFacts,
       });
     }
   }
@@ -175,6 +217,7 @@ export function envelopesFor(row: any, now = new Date()): PlannedEnvelope[] {
     if (mine[0]?.returnedAt) continue;
     if (!dueSince(mine[0])) continue;
     const letterNumber = mine.length + 1;
+    const kind = (h.priority ?? 5) <= 5 ? SurplusTemplateKind.LETTER_FAMILY : SurplusTemplateKind.LETTER_ASSOCIATE;
     out.push({
       leadId: row.id,
       heirId: h.id,
@@ -185,9 +228,11 @@ export function envelopesFor(row: any, now = new Date()): PlannedEnvelope[] {
       caseNumber: row.caseNumber || null,
       letterNumber,
       // Family hears a family letter; a neighbor or an associate the other.
-      kind: (h.priority ?? 5) <= 5 ? SurplusTemplateKind.LETTER_FAMILY : SurplusTemplateKind.LETTER_ASSOCIATE,
+      kind,
       mailType: 'standard',
       why: `${h.priorityLabel || h.roleLabel || 'Relative'}${mine.length ? `, letter ${letterNumber}` : ', first letter'}`,
+      kindLabel: kindLabel(kind),
+      ...caseFacts,
     });
   }
   return out;
@@ -244,6 +289,97 @@ export class SurplusPrintRunService {
     return { envelopes, cases };
   }
 
+  /**
+   * Every envelope due, unrendered, so the page can filter and pick. Cheap
+   * next to a render: no template is filled until the team has chosen.
+   */
+  async plan(opts: { organizationId?: string | null; county?: string | null; now?: Date }): Promise<PrintRunPlan> {
+    const { envelopes, cases } = await this.due(opts);
+    return {
+      generatedAt: opts.now || new Date(),
+      county: opts.county || null,
+      envelopes,
+      total: envelopes.length,
+      cases,
+      maxPerRun: RUN_MAX,
+      postage: this.postage(),
+    };
+  }
+
+  /** One envelope filled from the active template, or null when the claim is gone. */
+  private async renderOne(env: PlannedEnvelope, organizationId?: string | null, userId?: string | null): Promise<PrintRunLetter | null> {
+    const r = await this.templates.letterFor(env.leadId, env.kind, env.heirId, organizationId, userId);
+    if (!r) return null;
+    return {
+      ...env,
+      // The template's own idea of the recipient and the address, which
+      // is the same source the envelope was planned from.
+      recipientName: r.recipient.name || env.recipientName,
+      address: r.recipient.address || env.address,
+      label: r.label,
+      version: r.version,
+      versionLabel: r.versionLabel,
+      templateCounty: r.templateCounty ?? null,
+      hasText: r.hasText,
+      body: r.body,
+      unfilled: r.unfilled,
+      sender: r.sender,
+      propertyAddress: r.propertyAddress,
+      today: r.today,
+    };
+  }
+
+  /**
+   * Render the envelopes the page chose. The plan is re-read so a letter
+   * that stopped being due since the page loaded (somebody replied, the
+   * mail came back, another run already mailed it) is left out and named,
+   * rather than printed twice.
+   */
+  async render(
+    body: { items?: RenderItem[]; county?: string | null } | null,
+    organizationId?: string | null,
+    userId?: string | null,
+    now?: Date,
+  ): Promise<PrintRun & { notDue: { leadId: string; heirId: string | null }[] }> {
+    const items = Array.isArray(body?.items) ? body!.items.filter((i) => i && typeof i.leadId === 'string') : [];
+    if (!items.length) throw new BadRequestException('Pick at least one letter for the run.');
+    if (items.length > RUN_MAX) throw new BadRequestException(`One run is at most ${RUN_MAX} letters. Pick fewer, print them, then build the next run.`);
+    const { envelopes, cases } = await this.due({ organizationId, county: body?.county || null, now });
+    const keyOf = (leadId: string, heirId: string | null | undefined) => `${leadId}:${heirId || ''}`;
+    const byKey = new Map(envelopes.map((e) => [keyOf(e.leadId, e.heirId), e]));
+    const letters: PrintRunLetter[] = [];
+    const notDue: { leadId: string; heirId: string | null }[] = [];
+    const seen = new Set<string>();
+    for (const item of items) {
+      const k = keyOf(item.leadId, item.heirId);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      const env = byKey.get(k);
+      if (!env) {
+        notDue.push({ leadId: item.leadId, heirId: item.heirId || null });
+        continue;
+      }
+      try {
+        const letter = await this.renderOne(env, organizationId, userId);
+        if (letter) letters.push(letter);
+      } catch (err: any) {
+        this.logger.warn(`Print run skipped a letter to ${env.recipientName} on ${env.leadId}: ${err?.message || err}`);
+      }
+    }
+    return {
+      generatedAt: now || new Date(),
+      county: body?.county || null,
+      total: envelopes.length,
+      cases,
+      toClaimants: letters.filter((e) => !e.heirId).length,
+      toRelatives: letters.filter((e) => !!e.heirId).length,
+      letters,
+      truncated: false,
+      postage: this.postage(),
+      notDue,
+    };
+  }
+
   /** The run: the first `max` envelopes due, rendered from the active templates. */
   async build(opts: {
     organizationId?: string | null;
@@ -257,24 +393,8 @@ export class SurplusPrintRunService {
     const letters: PrintRunLetter[] = [];
     for (const env of envelopes.slice(0, max)) {
       try {
-        const r = await this.templates.letterFor(env.leadId, env.kind, env.heirId, opts.organizationId, opts.userId);
-        if (!r) continue;
-        letters.push({
-          ...env,
-          // The template's own idea of the recipient and the address, which
-          // is the same source the envelope was planned from.
-          recipientName: r.recipient.name || env.recipientName,
-          address: r.recipient.address || env.address,
-          label: r.label,
-          version: r.version,
-          versionLabel: r.versionLabel,
-          hasText: r.hasText,
-          body: r.body,
-          unfilled: r.unfilled,
-          sender: r.sender,
-          propertyAddress: r.propertyAddress,
-          today: r.today,
-        });
+        const letter = await this.renderOne(env, opts.organizationId, opts.userId);
+        if (letter) letters.push(letter);
       } catch (err: any) {
         this.logger.warn(`Print run skipped a letter to ${env.recipientName} on ${env.leadId}: ${err?.message || err}`);
       }
