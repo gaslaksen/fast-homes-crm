@@ -477,6 +477,15 @@ export const surplusAPI = {
   /** Render the letters picked. Anything no longer due comes back in notDue. Records nothing. */
   printRunRender: (items: { leadId: string; heirId: string | null }[], county?: string | null) =>
     api.post('/surplus/print-run/render', { items, county: county || null }),
+  /** Whether Send through Lob is on, test or live, and how much of the month is left. */
+  printRunLob: () => api.get('/surplus/print-run/lob'),
+  /**
+   * Send the picked letters through Lob. A test key makes proof PDFs and records nothing;
+   * a live key mails them and records each one as mailed. Lob renders every letter, so
+   * a big run takes a while.
+   */
+  printRunSendLob: (items: { leadId: string; heirId: string | null }[], county?: string | null) =>
+    api.post('/surplus/print-run/lob', { items, county: county || null }, { timeout: 15 * 60_000 }),
   /** The run went out: record every envelope and log the postage on each claim. */
   printRunMailed: (body: {
     items: {

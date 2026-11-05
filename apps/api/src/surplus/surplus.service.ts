@@ -1639,6 +1639,8 @@ export class SurplusService {
       recipientName?: string | null;
       /** The envelope went to this heir rather than the claimant. One id only. */
       heirId?: string | null;
+      /** Lob printed and mailed it: the letter id its webhooks carry, and the delivery date Lob expects. */
+      lob?: { letterId: string; expectedDeliveryAt?: Date | null } | null;
     },
     userId?: string | null,
     organizationId?: string | null,
@@ -1715,6 +1717,14 @@ export class SurplusService {
           trackingNumber: (opts.trackingNumber || '').trim() || null,
           note: (opts.note || '').trim() || null,
           sentByUserId: userId || null,
+          ...(opts.lob
+            ? {
+                lobLetterId: opts.lob.letterId,
+                lobStatus: 'created',
+                lobEventAt: new Date(),
+                expectedDeliveryAt: opts.lob.expectedDeliveryAt || null,
+              }
+            : {}),
         },
       });
       // The cache the queue reads: the latest envelope, whoever it went to.
@@ -1759,6 +1769,7 @@ export class SurplusService {
               (recipientName && recipientName !== claimantName ? ` to ${recipientName}` : '') +
               (address ? ` at ${address}` : ', address not recorded') +
               (mailType !== 'standard' ? ` by ${mailType === 'fedex' ? 'FedEx' : 'Priority Mail'}` : '') +
+              (opts.lob ? ` through Lob (${opts.lob.letterId})` : '') +
               (opts.trackingNumber ? `, tracking ${String(opts.trackingNumber).trim()}` : '') +
               (extra ? `. ${extra}` : ''),
           },
@@ -3256,6 +3267,11 @@ export class SurplusService {
       heirId: l.heirId || null,
       note: l.note || null,
       returnedAt: l.returnedAt || null,
+      lobLetterId: l.lobLetterId || null,
+      lobStatus: l.lobStatus || null,
+      lobEventAt: l.lobEventAt || null,
+      expectedDeliveryAt: l.expectedDeliveryAt || null,
+      deliveredAt: l.deliveredAt || null,
     }));
     const cadence = d.letterCadenceDays || DEFAULT_LETTER_CADENCE_DAYS;
     // The clock is the claimant's own. A letter to a living claimant's son is

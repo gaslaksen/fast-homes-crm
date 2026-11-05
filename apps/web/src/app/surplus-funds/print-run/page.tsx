@@ -18,6 +18,12 @@ import { todayLocal } from '@/lib/dates';
  *    every envelope with the template version on the page and logs the
  *    postage on each claim.
  *
+ * Or, on step 2, Send through Lob: Lob prints and mails the standard
+ * letters (Priority stays on paper, Lob has none). With a test key Lob only
+ * makes proof PDFs and nothing is recorded; with a live key each letter is
+ * recorded as mailed the moment Lob takes it, and Lob's tracking lands on
+ * the letter in the claim's history.
+ *
  * Nothing is recorded until "Mailed". A letter that stopped being due while
  * the page was open (a reply, returned mail, another run) is left out at
  * render and named, rather than printed twice.
@@ -94,6 +100,31 @@ const NET_FLOORS: [number, string][] = [
 const TOP_PICKS = [25, 50, 100, 200];
 /** Rows drawn before "Show all", so 1,600 letters do not slow the page. */
 const ROWS_SHOWN = 250;
+
+interface LobState {
+  configured: boolean;
+  mode: 'test' | 'live' | null;
+  monthlyLimit: number | null;
+  sentThisMonth: number;
+  remaining: number | null;
+  cost: number | null;
+  returnAddress?: boolean;
+}
+
+interface LobOut {
+  leadId: string;
+  heirId: string | null;
+  recipientName: string;
+  letterNumber: number;
+}
+
+interface LobResult {
+  mode: 'test' | 'live';
+  sent: (LobOut & { lobLetterId: string; url: string | null; expectedDeliveryDate: string | null })[];
+  heldBack: (LobOut & { reason: string })[];
+  failed: (LobOut & { error: string; lobLetterId?: string | null })[];
+  postageTotal: number;
+}
 
 function key(l: { leadId: string; heirId: string | null }) {
   return `${l.leadId}:${l.heirId || ''}`;
@@ -191,6 +222,13 @@ function PrintRunPage() {
   const [postage, setPostage] = useState<Record<MailType, string>>({ standard: '', priority: '', fedex: '' });
   const [result, setResult] = useState<{ mailed: number; postageTotal: number; failed: { recipientName: string | null; error: string }[] } | null>(null);
 
+  // Lob. Off (no button) until the API has a secret key.
+  const [lob, setLob] = useState<LobState | null>(null);
+  const [lobBusy, setLobBusy] = useState(false);
+  const [lobResult, setLobResult] = useState<LobResult | null>(null);
+  /** Letters Lob is mailing (live key): out of the print and the Mailed click. */
+  const [lobSent, setLobSent] = useState<Set<string>>(new Set());
+
   const loadPlan = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -212,9 +250,19 @@ function PrintRunPage() {
     }
   }, []);
 
+  const loadLob = useCallback(async () => {
+    try {
+      const r = await surplusAPI.printRunLob();
+      setLob(r.data);
+    } catch {
+      setLob(null);
+    }
+  }, []);
+
   useEffect(() => {
     loadPlan();
-  }, [loadPlan]);
+    loadLob();
+  }, [loadPlan, loadLob]);
 
   const envelopes = useMemo(() => plan?.envelopes || [], [plan]);
   const byKey = useMemo(() => new Map(envelopes.map((e) => [key(e), e])), [envelopes]);
@@ -338,6 +386,8 @@ function PrintRunPage() {
       const data: Run = r.data;
       setRun(data);
       setDropped(new Set());
+      setLobResult(null);
+      setLobSent(new Set());
       setMailTypes(Object.fromEntries(data.letters.map((l) => [key(l), l.mailType])));
       setTracking({});
       setStep('review');
@@ -349,7 +399,19 @@ function PrintRunPage() {
     }
   };
 
-  const kept = useMemo(() => (run ? run.letters.filter((l) => !dropped.has(key(l)) && l.hasText && l.unfilled.length === 0) : []), [run, dropped]);
+  const kept = useMemo(
+    () => (run ? run.letters.filter((l) => !dropped.has(key(l)) && !lobSent.has(key(l)) && l.hasText && l.unfilled.length === 0) : []),
+    [run, dropped, lobSent],
+  );
+  /** What Lob can take: the letters going standard. Priority and FedEx stay on paper. */
+  const lobSendable = useMemo(() => kept.filter((l) => (mailTypes[key(l)] || l.mailType) === 'standard'), [kept, mailTypes]);
+  const lobByKey = useMemo(() => {
+    const m = new Map<string, { sent?: LobResult['sent'][number]; held?: string; failed?: string }>();
+    for (const x of lobResult?.sent || []) m.set(key(x), { sent: x });
+    for (const x of lobResult?.heldBack || []) m.set(key(x), { held: x.reason });
+    for (const x of lobResult?.failed || []) m.set(key(x), { failed: x.error });
+    return m;
+  }, [lobResult]);
   const unprintable = useMemo(() => (run ? run.letters.filter((l) => !l.hasText || l.unfilled.length > 0) : []), [run]);
 
   const estimate = useMemo(() => {
@@ -402,9 +464,49 @@ function PrintRunPage() {
     }
   };
 
+  const sendLob = async () => {
+    if (!run || !lob?.configured || lobBusy || busy || !lobSendable.length) return;
+    const n = lobSendable.length;
+    const live = lob.mode === 'live';
+    const left = kept.length - n;
+    const each = lob.cost ?? 0;
+    const ok = window.confirm(
+      live
+        ? `Mail ${n} letter${n === 1 ? '' : 's'} through Lob now?\n\n` +
+            `Lob prints and mails each one First Class, black and white, at about $${each.toFixed(2)} a letter ($${(each * n).toFixed(2)}). ` +
+            `Each is recorded on its claim as mailed today with the postage, and Lob's tracking lands on the letter. ` +
+            `${lob.remaining ?? 0} of this month's ${lob.monthlyLimit ?? 0} are left. Lob can cancel within 4 hours from its dashboard.` +
+            (left ? `\n\n${left} Priority or FedEx letter${left === 1 ? '' : 's'} stay here to print.` : '')
+        : `Make ${n} Lob test proof${n === 1 ? '' : 's'}?\n\nThe key on the API is a TEST key: Lob renders each letter as a PDF to check and mails nothing. Nothing is recorded on the claims.`,
+    );
+    if (!ok) return;
+    setLobBusy(true);
+    setError(null);
+    try {
+      const r = await surplusAPI.printRunSendLob(lobSendable.map((l) => ({ leadId: l.leadId, heirId: l.heirId })));
+      const data: LobResult = r.data;
+      setLobResult(data);
+      if (data.mode === 'live') {
+        setLobSent((s) => {
+          const next = new Set(s);
+          for (const x of data.sent) next.add(key(x));
+          for (const x of data.failed) if (x.lobLetterId) next.add(key(x));
+          return next;
+        });
+        loadLob();
+      }
+    } catch (e: any) {
+      setError(e?.response?.data?.message || 'Lob could not be reached. Nothing was sent.');
+    } finally {
+      setLobBusy(false);
+    }
+  };
+
   const nextRun = async () => {
     setRun(null);
     setResult(null);
+    setLobResult(null);
+    setLobSent(new Set());
     setSelected(new Set());
     setStep('choose');
     await loadPlan();
@@ -729,6 +831,23 @@ function PrintRunPage() {
                 {rendering ? 'Refreshing...' : 'Refresh text'}
               </button>
             )}
+            {lob?.configured && !result && (
+              <button
+                type="button"
+                onClick={sendLob}
+                disabled={lobBusy || busy || rendering || !lobSendable.length || (lob.mode === 'live' && (lob.remaining ?? 0) === 0)}
+                title={
+                  lob.mode === 'live'
+                    ? `Lob prints and mails these First Class and each is recorded as mailed. ${lob.remaining ?? 0} of ${lob.monthlyLimit ?? 0} left this month.`
+                    : 'Test key: Lob makes a proof PDF of each letter and mails nothing'
+                }
+                className={`h-9 px-4 rounded-lg text-sm font-medium disabled:opacity-50 ${
+                  lob.mode === 'live' ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'border border-amber-500 text-amber-800 bg-amber-50 hover:bg-amber-100'
+                }`}
+              >
+                {lobBusy ? 'Sending to Lob...' : lob.mode === 'live' ? `Mail ${lobSendable.length} through Lob` : `Lob test proofs, ${lobSendable.length}`}
+              </button>
+            )}
             <button
               onClick={() => window.print()}
               disabled={!kept.length || rendering}
@@ -786,6 +905,23 @@ function PrintRunPage() {
               {notDueNames.length > 5 ? ', ...' : ''}).
             </span>
           )}
+          {lob?.configured && lob.mode === 'test' && !lobResult && (
+            <span className="text-amber-700">Lob is on a test key: sending makes proof PDFs only, nothing is mailed or recorded.</span>
+          )}
+          {lob?.configured && lob.mode === 'live' && (
+            <span>
+              Lob: {lob.sentThisMonth} of {lob.monthlyLimit} sent this month
+            </span>
+          )}
+          {lobResult && (
+            <span className={lobResult.failed.length ? 'text-red-600' : 'text-green-700 font-medium'}>
+              {lobResult.mode === 'test'
+                ? `${lobResult.sent.length} test proof${lobResult.sent.length === 1 ? '' : 's'} made, nothing mailed. Open them from each letter below.`
+                : `Lob is mailing ${lobResult.sent.length}, recorded with $${lobResult.postageTotal.toFixed(2)} postage.`}
+              {lobResult.heldBack.length ? ` ${lobResult.heldBack.length} held back (reason on each letter).` : ''}
+              {lobResult.failed.length ? ` ${lobResult.failed.length} failed (reason on each letter).` : ''}
+            </span>
+          )}
           {result?.failed.length ? (
             <span className="text-red-600">Failed: {result.failed.map((f) => `${f.recipientName || 'a letter'} (${f.error})`).join('; ')}</span>
           ) : null}
@@ -799,7 +935,8 @@ function PrintRunPage() {
 
       {run?.letters.map((l, i) => {
         const k = key(l);
-        const off = dropped.has(k) || !l.hasText || l.unfilled.length > 0;
+        const viaLob = lobByKey.get(k);
+        const off = dropped.has(k) || lobSent.has(k) || !l.hasText || l.unfilled.length > 0;
         const type = mailTypes[k] || l.mailType;
         return (
           <div key={k} className={off ? 'no-print' : undefined}>
@@ -820,6 +957,18 @@ function PrintRunPage() {
               </a>
               {!l.hasText && <span className="text-amber-300">No template text for this kind yet. Write it with Edit this text.</span>}
               {l.unfilled.length > 0 && <span className="text-amber-300">Could not fill: {l.unfilled.join(', ')}</span>}
+              {viaLob?.sent && lobResult?.mode === 'test' && viaLob.sent.url && (
+                <a href={viaLob.sent.url} target="_blank" rel="noreferrer" className="underline text-amber-300">
+                  Lob test proof ↗
+                </a>
+              )}
+              {viaLob?.sent && lobResult?.mode === 'live' && (
+                <span className="text-emerald-300">
+                  Lob is mailing it{viaLob.sent.expectedDeliveryDate ? `, expected ${viaLob.sent.expectedDeliveryDate}` : ''}
+                </span>
+              )}
+              {viaLob?.held && <span className="text-amber-300">Not sent to Lob: {viaLob.held}</span>}
+              {viaLob?.failed && <span className="text-red-300">Lob: {viaLob.failed}</span>}
               <span className="ml-auto flex items-center gap-2">
                 <select
                   value={type}

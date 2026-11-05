@@ -246,6 +246,11 @@ export interface SurplusPanelLead {
     heirId: string | null;
     /** The envelope came back undeliverable. */
     returnedAt: string | null;
+    /** Lob mailed it: the letter id and the last tracking step Lob reported. */
+    lobLetterId?: string | null;
+    lobStatus?: string | null;
+    expectedDeliveryAt?: string | null;
+    deliveredAt?: string | null;
   }[];
   letterCount: number;
   /** A letter came back from the mailing address on file, so it is not mailed again. */
@@ -4393,6 +4398,19 @@ function DocLink({ doc, source }: { doc: LedgerDoc; source?: string | null }) {
  * One letter per claimant for now. Marking again overwrites the date; the
  * notes keep the history.
  */
+/** Lob's tracking steps, as the letter history says them. */
+const LOB_STATUS_LABEL: Record<string, string> = {
+  created: 'with Lob',
+  mailed: 'Mailed',
+  in_transit: 'In transit',
+  in_local_area: 'In local area',
+  processed_for_delivery: 'Out for delivery',
+  're-routed': 'Re-routed',
+  delivered: 'Delivered',
+  returned_to_sender: 'Returned to sender',
+  failed: 'Failed at Lob',
+};
+
 const MAIL_TYPE_LABEL: Record<string, string> = {
   standard: 'Standard',
   priority: 'Priority Mail',
@@ -4644,6 +4662,13 @@ function LetterHistory({
                 {l.mailType !== 'standard' ? ` · ${MAIL_TYPE_LABEL[l.mailType] || l.mailType}` : ''}
                 {l.trackingNumber ? ` · ${l.trackingNumber}` : ''}
                 {l.templateKind ? ` · ${LETTER_KINDS.find(([k]) => k === l.templateKind)?.[1] || l.templateKind}` : ''}
+                {l.lobLetterId && (
+                  <span title={l.lobLetterId} style={{ color: l.lobStatus === 'failed' ? 'var(--red)' : 'var(--dim)' }}>
+                    {' '}
+                    · Lob: {l.deliveredAt ? `Delivered ${fmtDate(l.deliveredAt)}` : LOB_STATUS_LABEL[l.lobStatus || ''] || l.lobStatus || 'sent'}
+                    {!l.deliveredAt && !l.returnedAt && l.expectedDeliveryAt ? `, expected ${fmtDate(l.expectedDeliveryAt)}` : ''}
+                  </span>
+                )}
                 {l.returnedAt && (
                   <span style={{ color: 'var(--red)', fontWeight: 600 }}> · Came back {fmtDate(l.returnedAt)}</span>
                 )}

@@ -28,6 +28,8 @@ const EXPECTED_PUBLIC = [
   'POST /webhooks/propertyleads',
   'POST /webhooks/google-ads',
   'POST /webhooks/leadhouse',
+  // Lob's tracking events, signed with LOB_WEBHOOK_SECRET.
+  'POST /webhooks/lob',
   'POST /webhooks/twilio/inbound',
   'POST /webhooks/investorfuse',
   'POST /webhooks/slack-lead',

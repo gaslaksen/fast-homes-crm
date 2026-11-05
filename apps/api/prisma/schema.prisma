@@ -2889,6 +2889,16 @@ model SurplusLetter {
   /// When the envelope came back undeliverable. That address is not written
   /// to again, and the claim stops waiting on it in Letter sent.
   returnedAt     DateTime?
+  /// Set when Lob printed and mailed the envelope (a live key only; test
+  /// letters are proofs and never written here). Lob's webhooks find the
+  /// row by it.
+  lobLetterId        String?   @unique
+  /// Lob's last tracking step: mailed, in_transit, in_local_area,
+  /// processed_for_delivery, re-routed, delivered, returned_to_sender, failed.
+  lobStatus          String?
+  lobEventAt         DateTime?
+  expectedDeliveryAt DateTime?
+  deliveredAt        DateTime?
 
   createdAt DateTime @default(now())
 

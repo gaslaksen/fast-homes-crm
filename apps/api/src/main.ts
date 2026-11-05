@@ -4,7 +4,9 @@ import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // rawBody keeps the bytes a webhook signed (Lob signs the raw body), next
+  // to the parsed JSON every other route reads.
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { rawBody: true });
 
   // Health check endpoint for Railway
   const httpAdapter = app.getHttpAdapter();
