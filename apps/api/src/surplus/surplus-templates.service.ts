@@ -44,6 +44,7 @@ import { CLAIM_STATUS_LABEL } from './surplus-classify.util';
 import { relativeOutreachScript } from './surplus-name-search.util';
 import { splitOwnerName } from '../foreclosures/foreclosure-scoring.util';
 import { NOTARY_COVER, LIMITED_POA, DIRECTION_TO_PAY, NOTARY_PACKAGE_NAME } from './surplus-notary-package';
+import { letterAddress } from './surplus-letter-address.util';
 
 /** Every merge field a template may use, with what it fills in. */
 export const MERGE_FIELDS: { key: string; meaning: string }[] = [
@@ -960,7 +961,10 @@ export class SurplusTemplatesService {
       timeZone: 'America/New_York',
     });
 
-    const fields = { ...built.fields, recipientName, recipientAddress: recipientAddress || null, today };
+    // The text reads the address the way a person writes it; the envelope
+    // (recipient.address below) keeps the stored one, which the returned-mail
+    // check compares against.
+    const fields = { ...built.fields, recipientName, recipientAddress: letterAddress(recipientAddress) || null, today };
     const active = await this.list(organizationId, built.facts.county);
     const t = active.kinds.find((k) => k.kind === kind)!;
     const body = renderTemplate(t.body, fields);
@@ -1072,7 +1076,8 @@ export class SurplusTemplatesService {
       claimant,
       claimantFirstName: lead.sellerFirstName || claimant,
       daysSearching,
-      propertyAddress: [lead.propertyAddress, lead.propertyCity].filter(Boolean).join(', '),
+      // Display only: county records arrive in capitals (see letterAddress).
+      propertyAddress: letterAddress([lead.propertyAddress, lead.propertyCity].filter(Boolean).join(', ')),
       county: d.county,
       caseNumber: d.caseNumber,
       surplusAmount: d.surplusAtNotice ?? d.grossSurplus ?? null,

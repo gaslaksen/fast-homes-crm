@@ -3,6 +3,7 @@ import {
   LOB_HTML_MAX,
   lobAddressFrom,
   lobLetterEvent,
+  lobErrorMessage,
   lobLetterHtml,
   lobModeOf,
   lobReturnAddress,
@@ -69,7 +70,9 @@ describe('lobLetterHtml', () => {
   it('escapes the text and keeps the address area at the top empty', () => {
     const html = lobLetterHtml({ companyName: 'D.I.G. Deeper LLC', phone: '(904) 595-9620', body: 'Dear <Jane> & co', propertyAddress: '1 Main St' });
     expect(html).toContain('Dear &lt;Jane&gt; &amp; co');
-    expect(html).toContain('height:3.2in');
+    // 0.75in repeating top row plus 2.45in on the first page: text starts 3.2in down.
+    expect(html).toContain('.top{height:0.75in}');
+    expect(html).toContain('.first{height:2.45in}');
     expect(html).toContain('Re: 1 Main St');
     expect(html.length).toBeLessThan(LOB_HTML_MAX);
   });
@@ -100,5 +103,28 @@ describe('lobLetterEvent', () => {
     expect(lobLetterEvent('letter.return_envelope.in_transit').event.kind).toBe('ignore');
     expect(lobLetterEvent('postcard.delivered').event.kind).toBe('ignore');
     expect(lobLetterEvent(undefined).event.kind).toBe('ignore');
+  });
+});
+
+describe('lobLetterHtml layout', () => {
+  it('puts the margins in the page, since Lob ignores @page margins', () => {
+    const html = lobLetterHtml({ companyName: 'X', phone: '1', body: 'a' });
+    expect(html).toContain('@page{size:8.5in 11in;margin:0}');
+    expect(html).toContain('td{padding:0 1in;');
+    expect(html).toMatch(/<thead>.*class="top".*<\/thead><tfoot>.*class="bot".*<\/tfoot>/);
+  });
+
+  it('makes each paragraph a row and keeps line breaks inside one', () => {
+    const html = lobLetterHtml({ companyName: 'X', phone: '1', body: 'Nov 5\n\nJane Doe\n12 Oak St\n\n\nDear Jane,\r\n\r\nThanks.\n' });
+    const paras = [...html.matchAll(/<div class="p">([\s\S]*?)<\/div>/g)].map((m) => m[1]);
+    expect(paras).toEqual(['Nov 5', 'Jane Doe\n12 Oak St', 'Dear Jane,', 'Thanks.']);
+  });
+});
+
+describe('lobErrorMessage', () => {
+  it('turns a strictness refusal into what to do, and leaves other errors alone', () => {
+    expect(lobErrorMessage("The 'to' address does not meet your minimum deliverability strictness.", null)).toMatch(/^USPS does not list this as a deliverable address/);
+    expect(lobErrorMessage('anything', 'FAILED_DELIVERABILITY_STRICTNESS')).toMatch(/vacant lot/);
+    expect(lobErrorMessage('Unauthorized', null)).toBe('Unauthorized');
   });
 });
