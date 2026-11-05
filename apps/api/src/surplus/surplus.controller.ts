@@ -1441,6 +1441,18 @@ export class SurplusController {
   }
 
   /**
+   * Send this one letter through Lob, to the claimant or a person on the
+   * case. A test key makes a proof PDF and records nothing; a live key mails
+   * it and records it as mailed.
+   * Body: { kind, heirId?, mailType? }
+   */
+  @Post(':id/letter/lob')
+  async letterViaLob(@Param('id') id: string, @Body() body: any, @Headers('authorization') authHeader?: string) {
+    const { organizationId, userId } = this.decodeToken(authHeader);
+    return this.printRun.sendOneViaLob(id, body || {}, organizationId || null, userId || null);
+  }
+
+  /**
    * Bulk stage change, including marking dead. The board can select a rack of
    * properties and clear them in one call.
    */

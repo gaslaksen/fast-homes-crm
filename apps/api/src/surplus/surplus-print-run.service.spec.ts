@@ -255,7 +255,10 @@ describe('SurplusPrintRunService', () => {
   });
 });
 
-function lobHarness(rows: any[], opts: { mode?: 'test' | 'live' | null; sentThisMonth?: number; limit?: number; markFails?: boolean } = {}) {
+function lobHarness(
+  rows: any[],
+  opts: { mode?: 'test' | 'live' | null; sentThisMonth?: number; limit?: number; markFails?: boolean; lettersBefore?: number } = {},
+) {
   const list = jest.fn(async ({ page }: any) => ({ data: page === 1 ? rows : [], total: rows.length, pageSize: 200 }));
   const markLetterMailed = jest.fn(async () => {
     if (opts.markFails) throw new Error('db down');
@@ -296,7 +299,8 @@ function lobHarness(rows: any[], opts: { mode?: 'test' | 'live' | null; sentThis
   const letters = new Map<string, any>();
   const prisma = {
     surplusLetter: {
-      count: jest.fn(async () => opts.sentThisMonth ?? 0),
+      // The month's live letters, or (by person) the letters already sent to someone.
+      count: jest.fn(async ({ where }: any) => (where?.lobLetterId ? opts.sentThisMonth ?? 0 : opts.lettersBefore ?? 0)),
       findUnique: jest.fn(async ({ where }: any) => letters.get(where.lobLetterId) || null),
       update: jest.fn(async ({ where, data }: any) => {
         for (const l of letters.values()) if (l.id === where.id) Object.assign(l, data);
@@ -416,5 +420,45 @@ describe('SurplusPrintRunService.applyLobEvent', () => {
     const h = lobHarness([]);
     expect(await h.svc.applyLobEvent(ev('letter.mailed', 'ltr_unknown', '2026-11-05T11:00:00Z'))).toEqual({ applied: false, reason: 'letter not in Dealcore' });
     expect((await h.svc.applyLobEvent(ev('postcard.mailed', 'psc_1', '2026-11-05T11:00:00Z'))).applied).toBe(false);
+  });
+});
+
+describe('SurplusPrintRunService.sendOneViaLob', () => {
+  const NOW_ONE = new Date('2026-11-05T15:00:00Z');
+
+  it('with a test key makes one proof for the person picked and records nothing', async () => {
+    const { svc, createLetter, markLetterMailed } = lobHarness([], { lettersBefore: 2 });
+    const out: any = await svc.sendOneViaLob('a', { kind: 'letter_family', heirId: 'h' }, 'org1', 'user1', NOW_ONE);
+    expect(out).toMatchObject({ mode: 'test', ok: true, lobLetterId: 'ltr_1', url: 'https://lob.test/1.pdf', letterNumber: 3, recipientName: 'Person h' });
+    expect(markLetterMailed).not.toHaveBeenCalled();
+    const req = createLetter.mock.calls[0][0];
+    expect(req.to).toMatchObject({ name: 'Person h', address_line1: '4 Pine Ave', address_line2: 'Apt 2' });
+    expect(req.idempotencyKey).toBe('dealcore:test:a:h:3:letter_family:3:2026-11-05');
+  });
+
+  it('refuses what Lob cannot take, with the reason', async () => {
+    const { svc, createLetter } = lobHarness([]);
+    await expect(svc.sendOneViaLob('a', { kind: 'letter_claimant', mailType: 'priority' }, 'org1', 'user1', NOW_ONE)).rejects.toThrow('Priority Mail stays on paper');
+    await expect(svc.sendOneViaLob('b', { kind: 'letter_claimant' }, 'org1', 'user1', NOW_ONE)).rejects.toThrow('not a US street');
+    await expect(svc.sendOneViaLob('a', { kind: 'voicemail' }, 'org1', 'user1', NOW_ONE)).rejects.toThrow('Pick a letter');
+    expect(createLetter).not.toHaveBeenCalled();
+  });
+
+  it('with a live key records it with its Lob id, and stops at the monthly cap', async () => {
+    const live = lobHarness([], { mode: 'live' });
+    const out: any = await live.svc.sendOneViaLob('a', { kind: 'letter_claimant' }, 'org1', 'user1', NOW_ONE);
+    expect(out).toMatchObject({ mode: 'live', ok: true, postage: 1.07, alreadyRecorded: false });
+    expect(live.markLetterMailed).toHaveBeenCalledWith(['a'], expect.objectContaining({ heirId: null, lob: expect.objectContaining({ letterId: 'ltr_1' }) }), 'user1', 'org1');
+    const full = lobHarness([], { mode: 'live', sentThisMonth: 500, limit: 500 });
+    await expect(full.svc.sendOneViaLob('a', { kind: 'letter_claimant' }, 'org1', 'user1', NOW_ONE)).rejects.toThrow('Lob letters are used');
+  });
+
+  it('does not record a letter twice when Lob hands back one already in the history', async () => {
+    const h = lobHarness([], { mode: 'live' });
+    h.letters.set('ltr_1', { id: 'sl1', lobLetterId: 'ltr_1' });
+    const out: any = await h.svc.sendOneViaLob('a', { kind: 'letter_claimant' }, 'org1', 'user1', NOW_ONE);
+    expect(out).toMatchObject({ ok: true, alreadyRecorded: true, postage: 0 });
+    expect(h.markLetterMailed).not.toHaveBeenCalled();
+    expect(h.addExpense).not.toHaveBeenCalled();
   });
 });
