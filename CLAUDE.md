@@ -93,7 +93,99 @@ auto-responding, so the two systems do not both message the lead.
 - `apps/api/src/webhooks/webhooks.controller.ts` provider webhooks
 - `apps/api/prisma/` schema, migrations, seed
 
+## Traps that have broken production before
+
+- **The web app never imports `@fast-homes/shared` at runtime.** Vercel runs
+  `pnpm --filter web build` (plain `next build`) and `packages/shared/dist` is
+  never built there, so a runtime import fails the deploy while every local
+  check passes. Copy the helper into `apps/web/src/lib/` with a "keep in step"
+  comment pointing at the original. `import type` from shared is fine. To see
+  the build the way Vercel does, move `packages/shared/dist` aside, run
+  `pnpm --filter web build`, then move it back.
+- **`next build` lints, and an ESLint error fails the Vercel deploy.** Run
+  `npx next lint` from `apps/web` before any web PR. Escape apostrophes and
+  quotes in JSX text (`&apos;`, `&ldquo;`, `&rdquo;`). Existing warnings are fine.
+- **Every new Nest provider needs its own `@Injectable()`**, subclasses
+  included (for example a county adapter extending `RealTdmAdapter`). Without
+  it the API crash-loops on boot. Jest and `tsc` do not catch this.
+- **Pipeline board buttons.** In
+  `apps/web/src/components/pipelines/pipeline-board.css`, `.dc-board button`
+  strips border, background and color. Write new board button styles as
+  `button.dc-whatever`, never a bare `.dc-whatever`.
+- **Calendar dates.** Railway runs in UTC, so a date-only value stored at
+  midnight UTC shows a day early in Eastern. Default date inputs with
+  `todayLocal()` (`apps/web/src/lib/dates.ts`) and display midnight-UTC days
+  with `fmtDay()` (`apps/web/src/components/pipelines/format.ts`). Store picked
+  days at noon UTC with `calendarDayToDate()` (`apps/api/src/surplus/surplus.util.ts`)
+  only when no day-count math depends on midnight.
+- **`apps/api/railway.json` is stale** and starts the API with
+  `prisma db push`, which can drop columns. Railway reads it only if the API
+  service's Root Directory is `apps/api`, so that setting must stay empty. The
+  real config is the root `railway.json`.
+- **Railway stops reading `railway.json` on 2026-12-01.** Its replacement is
+  `.railway/railway.ts` (partial export named `fast-homes-api`, its own
+  `package.json` with `"type": "module"`). Never run `railway config pull`,
+  `config init` or `config apply` without the owner's go-ahead: a config file
+  without the partial export deletes every resource it omits, Postgres and
+  Redis included.
+
+## Merging and checking a deploy
+
+- Merge a PR with `gh pr merge N --merge` once CI is green, then confirm with
+  `gh pr view N --json state,mergeCommit`. GitHub auto-merge is off on this
+  repo. Never merge by checking out `master` locally and pushing.
+- A merge does not prove a deploy. Railway has silently skipped merge commits,
+  and a failed deploy leaves the old build serving, so `/health` answering 200
+  proves nothing. Check
+  `gh api repos/gaslaksen/fast-homes-crm/commits/<sha>/status` (context
+  `dealcore - @fast-homes/api`) or hit a route the new code adds. The fix for a
+  skipped deploy is "Deploy latest commit" in Railway, not "Redeploy" (which
+  rebuilds the old commit).
+- Production API writes need a real signed-in token whose user has an
+  organization. Always read the response status. Prefer the app's own buttons
+  to hand-made API calls against prod.
+
+## Business rules (owner's decisions, do not change without asking)
+
+Surplus funds (Florida overages):
+
+- The workable window is day 110 to day 365, counted from the notice date (the
+  sale date when no notice has been read). Anything that spends money or puts a
+  claim in front of the team respects it (`SURPLUS_EARLY_DAYS`).
+- Every paid lookup goes through one gate, `traceCriteria` in
+  `apps/api/src/surplus/surplus-skiptrace.util.ts`. No lookup when someone
+  else's claim is pending, the claim is assigned or paid out, the notice is
+  over a year old, or the county lists the claimant as dead (estates get the
+  estate search instead). Relatives: only the spouse and likely children.
+- BatchData and Endato are dropped. The IDI batch (export CSV, upload at IDI,
+  import the results) is the only skip trace.
+- Claude web searches (social profiles, obituaries) run only when a person
+  clicks for them, never on a pull or cron. Obituary search costs money and is
+  capped by `OBITUARY_MONTHLY_BUDGET`. Bots never send social messages.
+- Drips enroll per person (`CampaignEnrollment.heirId`, null means the
+  claimant). A reply from anyone on the case stops every drip on it; STOP opts
+  out only that person. Any new send or opt-out path must handle heir
+  enrollments, not assume `lead.sellerPhone`.
+- After any `full: true` county pull, check `createdLeadIds` for duplicates.
+  Owner name wording drifts between pulls (ET AL, ESTATE OF, DECD) and dedupe
+  matches the exact name.
+- County discovery scripts must call the adapter's real parser, never a quick
+  regex written for the sweep.
+
+Other pipelines and companies:
+
+- Foreclosures and Tax Sales have no automated outreach. Foreclosure leads are
+  created with `autoRespond=false`. Probate has AI messaging off, and drips
+  enroll only the `primaryContact` lead, since one heir can own many properties.
+- Two companies share one login: Quick Cash Home Buyers and D.I.G. Deeper LLC.
+  Surplus leads send as D.I.G. Deeper, everything else as Quick Cash. The one
+  rule is `brandForLeadSource()` in `apps/api/src/common/company.constants.ts`.
+  Leads have no company column; the company comes from the lead's source via
+  `brand_modules`, and `checkSameCompany` refuses enrolling a lead in another
+  company's campaign.
+
 ## Before opening a PR
 
 Run `pnpm build`, `pnpm test`, and `pnpm lint`. If you touched the schema,
 confirm the migration file is committed. Never commit secrets or `.env` files.
+If you touched `apps/web`, also run `npx next lint` there (see the traps above).
