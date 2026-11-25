@@ -106,6 +106,7 @@ import { clerkContactName } from './surplus-county-readiness.util';
 import { LETTER_REPLY_TASK_PREFIX } from './surplus-progress.util';
 import { cleanIdiClaimant, idiBatchCode } from './surplus-idi.util';
 import { ShortCache } from './short-cache.util';
+import { SurplusRowCache, rowStamp } from './surplus-row-cache.util';
 
 /** What toRow needs beyond the lead: per-request lookups fetched once. */
 interface RowContext {
@@ -167,6 +168,43 @@ const LEAD_INCLUDE = {
     },
   },
 };
+
+/**
+ * What the board's row cache compares to decide whether a built row is still
+ * good. Narrow on purpose: about 60 ms for 3,000 leads against about 800 ms
+ * for LEAD_INCLUDE plus toRow. Covers every input of toRow that has a stamp;
+ * see SurplusRowCache for the ones that do not and how they are caught.
+ */
+const ROW_STAMP_SELECT = {
+  id: true,
+  updatedAt: true,
+  surplusDetail: {
+    select: {
+      updatedAt: true,
+      heirs: { select: { id: true, updatedAt: true }, orderBy: { id: 'asc' as const } },
+      _count: {
+        select: {
+          letters: true,
+          documents: true,
+          expenses: true,
+          traceAttempts: true,
+          socialProfiles: true,
+          addresses: true,
+          batchMembers: { where: { result: null } },
+        },
+      },
+    },
+  },
+  _count: {
+    select: {
+      ...LEAD_INCLUDE._count.select,
+      tasks: { where: { completed: false } },
+    },
+  },
+};
+
+/** How long a built board row may be reused before it is rebuilt regardless. */
+const BOARD_ROW_TTL_MS = 20_000;
 
 const CHANNELS = ['called', 'texted', 'emailed', 'lettered'] as const;
 const CONTACT_RANK: Record<string, number> = { not_tapped: 0, tapped: 1, recap_scheduled: 2 };
@@ -277,6 +315,11 @@ export class SurplusService {
    * them stay live. See ShortCache for why this exists.
    */
   private readonly statsCache = new ShortCache<any>(30_000);
+
+  /** Built board rows per organization. See SurplusRowCache. */
+  private readonly boardRows = new Map<string, SurplusRowCache<{ row: any; heirs: any[] }>>();
+  /** One board refresh at a time per organization, so simultaneous loads build each row once. */
+  private readonly boardLocks = new Map<string, Promise<unknown>>();
 
   constructor(
     private prisma: PrismaService,
@@ -2313,25 +2356,31 @@ export class SurplusService {
     const searched = surplusSearchWhere(filters.search);
     if (searched) where.AND = [searched];
 
-    const leads = await this.prisma.lead.findMany({
-      where,
-      // Heirs travel with the detail: an Estate claimant's queue, card and
-      // panel all depend on whether a living heir is on file.
-      include: LEAD_INCLUDE,
-      orderBy: this.orderFor(filters.sort),
-      take: 5000,
-    });
-
-    const ctx = await this.rowContext(filters.organizationId);
-    let rows = leads.filter((l) => l.surplusDetail).map((l) => this.toRow(l, ctx));
+    let rows: any[];
+    let people: Map<string, any[]>;
+    if (filters.useRowCache) {
+      const built = await this.boardRowsFor(where, this.orderFor(filters.sort), filters.organizationId, 5000);
+      rows = built.map((b) => b.row);
+      people = new Map(built.map((b) => [b.row.id, b.heirs]));
+    } else {
+      const leads = await this.prisma.lead.findMany({
+        where,
+        // Heirs travel with the detail: an Estate claimant's queue, card and
+        // panel all depend on whether a living heir is on file.
+        include: LEAD_INCLUDE,
+        orderBy: this.orderFor(filters.sort),
+        take: 5000,
+      });
+      const ctx = await this.rowContext(filters.organizationId);
+      rows = leads.filter((l) => l.surplusDetail).map((l) => this.toRow(l, ctx));
+      people = new Map(leads.map((l) => [l.id, (l.surplusDetail as any)?.heirs || []]));
+    }
 
     // A claim found through somebody around it says who, or the board shows
-    // the claimant's name for a search that typed the daughter's.
+    // the claimant's name for a search that typed the daughter's. A copy, not
+    // a write: cached rows are shared between requests.
     if (filters.search) {
-      const people = new Map(leads.map((l) => [l.id, (l.surplusDetail as any)?.heirs || []]));
-      for (const r of rows as any[]) {
-        r.searchMatches = surplusSearchPeopleHits(filters.search, people.get(r.id) || []);
-      }
+      rows = rows.map((r) => ({ ...r, searchMatches: surplusSearchPeopleHits(filters.search!, people.get(r.id) || []) }));
     }
 
     // These read the compliance gate, a derived clock, or the per-number DNC
@@ -2461,6 +2510,95 @@ export class SurplusService {
    * list of counties we INTEND to work is a roadmap, not a filter, and it does
    * not belong in a dropdown that is there to narrow what is on screen.
    */
+  /**
+   * The board's rows for this query, in its order, reusing rows built by
+   * earlier requests where their stamp still matches. See SurplusRowCache.
+   *
+   * The stamp is read before the full load, so a write landing in between
+   * leaves a row NEWER than its stamp, and the next request rebuilds it. The
+   * safe direction: a cached row is never older than the stamp it is filed
+   * under.
+   */
+  private async boardRowsFor(
+    where: any,
+    orderBy: any,
+    organizationId?: string | null,
+    take?: number,
+  ): Promise<{ row: any; heirs: any[] }[]> {
+    const key = organizationId || '*';
+    const run = async () => {
+      let cache = this.boardRows.get(key);
+      if (!cache) {
+        cache = new SurplusRowCache(BOARD_ROW_TTL_MS);
+        this.boardRows.set(key, cache);
+      }
+      cache.prune();
+
+      const stamps = await this.prisma.lead.findMany({
+        where,
+        select: ROW_STAMP_SELECT,
+        ...(orderBy ? { orderBy } : {}),
+        ...(take ? { take } : {}),
+      });
+      const stampOf = new Map(stamps.map((s) => [s.id, rowStamp(s)]));
+      const stale = stamps.filter((s) => !cache!.get(s.id, stampOf.get(s.id)!)).map((s) => s.id);
+
+      if (stale.length) {
+        const ctx = await this.rowContext(organizationId);
+        // In chunks, so a large org stays well under Postgres's bind limit.
+        for (let i = 0; i < stale.length; i += 2000) {
+          const leads = await this.prisma.lead.findMany({
+            where: { id: { in: stale.slice(i, i + 2000) } },
+            include: LEAD_INCLUDE,
+          });
+          for (const l of leads) {
+            if (!l.surplusDetail) continue;
+            cache.set(l.id, stampOf.get(l.id)!, {
+              row: this.toRow(l, ctx),
+              heirs: (l.surplusDetail as any).heirs || [],
+            });
+          }
+        }
+      }
+
+      // A lead deleted between the stamp and the load has no row under its
+      // stamp and drops out, as it would have from a fresh query.
+      return stamps
+        .map((s) => cache!.peek(s.id, stampOf.get(s.id)!))
+        .filter((b): b is { row: any; heirs: any[] } => !!b);
+    };
+
+    const prev = this.boardLocks.get(key) || Promise.resolve();
+    const mine = prev.catch(() => undefined).then(run);
+    this.boardLocks.set(key, mine);
+    try {
+      return await mine;
+    } finally {
+      if (this.boardLocks.get(key) === mine) this.boardLocks.delete(key);
+      this.scheduleBoardRelease(key);
+    }
+  }
+
+  /**
+   * Let go of an org's rows once nobody has loaded the board for a window.
+   * The rows run about 30 KB each, so 3,000 of them are about 90 MB, and
+   * without this they would stay until the next board load however long that
+   * took. Unref'd, so it never holds the process open.
+   */
+  private readonly boardReleaseTimers = new Map<string, NodeJS.Timeout>();
+  private scheduleBoardRelease(key: string) {
+    clearTimeout(this.boardReleaseTimers.get(key));
+    const timer = setTimeout(() => {
+      this.boardReleaseTimers.delete(key);
+      const cache = this.boardRows.get(key);
+      if (!cache) return;
+      cache.prune();
+      if (cache.size === 0) this.boardRows.delete(key);
+    }, BOARD_ROW_TTL_MS + 1_000);
+    timer.unref?.();
+    this.boardReleaseTimers.set(key, timer);
+  }
+
   private async countiesInUse(organizationId?: string | null): Promise<string[]> {
     const rows = await this.prisma.surplusDetail.findMany({
       where: {
@@ -2475,15 +2613,20 @@ export class SurplusService {
   }
 
   private orderFor(sort?: string): any {
+    // The id breaks ties. Without it, claims sharing a notice date (or a null
+    // one) came back in whatever order Postgres chose that time, the board's
+    // stable sorts kept that order, and a claim could hop between pages from
+    // one reload to the next.
+    const byId = { id: 'asc' as const };
     switch (sort) {
       case 'surplus':
-        return [{ surplusDetail: { grossSurplus: { sort: 'desc', nulls: 'last' } } }];
+        return [{ surplusDetail: { grossSurplus: { sort: 'desc', nulls: 'last' } } }, byId];
       case 'tier':
-        return [{ surplusDetail: { tier: 'asc' } }];
+        return [{ surplusDetail: { tier: 'asc' } }, byId];
       default:
         // Newest notice first: the clock starts at the notice, so the freshest
         // one has the most runway left to work.
-        return [{ surplusDetail: { noticeDate: { sort: 'desc', nulls: 'last' } } }];
+        return [{ surplusDetail: { noticeDate: { sort: 'desc', nulls: 'last' } } }, byId];
     }
   }
 
@@ -2497,17 +2640,19 @@ export class SurplusService {
   }
 
   private async computeStats(organizationId?: string) {
-    const leads = await this.prisma.lead.findMany({
-      where: {
+    // Only the board asks for these, so they share its row cache.
+    const built = await this.boardRowsFor(
+      {
         source: LeadSource.SURPLUS,
         ...(organizationId ? { organizationId } : {}),
+        surplusDetail: { isNot: null },
       },
-      // Heirs travel with the detail: an Estate claimant's queue, card and
-      // panel all depend on whether a living heir is on file.
-      include: LEAD_INCLUDE,
-    });
-    const ctx = await this.rowContext(organizationId);
-    const all = leads.filter((l) => l.surplusDetail).map((l) => this.toRow(l, ctx));
+      // A fixed order, so co-owners tied on work score pick the same head
+      // claimant (and so the same queue and rating) on every load.
+      [{ id: 'asc' }],
+      organizationId,
+    );
+    const all = built.map((b) => b.row);
     const feed = all.filter(
       (r) => r.grossSurplus >= SURPLUS_FLOOR && r.claimantType !== SurplusClaimantType.LIENHOLDER,
     );

@@ -197,6 +197,8 @@ export class SurplusController {
       sortDir,
       page: num(page),
       pageSize: num(pageSize),
+      // The board reloads this after every save; see SurplusRowCache.
+      useRowCache: true,
     });
   }
 

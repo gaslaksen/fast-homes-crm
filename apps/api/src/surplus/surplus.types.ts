@@ -165,4 +165,10 @@ export interface SurplusListFilters {
   sortDir?: string;
   page?: number;
   pageSize?: number;
+  /**
+   * Reuse rows built by earlier requests when nothing they read has changed.
+   * Only the board itself passes this. The print run, IDI export, outreach
+   * list, prune and call session act on what they read and always build fresh.
+   */
+  useRowCache?: boolean;
 }
