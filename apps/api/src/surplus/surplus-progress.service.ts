@@ -8,8 +8,7 @@ import {
   outcomeDeadReason,
 } from './surplus-progress.util';
 import { clerkTaskTitle, countyReadiness, practiceRunTaskTitle } from './surplus-county-readiness.util';
-
-const DAY = 86_400_000;
+import { easternMorning } from './surplus-due.util';
 
 /**
  * Moves the course's four fields on a surplus case (Stage, Next action,
@@ -180,8 +179,7 @@ export class SurplusProgressService {
           select: { id: true },
         });
         if (exists) return false;
-        const dueDate = new Date(Date.now() + days * DAY);
-        dueDate.setHours(9, 0, 0, 0);
+        const dueDate = easternMorning(days);
         await this.prisma.task.create({ data: { leadId, title, dueDate, userId: opts.userId || undefined } });
         await this.prisma.activity.create({
           data: {
