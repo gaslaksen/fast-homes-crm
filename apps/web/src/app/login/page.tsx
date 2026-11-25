@@ -1,9 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { authAPI } from '@/lib/api';
+import { hasLiveToken } from '@/lib/session';
 import Logo from '@/components/Logo';
 
 export default function LoginPage() {
@@ -12,6 +13,22 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  // False until we know whether this browser is already signed in, so a
+  // signed-in visitor never sees the form flash up and mistake it for a
+  // sign-out.
+  const [checked, setChecked] = useState(false);
+
+  useEffect(() => {
+    if (hasLiveToken()) {
+      router.replace('/dashboard');
+      return;
+    }
+    setChecked(true);
+  }, [router]);
+
+  if (!checked) {
+    return <div className="min-h-screen bg-gray-50 dark:bg-gray-950" />;
+  }
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();

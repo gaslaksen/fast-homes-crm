@@ -105,6 +105,7 @@ import { isSignedStage } from './surplus-progress.util';
 import { clerkContactName } from './surplus-county-readiness.util';
 import { LETTER_REPLY_TASK_PREFIX } from './surplus-progress.util';
 import { cleanIdiClaimant, idiBatchCode } from './surplus-idi.util';
+import { ShortCache } from './short-cache.util';
 
 /** What toRow needs beyond the lead: per-request lookups fetched once. */
 interface RowContext {
@@ -269,6 +270,13 @@ const ENTITY_NAME =
 @Injectable()
 export class SurplusService {
   private readonly logger = new Logger(SurplusService.name);
+
+  /**
+   * The board's headline counts, per organization, for 30 seconds. The
+   * numbers can trail a save by up to that long; the list and the rows under
+   * them stay live. See ShortCache for why this exists.
+   */
+  private readonly statsCache = new ShortCache<any>(30_000);
 
   constructor(
     private prisma: PrismaService,
@@ -2485,6 +2493,10 @@ export class SurplusService {
    * be non-zero at all.
    */
   async stats(organizationId?: string) {
+    return this.statsCache.get(organizationId || '*', () => this.computeStats(organizationId));
+  }
+
+  private async computeStats(organizationId?: string) {
     const leads = await this.prisma.lead.findMany({
       where: {
         source: LeadSource.SURPLUS,
