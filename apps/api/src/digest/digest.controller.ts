@@ -85,7 +85,10 @@ export class DigestController {
       select: { email: true },
     });
     return {
-      schedule: '07:00 America/New_York, daily',
+      schedule:
+        this.config.get<string>('DAILY_BRIEF_ENABLED') === 'true'
+          ? '07:00 America/New_York, daily'
+          : 'off (DAILY_BRIEF_ENABLED is not "true")',
       willReceive: rows,
       optedOut: optedOut.map((u) => u.email),
     };

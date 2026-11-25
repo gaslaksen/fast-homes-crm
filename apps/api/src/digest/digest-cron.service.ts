@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { CronLockService } from '../common/cron-lock.service';
 import { MailerService } from '../mailer/mailer.service';
@@ -7,7 +8,13 @@ import { DigestService } from './digest.service';
 import { DigestRenderService } from './digest-render.service';
 
 /**
- * Sends the Dealcore Daily Brief at 7:00 AM ET, every day.
+ * Sends the Dealcore Daily Brief at 7:00 AM ET, every day, when switched on.
+ *
+ * OFF by default since 2026-11-25 at the owner's request: the team found no
+ * value in it. Only an explicit DAILY_BRIEF_ENABLED="true" brings the schedule
+ * back. The preview and send-test endpoints still work on demand. While it is
+ * off, missed county pulls show only in the surplus board's status menu, and
+ * overdue tasks reach their owner through the 9 AM task reminder email.
  *
  * The brief is assembled ONCE per organization and then rendered per recipient,
  * so a three-person team costs one round of queries and one news summarization
@@ -29,20 +36,32 @@ export class DigestCronService implements OnModuleInit {
    */
   private lastSentDayKey: string | null = null;
 
+  /** Whether the 7:00 AM schedule sends anything. */
+  readonly enabled: boolean;
+
   constructor(
+    config: ConfigService,
     private prisma: PrismaService,
     private digest: DigestService,
     private render: DigestRenderService,
     private mailer: MailerService,
     private lock: CronLockService,
-  ) {}
+  ) {
+    // Default OFF. Only an explicit "true" starts the schedule.
+    this.enabled = (config.get<string>('DAILY_BRIEF_ENABLED') ?? 'false') === 'true';
+  }
 
   onModuleInit() {
-    this.logger.log('Daily Brief scheduled for 07:00 America/New_York, daily');
+    this.logger.log(
+      this.enabled
+        ? 'Daily Brief scheduled for 07:00 America/New_York, daily'
+        : 'Daily Brief is off (DAILY_BRIEF_ENABLED is not "true")',
+    );
   }
 
   @Cron('0 7 * * *', { timeZone: 'America/New_York' })
   async sendDailyBrief() {
+    if (!this.enabled) return;
     const now = new Date();
     const dayKey = new Intl.DateTimeFormat('en-CA', {
       timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit',
