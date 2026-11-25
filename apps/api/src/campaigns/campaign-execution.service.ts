@@ -29,6 +29,7 @@ import {
   heirTextNumber,
   knownEmails,
 } from './campaign-recipient';
+import { CampaignRunTally } from './campaign-run-tally.util';
 
 // Instance tag for distinguishing Railway replicas in logs.
 const INSTANCE_TAG = `${os.hostname()}/${process.pid}`;
@@ -52,7 +53,7 @@ const MAX_STEP_ATTEMPTS = 5;
 const DEFAULT_EMAIL_DAILY_LIMIT = 90;
 const DEFAULT_EMAIL_HOURLY_LIMIT = 20;
 
-type StepOutcome =
+export type StepOutcome =
   | { kind: 'SENT'; externalId?: string }
   // A send that was attempted and failed. Burns one of MAX_STEP_ATTEMPTS.
   | { kind: 'RETRY'; reason: string }
@@ -134,13 +135,16 @@ export class CampaignExecutionService implements OnModuleInit {
         lead: true,
         heir: { select: { id: true, name: true } },
       },
+      // Longest waiting first, so a batch full of rate limited emails cannot
+      // keep pushing a due text to a later run.
+      orderBy: [{ nextSendAt: 'asc' }, { id: 'asc' }],
       take: 50, // cap per run
     });
 
-    if (enrollments.length > 0) {
-      this.logger.log(`⏰ Processing ${enrollments.length} scheduled campaign message(s)`);
-    }
-
+    // One summary line per run instead of a line per enrollment. With two
+    // replicas and a backlog of rate limited emails, the per-enrollment lines
+    // were about 2,960 a day (2026-11-24), 40% of the API's logs.
+    const run = new CampaignRunTally();
     for (const enrollment of enrollments) {
       // A Dead lead gets no more drips. A surplus case the county paid out, or
       // a claimant who said no, used to keep receiving "we may have found
@@ -151,6 +155,7 @@ export class CampaignExecutionService implements OnModuleInit {
           data: { status: 'REMOVED', nextSendAt: null },
         });
         this.logger.log(`Enrollment ${enrollment.id} removed: lead ${enrollment.leadId} is Dead`);
+        run.count('removed');
         continue;
       }
 
@@ -165,18 +170,13 @@ export class CampaignExecutionService implements OnModuleInit {
         },
         data: { nextSendAt: null },
       });
-      if (claimed.count === 0) {
-        // Benign: another Railway replica already picked this up. Kept at
-        // debug level so it doesn't flood prod logs.
-        this.logger.debug(
-          `[${INSTANCE_TAG}] Enrollment ${enrollment.id} already claimed by another instance — skipping`,
-        );
-        continue;
-      }
+      // Benign and silent: another replica already picked this up.
+      if (claimed.count === 0) continue;
 
       try {
-        await this.executeStep(enrollment);
+        run.add(await this.executeStep(enrollment));
       } catch (err) {
+        run.count('failed');
         // Restore nextSendAt on unexpected failure so it retries next cron run.
         try {
           await this.prisma.campaignEnrollment.update({
@@ -195,13 +195,16 @@ export class CampaignExecutionService implements OnModuleInit {
         );
       }
     }
+    const summary = run.summary();
+    if (summary) this.logger.log(`[${INSTANCE_TAG}] Campaign run: ${summary}`);
   }
 
   // Stale lead auto-enrollment removed — was auto-enrolling leads in hardcoded
   // seed campaigns. Campaign enrollment is now manual (via UI) or triggered on
   // first inbound reply (via handleInboundMessage).
 
-  async executeStep(enrollment: any) {
+  /** Runs the enrollment's current step. Returns what happened, or null when it had no step left. */
+  async executeStep(enrollment: any): Promise<StepOutcome | null> {
     const { campaign, lead } = enrollment;
     const steps: any[] = campaign.steps;
 
@@ -214,7 +217,7 @@ export class CampaignExecutionService implements OnModuleInit {
         where: { id: enrollment.id },
         data: { status: 'COMPLETED', completedAt: new Date(), nextSendAt: null },
       });
-      return;
+      return null;
     }
 
     // Load org once so merge fields resolve to the real company name
@@ -273,7 +276,7 @@ export class CampaignExecutionService implements OnModuleInit {
           where: { id: enrollment.id },
           data: { status: 'PAUSED', nextSendAt: null },
         });
-        return;
+        return outcome;
       }
 
       // Restore so the next cron run retries the same step.
@@ -284,7 +287,7 @@ export class CampaignExecutionService implements OnModuleInit {
       this.logger.warn(
         `Enrollment ${enrollment.id} step ${currentStep.stepOrder} will retry (attempt ${priorFailures + 2}/${MAX_STEP_ATTEMPTS}): ${outcome.reason}`,
       );
-      return;
+      return outcome;
     }
 
     if (outcome.kind === 'DEFERRED') {
@@ -295,11 +298,8 @@ export class CampaignExecutionService implements OnModuleInit {
         where: { id: enrollment.id },
         data: { nextSendAt: outcome.retryAt },
       });
-      this.logger.log(
-        `Enrollment ${enrollment.id} step ${currentStep.stepOrder} deferred to ` +
-        `${outcome.retryAt.toISOString()}: ${outcome.reason}`,
-      );
-      return;
+      // No line of its own: the run's summary counts it with its reason.
+      return outcome;
     }
 
     if (outcome.kind === 'SKIPPED') {
@@ -376,6 +376,7 @@ export class CampaignExecutionService implements OnModuleInit {
         },
       });
     }
+    return outcome;
   }
 
   /**
