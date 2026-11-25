@@ -107,6 +107,7 @@ import { LETTER_REPLY_TASK_PREFIX } from './surplus-progress.util';
 import { cleanIdiClaimant, idiBatchCode } from './surplus-idi.util';
 import { ShortCache } from './short-cache.util';
 import { SurplusRowCache, rowStamp } from './surplus-row-cache.util';
+import { easternMorning } from './surplus-due.util';
 
 /** What toRow needs beyond the lead: per-request lookups fetched once. */
 interface RowContext {
@@ -1641,9 +1642,7 @@ export class SurplusService {
   ) {
     const open = await this.prisma.task.findFirst({ where: { leadId, title, completed: false } });
     if (open) return;
-    const dueDate = new Date();
-    dueDate.setDate(dueDate.getDate() + days);
-    dueDate.setHours(9, 0, 0, 0);
+    const dueDate = easternMorning(days);
     await this.prisma.task.create({
       data: { leadId, title, dueDate, userId: userId || undefined, heirId: heirId || null },
     });
