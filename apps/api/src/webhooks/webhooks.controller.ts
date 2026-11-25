@@ -543,8 +543,8 @@ export class WebhooksController {
   @Public()
   @Post('twilio/inbound')
   async handleTwilioInbound(@Body() body: any, @Req() req: Request, @Res() res: Response) {
-    console.log('📥 Twilio inbound message:', JSON.stringify(body).substring(0, 500));
-
+    // No raw dump of the payload: it carried the sender's text into Railway's
+    // logs. MessagesService logs the inbound with its sender and length.
     const emptyTwiml = '<?xml version="1.0" encoding="UTF-8"?><Response></Response>';
 
     if (!this.verifyTwilioSignature(req, body)) {
@@ -586,8 +586,6 @@ export class WebhooksController {
         To: body.To,
         Body: text || '[📷 Photo]',  // placeholder for MMS-only messages
       });
-
-      console.log('✅ Twilio message processed:', result);
 
       if (mediaUrls.length > 0 && result?.leadId) {
         this.logger.log(`📸 Twilio MMS detected: ${mediaUrls.length} media URL(s) from ${from}`);
@@ -718,8 +716,9 @@ export class WebhooksController {
   @Public()
   @Post('twilio/status')
   async handleTwilioStatus(@Body() body: any, @Req() req: Request) {
-    console.log('📥 Twilio status update:', JSON.stringify(body).substring(0, 300));
-
+    // Silent on success. Every text sends two or three of these (sent,
+    // delivered), and dumping each one was about 1,100 lines a day of phone
+    // numbers (2026-11-24). Failures still log below with their error code.
     if (!this.verifyTwilioSignature(req, body)) {
       return { success: false, error: 'Invalid Twilio signature' };
     }
@@ -743,8 +742,8 @@ export class WebhooksController {
         },
       });
 
-      if (body.ErrorCode) {
-        console.warn(`⚠️  Twilio SMS ${messageSid} failed: error ${body.ErrorCode}`);
+      if (body.ErrorCode || status === 'failed' || status === 'undelivered') {
+        this.logger.warn(`⚠️  Twilio SMS ${messageSid} ${status}: error ${body.ErrorCode || 'none given'}`);
       }
 
       return { success: true };

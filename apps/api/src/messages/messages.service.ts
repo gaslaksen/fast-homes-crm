@@ -322,8 +322,6 @@ export class MessagesService {
         },
       });
 
-      this.logger.log(`Message sent via ${this.smsProvider.constructor.name}: ${sent.sid}`);
-
       // Record touch (activity log + pipeline tracking)
       await this.leadsService.recordTouch(leadId, 'MESSAGE_SENT', {
         userId,
@@ -1123,7 +1121,8 @@ You decide the right approach based on the conversation flow.${photoNudge}`.trim
     const from = formatPhoneNumber(data.From);
     const body = data.Body.trim();
 
-    this.logger.log(`📥 Inbound message from ${from}: "${body.substring(0, 80)}"`);
+    // The text itself stays out of the logs; it is on the thread.
+    this.logger.log(`📥 Inbound message from ${from} (${body.length} chars)`);
 
     // Find the lead by any number we hold for it, not just Lead.sellerPhone.
     // An agent can text a skip-traced second or third number, and the reply
