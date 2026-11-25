@@ -1,11 +1,32 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailerService } from '../mailer/mailer.service';
 
+/** Most reminders one run sends. The rest go on the next run, 5 minutes on. */
+const REMINDERS_PER_RUN = 100;
+
+/**
+ * Emails the person a task is assigned to once it comes due. Surplus stage
+ * tasks, notary appointments, dialer callbacks and "Next action" all land
+ * here, and for a callback at a set time this is the only nudge anyone gets
+ * (the Daily Brief lists overdue surplus follow-ups once a morning).
+ *
+ * Production runs two API replicas and every @Cron fires on both. Each task is
+ * therefore claimed (reminderSent flipped from false to true in one update)
+ * before its email goes out, so only the replica that wins the claim sends it.
+ * Before this, both replicas emailed the same task a second apart (2026-11-11).
+ *
+ * A task with no one assigned is never asked for. Nobody gets an email for it
+ * either way, and the cadence makes dozens at a time that used to log a
+ * warning each. Those show on the board and in the Daily Brief.
+ *
+ * Quiet unless it sends: with two replicas, a line per run was about 1,150 log
+ * lines a day of "No due reminders to process".
+ */
 @Injectable()
-export class RemindersService implements OnModuleInit {
+export class RemindersService {
   private readonly logger = new Logger(RemindersService.name);
 
   constructor(
@@ -14,46 +35,35 @@ export class RemindersService implements OnModuleInit {
     private config: ConfigService,
   ) {}
 
-  onModuleInit() {
-    this.logger.log('⏰ RemindersService initialized — cron will fire every 5 minutes');
-  }
-
   @Cron('*/5 * * * *')
-  async processReminders() {
+  async processReminders(): Promise<number> {
     const now = new Date();
-    this.logger.log(`⏰ Reminder cron fired at ${now.toISOString()}`);
-
     const dueTasks = await this.prisma.task.findMany({
       where: {
         dueDate: { lte: now },
         completed: false,
         reminderSent: false,
+        userId: { not: null },
       },
       include: {
         lead: true,
         user: true,
       },
+      orderBy: { dueDate: 'asc' },
+      take: REMINDERS_PER_RUN,
     });
 
-    if (dueTasks.length === 0) {
-      this.logger.log('No due reminders to process');
-      return;
-    }
-
-    this.logger.log(`Processing ${dueTasks.length} due reminder(s)`);
-
+    let sent = 0;
     for (const task of dueTasks) {
       const email = task.user?.email;
-      if (!email) {
-        this.logger.warn(
-          `Task ${task.id} has no user email — skipping reminder`,
-        );
-        await this.prisma.task.update({
-          where: { id: task.id },
-          data: { reminderSent: true },
-        });
-        continue;
-      }
+      if (!email) continue;
+
+      // The claim. Only the replica whose update flips the flag sends.
+      const claimed = await this.prisma.task.updateMany({
+        where: { id: task.id, reminderSent: false },
+        data: { reminderSent: true },
+      });
+      if (claimed.count === 0) continue;
 
       const lead = task.lead;
       const leadName = [lead.sellerFirstName, lead.sellerLastName]
@@ -87,7 +97,7 @@ export class RemindersService implements OnModuleInit {
             </a>
           </div>
           <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 32px 0;" />
-          <p style="color: #9ca3af; font-size: 12px;">Deal Core &mdash; Follow-up reminder</p>
+          <p style="color: #9ca3af; font-size: 12px;">Deal Core follow-up reminder</p>
         </div>
       `;
 
@@ -97,18 +107,18 @@ export class RemindersService implements OnModuleInit {
           `Reminder: ${task.title}`,
           html,
         );
-        await this.prisma.task.update({
-          where: { id: task.id },
-          data: { reminderSent: true },
-        });
-        this.logger.log(
-          `Sent reminder for task ${task.id} to ${email}`,
-        );
-      } catch (err) {
+        sent++;
+        this.logger.log(`Sent reminder for task ${task.id}`);
+      } catch (err: any) {
+        // Give the claim back so the next run tries again.
+        await this.prisma.task
+          .updateMany({ where: { id: task.id }, data: { reminderSent: false } })
+          .catch(() => undefined);
         this.logger.error(
           `Failed to send reminder for task ${task.id}: ${err.message}`,
         );
       }
     }
+    return sent;
   }
 }
